@@ -6,8 +6,7 @@
 # リポジトリ・クローン先が既に存在する場合はスキップ（冪等）。
 #
 # 【可視性ルール】
-#   tama-create 配下はテスト用のため Public（Ruleset 利用可）
-#   その他の組織・ユーザーは Private
+#   常に Private で作成する。
 #
 # 【テンプレートファイルの配布】
 #   クローン後に sf-tools/templates/ の全ファイルを REPO_DIR/ にコピーする。
@@ -46,11 +45,8 @@ if run gh repo view "$REPO_FULL_NAME" --json name 2>/dev/null; then
     log "WARNING" "リポジトリはすでに存在します。作成をスキップします: ${REPO_FULL_NAME}"
 else
     log "INFO" "GitHub リポジトリを作成中..."
-    # tama-create 配下はテスト用リポジトリのため Public で作成（Ruleset 利用可）
-    # その他の組織・ユーザーは Private で作成
-    visibility_opt="--private"
-    [[ "$GITHUB_OWNER" == "tama-create" ]] && visibility_opt="--public"
-    run gh repo create "$REPO_FULL_NAME" "$visibility_opt"
+    # 常に Private で作成する
+    run gh repo create "$REPO_FULL_NAME" --private
     if ! run gh repo view "$REPO_FULL_NAME" --json name 2>/dev/null; then
         die "リポジトリの作成に失敗しました。
 考えられる原因:

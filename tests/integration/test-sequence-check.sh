@@ -11,7 +11,7 @@
 #   main のみ                : ✅1 = 1 件
 #
 # 【使用方法】
-#   cd /c/home/tama-create/test/init/force-test
+#   cd /c/home/tamashimon-org/test/init/force-test
 #   bash ~/sf-tools/tests/integration/test-sequence-check.sh
 #
 # 【前提条件】
@@ -22,7 +22,7 @@
 
 set -uo pipefail
 
-REPO="tama-create/force-test"
+REPO="tamashimon-org/force-test"
 TS=$(date +%H%M%S)
 
 # ログ出力先

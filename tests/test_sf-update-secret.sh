@@ -14,7 +14,7 @@ _create_mocks_update_secret() {
 #!/bin/bash
 echo "git \$*" >> "\${MOCK_CALL_LOG:-/dev/null}"
 case "\$1" in
-    remote) echo "https://github.com/tama-create/force-test.git" ;;
+    remote) echo "https://github.com/tamashimon-org/force-test.git" ;;
     *)      exit 0 ;;
 esac
 EOF

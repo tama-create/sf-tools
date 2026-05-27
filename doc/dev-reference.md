@@ -519,7 +519,7 @@ C:\home\<github-owner>\<company>\<branch>\force-<company>/
 
 | ディレクトリ例 | 作業ブランチ | 用途 |
 |---|---|---|
-| `C:\home\tama-create\test\system\force-test` | `system` | 開発作業用 |
+| `C:\home\tamashimon-org\test\system\force-test` | `system` | 開発作業用 |
 
 - 開発は基本的に上記の `system` ブランチ用ディレクトリで行うこと
 - 検証のために一時的にブランチを切り替えることは許可されるが、作業完了後は元のブランチに戻すこと

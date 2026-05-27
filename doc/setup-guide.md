@@ -43,7 +43,7 @@ sf-tools は、Salesforce 開発の環境構築・日々の作業を自動化す
 一度クローンすれば、複数のプロジェクトで共有できます。
 
 ```bash
-git clone https://github.com/tama-create/sf-tools.git ~/sf-tools
+git clone https://github.com/tamashimon-org/sf-tools.git ~/sf-tools
 ```
 
 PATH に追加して、どこからでも実行できるようにする:

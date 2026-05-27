@@ -269,7 +269,7 @@ case "$1 $2" in
     "secret set")   exit "${MOCK_GH_SECRET_SET_EXIT:-0}" ;;
     "variable set") exit "${MOCK_GH_VARIABLE_SET_EXIT:-0}" ;;
     "variable get") echo "${MOCK_GH_VARIABLE_GET_VALUE:-fake@example.com}" ; exit "${MOCK_GH_VARIABLE_GET_EXIT:-0}" ;;
-    "api user")    echo "${MOCK_GH_API_USER:-tama-create}" ;;
+    "api user")    echo "${MOCK_GH_API_USER:-tamashimon-org}" ;;
     *) exit 0 ;;
 esac
 EOF

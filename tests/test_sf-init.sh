@@ -10,15 +10,14 @@
 #   4.  Salesforce ログイン失敗      - sf org login が exit 1 を返す
 #   5.  許可されていないユーザー     - check_authorized_user で失敗
 #   6.  無効なフォルダ構成           - GitHub オーナー名バリデーション失敗
-#   7.  リポジトリ visibility (Public) - tama-create → --public
-#   8.  リポジトリ visibility (Private) - 他オーナー → --private
-#   9.  --only 1 → Phase 1 のみ実行
-#   10. --only 2 → .sf-init.env が生成される
-#   11. --only 9 → Phase 9 のみ実行
-#   12. --add-tier staging → 正常終了・Secrets/Variables 登録
-#   13. --add-tier staging → 既存ならエラー
-#   14. --add-tier develop → staging なしはエラー
-#   15. 不明なオプション → エラー終了
+#   7.  リポジトリ visibility (Private) - 常に --private で作成
+#   8.  --only 1 → Phase 1 のみ実行
+#   9.  --only 2 → .sf-init.env が生成される
+#   10. --only 9 → Phase 9 のみ実行
+#   11. --add-tier staging → 正常終了・Secrets/Variables 登録
+#   12. --add-tier staging → 既存ならエラー
+#   13. --add-tier develop → staging なしはエラー
+#   14. 不明なオプション → エラー終了
 # ==============================================================================
 
 source "$(dirname "${BASH_SOURCE[0]}")/test_helper.sh"
@@ -347,39 +346,11 @@ test_invalid_owner_folder() {
 }
 
 # ==============================================================================
-# テスト 7: リポジトリ visibility - tama-create → --public で作成
+# テスト 7: リポジトリ visibility - 常に --private で作成
 # ==============================================================================
-test_repo_visibility_public_for_tama_create() {
+test_repo_visibility_private() {
     echo ""
-    echo -e "${CLR_HEAD}[TEST] tama-create オーナー → --public で作成${CLR_RST}"
-
-    local mb mock_home init_base init_dir
-    mb=$(setup_mock_bin)
-    export MOCK_CALL_LOG="$mb/calls.log"
-    mock_home=$(setup_mock_home)
-    init_base=$(_setup_init_dir "tama-create" "testproject")
-    init_dir="$init_base/home/tama-create/testproject"
-
-    create_all_mocks "$mb"
-    create_mock_gh_for_init "$mb"
-    _stub_subscripts "$mock_home"
-
-    _make_input_3branches \
-        | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
-              bash "$mock_home/sf-tools/bin/sf-init.sh" ) > /dev/null 2>&1
-
-    assert_file_contains "$MOCK_CALL_LOG" "gh repo create"  "gh repo create が呼ばれる"
-    assert_file_contains "$MOCK_CALL_LOG" "--public"        "tama-create は --public で作成される"
-
-    teardown "$mb" "$mock_home" "$init_base"
-}
-
-# ==============================================================================
-# テスト 8: リポジトリ visibility - 他オーナー → --private で作成
-# ==============================================================================
-test_repo_visibility_private_for_other_owner() {
-    echo ""
-    echo -e "${CLR_HEAD}[TEST] 他オーナー（tamashimon）→ --private で作成${CLR_RST}"
+    echo -e "${CLR_HEAD}[TEST] 任意オーナー → --private で作成${CLR_RST}"
 
     local mb mock_home init_base init_dir
     mb=$(setup_mock_bin)
@@ -397,13 +368,13 @@ test_repo_visibility_private_for_other_owner() {
               bash "$mock_home/sf-tools/bin/sf-init.sh" ) > /dev/null 2>&1
 
     assert_file_contains "$MOCK_CALL_LOG" "gh repo create"  "gh repo create が呼ばれる"
-    assert_file_contains "$MOCK_CALL_LOG" "--private"       "他オーナーは --private で作成される"
+    assert_file_contains "$MOCK_CALL_LOG" "--private"       "常に --private で作成される"
 
     teardown "$mb" "$mock_home" "$init_base"
 }
 
 # ==============================================================================
-# テスト 9: --only 1 → Phase 1 のみ実行（gh repo create は呼ばれない）
+# テスト 8: --only 1 → Phase 1 のみ実行（gh repo create は呼ばれない）
 # ==============================================================================
 test_only_option_runs_single_phase() {
     echo ""
@@ -433,7 +404,7 @@ test_only_option_runs_single_phase() {
 }
 
 # ==============================================================================
-# テスト 10: --only 2 → .sf-init.env が生成される
+# テスト 9: --only 2 → .sf-init.env が生成される
 # ==============================================================================
 test_only_phase2_creates_env_file() {
     echo ""
@@ -464,7 +435,7 @@ test_only_phase2_creates_env_file() {
 }
 
 # ==============================================================================
-# テスト 11: --only 9 → Phase 9 のみ実行（git commit は呼ばれない）
+# テスト 10: --only 9 → Phase 9 のみ実行（git commit は呼ばれない）
 # ==============================================================================
 test_resume_runs_from_specified_phase() {
     echo ""
@@ -508,7 +479,7 @@ ENVEOF
 }
 
 # ==============================================================================
-# テスト 12: --add-tier staging → 正常終了・Secrets/Variables が登録される
+# テスト 11: --add-tier staging → 正常終了・Secrets/Variables が登録される
 # ==============================================================================
 test_add_tier_staging_happy() {
     echo ""
@@ -567,7 +538,7 @@ GITEOF
 }
 
 # ==============================================================================
-# テスト 13: --add-tier staging → すでに存在する場合はエラー
+# テスト 12: --add-tier staging → すでに存在する場合はエラー
 # ==============================================================================
 test_add_tier_staging_already_exists() {
     echo ""
@@ -607,7 +578,7 @@ GITEOF
 }
 
 # ==============================================================================
-# テスト 14: --add-tier develop → staging がない場合はエラー
+# テスト 13: --add-tier develop → staging がない場合はエラー
 # ==============================================================================
 test_add_tier_develop_without_staging() {
     echo ""
@@ -647,7 +618,7 @@ GITEOF
 }
 
 # ==============================================================================
-# テスト 15: 不明なオプション → エラー終了
+# テスト 14: 不明なオプション → エラー終了
 # ==============================================================================
 test_unknown_option_fails() {
     echo ""
@@ -686,8 +657,7 @@ test_repo_create_failure
 test_sf_login_failure
 test_unauthorized_user
 test_invalid_owner_folder
-test_repo_visibility_public_for_tama_create
-test_repo_visibility_private_for_other_owner
+test_repo_visibility_private
 test_only_option_runs_single_phase
 test_only_phase2_creates_env_file
 test_resume_runs_from_specified_phase

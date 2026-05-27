@@ -21,7 +21,7 @@
 #
 # 【前提】
 #   ~/sf-tools は初回インストール済みであること。
-#   初回インストール: git clone https://github.com/tama-create/sf-tools.git ~/sf-tools
+#   初回インストール: git clone https://github.com/tamashimon-org/sf-tools.git ~/sf-tools
 #
 # 【オプション】
 #   -v, --verbose       : コマンドの応答（出力）をコンソールにも表示します

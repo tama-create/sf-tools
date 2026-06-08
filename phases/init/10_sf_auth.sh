@@ -27,13 +27,10 @@
 #   BRANCH_COUNT は Phase 5 で .sf-init.env に書き出される。
 #   APP_TYPE は選択後に .sf-init.env に書き出す（--resume 時の再利用のため）。
 #
-# 【アプリ種別について】
-#   ・外部クライアントアプリケーション（ECA）を新規作成する方式を推奨。
-#     接続アプリから ECA への自動移行後の状態と等価であることを検証済み。
-#   ・Spring '26 以降、新規の接続アプリはデフォルトで作成不可
-#     （Salesforce サポートへ申請が必要）。既存の接続アプリは引き続き動作する。
-#   ・ECA はデフォルトで全ユーザー非許可（closed by default）。プロファイルまたは
-#     権限セットで明示的にアクセス付与しないとログイン不可。
+# 【接続アプリケーション運用上の注意】
+#   ・作成した接続アプリケーションを「外部クライアントアプリへの移行」または「削除」しないこと。
+#     OAuth 内部状態が破損し client_identifier_invalid エラーが発生する。
+#     問題が起きた場合は同じアプリを修正せず、別名で新規作成すること。
 #   ・Developer Edition 組織では pre-authorization の反映が遅延・失敗する場合がある。
 #     JWT Bearer Flow は Production / Sandbox 組織での使用を推奨。
 # ==============================================================================
@@ -102,50 +99,30 @@ _show_connected_app_guide() {
 _show_external_client_app_guide() {
     log "HEADER" "Phase 10-2: Salesforce 外部クライアントアプリケーション を設定してください。"
     log "INFO" ""
-    log "INFO" "  ※ この手順は「接続アプリから ECA への自動移行後の状態」と等価"
-    log "INFO" "    （検証済み）。最初から ECA を作成すれば同じ結果が得られる。"
-    log "INFO" ""
     log "INFO" "  ▼ アップロードする証明書ファイル（server.crt）のパス:"
     log "INFO" "    ${JWT_DIR}/server.crt"
     log "INFO" ""
     log "INFO" "  ╔══════════════════════════════════════════════════╗"
     log "INFO" "  ║  STEP A: 外部クライアントアプリを作成する        ║"
     log "INFO" "  ╚══════════════════════════════════════════════════╝"
-    log "INFO" "  1. 設定の検索窓に「外部クライアントアプリケーション」と入力"
-    log "INFO" "     → 「外部クライアントアプリマネージャー」→「新規外部クライアントアプリ」"
-    log "INFO" "  2. 基本情報（アプリケーション名: SF_TOOLS・API 参照名: SF_TOOLS・連絡先メール: 任意）"
-    log "INFO" ""
-    log "INFO" "  ─ 「設定」タブ ─────────────────────────────────"
-    log "INFO" "  3. 「OAuth 設定」→「OAuth を有効化」にチェック"
+    log "INFO" "  1. 設定の検索窓に「外部クライアントアプリケーション」と入力 → 「新規」"
+    log "INFO" "  2. 基本情報を入力（アプリケーション名: SF_TOOLS・API 参照名: SF_TOOLS・連絡先メール: 任意）"
+    log "INFO" "  3. 「フロー」タブ → 「JWT Bearer」を有効化"
     log "INFO" "     コールバック URL: https://login.salesforce.com/services/oauth2/callback"
-    log "INFO" "  4. 「OAuth 範囲」に以下を追加（2 ペイン式）"
+    log "INFO" "  4. 「OAuth 範囲」に以下を追加"
     log "INFO" "     ・フルアクセス (full)"
     log "INFO" "     ・いつでも要求を実行 (refresh_token, offline_access)"
-    log "INFO" "  5. 「フローの有効化」→「JWT ベアラーフローを有効化」にチェック"
-    log "INFO" "     → 「証明書アップロード」で上記の server.crt をアップロード"
-    log "INFO" "  6. 保存"
+    log "INFO" "  5. 「デジタル署名を使用」にチェック → 上記の server.crt をアップロード"
+    log "INFO" "  6. 保存 → 「コンシューマー鍵（クライアント ID）」をコピー"
     log "INFO" ""
     log "INFO" "  ★ 保存後 2〜10 分待ってから STEP B へ進んでください ★"
     log "INFO" ""
     log "INFO" "  ╔══════════════════════════════════════════════════╗"
-    log "INFO" "  ║  STEP B: ポリシーを設定する（ECA は必須）        ║"
+    log "INFO" "  ║  STEP B: ポリシーとプロファイルを設定する        ║"
     log "INFO" "  ╚══════════════════════════════════════════════════╝"
-    log "INFO" "  ※ ECA はデフォルトで全ユーザー非許可。プロファイル/権限セットを"
-    log "INFO" "    明示的に付与しないと JWT 認証が失敗する。"
-    log "INFO" ""
-    log "INFO" "  設定の検索窓に「外部クライアントアプリケーションを管理」→ 作成したアプリ"
-    log "INFO" "  → 「ポリシー」タブ → 「編集」"
-    log "INFO" "  ・「アプリケーションポリシー」→「プロファイルを選択」で"
-    log "INFO" "    接続ユーザーのプロファイル（例: システム管理者）を追加"
-    log "INFO" "  ・「OAuth ポリシー」→「プラグインポリシー」→「許可されているユーザー」"
-    log "INFO" "    →「管理者が承認したユーザーは事前承認済み」"
-    log "INFO" "  ・保存"
-    log "INFO" ""
-    log "INFO" "  ╔══════════════════════════════════════════════════╗"
-    log "INFO" "  ║  STEP C: コンシューマー鍵を取得                  ║"
-    log "INFO" "  ╚══════════════════════════════════════════════════╝"
-    log "INFO" "  「設定」タブ →「OAuth 設定」→「コンシューマー鍵と秘密」"
-    log "INFO" "  → 「コンシューマー鍵」をコピー（次の手順で使用）"
+    log "INFO" "  作成したアプリを開く → 「ポリシー」タブ"
+    log "INFO" "  ・「許可されているユーザー」→「管理者が承認したユーザーは事前承認済み」→ 保存"
+    log "INFO" "  「プロファイル」タブ → 接続ユーザーのプロファイル（例: システム管理者）を追加"
     log "INFO" ""
     press_enter "設定が完了したら Enter を押してください（q で中断）"
 }
@@ -180,10 +157,9 @@ fi
 log "HEADER" "Phase 10-1.5: Salesforce アプリ種別を選択してください。"
 log "INFO" ""
 log "INFO" "  [1] 接続アプリケーション（Connected App）"
-log "INFO" "      ※ Spring '26 以降は新規作成不可（サポート申請が必要）。"
-log "INFO" "        既存プロジェクトの互換維持用"
-log "INFO" "  [2] 外部クライアントアプリケーション（External Client App）★推奨"
-log "INFO" "      ※ Salesforce の新標準。JWT Bearer Flow 完全対応・検証済み"
+log "INFO" "      ※ 今後廃止予定。既存プロジェクトとの互換維持に使用"
+log "INFO" "  [2] 外部クライアントアプリケーション（External Client App）"
+log "INFO" "      ※ Salesforce 推奨の新方式"
 log "INFO" ""
 
 # --resume 時は .sf-init.env に保存済みの種別を再利用

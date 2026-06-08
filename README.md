@@ -39,7 +39,7 @@ Salesforce 開発で毎回発生する環境構築、デプロイ、事前チェ
 ### 2.1 sf-tools の配置
 
 ```bash
-git clone https://github.com/tamashimon-org/sf-tools.git ~/sf-tools
+git clone https://github.com/tama-create/sf-tools.git ~/sf-tools
 ```
 
 ### 2.2 PATH の設定（推奨）

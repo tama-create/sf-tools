@@ -164,7 +164,7 @@ jobs:
       # Step 6: sf-tools のクローン
       # --------------------------------------------------------------------------
       - name: 自動化ツール（sf-tools）を取得
-        run: git clone -b ${{ vars.SF_TOOLS_BRANCH || 'main' }} https://x-access-token:${{ secrets.SF_TOOLS_TOKEN }}@github.com/tamashimon-org/sf-tools.git ~/sf-tools
+        run: git clone -b ${{ vars.SF_TOOLS_BRANCH || 'main' }} https://x-access-token:${{ secrets.SF_TOOLS_TOKEN }}@github.com/tama-create/sf-tools.git ~/sf-tools
 
       # --------------------------------------------------------------------------
       # Step 7: Salesforce へのリリース実行

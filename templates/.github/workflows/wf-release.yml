@@ -113,7 +113,7 @@ jobs:
       - name: Node.js をインストール
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
 
       # --------------------------------------------------------------------------
       # Step 4: Salesforce CLI のインストール

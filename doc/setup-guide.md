@@ -117,6 +117,22 @@ GitHub オーナー名とプロジェクト名はフォルダ構成から自動�
 
 > クローン先は sf-init.sh を実行したディレクトリに自動設定されます。
 
+### 3.2. SF_TOOLS_TOKEN の手動登録
+
+GitHub Actions（wf-metasync / wf-validate / wf-release）は、実行のたびに Private リポジトリ `tama-create/sf-tools` を clone します。この clone に使う読み取り専用 Token を `SF_TOOLS_TOKEN` として**手動で**登録します（sf-init.sh は登録しません）。
+
+1. sf-tools の所有者アカウント（`tama-create`）で、GitHub の **Settings → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token** を開く
+2. 次のとおり設定する
+   - Resource owner: `tama-create`
+   - Repository access: **Only select repositories** → `sf-tools` のみ
+   - Permissions: **Contents = Read-only**（他は追加しない）
+   - Expiration: 運用方針に合わせて設定する（期限が切れると全 force-* の Actions が止まるため、期限日をメモしておくこと）
+3. 発行直後の値をコピーし、force-* リポジトリの **Settings → Secrets and variables → Actions** で `SF_TOOLS_TOKEN` として登録する
+
+> ⚠️ Token の値はチャット・コード・ログに貼らないこと。漏れた疑いがあるときは Delete して作り直す。
+
+> ⚠️ Resource owner が sf-tools の所有者と異なると clone に失敗する。sf-tools の所有者を変更した場合は Token を作り直すこと。
+
 ---
 
 ## 4. 動作確認
@@ -244,3 +260,13 @@ Windows 環境での改行コードの違い。動作に影響はない。
 
 main ブランチへの直接プッシュは禁止。PR 経由でマージすること。
 テスト等でバイパスが必要な場合は `git push --no-verify`。
+
+### 7.6. ❌ wf-metasync / wf-validate / wf-release が「自動化ツール（sf-tools）を取得」で失敗する
+
+`SF_TOOLS_TOKEN` が未設定・有効期限切れ・対象リポジトリ違い（Resource owner が sf-tools の所有者と異なる）のいずれか。3.2 の手順で Token を作り直し、Secret を更新する。
+
+### 7.7. ❌ 「差分抽出ツール（Salesforce Git Delta）をインストール」で TypeError が出て失敗する
+
+エラー例: `TypeError: webidl.util.markAsUncloneable is not a function`
+
+ワークフローの Node.js が古い（`@salesforce/cli` の最新版は Node 22 以上が必要）。各 `wf-*.yml` の `node-version` を `22` 以上にする。`sf-tools/templates/` を直しても配布済みの force-* には自動反映されないため、force-* 側の `wf-*.yml` も修正すること。

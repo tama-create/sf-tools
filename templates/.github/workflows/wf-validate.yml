@@ -101,7 +101,7 @@ jobs:
       - name: 自動化ツール（sf-tools）を取得
         run: |
           git clone -b ${{ vars.SF_TOOLS_BRANCH || 'main' }} https://x-access-token:${{ secrets.SF_TOOLS_TOKEN }}@github.com/tama-create/sf-tools.git "$HOME/sf-tools"
-          chmod +x "$HOME/sf-tools/"*.sh "$HOME/sf-tools/lib/"*.sh
+          chmod +x "$HOME/sf-tools/bin/"*.sh "$HOME/sf-tools/lib/"*.sh
 
       # --------------------------------------------------------------------------
       # Step 5: 接続先 Salesforce 組織の選択
@@ -159,7 +159,7 @@ jobs:
           SF_TARGET_ORG: ci-org
         run: |
           set +e
-          bash "$HOME/sf-tools/sf-release.sh" --no-open > /tmp/sf_result.txt 2>&1
+          bash "$HOME/sf-tools/bin/sf-release.sh" --no-open > /tmp/sf_result.txt 2>&1
           EXIT_CODE=$?
           cat /tmp/sf_result.txt
           echo "exit_code=$EXIT_CODE" >> "$GITHUB_OUTPUT"

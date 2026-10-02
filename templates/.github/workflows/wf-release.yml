@@ -182,8 +182,8 @@ jobs:
           SOURCE="${{ github.event.pull_request.head.ref || github.ref_name }}"
           mkdir -p sf-tools/release
           echo "$SOURCE" > sf-tools/release/branch_name.txt
-          chmod +x ~/sf-tools/sf-release.sh
-          ~/sf-tools/sf-release.sh --release --no-open --target "$TARGET"
+          chmod +x ~/sf-tools/bin/sf-release.sh
+          ~/sf-tools/bin/sf-release.sh --release --no-open --target "$TARGET"
 
       # --------------------------------------------------------------------------
       # Step 8: Slack への結果通知

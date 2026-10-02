@@ -328,11 +328,15 @@ sf-init.sh が登録する認証情報は、機密性に応じて **Secret（暗
 | `SF_CONSUMER_KEY_*` | Secret | Connected App のコンシューマキー |
 | `PAT_TOKEN` | Secret | GitHub Personal Access Token |
 | `SLACK_BOT_TOKEN` | Secret | Slack Bot のアクセストークン |
+| `SF_TOOLS_TOKEN` | Secret | GitHub Actions が Private の sf-tools を clone するための Fine-grained PAT（**sf-init.sh は登録しない・手動登録**） |
 | `SF_USERNAME_*` | Variable | Salesforce ユーザー名（平文で問題なし） |
 | `SF_INSTANCE_URL_*` | Variable | Salesforce インスタンス URL（平文で問題なし） |
 | `SLACK_CHANNEL_ID` | Variable | 通知先 Slack チャンネル ID（平文で問題なし） |
+| `SF_TOOLS_BRANCH` | Variable | Actions が clone する sf-tools のブランチ（検証環境で sf-init.sh を環境変数 `SF_TOOLS_BRANCH=development` 付きで実行した場合のみ `development` を登録。未設定なら `main`） |
 
 > `*` は組織ごとのサフィックス（`PROD` / `STG` / `DEV`）。
+
+> ⚠️ `SF_TOOLS_TOKEN` は sf-init.sh では登録されません。wf-metasync / wf-validate / wf-release は、実行のたびに Private リポジトリの sf-tools を clone するため、未設定・有効期限切れ・対象リポジトリ違いのいずれかで **全ワークフローが「自動化ツール（sf-tools）を取得」ステップで失敗します**。作成手順は `doc/setup-guide.md` の 3.2 を参照してください。
 
 #### 4.4.2 ブランチ tier のスケールアップ
 

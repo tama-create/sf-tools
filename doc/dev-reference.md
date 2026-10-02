@@ -352,6 +352,8 @@ GitHub Secrets / Variables の JWT 認証情報を再登録する。実行フロ
 
 > Secret は暗号化されており `gh secret get` で値を読み取れないが、Variable は `gh variable get` で取得できる。ユーザー名はメニュー表示時に現在値を自動取得して表示する。
 
+> `SF_TOOLS_TOKEN`（Secret）は `sf-init.sh` / `sf-update-secret.sh` のいずれも登録しない（手動登録）。wf-metasync / wf-validate / wf-release が Private の `tama-create/sf-tools` を clone するための Fine-grained PAT（Contents: Read-only・Resource owner は sf-tools の所有者）。`SF_TOOLS_BRANCH`（Variable）は、sf-init.sh を環境変数 `SF_TOOLS_BRANCH=development` 付きで実行した場合のみ `phases/init/09_repo_rules.sh` が `development` を登録する（検証環境用）。未設定なら Actions は `main` を clone する。手順は `doc/setup-guide.md` 3.2 を参照。
+
 **SF_PRIVATE_KEY の base64 エンコーディング:**
 GitHub Actions のワークフローは Secret から取得した値を `base64 -d` でデコードして使用する。そのため `SF_PRIVATE_KEY` は **base64 エンコード済みの文字列** として登録しなければならない。`sf-update-secret.sh` の `_update_private_key` は以下のパイプで登録する:
 

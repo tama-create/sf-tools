@@ -95,6 +95,7 @@ phase_update() {
     # （bash が sf-init.sh を実行中に git pull で sf-init.sh が書き換わると読み位置がずれてエラーになるため）
     if [[ -n "${SF_INIT_RUNNING:-}" ]]; then
         log "INFO" "sf-init.sh から実行中のため sf-tools の git pull をスキップします。"
+        UPDATE_SKIPPED=1  # メインフローで「最新化しました」と誤表示しないための目印
         return $RET_OK
     fi
     log "INFO" "sf-tools を最新化します (${TARGET_DIR})..."
@@ -218,7 +219,11 @@ phase_upgrade_tools_bg() {
 # 6. メインフロー
 # ------------------------------------------------------------------------------
 if phase_update; then
-    log "SUCCESS" "sf-tools を最新化しました。"
+    if [[ -n "${UPDATE_SKIPPED:-}" ]]; then
+        log "INFO" "sf-tools の最新化はスキップしました。"
+    else
+        log "SUCCESS" "sf-tools を最新化しました。"
+    fi
 else
     log "WARNING" "sf-tools の最新化に失敗しました（続行します）"
 fi

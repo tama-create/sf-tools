@@ -19,6 +19,7 @@
 #   13. --add-tier develop → staging なしはエラー
 #   14. 不明なオプション → エラー終了
 #   15. 環境種別の選択（本番 / 検証で続行 / 検証を取り消して選び直し / 検証で中断）
+#   16. Phase 11（SF_TOOLS_TOKEN）: 登録 / 読み取り失敗で再入力 / 読み取り失敗でスキップ / q で中断
 # ==============================================================================
 
 source "$(dirname "${BASH_SOURCE[0]}")/test_helper.sh"
@@ -70,6 +71,11 @@ case "$1 $2" in
     "repo create") exit "${MOCK_GH_REPO_CREATE_EXIT:-0}" ;;
     "secret set")  exit "${MOCK_GH_SECRET_SET_EXIT:-0}" ;;
     "api user")    echo "${MOCK_GH_API_USER:-${github_owner}}" ;;
+    "api repos/"*)
+        # Phase 11 の読み取り確認: Token（環境変数 GH_TOKEN）が "badtoken" で始まる場合、または
+        # MOCK_GH_API_REPO_EXIT が非ゼロの場合は失敗させる
+        [[ "${GH_TOKEN:-}" == badtoken* ]] && exit 1
+        exit "${MOCK_GH_API_REPO_EXIT:-0}" ;;
     *) exit 0 ;;
 esac
 GHEOF
@@ -130,10 +136,13 @@ _stub_subscripts() {
 #  19. Y                  (develop Sandbox? - ask_yn read_key)
 #  20. fake_dev_key       (develop コンシューマーキー - read_or_quit)
 #  21. dev@example.com    (develop ユーザー名 - read_or_quit)
-#  22. N                  (init フォルダ削除をスキップ)
+# 入力順（Phase 11: SF_TOOLS_TOKEN）:
+#  22. \n                 (press_enter - Token 作成案内)
+#  23. ghp_faketoolstoken (SF_TOOLS_TOKEN - read_secret。画面に表示されない)
+#  24. N                  (init フォルダ削除をスキップ)
 # ==============================================================================
 _make_input_3branches() {
-    printf 'Y\nY\n1\n1\nghp_faketoken\n\nxoxb-faketoken\nC01ABCDEFGH\n\n1\nN\nfake_prod_key\nprod@example.com\nY\nfake_stg_key\nstg@example.com\nY\nfake_dev_key\ndev@example.com\nN\n'
+    printf 'Y\nY\n1\n1\nghp_faketoken\n\nxoxb-faketoken\nC01ABCDEFGH\n\n1\nN\nfake_prod_key\nprod@example.com\nY\nfake_stg_key\nstg@example.com\nY\nfake_dev_key\ndev@example.com\n\nghp_faketoolstoken\nN\n'
 }
 
 # ==============================================================================
@@ -175,6 +184,8 @@ test_happy_path_3branches() {
     assert_file_contains "$MOCK_CALL_LOG" "gh secret set PAT_TOKEN"                  "PAT_TOKEN が登録される"
     assert_file_contains "$MOCK_CALL_LOG" "gh secret set SLACK_BOT_TOKEN"            "SLACK_BOT_TOKEN が登録される"
     assert_file_contains "$MOCK_CALL_LOG" "gh variable set SLACK_CHANNEL_ID"          "SLACK_CHANNEL_ID が登録される"
+    assert_file_contains "$MOCK_CALL_LOG" "gh secret set SF_TOOLS_TOKEN"             "SF_TOOLS_TOKEN が登録される"
+    assert_file_not_contains "$MOCK_CALL_LOG" "ghp_faketoolstoken"                   "SF_TOOLS_TOKEN の値がコマンドのログに含まれない"
     assert_file_contains "$MOCK_CALL_LOG" "git add"                                  "git add が呼ばれる"
 
     teardown "$mb" "$mock_home" "$init_base"
@@ -716,6 +727,69 @@ test_env_type_selection() {
 }
 
 # ==============================================================================
+# テスト 16: Phase 11（SF_TOOLS_TOKEN）— --only 11 で単体実行
+#   入力列: 警告確認 Y →（\n は press_enter が消費）→ Token ...
+#   - 正常                : Token で読み取れる → SF_TOOLS_TOKEN が登録される
+#   - 失敗 → Y → 再入力   : 1回目の Token で読めず、入力し直して成功 → 登録される
+#   - 失敗 → N            : 登録をスキップして正常終了（SF_TOOLS_TOKEN は登録されない）
+#   - q                   : 中断（登録されない）
+#   いずれも Token の値が MOCK_CALL_LOG（コマンドのログ）に含まれないこと
+# ==============================================================================
+test_phase11_sf_tools_token() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] Phase 11: SF_TOOLS_TOKEN（登録 / 再入力 / スキップ / 中断）${CLR_RST}"
+
+    local mb mock_home init_base init_dir exit_code
+    mb=$(setup_mock_bin)
+    export MOCK_CALL_LOG="$mb/calls.log"
+    mock_home=$(setup_mock_home)
+    create_all_mocks "$mb"
+    create_mock_gh_for_init "$mb"
+    _stub_subscripts "$mock_home"
+
+    # ケースごとに init フォルダと .sf-init.env（REPO_DIR なし = 最後の削除確認が出ない）を用意して実行する
+    _p11_run() {
+        init_base=$(_setup_init_dir "tamashimon" "testproject")
+        init_dir="$init_base/home/tamashimon/testproject"
+        mkdir -p "$init_dir/init"
+        printf 'REPO_FULL_NAME="tamashimon/force-testproject"\nPROJECT_NAME="testproject"\n' > "$init_dir/init/.sf-init.env"
+        : > "$MOCK_CALL_LOG"
+        printf '%b' "$1" \
+            | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
+                  bash "$mock_home/sf-tools/bin/sf-init.sh" --only 11 ) > /dev/null 2>&1
+        exit_code=$?
+    }
+
+    # 正常
+    _p11_run 'Y\nghp_goodtoken\n'
+    assert_exit_ok       "$exit_code"                                                 "正常 → 終了コード 0"
+    assert_file_contains "$MOCK_CALL_LOG" "gh secret set SF_TOOLS_TOKEN"              "正常 → SF_TOOLS_TOKEN が登録される"
+    assert_file_not_contains "$MOCK_CALL_LOG" "ghp_goodtoken"                         "正常 → Token の値がコマンドのログに含まれない"
+    rm -rf "$init_base"
+
+    # 失敗 → Y → 再入力
+    _p11_run 'Y\nbadtoken_first\nY\nghp_secondtoken\n'
+    assert_exit_ok       "$exit_code"                                                 "失敗 → 再入力 → 終了コード 0"
+    assert_file_contains "$MOCK_CALL_LOG" "gh secret set SF_TOOLS_TOKEN"              "失敗 → 再入力 → SF_TOOLS_TOKEN が登録される"
+    assert_file_not_contains "$MOCK_CALL_LOG" "badtoken_first"                        "失敗した Token の値もログに含まれない"
+    rm -rf "$init_base"
+
+    # 失敗 → N: スキップ
+    _p11_run 'Y\nbadtoken_only\nN\n'
+    assert_exit_ok       "$exit_code"                                                 "失敗 → N → 正常終了（スキップ）"
+    assert_file_not_contains "$MOCK_CALL_LOG" "gh secret set SF_TOOLS_TOKEN"          "失敗 → N → SF_TOOLS_TOKEN は登録されない"
+    rm -rf "$init_base"
+
+    # q: 中断
+    _p11_run 'Y\nq\n'
+    assert_exit_fail     "$exit_code"                                                 "q → 中断（異常終了）"
+    assert_file_not_contains "$MOCK_CALL_LOG" "gh secret set SF_TOOLS_TOKEN"          "q → SF_TOOLS_TOKEN は登録されない"
+
+    unset -f _p11_run
+    teardown "$mb" "$mock_home" "$init_base"
+}
+
+# ==============================================================================
 # テスト実行
 # ==============================================================================
 echo ""
@@ -738,5 +812,6 @@ test_add_tier_staging_already_exists
 test_add_tier_develop_without_staging
 test_unknown_option_fails
 test_env_type_selection
+test_phase11_sf_tools_token
 
 print_summary

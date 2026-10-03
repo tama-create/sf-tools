@@ -78,6 +78,7 @@ GitHub リポジトリの作成から Salesforce 組織への接続、ブラン�
 | 初回コミット | セットアップ内容をまとめてコミット＆プッシュ |
 | Ruleset 設定 | ブランチ保護ルールを自動設定 |
 | JWT Secrets 登録 | JWT 認証情報（SF_PRIVATE_KEY 等）を GitHub Secrets に登録 |
+| SF_TOOLS_TOKEN 登録 | Actions が Private の sf-tools を clone するための Token（Fine-grained PAT）を Secrets に登録 |
 
 ### 3.1. 入力が必要な項目
 
@@ -97,6 +98,7 @@ GitHub オーナー名とプロジェクト名はフォルダ構成から自動�
 1. **環境種別の選択**（**通常は「1. 本番環境」**）
    - 1. 本番環境: GitHub Actions は sf-tools の `main`（リリース済みの配布版）を使用します
    - 2. 検証環境: **sf-tools の開発者専用**です。リリース前の未検証コード（`development`）が使われます。選択すると確認（Y/N/q）が出ます
+   - 選択した環境に合わせて、`~/sf-tools` が最新かどうかも確認されます。遅れていれば更新して中断するので、もう一度 `sf-init.sh` を実行してください
 2. **ブランチ構成の選択**（3 / 2 / 1 階層）
 3. **GitHub Classic PAT の発行**（ブラウザで操作・トークンを貼り付け）
    - Note: `sf-metasync-{プロジェクト名}`（自動表示）
@@ -115,14 +117,19 @@ GitHub オーナー名とプロジェクト名はフォルダ構成から自動�
    - `SF_CONSUMER_KEY_*`: Connected App コンシューマーキー（本番・ステージング・開発）
    - `SF_USERNAME_*`: 接続ユーザー名（本番・ステージング・開発）
    - `SF_INSTANCE_URL_*`: 接続 URL（例: `https://login.salesforce.com`）
+8. **SF_TOOLS_TOKEN の作成**（ブラウザで操作・Token を貼り付け。詳細は 3.2）
+   - `sf-init.sh` が、Fine-grained PAT の作成画面を事前入力した URL で開き、URL を画面にも表示します
+   - Token は画面に表示されません。入力後に sf-tools を読めるか確認してから登録します
 
 > JWT 秘密鍵の事前準備: `openssl genrsa -out server.key 2048` で生成し、公開鍵を各 Salesforce 組織の Connected App に登録しておくこと。
 
 > クローン先は sf-init.sh を実行したディレクトリに自動設定されます。
 
-### 3.2. SF_TOOLS_TOKEN の手動登録
+### 3.2. SF_TOOLS_TOKEN の登録
 
-GitHub Actions（wf-metasync / wf-validate / wf-release）は、実行のたびに Private リポジトリ `tama-create/sf-tools` を clone します。この clone に使う読み取り専用 Token を `SF_TOOLS_TOKEN` として**手動で**登録します（sf-init.sh は登録しません）。
+GitHub Actions（wf-metasync / wf-validate / wf-release）は、実行のたびに Private リポジトリ `tama-create/sf-tools` を clone します。この clone に使う読み取り専用 Token を `SF_TOOLS_TOKEN` として登録します。
+
+`sf-init.sh` の **Phase 11 が、この登録を行います**（作成画面を開く → Token を入力 → sf-tools を読めることを確認 → Secret に登録）。以下の手順は、Phase 11 の画面で行う操作の説明です。Phase 11 をスキップした場合や、Token を作り直す場合は、同じ手順で作成し、手動で登録してください（`gh secret set SF_TOOLS_TOKEN -R <owner>/<repo>`）。
 
 1. sf-tools の所有者アカウント（`tama-create`）で、GitHub の **Settings → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token** を開く
 2. 次のとおり設定する

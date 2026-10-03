@@ -23,6 +23,7 @@
 #   read_key VARNAME [PROMPT] [V]  ... 1文字即時入力（Enter 不要・空 Enter 無視）
 #   press_enter [MSG]              ... Enter 待ち（q で中断）
 #   read_or_quit VARNAME PROMPT    ... テキスト入力（空 Enter 無視・q で中断）
+#   read_secret VARNAME PROMPT     ... 秘密情報の入力（画面に表示しない・空 Enter 無視・q で中断）
 #   ask_yn QUESTION                ... Y/N/q 確認（1文字即時入力）
 #
 # 【戻り値定数】
@@ -597,6 +598,32 @@ read_or_quit() {
         read_input _rq_var "$prompt" || die "中断しました。"  # EOF → 中断
         [[ "$_rq_var" == "q" || "$_rq_var" == "Q" ]] && die "中断しました。"
         [[ -n "$_rq_var" ]] && break  # 空 Enter → 再入力
+    done
+}
+
+# read_secret - 秘密情報の入力（画面に表示しない・空 Enter 無視・q で中断）
+# ------------------------------------------------------------------------------
+# 【使い方】
+#   read_secret VARNAME PROMPT
+#
+# 【動作】
+#   - 入力した文字を画面に表示しない（read -s）。貼り付けた Token が画面・スクロールバックに残らない
+#   - 空 Enter は無視して再入力。q / Q で die。EOF も die
+#   - 末尾の CR（Windows の貼り付け）は除去する
+#
+# 【使用例】
+#   read_secret SF_TOOLS_TOKEN_VALUE "  Token を貼り付けてください（画面には表示されません・q で中断）："
+# ------------------------------------------------------------------------------
+read_secret() {
+    local -n _rs_var=$1
+    local prompt="$2"
+    while true; do
+        printf "%s" "$prompt" >&2
+        IFS= read -rs _rs_var || { printf "\n" >&2; die "入力が中断されました。"; }
+        printf "\n" >&2
+        _rs_var="${_rs_var%$'\r'}"
+        [[ "$_rs_var" == "q" || "$_rs_var" == "Q" ]] && die "中断しました。"
+        [[ -n "$_rs_var" ]] && break  # 空 Enter → 再入力
     done
 }
 

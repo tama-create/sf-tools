@@ -18,6 +18,12 @@
 #   検証環境 (staging)    : SF_TOOLS_BRANCH=development → GitHub Actions は sf-tools development を使用
 #                           sf-tools の開発者専用（未リリースのコードが使われる）。
 #                           誤選択を防ぐため、選択時に WARNING と Y/N/q 確認を行う（N なら選択に戻る）
+#
+# 【sf-tools の最新化確認】
+#   環境種別の選択直後に ensure_sf_tools_branch（init-common.sh）を呼び、~/sf-tools が
+#   選択した環境のブランチ（本番=main / 検証=development）かどうか、origin より遅れていないかを確認する。
+#   ・遅れていれば確認のうえ git pull --ff-only を実行し、実行中のスクリプトが書き換わるため die で中断する
+#   ・ブランチ違いは確認（Y/N/q）。ローカルに未コミット・未 push の変更があれば更新せず警告のみ
 # ==============================================================================
 
 # SF_TOOLS_DIR は sf-init.sh（司令塔）から export される
@@ -99,6 +105,9 @@ while true; do
     fi
     echo ""
 done
+
+# 選択した環境に合わせて ~/sf-tools の最新化を確認する（更新した場合は die で中断）
+ensure_sf_tools_branch "$SF_TOOLS_BRANCH"
 
 # .sf-init.env に変数を書き出す（後続フェーズで source して使用）
 {

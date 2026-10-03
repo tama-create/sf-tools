@@ -29,7 +29,7 @@ SF_INIT_ENV_FILE="${SF_INIT_ENV_FILE:-${PWD}/.sf-init.env}"
 
 [[ -z "$REPO_DIR" ]]          && die "REPO_DIR が未設定です。Phase 2 が完了しているか確認してください。"
 [[ -z "$REPO_FULL_NAME" ]]    && die "REPO_FULL_NAME が未設定です。Phase 2 が完了しているか確認してください。"
-[[ -z "$PAT_TOKEN_VALUE" ]]   && die "PAT_TOKEN_VALUE が未設定です。Phase 7 が完了しているか確認してください。"
+[[ -z "$PAT_TOKEN_VALUE" ]]   && die "PAT_TOKEN_VALUE が未設定です。Phase 6 が完了しているか確認してください。"
 
 # ------------------------------------------------------------------------------
 # メイン処理

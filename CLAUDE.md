@@ -214,7 +214,7 @@ Salesforce 開発の環境構築と日々の作業を自動化するシェルス
 |---|---|
 | `bin/sf-*.sh` | 各種自動化スクリプト本体 |
 | `lib/common.sh` | 全スクリプト共通ライブラリ。`log` / `run` / `die` / 入力関数群を提供 |
-| `phases/init/` | sf-init.sh のサブスクリプト（Phase 02〜10 + `add_tier.sh`） |
+| `phases/init/` | sf-init.sh のサブスクリプト（Phase 02〜11 + `add_tier.sh`） |
 | `hooks/pre-push` | git push フックの実体 |
 | `templates/` | force-* へ配布する雛形。**参照は sf-init 専用**（`phase_setup_release_dir` のみ日常運用でも参照可） |
 | `tests/` | モックベースの単体テスト一式 |

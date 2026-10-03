@@ -132,6 +132,11 @@ case "$1" in
         case "$3" in
             pull) exit "${MOCK_GIT_PULL_EXIT:-0}" ;;
             symbolic-ref) echo "${MOCK_GIT_BRANCH:-feature/test}"; exit 0 ;;
+            rev-parse)
+                # 既定では「Git リポジトリではない」を返す（sf-init の sf-tools 最新化確認をスキップさせ、
+                # 対話入力を消費しないようにする）。最新化確認自体のテストは test_init-common.sh で実際の Git を使う
+                [[ "$4" == "--is-inside-work-tree" ]] && exit "${MOCK_GIT_IS_REPO_EXIT:-1}"
+                exit 0 ;;
             *) exit 0 ;;
         esac ;;
     symbolic-ref)   echo "${MOCK_GIT_BRANCH:-feature/test}"; exit 0 ;;

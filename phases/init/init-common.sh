@@ -10,6 +10,8 @@
 #   generate_jwt_cert         ... JWT 用秘密鍵・証明書を openssl で生成する
 #   register_jwt_secret       ... JWT 認証情報を取得・テストして GitHub Secret に登録する
 #                                 テスト失敗時はスキップして続行するか確認する（DE 組織対応）
+#   ensure_sf_tools_branch BR ... 選択した環境（main / development）に合わせて ~/sf-tools の最新化を確認する
+#                                 （ブランチ違い・遅れ・ローカル変更を検出。更新したら die で中断）
 #
 # 【lib/common.sh から利用可能な関数】
 #   press_enter [MSG]         ... Enter 待ち（q で中断）
@@ -174,3 +176,74 @@ register_jwt_secret() {
 
     log "SUCCESS" "  SF_CONSUMER_KEY_${suffix}（Secret）/ SF_USERNAME_${suffix}（Variable）/ SF_INSTANCE_URL_${suffix}（Variable）を登録しました。"
 }
+
+# ------------------------------------------------------------------------------
+# ensure_sf_tools_branch - 選択した環境に合わせて sf-tools（~/sf-tools）の最新化を確認する
+# ------------------------------------------------------------------------------
+# 【使い方】
+#   ensure_sf_tools_branch main          # 本番環境を選択した場合
+#   ensure_sf_tools_branch development   # 検証環境を選択した場合
+#
+# 【動作】（SF_TOOLS_DIR の Git リポジトリを対象にする）
+#   - Git リポジトリでない / HEAD が分離状態 / origin に接続できない → WARNING で確認をスキップして続行
+#   - 現在のブランチが目標ブランチと違う → WARNING + ask_yn（N/q は die。ブランチの自動切り替えはしない）
+#   - 未コミットの変更または未 push のコミットがある → 更新せず WARNING のみで続行（開発者の作業を守る）
+#   - origin より遅れている → 遅れたコミットを表示し ask_yn。Y なら git pull --ff-only を実行し、
+#     実行中のスクリプトが書き換わるため die で中断する。N なら WARNING で続行
+#   - 最新ならそのまま続行
+# ------------------------------------------------------------------------------
+ensure_sf_tools_branch() {
+    local target="$1"
+    local dir="${SF_TOOLS_DIR:-}"
+    local cur dirty ahead behind line
+
+    if [[ -z "$dir" ]] || ! git -C "$dir" rev-parse --is-inside-work-tree >/dev/null 2>&1; then  # if cmd のため run 不使用
+        log "WARNING" "sf-tools が Git リポジトリではないため、最新化の確認をスキップします。"
+        return $RET_OK
+    fi
+    cur=$(git -C "$dir" symbolic-ref --short HEAD 2>/dev/null || true)  # VAR=$(cmd) のため run 不使用
+    if [[ -z "$cur" ]]; then
+        log "WARNING" "sf-tools の HEAD がブランチを指していないため、最新化の確認をスキップします。"
+        return $RET_OK
+    fi
+    if [[ "$cur" != "$target" ]]; then
+        log "WARNING" "ローカルの sf-tools は ${cur} ブランチですが、選択した環境は ${target} です。"
+        ask_yn "▶ このまま続行しますか？" || die "セットアップを中断しました。"
+    fi
+    if ! run git -C "$dir" fetch origin "$cur"; then
+        log "WARNING" "origin に接続できなかったため、sf-tools の最新化の確認をスキップします。"
+        return $RET_OK
+    fi
+    if ! git -C "$dir" rev-parse --verify --quiet "origin/${cur}" >/dev/null 2>&1; then  # if cmd のため run 不使用
+        log "WARNING" "origin に ${cur} ブランチが存在しないため、最新化の確認をスキップします。"
+        return $RET_OK
+    fi
+    dirty=$(git -C "$dir" status --porcelain 2>/dev/null || true)  # VAR=$(cmd) のため run 不使用
+    ahead=$(git -C "$dir" rev-list --count "origin/${cur}..HEAD" 2>/dev/null || echo 0)  # VAR=$(cmd) のため run 不使用
+    behind=$(git -C "$dir" rev-list --count "HEAD..origin/${cur}" 2>/dev/null || echo 0)  # VAR=$(cmd) のため run 不使用
+    if [[ "$behind" -eq 0 ]]; then
+        log "INFO" "sf-tools（${cur}）は最新です。"
+        return $RET_OK
+    fi
+    if [[ -n "$dirty" || "$ahead" -gt 0 ]]; then
+        log "WARNING" "sf-tools（${cur}）は origin より ${behind} コミット遅れていますが、ローカルに未コミットの変更または未 push のコミットがあるため更新しません。"
+        return $RET_OK
+    fi
+    log "WARNING" "sf-tools（${cur}）は origin より ${behind} コミット遅れています。"
+    while IFS= read -r line; do
+        log "INFO" "  ${line}"
+    done < <(git -C "$dir" log --oneline -10 "HEAD..origin/${cur}" 2>/dev/null)  # プロセス置換のため run 不使用
+    if ask_yn "▶ sf-tools を更新しますか？"; then
+        run git -C "$dir" pull --ff-only origin "$cur" || die "sf-tools の更新に失敗しました。"
+        die "sf-tools を更新したため、この実行を中断しました。"
+    fi
+    log "WARNING" "sf-tools を更新せずに続行します。"
+    return $RET_OK
+}
+
+# ------------------------------------------------------------------------------
+# sf-tools リポジトリ（GitHub Actions が clone する Private リポジトリ）の OWNER/REPO
+# ワークフローのテンプレート（templates/.github/workflows/）の clone 先と一致させること。
+# 環境変数 SF_TOOLS_REPO_FULL_NAME で上書きできる（テスト・別環境用）。
+# ------------------------------------------------------------------------------
+SF_TOOLS_REPO_FULL_NAME="${SF_TOOLS_REPO_FULL_NAME:-tama-create/sf-tools}"

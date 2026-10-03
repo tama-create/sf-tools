@@ -92,7 +92,7 @@ sf-init.sh
 以下を自動実行します。
 
 1. 環境チェック（ツール・GitHub CLI 認証）
-2. プロジェクト情報の確認（フォルダ構成から自動導出）と環境種別の選択（通常は「1. 本番環境」。「2. 検証環境」は sf-tools の開発者専用で、選択すると確認が出ます）
+2. プロジェクト情報の確認（フォルダ構成から自動導出）と環境種別の選択（通常は「1. 本番環境」。「2. 検証環境」は sf-tools の開発者専用で、選択すると確認が出ます。あわせて `~/sf-tools` が最新かを確認し、遅れていれば更新して中断します）
 3. GitHub リポジトリ作成・clone
 4. ワークフロー・設定ファイル生成
 5. ブランチ構成
@@ -101,6 +101,7 @@ sf-init.sh
 8. 初回コミット＆プッシュ
 9. GitHub リポジトリ設定・Ruleset 適用
 10. JWT 認証情報（Salesforce → GitHub Secrets / Variables）の設定
+11. SF_TOOLS_TOKEN の設定（Actions が Private の sf-tools を clone するための Token を Secret に登録）
 
 > リポジトリ名は必ず `force-` で始めてください。
 
@@ -328,7 +329,7 @@ sf-init.sh が登録する認証情報は、機密性に応じて **Secret（暗
 | `SF_CONSUMER_KEY_*` | Secret | Connected App のコンシューマキー |
 | `PAT_TOKEN` | Secret | GitHub Personal Access Token |
 | `SLACK_BOT_TOKEN` | Secret | Slack Bot のアクセストークン |
-| `SF_TOOLS_TOKEN` | Secret | GitHub Actions が Private の sf-tools を clone するための Fine-grained PAT（**sf-init.sh は登録しない・手動登録**） |
+| `SF_TOOLS_TOKEN` | Secret | GitHub Actions が Private の sf-tools を clone するための Fine-grained PAT（**sf-init.sh の Phase 11 で登録**。スキップした場合・作り直しは手動登録） |
 | `SF_USERNAME_*` | Variable | Salesforce ユーザー名（平文で問題なし） |
 | `SF_INSTANCE_URL_*` | Variable | Salesforce インスタンス URL（平文で問題なし） |
 | `SLACK_CHANNEL_ID` | Variable | 通知先 Slack チャンネル ID（平文で問題なし） |
@@ -336,7 +337,7 @@ sf-init.sh が登録する認証情報は、機密性に応じて **Secret（暗
 
 > `*` は組織ごとのサフィックス（`PROD` / `STG` / `DEV`）。
 
-> ⚠️ `SF_TOOLS_TOKEN` は sf-init.sh では登録されません。wf-metasync / wf-validate / wf-release は、実行のたびに Private リポジトリの sf-tools を clone するため、未設定・有効期限切れ・対象リポジトリ違いのいずれかで **全ワークフローが「自動化ツール（sf-tools）を取得」ステップで失敗します**。作成手順は `doc/setup-guide.md` の 3.2 を参照してください。
+> ⚠️ `SF_TOOLS_TOKEN` は sf-init.sh の Phase 11 で登録します（Token の作成画面を事前入力した URL で開き、入力した Token で sf-tools を読めることを確認してから登録します）。wf-metasync / wf-validate / wf-release は、実行のたびに Private リポジトリの sf-tools を clone するため、未設定・有効期限切れ・対象リポジトリ違いのいずれかで **全ワークフローが「自動化ツール（sf-tools）を取得」ステップで失敗します**。Phase 11 をスキップした場合や、Token を作り直す場合の手順は `doc/setup-guide.md` の 3.2 を参照してください。
 
 #### 4.4.2 ブランチ tier のスケールアップ
 
@@ -750,7 +751,8 @@ sf-tools/
 │       ├── 07_slack.sh
 │       ├── 08_initial_commit.sh
 │       ├── 09_repo_rules.sh
-│       └── 10_sf_auth.sh
+│       ├── 10_sf_auth.sh
+│       └── 11_sf_tools_token.sh
 ├── hooks/
 │   ├── pre-push                ← sf-hook.sh がプロジェクト側へコピー
 │   └── pre-commit
@@ -810,7 +812,7 @@ sf-tools の `main` ブランチは、**そのまま全ユーザーに配布さ�
 
 変更内容に応じて確認します。詳細は `doc/dev-reference.md` セクション 9 を参照してください。
 
-- 新規セットアップ（`sf-init.sh`）が最後まで通ること（`SF_TOOLS_TOKEN` の手動登録を含む）
+- 新規セットアップ（`sf-init.sh`）が最後まで通ること（Phase 11 の `SF_TOOLS_TOKEN` の登録を含む）
 - メタデータ同期（`wf-metasync`）を手動実行して成功すること
 - デプロイ対象を含む PR で `wf-validate` が通ること（動作確認だけの PR はマージせずに閉じる）
 

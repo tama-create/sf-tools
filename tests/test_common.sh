@@ -163,6 +163,54 @@ test_check_gh_owner_org_api_failure() {
     rm -f "$script"; teardown "$mb"
 }
 
+
+# ------------------------------------------------------------------------------
+# read_secret のテスト
+# ------------------------------------------------------------------------------
+_make_read_secret_script() {
+    local script
+    script=$(mktemp /tmp/test-read-secret-XXXX.sh)
+    cat > "$script" << SEOF
+#!/bin/bash
+readonly SCRIPT_NAME=test
+readonly LOG_FILE=/dev/null
+readonly LOG_MODE=NEW
+export SF_INIT_MODE=1
+source '${SF_TOOLS_DIR}/lib/common.sh'
+V=""
+read_secret V "PROMPT: "
+echo "GOT=[\$V]"
+SEOF
+    chmod +x "$script"
+    echo "$script"
+}
+
+test_read_secret() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] read_secret: 入力を受け取り、画面に値を出さない${CLR_RST}"
+    local script out
+    script=$(_make_read_secret_script)
+
+    out=$(printf 'ghp_secretvalue\n' | bash "$script" 2>&1)
+    [[ "$out" == *"GOT=[ghp_secretvalue]"* ]] && pass "入力した値が変数に入る" || fail "入力した値が変数に入る" "$out"
+    # 変数の確認用 GOT 行を除いた表示（プロンプト等）に値が含まれないこと
+    [[ "$(echo "$out" | grep -v '^GOT=')" != *"ghp_secretvalue"* ]] && pass "値が画面（プロンプト出力）に表示されない" || fail "値が画面に表示されない" "$out"
+
+    out=$(printf '\n\nghp_second\n' | bash "$script" 2>&1)
+    [[ "$out" == *"GOT=[ghp_second]"* ]] && pass "空 Enter は無視して再入力になる" || fail "空 Enter は無視して再入力になる" "$out"
+
+    out=$(printf 'ghp_crlf\r\n' | bash "$script" 2>&1)
+    [[ "$out" == *"GOT=[ghp_crlf]"* ]] && pass "末尾の CR が除去される" || fail "末尾の CR が除去される" "$out"
+
+    printf 'q\n' | bash "$script" > /dev/null 2>&1
+    assert_exit_fail $? "q → 中断（die）"
+
+    printf '' | bash "$script" > /dev/null 2>&1
+    assert_exit_fail $? "EOF → 中断（die）"
+
+    rm -f "$script"
+}
+
 test_check_gh_owner_match
 test_check_gh_owner_mismatch
 test_check_gh_owner_skip_on_empty
@@ -170,5 +218,6 @@ test_check_gh_owner_org_admin
 test_check_gh_owner_org_member
 test_check_gh_owner_org_admin_pending
 test_check_gh_owner_org_api_failure
+test_read_secret
 
 print_summary

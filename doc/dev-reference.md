@@ -48,6 +48,7 @@
 | ファイル | 対象スクリプト |
 |---|---|
 | `test_common.sh` | lib/common.sh |
+| `test_init-common.sh` | phases/init/init-common.sh（`ensure_sf_tools_branch`。実際の Git と一時 bare リポジトリを使用） |
 | `test_sf-unhook.sh` | sf-unhook.sh |
 | `test_sf-hook.sh` | sf-hook.sh |
 | `test_sf-init.sh` | sf-init.sh |
@@ -353,7 +354,7 @@ GitHub Secrets / Variables の JWT 認証情報を再登録する。実行フロ
 
 > Secret は暗号化されており `gh secret get` で値を読み取れないが、Variable は `gh variable get` で取得できる。ユーザー名はメニュー表示時に現在値を自動取得して表示する。
 
-> `SF_TOOLS_TOKEN`（Secret）は `sf-init.sh` / `sf-update-secret.sh` のいずれも登録しない（手動登録）。wf-metasync / wf-validate / wf-release が Private の `tama-create/sf-tools` を clone するための Fine-grained PAT（Contents: Read-only・Resource owner は sf-tools の所有者）。`SF_TOOLS_BRANCH`（Variable）は、sf-init.sh を環境変数 `SF_TOOLS_BRANCH=development` 付きで実行した場合のみ `phases/init/09_repo_rules.sh` が `development` を登録する（検証環境用）。未設定なら Actions は `main` を clone する。手順は `doc/setup-guide.md` 3.2 を参照。
+> `SF_TOOLS_TOKEN`（Secret）は `sf-update-secret.sh` では登録しない。`sf-init.sh` の Phase 11 が登録する（スキップ時・作り直しは手動登録）。wf-metasync / wf-validate / wf-release が Private の `tama-create/sf-tools` を clone するための Fine-grained PAT（Contents: Read-only・Resource owner は sf-tools の所有者）。`SF_TOOLS_BRANCH`（Variable）は、sf-init.sh を環境変数 `SF_TOOLS_BRANCH=development` 付きで実行した場合のみ `phases/init/09_repo_rules.sh` が `development` を登録する（検証環境用）。未設定なら Actions は `main` を clone する。手順は `doc/setup-guide.md` 3.2 を参照。
 
 **SF_PRIVATE_KEY の base64 エンコーディング:**
 GitHub Actions のワークフローは Secret から取得した値を `base64 -d` でデコードして使用する。そのため `SF_PRIVATE_KEY` は **base64 エンコード済みの文字列** として登録しなければならない。`sf-update-secret.sh` の `_update_private_key` は以下のパイプで登録する:
@@ -387,6 +388,7 @@ tr -d '\r' < "$key_file" | base64 -w 0 | gh secret set "SF_PRIVATE_KEY" -R "$REP
 8. 初回コミット＆プッシュ
 9. GitHub リポジトリ設定・Ruleset の適用
 10. JWT 認証情報の設定（SF_PRIVATE_KEY / SF_CONSUMER_KEY_* を Secret / SF_USERNAME_* / SF_INSTANCE_URL_* を Variable に登録）
+11. SF_TOOLS_TOKEN の設定（`11_sf_tools_token.sh`。Fine-grained PAT の作成画面を事前入力 URL で開く → `read_secret` で Token を入力（画面に表示しない）→ `GH_TOKEN` 環境変数で `gh api repos/<sf-tools>` を実行して読み取りを確認（コマンドの文字列・ログに Token を含めない）→ `printf '%s' "$TOKEN" | run gh secret set SF_TOOLS_TOKEN`。確認に失敗した場合は再入力かスキップを選ぶ。Token は `.sf-init.env` に書き出さない。sf-tools の OWNER/REPO は `init-common.sh` の `SF_TOOLS_REPO_FULL_NAME`）
 
 オプション:
 - `--resume N`: Phase N から再開（エラー後の再試行）
@@ -543,6 +545,7 @@ sf-tools の `main` への反映は、全ユーザーへの配布と同義であ
 
 - 一般ユーザーの `~/sf-tools` は `main` のため、`main` へのマージで配布される
 - 開発者の `~/sf-tools` を `development` にし、検証環境の force-* の `SF_TOOLS_BRANCH` を `development` にすれば、`main` を汚さずに検証できる
+- `sf-init.sh` は、Phase 2 で環境種別を選んだ直後に `ensure_sf_tools_branch`（`phases/init/init-common.sh`）で `~/sf-tools` の最新化を確認する（本番 = `main`、検証 = `development`）。ブランチ違いは確認（Y/N/q）、遅れていれば確認のうえ `git pull --ff-only` を実行して中断する（実行中のスクリプトが書き換わるため。再実行すれば最新で動く）。ローカルに未コミット・未 push の変更があれば更新せず警告のみ。ブランチの自動切り替えは行わない
 
 ### 9.2 検証環境の作り方
 
@@ -552,7 +555,7 @@ sf-tools の `main` への反映は、全ユーザーへの配布と同義であ
 | 既存の force-* | `gh variable set SF_TOOLS_BRANCH --body "development" -R <owner>/<repo>` |
 | ローカル | `~/sf-tools` を `development` にチェックアウトしておく |
 
-- `SF_TOOLS_TOKEN`（Secret）は `sf-init.sh` が登録しないため、手動登録が必要（`doc/setup-guide.md` 3.2）
+- `SF_TOOLS_TOKEN`（Secret）は `sf-init.sh` の Phase 11 が登録する（スキップした場合のみ手動登録が必要。`doc/setup-guide.md` 3.2）
 
 ### 9.3 検証チェックリスト（rr の前提）
 
@@ -561,7 +564,7 @@ sf-tools の `main` への反映は、全ユーザーへの配布と同義であ
 | 確認項目 | 方法 |
 |---|---|
 | テスト | `bash tests/run_tests.sh` が全件 PASS |
-| `sf-init.sh` を変更した場合 | 検証環境の新規 force-* を作成し、最後まで通ること（`SF_TOOLS_TOKEN` の手動登録を含む） |
+| `sf-init.sh` を変更した場合 | 検証環境の新規 force-* を作成し、最後まで通ること（Phase 11 の `SF_TOOLS_TOKEN` の登録を含む） |
 | ワークフロー・`sf-metasync.sh` を変更した場合 | `wf-metasync` を `workflow_dispatch` で手動実行して成功すること |
 | `sf-release.sh` / `wf-validate` / `wf-release` を変更した場合 | デプロイ対象を含む PR を作り、`wf-validate` が通ること（動作確認のみの PR はマージせずに閉じる。マージすると `wf-release` が実際にデプロイする） |
 

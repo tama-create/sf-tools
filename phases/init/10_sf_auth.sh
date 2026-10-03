@@ -8,9 +8,15 @@
 # 【処理フロー】
 #   1.   openssl で秘密鍵・証明書を生成（~/.sf-jwt/<REPO_NAME>/）
 #   1.5. アプリ種別を選択（接続アプリケーション / 外部クライアントアプリケーション）
-#   2.   選択種別に応じた Salesforce 設定手順を案内（証明書アップロードまで待機）
+#   2.   接続アプリケーション（1）: Salesforce 設定手順を案内（証明書アップロードまで待機・手動）
+#        外部クライアントアプリケーション（2）: 自動作成のため案内のみ（手動の設定は不要）
 #   3.   秘密鍵を SF_PRIVATE_KEY として GitHub Secrets に登録
-#   4.   組織ごとに本番 or Sandbox を選択・コンシューマーキー・ユーザー名を入力して JWT 接続テスト
+#   4.   組織ごとに登録する（本番 or Sandbox を選択）
+#        ・接続アプリケーション（1）: コンシューマーキー・ユーザー名を入力して JWT 接続テスト
+#        ・外部クライアントアプリケーション（2）: register_jwt_secret_eca（init-common.sh）が
+#            sf org login web（ブラウザでログイン）→ ユーザー名とプロファイル名を取得 →
+#            メタデータを deploy してアプリを作成（JWT Bearer・フルアクセス・管理者承認済み事前承認）→
+#            コンシューマー鍵を retrieve で自動取得 → JWT 接続テスト（反映待ちのためリトライ）
 #   5.   SF_CONSUMER_KEY_xxx を Secret / SF_USERNAME_xxx・SF_INSTANCE_URL_xxx を Variable に登録
 #
 # 【登録する GitHub Secrets（機密）】
@@ -23,7 +29,8 @@
 #
 # 【備考】
 #   秘密鍵は ~/.sf-jwt/<REPO_NAME>/server.key に保存される。
-#   証明書（server.crt）は各組織の Connected App または外部クライアントアプリにアップロードが必要。
+#   証明書（server.crt）は、接続アプリケーションでは各組織へ手動でアップロードする。
+#   外部クライアントアプリケーションでは、sf-init がメタデータの deploy で登録する。
 #   BRANCH_COUNT は Phase 5 で .sf-init.env に書き出される。
 #   APP_TYPE は選択後に .sf-init.env に書き出す（--resume 時の再利用のため）。
 #
@@ -94,40 +101,6 @@ _show_connected_app_guide() {
 }
 
 # ------------------------------------------------------------------------------
-# Step 2 案内文: 外部クライアントアプリケーション（External Client App）
-# ------------------------------------------------------------------------------
-_show_external_client_app_guide() {
-    log "HEADER" "Phase 10-2: Salesforce 外部クライアントアプリケーション を設定してください。"
-    log "INFO" ""
-    log "INFO" "  ▼ アップロードする証明書ファイル（server.crt）のパス:"
-    log "INFO" "    ${JWT_DIR}/server.crt"
-    log "INFO" ""
-    log "INFO" "  ╔══════════════════════════════════════════════════╗"
-    log "INFO" "  ║  STEP A: 外部クライアントアプリを作成する        ║"
-    log "INFO" "  ╚══════════════════════════════════════════════════╝"
-    log "INFO" "  1. 設定の検索窓に「外部クライアントアプリケーション」と入力 → 「新規」"
-    log "INFO" "  2. 基本情報を入力（アプリケーション名: SF_TOOLS・API 参照名: SF_TOOLS・連絡先メール: 任意）"
-    log "INFO" "  3. 「フロー」タブ → 「JWT Bearer」を有効化"
-    log "INFO" "     コールバック URL: https://login.salesforce.com/services/oauth2/callback"
-    log "INFO" "  4. 「OAuth 範囲」に以下を追加"
-    log "INFO" "     ・フルアクセス (full)"
-    log "INFO" "     ・いつでも要求を実行 (refresh_token, offline_access)"
-    log "INFO" "  5. 「デジタル署名を使用」にチェック → 上記の server.crt をアップロード"
-    log "INFO" "  6. 保存 → 「コンシューマー鍵（クライアント ID）」をコピー"
-    log "INFO" ""
-    log "INFO" "  ★ 保存後 2〜10 分待ってから STEP B へ進んでください ★"
-    log "INFO" ""
-    log "INFO" "  ╔══════════════════════════════════════════════════╗"
-    log "INFO" "  ║  STEP B: ポリシーとプロファイルを設定する        ║"
-    log "INFO" "  ╚══════════════════════════════════════════════════╝"
-    log "INFO" "  作成したアプリを開く → 「ポリシー」タブ"
-    log "INFO" "  ・「許可されているユーザー」→「管理者が承認したユーザーは事前承認済み」→ 保存"
-    log "INFO" "  「プロファイル」タブ → 接続ユーザーのプロファイル（例: システム管理者）を追加"
-    log "INFO" ""
-    press_enter "設定が完了したら Enter を押してください（q で中断）"
-}
-
-# ------------------------------------------------------------------------------
 # メイン処理
 # ------------------------------------------------------------------------------
 log "HEADER" "Phase 10: JWT 認証情報の設定"
@@ -185,7 +158,10 @@ esac
 if [[ "$APP_TYPE" == "1" ]]; then
     _show_connected_app_guide
 else
-    _show_external_client_app_guide
+    # 外部クライアントアプリは、組織ごとに自動で作成する（Step 4: register_jwt_secret_eca）
+    log "HEADER" "Phase 10-2: 外部クライアントアプリケーションは自動で作成します。"
+    log "INFO" "  各組織で、ブラウザでのログインが必要です（接続ユーザー＝管理者権限のユーザー）。"
+    log "INFO" "  アプリの作成・証明書の登録・ポリシーとプロファイルの設定・コンシューマー鍵の取得は、sf-init が自動で行います。"
 fi
 
 # --------------------------------------------------------------------------
@@ -203,17 +179,28 @@ log "SUCCESS" "SF_PRIVATE_KEY を登録しました。"
 # --------------------------------------------------------------------------
 log "HEADER" "Phase 10-4: 各組織の JWT 認証情報を設定します。"
 
+# アプリ種別に応じた組織ごとの登録
+#   接続アプリ（1）      : コンシューマーキー・ユーザー名を入力 → JWT 接続テスト → 登録
+#   外部クライアントアプリ（2）: 自動作成（deploy）→ コンシューマー鍵を自動取得 → JWT 接続テスト → 登録
+_register_org() {
+    if [[ "$APP_TYPE" == "1" ]]; then
+        register_jwt_secret "$1" "$2" "$3" "${JWT_DIR}/server.key"
+    else
+        register_jwt_secret_eca "$1" "$2" "$3" "${JWT_DIR}/server.key" "${JWT_DIR}/server.crt"
+    fi
+}
+
 # 10-4-1. メイン組織（必須・本番 or Sandbox を選択）
-register_jwt_secret "prod" "PROD" "メイン組織" "${JWT_DIR}/server.key"
+_register_org "prod" "PROD" "メイン組織"
 
 # 10-4-2. ステージング組織（2 階層以上）
 if [[ $BRANCH_COUNT -ge 2 ]]; then
-    register_jwt_secret "staging" "STG" "ステージング組織" "${JWT_DIR}/server.key"
+    _register_org "staging" "STG" "ステージング組織"
 fi
 
 # 10-4-3. 開発組織（3 階層）
 if [[ $BRANCH_COUNT -ge 3 ]]; then
-    register_jwt_secret "develop" "DEV" "開発組織" "${JWT_DIR}/server.key"
+    _register_org "develop" "DEV" "開発組織"
 fi
 
 log "SUCCESS" "Phase 10 完了: JWT 認証情報の設定 OK。"

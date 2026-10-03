@@ -277,3 +277,223 @@ delete_existing_ruleset() {
     fi
     return $RET_OK
 }
+
+# ------------------------------------------------------------------------------
+# _xml_escape - XML の特殊文字（& < >）をエスケープする（プロファイル名などを XML に埋め込むため）
+# ------------------------------------------------------------------------------
+_xml_escape() {
+    printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'
+}
+
+# ------------------------------------------------------------------------------
+# generate_eca_metadata - 外部クライアントアプリ（ECA）のメタデータ（ソース形式・5 ファイル）を生成する
+# ------------------------------------------------------------------------------
+# 【使い方】
+#   generate_eca_metadata DIR APP_NAME CONTACT_EMAIL PROFILE_NAME CERT_FILE
+#
+# 【引数】
+#   DIR           : 出力先（DIR/force-app/main/default/ 配下に生成する）
+#   APP_NAME      : アプリの API 参照名（英数字と _ のみ）
+#   CONTACT_EMAIL : 連絡先メール
+#   PROFILE_NAME  : 事前承認するプロファイルの表示名（言語依存。日本語の組織では「システム管理者」）
+#   CERT_FILE     : JWT 用の証明書（PEM）。<certificate> には BEGIN/END 行を除いた本文を入れる
+#
+# 【生成するもの】（JWT Bearer Flow・フルアクセス + refresh_token・管理者が承認したユーザーは事前承認済み）
+#   externalClientApps / extlClntAppGlobalOauthSets / extlClntAppOauthSettings /
+#   extlClntAppOauthPolicies / extlClntAppPolicies
+#   consumerKey は出力項目のため書かない（deploy 後に retrieve して取得する）
+# ------------------------------------------------------------------------------
+generate_eca_metadata() {
+    local dir="$1" app="$2" email="$3" profile="$4" cert_file="$5"
+    local base="${dir}/force-app/main/default" cert esc_email esc_profile
+    cert=$(grep -v -- '-----' "$cert_file" | tr -d '\r')  # VAR=$(cmd) のため run 不使用。PEM の本文のみ
+    esc_email=$(_xml_escape "$email")
+    esc_profile=$(_xml_escape "$profile")
+
+    run mkdir -p "${base}/externalClientApps" "${base}/extlClntAppGlobalOauthSets" \
+                 "${base}/extlClntAppOauthSettings" "${base}/extlClntAppOauthPolicies" \
+                 "${base}/extlClntAppPolicies" || return $RET_NG
+    # run 不使用: ファイル生成
+    printf '%s\n' '{"packageDirectories":[{"path":"force-app","default":true}],"namespace":"","sourceApiVersion":"64.0"}' \
+        > "${dir}/sfdx-project.json"
+
+    # run 不使用: ファイル生成（ヒアドキュメント）
+    cat > "${base}/externalClientApps/${app}.eca-meta.xml" << ECAEOF
+<?xml version="1.0" encoding="UTF-8"?>
+<ExternalClientApplication xmlns="http://soap.sforce.com/2006/04/metadata">
+    <contactEmail>${esc_email}</contactEmail>
+    <distributionState>Local</distributionState>
+    <isProtected>false</isProtected>
+    <label>${app}</label>
+</ExternalClientApplication>
+ECAEOF
+    cat > "${base}/extlClntAppGlobalOauthSets/${app}_glbloauth.ecaGlblOauth-meta.xml" << ECAEOF
+<?xml version="1.0" encoding="UTF-8"?>
+<ExtlClntAppGlobalOauthSettings xmlns="http://soap.sforce.com/2006/04/metadata">
+    <callbackUrl>https://login.salesforce.com/services/oauth2/callback</callbackUrl>
+    <certificate>${cert}</certificate>
+    <externalClientApplication>${app}</externalClientApplication>
+    <isClientCredentialsFlowEnabled>false</isClientCredentialsFlowEnabled>
+    <isCodeCredFlowEnabled>false</isCodeCredFlowEnabled>
+    <isCodeCredPostOnly>false</isCodeCredPostOnly>
+    <isConsumerSecretOptional>true</isConsumerSecretOptional>
+    <isDeviceFlowEnabled>false</isDeviceFlowEnabled>
+    <isIntrospectAllTokens>false</isIntrospectAllTokens>
+    <isNamedUserJwtEnabled>false</isNamedUserJwtEnabled>
+    <isPkceRequired>true</isPkceRequired>
+    <isRefreshTokenRotationEnabled>true</isRefreshTokenRotationEnabled>
+    <isSecretRequiredForRefreshToken>false</isSecretRequiredForRefreshToken>
+    <isSecretRequiredForTokenExchange>true</isSecretRequiredForTokenExchange>
+    <isTokenExchangeEnabled>false</isTokenExchangeEnabled>
+    <label>${app}_glbloauth</label>
+    <shouldRotateConsumerKey>false</shouldRotateConsumerKey>
+    <shouldRotateConsumerSecret>false</shouldRotateConsumerSecret>
+</ExtlClntAppGlobalOauthSettings>
+ECAEOF
+    cat > "${base}/extlClntAppOauthSettings/${app}_oauth.ecaOauth-meta.xml" << ECAEOF
+<?xml version="1.0" encoding="UTF-8"?>
+<ExtlClntAppOauthSettings xmlns="http://soap.sforce.com/2006/04/metadata">
+    <commaSeparatedOauthScopes>Full, RefreshToken</commaSeparatedOauthScopes>
+    <externalClientApplication>${app}</externalClientApplication>
+    <isFirstPartyAppEnabled>false</isFirstPartyAppEnabled>
+    <label>${app}_oauth</label>
+</ExtlClntAppOauthSettings>
+ECAEOF
+    cat > "${base}/extlClntAppOauthPolicies/${app}_oauthPlcy.ecaOauthPlcy-meta.xml" << ECAEOF
+<?xml version="1.0" encoding="UTF-8"?>
+<ExtlClntAppOauthConfigurablePolicies xmlns="http://soap.sforce.com/2006/04/metadata">
+    <commaSeparatedProfile>${esc_profile}</commaSeparatedProfile>
+    <externalClientApplication>${app}</externalClientApplication>
+    <ipRelaxationPolicyType>Enforce</ipRelaxationPolicyType>
+    <isClientCredentialsFlowEnabled>false</isClientCredentialsFlowEnabled>
+    <isGuestCodeCredFlowEnabled>false</isGuestCodeCredFlowEnabled>
+    <isTokenExchangeFlowEnabled>false</isTokenExchangeFlowEnabled>
+    <label>${app}_oauthPlcy</label>
+    <permittedUsersPolicyType>AdminApprovedPreAuthorized</permittedUsersPolicyType>
+    <refreshTokenPolicyType>SpecificInactivity</refreshTokenPolicyType>
+    <refreshTokenValidityPeriod>30</refreshTokenValidityPeriod>
+    <refreshTokenValidityUnit>Days</refreshTokenValidityUnit>
+    <requiredSessionLevel>STANDARD</requiredSessionLevel>
+</ExtlClntAppOauthConfigurablePolicies>
+ECAEOF
+    cat > "${base}/extlClntAppPolicies/${app}_plcy.ecaPlcy-meta.xml" << ECAEOF
+<?xml version="1.0" encoding="UTF-8"?>
+<ExtlClntAppConfigurablePolicies xmlns="http://soap.sforce.com/2006/04/metadata">
+    <externalClientApplication>${app}</externalClientApplication>
+    <isEnabled>true</isEnabled>
+    <isOauthPluginEnabled>true</isOauthPluginEnabled>
+    <label>${app}_plcy</label>
+    <startPage>None</startPage>
+</ExtlClntAppConfigurablePolicies>
+ECAEOF
+    return $RET_OK
+}
+
+# ------------------------------------------------------------------------------
+# register_jwt_secret_eca - 外部クライアントアプリ（ECA）を自動作成し、JWT 認証情報を GitHub に登録する
+# ------------------------------------------------------------------------------
+# 【使い方】
+#   register_jwt_secret_eca ORG_ALIAS SUFFIX LABEL KEY_FILE CERT_FILE
+#
+# 【処理フロー】
+#   1. 本番 / Sandbox を確認して接続 URL を決める
+#   2. sf org login web（ブラウザでログイン。接続ユーザーは管理者権限のユーザー）
+#   3. ログインしたユーザー名と、そのプロファイル名（表示名）を取得する
+#   4. generate_eca_metadata でメタデータを生成し、sf project deploy でアプリを作成する
+#   5. sf project retrieve でコンシューマー鍵を自動取得する（値はログに出さない）
+#   6. JWT 接続テスト（反映待ちのため、成功するまでリトライする）
+#   7. SF_CONSUMER_KEY_<suffix>（Secret）/ SF_USERNAME_<suffix> / SF_INSTANCE_URL_<suffix>（Variable）を登録
+#
+# 【備考】
+#   ・sf の認証はユーザー名単位で、エイリアスは別名にすぎない。ログイン用の一時エイリアスは
+#     sf alias unset で消す（sf org logout は同じユーザー名の全エイリアスの認証を消すため使わない）
+#   ・リトライ回数・間隔は環境変数 SF_INIT_JWT_RETRIES（既定 20）/ SF_INIT_JWT_INTERVAL（既定 30 秒）で変更できる
+# ------------------------------------------------------------------------------
+register_jwt_secret_eca() {
+    local org_alias="$1" suffix="$2" label="$3" key_file="$4" cert_file="$5"
+    local tmp_alias="sf-init-${REPO_NAME}-${suffix}"
+    local eca_name="SF_TOOLS_${REPO_NAME//[^A-Za-z0-9]/_}"
+    local instance_url="https://login.salesforce.com"
+    local username profile work consumer_key jwt_out jwt_ok=0 i
+    local retries="${SF_INIT_JWT_RETRIES:-20}" interval="${SF_INIT_JWT_INTERVAL:-30}"
+    local key_xml
+
+    log "HEADER" "${label}（SF_*_${suffix}）の設定（外部クライアントアプリを自動作成）"
+
+    # 1. 本番 / Sandbox
+    if ask_yn "  ${label}は Sandbox ですか？"; then
+        instance_url="https://test.salesforce.com"
+    fi
+    log "INFO" "  接続 URL: ${instance_url}"
+
+    # 2. ブラウザでログイン
+    log "INFO" "  ブラウザが開きます。${label}に、接続ユーザー（管理者権限）でログインしてください。"
+    run sf org login web --instance-url "$instance_url" --alias "$tmp_alias" \
+        || die "${label}へのログインに失敗しました。"
+
+    # 3. ユーザー名とプロファイル名（表示名）
+    username=$(sf org display --target-org "$tmp_alias" --json 2>/dev/null \
+        | grep -o '"username": *"[^"]*"' | head -1 | sed 's/.*: *"\(.*\)"/\1/')  # VAR=$(cmd) のため run 不使用
+    [[ -n "$username" ]] || die "ログインしたユーザー名を取得できませんでした。"
+    log "INFO" "  接続ユーザー: ${username}"
+    profile=$(sf data query --query "SELECT Profile.Name FROM User WHERE Username='${username}'" \
+        --target-org "$tmp_alias" --json 2>/dev/null \
+        | grep -o '"Name": *"[^"]*"' | head -1 | sed 's/.*: *"\(.*\)"/\1/')  # VAR=$(cmd) のため run 不使用
+    [[ -n "$profile" ]] || die "接続ユーザーのプロファイル名を取得できませんでした。"
+    log "INFO" "  プロファイル: ${profile}"
+
+    # 4. メタデータを生成して deploy（アプリ作成）
+    work=$(mktemp -d "${TMPDIR:-/tmp}/sf-init-eca.XXXXXX") || die "一時ディレクトリを作成できません。"  # VAR=$(cmd) のため run 不使用
+    generate_eca_metadata "$work" "$eca_name" "$username" "$profile" "$cert_file" \
+        || { rm -rf "$work"; die "外部クライアントアプリのメタデータを生成できませんでした。"; }
+    log "INFO" "  外部クライアントアプリ（${eca_name}）を作成します（メタデータの deploy）..."
+    (cd "$work" && run sf project deploy start --source-dir force-app --target-org "$tmp_alias") \
+        || { rm -rf "$work"; die "外部クライアントアプリの作成（deploy）に失敗しました。"; }
+
+    # 5. コンシューマー鍵を取得（値はログに出さない）
+    (cd "$work" && run sf project retrieve start \
+        --metadata "ExtlClntAppGlobalOauthSettings:${eca_name}_glbloauth" --target-org "$tmp_alias") \
+        || { rm -rf "$work"; die "コンシューマー鍵の取得（retrieve）に失敗しました。"; }
+    key_xml="${work}/force-app/main/default/extlClntAppGlobalOauthSets/${eca_name}_glbloauth.ecaGlblOauth-meta.xml"
+    consumer_key=$(sed -n 's:.*<consumerKey>\(.*\)</consumerKey>.*:\1:p' "$key_xml" 2>/dev/null | head -1)  # VAR=$(cmd) のため run 不使用
+    rm -rf "$work"
+    [[ -n "$consumer_key" ]] || die "コンシューマー鍵を取得できませんでした。"
+    log "INFO" "  コンシューマー鍵を取得しました。"
+
+    # 6. JWT 接続テスト（作成直後は反映待ちで失敗することがあるため、成功するまでリトライする）
+    log "INFO" "  JWT 接続テストを実行中...（反映待ちのため、成功するまで最大 ${retries} 回リトライします）"
+    for ((i = 1; i <= retries; i++)); do
+        # run 不使用: sf org login jwt は exit code が信頼できない場合があるため直接実行して確認する
+        # VAR=$(cmd) 形式のため run 不使用（コンシューマー鍵をコマンドのログに残さない）
+        jwt_out=$(sf org login jwt --client-id "$consumer_key" --jwt-key-file "$key_file" \
+            --username "$username" --instance-url "$instance_url" --alias "$org_alias" 2>&1)
+        if [[ $? -eq 0 ]] || echo "$jwt_out" | grep -q "Successfully authorized"; then
+            jwt_ok=1
+            break
+        fi
+        log "INFO" "  接続できませんでした（${i}/${retries}）。反映待ちのため ${interval} 秒後に再試行します..."
+        sleep "$interval"  # run 不使用: 待機
+    done
+    if [[ $jwt_ok -eq 1 ]]; then
+        log "SUCCESS" "  JWT 接続テスト成功。"
+    else
+        log "ERROR" "  [jwt error] ${jwt_out//$consumer_key/***masked***}"
+        log "WARNING" "  JWT 接続テストに成功しませんでした（反映待ち・ユーザーのプロファイル・組織の種類などを確認してください）。"
+        if ask_yn "  接続テストをスキップして GitHub Secrets への登録のみ行いますか？（GitHub Actions で後でテストできます）"; then
+            log "WARNING" "  接続テストをスキップします。GitHub Actions で動作を確認してください。"
+        else
+            die "  JWT 接続テストに失敗しました。"
+        fi
+    fi
+    # ログイン用の一時エイリアスを消す（sf org logout は同じユーザー名の全エイリアスの認証を消すため使わない）
+    run sf alias unset "$tmp_alias" || true  # 失敗しても続行（意図的エラー無視）
+
+    # 7. GitHub Secrets / Variables に登録
+    printf '%s' "$consumer_key" | run gh secret set "SF_CONSUMER_KEY_${suffix}" -R "$REPO_FULL_NAME" \
+        || die "SF_CONSUMER_KEY_${suffix} の登録に失敗しました。"
+    run gh variable set "SF_USERNAME_${suffix}"     --body "$username"     -R "$REPO_FULL_NAME" \
+        || die "SF_USERNAME_${suffix} の登録に失敗しました。"
+    run gh variable set "SF_INSTANCE_URL_${suffix}" --body "$instance_url" -R "$REPO_FULL_NAME" \
+        || die "SF_INSTANCE_URL_${suffix} の登録に失敗しました。"
+    log "SUCCESS" "  SF_CONSUMER_KEY_${suffix}（Secret）/ SF_USERNAME_${suffix}（Variable）/ SF_INSTANCE_URL_${suffix}（Variable）を登録しました。"
+}

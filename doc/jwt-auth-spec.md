@@ -3,6 +3,8 @@
 > **本ドキュメントの範囲:** JWT 認証への移行設計・仕様・実装方針。実装の詳細（コマンド引数等）はコードを正とします。
 >
 > **補足（sf-init Phase 10）:** Salesforce 側のアプリは「接続アプリケーション（Connected App）」と「外部クライアントアプリケーション（External Client App）」のいずれかを選択できます。本書は Connected App 前提で記述していますが、外部クライアントアプリでも同様の JWT Bearer Flow で動作します。
+>
+> **外部クライアントアプリ（External Client App）を選んだ場合は自動作成です。** Step 2 の手動案内は出ず、Step 4 の組織ごとの設定で、`sf org login web`（ブラウザでログイン）→ 接続ユーザー名とプロファイル名（表示名）の取得 → メタデータ（5 ファイル）の `sf project deploy` でアプリ作成（証明書の登録、JWT Bearer、フルアクセス + refresh_token、管理者が承認したユーザーは事前承認済み）→ `sf project retrieve` でコンシューマー鍵を自動取得 → JWT 接続テスト（反映待ちのためリトライ）→ Secrets / Variables を登録、までを `sf-init` が行います（コンシューマーキー・ユーザー名の手入力は不要です）。実装は `phases/init/init-common.sh` の `register_jwt_secret_eca` / `generate_eca_metadata` を参照してください。
 
 ---
 

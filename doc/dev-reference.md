@@ -389,7 +389,7 @@ tr -d '\r' < "$key_file" | base64 -w 0 | gh secret set "SF_PRIVATE_KEY" -R "$REP
 7. Slack 連携の設定（SLACK_BOT_TOKEN を Secret / SLACK_CHANNEL_ID を Variable に登録。チャンネル ID は C または G で始まる形式かを検証し、それ以外（D=DM など）は警告して確認する）
 8. 初回コミット＆プッシュ（PAT は GIT_ASKPASS で渡しコマンドのログに残さない。push 後に .sf-init.env から PAT を削除する）
 9. GitHub リポジトリ設定・Ruleset の適用（既存 Ruleset の ID は数字のときだけ削除対象にする）
-10. JWT 認証情報の設定（SF_PRIVATE_KEY / SF_CONSUMER_KEY_* を Secret / SF_USERNAME_* / SF_INSTANCE_URL_* を Variable に登録）
+10. JWT 認証情報の設定（SF_PRIVATE_KEY / SF_CONSUMER_KEY_* を Secret / SF_USERNAME_* / SF_INSTANCE_URL_* を Variable に登録）。アプリ種別が外部クライアントアプリ（2）のときは、組織ごとに `register_jwt_secret_eca`（`init-common.sh`）が自動作成する（`sf org login web` → ユーザー名・プロファイル名（表示名）を取得 → `generate_eca_metadata` で 5 ファイルを生成して `sf project deploy` → `sf project retrieve` でコンシューマー鍵を取得 → JWT 接続テスト（反映待ちのためリトライ。`SF_INIT_JWT_RETRIES` / `SF_INIT_JWT_INTERVAL`）→ 登録）。ログイン用の一時エイリアスは `sf alias unset` で消す（`sf org logout` は同じユーザー名の全エイリアスの認証を消すため使わない）。接続アプリ（1）は従来の手動案内
 11. SF_TOOLS_TOKEN の設定（`11_sf_tools_token.sh`。Fine-grained PAT の作成画面を事前入力 URL で開く → `read_secret` で Token を入力（画面に表示しない）→ `GH_TOKEN` 環境変数で `gh api repos/<sf-tools>` を実行して読み取りを確認（コマンドの文字列・ログに Token を含めない）→ `printf '%s' "$TOKEN" | run gh secret set SF_TOOLS_TOKEN`。確認に失敗した場合は再入力かスキップを選ぶ。Token は `.sf-init.env` に書き出さない。sf-tools の OWNER/REPO は `init-common.sh` の `SF_TOOLS_REPO_FULL_NAME`）
 
 オプション:

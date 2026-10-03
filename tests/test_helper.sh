@@ -204,8 +204,22 @@ case "$1 $2" in
             | sed 's/[,{]/&\n/g'
         exit "${MOCK_SF_ORG_DISPLAY_EXIT:-0}" ;;
     "org login")
+        # sf org login jwt を最初の N 回だけ失敗させる（MOCK_SF_JWT_FAIL_FIRST=N。反映待ちのリトライの再現）
+        if [[ "$3" == "jwt" && -n "${MOCK_SF_JWT_FAIL_FIRST:-}" ]]; then
+            _jc="${MOCK_CALL_LOG%/*}/jwt.cnt"
+            _n=$(( $(cat "$_jc" 2>/dev/null || echo 0) + 1 ))
+            echo "$_n" > "$_jc"
+            if [[ $_n -le ${MOCK_SF_JWT_FAIL_FIRST} ]]; then
+                echo "Error authenticating with JWT: client identifier invalid" >&2
+                exit 1
+            fi
+        fi
         [[ "${MOCK_SF_LOGIN_EXIT:-0}" -eq 0 ]] && echo "Successfully authorized fake@example.com with org ID 00D000000000001AAA"
         exit "${MOCK_SF_LOGIN_EXIT:-0}" ;;
+    "data query")
+        # 接続ユーザーのプロファイル名の取得（sf-init の外部クライアントアプリ作成）
+        echo "{\"status\":0,\"result\":{\"records\":[{\"Profile\":{\"Name\":\"${MOCK_SF_PROFILE_NAME:-System Administrator}\"}}]}}"
+        exit 0 ;;
     "org logout")   exit 0 ;;
     "org open")     exit 0 ;;
     "alias unset")  exit 0 ;;
@@ -220,7 +234,22 @@ case "$1 $2" in
         done
         [[ -n "$OUT_DIR" ]] && mkdir -p "$OUT_DIR/package" && echo '<Package/>' > "$OUT_DIR/package/package.xml"
         exit "${MOCK_SF_SGD_EXIT:-0}" ;;
-    "project retrieve") exit 0 ;;
+    "project retrieve")
+        # 外部クライアントアプリのコンシューマー鍵の取得を再現: ExtlClntAppGlobalOauthSettings:<名前> を指定された場合、
+        # カレントの force-app 配下に consumerKey を含むファイルを作る
+        _meta=""; _prev=""
+        for _a in "$@"; do
+            [[ "$_prev" == "--metadata" || "$_prev" == "-m" ]] && _meta="$_a"
+            _prev="$_a"
+        done
+        if [[ "$_meta" == ExtlClntAppGlobalOauthSettings:* ]]; then
+            _nm="${_meta#ExtlClntAppGlobalOauthSettings:}"
+            _d="force-app/main/default/extlClntAppGlobalOauthSets"
+            mkdir -p "$_d"
+            printf '<ExtlClntAppGlobalOauthSettings>\n    <consumerKey>%s</consumerKey>\n</ExtlClntAppGlobalOauthSettings>\n' \
+                "${MOCK_SF_CONSUMER_KEY:-3MVGMOCKCONSUMERKEY}" > "$_d/${_nm}.ecaGlblOauth-meta.xml"
+        fi
+        exit 0 ;;
     "project generate")
         OUT_DIR=""; OUT_NAME="package.xml"; PREV=""
         for arg in "$@"; do
@@ -233,6 +262,8 @@ case "$1 $2" in
             > "$OUT_DIR/$OUT_NAME"
         exit 0 ;;
     "project deploy")
+        # カレントに force-app があれば、deploy された内容をテストで検証できるよう控えを残す
+        [[ -d force-app ]] && cp -r force-app "${MOCK_CALL_LOG%/*}/deployed_src" 2>/dev/null
         echo '{"status":0,"result":{"success":true}}'
         exit "${MOCK_SF_DEPLOY_EXIT:-0}" ;;
     *) exit 0 ;;

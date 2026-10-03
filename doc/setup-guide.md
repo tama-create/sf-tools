@@ -112,11 +112,16 @@ GitHub オーナー名とプロジェクト名はフォルダ構成から自動�
    /invite @sf-notify-<プロジェクト名>
    ```
    - Bot がチャンネルに参加していないと通知が届きません
-7. **JWT 認証情報の入力**（各 Salesforce 組織の Connected App 情報）
-   - `SF_PRIVATE_KEY`: PEM 秘密鍵（全組織共通）
-   - `SF_CONSUMER_KEY_*`: Connected App コンシューマーキー（本番・ステージング・開発）
-   - `SF_USERNAME_*`: 接続ユーザー名（本番・ステージング・開発）
-   - `SF_INSTANCE_URL_*`: 接続 URL（例: `https://login.salesforce.com`）
+7. **JWT 認証情報の設定**（Salesforce の組織ごと）
+   - まず、アプリ種別を選びます。**「2. 外部クライアントアプリケーション」（Salesforce 推奨）を選ぶと、アプリの作成を `sf-init` が自動で行います**
+     - 組織ごとに「Sandbox か」を答え、**ブラウザで Salesforce にログイン**する（接続ユーザー＝管理者権限のユーザー）だけです
+     - アプリの作成・証明書の登録・ポリシーとプロファイルの設定・コンシューマー鍵の取得は自動です（反映待ちのため、接続テストは成功するまでリトライします）
+   - 「1. 接続アプリケーション」（廃止予定）を選んだ場合は、従来どおり手動です。Salesforce の画面で設定し、次を入力します
+     - `SF_CONSUMER_KEY_*`: Connected App コンシューマーキー（本番・ステージング・開発）
+     - `SF_USERNAME_*`: 接続ユーザー名（本番・ステージング・開発）
+   - いずれの場合も、次が GitHub に登録されます
+     - `SF_PRIVATE_KEY`: PEM 秘密鍵（全組織共通）
+     - `SF_CONSUMER_KEY_*` / `SF_USERNAME_*` / `SF_INSTANCE_URL_*`（例: `https://login.salesforce.com`）
 8. **SF_TOOLS_TOKEN の作成**（ブラウザで操作・Token を貼り付け。詳細は 3.2）
    - `sf-init.sh` が、Fine-grained PAT の作成画面を事前入力した URL で開き、URL を画面にも表示します
    - Token は画面に表示されません。入力後に sf-tools を読めるか確認してから登録します

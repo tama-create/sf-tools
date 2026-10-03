@@ -22,6 +22,7 @@
 #   16. Phase 11（SF_TOOLS_TOKEN）: 登録 / 読み取り失敗で再入力 / 読み取り失敗でスキップ / q で中断
 #   17. Phase 9: 既存 Ruleset の ID 検証（403 のエラー本文を ID として扱わない / 数字の ID は削除）
 #   18. Phase 7: SLACK_CHANNEL_ID の形式チェック（C… / D… → N で再入力 / D… → Y で登録）
+#   19. Phase 10: 外部クライアントアプリの自動作成（正常 / JWT リトライ / deploy 失敗 / JWT 不成功で中断・スキップ）
 # ==============================================================================
 
 source "$(dirname "${BASH_SOURCE[0]}")/test_helper.sh"
@@ -915,6 +916,97 @@ test_phase7_channel_id() {
 }
 
 # ==============================================================================
+# テスト 19: Phase 10 — 外部クライアントアプリ（ECA）の自動作成（--only 10）
+#   入力列: 警告確認 Y → アプリ種別 2 → メイン組織は Sandbox? N（ブランチ構成 1 階層 = メイン組織のみ）
+#   - 正常                  : ブラウザログイン → deploy → 鍵を retrieve → JWT → 登録。メタデータの内容も検証
+#   - JWT が最初の 2 回失敗 : リトライして 3 回目で成功
+#   - deploy が失敗         : 中断。retrieve・登録は行われない
+#   - JWT が成功しない      : 確認で N → 中断 / Y → 接続テストをスキップして登録
+#   いずれも sf org logout は使わない（同じユーザー名の全エイリアスの認証が消えるため）
+# ==============================================================================
+test_phase10_eca_auto() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] Phase 10: 外部クライアントアプリの自動作成${CLR_RST}"
+
+    local mb mock_home init_base init_dir exit_code out jwt_calls
+    mb=$(setup_mock_bin)
+    export MOCK_CALL_LOG="$mb/calls.log"
+    mock_home=$(setup_mock_home)
+    create_all_mocks "$mb"
+    create_mock_gh_for_init "$mb"
+    _stub_subscripts "$mock_home"
+    out="$mb/out.log"
+    export MOCK_SF_ORG_JSON='{"result":{"username":"admin@example.com","alias":"x"}}'
+    export SF_INIT_JWT_INTERVAL=0
+
+    _p10_run() {
+        init_base=$(_setup_init_dir "tamashimon" "testproject")
+        init_dir="$init_base/home/tamashimon/testproject"
+        mkdir -p "$init_dir/init"
+        printf 'REPO_FULL_NAME="tamashimon/force-testproject"\nREPO_NAME="force-testproject"\nPROJECT_NAME="testproject"\nBRANCH_COUNT="1"\n' \
+            > "$init_dir/init/.sf-init.env"
+        # 前のケースで生成された証明書が残ると「既存の証明書を再利用しますか？」の確認が出て入力列がずれるため消す
+        rm -rf "$mb/deployed_src" "$mb/jwt.cnt" "$mock_home/.sf-jwt"
+        : > "$MOCK_CALL_LOG"
+        printf '%b' "$1" \
+            | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
+                  bash "$mock_home/sf-tools/bin/sf-init.sh" --only 10 ) > "$out" 2>&1
+        exit_code=$?
+    }
+
+    # 正常
+    _p10_run 'Y\n2\nN\n'
+    assert_exit_ok            "$exit_code"                                                              "正常 → 終了コード 0"
+    assert_file_contains      "$MOCK_CALL_LOG" "sf org login web --instance-url https://login.salesforce.com --alias sf-init-force-testproject-PROD" "ブラウザでログインする（一時エイリアス）"
+    assert_file_contains      "$MOCK_CALL_LOG" "sf project deploy start --source-dir force-app"          "メタデータを deploy する"
+    assert_file_contains      "$MOCK_CALL_LOG" "ExtlClntAppGlobalOauthSettings:SF_TOOLS_force_testproject_glbloauth" "コンシューマー鍵を retrieve で取得する"
+    assert_file_contains      "$MOCK_CALL_LOG" "sf org login jwt"                                         "JWT 接続テストを行う"
+    assert_file_contains      "$MOCK_CALL_LOG" "sf alias unset sf-init-force-testproject-PROD"            "一時エイリアスを sf alias unset で消す"
+    assert_file_not_contains  "$MOCK_CALL_LOG" "org logout"                                               "sf org logout は使わない"
+    assert_file_contains      "$MOCK_CALL_LOG" "gh secret set SF_CONSUMER_KEY_PROD"                       "SF_CONSUMER_KEY_PROD が登録される"
+    assert_file_not_contains  "$MOCK_CALL_LOG" "--body 3MVGMOCKCONSUMERKEY"                               "コンシューマー鍵を --body（引数）で渡さない"
+    assert_file_contains      "$MOCK_CALL_LOG" "gh variable set SF_USERNAME_PROD --body admin@example.com" "SF_USERNAME_PROD にログインしたユーザー名が登録される"
+    local d="$mb/deployed_src/main/default"
+    assert_file_exists        "$d/externalClientApps/SF_TOOLS_force_testproject.eca-meta.xml"            "ECA 本体のメタデータが生成される"
+    assert_file_contains      "$d/extlClntAppOauthPolicies/SF_TOOLS_force_testproject_oauthPlcy.ecaOauthPlcy-meta.xml" "<commaSeparatedProfile>System Administrator</commaSeparatedProfile>" "接続ユーザーのプロファイル名が入る"
+    assert_file_contains      "$d/extlClntAppOauthPolicies/SF_TOOLS_force_testproject_oauthPlcy.ecaOauthPlcy-meta.xml" "AdminApprovedPreAuthorized" "管理者が承認したユーザーは事前承認済み"
+    assert_file_contains      "$d/extlClntAppGlobalOauthSets/SF_TOOLS_force_testproject_glbloauth.ecaGlblOauth-meta.xml" "<certificate>" "証明書が入る"
+    assert_file_not_contains  "$d/extlClntAppGlobalOauthSets/SF_TOOLS_force_testproject_glbloauth.ecaGlblOauth-meta.xml" "-----BEGIN" "証明書の BEGIN/END 行は含まない（本文のみ）"
+    assert_file_not_contains  "$d/extlClntAppGlobalOauthSets/SF_TOOLS_force_testproject_glbloauth.ecaGlblOauth-meta.xml" "consumerKey" "consumerKey は書かない（出力項目）"
+    rm -rf "$init_base"
+
+    # JWT が最初の 2 回失敗 → リトライして成功
+    MOCK_SF_JWT_FAIL_FIRST=2 _p10_run 'Y\n2\nN\n'
+    jwt_calls=$(grep -c "^sf org login jwt" "$MOCK_CALL_LOG")
+    assert_exit_ok            "$exit_code"                                                              "JWT リトライ → 終了コード 0"
+    [[ "$jwt_calls" -eq 3 ]] && pass "JWT 接続テストを 3 回試行（2 回失敗 + 1 回成功）" || fail "JWT 接続テストを 3 回試行" "試行回数: ${jwt_calls}"
+    assert_file_contains      "$MOCK_CALL_LOG" "gh secret set SF_CONSUMER_KEY_PROD"                       "リトライ成功後に登録される"
+    rm -rf "$init_base"
+
+    # deploy 失敗 → 中断
+    MOCK_SF_DEPLOY_EXIT=1 _p10_run 'Y\n2\nN\n'
+    assert_exit_fail          "$exit_code"                                                              "deploy 失敗 → 中断"
+    assert_file_not_contains  "$MOCK_CALL_LOG" "project retrieve"                                         "deploy 失敗 → retrieve しない"
+    assert_file_not_contains  "$MOCK_CALL_LOG" "gh secret set SF_CONSUMER_KEY_PROD"                       "deploy 失敗 → 登録しない"
+    rm -rf "$init_base"
+
+    # JWT が成功しない → 確認で N → 中断
+    MOCK_SF_JWT_FAIL_FIRST=99 SF_INIT_JWT_RETRIES=2 _p10_run 'Y\n2\nN\nN\n'
+    assert_exit_fail          "$exit_code"                                                              "JWT 不成功 + スキップしない → 中断"
+    assert_file_not_contains  "$MOCK_CALL_LOG" "gh secret set SF_CONSUMER_KEY_PROD"                       "JWT 不成功 + スキップしない → 登録しない"
+    rm -rf "$init_base"
+
+    # JWT が成功しない → 確認で Y → スキップして登録
+    MOCK_SF_JWT_FAIL_FIRST=99 SF_INIT_JWT_RETRIES=2 _p10_run 'Y\n2\nN\nY\n'
+    assert_exit_ok            "$exit_code"                                                              "JWT 不成功 + スキップする → 終了コード 0"
+    assert_file_contains      "$MOCK_CALL_LOG" "gh secret set SF_CONSUMER_KEY_PROD"                       "JWT 不成功 + スキップする → 登録される"
+
+    unset -f _p10_run
+    unset MOCK_SF_ORG_JSON SF_INIT_JWT_INTERVAL
+    teardown "$mb" "$mock_home" "$init_base"
+}
+
+# ==============================================================================
 # テスト実行
 # ==============================================================================
 echo ""
@@ -940,5 +1032,6 @@ test_env_type_selection
 test_phase11_sf_tools_token
 test_phase9_ruleset_id
 test_phase7_channel_id
+test_phase10_eca_auto
 
 print_summary

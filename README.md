@@ -100,7 +100,7 @@ sf-init.sh
 7. Slack 連携の設定
 8. 初回コミット＆プッシュ
 9. GitHub リポジトリ設定・Ruleset 適用
-10. JWT 認証情報（Salesforce → GitHub Secrets / Variables）の設定
+10. JWT 認証情報（Salesforce → GitHub Secrets / Variables）の設定（外部クライアントアプリは、ブラウザでログインするだけで自動作成）
 11. SF_TOOLS_TOKEN の設定（Actions が Private の sf-tools を clone するための Token を Secret に登録）
 
 > リポジトリ名は必ず `force-` で始めてください。

@@ -94,20 +94,23 @@ GitHub オーナー名とプロジェクト名はフォルダ構成から自動�
 
 実行中に以下を順番に入力・操作する:
 
-1. **ブランチ構成の選択**（3 / 2 / 1 階層）
-2. **GitHub Classic PAT の発行**（ブラウザで操作・トークンを貼り付け）
+1. **環境種別の選択**（**通常は「1. 本番環境」**）
+   - 1. 本番環境: GitHub Actions は sf-tools の `main`（リリース済みの配布版）を使用します
+   - 2. 検証環境: **sf-tools の開発者専用**です。リリース前の未検証コード（`development`）が使われます。選択すると確認（Y/N/q）が出ます
+2. **ブランチ構成の選択**（3 / 2 / 1 階層）
+3. **GitHub Classic PAT の発行**（ブラウザで操作・トークンを貼り付け）
    - Note: `sf-metasync-{プロジェクト名}`（自動表示）
    - Expiration: `No expiration`
    - Scopes: `repo`（全選択）・`workflow`
-3. **Slack Bot Token の取得**（ブラウザで操作・トークンを貼り付け）
-4. **Slack チャンネル ID の入力**（`C` で始まる文字列）
-5. **Bot をチャンネルに招待**（Slack で手動実行が必要）
+4. **Slack Bot Token の取得**（ブラウザで操作・トークンを貼り付け）
+5. **Slack チャンネル ID の入力**（`C` で始まる文字列）
+6. **Bot をチャンネルに招待**（Slack で手動実行が必要）
    - 通知先チャンネルを開き、以下を実行:
    ```
    /invite @sf-notify-<プロジェクト名>
    ```
    - Bot がチャンネルに参加していないと通知が届きません
-6. **JWT 認証情報の入力**（各 Salesforce 組織の Connected App 情報）
+7. **JWT 認証情報の入力**（各 Salesforce 組織の Connected App 情報）
    - `SF_PRIVATE_KEY`: PEM 秘密鍵（全組織共通）
    - `SF_CONSUMER_KEY_*`: Connected App コンシューマーキー（本番・ステージング・開発）
    - `SF_USERNAME_*`: 接続ユーザー名（本番・ステージング・開発）

@@ -18,6 +18,7 @@
 #   12. --add-tier staging → 既存ならエラー
 #   13. --add-tier develop → staging なしはエラー
 #   14. 不明なオプション → エラー終了
+#   15. 環境種別の選択（本番 / 検証で続行 / 検証を取り消して選び直し / 検証で中断）
 # ==============================================================================
 
 source "$(dirname "${BASH_SOURCE[0]}")/test_helper.sh"
@@ -644,6 +645,77 @@ test_unknown_option_fails() {
 }
 
 # ==============================================================================
+# テスト 15: 環境種別の選択（--only 2 で Phase 2 のみ実行）
+#   入力列: 警告確認 Y → Phase2 確認 Y → 環境種別以降（\n は buffer 残留として無視される）
+#   - 1            → 本番環境（確認なし）
+#   - 2 → Y        → 検証環境
+#   - 2 → N → 1    → 検証を取り消して選び直し、本番環境
+#   - 2 → q        → 中断（.sf-init.env は生成されない）
+# ==============================================================================
+test_env_type_selection() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] 環境種別の選択（本番 / 検証・確認 / 選び直し / 中断）${CLR_RST}"
+
+    local mb mock_home init_base init_dir env_file exit_code
+    mb=$(setup_mock_bin)
+    export MOCK_CALL_LOG="$mb/calls.log"
+    mock_home=$(setup_mock_home)
+    create_all_mocks "$mb"
+    create_mock_gh_for_init "$mb"
+
+    # 1: 本番環境
+    init_base=$(_setup_init_dir "tamashimon" "testproject")
+    init_dir="$init_base/home/tamashimon/testproject"
+    env_file="$init_dir/init/.sf-init.env"
+    printf 'Y\nY\n1\nN\n' \
+        | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
+              bash "$mock_home/sf-tools/bin/sf-init.sh" --only 2 ) > /dev/null 2>&1
+    exit_code=$?
+    assert_exit_ok       "$exit_code"                              "1 → 正常終了"
+    assert_file_contains "$env_file" 'ENV_TYPE="production"'       "1 → ENV_TYPE=production"
+    assert_file_contains "$env_file" 'SF_TOOLS_BRANCH="main"'      "1 → SF_TOOLS_BRANCH=main"
+    rm -rf "$init_base"
+
+    # 2 → Y: 検証環境
+    init_base=$(_setup_init_dir "tamashimon" "testproject")
+    init_dir="$init_base/home/tamashimon/testproject"
+    env_file="$init_dir/init/.sf-init.env"
+    printf 'Y\nY\n2\nY\nN\n' \
+        | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
+              bash "$mock_home/sf-tools/bin/sf-init.sh" --only 2 ) > /dev/null 2>&1
+    exit_code=$?
+    assert_exit_ok       "$exit_code"                                    "2 → Y → 正常終了"
+    assert_file_contains "$env_file" 'ENV_TYPE="staging"'                "2 → Y → ENV_TYPE=staging"
+    assert_file_contains "$env_file" 'SF_TOOLS_BRANCH="development"'     "2 → Y → SF_TOOLS_BRANCH=development"
+    rm -rf "$init_base"
+
+    # 2 → N → 1: 検証を取り消して選び直し、本番環境
+    init_base=$(_setup_init_dir "tamashimon" "testproject")
+    init_dir="$init_base/home/tamashimon/testproject"
+    env_file="$init_dir/init/.sf-init.env"
+    printf 'Y\nY\n2\nN\n1\nN\n' \
+        | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
+              bash "$mock_home/sf-tools/bin/sf-init.sh" --only 2 ) > /dev/null 2>&1
+    exit_code=$?
+    assert_exit_ok       "$exit_code"                              "2 → N → 1 → 正常終了"
+    assert_file_contains "$env_file" 'ENV_TYPE="production"'       "2 → N → 1 → ENV_TYPE=production（選び直せる）"
+    rm -rf "$init_base"
+
+    # 2 → q: 中断
+    init_base=$(_setup_init_dir "tamashimon" "testproject")
+    init_dir="$init_base/home/tamashimon/testproject"
+    env_file="$init_dir/init/.sf-init.env"
+    printf 'Y\nY\n2\nq\n' \
+        | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
+              bash "$mock_home/sf-tools/bin/sf-init.sh" --only 2 ) > /dev/null 2>&1
+    exit_code=$?
+    assert_exit_fail        "$exit_code"   "2 → q → 中断（異常終了）"
+    assert_file_not_exists  "$env_file"    "2 → q → .sf-init.env は生成されない"
+
+    teardown "$mb" "$mock_home" "$init_base"
+}
+
+# ==============================================================================
 # テスト実行
 # ==============================================================================
 echo ""
@@ -665,5 +737,6 @@ test_add_tier_staging_happy
 test_add_tier_staging_already_exists
 test_add_tier_develop_without_staging
 test_unknown_option_fails
+test_env_type_selection
 
 print_summary

@@ -11,15 +11,24 @@ echo -e "${CLR_HEAD}=== common.sh ===${CLR_RST}"
 # ------------------------------------------------------------------------------
 # check_gh_owner のテスト
 # ------------------------------------------------------------------------------
+# 引数1: gh api user が返すユーザー名 / 引数2: 組織メンバーシップ API が返す "role state"（空なら空返却）
+# 引数3: "fail" を渡すと組織メンバーシップ API が exit 1 で失敗する
 _make_mock_gh_bin() {
-    local mb user
+    local mb user org_status org_cmd
     mb=$(setup_mock_bin)
     user="${1:-testowner}"
+    org_status="${2:-}"
+    if [[ "${3:-}" == "fail" ]]; then
+        org_cmd="exit 1"
+    else
+        org_cmd="echo \"${org_status}\""
+    fi
     cat > "$mb/gh" << EOF
 #!/bin/bash
 echo "gh \$*" >> "\${MOCK_CALL_LOG:-/dev/null}"
 case "\$1 \$2" in
     "api user") echo "${user}" ;;
+    "api user/memberships/orgs/"*) ${org_cmd} ;;
     *) exit 0 ;;
 esac
 EOF
@@ -94,8 +103,72 @@ GHEOF
     rm -f "$script"; teardown "$mb"
 }
 
+# 不一致だが、オーナーが組織で認証ユーザーがその有効な管理者 → 通過
+test_check_gh_owner_org_admin() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] check_gh_owner: 組織の有効な管理者 → 正常終了${CLR_RST}"
+
+    local mb script
+    mb=$(_make_mock_gh_bin "other-user" "admin active")
+    script=$(_make_check_gh_owner_script)
+
+    PATH="$mb:$PATH" bash "$script" "testorg" > /dev/null 2>&1
+    assert_exit_ok $? "組織 admin(active) → 終了コード 0"
+
+    rm -f "$script"; teardown "$mb"
+}
+
+# 不一致で、組織の一般メンバー → die
+test_check_gh_owner_org_member() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] check_gh_owner: 組織の一般メンバー → die${CLR_RST}"
+
+    local mb script
+    mb=$(_make_mock_gh_bin "other-user" "member active")
+    script=$(_make_check_gh_owner_script)
+
+    PATH="$mb:$PATH" bash "$script" "testorg" > /dev/null 2>&1
+    assert_exit_fail $? "組織 member → die"
+
+    rm -f "$script"; teardown "$mb"
+}
+
+# 不一致で、組織の管理者だが招待が未承諾（pending）→ die
+test_check_gh_owner_org_admin_pending() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] check_gh_owner: 組織 admin だが pending → die${CLR_RST}"
+
+    local mb script
+    mb=$(_make_mock_gh_bin "other-user" "admin pending")
+    script=$(_make_check_gh_owner_script)
+
+    PATH="$mb:$PATH" bash "$script" "testorg" > /dev/null 2>&1
+    assert_exit_fail $? "組織 admin(pending) → die"
+
+    rm -f "$script"; teardown "$mb"
+}
+
+# 不一致で、組織メンバーシップ API が失敗 → die（安全側に倒す）
+test_check_gh_owner_org_api_failure() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] check_gh_owner: 組織 API 失敗 → die${CLR_RST}"
+
+    local mb script
+    mb=$(_make_mock_gh_bin "other-user" "" "fail")
+    script=$(_make_check_gh_owner_script)
+
+    PATH="$mb:$PATH" bash "$script" "testorg" > /dev/null 2>&1
+    assert_exit_fail $? "組織 API 失敗 → die"
+
+    rm -f "$script"; teardown "$mb"
+}
+
 test_check_gh_owner_match
 test_check_gh_owner_mismatch
 test_check_gh_owner_skip_on_empty
+test_check_gh_owner_org_admin
+test_check_gh_owner_org_member
+test_check_gh_owner_org_admin_pending
+test_check_gh_owner_org_api_failure
 
 print_summary

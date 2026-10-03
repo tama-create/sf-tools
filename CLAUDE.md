@@ -8,7 +8,8 @@
 
 ### 1.1 絶対禁止
 
-- **mm は「mm」という言葉が明示されるまで絶対に実行しないこと。作業完了・テストPASS・確認取得などいかなる状況でも、「mm」の明示なしにコミット・プッシュ・PR作成・マージを行うことは絶対禁止**
+- **mm（開発反映）と rr（リリース）は、それぞれの言葉が明示されるまで絶対に実行しないこと。作業完了・テストPASS・確認取得などいかなる状況でも、明示なしにコミット・プッシュ・PR作成・マージを行うことは絶対禁止**
+- **sf-tools の `main` へのマージは「rr」のときだけ。「mm」では `main` に触れない。** `main` へのマージは全ユーザーへの配布と同義（各 `~/sf-tools` の `git pull` で届く）
 - `force-*` 側の `main` へのマージは、明示的な指示なしで行わないこと
 - 思い込みで実行しないこと。必ずコード・文脈・既存仕様を確認してから実行すること
 - **ファイル変更は、ユーザーが「GO」を出してから始めること。変更前に方針・内容を提示して確認を取ること**
@@ -22,18 +23,32 @@
 | 変更前 | 方針・内容を提示 → GO を待つ |
 | 変更中 | `run` ラッパー必須・日本語コメント・UTF-8/LF 維持 |
 | 変更後 | `bash tests/run_tests.sh` で全件 PASS → mm を依頼 |
+| 検証 | 検証環境の force-*（`SF_TOOLS_BRANCH=development`）で実動作を確認（ユーザーが実施・報告） |
+| リリース | 検証 OK の報告後に rr を依頼 |
 
 > **mm の前にテスト全件 PASS は必須。PASS 確認なしの mm 依頼は禁止。**
+> **rr の前に、テスト全件 PASS と検証環境での実動作確認の報告が必須。どちらかが欠けた rr 依頼は断ること。**
 
-### 1.3 mm 実行手順
+### 1.3 mm / rr 実行手順
 
-「mm」と明示された場合のみ、以下の手順を一括実行すること。
+#### 1.3.1 mm（開発反映）
+
+「mm」と明示された場合のみ、以下の手順を一括実行すること。**`main` には触れない。**
 
 ```bash
 git checkout development                 # development ブランチに移動
 git add <対象ファイル>
 git commit -m "..."
 git push origin development
+```
+
+#### 1.3.2 rr（リリース）
+
+「rr」と明示された場合のみ、以下の手順を一括実行すること。前提: `development` が mm 済み（未コミットの変更なし）で、1.2 の rr 前提が満たされていること。
+
+```bash
+git checkout development
+git fetch origin                         # origin/development・origin/main が手元より進んでいないか確認
 gh pr create --base main
 gh pr merge <PR番号> --merge             # --delete-branch は付けない
 git checkout development                 # マージ後も development に戻る
@@ -50,7 +65,7 @@ git pull origin main                     # main の最新を取り込む
 
 ### 1.5 Git worktree を使うとき
 
-- worktree で作業したブランチが `mm` で `main` にマージされたあとは、そのworktreeは役目を終えている。**古いworktreeのファイルを本体の作業ディレクトリへコピー・参照しない**（別のworktree/別マシンでの後続の変更を上書きして消す事故になる）
+- worktree で作業したブランチが `rr` で `main` にマージされたあとは、そのworktreeは役目を終えている。**古いworktreeのファイルを本体の作業ディレクトリへコピー・参照しない**（別のworktree/別マシンでの後続の変更を上書きして消す事故になる）
 - 複数のworktreeやマシンで並行して作業している可能性があるときは、書き込み前に `git fetch` して `origin/development` や `origin/main` が自分の手元より進んでいないか確認する
 - （KonaYufuPJで、古いworktreeの内容を本体へコピーして公開ページの最新更新27コミット分を消しかけた事故が実際に発生している。同じ轍を踏まない）
 
@@ -119,7 +134,7 @@ git pull origin main                     # main の最新を取り込む
 |---|---|
 | 警告ボックス表示 | `CLR_ERR` (赤) + box-drawing chars で目立つ警告を表示 |
 | `ask_yn \|\| die` | N/q で必ず中断すること（`|| die` 必須）|
-| `check_gh_owner "$OWNER"` | gh 認証ユーザーがリポジトリオーナーと一致するか確認（不一致時は `die`）|
+| `check_gh_owner "$OWNER"` | gh 認証ユーザーがリポジトリオーナーと一致するか確認（不一致は `die`。ただしオーナーが組織で、ユーザーがその有効な admin なら通過）|
 | GITHUB_ACTIONS スキップ | `GITHUB_ACTIONS=true` の場合は警告・確認をスキップして自動実行 |
 | 二重確認の防止 | `SF_DEPLOY_CONFIRMED=1` を export して呼び出し先の確認をスキップ |
 
@@ -212,10 +227,13 @@ Salesforce 開発の環境構築と日々の作業を自動化するシェルス
 | ブランチ | 用途 |
 |---|---|
 | `development` | 開発ブランチ（通常の作業はここで行う） |
-| `main` | リリースブランチ（`development` → PR → merge でリリース） |
+| `main` | リリースブランチ（`development` → PR → merge でリリース＝全ユーザーへ配布） |
 
 - 作業は `development` ブランチで行い、`main` へは PR 経由でマージする
-- mm = commit → push → PR 作成 → main へマージ
+- mm = commit → push（`development` まで。`main` には入らない）
+- rr = PR 作成 → `main` へマージ（配布）。実施前に検証環境の force-* で確認すること
+- 検証環境 = Variable `SF_TOOLS_BRANCH=development` の force-*（Actions が sf-tools の `development` を使う）。詳細は `doc/dev-reference.md` セクション 9
+- `main` のブランチ保護は GitHub 無料プランでは設定できないため、上記の運用ルールで守る
 
 ---
 
@@ -233,3 +251,4 @@ Salesforce 開発の環境構築と日々の作業を自動化するシェルス
 | 6. スクリプト依存関係マップ | 呼び出し関係 |
 | 7. デバッグコマンド集 | Salesforce CLI / Git コマンド |
 | 8. force-* ローカル環境 | ディレクトリ構成 |
+| 9. 開発・リリース手順 | 検証環境・検証チェックリスト・rr の前提 |

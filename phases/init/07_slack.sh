@@ -69,8 +69,14 @@ echo "  確認方法: チャンネルを開く → チャンネル名をクリ�
 echo "            C から始まる文字列（例: C01ABCDEFGH）"
 echo ""
 
-channel_id=""
-read_or_quit channel_id "  チャンネル ID（q で中断）："
+# チャンネル ID は C（または G）で始まる。D（ダイレクトメッセージ）や U（ユーザー）などは警告して確認する
+while true; do
+    channel_id=""
+    read_or_quit channel_id "  チャンネル ID（q で中断）："
+    [[ "$channel_id" =~ ^[CG][A-Z0-9]{8,}$ ]] && break
+    log "WARNING" "「${channel_id}」はチャンネル ID の形式ではありません（チャンネル ID は C または G で始まります。D はダイレクトメッセージ、U はユーザーの ID です）。"
+    ask_yn "▶ このまま登録しますか？（N の場合は入力し直します）" && break
+done
 
 echo "$channel_id" | run gh variable set SLACK_CHANNEL_ID -R "$REPO_FULL_NAME" \
     || die "SLACK_CHANNEL_ID の登録に失敗しました。"

@@ -9,6 +9,11 @@
 #   3. Ruleset: protect-staging の作成（同上）
 #
 # 無料プランでは Ruleset が利用できない場合があるため、失敗は WARNING 扱い。
+#
+# 【既存 Ruleset の削除（再実行の冪等性確保）】
+#   delete_existing_ruleset（init-common.sh）が、同名の Ruleset の ID を取得して削除する。
+#   ID は数字のときだけ有効とみなす（gh api が失敗すると、エラーの応答本文が標準出力に出るため）。
+#   確認できなかった場合は WARNING を出して削除をスキップし、削除の成否はそのまま表示する。
 # ==============================================================================
 
 # SF_TOOLS_DIR は sf-init.sh（司令塔）から export される
@@ -57,13 +62,7 @@ fi
 log "INFO" "[2/3] Ruleset: protect-main を作成中..."
 
 # 既存の protect-main を削除（冪等性確保）
-EXISTING_MAIN_ID=$(gh api "repos/${REPO_FULL_NAME}/rulesets" \
-    --jq '.[] | select(.name=="protect-main") | .id' 2>/dev/null || echo "")  # 変数代入のため run 不要
-if [[ -n "$EXISTING_MAIN_ID" ]]; then
-    run gh api --method DELETE "repos/${REPO_FULL_NAME}/rulesets/${EXISTING_MAIN_ID}" \
-        || log "WARNING" "既存の protect-main (id: ${EXISTING_MAIN_ID}) の削除に失敗しました。"
-    log "INFO" "既存の protect-main (id: ${EXISTING_MAIN_ID}) を削除しました。"
-fi
+delete_existing_ruleset "$REPO_FULL_NAME" "protect-main"
 
 if run gh api --method POST "repos/${REPO_FULL_NAME}/rulesets" \
     --input - << 'EOF'
@@ -113,13 +112,7 @@ fi
 log "INFO" "[3/3] Ruleset: protect-staging を作成中..."
 
 # 既存の protect-staging を削除（冪等性確保）
-EXISTING_STAGING_ID=$(gh api "repos/${REPO_FULL_NAME}/rulesets" \
-    --jq '.[] | select(.name=="protect-staging") | .id' 2>/dev/null || echo "")  # 変数代入のため run 不要
-if [[ -n "$EXISTING_STAGING_ID" ]]; then
-    run gh api --method DELETE "repos/${REPO_FULL_NAME}/rulesets/${EXISTING_STAGING_ID}" \
-        || log "WARNING" "既存の protect-staging (id: ${EXISTING_STAGING_ID}) の削除に失敗しました。"
-    log "INFO" "既存の protect-staging (id: ${EXISTING_STAGING_ID}) を削除しました。"
-fi
+delete_existing_ruleset "$REPO_FULL_NAME" "protect-staging"
 
 if run gh api --method POST "repos/${REPO_FULL_NAME}/rulesets" \
     --input - << 'EOF'

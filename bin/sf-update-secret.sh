@@ -218,7 +218,7 @@ _update_consumer_key() {
 
     _test_jwt_login "$org_alias" "$suffix" "$label" "$consumer_key" "$username" "$instance_url" "$key_file"
 
-    run gh secret set "SF_CONSUMER_KEY_${suffix}" --body "$consumer_key" -R "$REPO_FULL_NAME" \
+    printf '%s' "$consumer_key" | run gh secret set "SF_CONSUMER_KEY_${suffix}" -R "$REPO_FULL_NAME" \
         || die "SF_CONSUMER_KEY_${suffix} の更新に失敗しました。"
     log "SUCCESS" "SF_CONSUMER_KEY_${suffix} を更新しました。"
 }
@@ -315,7 +315,7 @@ _update_all() {
 
         _test_jwt_login "$org_alias" "$suffix" "$label" "$consumer_key" "$username" "$instance_url" "$key_file"
 
-        run gh secret set   "SF_CONSUMER_KEY_${suffix}" --body "$consumer_key" -R "$REPO_FULL_NAME" \
+        printf '%s' "$consumer_key" | run gh secret set "SF_CONSUMER_KEY_${suffix}" -R "$REPO_FULL_NAME" \
             || die "SF_CONSUMER_KEY_${suffix} の更新に失敗しました。"
         run gh variable set "SF_USERNAME_${suffix}"     --body "$username"     -R "$REPO_FULL_NAME" \
             || die "SF_USERNAME_${suffix} の更新に失敗しました。"

@@ -123,6 +123,8 @@
 | `read_key` | `read_key VAR [PROMPT] [VALID]` | 1文字即時入力（Enter 不要・空 Enter 無視・EOF 対応） |
 | `press_enter` | `press_enter [MSG]` | Enter 待ち（q で中断） |
 | `read_or_quit` | `read_or_quit VAR PROMPT` | テキスト入力（空 Enter 無視・q で中断・EOF 対応） |
+| `read_secret` | `read_secret VAR PROMPT` | 秘密情報の入力（画面に表示しない・空 Enter 無視・q で中断・末尾の CR を除去）。Token の入力に使う |
+| `_mask_secrets` | `_mask_secrets TEXT` | `ghp_` / `gho_` / `github_pat_` / `xoxb-` などの Token らしい文字列を伏せ字にする。`run` のコマンドログに自動適用される（保険。Token はそもそも引数に含めず、環境変数・標準入力・`GIT_ASKPASS` で渡すこと） |
 | `ask_yn` | `ask_yn "質問"` | Y/N/q 確認（1文字即時入力・q は `die`） |
 
 ### 3.2 `log` のレベル
@@ -384,9 +386,9 @@ tr -d '\r' < "$key_file" | base64 -w 0 | gh secret set "SF_PRIVATE_KEY" -R "$REP
 4. ファイル生成（sf-install.sh / sf-hook.sh）
 5. ブランチ構成（対話選択 → branches.txt 更新）
 6. PAT_TOKEN の設定
-7. Slack 連携の設定（SLACK_BOT_TOKEN を Secret / SLACK_CHANNEL_ID を Variable に登録）
-8. 初回コミット＆プッシュ
-9. GitHub リポジトリ設定・Ruleset の適用
+7. Slack 連携の設定（SLACK_BOT_TOKEN を Secret / SLACK_CHANNEL_ID を Variable に登録。チャンネル ID は C または G で始まる形式かを検証し、それ以外（D=DM など）は警告して確認する）
+8. 初回コミット＆プッシュ（PAT は GIT_ASKPASS で渡しコマンドのログに残さない。push 後に .sf-init.env から PAT を削除する）
+9. GitHub リポジトリ設定・Ruleset の適用（既存 Ruleset の ID は数字のときだけ削除対象にする）
 10. JWT 認証情報の設定（SF_PRIVATE_KEY / SF_CONSUMER_KEY_* を Secret / SF_USERNAME_* / SF_INSTANCE_URL_* を Variable に登録）
 11. SF_TOOLS_TOKEN の設定（`11_sf_tools_token.sh`。Fine-grained PAT の作成画面を事前入力 URL で開く → `read_secret` で Token を入力（画面に表示しない）→ `GH_TOKEN` 環境変数で `gh api repos/<sf-tools>` を実行して読み取りを確認（コマンドの文字列・ログに Token を含めない）→ `printf '%s' "$TOKEN" | run gh secret set SF_TOOLS_TOKEN`。確認に失敗した場合は再入力かスキップを選ぶ。Token は `.sf-init.env` に書き出さない。sf-tools の OWNER/REPO は `init-common.sh` の `SF_TOOLS_REPO_FULL_NAME`）
 

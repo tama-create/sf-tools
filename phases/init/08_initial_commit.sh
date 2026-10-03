@@ -8,6 +8,12 @@
 # 【PAT 使用理由】
 #   gh の OAuth 認証は workflow スコープを持たないため、
 #   ワークフロー YML を含む push には PAT（repo + workflow スコープ）を使用する。
+#
+# 【PAT の渡し方】
+#   Token は URL やコマンドの引数に含めない（コマンドのログ・.git/config・プロセス一覧に残さないため）。
+#   GIT_ASKPASS（一時スクリプト。終了時に削除）と環境変数 SF_INIT_PUSH_TOKEN で git に渡し、
+#   -c credential.helper= で gh 等の認証ヘルパーを無効化して PAT を確実に使う。origin の URL は書き換えない。
+#   push が完了したら、.sf-init.env から PAT_TOKEN_VALUE の行を削除する。
 # ==============================================================================
 
 # SF_TOOLS_DIR は sf-init.sh（司令塔）から export される
@@ -56,14 +62,27 @@ else
 fi
 
 # PAT トークン（workflow スコープ付き）で push
-# gh の OAuth 認証は workflow スコープを持たないため PAT を使用する
-origin_url=$(git remote get-url origin)   # VAR=$(cmd) 形式のため run 不要
-pat_url="https://${PAT_TOKEN_VALUE}@github.com/${REPO_FULL_NAME}.git"
-run git remote set-url origin "$pat_url"
+# gh の OAuth 認証は workflow スコープを持たないため PAT を使用する。
+# Token は URL やコマンドの引数に含めず、GIT_ASKPASS（一時スクリプト）経由で git に渡す
+# （コマンドのログ・.git/config・プロセス一覧に Token が残らないようにするため）。
+# origin の URL は書き換えない。-c credential.helper= で gh 等の認証ヘルパーを無効化し、PAT を確実に使う。
+askpass_script=$(mktemp "${TMPDIR:-/tmp}/sf-init-askpass.XXXXXX") \
+    || die "一時ファイルを作成できません。"  # VAR=$(cmd) 形式のため run 不要
+trap 'rm -f "$askpass_script"' EXIT
+cat > "$askpass_script" << 'ASKEOF'
+#!/bin/bash
+# GIT_ASKPASS: Username には固定値、Password には環境変数の Token を返す
+case "$1" in
+    Username*) echo "x-access-token" ;;
+    *)         echo "$SF_INIT_PUSH_TOKEN" ;;
+esac
+ASKEOF
+chmod 700 "$askpass_script"
+export GIT_ASKPASS="$askpass_script" GIT_TERMINAL_PROMPT=0 SF_INIT_PUSH_TOKEN="$PAT_TOKEN_VALUE"
 
 # main をプッシュ（.github/workflows/ を含むため workflow スコープ付き PAT が必須）
-run git push --no-verify origin main \
-    || { run git remote set-url origin "$origin_url"; die "git push に失敗しました。"; }
+run git -c credential.helper= push --no-verify origin main \
+    || die "git push に失敗しました。"
 
 # main 以外のブランチを作成・プッシュ
 # Phase 5 では branches.txt の更新のみ行い、リモートブランチ作成はここで実施する
@@ -75,21 +94,23 @@ if [[ -f "$branches_file" ]]; then
         [[ -z "${branch// }" ]]            && continue  # 空行スキップ
         [[ "$branch" == "main" ]]          && continue  # main はスキップ
         # リモートに既に存在するか確認
-        if git ls-remote --exit-code --heads origin "$branch" > /dev/null 2>&1; then
+        if git -c credential.helper= ls-remote --exit-code --heads origin "$branch" > /dev/null 2>&1; then
             log "INFO" "${branch} — スキップ（既に存在）"
             continue
         fi
         run git checkout -B "$branch" \
-            || { run git remote set-url origin "$origin_url"; die "${branch} ブランチの作成に失敗しました。"; }
-        run git push --no-verify -u origin "$branch" \
-            || { run git remote set-url origin "$origin_url"; die "${branch} ブランチのプッシュに失敗しました。"; }
+            || die "${branch} ブランチの作成に失敗しました。"
+        run git -c credential.helper= push --no-verify -u origin "$branch" \
+            || die "${branch} ブランチのプッシュに失敗しました。"
         run git checkout main \
-            || { run git remote set-url origin "$origin_url"; die "main への切り替えに失敗しました。"; }
+            || die "main への切り替えに失敗しました。"
         log "SUCCESS" "${branch} ブランチを作成しました。"
     done < "$branches_file"
 fi
 
-run git remote set-url origin "$origin_url"
+# push が完了したら、PAT を .sf-init.env に残さない（後続フェーズでは使用しない）
+unset GIT_ASKPASS SF_INIT_PUSH_TOKEN
+run sed -i '/^PAT_TOKEN_VALUE=/d' "$SF_INIT_ENV_FILE"
 
 log "SUCCESS" "初回コミット＆プッシュ完了。"
 

@@ -127,6 +127,8 @@ create_mock_git() {
     cat > "$bin_dir/git" << 'EOF'
 #!/bin/bash
 echo "git $*" >> "${MOCK_CALL_LOG:-/dev/null}"
+# 先頭の -c key=value（例: -c credential.helper=）は読み飛ばして、サブコマンドで分岐する
+while [[ "${1:-}" == "-c" ]]; do shift 2; done
 case "$1" in
     -C)
         case "$3" in

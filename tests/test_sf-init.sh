@@ -20,6 +20,8 @@
 #   14. 不明なオプション → エラー終了
 #   15. 環境種別の選択（本番 / 検証で続行 / 検証を取り消して選び直し / 検証で中断）
 #   16. Phase 11（SF_TOOLS_TOKEN）: 登録 / 読み取り失敗で再入力 / 読み取り失敗でスキップ / q で中断
+#   17. Phase 9: 既存 Ruleset の ID 検証（403 のエラー本文を ID として扱わない / 数字の ID は削除）
+#   18. Phase 7: SLACK_CHANNEL_ID の形式チェック（C… / D… → N で再入力 / D… → Y で登録）
 # ==============================================================================
 
 source "$(dirname "${BASH_SOURCE[0]}")/test_helper.sh"
@@ -71,7 +73,21 @@ case "$1 $2" in
     "repo create") exit "${MOCK_GH_REPO_CREATE_EXIT:-0}" ;;
     "secret set")  exit "${MOCK_GH_SECRET_SET_EXIT:-0}" ;;
     "api user")    echo "${MOCK_GH_API_USER:-${github_owner}}" ;;
+    "variable set")
+        # --body で値が渡される場合は何もしない（標準入力を読むと、テストの入力列を消費してしまう）
+        case " $* " in *" --body "*) exit 0 ;; esac
+        # 標準入力で渡された値を、変数名ごとのファイルに保存する（テストで値を検証するため）
+        cat > "${MOCK_CALL_LOG%/*}/var_$3.txt"; exit 0 ;;
     "api repos/"*)
+        # Ruleset 一覧: MOCK_GH_RULESETS=error → エラー本文を標準出力に出して exit 1（無料プランの 403 を再現）、
+        #               MOCK_GH_RULESETS=id    → 既存の Ruleset の ID（12345）を返す
+        if [[ "$2" == */rulesets ]]; then
+            case "${MOCK_GH_RULESETS:-none}" in
+                error) echo '{"message":"Upgrade to GitHub Pro or make this repository public to enable this feature.","status":"403"}'; exit 1 ;;
+                id)    echo "12345"; exit 0 ;;
+                *)     exit 0 ;;
+            esac
+        fi
         # Phase 11 の読み取り確認: Token（環境変数 GH_TOKEN）が "badtoken" で始まる場合、または
         # MOCK_GH_API_REPO_EXIT が非ゼロの場合は失敗させる
         [[ "${GH_TOKEN:-}" == badtoken* ]] && exit 1
@@ -186,6 +202,10 @@ test_happy_path_3branches() {
     assert_file_contains "$MOCK_CALL_LOG" "gh variable set SLACK_CHANNEL_ID"          "SLACK_CHANNEL_ID が登録される"
     assert_file_contains "$MOCK_CALL_LOG" "gh secret set SF_TOOLS_TOKEN"             "SF_TOOLS_TOKEN が登録される"
     assert_file_not_contains "$MOCK_CALL_LOG" "ghp_faketoolstoken"                   "SF_TOOLS_TOKEN の値がコマンドのログに含まれない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "ghp_faketoken"                        "PAT_TOKEN の値がコマンド（git push 等）のログに含まれない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "--body fake_prod_key"                 "コンシューマー鍵を --body（コマンドの引数）で渡さない（標準入力で渡す）"
+    assert_file_contains "$MOCK_CALL_LOG" "git -c credential.helper= push"           "Phase 8: 認証ヘルパーを無効化して push する"
+    assert_file_not_contains "$init_dir/init/.sf-init.env" "PAT_TOKEN_VALUE"         "push 後に .sf-init.env から PAT が削除される"
     assert_file_contains "$MOCK_CALL_LOG" "git add"                                  "git add が呼ばれる"
 
     teardown "$mb" "$mock_home" "$init_base"
@@ -790,6 +810,111 @@ test_phase11_sf_tools_token() {
 }
 
 # ==============================================================================
+# テスト 17: Phase 9 の既存 Ruleset の削除（--only 9）
+#   - エラー本文が返る（無料プランの 403）: 削除を試みない・「確認できなかった」と表示（誤った ID で DELETE しない）
+#   - 数字の ID が返る                    : その ID で DELETE が呼ばれ、「削除しました」と表示
+# ==============================================================================
+test_phase9_ruleset_id() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] Phase 9: 既存 Ruleset の ID 検証（エラー本文を ID として扱わない）${CLR_RST}"
+
+    local mb mock_home init_base init_dir exit_code out
+    mb=$(setup_mock_bin)
+    export MOCK_CALL_LOG="$mb/calls.log"
+    mock_home=$(setup_mock_home)
+    create_all_mocks "$mb"
+    create_mock_gh_for_init "$mb"
+    _stub_subscripts "$mock_home"
+    out="$mb/out.log"
+
+    _p9_run() {
+        init_base=$(_setup_init_dir "tamashimon" "testproject")
+        init_dir="$init_base/home/tamashimon/testproject"
+        mkdir -p "$init_dir/init"
+        printf 'GITHUB_OWNER="tamashimon"\nPROJECT_NAME="testproject"\nREPO_NAME="force-testproject"\nREPO_FULL_NAME="tamashimon/force-testproject"\n' \
+            > "$init_dir/init/.sf-init.env"
+        : > "$MOCK_CALL_LOG"
+        printf 'Y\n' \
+            | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
+                  bash "$mock_home/sf-tools/bin/sf-init.sh" --only 9 ) > "$out" 2>&1
+        exit_code=$?
+    }
+
+    # エラー本文（403）
+    MOCK_GH_RULESETS=error _p9_run
+    assert_exit_ok            "$exit_code"                         "403 でも Phase 9 は正常終了する"
+    assert_file_not_contains  "$MOCK_CALL_LOG" "--method DELETE"   "403 → エラー本文を ID として DELETE しない"
+    assert_file_contains      "$out" "確認できなかった"             "403 → 「確認できなかった」と表示される"
+    assert_file_not_contains  "$out" "を削除しました"               "403 → 「削除しました」と誤表示しない"
+    rm -rf "$init_base"
+
+    # 数字の ID
+    MOCK_GH_RULESETS=id _p9_run
+    assert_exit_ok            "$exit_code"                                     "既存 Ruleset あり → 正常終了"
+    assert_file_contains      "$MOCK_CALL_LOG" "rulesets/12345"                "既存 Ruleset あり → その ID で DELETE される"
+    assert_file_contains      "$out" "を削除しました"                           "既存 Ruleset あり → 「削除しました」と表示される"
+
+    unset -f _p9_run
+    teardown "$mb" "$mock_home" "$init_base"
+}
+
+# ==============================================================================
+# テスト 18: Phase 7 の SLACK_CHANNEL_ID の形式チェック（--only 7）
+#   入力列: 警告確認 Y →（\n は press_enter が消費）→ Bot Token → チャンネル ID ...
+#   - C… の ID               : 警告なしで登録
+#   - D… の ID → N → C…      : 警告後に入力し直し、C… が登録される
+#   - D… の ID → Y           : 警告のうえ、そのまま登録される
+# ==============================================================================
+test_phase7_channel_id() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] Phase 7: SLACK_CHANNEL_ID の形式チェック${CLR_RST}"
+
+    local mb mock_home init_base init_dir exit_code out
+    mb=$(setup_mock_bin)
+    export MOCK_CALL_LOG="$mb/calls.log"
+    mock_home=$(setup_mock_home)
+    create_all_mocks "$mb"
+    create_mock_gh_for_init "$mb"
+    _stub_subscripts "$mock_home"
+    out="$mb/out.log"
+
+    _p7_run() {
+        init_base=$(_setup_init_dir "tamashimon" "testproject")
+        init_dir="$init_base/home/tamashimon/testproject"
+        mkdir -p "$init_dir/init"
+        printf 'REPO_FULL_NAME="tamashimon/force-testproject"\nPROJECT_NAME="testproject"\n' > "$init_dir/init/.sf-init.env"
+        rm -f "$mb"/var_SLACK_CHANNEL_ID.txt
+        : > "$MOCK_CALL_LOG"
+        printf '%b' "$1" \
+            | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
+                  bash "$mock_home/sf-tools/bin/sf-init.sh" --only 7 ) > "$out" 2>&1
+        exit_code=$?
+    }
+
+    # C… の ID
+    _p7_run 'Y\nxoxb-fake\nC01ABCDEFGH\n\n'
+    assert_exit_ok           "$exit_code"                                  "C… → 正常終了"
+    assert_file_contains     "$mb/var_SLACK_CHANNEL_ID.txt" "C01ABCDEFGH"  "C… → そのまま登録される"
+    assert_file_not_contains "$out" "チャンネル ID の形式ではありません"    "C… → 警告が出ない"
+    rm -rf "$init_base"
+
+    # D… の ID → N → C… の ID
+    _p7_run 'Y\nxoxb-fake\nD0C6AQHLYLT\nN\nC01ABCDEFGH\n\n'
+    assert_exit_ok           "$exit_code"                                  "D… → N → C… → 正常終了"
+    assert_file_contains     "$out" "チャンネル ID の形式ではありません"    "D… → 警告が出る"
+    assert_file_contains     "$mb/var_SLACK_CHANNEL_ID.txt" "C01ABCDEFGH"  "D… → N → 入力し直した C… が登録される"
+    rm -rf "$init_base"
+
+    # D… の ID → Y（そのまま登録）
+    _p7_run 'Y\nxoxb-fake\nD0C6AQHLYLT\nY\n\n'
+    assert_exit_ok           "$exit_code"                                  "D… → Y → 正常終了"
+    assert_file_contains     "$mb/var_SLACK_CHANNEL_ID.txt" "D0C6AQHLYLT"  "D… → Y → そのまま登録される"
+
+    unset -f _p7_run
+    teardown "$mb" "$mock_home" "$init_base"
+}
+
+# ==============================================================================
 # テスト実行
 # ==============================================================================
 echo ""
@@ -813,5 +938,7 @@ test_add_tier_develop_without_staging
 test_unknown_option_fails
 test_env_type_selection
 test_phase11_sf_tools_token
+test_phase9_ruleset_id
+test_phase7_channel_id
 
 print_summary

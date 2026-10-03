@@ -167,7 +167,7 @@ register_jwt_secret() {
 
     # GitHub Secrets / Variables に登録
     # SF_CONSUMER_KEY は機密情報のため Secret、SF_USERNAME と SF_INSTANCE_URL は Variable（平文で管理）
-    run gh secret   set      "SF_CONSUMER_KEY_${suffix}" --body "$consumer_key" -R "$REPO_FULL_NAME" \
+    printf '%s' "$consumer_key" | run gh secret set "SF_CONSUMER_KEY_${suffix}" -R "$REPO_FULL_NAME" \
         || die "SF_CONSUMER_KEY_${suffix} の登録に失敗しました。"
     run gh variable set      "SF_USERNAME_${suffix}"     --body "$username"     -R "$REPO_FULL_NAME" \
         || die "SF_USERNAME_${suffix} の登録に失敗しました。"
@@ -247,3 +247,33 @@ ensure_sf_tools_branch() {
 # 環境変数 SF_TOOLS_REPO_FULL_NAME で上書きできる（テスト・別環境用）。
 # ------------------------------------------------------------------------------
 SF_TOOLS_REPO_FULL_NAME="${SF_TOOLS_REPO_FULL_NAME:-tama-create/sf-tools}"
+
+# ------------------------------------------------------------------------------
+# delete_existing_ruleset - 同名の既存 Ruleset があれば削除する（再実行の冪等性確保）
+# ------------------------------------------------------------------------------
+# 【使い方】
+#   delete_existing_ruleset "$REPO_FULL_NAME" "protect-main"
+#
+# 【動作】
+#   - Ruleset 一覧から同名の ID を取得する。ID は数字のときだけ有効とみなす
+#     （gh api が失敗した場合、エラーの応答本文が標準出力に出るため、数字以外は「確認できなかった」と扱う）
+#   - 確認できなかった場合（無料プランの Private リポジトリなど）は WARNING を出して何も削除しない
+#   - 削除の成否はそのまま表示する（失敗したのに「削除しました」と出さない）
+#   - いずれの場合も呼び出し元は続行する（常に RET_OK を返す）
+# ------------------------------------------------------------------------------
+delete_existing_ruleset() {
+    local repo="$1" name="$2" id
+    id=$(gh api "repos/${repo}/rulesets" \
+        --jq ".[] | select(.name==\"${name}\") | .id" 2>/dev/null || true)  # VAR=$(cmd) のため run 不使用
+    if [[ ! "$id" =~ ^[0-9]+$ ]]; then
+        # 空 = 同名の Ruleset なし。数字以外 = API のエラー本文など（確認できなかった）
+        [[ -n "$id" ]] && log "WARNING" "既存の ${name} を確認できなかったため、削除をスキップします（プランの制限などの可能性があります）。"
+        return $RET_OK
+    fi
+    if run gh api --method DELETE "repos/${repo}/rulesets/${id}"; then
+        log "INFO" "既存の ${name} (id: ${id}) を削除しました。"
+    else
+        log "WARNING" "既存の ${name} (id: ${id}) の削除に失敗しました。"
+    fi
+    return $RET_OK
+}

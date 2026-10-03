@@ -183,6 +183,22 @@ log() {
     return $RET_OK
 }
 
+# _mask_secrets - 文字列中の Token らしい文字列を伏せ字にする（コマンドのログへの混入を防ぐ保険）
+# ------------------------------------------------------------------------------
+# 【使い方】
+#   masked=$(_mask_secrets "$text")
+#
+# 【対象】
+#   GitHub の Token（ghp_ / gho_ / ghu_ / ghs_ / ghr_ / github_pat_）と Slack の Token（xoxb- 等）
+#   本来は Token をコマンドの引数に含めない（環境変数・標準入力・GIT_ASKPASS で渡す）。これは万一の保険。
+# ------------------------------------------------------------------------------
+_mask_secrets() {
+    printf '%s' "$1" | sed -E \
+        -e 's/(gh[pousr]_)[A-Za-z0-9]+/\1***masked***/g' \
+        -e 's/github_pat_[A-Za-z0-9_]+/github_pat_***masked***/g' \
+        -e 's/(xox[abprs]-)[A-Za-z0-9-]+/\1***masked***/g'
+}
+
 # ------------------------------------------------------------------------------
 # 6. run - コマンド実行ラッパー（通常呼び出し・命令置換の両対応）
 # ------------------------------------------------------------------------------
@@ -236,7 +252,7 @@ run() {
         || tmp_out="${_run_tmpdir}/cmd_out_$$_${RANDOM}.tmp"  # run 不使用: 変数代入・mktemp フォールバック
     local status
 
-    log "CMD" "[${SCRIPT_NAME}.sh] ${cmd[*]}"
+    log "CMD" "[${SCRIPT_NAME}.sh] $(_mask_secrets "${cmd[*]}")"
 
     if [[ "${SILENT_EXEC:-}" != "1" ]]; then
         # リアルタイム表示: stderr に流しつつ tmp に保存（命令置換の stdout には影響しない）

@@ -211,6 +211,40 @@ test_read_secret() {
     rm -f "$script"
 }
 
+
+# ------------------------------------------------------------------------------
+# _mask_secrets / run のコマンドログの伏せ字（Token が CMD ログに残らないこと）
+# ------------------------------------------------------------------------------
+test_mask_secrets() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] _mask_secrets / run: Token らしい文字列をコマンドログで伏せ字にする${CLR_RST}"
+
+    local script logf out
+    script=$(mktemp /tmp/test-mask-XXXX.sh)
+    logf=$(mktemp /tmp/test-mask-log-XXXX)
+    cat > "$script" << SEOF
+#!/bin/bash
+readonly SCRIPT_NAME=test
+readonly LOG_FILE='${logf}'
+readonly LOG_MODE=NEW
+export SF_INIT_MODE=1
+source '${SF_TOOLS_DIR}/lib/common.sh'
+echo "MASK=\$(_mask_secrets 'a ghp_ABC123def b gho_XYZ789 c github_pat_11AAA_bbbCCC d xoxb-111-222-AbCdEf e plain')"
+run true "https://ghp_SECRETVALUE@github.com/o/r.git" xoxb-9-9-ZzZz > /dev/null 2>&1
+SEOF
+    out=$(bash "$script" 2>&1)
+
+    [[ "$out" == *"MASK=a ghp_***masked*** b gho_***masked*** c github_pat_***masked*** d xoxb-***masked*** e plain"* ]] \
+        && pass "ghp_ / gho_ / github_pat_ / xoxb- が伏せ字になり、通常の文字列は変わらない" \
+        || fail "Token らしい文字列が伏せ字になる" "$out"
+
+    assert_file_not_contains "$logf" "ghp_SECRETVALUE"  "run のコマンドログに GitHub の Token が残らない"
+    assert_file_not_contains "$logf" "xoxb-9-9-ZzZz"    "run のコマンドログに Slack の Token が残らない"
+    assert_file_contains     "$logf" "***masked***"     "run のコマンドログに伏せ字が記録される"
+
+    rm -f "$script" "$logf"
+}
+
 test_check_gh_owner_match
 test_check_gh_owner_mismatch
 test_check_gh_owner_skip_on_empty
@@ -219,5 +253,6 @@ test_check_gh_owner_org_member
 test_check_gh_owner_org_admin_pending
 test_check_gh_owner_org_api_failure
 test_read_secret
+test_mask_secrets
 
 print_summary

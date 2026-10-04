@@ -494,6 +494,14 @@ cat logs/run_tests.log | grep '\[FAIL\]'          # 失敗行のみ抽出
 cat logs/error.log                                # run 失敗コマンドのログ
 ```
 
+実環境で `sf-init.sh` を通しで検証する e2e は、通常のテストには含まれない（9.6 参照）。
+
+```bash
+bash tests/e2e/bootstrap.sh                       # 鍵一式の作成（最初の 1 回だけ）
+bash tests/e2e/run.sh                             # 前掃除 → sf-init の通し実行 → 確認 → 後掃除
+bash tests/e2e/cleanup.sh                         # 削除対象の一覧（何も消さない）。--yes で削除
+```
+
 ### 7.2 Salesforce CLI
 
 ```bash
@@ -566,7 +574,7 @@ sf-tools の `main` への反映は、全ユーザーへの配布と同義であ
 | 確認項目 | 方法 |
 |---|---|
 | テスト | `bash tests/run_tests.sh` が全件 PASS |
-| `sf-init.sh` を変更した場合 | 検証環境の新規 force-* を作成し、最後まで通ること（Phase 11 の `SF_TOOLS_TOKEN` の登録を含む） |
+| `sf-init.sh` を変更した場合 | 検証環境の新規 force-* を作成し、最後まで通ること（Phase 11 の `SF_TOOLS_TOKEN` の登録を含む）。`bash tests/e2e/run.sh` で自動化できる（9.6） |
 | ワークフロー・`sf-metasync.sh` を変更した場合 | `wf-metasync` を `workflow_dispatch` で手動実行して成功すること |
 | `sf-release.sh` / `wf-validate` / `wf-release` を変更した場合 | デプロイ対象を含む PR を作り、`wf-validate` が通ること（動作確認のみの PR はマージせずに閉じる。マージすると `wf-release` が実際にデプロイする） |
 
@@ -583,3 +591,41 @@ sf-tools の `main` への反映は、全ユーザーへの配布と同義であ
 - `main` のブランチ保護・Ruleset は、GitHub 無料プラン（Private リポジトリ）では設定できない（`Upgrade to GitHub Pro or make this repository public`）
 - そのため、`CLAUDE.md` 1.1 の運用ルール（mm / rr は明示された場合のみ、rr は検証報告が前提）で守る
 - プランの変更、またはリポジトリを公開にできるようになった場合は、`main` に Required reviewers を設定すること
+
+### 9.6 e2e（sf-init の通し検証の自動化）
+
+実際の GitHub / Salesforce で `sf-init.sh` を Phase 1〜11 まで自動実行し、検証し、削除する。`tests/e2e/` に置き、通常の `bash tests/run_tests.sh` には含めない（実環境を使うため）。安全ガードと部品は `tests/test_e2e.sh`（モック）で確認する。
+
+**方式:** `sf-init.sh` 本体は変えず、外から標準入力と PATH の差し替えで操作する（本番のコードに近道を入れない）。
+
+| 部品 | 役割 |
+|---|---|
+| `tests/e2e/lib.sh` | 共通関数。名前の判定、ガード、鍵一式の読み込み、削除、エイリアスの保存・復元、`e2e_make_input`（標準入力の台本） |
+| `tests/e2e/run.sh` | 前掃除 → `sf-init.sh` の実行 → 確認 → 後掃除。`--keep`（後掃除なし）、`--no-actions`（Actions の確認を省略） |
+| `tests/e2e/cleanup.sh` | 削除。既定は一覧のみ、`--yes` で削除（確認で `delete` の入力が必要。`--no-confirm` で省略） |
+| `tests/e2e/bootstrap.sh` | 鍵一式（`~/.sf-tools-e2e/fixture.env`）の作成。最初の 1 回だけ。雛形は `fixture.example.env` |
+| `tests/e2e/shims/sf` | `sf org login web` だけを `sf org login sfdx-url`（認証 URL）に差し替える。他のコマンドは本物の `sf` に渡す |
+| `tests/e2e/shims/browser` | `start` / `xdg-open` / `open` の名前でコピーされ、ブラウザを開かない |
+
+**テスト用の名前:** プロジェクト `e2e-YYYYMMDD-HHMMSS` → リポジトリ `force-e2e-YYYYMMDD-HHMMSS` → 外部クライアントアプリ `SF_TOOLS_force_e2e_YYYYMMDD_HHMMSS`。毎回別の名前なので、前回の削除を待たずに実行できる。
+
+**確認する内容:** Secret / Variable / ブランチ / ワークフローの存在、`SF_TOOLS_BRANCH=development`、`SLACK_CHANNEL_ID` の一致、トークンが出力・ログに出ていないこと、`wf-metasync` の成功、`wf-release` の途中のステップ（JWT ログイン・Private の `sf-tools` の取得）と Slack 通知（`"ok":true`）。`wf-release` は `main` に release 用のファイルが無く、最終的に失敗するのが正常。
+
+**削除の安全ガード:**
+
+- 削除対象は、名前の形式（上記のタイムスタンプ付き）が一致するものだけ。`SF_TOOLS`、`force-test-win` などは対象外（`e2e_is_target_*`）
+- オーナーは、鍵一式の `E2E_OWNER` のみ。gh のログインユーザーが `E2E_GH_USER` と一致しないと動かない
+- `e2e_guard_env` を通らないと、削除系の関数は動かない（`E2E_GUARD_OK=1`）。GitHub Actions 上では動かない
+- `cleanup.sh` は既定で何も消さない。`--yes` でも、一覧を見せたうえで `delete` の入力を求める
+
+**Salesforce の外部クライアントアプリの削除:** 削除用のデプロイ（`sf project deploy start --manifest package.xml --post-destructive-changes destructiveChanges.xml`）で、5 つの構成要素を消す（`ExternalClientApplication` / `ExtlClntAppGlobalOauthSettings` / `ExtlClntAppOauthSettings` / `ExtlClntAppOauthConfigurablePolicies` / `ExtlClntAppConfigurablePolicies`）。ローカルのソースは要らない。アプリを消すと、そのアプリでの JWT のセッションも無効になるため、削除の前に、認証 URL（`sfdxAuthUrl`）で管理用にログインし直す。これで、テスト後の `sf` の認証は、健全な状態に戻る。
+
+**sf のエイリアス:** `sf-init` は `prod` / `staging` / `develop` を付けるため、実行前の状態を保存し、終了時に復元する（増えたものは外し、変わったものは戻す）。
+
+**前提と限界:**
+
+- 台本（`e2e_make_input`）は、`sf-init` の質問の順番に依存する。質問を変えたら、台本も直す。`tests/test_sf-init.sh` の `test_e2e_input_sequence`（モック）が、ずれを検知する
+- Token の作成と、テスト用組織への最初のログインは自動化できない（`bootstrap.sh` で 1 回だけ手動）
+- 実機の Windows（Git Bash）で動かす前提。`sf` が成功しても終了コード 1 を返す環境では、`E2E_SF_REDIRECTED=1`（`bootstrap.sh` が判定して設定）
+- テスト用組織は、本番または Developer Edition（Sandbox ではない）
+- リポジトリの削除には、`gh` の `delete_repo` の権限が要る（`gh auth refresh -h github.com -s delete_repo`）

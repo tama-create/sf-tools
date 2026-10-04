@@ -8,6 +8,8 @@
 #   1. GitHub    : {E2E_OWNER}/force-e2e-YYYYMMDD-HHMMSS のリポジトリ
 #   2. Salesforce: SF_TOOLS_force_e2e_YYYYMMDD_HHMMSS の外部クライアントアプリ（5 つの構成要素）
 #   3. ローカル  : {E2E_HOME_ROOT}/{E2E_OWNER}/e2e-YYYYMMDD-HHMMSS と ~/.sf-jwt/force-e2e-YYYYMMDD-HHMMSS
+#                  と、強制終了で残った一時ファイル・フォルダ（$TMPDIR の e2e-run.* / e2e-eca-del.* / e2e-sfdx-url.*。
+#                  認証 URL を含むことがある。30 分以内のものは、実行中の可能性があるため対象外）
 #
 # 【オプション】
 #   --yes         : 実際に削除する（確認のため、delete と入力させる）

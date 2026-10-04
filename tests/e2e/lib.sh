@@ -16,6 +16,8 @@
 #        リポジトリ        : force-e2e-YYYYMMDD-HHMMSS
 #        外部クライアントアプリ : SF_TOOLS_force_e2e_YYYYMMDD_HHMMSS
 #        作業フォルダ      : e2e-YYYYMMDD-HHMMSS
+#        一時ファイル・フォルダ（強制終了で残ったもの）: $TMPDIR の e2e-run.XXXXXX / e2e-eca-del.XXXXXX /
+#                          e2e-sfdx-url.XXXXXX（実行中の run.sh のものと、30 分以内のものは対象外）
 #   3. オーナーは、鍵一式のファイルで明示した E2E_OWNER だけ。gh のログインユーザーも E2E_GH_USER と一致が必須
 #   4. GitHub Actions 上では動かない
 #
@@ -42,6 +44,8 @@ e2e_is_target_repo()    { [[ "$1" =~ ^force-e2e-[0-9]{8}-[0-9]{6}$ ]]; }
 e2e_is_target_eca()     { [[ "$1" =~ ^SF_TOOLS_force_e2e_[0-9]{8}_[0-9]{6}$ ]]; }
 e2e_is_target_project() { [[ "$1" =~ ^e2e-[0-9]{8}-[0-9]{6}$ ]]; }
 e2e_is_target_jwt_dir() { [[ "$1" =~ ^force-e2e-[0-9]{8}-[0-9]{6}$ ]]; }
+# 一時ファイル・フォルダ（mktemp が作る 6 文字の英数字つき）: e2e-run.XXXXXX / e2e-eca-del.XXXXXX / e2e-sfdx-url.XXXXXX
+e2e_is_target_tmp()     { [[ "$1" =~ ^e2e-(run|eca-del|sfdx-url)\.[A-Za-z0-9]{6}$ ]]; }
 
 # Windows（Git Bash）かどうか（lib/common.sh の is_gitbash を使う。$OSTYPE は msys / mingw / cygwin のいずれにもなる）
 e2e_is_windows() { is_gitbash; }
@@ -53,6 +57,27 @@ e2e_new_project_name() { printf 'e2e-%s' "$(date +%Y%m%d-%H%M%S)"; }
 # 鍵一式の読み込み
 # ------------------------------------------------------------------------------
 e2e_fixture_path() { printf '%s' "${E2E_FIXTURE:-$HOME/.sf-tools-e2e/fixture.env}"; }
+
+# 認証 URL の形式（force://<クライアント ID>:<シークレット（空でもよい）>:<リフレッシュトークン>@<ホスト>）か判定する。
+# 新しい sf は、認証 URL の代わりに「[REDACTED] Use 'sf org auth show-sfdx-auth-url' to view」という文章を返すため、
+# その文章を認証 URL として保存・使用しないように、形式で確認する
+e2e_valid_sfdx_url() { [[ "$1" =~ ^force://[^:@[:space:]]+:[^:@[:space:]]*:[^@[:space:]]+@[^@[:space:]]+$ ]]; }
+
+# ログイン済みの組織（エイリアスまたはユーザー名）の認証 URL を、標準出力に返す。取得できなければ、何も出さず、戻り値 1
+#   1. 新しい sf: sf org auth show-sfdx-auth-url（--no-prompt で、確認を省く）
+#   2. 古い sf  : sf org display --verbose（sfdxAuthUrl）。新しい sf では、値が隠されるため、形式の確認で除外する
+# 値を画面・ログに出さない（呼び出し側が、変数に受け取る）
+e2e_get_sfdx_auth_url() {
+    local alias="$1" out url
+    out=$(sf org auth show-sfdx-auth-url --target-org "$alias" --no-prompt --json 2>/dev/null)  # VAR=$(cmd) のため run 不使用（値をログに出さない）
+    url=$(printf '%s' "$out" | grep -oE 'force://[^"]*' | head -1)
+    if ! e2e_valid_sfdx_url "$url"; then
+        out=$(sf org display --target-org "$alias" --verbose --json 2>/dev/null)  # VAR=$(cmd) のため run 不使用（値をログに出さない）
+        url=$(printf '%s' "$out" | grep -oE '"sfdxAuthUrl": *"force://[^"]*"' | head -1 | sed -E 's/.*: *"(.*)"/\1/')
+    fi
+    e2e_valid_sfdx_url "$url" || return 1
+    printf '%s' "$url"
+}
 
 e2e_load_fixture() {
     local f perm v
@@ -72,6 +97,8 @@ e2e_load_fixture() {
              E2E_SLACK_CHANNEL_ID E2E_SF_TOOLS_TOKEN E2E_SFDX_AUTH_URL; do
         [[ -n "${!v:-}" ]] || die "${v} が未設定です（${f}）。"
     done
+    e2e_valid_sfdx_url "$E2E_SFDX_AUTH_URL" \
+        || die "E2E_SFDX_AUTH_URL が認証 URL の形式ではありません（${f}）。"
     [[ -n "${E2E_SF_REDIRECTED:-}" ]] && export SF_REDIRECTED="$E2E_SF_REDIRECTED"
     return 0
 }
@@ -131,14 +158,32 @@ e2e_sf_connected() {
     sf org display --target-org "$1" --json 2>/dev/null | grep -q '"username": *"[^"]*"'  # 判定のみのため run 不使用
 }
 
+# 失敗したら、sf の出力（原因）を表示し、一時的な失敗に備えて、待ってから 1 回だけやり直す
+#   E2E_ADMIN_RETRY_WAIT: やり直すまでの待ち時間（秒。既定 5）
 e2e_sf_admin_login() {
-    local urlfile
+    local urlfile try out max=2 wait_sec="${E2E_ADMIN_RETRY_WAIT:-5}"
     urlfile=$(mktemp "${TMPDIR:-/tmp}/e2e-sfdx-url.XXXXXX") || die "一時ファイルを作成できません。"  # VAR=$(cmd) のため run 不使用
     chmod 600 "$urlfile" 2>/dev/null || true  # run 不使用: ファイル権限保護（Windows は効果なし・意図的エラー無視）
     printf '%s' "$E2E_SFDX_AUTH_URL" > "$urlfile"
-    run sf org login sfdx-url --sfdx-url-file "$urlfile" --alias "$E2E_ADMIN_ALIAS" || true  # 終了コードを信頼できないため無視
+    for ((try = 1; try <= max; try++)); do
+        # 終了コードを信頼できない環境があるため無視し、接続できたかで判定する。出力は、失敗時の表示のために受け取る
+        out=$(run sf org login sfdx-url --sfdx-url-file "$urlfile" --alias "$E2E_ADMIN_ALIAS" || true)  # 終了コードを信頼できないため無視
+        if e2e_sf_connected "$E2E_ADMIN_ALIAS"; then
+            rm -f "$urlfile"
+            return 0
+        fi
+        log "WARNING" "  管理用ログインに失敗しました（${try}/${max}）。sf の出力:"
+        printf '%s\n' "$out" | grep -v '^[[:space:]]*$' | head -6 | while IFS= read -r line; do
+            # トークン・認証 URL のリフレッシュトークンは、伏せ字にして表示する
+            line=$(printf '%s' "$line" | sed -E 's#(force://[^:@ ]*:[^:@ ]*:)[^@ ]*@#\1***masked***@#')  # パイプのみのため run 不使用
+            log "WARNING" "    $(_mask_secrets "$line")"
+        done
+        if (( try < max )); then
+            sleep "$wait_sec"  # run 不使用: 待機
+        fi
+    done
     rm -f "$urlfile"
-    e2e_sf_connected "$E2E_ADMIN_ALIAS" || die "テスト用組織への管理用ログインに失敗しました。"
+    die "テスト用組織への管理用ログインに失敗しました。"
 }
 
 # ------------------------------------------------------------------------------
@@ -216,13 +261,25 @@ e2e_list_target_local() {
         base=$(basename "$d")  # VAR=$(cmd) のため run 不使用
         e2e_is_target_jwt_dir "$base" && printf '%s\n' "$d"
     done
+    # 強制終了などで残った、一時ファイル・フォルダ（認証 URL を含む）。次のものは、対象外にする
+    #   ・いま実行中の run.sh の一時フォルダ（E2E_TMP）
+    #   ・新しいもの（E2E_TMP_MIN_AGE 分以内。既定 30。別の実行の途中かもしれない）
+    local tdir="${TMPDIR:-/tmp}" age="${E2E_TMP_MIN_AGE:-30}"
+    for d in "$tdir"/e2e-run.* "$tdir"/e2e-eca-del.* "$tdir"/e2e-sfdx-url.*; do
+        [[ -e "$d" ]] || continue
+        base=$(basename "$d")  # VAR=$(cmd) のため run 不使用
+        e2e_is_target_tmp "$base" || continue
+        [[ -n "${E2E_TMP:-}" && "$d" == "$E2E_TMP" ]] && continue
+        [[ -n "$(find "$d" -maxdepth 0 -mmin +"$age" 2>/dev/null)" ]] && printf '%s\n' "$d"
+    done
 }
 
 e2e_delete_local() {
     local d="$1" base
     e2e_require_guard
     base=$(basename "$d")  # VAR=$(cmd) のため run 不使用
-    e2e_is_target_project "$base" || e2e_is_target_jwt_dir "$base" || die "削除対象外のフォルダ名です: ${d}"
+    e2e_is_target_project "$base" || e2e_is_target_jwt_dir "$base" || e2e_is_target_tmp "$base" \
+        || die "削除対象外のフォルダ名です: ${d}"
     run rm -rf "${d:?}" || die "フォルダの削除に失敗しました: ${d}"
 }
 

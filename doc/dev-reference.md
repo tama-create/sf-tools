@@ -628,6 +628,15 @@ sf-tools の `main` への反映は、全ユーザーへの配布と同義であ
 - `e2e_guard_env` を通らないと、削除系の関数は動かない（`E2E_GUARD_OK=1`）。GitHub Actions 上では動かない
 - `cleanup.sh` は既定で何も消さない。`--yes` でも、一覧を見せたうえで `delete` の入力を求める
 
+**鍵一式の認証 URL（`E2E_SFDX_AUTH_URL`）:**
+
+- 新しい `sf`（2.152 以降）は、`sf org display --verbose` で認証 URL を**隠し**、「`[REDACTED] Use 'sf org auth show-sfdx-auth-url' to view`」という文章を返す。そのため、`bootstrap.sh` は、`sf org auth show-sfdx-auth-url --no-prompt --json` で取得する（`e2e_get_sfdx_auth_url`。古い `sf` では、`display --verbose` にフォールバックする）
+- 取得した値、および鍵一式の読み込み時の値は、形式（`force://<クライアント ID>:<シークレット>:<リフレッシュトークン>@<ホスト>`）を確認する（`e2e_valid_sfdx_url`）。形式に合わない値（隠された文章など）は、保存も使用もしない
+
+**管理用ログイン（`e2e_sf_admin_login`）:** 認証 URL で、テスト用組織にログインし直す（削除・一覧の前）。失敗したら、`sf` の出力（原因。トークン・認証 URL のリフレッシュトークンは伏せ字）を表示し、`E2E_ADMIN_RETRY_WAIT` 秒（既定 5）待って、1 回だけやり直す。実機で、一度だけ原因不明の失敗（`RefreshTokenAuthError`）があり、同じ認証 URL での再実行は成功したため、一時的な失敗に備えている。
+
+**強制終了後の後始末:** `run.sh` が強制終了（ウィンドウが閉じるなど）すると、一時フォルダ（`$TMPDIR/e2e-run.XXXXXX`。認証 URL のファイルを含む）と、作成済みのテスト用リソースが残る。次回の前掃除、または `cleanup.sh` が、残った一時ファイル・フォルダ（`e2e-run.*` / `e2e-eca-del.*` / `e2e-sfdx-url.*`）も、掃除の対象にする。ただし、いま実行中の `run.sh` の一時フォルダ（`E2E_TMP`）と、30 分以内のもの（`E2E_TMP_MIN_AGE`。別の実行の途中かもしれない）は、対象外。
+
 **Salesforce の外部クライアントアプリの削除:** 削除用のデプロイ（`sf project deploy start --manifest package.xml --post-destructive-changes destructiveChanges.xml`）で、5 つの構成要素を消す（`ExternalClientApplication` / `ExtlClntAppGlobalOauthSettings` / `ExtlClntAppOauthSettings` / `ExtlClntAppOauthConfigurablePolicies` / `ExtlClntAppConfigurablePolicies`）。ローカルのソースは要らない。アプリを消すと、そのアプリでの JWT のセッションも無効になるため、削除の前に、認証 URL（`sfdxAuthUrl`）で管理用にログインし直す。これで、テスト後の `sf` の認証は、健全な状態に戻る。
 
 **sf のエイリアス:** `sf-init` は `prod` / `staging` / `develop` を付けるため、実行前の状態を保存し、終了時に復元する（増えたものは外し、変わったものは戻す）。

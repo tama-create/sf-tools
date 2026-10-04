@@ -54,8 +54,33 @@ case "$1 $2" in
         done
         [[ $_first -eq 0 ]] && echo '    }'
         echo '  ],'; echo '  "warnings": []'; echo '}' ;;
-    "org display") echo '{"status":0,"result":{"username":"admin@example.com"}}' ;;
-    "org login")   exit 0 ;;
+    "org display")
+        # 管理用ログインの失敗の再現（MOCK_SF_ADMIN_FAIL_FIRST=N: sfdx-url のログインが N 回失敗する間は、未接続）
+        if [[ -n "${MOCK_SF_ADMIN_FAIL_FIRST:-}" && "$*" == *"--target-org sf-tools-e2e-admin"* && ! -f "$_dir/admin_ok" ]]; then
+            echo "Error: No authorization information found" >&2; exit 1
+        fi
+        # --verbose: 認証 URL を返す。新しい sf のように隠す（既定）か、MOCK_SF_DISPLAY_URL の値を返す
+        if [[ "$*" == *"--verbose"* ]]; then
+            echo "{\"status\":0,\"result\":{\"username\":\"admin@example.com\",\"sfdxAuthUrl\":\"${MOCK_SF_DISPLAY_URL:-[REDACTED] Use 'sf org auth show-sfdx-auth-url' to view}\"}}"
+            exit 0
+        fi
+        echo '{"status":0,"result":{"username":"admin@example.com"}}' ;;
+    "org auth")
+        # sf org auth show-sfdx-auth-url（MOCK_SF_SHOW_URL=none で、使えない古い sf を再現）
+        [[ "${MOCK_SF_SHOW_URL:-}" == "none" ]] && { echo "Error: command not found" >&2; exit 1; }
+        echo "{\"status\":0,\"result\":{\"sfdxAuthUrl\":\"${MOCK_SF_SHOW_URL:-force://PlatformCLI::fakeshowtoken@example.my.salesforce.com}\"},\"warnings\":[\"exposes an SFDX Auth URL\"]}" ;;
+    "org login")
+        # sfdx-url のログインを、最初の N 回だけ失敗させる（MOCK_SF_ADMIN_FAIL_FIRST=N。一時的な失敗・再試行の再現）
+        if [[ "$3" == "sfdx-url" && -n "${MOCK_SF_ADMIN_FAIL_FIRST:-}" ]]; then
+            _n=$(( $(cat "$_dir/login.cnt" 2>/dev/null || echo 0) + 1 )); echo "$_n" > "$_dir/login.cnt"
+            if [[ $_n -le ${MOCK_SF_ADMIN_FAIL_FIRST} ]]; then
+                echo "Error (RefreshTokenAuthError): Error authenticating with the refresh token due to:" >&2
+                echo "force://PlatformCLI::secretrefreshtoken123@example.my.salesforce.com" >&2
+                exit 1
+            fi
+            : > "$_dir/admin_ok"
+        fi
+        exit 0 ;;
     "org list")
         echo '{'; echo '  "status": 0,'; echo '  "result": ['
         for n in ${MOCK_SF_ECAS:-}; do
@@ -129,6 +154,13 @@ test_e2e_names() {
         e2e_is_target_jwt_dir force-e2e-20261004-103000 || echo BAD13
         e2e_is_target_jwt_dir force-test-win          && echo BAD14
         [[ "$(e2e_new_project_name)" =~ ^e2e-[0-9]{8}-[0-9]{6}$ ]] || echo BAD15
+        e2e_is_target_tmp e2e-run.AbCdEf        || echo BAD21
+        e2e_is_target_tmp e2e-sfdx-url.AbCdEf   || echo BAD22
+        e2e_is_target_tmp e2e-eca-del.123456    || echo BAD23
+        e2e_is_target_tmp e2e-run.AbC           && echo BAD24
+        e2e_is_target_tmp e2e-run.AbCdEf1       && echo BAD25
+        e2e_is_target_tmp other.AbCdEf          && echo BAD26
+        e2e_is_target_tmp "e2e-run.AbCdEf;rm"   && echo BAD27
         OSTYPE=cygwin;    e2e_is_windows || echo BAD16
         OSTYPE=msys;      e2e_is_windows || echo BAD17
         OSTYPE=mingw64;   e2e_is_windows || echo BAD18
@@ -429,6 +461,140 @@ test_e2e_run_guard() {
     teardown "$CB"
 }
 
+# ------------------------------------------------------------------------------
+# 12. 認証 URL の検証と取得
+# ------------------------------------------------------------------------------
+test_e2e_sfdx_url() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] 認証 URL の検証と取得（新しい sf は --verbose で隠すため）${CLR_RST}"
+    local mb out; mb=$(setup_mock_bin); MB="$mb"; FX="$mb/fx.env"; HM="$mb"
+    export MOCK_CALL_LOG="$mb/calls.log"; _mk_mocks "$mb"; _mk_fixture "$FX"
+
+    # 形式の判定
+    _e2e_call '
+        e2e_valid_sfdx_url "force://PlatformCLI::abc123.def@host.my.salesforce.com"            || echo BAD1
+        e2e_valid_sfdx_url "force://clientid:clientsecret:abc123@host.my.salesforce.com"       || echo BAD2
+        e2e_valid_sfdx_url "[REDACTED] Use '"'"'sf org auth show-sfdx-auth-url'"'"' to view"      && echo BAD3
+        e2e_valid_sfdx_url ""                                                                  && echo BAD4
+        e2e_valid_sfdx_url "force://x@y"                                                       && echo BAD5
+        e2e_valid_sfdx_url "https://PlatformCLI::abc@host"                                     && echo BAD6
+        e2e_valid_sfdx_url "force://PlatformCLI::abc@host extra"                               && echo BAD7
+        echo DONE'
+    assert_file_contains     "$mb/out.log" "DONE" "形式の判定が最後まで実行された"
+    assert_file_not_contains "$mb/out.log" "BAD"  "認証 URL の形式は通り、隠された文章・不正な形式は通らない"
+
+    # 鍵一式の読み込みで、形式の違う認証 URL を拒否する
+    _mk_fixture "$FX"; sed -i "s|^E2E_SFDX_AUTH_URL=.*|E2E_SFDX_AUTH_URL='[REDACTED] Use sf org auth show-sfdx-auth-url to view'|" "$FX"
+    _e2e_call 'e2e_load_fixture; echo LOADED'
+    assert_file_not_contains "$mb/out.log" "LOADED" "鍵一式の認証 URL が隠された文章だと、読み込みに失敗する"
+    assert_file_contains     "$mb/out.log" "認証 URL の形式ではありません" "その旨が表示される"
+    _mk_fixture "$FX"
+
+    # 取得: 新しい sf（show-sfdx-auth-url が使える）
+    _e2e_call 'u=$(e2e_get_sfdx_auth_url prod); echo "URL=[$u]"'
+    assert_file_contains "$mb/out.log" "URL=[force://PlatformCLI::fakeshowtoken@example.my.salesforce.com]" "新しい sf: show-sfdx-auth-url から取得できる"
+
+    # 取得: 古い sf（show が使えず、display --verbose に認証 URL がある）
+    MOCK_SF_SHOW_URL=none MOCK_SF_DISPLAY_URL="force://PlatformCLI::olddisplaytoken@example.my.salesforce.com" \
+        _e2e_call 'u=$(e2e_get_sfdx_auth_url prod); echo "URL=[$u]"'
+    assert_file_contains "$mb/out.log" "URL=[force://PlatformCLI::olddisplaytoken@example.my.salesforce.com]" "古い sf: display --verbose から取得できる"
+
+    # 取得: show が不正な値を返す → display にフォールバック
+    MOCK_SF_SHOW_URL="[REDACTED]" MOCK_SF_DISPLAY_URL="force://PlatformCLI::fallbacktoken@example.my.salesforce.com" \
+        _e2e_call 'u=$(e2e_get_sfdx_auth_url prod); echo "URL=[$u]"'
+    assert_file_contains "$mb/out.log" "URL=[force://PlatformCLI::fallbacktoken@example.my.salesforce.com]" "show が不正な値 → display にフォールバックする"
+
+    # 取得: どちらでも取れない（show が使えず、display は隠される）→ 失敗（隠された文章を返さない）
+    MOCK_SF_SHOW_URL=none _e2e_call 'u=$(e2e_get_sfdx_auth_url prod); rc=$?; echo "RC=$rc URL=[$u]"'
+    assert_file_contains     "$mb/out.log" "RC=1 URL=[]" "どちらでも取れない → 空で、戻り値 1"
+    assert_file_not_contains "$mb/out.log" "REDACTED"   "隠された文章を、認証 URL として返さない"
+
+    unset MOCK_CALL_LOG
+    teardown "$mb"
+}
+
+# ------------------------------------------------------------------------------
+# 13. 管理用ログインの失敗時の表示と再試行
+# ------------------------------------------------------------------------------
+test_e2e_admin_login_retry() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] 管理用ログイン: 失敗時に原因を表示し、1 回だけやり直す${CLR_RST}"
+    local mb n; mb=$(setup_mock_bin); MB="$mb"; FX="$mb/fx.env"; HM="$mb"
+    export MOCK_CALL_LOG="$mb/calls.log"; _mk_mocks "$mb"; _mk_fixture "$FX"
+    export E2E_ADMIN_RETRY_WAIT=0
+    local script='e2e_load_fixture; e2e_guard_env; e2e_sf_admin_login; echo LOGGED_IN'
+    _attempts() { grep -c "^sf org login sfdx-url" "$MOCK_CALL_LOG"; }
+    _reset() { rm -f "$mb/login.cnt" "$mb/admin_ok"; : > "$MOCK_CALL_LOG"; }
+
+    _reset; _e2e_call "$script"
+    assert_file_contains "$mb/out.log" "LOGGED_IN" "正常: 1 回でログインできる"
+    [[ "$(_attempts)" -eq 1 ]] && pass "正常: 試行は 1 回" || fail "正常: 試行は 1 回" "試行: $(_attempts)"
+
+    _reset; MOCK_SF_ADMIN_FAIL_FIRST=1 _e2e_call "$script"
+    assert_file_contains "$mb/out.log" "LOGGED_IN" "1 回目が失敗しても、やり直してログインできる"
+    [[ "$(_attempts)" -eq 2 ]] && pass "1 回目が失敗 → 試行は 2 回" || fail "1 回目が失敗 → 試行は 2 回" "試行: $(_attempts)"
+    assert_file_contains "$mb/out.log" "管理用ログインに失敗しました（1/2）" "1 回目の失敗が、表示される"
+
+    _reset; MOCK_SF_ADMIN_FAIL_FIRST=2 _e2e_call "$script"
+    assert_file_not_contains "$mb/out.log" "LOGGED_IN" "2 回とも失敗 → 中断する"
+    [[ "$(_attempts)" -eq 2 ]] && pass "2 回とも失敗 → 試行は 2 回で、止まる" || fail "2 回とも失敗 → 試行は 2 回で、止まる" "試行: $(_attempts)"
+    assert_file_contains     "$mb/out.log" "RefreshTokenAuthError" "失敗時に、sf の出力（原因）が表示される"
+    assert_file_contains     "$mb/out.log" "***masked***"          "認証 URL のリフレッシュトークンは、伏せ字で表示される"
+    assert_file_not_contains "$mb/out.log" "secretrefreshtoken123" "リフレッシュトークンの値は、画面に出ない"
+    assert_file_contains     "$mb/out.log" "管理用ログインに失敗しました。" "最後に、失敗の旨で中断する"
+
+    unset -f _attempts _reset
+    unset MOCK_CALL_LOG E2E_ADMIN_RETRY_WAIT
+    teardown "$mb"
+}
+
+# ------------------------------------------------------------------------------
+# 14. 強制終了で残った一時ファイル・フォルダの掃除
+# ------------------------------------------------------------------------------
+test_e2e_tmp_cleanup() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] 強制終了で残った一時ファイル・フォルダの掃除（認証 URL を含むことがある）${CLR_RST}"
+    _mk_cleanup_env
+    local t="$CB/tmpdir"; mkdir -p "$t"
+    # 掃除の対象（古い）
+    mkdir -p "$t/e2e-run.AbCdEf" "$t/e2e-eca-del.123456"
+    echo secret > "$t/e2e-run.AbCdEf/sfdx-url.txt"
+    echo secret > "$t/e2e-sfdx-url.QwErTy"
+    # 対象外: 新しいもの（別の実行の途中かもしれない）、実行中の run.sh のもの、名前が違うもの
+    mkdir -p "$t/e2e-run.NewOne" "$t/e2e-run.Curren" "$t/e2e-run.toolong1" "$t/other.AbCdEf" "$t/e2e-run.AbC"
+    touch -d "2 hours ago" "$t/e2e-run.AbCdEf" "$t/e2e-run.AbCdEf/sfdx-url.txt" "$t/e2e-eca-del.123456" "$t/e2e-sfdx-url.QwErTy" \
+        "$t/e2e-run.Curren" "$t/e2e-run.toolong1" "$t/other.AbCdEf" "$t/e2e-run.AbC"
+
+    # 一覧（実行中の run.sh の一時フォルダは、E2E_TMP で除外される）
+    TMPDIR="$t" E2E_TMP="$t/e2e-run.Curren" _e2e_call 'e2e_load_fixture; e2e_guard_env; e2e_list_target_local'
+    assert_file_contains     "$MB/out.log" "$t/e2e-run.AbCdEf"       "古い e2e-run.* が、掃除の対象になる"
+    assert_file_contains     "$MB/out.log" "$t/e2e-eca-del.123456"   "古い e2e-eca-del.* が、掃除の対象になる"
+    assert_file_contains     "$MB/out.log" "$t/e2e-sfdx-url.QwErTy"  "古い e2e-sfdx-url.*（ファイル）が、掃除の対象になる"
+    assert_file_not_contains "$MB/out.log" "e2e-run.NewOne"          "新しいもの（30 分以内）は、対象外"
+    assert_file_not_contains "$MB/out.log" "e2e-run.Curren"          "実行中の run.sh の一時フォルダ（E2E_TMP）は、対象外"
+    assert_file_not_contains "$MB/out.log" "toolong1"                "名前の形式が違うもの（文字数が違う）は、対象外"
+    assert_file_not_contains "$MB/out.log" "other.AbCdEf"            "ほかの名前は、対象外"
+
+    # cleanup.sh（既定は一覧のみ。何も消さない）
+    TMPDIR="$t" _run_cleanup
+    assert_dir_exists "$t/e2e-run.AbCdEf" "一覧のみの間は、一時フォルダを消さない"
+
+    # cleanup.sh --yes --no-confirm（対象だけを消す）
+    TMPDIR="$t" _run_cleanup --yes --no-confirm; local rc=$?
+    assert_exit_ok "$rc" "削除 → 終了コード 0"
+    assert_dir_not_exists "$t/e2e-run.AbCdEf"     "古い e2e-run.* を削除する"
+    assert_dir_not_exists "$t/e2e-eca-del.123456" "古い e2e-eca-del.* を削除する"
+    assert_file_not_exists "$t/e2e-sfdx-url.QwErTy" "古い e2e-sfdx-url.* を削除する"
+    assert_dir_exists "$t/e2e-run.NewOne"   "新しいものは残る"
+    assert_dir_exists "$t/e2e-run.toolong1" "名前の形式が違うものは残る"
+    assert_dir_exists "$t/other.AbCdEf"     "ほかの名前は残る"
+
+    # 削除関数は、対象外の名前なら動かない
+    _e2e_call 'e2e_load_fixture; e2e_guard_env; e2e_delete_local "'"$t"'/other.AbCdEf"; echo DONE'
+    assert_file_not_contains "$MB/out.log" "DONE" "対象外の名前は、削除しない（異常終了する）"
+    assert_dir_exists "$t/other.AbCdEf" "対象外のフォルダが残っている"
+
+    unset MOCK_CALL_LOG MOCK_GH_REPOS MOCK_SF_ECAS
+    teardown "$CB"
+}
+
 test_e2e_names
 test_e2e_guard
 test_e2e_delete_guards
@@ -440,5 +606,8 @@ test_e2e_sf_shim
 test_e2e_alias_restore
 test_e2e_input
 test_e2e_run_guard
+test_e2e_sfdx_url
+test_e2e_admin_login_retry
+test_e2e_tmp_cleanup
 
 print_summary

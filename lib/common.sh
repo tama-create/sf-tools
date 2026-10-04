@@ -17,12 +17,13 @@
 #   get_target_org [ALIAS]    ... 接続先組織エイリアスを解決
 #   check_force_dir           ... force-* ディレクトリ内か確認
 #   check_home_dir            ... ~/home/{owner}/{company}/ の正しい階層か確認し GITHUB_OWNER/COMPANY_NAME をセット
-#   check_gh_owner OWNER      ... gh 認証ユーザーが期待するオーナーと一致するか確認
+#   check_gh_owner OWNER      ... gh 認証ユーザーが期待するオーナーと一致するか確認（組織の有効な admin も許可）
 #   open_browser URL               ... OS を判定してブラウザを開く（WSL/Git Bash/macOS/Linux 対応）
 #   read_input VARNAME [PROMPT]    ... readline 対応インタラクティブ入力
 #   read_key VARNAME [PROMPT] [V]  ... 1文字即時入力（Enter 不要・空 Enter 無視）
 #   press_enter [MSG]              ... Enter 待ち（q で中断）
 #   read_or_quit VARNAME PROMPT    ... テキスト入力（空 Enter 無視・q で中断）
+#   read_secret VARNAME PROMPT     ... 秘密情報の入力（画面に表示しない・空 Enter 無視・q で中断）
 #   ask_yn QUESTION                ... Y/N/q 確認（1文字即時入力）
 #
 # 【戻り値定数】
@@ -182,6 +183,22 @@ log() {
     return $RET_OK
 }
 
+# _mask_secrets - 文字列中の Token らしい文字列を伏せ字にする（コマンドのログへの混入を防ぐ保険）
+# ------------------------------------------------------------------------------
+# 【使い方】
+#   masked=$(_mask_secrets "$text")
+#
+# 【対象】
+#   GitHub の Token（ghp_ / gho_ / ghu_ / ghs_ / ghr_ / github_pat_）と Slack の Token（xoxb- 等）
+#   本来は Token をコマンドの引数に含めない（環境変数・標準入力・GIT_ASKPASS で渡す）。これは万一の保険。
+# ------------------------------------------------------------------------------
+_mask_secrets() {
+    printf '%s' "$1" | sed -E \
+        -e 's/(gh[pousr]_)[A-Za-z0-9]+/\1***masked***/g' \
+        -e 's/github_pat_[A-Za-z0-9_]+/github_pat_***masked***/g' \
+        -e 's/(xox[abprs]-)[A-Za-z0-9-]+/\1***masked***/g'
+}
+
 # ------------------------------------------------------------------------------
 # 6. run - コマンド実行ラッパー（通常呼び出し・命令置換の両対応）
 # ------------------------------------------------------------------------------
@@ -235,7 +252,7 @@ run() {
         || tmp_out="${_run_tmpdir}/cmd_out_$$_${RANDOM}.tmp"  # run 不使用: 変数代入・mktemp フォールバック
     local status
 
-    log "CMD" "[${SCRIPT_NAME}.sh] ${cmd[*]}"
+    log "CMD" "[${SCRIPT_NAME}.sh] $(_mask_secrets "${cmd[*]}")"
 
     if [[ "${SILENT_EXEC:-}" != "1" ]]; then
         # リアルタイム表示: stderr に流しつつ tmp に保存（命令置換の stdout には影響しない）
@@ -370,17 +387,23 @@ check_force_dir() {
 #
 # 【検証内容】
 #   - gh api user でログイン中のユーザー名を取得
-#   - 期待するオーナーと一致しない場合は die
-#   - gh コマンドが使えない場合はチェックをスキップ（ネットワーク障害等への配慮）
+#   - 期待するオーナーと一致すれば通過
+#   - 一致しない場合、オーナーが組織で認証ユーザーがその組織の有効な管理者（admin かつ active）なら通過
+#   - 上記以外は die（組織 API が失敗した場合も通過させない）
+#   - gh コマンドが使えない場合（ユーザー名が空）はチェックをスキップ（ネットワーク障害等への配慮）
 # ------------------------------------------------------------------------------
 check_gh_owner() {
     local expected_owner="$1"
-    local gh_user
+    local gh_user org_status
     gh_user=$(gh api user --jq '.login' 2>/dev/null || true)  # VAR=$(cmd) のため run 不使用
-    if [[ -n "$gh_user" && "$gh_user" != "$expected_owner" ]]; then
-        die "gh の認証ユーザー（${gh_user}）がリポジトリオーナー（${expected_owner}）と一致しません。
-  gh auth switch --user ${expected_owner} を実行してから再試行してください。"
+    [[ -z "$gh_user" || "$gh_user" == "$expected_owner" ]] && return $RET_OK
+    # 不一致: オーナーが組織なら、認証ユーザーがその組織の有効な管理者かを確認する
+    org_status=$(gh api "user/memberships/orgs/${expected_owner}" --jq '.role + " " + .state' 2>/dev/null || true)  # VAR=$(cmd) のため run 不使用
+    if [[ "$org_status" == "admin active" ]]; then
+        log "INFO" "gh の認証ユーザー（${gh_user}）は組織 ${expected_owner} の管理者です。続行します。"
+        return $RET_OK
     fi
+    die "gh の認証ユーザー（${gh_user}）がリポジトリオーナー（${expected_owner}）と一致せず、組織の管理者（admin）でもありません。"
 }
 
 # check_home_dir - ~/home/{owner}/{company}/ の正しい階層か確認し変数をセットする
@@ -591,6 +614,32 @@ read_or_quit() {
         read_input _rq_var "$prompt" || die "中断しました。"  # EOF → 中断
         [[ "$_rq_var" == "q" || "$_rq_var" == "Q" ]] && die "中断しました。"
         [[ -n "$_rq_var" ]] && break  # 空 Enter → 再入力
+    done
+}
+
+# read_secret - 秘密情報の入力（画面に表示しない・空 Enter 無視・q で中断）
+# ------------------------------------------------------------------------------
+# 【使い方】
+#   read_secret VARNAME PROMPT
+#
+# 【動作】
+#   - 入力した文字を画面に表示しない（read -s）。貼り付けた Token が画面・スクロールバックに残らない
+#   - 空 Enter は無視して再入力。q / Q で die。EOF も die
+#   - 末尾の CR（Windows の貼り付け）は除去する
+#
+# 【使用例】
+#   read_secret SF_TOOLS_TOKEN_VALUE "  Token を貼り付けてください（画面には表示されません・q で中断）："
+# ------------------------------------------------------------------------------
+read_secret() {
+    local -n _rs_var=$1
+    local prompt="$2"
+    while true; do
+        printf "%s" "$prompt" >&2
+        IFS= read -rs _rs_var || { printf "\n" >&2; die "入力が中断されました。"; }
+        printf "\n" >&2
+        _rs_var="${_rs_var%$'\r'}"
+        [[ "$_rs_var" == "q" || "$_rs_var" == "Q" ]] && die "中断しました。"
+        [[ -n "$_rs_var" ]] && break  # 空 Enter → 再入力
     done
 }
 

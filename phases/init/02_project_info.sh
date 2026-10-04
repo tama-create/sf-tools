@@ -14,8 +14,16 @@
 #   REPO_DIR      = {PWD}/force-{company}
 #
 # 【環境種別】
-#   本番環境 (production) : SF_TOOLS_BRANCH=main       → GitHub Actions は sf-tools main を使用
+#   本番環境 (production) : SF_TOOLS_BRANCH=main       → GitHub Actions は sf-tools main を使用（通常はこちら）
 #   検証環境 (staging)    : SF_TOOLS_BRANCH=development → GitHub Actions は sf-tools development を使用
+#                           sf-tools の開発者専用（未リリースのコードが使われる）。
+#                           誤選択を防ぐため、選択時に WARNING と Y/N/q 確認を行う（N なら選択に戻る）
+#
+# 【sf-tools の最新化確認】
+#   環境種別の選択直後に ensure_sf_tools_branch（init-common.sh）を呼び、~/sf-tools が
+#   選択した環境のブランチ（本番=main / 検証=development）かどうか、origin より遅れていないかを確認する。
+#   ・遅れていれば確認のうえ git pull --ff-only を実行し、実行中のスクリプトが書き換わるため die で中断する
+#   ・ブランチ違いは確認（Y/N/q）。ローカルに未コミット・未 push の変更があれば更新せず警告のみ
 # ==============================================================================
 
 # SF_TOOLS_DIR は sf-init.sh（司令塔）から export される
@@ -73,20 +81,33 @@ ask_yn "▶ よろしいですか？" || die "セットアップを中断しま�
 # 環境種別の選択
 echo ""
 log "INFO" "環境種別を選択してください："
-log "INFO" "  1. 本番環境  - GitHub Actions は sf-tools main ブランチを使用"
-log "INFO" "  2. 検証環境  - GitHub Actions は sf-tools development ブランチを使用"
+log "INFO" "  1. 本番環境  - 通常はこちらを選択してください。"
+log "INFO" "                 GitHub Actions は sf-tools main ブランチ（リリース済みの配布版）を使用"
+log "INFO" "  2. 検証環境  - sf-tools の開発者専用です（リリース前の動作確認用）。"
+log "INFO" "                 GitHub Actions は sf-tools development ブランチ（未リリース版）を使用"
 echo ""
-read_key ENV_TYPE_KEY "▶ 環境種別を選択してください [1/2/q]：" "[12qQ]"
-[[ "$ENV_TYPE_KEY" =~ ^[qQ]$ ]] && die "セットアップを中断しました。"
-if [[ "$ENV_TYPE_KEY" == "1" ]]; then
-    ENV_TYPE="production"
-    SF_TOOLS_BRANCH="main"
-    log "INFO" "  → 本番環境（sf-tools: main）"
-else
-    ENV_TYPE="staging"
-    SF_TOOLS_BRANCH="development"
-    log "INFO" "  → 検証環境（sf-tools: development）"
-fi
+while true; do
+    read_key ENV_TYPE_KEY "▶ 環境種別を選択してください [1/2/q]：" "[12qQ]"
+    [[ "$ENV_TYPE_KEY" =~ ^[qQ]$ ]] && die "セットアップを中断しました。"
+    if [[ "$ENV_TYPE_KEY" == "1" ]]; then
+        ENV_TYPE="production"
+        SF_TOOLS_BRANCH="main"
+        log "INFO" "  → 本番環境（sf-tools: main）"
+        break
+    fi
+    # 検証環境は未リリースのコードを使うため、誤選択を防ぐ確認を挟む（N なら選択に戻る）
+    log "WARNING" "検証環境は sf-tools の開発者専用です。リリース前の未検証コード（sf-tools development）が使われます。"
+    if ask_yn "▶ 検証環境で続行しますか？"; then
+        ENV_TYPE="staging"
+        SF_TOOLS_BRANCH="development"
+        log "INFO" "  → 検証環境（sf-tools: development）"
+        break
+    fi
+    echo ""
+done
+
+# 選択した環境に合わせて ~/sf-tools の最新化を確認する（更新した場合は die で中断）
+ensure_sf_tools_branch "$SF_TOOLS_BRANCH"
 
 # .sf-init.env に変数を書き出す（後続フェーズで source して使用）
 {

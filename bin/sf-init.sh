@@ -23,6 +23,7 @@
 #   Phase 8:  初回コミット＆プッシュ
 #   Phase 9:  GitHub リポジトリ設定・Ruleset の適用
 #   Phase 10: JWT 認証情報の設定（Salesforce GitHub Secrets 登録）
+#   Phase 11: SF_TOOLS_TOKEN の設定（Actions が Private の sf-tools を clone するための Token を Secret 登録）
 #
 # 【手動操作が必要なステップ】
 #   - Salesforce 組織へのブラウザログイン
@@ -100,7 +101,7 @@ while [[ $# -gt 0 ]]; do
         *)
             die "不明なオプションです: $1
 使い方:
-  ~/sf-tools/bin/sf-init.sh                       # Phase 1〜10 を順次実行
+  ~/sf-tools/bin/sf-init.sh                       # Phase 1〜11 を順次実行
   ~/sf-tools/bin/sf-init.sh --resume N             # Phase N から最後まで順次実行
   ~/sf-tools/bin/sf-init.sh --only N               # Phase N のみ実行
   ~/sf-tools/bin/sf-init.sh --add-tier staging     # staging tier を追加
@@ -125,7 +126,7 @@ if [[ -n "$ONLY_PHASE" ]]; then
     END_PHASE=$ONLY_PHASE
 else
     START_PHASE=$RESUME_PHASE
-    END_PHASE=10
+    END_PHASE=11
 fi
 
 # ------------------------------------------------------------------------------

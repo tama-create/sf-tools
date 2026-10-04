@@ -92,15 +92,16 @@ sf-init.sh
 以下を自動実行します。
 
 1. 環境チェック（ツール・GitHub CLI 認証）
-2. プロジェクト情報の確認（フォルダ構成から自動導出）
+2. プロジェクト情報の確認（フォルダ構成から自動導出）と環境種別の選択（通常は「1. 本番環境」。「2. 検証環境」は sf-tools の開発者専用で、選択すると確認が出ます。あわせて `~/sf-tools` が最新かを確認し、遅れていれば更新して中断します）
 3. GitHub リポジトリ作成・clone
 4. ワークフロー・設定ファイル生成
 5. ブランチ構成
 6. PAT_TOKEN の設定
-7. Slack 連携の設定
+7. Slack 連携の設定（通知先は、全員が参加する共有チャンネルを Slack で事前に作成しておく。DM は使えません）
 8. 初回コミット＆プッシュ
 9. GitHub リポジトリ設定・Ruleset 適用
-10. JWT 認証情報（Salesforce → GitHub Secrets / Variables）の設定
+10. JWT 認証情報（Salesforce → GitHub Secrets / Variables）の設定（外部クライアントアプリは、ブラウザでログインするだけで自動作成）
+11. SF_TOOLS_TOKEN の設定（Actions が Private の sf-tools を clone するための Token を Secret に登録）
 
 > リポジトリ名は必ず `force-` で始めてください。
 
@@ -228,7 +229,7 @@ sfl
 ⚠️ のついたスクリプトは**管理者専用**です。実行すると赤い警告ボックスが表示され、続行確認（Y/N/q）を求められます。一般の開発者が誤って実行した場合は `N` または `q` で中断できます。
 
 - `GITHUB_ACTIONS=true` の環境変数が設定されている場合（GitHub Actions 上）は確認プロンプトをスキップして自動実行します
-- `gh` コマンドを使うスクリプトは起動時に gh 認証ユーザーとリポジトリオーナーの一致を確認します。不一致の場合は `gh auth switch` を案内して中断します
+- `gh` コマンドを使うスクリプトは起動時に gh 認証ユーザーとリポジトリオーナーの一致を確認します。不一致の場合は中断します。ただし、オーナーが GitHub 組織（例: `tamashimon-org`）で、認証ユーザーがその組織の有効な管理者（admin）であれば、そのまま続行します。組織の一般メンバーや、組織情報を取得できない場合は中断します（`gh auth switch` で正しいアカウントに切り替えてから再実行してください）
 
 ### 4.1 一覧
 
@@ -328,7 +329,7 @@ sf-init.sh が登録する認証情報は、機密性に応じて **Secret（暗
 | `SF_CONSUMER_KEY_*` | Secret | Connected App のコンシューマキー |
 | `PAT_TOKEN` | Secret | GitHub Personal Access Token |
 | `SLACK_BOT_TOKEN` | Secret | Slack Bot のアクセストークン |
-| `SF_TOOLS_TOKEN` | Secret | GitHub Actions が Private の sf-tools を clone するための Fine-grained PAT（**sf-init.sh は登録しない・手動登録**） |
+| `SF_TOOLS_TOKEN` | Secret | GitHub Actions が Private の sf-tools を clone するための Fine-grained PAT（**sf-init.sh の Phase 11 で登録**。スキップした場合・作り直しは手動登録） |
 | `SF_USERNAME_*` | Variable | Salesforce ユーザー名（平文で問題なし） |
 | `SF_INSTANCE_URL_*` | Variable | Salesforce インスタンス URL（平文で問題なし） |
 | `SLACK_CHANNEL_ID` | Variable | 通知先 Slack チャンネル ID（平文で問題なし） |
@@ -336,7 +337,7 @@ sf-init.sh が登録する認証情報は、機密性に応じて **Secret（暗
 
 > `*` は組織ごとのサフィックス（`PROD` / `STG` / `DEV`）。
 
-> ⚠️ `SF_TOOLS_TOKEN` は sf-init.sh では登録されません。wf-metasync / wf-validate / wf-release は、実行のたびに Private リポジトリの sf-tools を clone するため、未設定・有効期限切れ・対象リポジトリ違いのいずれかで **全ワークフローが「自動化ツール（sf-tools）を取得」ステップで失敗します**。作成手順は `doc/setup-guide.md` の 3.2 を参照してください。
+> ⚠️ `SF_TOOLS_TOKEN` は sf-init.sh の Phase 11 で登録します（Token の作成画面を事前入力した URL で開き、入力した Token で sf-tools を読めることを確認してから登録します）。wf-metasync / wf-validate / wf-release は、実行のたびに Private リポジトリの sf-tools を clone するため、未設定・有効期限切れ・対象リポジトリ違いのいずれかで **全ワークフローが「自動化ツール（sf-tools）を取得」ステップで失敗します**。Phase 11 をスキップした場合や、Token を作り直す場合の手順は `doc/setup-guide.md` の 3.2 を参照してください。
 
 #### 4.4.2 ブランチ tier のスケールアップ
 
@@ -750,7 +751,8 @@ sf-tools/
 │       ├── 07_slack.sh
 │       ├── 08_initial_commit.sh
 │       ├── 09_repo_rules.sh
-│       └── 10_sf_auth.sh
+│       ├── 10_sf_auth.sh
+│       └── 11_sf_tools_token.sh
 ├── hooks/
 │   ├── pre-push                ← sf-hook.sh がプロジェクト側へコピー
 │   └── pre-commit
@@ -789,3 +791,29 @@ sf-tools/
 - 追加依存を減らし、Git Bash（Windows）と GitHub Actions（Ubuntu）を検証対象に、macOS / WSL でも動くクロスプラットフォーム構成を維持する
 - まず dry-run を基本にし、必要時のみ本番実行する
 - Bash 4.3 以上を必須とし、互換ハックより環境アップグレードを優先する（コード品質・メンテナンス性を守るため）
+
+---
+
+## 9. 開発・リリースの流れ（sf-tools の開発者向け）
+
+sf-tools の `main` ブランチは、**そのまま全ユーザーに配布される**ブランチです。各ユーザーの `~/sf-tools` は `git pull` で `main` を取り込みます。そのため、修正はいきなり `main` に入れず、次の順で進めます。
+
+| 手順 | 内容 |
+|---|---|
+| 1. 修正 | `development` ブランチで修正し、`bash tests/run_tests.sh` を全件 PASS させる（`mm`：`development` までコミット・push） |
+| 2. 検証 | 検証環境の `force-*` で実際に動作を確認する（下記） |
+| 3. リリース | 検証 OK を確認してから、`development` → `main` の PR をマージする（`rr`）。これが配布になる |
+
+### 9.1 検証環境とは
+
+`sf-init.sh` の Phase 2 で「検証環境」を選んだ `force-*` のことです。そのリポジトリの GitHub Actions は、sf-tools の `main` ではなく `development` ブランチを使います（Variable `SF_TOOLS_BRANCH=development`）。開発者の `~/sf-tools` を `development` にしておけば、ローカルのコマンドも同じ内容で動きます。
+
+### 9.2 検証で確認すること
+
+変更内容に応じて確認します。詳細は `doc/dev-reference.md` セクション 9 を参照してください。
+
+- 新規セットアップ（`sf-init.sh`）が最後まで通ること（Phase 11 の `SF_TOOLS_TOKEN` の登録を含む）
+- メタデータ同期（`wf-metasync`）を手動実行して成功すること
+- デプロイ対象を含む PR で `wf-validate` が通ること（動作確認だけの PR はマージせずに閉じる）
+
+> ⚠️ `main` のブランチ保護は GitHub の無料プラン（Private リポジトリ）では設定できません。誤ったリリースを防ぐため、上記の運用を守ってください。

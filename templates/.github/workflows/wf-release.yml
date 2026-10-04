@@ -12,7 +12,7 @@
 #   SF_CONSUMER_KEY_DEV  : 開発組織の Connected App コンシューマーキー
 #   SLACK_BOT_TOKEN      : Slack API の Bot Token
 #   SF_TOOLS_TOKEN       : sf-tools（Private）を clone する Fine-grained PAT（Contents: Read-only）
-#                          sf-init.sh は登録しない。手動で登録すること（doc/setup-guide.md 3.2 参照）
+#                          sf-init.sh の Phase 11 が登録する（スキップ時・作り直しは手動: doc/setup-guide.md 3.2 参照）
 #
 # 【必要な GitHub Variables（このリポジトリに設定すること）】
 #   SF_USERNAME_PROD     : 本番組織の接続ユーザー名

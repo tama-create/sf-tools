@@ -6,7 +6,7 @@
 # ワークフローがブランチ保護をバイパスして push するために必要。
 #
 # 【備考】
-#   生成した PAT_TOKEN_VALUE は .sf-init.env に書き出し、Phase 9 で使用する。
+#   生成した PAT_TOKEN_VALUE は .sf-init.env に書き出し、Phase 8 で使用する。
 # ==============================================================================
 
 # SF_TOOLS_DIR は sf-init.sh（司令塔）から export される
@@ -32,7 +32,7 @@ SF_INIT_ENV_FILE="${SF_INIT_ENV_FILE:-${PWD}/.sf-init.env}"
 # ------------------------------------------------------------------------------
 # メイン処理
 # ------------------------------------------------------------------------------
-log "HEADER" "Phase 7: PAT_TOKEN の設定"
+log "HEADER" "Phase 6: PAT_TOKEN の設定"
 echo ""
 echo "  ワークフローがブランチ保護をバイパスして push するために必要です。"
 echo ""
@@ -57,8 +57,8 @@ echo ""
 echo "$PAT_TOKEN_VALUE" | run gh secret set PAT_TOKEN -R "$REPO_FULL_NAME" \
     || die "PAT_TOKEN の登録に失敗しました。"
 
-# PAT_TOKEN_VALUE を .sf-init.env に書き出す（Phase 9 の push で使用）
+# PAT_TOKEN_VALUE を .sf-init.env に書き出す（Phase 8 の push で使用）
 printf 'PAT_TOKEN_VALUE="%s"\n' "$PAT_TOKEN_VALUE" >> "$SF_INIT_ENV_FILE"
 
-log "SUCCESS" "Phase 7 完了: PAT_TOKEN の設定 OK。"
+log "SUCCESS" "Phase 6 完了: PAT_TOKEN の設定 OK。"
 exit $RET_OK

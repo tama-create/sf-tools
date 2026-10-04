@@ -48,6 +48,7 @@
 | ファイル | 対象スクリプト |
 |---|---|
 | `test_common.sh` | lib/common.sh |
+| `test_init-common.sh` | phases/init/init-common.sh（`ensure_sf_tools_branch`。実際の Git と一時 bare リポジトリを使用） |
 | `test_sf-unhook.sh` | sf-unhook.sh |
 | `test_sf-hook.sh` | sf-hook.sh |
 | `test_sf-init.sh` | sf-init.sh |
@@ -116,12 +117,14 @@
 | `get_target_org` | `get_target_org [ALIAS]` | 対象組織エイリアスを解決して出力 |
 | `check_force_dir` | `check_force_dir` | `force-*` ディレクトリか検証 |
 | `check_home_dir` | `check_home_dir` | `~/home/{owner}/{company}/` の階層を検証し `GITHUB_OWNER` / `COMPANY_NAME` をセット |
-| `check_gh_owner` | `check_gh_owner OWNER` | gh 認証ユーザーがリポジトリオーナーと一致するか確認（不一致は die、gh が空を返す場合はスキップ） |
+| `check_gh_owner` | `check_gh_owner OWNER` | gh 認証ユーザーがリポジトリオーナーと一致するか確認（不一致は die。オーナーが組織で、ユーザーがその有効な admin なら通過。gh が空を返す場合はスキップ） |
 | `open_browser` | `open_browser URL` | OS 判定してブラウザを開く（WSL/GitBash/macOS/Linux 対応） |
 | `read_input` | `read_input VAR [PROMPT]` | readline 対応テキスト入力（矢印キー・BS 有効） |
 | `read_key` | `read_key VAR [PROMPT] [VALID]` | 1文字即時入力（Enter 不要・空 Enter 無視・EOF 対応） |
 | `press_enter` | `press_enter [MSG]` | Enter 待ち（q で中断） |
 | `read_or_quit` | `read_or_quit VAR PROMPT` | テキスト入力（空 Enter 無視・q で中断・EOF 対応） |
+| `read_secret` | `read_secret VAR PROMPT` | 秘密情報の入力（画面に表示しない・空 Enter 無視・q で中断・末尾の CR を除去）。Token の入力に使う |
+| `_mask_secrets` | `_mask_secrets TEXT` | `ghp_` / `gho_` / `github_pat_` / `xoxb-` などの Token らしい文字列を伏せ字にする。`run` のコマンドログに自動適用される（保険。Token はそもそも引数に含めず、環境変数・標準入力・`GIT_ASKPASS` で渡すこと） |
 | `ask_yn` | `ask_yn "質問"` | Y/N/q 確認（1文字即時入力・q は `die`） |
 
 ### 3.2 `log` のレベル
@@ -183,13 +186,14 @@ fi
 
 #### 3.4.3 `check_gh_owner`（gh 認証ユーザー確認）
 
-`gh` コマンドを使うすべての管理者向けスクリプトは、リポジトリオーナーが確定した直後に `check_gh_owner` を呼び出す。認証ユーザーが一致しない場合は `die` で即終了し、正しいアカウントへの切り替えを案内する。
+`gh` コマンドを使うすべての管理者向けスクリプトは、リポジトリオーナーが確定した直後に `check_gh_owner` を呼び出す。認証ユーザーがオーナーと一致しない場合は `die` で即終了する（`die` のメッセージは事実のみで、復旧案内は含めない）。ただし、オーナーが組織で、認証ユーザーがその組織の有効な管理者（`role=admin` かつ `state=active`）である場合は通過する。
 
 ```bash
 check_home_dir               # GITHUB_OWNER / COMPANY_NAME をセット
 check_gh_owner "$GITHUB_OWNER"   # 認証ユーザーの一致確認
 ```
 
+- 組織の管理者判定は `gh api user/memberships/orgs/<オーナー>` の `role` と `state` で行う。API が失敗した場合は通過させず `die` する（安全側）
 - gh が空を返す場合（ネットワーク障害・未認証）はチェックをスキップして続行する
 - `sf-init.sh` / `sf-job.sh` のフェーズサブスクリプトは、メインスクリプトで確認済みのため個別呼び出し不要
 
@@ -328,7 +332,7 @@ GitHub Secrets / Variables の JWT 認証情報を再登録する。実行フロ
 
 1. `force-*` ディレクトリかチェック
 2. git remote から対象リポジトリ（OWNER/REPO）を自動取得
-3. `check_gh_owner` で gh 認証ユーザーを確認（不一致は die）
+3. `check_gh_owner` で gh 認証ユーザーを確認（不一致は die。オーナーが組織で、ユーザーがその有効な admin なら通過）
 4. 赤い警告ボックス + `ask_yn || die`（管理者向け確認）
 5. メインメニューで操作を選択 `[1-4/q]`（1文字即時選択）:
    - 1: 秘密鍵（`SF_PRIVATE_KEY` Secret）を更新
@@ -352,7 +356,7 @@ GitHub Secrets / Variables の JWT 認証情報を再登録する。実行フロ
 
 > Secret は暗号化されており `gh secret get` で値を読み取れないが、Variable は `gh variable get` で取得できる。ユーザー名はメニュー表示時に現在値を自動取得して表示する。
 
-> `SF_TOOLS_TOKEN`（Secret）は `sf-init.sh` / `sf-update-secret.sh` のいずれも登録しない（手動登録）。wf-metasync / wf-validate / wf-release が Private の `tama-create/sf-tools` を clone するための Fine-grained PAT（Contents: Read-only・Resource owner は sf-tools の所有者）。`SF_TOOLS_BRANCH`（Variable）は、sf-init.sh を環境変数 `SF_TOOLS_BRANCH=development` 付きで実行した場合のみ `phases/init/09_repo_rules.sh` が `development` を登録する（検証環境用）。未設定なら Actions は `main` を clone する。手順は `doc/setup-guide.md` 3.2 を参照。
+> `SF_TOOLS_TOKEN`（Secret）は `sf-update-secret.sh` では登録しない。`sf-init.sh` の Phase 11 が登録する（スキップ時・作り直しは手動登録）。wf-metasync / wf-validate / wf-release が Private の `tama-create/sf-tools` を clone するための Fine-grained PAT（Contents: Read-only・Resource owner は sf-tools の所有者）。`SF_TOOLS_BRANCH`（Variable）は、sf-init.sh を環境変数 `SF_TOOLS_BRANCH=development` 付きで実行した場合のみ `phases/init/09_repo_rules.sh` が `development` を登録する（検証環境用）。未設定なら Actions は `main` を clone する。手順は `doc/setup-guide.md` 3.2 を参照。
 
 **SF_PRIVATE_KEY の base64 エンコーディング:**
 GitHub Actions のワークフローは Secret から取得した値を `base64 -d` でデコードして使用する。そのため `SF_PRIVATE_KEY` は **base64 エンコード済みの文字列** として登録しなければならない。`sf-update-secret.sh` の `_update_private_key` は以下のパイプで登録する:
@@ -382,10 +386,11 @@ tr -d '\r' < "$key_file" | base64 -w 0 | gh secret set "SF_PRIVATE_KEY" -R "$REP
 4. ファイル生成（sf-install.sh / sf-hook.sh）
 5. ブランチ構成（対話選択 → branches.txt 更新）
 6. PAT_TOKEN の設定
-7. Slack 連携の設定（SLACK_BOT_TOKEN を Secret / SLACK_CHANNEL_ID を Variable に登録）
-8. 初回コミット＆プッシュ
-9. GitHub リポジトリ設定・Ruleset の適用
-10. JWT 認証情報の設定（SF_PRIVATE_KEY / SF_CONSUMER_KEY_* を Secret / SF_USERNAME_* / SF_INSTANCE_URL_* を Variable に登録）
+7. Slack 連携の設定（SLACK_BOT_TOKEN を Secret / SLACK_CHANNEL_ID を Variable に登録。チャンネル ID は C または G で始まる形式かを検証し、それ以外（D=DM、U=ユーザーなど）は警告して拒否し、入力し直させる。通知先は全員が参加する共有チャンネルのため）
+8. 初回コミット＆プッシュ（PAT は GIT_ASKPASS で渡しコマンドのログに残さない。push 後に .sf-init.env から PAT を削除する）
+9. GitHub リポジトリ設定・Ruleset の適用（既存 Ruleset の ID は数字のときだけ削除対象にする）
+10. JWT 認証情報の設定（SF_PRIVATE_KEY / SF_CONSUMER_KEY_* を Secret / SF_USERNAME_* / SF_INSTANCE_URL_* を Variable に登録）。アプリ種別が外部クライアントアプリ（2）のときは、組織ごとに `register_jwt_secret_eca`（`init-common.sh`）が自動作成する（`sf org login web` → ユーザー名・プロファイル名（表示名）を取得 → `generate_eca_metadata` で 5 ファイルを生成して `sf project deploy` → `sf project retrieve` でコンシューマー鍵を取得 → JWT 接続テスト（反映待ちのためリトライ。`SF_INIT_JWT_RETRIES` / `SF_INIT_JWT_INTERVAL`）→ 登録）。ログイン用の一時エイリアス（`sf-tools-PROD` / `sf-tools-STG` / `sf-tools-DEV`。ユーザーが運用中のエイリアスと重ならないよう `sf-tools-` を付ける）は、ログイン前に `sf alias unset` で外し（前回の古い認証による誤判定の防止）、終了後にも `sf alias unset` で消す（`sf org logout` は同じユーザー名の全エイリアスの認証を消すため使わない）。`sf` は、Windows の Git Bash で、公式インストーラー版 + 自動更新版の組み合わせのとき、成功しても終了コード 1 を返すことがある（`sf org login web` / `sf org display` ほか。`SF_REDIRECTED=1` で回避できる）。そのためログインの成否は、終了コードを一切見ず、一時エイリアスの接続情報（`sf org display --json` の出力の `username`）が取れるかで判定する。接続アプリ（1）は従来の手動案内
+11. SF_TOOLS_TOKEN の設定（`11_sf_tools_token.sh`。Fine-grained PAT の作成画面を事前入力 URL で開く → `read_secret` で Token を入力（画面に表示しない）→ `GH_TOKEN` 環境変数で `gh api repos/<sf-tools>` を実行して読み取りを確認（コマンドの文字列・ログに Token を含めない）→ `printf '%s' "$TOKEN" | run gh secret set SF_TOOLS_TOKEN`。確認に失敗した場合は再入力かスキップを選ぶ。Token は `.sf-init.env` に書き出さない。sf-tools の OWNER/REPO は `init-common.sh` の `SF_TOOLS_REPO_FULL_NAME`）
 
 オプション:
 - `--resume N`: Phase N から再開（エラー後の再試行）
@@ -451,6 +456,7 @@ sf-init.sh --add-tier develop    # main+staging → main+staging+develop
 | WF ファイル名・ジョブ名 | `doc/setup-guide.md` セクション5、`doc/sf-cicd-strategy.md` セクション4.2 |
 | `templates/.github/workflows/` の `name:` | `doc/setup-guide.md` のワークフロー一覧 |
 | `templates/.github/workflows/` の内容 | `phases/init/08_repo_rules.sh` の `required_status_checks.context` との整合 |
+| mm / rr の運用・リリース手順 | `CLAUDE.md` 1.3・4.3、`README.md` セクション 9、本書セクション 9 |
 
 > ドキュメントの詳細（フロー・パス等）はコードを確認してから記載すること。推測で書かないこと。
 
@@ -525,3 +531,55 @@ C:\home\<github-owner>\<company>\<branch>\force-<company>/
 
 - 開発は基本的に上記の `system` ブランチ用ディレクトリで行うこと
 - 検証のために一時的にブランチを切り替えることは許可されるが、作業完了後は元のブランチに戻すこと
+
+---
+
+## 9. 開発・リリース手順（sf-tools）
+
+sf-tools の `main` への反映は、全ユーザーへの配布と同義である。修正は `development` で行い、検証環境で確認してから `main` に入れる。
+
+### 9.1 ブランチと配布の関係
+
+| 対象 | 参照するブランチ | 決まり方 |
+|---|---|---|
+| ユーザーのローカル `~/sf-tools` | `~/sf-tools` で今チェックアウトしているブランチ | `sf-install.sh` が `git pull origin <現在のブランチ>` を実行する |
+| force-* の GitHub Actions | Variable `SF_TOOLS_BRANCH`（未設定なら `main`） | `wf-metasync` / `wf-validate` / `wf-release` が `git clone -b` で取得する |
+
+- 一般ユーザーの `~/sf-tools` は `main` のため、`main` へのマージで配布される
+- 開発者の `~/sf-tools` を `development` にし、検証環境の force-* の `SF_TOOLS_BRANCH` を `development` にすれば、`main` を汚さずに検証できる
+- `sf-init.sh` は、Phase 2 で環境種別を選んだ直後に `ensure_sf_tools_branch`（`phases/init/init-common.sh`）で `~/sf-tools` の最新化を確認する（本番 = `main`、検証 = `development`）。ブランチ違いは確認（Y/N/q）、遅れていれば確認のうえ `git pull --ff-only` を実行して中断する（実行中のスクリプトが書き換わるため。再実行すれば最新で動く）。ローカルに未コミット・未 push の変更があれば更新せず警告のみ。ブランチの自動切り替えは行わない
+
+### 9.2 検証環境の作り方
+
+| 対象 | 方法 |
+|---|---|
+| 新規に作る force-* | `sf-init.sh` の Phase 2 で「2. 検証環境」を選ぶ（`SF_TOOLS_BRANCH=development` が Variable として登録される） |
+| 既存の force-* | `gh variable set SF_TOOLS_BRANCH --body "development" -R <owner>/<repo>` |
+| ローカル | `~/sf-tools` を `development` にチェックアウトしておく |
+
+- `SF_TOOLS_TOKEN`（Secret）は `sf-init.sh` の Phase 11 が登録する（スキップした場合のみ手動登録が必要。`doc/setup-guide.md` 3.2）
+
+### 9.3 検証チェックリスト（rr の前提）
+
+変更内容に応じて、必要な項目を実施し、結果をユーザーが報告する。
+
+| 確認項目 | 方法 |
+|---|---|
+| テスト | `bash tests/run_tests.sh` が全件 PASS |
+| `sf-init.sh` を変更した場合 | 検証環境の新規 force-* を作成し、最後まで通ること（Phase 11 の `SF_TOOLS_TOKEN` の登録を含む） |
+| ワークフロー・`sf-metasync.sh` を変更した場合 | `wf-metasync` を `workflow_dispatch` で手動実行して成功すること |
+| `sf-release.sh` / `wf-validate` / `wf-release` を変更した場合 | デプロイ対象を含む PR を作り、`wf-validate` が通ること（動作確認のみの PR はマージせずに閉じる。マージすると `wf-release` が実際にデプロイする） |
+
+> `templates/` の変更は配布済みの force-* に自動反映されない。検証環境の force-* の `wf-*.yml` は、手動で `templates/` と一致させること。
+
+### 9.4 リリース（rr）
+
+1. 9.3 の確認が完了し、ユーザーが結果を報告している
+2. 「rr」の指示で、`development` → `main` の PR を作成してマージする（手順は `CLAUDE.md` 1.3.2）
+3. マージ後、`main` の内容を検証環境の force-* でもう一度確認する
+
+### 9.5 ガードレール
+
+- `main` のブランチ保護・Ruleset は、GitHub 無料プラン（Private リポジトリ）では設定できない（`Upgrade to GitHub Pro or make this repository public`）
+- そのため、`CLAUDE.md` 1.1 の運用ルール（mm / rr は明示された場合のみ、rr は検証報告が前提）で守る
+- プランの変更、またはリポジトリを公開にできるようになった場合は、`main` に Required reviewers を設定すること

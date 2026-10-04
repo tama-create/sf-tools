@@ -85,9 +85,23 @@ test_git_update_is_last() {
     teardown "$td" "$mb"
 }
 
+# Git Bash（$OSTYPE が msys / mingw / cygwin）では、Git のアップデートが実行される
+# （$OSTYPE は bash が起動時に設定するため、環境変数では差し替えられない。bash -c の中で設定して、スクリプトを読み込む）
+test_git_update_on_gitbash() {
+    local td mb mh t
+    for t in msys cygwin; do
+        setup_std_env td mb mh
+        create_all_mocks "$mb"
+        (cd "$td" && PATH="$mb:$PATH" bash -c "OSTYPE=${t}; source '$SF_TOOLS_DIR/bin/sf-upgrade.sh'") > /dev/null 2>&1
+        assert_file_contains "$MOCK_CALL_LOG" "git update-git-for-windows" "OSTYPE=${t}（Git Bash）でも、Git のアップデートが実行される"
+        teardown "$td" "$mb"
+    done
+}
+
 test_normal_run
 test_no_npm
 test_no_sf
 test_git_update_is_last
+test_git_update_on_gitbash
 
 print_summary

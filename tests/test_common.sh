@@ -245,6 +245,52 @@ SEOF
     rm -f "$script" "$logf"
 }
 
+# ------------------------------------------------------------------------------
+# is_gitbash / open_browser のテスト（Git Bash でも $OSTYPE が cygwin になる環境がある）
+# ------------------------------------------------------------------------------
+_osd_run() {  # 引数: OSTYPE の値, 実行するコード（common.sh を読み込んだあとに、OSTYPE を設定して実行する）
+    bash -c "
+        readonly SCRIPT_NAME=test; readonly LOG_FILE=/dev/null; readonly LOG_MODE=NEW; export SF_INIT_MODE=1
+        source '${SF_TOOLS_DIR}/lib/common.sh'
+        OSTYPE='$1'
+        $2" 2>&1
+}
+
+test_is_gitbash() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] is_gitbash: \$OSTYPE が msys / mingw / cygwin なら Git Bash と判定する${CLR_RST}"
+    local t out
+    for t in msys msys2 mingw64 cygwin; do
+        out=$(_osd_run "$t" 'is_gitbash && echo YES || echo NO')
+        [[ "$out" == "YES" ]] && pass "OSTYPE=${t} → Git Bash と判定する" || fail "OSTYPE=${t} → Git Bash と判定する" "$out"
+    done
+    for t in linux-gnu darwin22 freebsd13; do
+        out=$(_osd_run "$t" 'is_gitbash && echo YES || echo NO')
+        [[ "$out" == "NO" ]] && pass "OSTYPE=${t} → Git Bash と判定しない" || fail "OSTYPE=${t} → Git Bash と判定しない" "$out"
+    done
+}
+
+test_open_browser_gitbash() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] open_browser: Git Bash（msys / mingw / cygwin）では start を呼ぶ${CLR_RST}"
+    local mb t n
+    mb=$(setup_mock_bin)
+    export MOCK_CALL_LOG="$mb/calls.log"
+    for n in start powershell.exe open xdg-open; do
+        printf '#!/bin/bash\necho "%s $*" >> "$MOCK_CALL_LOG"\n' "$n" > "$mb/$n"
+        chmod +x "$mb/$n"
+    done
+    for t in msys mingw64 cygwin; do
+        : > "$MOCK_CALL_LOG"
+        PATH="$mb:$PATH" _osd_run "$t" "open_browser 'https://example.com/x'" > /dev/null
+        assert_file_contains     "$MOCK_CALL_LOG" "https://example.com/x" "OSTYPE=${t} → start でブラウザを開く"
+        assert_file_contains     "$MOCK_CALL_LOG" "start"                 "OSTYPE=${t} → start が呼ばれる"
+        assert_file_not_contains "$MOCK_CALL_LOG" "powershell.exe"        "OSTYPE=${t} → WSL 用の powershell.exe は呼ばれない"
+    done
+    unset MOCK_CALL_LOG
+    teardown "$mb"
+}
+
 test_check_gh_owner_match
 test_check_gh_owner_mismatch
 test_check_gh_owner_skip_on_empty
@@ -254,5 +300,7 @@ test_check_gh_owner_org_admin_pending
 test_check_gh_owner_org_api_failure
 test_read_secret
 test_mask_secrets
+test_is_gitbash
+test_open_browser_gitbash
 
 print_summary

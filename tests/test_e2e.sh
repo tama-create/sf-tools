@@ -129,6 +129,11 @@ test_e2e_names() {
         e2e_is_target_jwt_dir force-e2e-20261004-103000 || echo BAD13
         e2e_is_target_jwt_dir force-test-win          && echo BAD14
         [[ "$(e2e_new_project_name)" =~ ^e2e-[0-9]{8}-[0-9]{6}$ ]] || echo BAD15
+        OSTYPE=cygwin;    e2e_is_windows || echo BAD16
+        OSTYPE=msys;      e2e_is_windows || echo BAD17
+        OSTYPE=mingw64;   e2e_is_windows || echo BAD18
+        OSTYPE=linux-gnu; e2e_is_windows && echo BAD19
+        OSTYPE=darwin22;  e2e_is_windows && echo BAD20
         echo DONE'
     assert_file_contains     "$mb/out.log" "DONE"  "判定の関数が最後まで実行された"
     assert_file_not_contains "$mb/out.log" "BAD"   "対象は一致し、対象外（他のリポジトリ・アプリ・不正な名前）は一致しない"
@@ -205,7 +210,7 @@ test_e2e_fixture() {
     assert_file_not_contains "$mb/out.log" "LOADED" "必須の項目が未設定だと、読み込みに失敗する"
     assert_file_contains     "$mb/out.log" "E2E_PAT_TOKEN が未設定" "未設定の項目名が表示される"
 
-    if [[ "$OSTYPE" != "msys"* && "$OSTYPE" != "mingw"* ]]; then
+    if [[ "$OSTYPE" != "msys"* && "$OSTYPE" != "mingw"* && "$OSTYPE" != "cygwin"* ]]; then
         _mk_fixture "$FX"; chmod 644 "$FX"
         _e2e_call 'e2e_load_fixture; echo LOADED'
         assert_file_not_contains "$mb/out.log" "LOADED" "権限が 600 でないと、読み込みに失敗する"

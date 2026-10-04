@@ -18,7 +18,7 @@
 
 | 目的 | 使う方法 | 理由 |
 |---|---|---|
-| GitBash 検出 | `[[ "$OSTYPE" == "msys"* \|\| "$OSTYPE" == "mingw"* ]]` | Bash 組み込み・サブプロセス不要 |
+| GitBash 検出 | `is_gitbash`（`lib/common.sh`。`$OSTYPE` が `msys*` / `mingw*` / `cygwin*`） | Bash 組み込み・サブプロセス不要。Git Bash でも、環境により `$OSTYPE` が `cygwin` になるため、`msys` / `mingw` だけを見ない |
 | macOS 検出 | `[[ "$OSTYPE" == "darwin"* ]]` | 同上 |
 | WSL 検出 | `grep -qi microsoft /proc/version 2>/dev/null` | `/proc` 非存在環境は `2>/dev/null` で抑制 |
 | macOS/Linux 分岐が必要な場合のみ | `uname -s` | `stat` 書式差異など限定的に使用 |
@@ -118,7 +118,8 @@
 | `check_force_dir` | `check_force_dir` | `force-*` ディレクトリか検証 |
 | `check_home_dir` | `check_home_dir` | `~/home/{owner}/{company}/` の階層を検証し `GITHUB_OWNER` / `COMPANY_NAME` をセット |
 | `check_gh_owner` | `check_gh_owner OWNER` | gh 認証ユーザーがリポジトリオーナーと一致するか確認（不一致は die。オーナーが組織で、ユーザーがその有効な admin なら通過。gh が空を返す場合はスキップ） |
-| `open_browser` | `open_browser URL` | OS 判定してブラウザを開く（WSL/GitBash/macOS/Linux 対応） |
+| `is_gitbash` | `if is_gitbash; then ...` | Windows の Git Bash か判定（`$OSTYPE` が `msys*` / `mingw*` / `cygwin*`） |
+| `open_browser` | `open_browser URL` | OS 判定してブラウザを開く（GitBash/WSL/macOS/Linux 対応。GitBash の判定を先に行う） |
 | `read_input` | `read_input VAR [PROMPT]` | readline 対応テキスト入力（矢印キー・BS 有効） |
 | `read_key` | `read_key VAR [PROMPT] [VALID]` | 1文字即時入力（Enter 不要・空 Enter 無視・EOF 対応） |
 | `press_enter` | `press_enter [MSG]` | Enter 待ち（q で中断） |
@@ -311,7 +312,7 @@ check_gh_owner "$GITHUB_OWNER"   # 認証ユーザーの一致確認
 
 - npm / Salesforce CLI / Git を更新
 - `sf-install.sh` から 24 時間間隔でバックグラウンド起動される
-- Git の更新は GitBash（`$OSTYPE == "msys"*` / `"mingw"*`）のみ実行（他環境はパッケージマネージャーを案内）
+- Git の更新は GitBash（`is_gitbash`: `$OSTYPE` が `msys*` / `mingw*` / `cygwin*`）のみ実行（他環境はパッケージマネージャーを案内）
 
 ### 4.10 sf-push.sh
 

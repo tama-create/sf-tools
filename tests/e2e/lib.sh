@@ -43,6 +43,9 @@ e2e_is_target_eca()     { [[ "$1" =~ ^SF_TOOLS_force_e2e_[0-9]{8}_[0-9]{6}$ ]]; 
 e2e_is_target_project() { [[ "$1" =~ ^e2e-[0-9]{8}-[0-9]{6}$ ]]; }
 e2e_is_target_jwt_dir() { [[ "$1" =~ ^force-e2e-[0-9]{8}-[0-9]{6}$ ]]; }
 
+# Windows（Git Bash）かどうか（lib/common.sh の is_gitbash を使う。$OSTYPE は msys / mingw / cygwin のいずれにもなる）
+e2e_is_windows() { is_gitbash; }
+
 # 新しいテスト用のプロジェクト名（これが作業フォルダ名になり、リポジトリは force-<名前> になる）
 e2e_new_project_name() { printf 'e2e-%s' "$(date +%Y%m%d-%H%M%S)"; }
 
@@ -57,7 +60,8 @@ e2e_load_fixture() {
     [[ -f "$f" ]] || die "鍵一式のファイルが見つかりません: ${f}"
 
     # 権限は本人のみ（600）であること。Windows（Git Bash）は権限が効かないため確認しない
-    if [[ "$OSTYPE" != "msys"* && "$OSTYPE" != "mingw"* ]]; then
+    # （Git Bash の $OSTYPE は、環境により msys / mingw / cygwin のいずれにもなる）
+    if ! e2e_is_windows; then
         perm=$(stat -c %a "$f" 2>/dev/null || stat -f %Lp "$f" 2>/dev/null)  # VAR=$(cmd) のため run 不使用
         [[ "$perm" == "600" ]] || die "鍵一式のファイルの権限が 600 ではありません（${perm}）: ${f}"
     fi

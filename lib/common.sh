@@ -18,7 +18,8 @@
 #   check_force_dir           ... force-* ディレクトリ内か確認
 #   check_home_dir            ... ~/home/{owner}/{company}/ の正しい階層か確認し GITHUB_OWNER/COMPANY_NAME をセット
 #   check_gh_owner OWNER      ... gh 認証ユーザーが期待するオーナーと一致するか確認（組織の有効な admin も許可）
-#   open_browser URL               ... OS を判定してブラウザを開く（WSL/Git Bash/macOS/Linux 対応）
+#   is_gitbash                     ... Windows の Git Bash か判定（$OSTYPE が msys / mingw / cygwin）
+#   open_browser URL               ... OS を判定してブラウザを開く（Git Bash/WSL/macOS/Linux 対応）
 #   read_input VARNAME [PROMPT]    ... readline 対応インタラクティブ入力
 #   read_key VARNAME [PROMPT] [V]  ... 1文字即時入力（Enter 不要・空 Enter 無視）
 #   press_enter [MSG]              ... Enter 待ち（q で中断）
@@ -546,26 +547,35 @@ read_key() {
     done
 }
 
+# is_gitbash - Windows の Git Bash（MSYS2 / Cygwin 系の Bash）かどうか
+# ------------------------------------------------------------------------------
+# $OSTYPE は、Git Bash でも環境により msys / mingw / cygwin のいずれにもなる
+# （cygwin になる環境があり、msys / mingw だけを見ていると判定を外す）。
+# 【使い方】  if is_gitbash; then ...
+# ------------------------------------------------------------------------------
+is_gitbash() { [[ "$OSTYPE" == "msys"* || "$OSTYPE" == "mingw"* || "$OSTYPE" == "cygwin"* ]]; }
+
 # open_browser - OS を判定してブラウザを開く
 # ------------------------------------------------------------------------------
 # 【使い方】
 #   open_browser URL
 #
 # 【対応環境】
-#   WSL      : powershell.exe Start-Process
 #   Git Bash : start ""
+#   WSL      : powershell.exe Start-Process
 #   macOS    : open
 #   Linux    : xdg-open
 # ------------------------------------------------------------------------------
 open_browser() {
     local url="$1"
     # stdin を /dev/null にリダイレクトし、パイプ入力の消費を防止する
-    if grep -qi microsoft /proc/version 2>/dev/null; then
+    # （Git Bash の判定を先にする。WSL の判定は /proc/version を読むため、$OSTYPE の判定のほうが確実）
+    if is_gitbash; then
+        # Git Bash / MSYS2 / Cygwin
+        start "" "$url" < /dev/null 2>/dev/null || true
+    elif grep -qi microsoft /proc/version 2>/dev/null; then
         # WSL 環境
         powershell.exe -c "Start-Process '$url'" < /dev/null 2>/dev/null || true
-    elif [[ "$OSTYPE" == "msys"* || "$OSTYPE" == "mingw"* ]]; then
-        # Git Bash / MSYS2
-        start "" "$url" < /dev/null 2>/dev/null || true
     elif [[ "$OSTYPE" == "darwin"* ]]; then
         # macOS
         open "$url" < /dev/null 2>/dev/null || true  # open は macOS 標準のため直接実行

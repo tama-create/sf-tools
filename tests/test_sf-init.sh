@@ -1083,6 +1083,51 @@ test_e2e_input_sequence() {
 }
 
 # ==============================================================================
+# テスト 21: sf の終了コードの確認（check_sf_cli）
+#   sf --version が終了コード 1 を返す環境（Windows の Git Bash で、公式インストーラー版を自動更新した場合）では、
+#   案内を表示して、リポジトリの作成などに進まずに中断する。--resume / --only のときも確認する
+# ==============================================================================
+test_sf_cli_check() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] sf の終了コードが 0 以外なら、sf-init は案内して中断する${CLR_RST}"
+
+    local mb mock_home init_base init_dir exit_code
+    mb=$(setup_mock_bin)
+    export MOCK_CALL_LOG="$mb/calls.log"
+    mock_home=$(setup_mock_home)
+    init_base=$(_setup_init_dir "tamashimon" "testproject")
+    init_dir="$init_base/home/tamashimon/testproject"
+    create_all_mocks "$mb"
+    create_mock_gh_for_init "$mb"
+    _stub_subscripts "$mock_home"
+
+    _run_init() {  # 引数: sf-init.sh のオプション。標準入力は、確認に進まないため、Y だけ
+        : > "$MOCK_CALL_LOG"
+        printf 'Y\n' | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" MOCK_SF_VERSION_EXIT=1 \
+              bash "$mock_home/sf-tools/bin/sf-init.sh" "$@" ) > "$mb/out.log" 2>&1
+        exit_code=$?
+    }
+
+    _run_init
+    assert_exit_fail         "$exit_code"                                                 "終了コード 1 → 中断する"
+    assert_file_contains     "$mb/out.log" "終了コードが 0 ではありません"                  "終了コード 1 → 案内が表示される"
+    assert_file_contains     "$mb/out.log" "npm install -g @salesforce/cli"                "終了コード 1 → npm 版のインストール方法が案内される"
+    assert_file_not_contains "$MOCK_CALL_LOG" "gh repo create"                             "終了コード 1 → リポジトリを作成しない"
+    assert_file_not_contains "$mb/out.log" "続行しますか"                                    "終了コード 1 → 管理者向けの確認まで進まない"
+
+    _run_init --resume 10
+    assert_exit_fail         "$exit_code"                                                 "終了コード 1 + --resume 10 → 中断する"
+    assert_file_contains     "$mb/out.log" "終了コードが 0 ではありません"                  "終了コード 1 + --resume 10 → 案内が表示される"
+
+    _run_init --only 10
+    assert_exit_fail         "$exit_code"                                                 "終了コード 1 + --only 10 → 中断する"
+
+    unset -f _run_init
+    unset MOCK_CALL_LOG
+    teardown "$mb" "$mock_home" "$init_base"
+}
+
+# ==============================================================================
 # テスト実行
 # ==============================================================================
 echo ""
@@ -1110,5 +1155,6 @@ test_phase9_ruleset_id
 test_phase7_channel_id
 test_phase10_eca_auto
 test_e2e_input_sequence
+test_sf_cli_check
 
 print_summary

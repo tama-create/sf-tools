@@ -19,6 +19,7 @@
 #   check_home_dir            ... ~/home/{owner}/{company}/ の正しい階層か確認し GITHUB_OWNER/COMPANY_NAME をセット
 #   check_gh_owner OWNER      ... gh 認証ユーザーが期待するオーナーと一致するか確認（組織の有効な admin も許可）
 #   is_gitbash                     ... Windows の Git Bash か判定（$OSTYPE が msys / mingw / cygwin）
+#   check_sf_cli [--warn-only]     ... sf が終了コードを正しく返すか確認（npm 版が前提。NG なら案内して die）
 #   open_browser URL               ... OS を判定してブラウザを開く（Git Bash/WSL/macOS/Linux 対応）
 #   read_input VARNAME [PROMPT]    ... readline 対応インタラクティブ入力
 #   read_key VARNAME [PROMPT] [V]  ... 1文字即時入力（Enter 不要・空 Enter 無視）
@@ -232,9 +233,14 @@ _mask_secrets() {
 #   各行には "[timestamp] [OUT]" のプレフィックスを付与します（空行は除く）。
 #
 # 【成功判定のルール】
-#   終了コードが 0 であれば成功とします。
-#   Salesforce CLI は処理成功でも終了コードが非ゼロになる場合があるため、
-#   出力に成功キーワード（"Successfully" 等）が含まれる場合も RET_OK とします。
+#   終了コードが 0 であれば成功とします（終了コードのみを信頼する。出力の文字列では判定しない）。
+#   ただし、出力に NothingToDeploy / "No local changes to deploy" が含まれる場合は RET_NO_CHANGE とします
+#   （終了コードより優先）。
+#   ※ 以前は出力の成功キーワード（"Successfully" 等）でも RET_OK にしていたが、失敗を成功と誤判定する
+#     恐れがあるため削除した（2026-03-24）。
+#   ※ Salesforce CLI が、成功しても終了コード 1 を返す環境（Windows の Git Bash で、公式インストーラー版を
+#     自動更新した場合）では、終了コードに頼る処理が失敗扱いになる。そのため sf-tools は Salesforce CLI の
+#     npm 版を前提とし、sf-init.sh / sf-install.sh の最初に check_sf_cli で確認する。
 #
 # 【使用例】
 #   run bash "./sf-install.sh"                      || die "失敗"
@@ -554,6 +560,46 @@ read_key() {
 # 【使い方】  if is_gitbash; then ...
 # ------------------------------------------------------------------------------
 is_gitbash() { [[ "$OSTYPE" == "msys"* || "$OSTYPE" == "mingw"* || "$OSTYPE" == "cygwin"* ]]; }
+
+# check_sf_cli - sf（Salesforce CLI）が、終了コードを正しく返すか確認する
+# ------------------------------------------------------------------------------
+# 【背景】
+#   Windows の Git Bash で、Salesforce CLI の公式インストーラー版（自動更新後）を使うと、sf が成功しても
+#   常に終了コード 1 を返す（npm 版では正しく返る。Salesforce 側の起動用ファイルの問題）。
+#   run() は終了コードで成否を判定するため、この環境では、成功した処理も失敗扱いになる。
+#   そのため sf-tools は、Salesforce CLI の npm 版（npm install -g @salesforce/cli）を前提とする。
+#
+# 【使い方】
+#   check_sf_cli              # 終了コードが 0 以外なら、案内を表示して die する
+#   check_sf_cli --warn-only  # 案内を表示するだけで、続行する（戻り値 1）。die したくない呼び出し元用
+#
+# 【動作】
+#   ・sf が未インストールなら、何もしない（各スクリプトの環境チェックが扱う）
+#   ・sf --version の終了コードが 0 なら、何も表示しない
+#   ・0 以外なら、sf の場所と対処（npm 版への入れ替え）を ERROR で表示する
+# ------------------------------------------------------------------------------
+check_sf_cli() {
+    local warn_only=0 out rc sf_path
+    [[ "${1:-}" == "--warn-only" ]] && warn_only=1
+
+    command -v sf >/dev/null 2>&1 || return 0  # 存在確認のため run 不使用
+    out=$(sf --version 2>&1)  # VAR=$(cmd) のため run 不使用（終了コードを自分で判定する）
+    rc=$?
+    [[ $rc -eq 0 ]] && return 0
+
+    sf_path=$(command -v sf)  # VAR=$(cmd) のため run 不使用
+    log "ERROR" "sf（Salesforce CLI）の終了コードが 0 ではありません（sf --version: 終了コード ${rc}）。"
+    log "ERROR" "  sf の場所: ${sf_path}"
+    [[ -n "$out" ]] && log "ERROR" "  出力: $(printf '%s' "$out" | head -1)"
+    log "ERROR" "  Windows の Git Bash で、Salesforce CLI の公式インストーラー版を使うと、成功しても終了コード 1 になり、"
+    log "ERROR" "  sf-tools の処理が、成功しても失敗扱いになります。sf-tools は、npm 版の Salesforce CLI を前提としています。"
+    log "ERROR" "  対処: インストーラー版をアンインストールし、npm 版をインストールしてください（詳細は README の前提条件）。"
+    log "ERROR" "    npm install -g @salesforce/cli"
+    if [[ $warn_only -eq 1 ]]; then
+        return 1
+    fi
+    die "sf の終了コードが 0 ではないため、処理を中断しました。"
+}
 
 # open_browser - OS を判定してブラウザを開く
 # ------------------------------------------------------------------------------

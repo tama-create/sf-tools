@@ -119,6 +119,7 @@
 | `check_home_dir` | `check_home_dir` | `~/home/{owner}/{company}/` の階層を検証し `GITHUB_OWNER` / `COMPANY_NAME` をセット |
 | `check_gh_owner` | `check_gh_owner OWNER` | gh 認証ユーザーがリポジトリオーナーと一致するか確認（不一致は die。オーナーが組織で、ユーザーがその有効な admin なら通過。gh が空を返す場合はスキップ） |
 | `is_gitbash` | `if is_gitbash; then ...` | Windows の Git Bash か判定（`$OSTYPE` が `msys*` / `mingw*` / `cygwin*`） |
+| `check_sf_cli` | `check_sf_cli [--warn-only]` | `sf --version` の終了コードが 0 か確認する（sf は npm 版が前提）。0 以外なら、sf の場所と対処を ERROR で表示して `die`（`--warn-only` は表示のみで戻り値 1）。sf 未インストールなら何もしない |
 | `open_browser` | `open_browser URL` | OS 判定してブラウザを開く（GitBash/WSL/macOS/Linux 対応。GitBash の判定を先に行う） |
 | `read_input` | `read_input VAR [PROMPT]` | readline 対応テキスト入力（矢印キー・BS 有効） |
 | `read_key` | `read_key VAR [PROMPT] [VALID]` | 1文字即時入力（Enter 不要・空 Enter 無視・EOF 対応） |
@@ -139,6 +140,10 @@
 | `RET_OK` | 0 | 成功 |
 | `RET_NG` | 1 | 失敗（`logs/error.log` にも記録） |
 | `RET_NO_CHANGE` | 2 | `NothingToDeploy` など変更なし |
+
+**成功判定のルール:** `run()` は、**終了コードのみ**で成否を判定する（出力の文字列では判定しない）。ただし、出力に `NothingToDeploy` / `No local changes to deploy` が含まれる場合は `RET_NO_CHANGE`（終了コードより優先）。以前（〜2026-03-23）は、出力の成功キーワード（`Success` / `Succeeded` / `Deployed` / `status": 0` など）でも `RET_OK` にしていたが、失敗を成功と誤判定する恐れがあるため、2026-03-24 に削除した。
+
+**Salesforce CLI の前提:** Windows の Git Bash で、Salesforce CLI の公式インストーラー版（自動更新後）を使うと、`sf` が成功しても終了コード 1 を返す（`sf --version` や `sf alias unset` も 1。同じバージョンの npm 版は正しく返す）。このため sf-tools は **npm 版を前提**とし、`sf-init.sh`（NG なら中断）と `sf-install.sh`（警告のみ）の起動時に、`check_sf_cli`（`sf --version` の終了コードが 0 か）で確認する。`sf-install.sh` を警告のみにしているのは、中断すると sf-tools 自身の最新化（`git pull`）まで止まるため。個別に出力で成否を判定している箇所（`sf org login jwt` の `Successfully authorized` など）は、npm 版でも、そのまま動く。
 
 ### 3.4 安全ガードパターン
 
@@ -243,6 +248,7 @@ check_gh_owner "$GITHUB_OWNER"   # 認証ユーザーの一致確認
 ### 4.4 sf-install.sh
 
 処理順（順序変更禁止）:
+0. `check_sf_cli --warn-only`（`sf --version` の終了コードを確認し、0 以外なら警告のみ。中断しない）
 1. `~/sf-tools` を `git pull` で更新
 2. `config/*.txt` を不足時のみ補充
 3. `sf-hook.sh` で Git Hook をインストール
@@ -311,6 +317,7 @@ check_gh_owner "$GITHUB_OWNER"   # 認証ユーザーの一致確認
 ### 4.9 sf-upgrade.sh
 
 - npm / Salesforce CLI / Git を更新
+- Salesforce CLI は、npm 版（`npm ls -g @salesforce/cli` が成功）なら `npm install -g @salesforce/cli@latest`、それ以外（公式インストーラー・pkg など）なら `sf update` で更新する
 - `sf-install.sh` から 24 時間間隔でバックグラウンド起動される
 - Git の更新は GitBash（`is_gitbash`: `$OSTYPE` が `msys*` / `mingw*` / `cygwin*`）のみ実行（他環境はパッケージマネージャーを案内）
 
@@ -379,6 +386,8 @@ tr -d '\r' < "$key_file" | base64 -w 0 | gh secret set "SF_PRIVATE_KEY" -R "$REP
 ### 4.13 sf-init.sh
 
 新規 Salesforce プロジェクトの初期セットアップ。`phases/init/` 配下のフェーズスクリプトを順次実行する。
+
+起動時（フェーズの実行・`--resume` / `--only` / `--add-tier` の前）に `check_sf_cli` で、`sf --version` の終了コードを確認し、0 以外なら案内（npm 版への入れ替え）を表示して中断する（3.3 参照）。
 
 実行フロー:
 1. 環境チェック（ツール確認・GitHub CLI 認証確認）
@@ -627,6 +636,6 @@ sf-tools の `main` への反映は、全ユーザーへの配布と同義であ
 
 - 台本（`e2e_make_input`）は、`sf-init` の質問の順番に依存する。質問を変えたら、台本も直す。`tests/test_sf-init.sh` の `test_e2e_input_sequence`（モック）が、ずれを検知する
 - Token の作成と、テスト用組織への最初のログインは自動化できない（`bootstrap.sh` で 1 回だけ手動）
-- 実機の Windows（Git Bash）で動かす前提。`sf` が成功しても終了コード 1 を返す環境では、`E2E_SF_REDIRECTED=1`（`bootstrap.sh` が判定して設定）
+- 実機の Windows（Git Bash）で動かす前提。`sf` は npm 版が前提（`sf-init.sh` の `check_sf_cli` が確認する）。公式インストーラー版で、`sf` が成功しても終了コード 1 を返す環境では、`E2E_SF_REDIRECTED=1`（`bootstrap.sh` が判定して設定）で一時的に回避できるが、npm 版に入れ替えれば不要
 - テスト用組織は、本番または Developer Edition（Sandbox ではない）
 - リポジトリの削除には、`gh` の `delete_repo` の権限が要る（`gh auth refresh -h github.com -s delete_repo`）

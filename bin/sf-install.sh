@@ -20,6 +20,9 @@
 #   sf-tools リポジトリへの実行時依存はない。
 #
 # 【前提】
+#   Salesforce CLI（sf）は npm 版（npm install -g @salesforce/cli）であること。
+#   起動時に sf --version の終了コードを確認し、0 以外なら警告を表示する（中断はしない。
+#   中断すると sf-tools 自身の最新化まで止まってしまうため）。
 #   ~/sf-tools は初回インストール済みであること。
 #   初回インストール: git clone https://github.com/tama-create/sf-tools.git ~/sf-tools
 #
@@ -55,6 +58,10 @@ source "$COMMON_LIB"
 # 3. 初期チェック
 # ------------------------------------------------------------------------------
 log "HEADER" "sf-tools のセットアップを開始します (${SCRIPT_NAME}.sh)"
+
+# sf が終了コードを正しく返すか確認する（npm 版が前提）。
+# 警告のみで続行する: ここで中断すると、sf-tools 自身の最新化（git pull）まで止まってしまうため
+check_sf_cli --warn-only || true  # 警告のみのため、戻り値は無視（意図的エラー無視）
 
 trap 'rm -f ./sf-tools/cmd_out_'"$$"'_*.tmp 2>/dev/null' EXIT
 

@@ -20,7 +20,7 @@ Salesforce 開発で毎回発生する環境構築、デプロイ、事前チェ
 | ツール | 確認コマンド | 用途 | 取得先 | Windows インストール方法 |
 |---|---|---|---|---|
 | Git (Git Bash) | `git --version` | Git Bash / フック / バージョン管理 | https://git-scm.com/download/win | インストーラ実行 |
-| Salesforce CLI | `sf --version` | 組織接続、デプロイ、retrieve | https://developer.salesforce.com/tools/salesforcecli | `winget install --id Salesforce.sf` または公式インストーラ |
+| Salesforce CLI（**npm 版**） | `sf --version` | 組織接続、デプロイ、retrieve | https://developer.salesforce.com/tools/salesforcecli | `npm install -g @salesforce/cli`（Node.js が必要。**公式インストーラー版は非対応**。1.1 参照） |
 | GitHub CLI | `gh --version` | PR 作成・Secrets 登録・リポジトリ操作 | https://cli.github.com/ | `winget install --id GitHub.cli` |
 | Visual Studio Code | `code --version` | エディタ起動 | https://code.visualstudio.com/ | `winget install --id Microsoft.VisualStudioCode` |
 | Slack | — | デプロイ通知の受信 | https://slack.com/downloads/windows | インストーラ実行 |
@@ -31,6 +31,36 @@ Salesforce 開発で毎回発生する環境構築、デプロイ、事前チェ
 - Git Bash で実行してください（PowerShell / コマンドプロンプトは非対応）
 - `sf-init.sh` を除くすべてのスクリプトは `force-*` ディレクトリ内から実行してください
 - `sf-init.sh` のみ `force-*` の**外**（親ディレクトリ）から実行します
+
+### 1.1 Salesforce CLI は npm 版を使う
+
+sf-tools は、**Salesforce CLI（`sf`）の npm 版**（`npm install -g @salesforce/cli`）を前提としています。npm 版も、Salesforce が案内しているインストール方法の一つです。
+
+**理由:** Windows の Git Bash で、Salesforce CLI の**公式インストーラー版**（`winget` 版を含む可能性があります）を使い、自動更新が入った状態になると、`sf` が**成功しても、終了コード 1 を返し続ける**ことがあります（同じバージョンの npm 版は、正しく返します。Salesforce の起動用ファイルの問題と考えられます）。sf-tools は、コマンドの成否を終了コードで判定するため、この環境では、成功した処理も失敗扱いになります。
+
+**確認方法:** 次のコマンドで、`終了コード=0` と表示されれば問題ありません。
+
+```bash
+command -v sf; sf --version; echo "終了コード=$?"
+```
+
+`sf-init.sh` は、起動時にこれを確認し、0 以外なら案内を表示して中断します。`sf-install.sh` は、警告を表示するだけで続行します（中断すると、sf-tools 自身の最新化が止まってしまうためです）。
+
+**インストーラー版から npm 版への入れ替え（Windows）:**
+
+1. npm 版を入れます（`C:\Program Files\nodejs` に書き込むため、管理者権限の Git Bash が必要な場合があります）。
+   ```bash
+   npm install -g @salesforce/cli
+   ```
+2. 公式インストーラー版をアンインストールします（「設定 → アプリ」の「Salesforce CLI」、または `C:\sf\Uninstall.exe`）。
+3. 自動更新で増えた `%LOCALAPPDATA%\sf\client` を削除します。
+4. **新しい** Git Bash を開いて、上の確認コマンドを実行します。あわせて `sf org list` で、既存の組織が表示されることを確認してください。
+
+> ⚠️ `~/.sf` と `~/.sfdx` は、組織のログイン情報が入っているため、**削除しないでください**。入れ替えても、ログイン情報は残ります。VS Code を使っている場合は、入れ替え後に VS Code を再起動してください。
+
+**更新:** `sf-upgrade.sh` が、npm 版は `npm install -g @salesforce/cli@latest` で更新します（手動で行う場合も同じコマンドです）。
+
+**macOS / Linux:** 同じく npm 版をおすすめします。ほかの方法（pkg・Homebrew など）で入れた場合も、上の確認コマンドで終了コード 0 になれば、そのまま使えます。
 
 ---
 

@@ -197,6 +197,10 @@ create_mock_sf() {
 #!/bin/bash
 echo "sf $*" >> "${MOCK_CALL_LOG:-/dev/null}"
 case "$1 $2" in
+    "--version "*|"version "*)
+        # check_sf_cli の確認用（MOCK_SF_VERSION_EXIT=1 で、成功しても終了コード 1 を返す環境を再現）
+        echo "@salesforce/cli/2.152.14 win32-x64 node-v24.14.0"
+        exit "${MOCK_SF_VERSION_EXIT:-0}" ;;
     "org display")
         # sf-init の一時エイリアス（sf-tools-*）は、ブラウザログインに失敗した場合は未接続として扱う
         # （MOCK_SF_LOGIN_WEB_FAIL=1。ログイン失敗の再現）
@@ -293,6 +297,8 @@ create_mock_npm() {
     cat > "$bin_dir/npm" << 'EOF'
 #!/bin/bash
 echo "npm $*" >> "${MOCK_CALL_LOG:-/dev/null}"
+# npm ls -g @salesforce/cli（sf が npm 版かの判定）: 既定は 1（npm 版ではない）。MOCK_NPM_LS_EXIT=0 で npm 版を再現
+[[ "$1" == "ls" ]] && exit "${MOCK_NPM_LS_EXIT:-1}"
 exit "${MOCK_NPM_EXIT:-0}"
 EOF
     chmod +x "$bin_dir/npm"

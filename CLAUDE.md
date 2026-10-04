@@ -207,6 +207,7 @@ Salesforce 開発の環境構築と日々の作業を自動化するシェルス
 - 実行場所は各 Salesforce プロジェクト (`force-*`) 側
 - `sf-hook.sh` は `hooks/pre-push` をコピーする設計
 - husky が設定されている場合は `core.hooksPath` を削除する設計
+- Salesforce CLI（`sf`）は **npm 版が前提**（`check_sf_cli`）。Windows の Git Bash で公式インストーラー版を使うと、成功しても終了コード 1 になるため非対応（`run` は終了コードのみで判定する。詳細は `doc/dev-reference.md` 3.3）
 
 ### 4.2 ディレクトリ構成
 

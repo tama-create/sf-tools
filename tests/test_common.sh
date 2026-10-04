@@ -291,6 +291,56 @@ test_open_browser_gitbash() {
     teardown "$mb"
 }
 
+# ------------------------------------------------------------------------------
+# check_sf_cli のテスト（sf が成功しても終了コード 1 を返す環境の検知）
+# ------------------------------------------------------------------------------
+# 引数: 1=PATH, 2=check_sf_cli の引数, 環境変数 MOCK_SF_VERSION_EXIT を引き継ぐ
+_csc_run() {
+    PATH="$1" bash -c "
+        readonly SCRIPT_NAME=test; readonly LOG_FILE=/dev/null; readonly LOG_MODE=NEW; export SF_INIT_MODE=1
+        source '${SF_TOOLS_DIR}/lib/common.sh'
+        check_sf_cli $2
+        echo RET=\$?" 2>&1
+}
+
+test_check_sf_cli() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] check_sf_cli: sf の終了コードが 0 以外なら案内して中断する${CLR_RST}"
+    local mb out rc
+    mb=$(setup_mock_bin)
+    export MOCK_CALL_LOG="$mb/calls.log"
+    create_mock_sf "$mb"
+
+    # 正常（終了コード 0）→ 何も表示せず戻り値 0
+    out=$(_csc_run "$mb:/usr/bin:/bin" "")
+    [[ "$out" == "RET=0" ]] && pass "正常 → 何も表示せず、戻り値 0" || fail "正常 → 何も表示せず、戻り値 0" "$out"
+
+    # 終了コード 1 → 案内を表示して die（以降の処理に進まない）
+    out=$(MOCK_SF_VERSION_EXIT=1 _csc_run "$mb:/usr/bin:/bin" "")
+    [[ "$out" == *"終了コードが 0 ではありません（sf --version: 終了コード 1）"* ]] \
+        && pass "終了コード 1 → 終了コードの値を表示する" || fail "終了コード 1 → 終了コードの値を表示する" "$out"
+    [[ "$out" == *"npm install -g @salesforce/cli"* ]] \
+        && pass "終了コード 1 → npm 版のインストール方法を案内する" || fail "終了コード 1 → npm 版のインストール方法を案内する" "$out"
+    [[ "$out" == *"sf の場所: $mb/sf"* ]] \
+        && pass "終了コード 1 → sf の場所を表示する" || fail "終了コード 1 → sf の場所を表示する" "$out"
+    [[ "$out" != *"RET="* ]] \
+        && pass "終了コード 1 → die して、以降の処理に進まない" || fail "終了コード 1 → die して、以降の処理に進まない" "$out"
+    MOCK_SF_VERSION_EXIT=1 _csc_run "$mb:/usr/bin:/bin" "" > /dev/null; rc=$?
+    assert_exit_fail "$rc" "終了コード 1 → スクリプトは異常終了する"
+
+    # --warn-only → 案内は表示するが、die せず、戻り値 1
+    out=$(MOCK_SF_VERSION_EXIT=1 _csc_run "$mb:/usr/bin:/bin" "--warn-only")
+    [[ "$out" == *"終了コードが 0 ではありません"* && "$out" == *"RET=1"* ]] \
+        && pass "--warn-only → 案内を表示し、die せずに戻り値 1" || fail "--warn-only → 案内を表示し、die せずに戻り値 1" "$out"
+
+    # sf が未インストール → 何もしない（各スクリプトの環境チェックが扱う）
+    out=$(_csc_run "/usr/bin:/bin" "")
+    [[ "$out" == "RET=0" ]] && pass "sf 未インストール → 何もせず、戻り値 0" || fail "sf 未インストール → 何もせず、戻り値 0" "$out"
+
+    unset MOCK_CALL_LOG
+    teardown "$mb"
+}
+
 test_check_gh_owner_match
 test_check_gh_owner_mismatch
 test_check_gh_owner_skip_on_empty
@@ -302,5 +352,6 @@ test_read_secret
 test_mask_secrets
 test_is_gitbash
 test_open_browser_gitbash
+test_check_sf_cli
 
 print_summary

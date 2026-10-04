@@ -56,8 +56,39 @@ test_update_all_success() {
     assert_file_contains "$mb/calls.log" "gh variable set SF_USERNAME_PROD"     "SF_USERNAME_PROD が更新される"
     assert_file_contains "$mb/calls.log" "gh variable set SF_INSTANCE_URL_PROD" "SF_INSTANCE_URL_PROD が更新される"
 
+    # JWT 接続テストは、一時的なホームフォルダの中で実行される（ユーザーの sf のエイリアス・認証を変えない）
+    local jwt_home
+    jwt_home=$(grep "^sf-jwt-env HOME=" "$mb/calls.log" | head -1 | sed -E 's/^sf-jwt-env HOME=([^ ]*) .*/\1/')
+    [[ -n "$jwt_home" && "$jwt_home" == *"sf-tools-home."* && "$jwt_home" != "$td" ]] \
+        && pass "JWT 接続テストは、一時的なホーム（sf-tools-home.*）の中で実行される" || fail "JWT 接続テストは、一時的なホームの中で実行される" "HOME=${jwt_home}"
+    [[ -n "$jwt_home" && ! -e "$jwt_home" ]] \
+        && pass "JWT 接続テストの一時的なホームは、実行後に削除されている" || fail "JWT 接続テストの一時的なホームは、実行後に削除されている" "${jwt_home}"
+
     teardown "$td" "$mb"
     rm -f /tmp/update-secret-test.log
+}
+
+# --- sf の終了コードが 0 以外（インストーラー版の不具合）→ 警告のみで、処理は続行される ---
+test_update_sf_cli_warning_only() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] sf の終了コード 1 → 警告を表示するが、続行する${CLR_RST}"
+
+    local td mb mh
+    setup_std_env td mb mh
+    _create_mocks_update_secret "$mb" "$td"
+    _prepare_update_all_env "$td" "$td"
+
+    printf 'Y4Yfake_consumer_key\nfake@example.com\n' \
+        | ( cd "$td" && HOME="$td" PATH="$mb:$PATH" MOCK_SF_VERSION_EXIT=1 \
+              bash "$SF_TOOLS_DIR/bin/sf-update-secret.sh" ) > /tmp/update-secret-test2.log 2>&1
+    local ec=$?
+
+    assert_exit_ok $ec "sf の終了コード 1 → 警告のみで、終了コード 0（続行する）"
+    assert_file_contains "/tmp/update-secret-test2.log" "終了コードが 0 ではありません" "警告が表示された"
+    assert_file_contains "$mb/calls.log" "gh secret set SF_CONSUMER_KEY_PROD" "更新の処理まで、続行された"
+
+    teardown "$td" "$mb"
+    rm -f /tmp/update-secret-test2.log
 }
 
 # --- JWT 接続テスト失敗 → エラー中止 ---
@@ -178,6 +209,7 @@ test_update_warning_cancel() {
 }
 
 test_update_all_success
+test_update_sf_cli_warning_only
 test_update_jwt_login_fail
 test_update_gh_fail
 test_update_not_force_dir

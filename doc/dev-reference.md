@@ -119,7 +119,8 @@
 | `check_home_dir` | `check_home_dir` | `~/home/{owner}/{company}/` の階層を検証し `GITHUB_OWNER` / `COMPANY_NAME` をセット |
 | `check_gh_owner` | `check_gh_owner OWNER` | gh 認証ユーザーがリポジトリオーナーと一致するか確認（不一致は die。オーナーが組織で、ユーザーがその有効な admin なら通過。gh が空を返す場合はスキップ） |
 | `is_gitbash` | `if is_gitbash; then ...` | Windows の Git Bash か判定（`$OSTYPE` が `msys*` / `mingw*` / `cygwin*`） |
-| `check_sf_cli` | `check_sf_cli [--warn-only]` | `sf --version` の終了コードが 0 か確認する（sf は npm 版が前提）。0 以外なら、sf の場所と対処を ERROR で表示して `die`（`--warn-only` は表示のみで戻り値 1）。sf 未インストールなら何もしない |
+| `check_sf_cli` | `check_sf_cli [--warn-only] [--cache]` | `sf --version` の終了コードが 0 か確認する（sf は npm 版が前提）。0 以外なら、sf の場所と対処を ERROR で表示して `die`（`--warn-only` は表示のみで戻り値 1）。`--cache`（日常のコマンド用）は、成功を `~/.sf-tools-sf-check`（`SF_TOOLS_SF_CHECK_STAMP` で変更可）に sf の場所つきで記録し、24 時間は確認を省略する（失敗は記録せず、毎回確認する）。sf 未インストール・GitHub Actions 上（`GITHUB_ACTIONS=true`）では何もしない |
+| `run_isolated_home` | `out=$(run_isolated_home CMD [ARGS])` | 一時的なホームフォルダ（`HOME` と `USERPROFILE` を `mktemp -d` のフォルダに）の中でコマンドを実行し、出力と終了コードを返す。終了後に一時フォルダを削除する。sf の認証・エイリアスを隔離するために使う（JWT 接続テスト） |
 | `open_browser` | `open_browser URL` | OS 判定してブラウザを開く（GitBash/WSL/macOS/Linux 対応。GitBash の判定を先に行う） |
 | `read_input` | `read_input VAR [PROMPT]` | readline 対応テキスト入力（矢印キー・BS 有効） |
 | `read_key` | `read_key VAR [PROMPT] [VALID]` | 1文字即時入力（Enter 不要・空 Enter 無視・EOF 対応） |
@@ -143,7 +144,9 @@
 
 **成功判定のルール:** `run()` は、**終了コードのみ**で成否を判定する（出力の文字列では判定しない）。ただし、出力に `NothingToDeploy` / `No local changes to deploy` が含まれる場合は `RET_NO_CHANGE`（終了コードより優先）。以前（〜2026-03-23）は、出力の成功キーワード（`Success` / `Succeeded` / `Deployed` / `status": 0` など）でも `RET_OK` にしていたが、失敗を成功と誤判定する恐れがあるため、2026-03-24 に削除した。
 
-**Salesforce CLI の前提:** Windows の Git Bash で、Salesforce CLI の公式インストーラー版（自動更新後）を使うと、`sf` が成功しても終了コード 1 を返す（`sf --version` や `sf alias unset` も 1。同じバージョンの npm 版は正しく返す）。このため sf-tools は **npm 版を前提**とし、`sf-init.sh`（NG なら中断）と `sf-install.sh`（警告のみ）の起動時に、`check_sf_cli`（`sf --version` の終了コードが 0 か）で確認する。`sf-install.sh` を警告のみにしているのは、中断すると sf-tools 自身の最新化（`git pull`）まで止まるため。個別に出力で成否を判定している箇所（`sf org login jwt` の `Successfully authorized` など）は、npm 版でも、そのまま動く。
+**Salesforce CLI の前提:** Windows の Git Bash で、Salesforce CLI の公式インストーラー版（自動更新後）を使うと、`sf` が成功しても終了コード 1 を返す（`sf --version` や `sf alias unset` も 1。同じバージョンの npm 版は正しく返す）。このため sf-tools は **npm 版を前提**とし、`sf-init.sh`（NG なら中断）と `sf-install.sh`（警告のみ）の起動時に、`check_sf_cli`（`sf --version` の終了コードが 0 か）で確認する。`sf-install.sh` を警告のみにしているのは、中断すると sf-tools 自身の最新化（`git pull`）まで止まるため。日常のコマンド（`sf-start.sh` / `sf-release.sh`（`sf-deploy` / `sf-dryrun` / pre-push の検証を含む）/ `sf-metasync.sh` / `sf-update-secret.sh`）も、起動時に `check_sf_cli --warn-only --cache`（警告のみ・成功は 24 時間省略。`git push` のフックなどを環境の問題で突然止めないため）で確認する。
+
+**JWT 接続テストの隔離:** `sf` の認証はユーザー名単位なので、JWT 接続テスト（`sf org login jwt`）をそのまま実行すると、エイリアス（`prod` / `staging` / `develop`）が増え、同じユーザーの既存の認証が JWT の認証に置き換わる（その鍵・アプリを後で消すと、そのユーザーの `sf` が使えなくなる）。そのため、JWT 接続テスト（`init-common.sh` の `register_jwt_secret` / `register_jwt_secret_eca`、`sf-update-secret.sh`）は `run_isolated_home`（一時的なホームフォルダ）の中で実行する。ほかの場所では、この JWT 用のエイリアスは使われない（`sf-start.sh` は、ユーザーが指定したエイリアスで `sf org login web` をする）。個別に出力で成否を判定している箇所（`sf org login jwt` の `Successfully authorized` など）は、npm 版でも、そのまま動く。
 
 ### 3.4 安全ガードパターン
 
@@ -634,6 +637,8 @@ sf-tools の `main` への反映は、全ユーザーへの配布と同義であ
 - 取得した値、および鍵一式の読み込み時の値は、形式（`force://<クライアント ID>:<シークレット>:<リフレッシュトークン>@<ホスト>`）を確認する（`e2e_valid_sfdx_url`）。形式に合わない値（隠された文章など）は、保存も使用もしない
 
 **管理用ログイン（`e2e_sf_admin_login`）:** 認証 URL で、テスト用組織にログインし直す（削除・一覧の前）。失敗したら、`sf` の出力（原因。トークン・認証 URL のリフレッシュトークンは伏せ字）を表示し、`E2E_ADMIN_RETRY_WAIT` 秒（既定 5）待って、1 回だけやり直す。実機で、一度だけ原因不明の失敗（`RefreshTokenAuthError`）があり、同じ認証 URL での再実行は成功したため、一時的な失敗に備えている。
+
+**一覧の取得失敗（「対象なし」と取り違えない）:** 削除の前に、GitHub のリポジトリ一覧（`e2e_list_target_repos`）と Salesforce のアプリ一覧（`e2e_list_target_ecas`）を取得する。取得の成否を確認せず、失敗を「対象なし」とみなすと、削除されないまま e2e が「成功」と報告する（実機で、アプリが 1 つ残る実例があった）。そのため、(1) 取得に失敗したら、`E2E_LIST_RETRY` 回（既定 3）、`E2E_LIST_RETRY_WAIT` 秒（既定 5）おいて再試行し、(2) それでも失敗なら、戻り値 1（何も出力しない）、(3) `e2e_cleanup_all` は、「対象なし」とは表示せず、ERROR を表示して失敗として記録する（`cleanup.sh` / `run.sh` の前掃除は中断、後掃除は結果を失敗にする。ほかの掃除は止めずに続ける）。Salesforce 側は、`sf` の終了コードを信頼できない環境があるため、成否を応答の `"status": 0` で判定する。削除後の再取得に失敗した場合も、削除できたとはみなさない。
 
 **強制終了後の後始末:** `run.sh` が強制終了（ウィンドウが閉じるなど）すると、一時フォルダ（`$TMPDIR/e2e-run.XXXXXX`。認証 URL のファイルを含む）と、作成済みのテスト用リソースが残る。次回の前掃除、または `cleanup.sh` が、残った一時ファイル・フォルダ（`e2e-run.*` / `e2e-eca-del.*` / `e2e-sfdx-url.*`）も、掃除の対象にする。ただし、いま実行中の `run.sh` の一時フォルダ（`E2E_TMP`）と、30 分以内のもの（`E2E_TMP_MIN_AGE`。別の実行の途中かもしれない）は、対象外。
 

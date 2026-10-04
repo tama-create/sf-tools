@@ -11,6 +11,12 @@
 #   4. 入力値で JWT 接続テストを実施（テスト成功後のみ登録）
 #   5. gh secret set / gh variable set で GitHub Secrets / Variables を更新
 #
+# 【前提・動作】
+#   Salesforce CLI（sf）は npm 版であること。起動時に check_sf_cli（sf --version の終了コード）で確認し、
+#   0 以外なら警告を表示する（続行する）。成功は 24 時間は確認を省略する。
+#   JWT 接続テスト（sf org login jwt）は、一時的なホームフォルダの中で実行する（run_isolated_home）。
+#   そのため、ユーザーの sf に、エイリアスが増えず、同じユーザーの既存の認証も置き換わらない。
+#
 # 【更新対象】
 #   GitHub Secrets（機密）:
 #     SF_PRIVATE_KEY                      （全組織共通）
@@ -86,6 +92,9 @@ check_gh_owner "${REPO_FULL_NAME%%/*}"
 log "HEADER" "GitHub Secrets（JWT 認証情報）を更新します (${SCRIPT_NAME}.sh)"
 log "INFO" "リポジトリ: ${REPO_FULL_NAME}"
 
+# sf が終了コードを正しく返すか確認する（npm 版が前提）。警告のみで続行し、成功は 24 時間は確認を省略する
+check_sf_cli --warn-only --cache || true  # 警告のみのため、戻り値は無視（意図的エラー無視）
+
 # ------------------------------------------------------------------------------
 # 共通: JWT 接続テスト関数
 # 引数: $1=org_alias $2=suffix $3=label $4=consumer_key $5=username
@@ -99,13 +108,14 @@ _test_jwt_login() {
     log "INFO" "  sf org login jwt --client-id *** --jwt-key-file ${key_file} --username ${username} --instance-url ${instance_url} --alias ${org_alias}"
 
     # exit code が不安定なため stdout/stderr をキャプチャして成否を判定する
+    # 一時的なホームフォルダの中で実行する: エイリアスが増えず、同じユーザーの既存の sf の認証も置き換わらない
     local jwt_out
-    jwt_out=$(sf org login jwt \
+    jwt_out=$(run_isolated_home sf org login jwt \
         --client-id    "$consumer_key" \
         --jwt-key-file "$key_file" \
         --username     "$username" \
         --instance-url "$instance_url" \
-        --alias        "$org_alias" 2>&1) || true
+        --alias        "$org_alias") || true
 
     log "INFO" "  ${jwt_out}"
 

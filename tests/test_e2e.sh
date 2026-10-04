@@ -18,6 +18,7 @@
 #   9. sf のエイリアスの保存・復元
 #  10. sf-init に流す入力の台本
 #  11. run.sh のガード（GitHub Actions 上・鍵一式なしでは動かない）
+#  15. 一覧の取得に失敗したとき（再試行・「対象なし」と取り違えない）
 # ==============================================================================
 source "$(dirname "${BASH_SOURCE[0]}")/test_helper.sh"
 echo -e "${CLR_HEAD}=== tests/e2e（安全ガードと部品）===${CLR_RST}"
@@ -34,7 +35,16 @@ _mk_mocks() {
 echo "gh $*" >> "${MOCK_CALL_LOG:-/dev/null}"
 case "$1 $2" in
     "api user")    echo "${MOCK_GH_API_USER:-tamashimon}" ;;
-    "repo list")   for n in ${MOCK_GH_REPOS:-}; do echo "$n"; done ;;
+    "repo list")
+        # 一覧の取得失敗の再現（MOCK_GH_LIST_FAIL_FIRST=N: 最初の N 回は失敗。all なら、ずっと失敗）
+        if [[ -n "${MOCK_GH_LIST_FAIL_FIRST:-}" ]]; then
+            _d="${MOCK_CALL_LOG%/*}"
+            _n=$(( $(cat "$_d/ghlist.cnt" 2>/dev/null || echo 0) + 1 )); echo "$_n" > "$_d/ghlist.cnt"
+            if [[ "$MOCK_GH_LIST_FAIL_FIRST" == "all" || $_n -le $MOCK_GH_LIST_FAIL_FIRST ]]; then
+                echo "error connecting to api.github.com" >&2; exit 1
+            fi
+        fi
+        for n in ${MOCK_GH_REPOS:-}; do echo "$n"; done ;;
     "repo delete") exit 0 ;;
     *)             exit 0 ;;
 esac
@@ -82,6 +92,15 @@ case "$1 $2" in
         fi
         exit 0 ;;
     "org list")
+        # 一覧の取得失敗の再現（MOCK_SF_LIST_FAIL_FIRST=N: 最初の N 回は失敗。all なら、ずっと失敗）
+        #   MOCK_SF_LIST_FAIL_MODE=empty: 終了コード 0 で、何も出力しない（終了コードを信頼できない環境の再現）
+        if [[ -n "${MOCK_SF_LIST_FAIL_FIRST:-}" ]]; then
+            _n=$(( $(cat "$_dir/sflist.cnt" 2>/dev/null || echo 0) + 1 )); echo "$_n" > "$_dir/sflist.cnt"
+            if [[ "$MOCK_SF_LIST_FAIL_FIRST" == "all" || $_n -le $MOCK_SF_LIST_FAIL_FIRST ]]; then
+                [[ "${MOCK_SF_LIST_FAIL_MODE:-}" == "empty" ]] && exit 0
+                echo '{"status":1,"name":"Error","message":"connection reset"}'; exit 1
+            fi
+        fi
         echo '{'; echo '  "status": 0,'; echo '  "result": ['
         for n in ${MOCK_SF_ECAS:-}; do
             grep -qx "$n" "$_dir/deleted.txt" 2>/dev/null && continue
@@ -595,6 +614,62 @@ test_e2e_tmp_cleanup() {
     teardown "$CB"
 }
 
+# ------------------------------------------------------------------------------
+# 15. 一覧の取得に失敗したとき（「対象なし」と取り違えない）
+#   背景: 一覧の取得に失敗したのを「対象なし」とみなし、アプリが削除されないまま e2e が「成功」した実例がある
+# ------------------------------------------------------------------------------
+test_e2e_list_failure() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] 一覧の取得に失敗したとき: 再試行し、それでも失敗なら「対象なし」とみなさない${CLR_RST}"
+    _mk_cleanup_env
+    export E2E_LIST_RETRY_WAIT=0
+    local fn='e2e_load_fixture; e2e_guard_env; out=$(e2e_list_target_ecas); rc=$?; echo "RC=$rc OUT=[$out]"'
+    _reset() { rm -f "$MB/sflist.cnt" "$MB/ghlist.cnt"; : > "$MOCK_CALL_LOG"; }
+
+    # --- Salesforce 側（関数）---
+    _reset; _e2e_call "$fn"
+    assert_file_contains "$MB/out.log" "RC=0 OUT=[SF_TOOLS_force_e2e_20260101_000000]" "正常: 一覧が取れる"
+
+    _reset; MOCK_SF_LIST_FAIL_FIRST=2 _e2e_call "$fn"
+    assert_file_contains "$MB/out.log" "RC=0 OUT=[SF_TOOLS_force_e2e_20260101_000000]" "2 回失敗しても、3 回目で取れる（再試行）"
+    [[ "$(grep -c '^sf org list' "$MOCK_CALL_LOG")" -eq 3 ]] && pass "再試行は 3 回までで、取れたら止まる" || fail "再試行は 3 回までで、取れたら止まる" "回数: $(grep -c '^sf org list' "$MOCK_CALL_LOG")"
+
+    _reset; MOCK_SF_LIST_FAIL_FIRST=all _e2e_call "$fn"
+    assert_file_contains "$MB/out.log" "RC=1 OUT=[]" "ずっと失敗 → 戻り値 1（何も出力しない）"
+    [[ "$(grep -c '^sf org list' "$MOCK_CALL_LOG")" -eq 3 ]] && pass "ずっと失敗 → 3 回で諦める" || fail "ずっと失敗 → 3 回で諦める" "回数: $(grep -c '^sf org list' "$MOCK_CALL_LOG")"
+
+    _reset; MOCK_SF_LIST_FAIL_FIRST=all MOCK_SF_LIST_FAIL_MODE=empty _e2e_call "$fn"
+    assert_file_contains "$MB/out.log" "RC=1 OUT=[]" "終了コード 0 で何も出力しない場合も、失敗として扱う（status で判定）"
+
+    # --- Salesforce 側（cleanup.sh）---
+    _reset; MOCK_SF_LIST_FAIL_FIRST=all _run_cleanup --yes --no-confirm; local rc=$?
+    assert_exit_fail "$rc" "アプリの一覧を取れない → 失敗で終わる（成功と報告しない）"
+    assert_file_contains     "$MB/out.log" "外部クライアントアプリの一覧を取得できませんでした" "取得失敗の旨が表示される"
+    assert_file_not_contains "$MB/out.log" "対象の外部クライアントアプリはありません" "「対象なし」とは表示しない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "post-destructive" "取得できないときは、アプリの削除をしない"
+    assert_file_contains     "$MOCK_CALL_LOG" "gh repo delete tamashimon-org/force-e2e-20260101-000000 --yes" "GitHub 側の削除は、続けて行う（途中で止まらない）"
+    assert_dir_not_exists "$CB/root/home/tamashimon-org/e2e-20260101-000000" "ローカルの掃除も、続けて行う（途中で止まらない）"
+
+    _reset; MOCK_SF_LIST_FAIL_FIRST=all _run_cleanup; rc=$?
+    assert_exit_fail "$rc" "一覧のみの表示でも、取れなければ失敗で終わる"
+
+    # --- GitHub 側 ---
+    teardown "$CB"
+    _mk_cleanup_env
+    _reset; MOCK_GH_LIST_FAIL_FIRST=1 _e2e_call 'e2e_load_fixture; e2e_guard_env; out=$(e2e_list_target_repos); echo "RC=$? OUT=[$out]"'
+    assert_file_contains "$MB/out.log" "RC=0 OUT=[force-e2e-20260101-000000" "リポジトリ一覧: 1 回失敗しても、取れる（再試行）"
+
+    _reset; MOCK_GH_LIST_FAIL_FIRST=all _run_cleanup --yes --no-confirm; rc=$?
+    assert_exit_fail "$rc" "リポジトリの一覧を取れない → 失敗で終わる"
+    assert_file_contains     "$MB/out.log" "リポジトリの一覧を取得できませんでした" "リポジトリの取得失敗の旨が表示される"
+    assert_file_not_contains "$MB/out.log" "対象のリポジトリはありません" "「対象なし」とは表示しない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "gh repo delete" "取得できないときは、リポジトリを削除しない"
+    assert_file_contains     "$MOCK_CALL_LOG" "post-destructive-changes" "Salesforce 側の削除は、続けて行う（途中で止まらない）"
+
+    unset -f _reset
+    unset MOCK_CALL_LOG MOCK_GH_REPOS MOCK_SF_ECAS E2E_LIST_RETRY_WAIT
+    teardown "$CB"
+}
+
 test_e2e_names
 test_e2e_guard
 test_e2e_delete_guards
@@ -609,5 +684,6 @@ test_e2e_run_guard
 test_e2e_sfdx_url
 test_e2e_admin_login_retry
 test_e2e_tmp_cleanup
+test_e2e_list_failure
 
 print_summary

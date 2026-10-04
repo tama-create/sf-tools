@@ -13,6 +13,10 @@ CLR_FAIL='\033[31m'
 CLR_HEAD='\033[36m'
 CLR_RST='\033[0m'
 
+# check_sf_cli の「24 時間は確認を省略」の記録先。テストでは、無効にする（本物のホームに記録を作らず、
+# 省略のテスト以外で、確認が省略されないようにするため。省略のテストは、独自の記録先を指定する）
+export SF_TOOLS_SF_CHECK_STAMP=/dev/null
+
 # ------------------------------------------------------------------------------
 # アサーション関数
 # ------------------------------------------------------------------------------
@@ -214,6 +218,8 @@ case "$1 $2" in
             | sed 's/[,{]/&\n/g'
         exit "${MOCK_SF_ORG_DISPLAY_EXIT:-0}" ;;
     "org login")
+        # sf org login jwt が、どのホームフォルダで実行されたかを記録する（JWT 接続テストの隔離の確認用）
+        [[ "$3" == "jwt" ]] && echo "sf-jwt-env HOME=${HOME} USERPROFILE=${USERPROFILE:-}" >> "${MOCK_CALL_LOG:-/dev/null}"
         # sf org login jwt を最初の N 回だけ失敗させる（MOCK_SF_JWT_FAIL_FIRST=N。反映待ちのリトライの再現）
         if [[ "$3" == "jwt" && -n "${MOCK_SF_JWT_FAIL_FIRST:-}" ]]; then
             _jc="${MOCK_CALL_LOG%/*}/jwt.cnt"

@@ -189,15 +189,28 @@ e2e_sf_admin_login() {
 # ------------------------------------------------------------------------------
 # 削除対象の一覧・削除
 # ------------------------------------------------------------------------------
-# GitHub のテスト用リポジトリの一覧（名前のみ）
+# 一覧の取得に失敗したときの再試行（回数・待機秒）。
+#   一覧の取得に失敗したのを「対象なし」と取り違えると、削除されないまま「成功」と報告してしまうため、
+#   取得の成否を必ず確認し、失敗が続いたら呼び出し側で中断する（戻り値 1）。
+#   これらの関数は $(...) の中で呼ばれる（標準出力が一覧になる）ため、ここでは log を出さない。
+E2E_LIST_RETRY="${E2E_LIST_RETRY:-3}"
+E2E_LIST_RETRY_WAIT="${E2E_LIST_RETRY_WAIT:-5}"
+
+# GitHub のテスト用リポジトリの一覧（名前のみ）。取得に失敗したら、戻り値 1（何も出力しない）
 e2e_list_target_repos() {
-    local name
+    local name out try
     e2e_require_guard
-    gh repo list "$E2E_OWNER" --limit 200 --json name --jq '.[].name' 2>/dev/null \
-        | while IFS= read -r name; do
-              name="${name%$'\r'}"
-              e2e_is_target_repo "$name" && printf '%s\n' "$name"
-          done  # パイプのみのため run 不使用
+    for (( try = 1; try <= E2E_LIST_RETRY; try++ )); do
+        if out=$(gh repo list "$E2E_OWNER" --limit 200 --json name --jq '.[].name' 2>/dev/null); then  # 条件チェック（成否は gh の終了コード）
+            while IFS= read -r name; do
+                name="${name%$'\r'}"
+                e2e_is_target_repo "$name" && printf '%s\n' "$name"
+            done <<< "$out"
+            return 0
+        fi
+        (( try < E2E_LIST_RETRY )) && sleep "$E2E_LIST_RETRY_WAIT"  # run 不使用: 待機
+    done
+    return 1
 }
 
 e2e_delete_repo() {
@@ -208,15 +221,24 @@ e2e_delete_repo() {
 }
 
 # Salesforce のテスト用外部クライアントアプリの一覧（名前のみ。管理用ログイン済みであること）
+#   sf の終了コードは信頼できない環境があるため、取得の成否は、応答の "status": 0 で判定する。
+#   取得に失敗したら、戻り値 1（何も出力しない）
 e2e_list_target_ecas() {
-    local name
+    local name out try
     e2e_require_guard
-    sf org list metadata --metadata-type ExternalClientApplication --target-org "$E2E_ADMIN_ALIAS" --json 2>/dev/null \
-        | grep -oE '"fullName": *"[^"]*"' | sed -E 's/.*: *"(.*)"/\1/' \
-        | while IFS= read -r name; do
-              name="${name%$'\r'}"
-              e2e_is_target_eca "$name" && printf '%s\n' "$name"
-          done  # パイプのみのため run 不使用
+    for (( try = 1; try <= E2E_LIST_RETRY; try++ )); do
+        out=$(sf org list metadata --metadata-type ExternalClientApplication --target-org "$E2E_ADMIN_ALIAS" --json 2>/dev/null) || true  # 終了コードを信頼できないため無視（成否は status で判定）
+        if printf '%s' "$out" | grep -qE '"status": *0[,[:space:]}]'; then  # パイプのみのため run 不使用
+            printf '%s\n' "$out" | grep -oE '"fullName": *"[^"]*"' | sed -E 's/.*: *"(.*)"/\1/' \
+                | while IFS= read -r name; do
+                      name="${name%$'\r'}"
+                      e2e_is_target_eca "$name" && printf '%s\n' "$name"
+                  done  # パイプのみのため run 不使用
+            return 0
+        fi
+        (( try < E2E_LIST_RETRY )) && sleep "$E2E_LIST_RETRY_WAIT"  # run 不使用: 待機
+    done
+    return 1
 }
 
 # 外部クライアントアプリ 1 つ（5 つの構成要素）を、削除用のデプロイ（destructiveChanges）で消す
@@ -295,8 +317,11 @@ e2e_cleanup_all() {
     log "HEADER" "e2e の掃除（${mode}）"
 
     # GitHub
-    list=$(e2e_list_target_repos)  # VAR=$(cmd) のため run 不使用
-    if [[ -z "$list" ]]; then
+    #   一覧の取得に失敗したときは「対象なし」とみなさず、失敗として記録して次へ進む（後始末を途中で止めないため）
+    if ! list=$(e2e_list_target_repos); then  # 条件チェック
+        log "ERROR" "  GitHub: リポジトリの一覧を取得できませんでした（対象の有無を判断できません）。"
+        failed=1
+    elif [[ -z "$list" ]]; then
         log "INFO" "  GitHub: 対象のリポジトリはありません。"
     else
         while IFS= read -r name; do
@@ -308,16 +333,23 @@ e2e_cleanup_all() {
 
     # Salesforce
     e2e_sf_admin_login
-    list=$(e2e_list_target_ecas)  # VAR=$(cmd) のため run 不使用
-    if [[ -z "$list" ]]; then
+    if ! list=$(e2e_list_target_ecas); then  # 条件チェック
+        log "ERROR" "  Salesforce: 外部クライアントアプリの一覧を取得できませんでした（対象の有無を判断できません）。"
+        failed=1
+    elif [[ -z "$list" ]]; then
         log "INFO" "  Salesforce: 対象の外部クライアントアプリはありません。"
     else
+        local after
         while IFS= read -r name; do
             [[ -z "$name" ]] && continue
             log "INFO" "  Salesforce: ${name}"
             if [[ "$mode" == "delete" ]]; then
                 e2e_delete_eca "$name"
-                if e2e_list_target_ecas | grep -qx "$name"; then
+                # 削除できたかは、一覧の再取得で確認する（再取得に失敗した場合も、削除できたとはみなさない）
+                if ! after=$(e2e_list_target_ecas); then  # 条件チェック
+                    log "ERROR" "  Salesforce: ${name} の削除後の一覧を取得できませんでした（削除できたか確認できません）。"
+                    failed=1
+                elif grep -qx "$name" <<< "$after"; then
                     log "ERROR" "  Salesforce: ${name} を削除できませんでした。"
                     failed=1
                 fi

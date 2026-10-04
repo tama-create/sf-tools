@@ -398,6 +398,7 @@ ECAEOF
 # 【処理フロー】
 #   1. 本番 / Sandbox を確認して接続 URL を決める
 #   2. sf org login web（ブラウザでログイン。接続ユーザーは管理者権限のユーザー）
+#      終了コードは信頼できないため一切見ず、一時エイリアス（sf-tools-<suffix>）の接続情報（出力の username）が取れるかで成否を判定する
 #   3. ログインしたユーザー名と、そのプロファイル名（表示名）を取得する
 #   4. generate_eca_metadata でメタデータを生成し、sf project deploy でアプリを作成する
 #   5. sf project retrieve でコンシューマー鍵を自動取得する（値はログに出さない）
@@ -411,7 +412,8 @@ ECAEOF
 # ------------------------------------------------------------------------------
 register_jwt_secret_eca() {
     local org_alias="$1" suffix="$2" label="$3" key_file="$4" cert_file="$5"
-    local tmp_alias="sf-init-${REPO_NAME}-${suffix}"
+    # ログイン用の一時エイリアス。ユーザーが運用中のエイリアス（prod 等）と重ならないよう sf-tools- を付ける
+    local tmp_alias="sf-tools-${suffix}"
     local eca_name="SF_TOOLS_${REPO_NAME//[^A-Za-z0-9]/_}"
     local instance_url="https://login.salesforce.com"
     local username profile work consumer_key jwt_out jwt_ok=0 i
@@ -428,13 +430,18 @@ register_jwt_secret_eca() {
 
     # 2. ブラウザでログイン
     log "INFO" "  ブラウザが開きます。${label}に、接続ユーザー（管理者権限）でログインしてください。"
-    run sf org login web --instance-url "$instance_url" --alias "$tmp_alias" \
-        || die "${label}へのログインに失敗しました。"
+    # 前回の古い認証が残っていて「ログイン済み」と誤判定しないよう、先に一時エイリアスを外す
+    run sf alias unset "$tmp_alias" || true  # 未設定でも続行（意図的エラー無視）
+    # sf は、成功しても終了コード 1 を返すことがある（Windows の Git Bash で、公式インストーラー版 + 自動更新版の組み合わせ時に確認。
+    # sf org login web / sf org display などで発生）。そのため、ここでは終了コードを一切信用せず、
+    # 一時エイリアスの接続情報（出力の username）が取れるかどうかで、ログインの成否を判定する
+    run sf org login web --instance-url "$instance_url" --alias "$tmp_alias" || true  # 終了コードを信頼できないため無視
 
     # 3. ユーザー名とプロファイル名（表示名）
     username=$(sf org display --target-org "$tmp_alias" --json 2>/dev/null \
-        | grep -o '"username": *"[^"]*"' | head -1 | sed 's/.*: *"\(.*\)"/\1/')  # VAR=$(cmd) のため run 不使用
-    [[ -n "$username" ]] || die "ログインしたユーザー名を取得できませんでした。"
+        | grep -o '"username": *"[^"]*"' | head -1 | sed 's/.*: *"\(.*\)"/\1/')  # VAR=$(cmd) のため run 不使用（終了コードは見ず、出力で判定）
+    [[ -n "$username" ]] || die "${label}へのログインに失敗しました（接続情報を取得できませんでした）。"
+    log "INFO" "  ログインに成功しました（sf の終了コードが 0 以外でも、接続情報が取得できれば成功とみなします）。"
     log "INFO" "  接続ユーザー: ${username}"
     profile=$(sf data query --query "SELECT Profile.Name FROM User WHERE Username='${username}'" \
         --target-org "$tmp_alias" --json 2>/dev/null \

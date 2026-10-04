@@ -6,6 +6,7 @@
 #
 #   7-1. Slack App 作成・Bot Token 取得・SLACK_BOT_TOKEN 登録（Secret）
 #   7-2. SLACK_CHANNEL_ID 登録（Variable）
+#        通知先は全員が参加する共有チャンネル（C… / G…）。DM（D…）・ユーザー（U…）は拒否して再入力
 #   7-3. Bot をチャンネルに招待
 # ==============================================================================
 
@@ -65,17 +66,22 @@ log "SUCCESS" "SLACK_BOT_TOKEN を登録しました。"
 # 8-2. チャンネル ID 登録
 echo ""
 echo "  通知先 Slack チャンネルの ID を入力します。"
+echo ""
+echo "  通知先は、このプロジェクトを使う全員が参加する共有チャンネルにしてください。"
+echo "  チャンネルがまだ無い場合は、Slack で先に作成しておいてください（既存のチャンネルでも構いません）。"
+echo "  ダイレクトメッセージ（DM）は、本人にしか届かないため使えません。"
+echo ""
 echo "  確認方法: チャンネルを開く → チャンネル名をクリック → 最下部に「チャンネル ID」"
 echo "            C から始まる文字列（例: C01ABCDEFGH）"
 echo ""
 
-# チャンネル ID は C（または G）で始まる。D（ダイレクトメッセージ）や U（ユーザー）などは警告して確認する
+# チャンネル ID は C（または G）で始まる。D（ダイレクトメッセージ）や U（ユーザー）などは
+# 通知が共有されないため受け付けず、入力し直させる
 while true; do
     channel_id=""
     read_or_quit channel_id "  チャンネル ID（q で中断）："
     [[ "$channel_id" =~ ^[CG][A-Z0-9]{8,}$ ]] && break
-    log "WARNING" "「${channel_id}」はチャンネル ID の形式ではありません（チャンネル ID は C または G で始まります。D はダイレクトメッセージ、U はユーザーの ID です）。"
-    ask_yn "▶ このまま登録しますか？（N の場合は入力し直します）" && break
+    log "WARNING" "「${channel_id}」はチャンネル ID の形式ではありません（チャンネル ID は C または G で始まります。D はダイレクトメッセージ、U はユーザーの ID で、通知先には使えません）。入力し直してください。"
 done
 
 echo "$channel_id" | run gh variable set SLACK_CHANNEL_ID -R "$REPO_FULL_NAME" \
@@ -90,6 +96,7 @@ echo ""
 echo "    /invite @sf-notify-${PROJECT_NAME}"
 echo ""
 echo "  Bot がチャンネルに参加していないと通知が届きません。"
+echo "  また、通知を見る人は、このチャンネルに参加してください。"
 echo ""
 press_enter "Bot の招待が完了したら Enter を押してください..."
 

@@ -198,6 +198,12 @@ create_mock_sf() {
 echo "sf $*" >> "${MOCK_CALL_LOG:-/dev/null}"
 case "$1 $2" in
     "org display")
+        # sf-init の一時エイリアス（sf-tools-*）は、ブラウザログインに失敗した場合は未接続として扱う
+        # （MOCK_SF_LOGIN_WEB_FAIL=1。ログイン失敗の再現）
+        if [[ "${MOCK_SF_LOGIN_WEB_FAIL:-}" == "1" && "$*" == *"--target-org sf-tools-"* ]]; then
+            echo "Error: No authorization information found" >&2
+            exit 1
+        fi
         # sf-start.sh の grep/cut パース（各キーが1行前提）に対応するため
         # コンパクト JSON を , と { で改行展開して出力する
         echo "${MOCK_SF_ORG_JSON:-{\"result\":{\"alias\":\"testorg\",\"id\":\"00D000000000001AAA\"}}}" \
@@ -213,6 +219,15 @@ case "$1 $2" in
                 echo "Error authenticating with JWT: client identifier invalid" >&2
                 exit 1
             fi
+        fi
+        # sf org login web の再現（MOCK_SF_LOGIN_WEB_FAIL=1: ログイン失敗 / MOCK_SF_LOGIN_WEB_EXIT=1: 成功するが終了コード 1）
+        if [[ "$3" == "web" ]]; then
+            if [[ "${MOCK_SF_LOGIN_WEB_FAIL:-}" == "1" ]]; then
+                echo "Error (AuthTimeoutError): The authentication session timed out. Please try again." >&2
+                exit 1
+            fi
+            echo "Successfully authorized fake@example.com with org ID 00D000000000001AAA"
+            exit "${MOCK_SF_LOGIN_WEB_EXIT:-0}"
         fi
         [[ "${MOCK_SF_LOGIN_EXIT:-0}" -eq 0 ]] && echo "Successfully authorized fake@example.com with org ID 00D000000000001AAA"
         exit "${MOCK_SF_LOGIN_EXIT:-0}" ;;

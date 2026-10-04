@@ -97,7 +97,7 @@ sf-init.sh
 4. ワークフロー・設定ファイル生成
 5. ブランチ構成
 6. PAT_TOKEN の設定
-7. Slack 連携の設定
+7. Slack 連携の設定（通知先は、全員が参加する共有チャンネルを Slack で事前に作成しておく。DM は使えません）
 8. 初回コミット＆プッシュ
 9. GitHub リポジトリ設定・Ruleset 適用
 10. JWT 認証情報（Salesforce → GitHub Secrets / Variables）の設定（外部クライアントアプリは、ブラウザでログインするだけで自動作成）

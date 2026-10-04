@@ -21,7 +21,7 @@
 #   15. 環境種別の選択（本番 / 検証で続行 / 検証を取り消して選び直し / 検証で中断）
 #   16. Phase 11（SF_TOOLS_TOKEN）: 登録 / 読み取り失敗で再入力 / 読み取り失敗でスキップ / q で中断
 #   17. Phase 9: 既存 Ruleset の ID 検証（403 のエラー本文を ID として扱わない / 数字の ID は削除）
-#   18. Phase 7: SLACK_CHANNEL_ID の形式チェック（C… / D… → N で再入力 / D… → Y で登録）
+#   18. Phase 7: SLACK_CHANNEL_ID の形式チェック（C… / G… のみ受け付け。D… / U… は拒否して再入力）
 #   19. Phase 10: 外部クライアントアプリの自動作成（正常 / JWT リトライ / deploy 失敗 / JWT 不成功で中断・スキップ）
 # ==============================================================================
 
@@ -863,8 +863,8 @@ test_phase9_ruleset_id() {
 # テスト 18: Phase 7 の SLACK_CHANNEL_ID の形式チェック（--only 7）
 #   入力列: 警告確認 Y →（\n は press_enter が消費）→ Bot Token → チャンネル ID ...
 #   - C… の ID               : 警告なしで登録
-#   - D… の ID → N → C…      : 警告後に入力し直し、C… が登録される
-#   - D… の ID → Y           : 警告のうえ、そのまま登録される
+#   - D… / U… の ID          : 警告のうえ拒否され、入力し直した C… / G… が登録される（D… / U… は登録されない）
+#   - 案内文                 : 共有チャンネルの用意と DM 不可が表示される
 # ==============================================================================
 test_phase7_channel_id() {
     echo ""
@@ -899,17 +899,25 @@ test_phase7_channel_id() {
     assert_file_not_contains "$out" "チャンネル ID の形式ではありません"    "C… → 警告が出ない"
     rm -rf "$init_base"
 
-    # D… の ID → N → C… の ID
-    _p7_run 'Y\nxoxb-fake\nD0C6AQHLYLT\nN\nC01ABCDEFGH\n\n'
-    assert_exit_ok           "$exit_code"                                  "D… → N → C… → 正常終了"
+    # D… の ID → 拒否されて入力し直し → C… の ID
+    _p7_run 'Y\nxoxb-fake\nD0C6AQHLYLT\nC01ABCDEFGH\n\n'
+    assert_exit_ok           "$exit_code"                                  "D… → 再入力 C… → 正常終了"
     assert_file_contains     "$out" "チャンネル ID の形式ではありません"    "D… → 警告が出る"
-    assert_file_contains     "$mb/var_SLACK_CHANNEL_ID.txt" "C01ABCDEFGH"  "D… → N → 入力し直した C… が登録される"
+    assert_file_contains     "$mb/var_SLACK_CHANNEL_ID.txt" "C01ABCDEFGH"  "D… → 拒否され、入力し直した C… が登録される"
+    assert_file_not_contains "$mb/var_SLACK_CHANNEL_ID.txt" "D0C6AQHLYLT"  "D… は登録されない"
     rm -rf "$init_base"
 
-    # D… の ID → Y（そのまま登録）
-    _p7_run 'Y\nxoxb-fake\nD0C6AQHLYLT\nY\n\n'
-    assert_exit_ok           "$exit_code"                                  "D… → Y → 正常終了"
-    assert_file_contains     "$mb/var_SLACK_CHANNEL_ID.txt" "D0C6AQHLYLT"  "D… → Y → そのまま登録される"
+    # U… の ID → 拒否されて入力し直し → G… の ID（非公開チャンネル）
+    _p7_run 'Y\nxoxb-fake\nU01ABCDEFGH\nG01ABCDEFGH\n\n'
+    assert_exit_ok           "$exit_code"                                  "U… → 再入力 G… → 正常終了"
+    assert_file_contains     "$mb/var_SLACK_CHANNEL_ID.txt" "G01ABCDEFGH"  "U… → 拒否され、入力し直した G… が登録される"
+    assert_file_not_contains "$mb/var_SLACK_CHANNEL_ID.txt" "U01ABCDEFGH"  "U… は登録されない"
+    rm -rf "$init_base"
+
+    # 案内文（共有チャンネルの案内が表示される）
+    _p7_run 'Y\nxoxb-fake\nC01ABCDEFGH\n\n'
+    assert_file_contains     "$out" "共有チャンネル"                        "共有チャンネルを用意する案内が表示される"
+    assert_file_contains     "$out" "DM"                                    "DM は使えない旨が表示される"
 
     unset -f _p7_run
     teardown "$mb" "$mock_home" "$init_base"
@@ -919,6 +927,9 @@ test_phase7_channel_id() {
 # テスト 19: Phase 10 — 外部クライアントアプリ（ECA）の自動作成（--only 10）
 #   入力列: 警告確認 Y → アプリ種別 2 → メイン組織は Sandbox? N（ブランチ構成 1 階層 = メイン組織のみ）
 #   - 正常                  : ブラウザログイン → deploy → 鍵を retrieve → JWT → 登録。メタデータの内容も検証
+#   - ログイン成功 + 終了コード 1 : login / display とも終了コード 1 でも、出力の username が取れれば成功とみなして続行
+#                                   （Windows の sf で実際に発生。終了コードは見ない）
+#   - ログイン失敗          : 接続情報が取れなければ中断。deploy・登録は行われない
 #   - JWT が最初の 2 回失敗 : リトライして 3 回目で成功
 #   - deploy が失敗         : 中断。retrieve・登録は行われない
 #   - JWT が成功しない      : 確認で N → 中断 / Y → 接続テストをスキップして登録
@@ -957,11 +968,12 @@ test_phase10_eca_auto() {
     # 正常
     _p10_run 'Y\n2\nN\n'
     assert_exit_ok            "$exit_code"                                                              "正常 → 終了コード 0"
-    assert_file_contains      "$MOCK_CALL_LOG" "sf org login web --instance-url https://login.salesforce.com --alias sf-init-force-testproject-PROD" "ブラウザでログインする（一時エイリアス）"
+    assert_file_contains      "$MOCK_CALL_LOG" "sf org login web --instance-url https://login.salesforce.com --alias sf-tools-PROD" "ブラウザでログインする（一時エイリアス）"
+    assert_file_contains      "$MOCK_CALL_LOG" "sf alias unset sf-tools-PROD"                             "ログイン前に前回の一時エイリアスを外す"
     assert_file_contains      "$MOCK_CALL_LOG" "sf project deploy start --source-dir force-app"          "メタデータを deploy する"
     assert_file_contains      "$MOCK_CALL_LOG" "ExtlClntAppGlobalOauthSettings:SF_TOOLS_force_testproject_glbloauth" "コンシューマー鍵を retrieve で取得する"
     assert_file_contains      "$MOCK_CALL_LOG" "sf org login jwt"                                         "JWT 接続テストを行う"
-    assert_file_contains      "$MOCK_CALL_LOG" "sf alias unset sf-init-force-testproject-PROD"            "一時エイリアスを sf alias unset で消す"
+    assert_file_contains      "$MOCK_CALL_LOG" "sf alias unset sf-tools-PROD"                             "一時エイリアスを sf alias unset で消す"
     assert_file_not_contains  "$MOCK_CALL_LOG" "org logout"                                               "sf org logout は使わない"
     assert_file_contains      "$MOCK_CALL_LOG" "gh secret set SF_CONSUMER_KEY_PROD"                       "SF_CONSUMER_KEY_PROD が登録される"
     assert_file_not_contains  "$MOCK_CALL_LOG" "--body 3MVGMOCKCONSUMERKEY"                               "コンシューマー鍵を --body（引数）で渡さない"
@@ -973,6 +985,21 @@ test_phase10_eca_auto() {
     assert_file_contains      "$d/extlClntAppGlobalOauthSets/SF_TOOLS_force_testproject_glbloauth.ecaGlblOauth-meta.xml" "<certificate>" "証明書が入る"
     assert_file_not_contains  "$d/extlClntAppGlobalOauthSets/SF_TOOLS_force_testproject_glbloauth.ecaGlblOauth-meta.xml" "-----BEGIN" "証明書の BEGIN/END 行は含まない（本文のみ）"
     assert_file_not_contains  "$d/extlClntAppGlobalOauthSets/SF_TOOLS_force_testproject_glbloauth.ecaGlblOauth-meta.xml" "consumerKey" "consumerKey は書かない（出力項目）"
+    rm -rf "$init_base"
+
+    # ログインは成功するが sf の終了コードが 1（Windows で実際に発生。org display も終了コード 1）→ 出力で判定して続行
+    MOCK_SF_LOGIN_WEB_EXIT=1 MOCK_SF_ORG_DISPLAY_EXIT=1 _p10_run 'Y\n2\nN\n'
+    assert_exit_ok            "$exit_code"                                                              "ログイン成功 + 終了コード 1（login / display とも）→ 続行して終了コード 0"
+    assert_file_contains      "$MOCK_CALL_LOG" "project deploy start"                                     "ログイン成功 + 終了コード 1 → deploy まで進む"
+    assert_file_contains      "$MOCK_CALL_LOG" "gh secret set SF_CONSUMER_KEY_PROD"                       "ログイン成功 + 終了コード 1 → 登録される"
+    rm -rf "$init_base"
+
+    # ログイン失敗（待ち時間切れなどで接続できていない）→ 中断
+    MOCK_SF_LOGIN_WEB_FAIL=1 _p10_run 'Y\n2\nN\n'
+    assert_exit_fail          "$exit_code"                                                              "ログイン失敗 → 中断"
+    assert_file_contains      "$out" "へのログインに失敗しました"                                          "ログイン失敗 → 失敗の旨が表示される"
+    assert_file_not_contains  "$MOCK_CALL_LOG" "project deploy start"                                     "ログイン失敗 → deploy しない"
+    assert_file_not_contains  "$MOCK_CALL_LOG" "gh secret set SF_CONSUMER_KEY_PROD"                       "ログイン失敗 → 登録しない"
     rm -rf "$init_base"
 
     # JWT が最初の 2 回失敗 → リトライして成功

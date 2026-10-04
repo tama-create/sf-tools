@@ -205,6 +205,11 @@ test_happy_path_3branches() {
     assert_file_not_contains "$MOCK_CALL_LOG" "ghp_faketoolstoken"                   "SF_TOOLS_TOKEN の値がコマンドのログに含まれない"
     assert_file_not_contains "$MOCK_CALL_LOG" "ghp_faketoken"                        "PAT_TOKEN の値がコマンド（git push 等）のログに含まれない"
     assert_file_not_contains "$MOCK_CALL_LOG" "--body fake_prod_key"                 "コンシューマー鍵を --body（コマンドの引数）で渡さない（標準入力で渡す）"
+    # 接続アプリ版の JWT 接続テストも、一時的なホームフォルダの中で実行される（ユーザーの sf の認証を変えない）
+    local jwt_home_ca
+    jwt_home_ca=$(grep "^sf-jwt-env HOME=" "$MOCK_CALL_LOG" | head -1 | sed -E 's/^sf-jwt-env HOME=([^ ]*) .*/\1/')
+    [[ -n "$jwt_home_ca" && "$jwt_home_ca" == *"sf-tools-home."* && "$jwt_home_ca" != "$mock_home" && ! -e "$jwt_home_ca" ]] \
+        && pass "接続アプリ版: JWT 接続テストは、一時的なホームの中で実行され、実行後に削除される" || fail "接続アプリ版: JWT 接続テストの隔離" "HOME=${jwt_home_ca}"
     assert_file_contains "$MOCK_CALL_LOG" "git -c credential.helper= push"           "Phase 8: 認証ヘルパーを無効化して push する"
     assert_file_not_contains "$init_dir/init/.sf-init.env" "PAT_TOKEN_VALUE"         "push 後に .sf-init.env から PAT が削除される"
     assert_file_contains "$MOCK_CALL_LOG" "git add"                                  "git add が呼ばれる"
@@ -975,6 +980,13 @@ test_phase10_eca_auto() {
     assert_file_contains      "$MOCK_CALL_LOG" "sf org login jwt"                                         "JWT 接続テストを行う"
     assert_file_contains      "$MOCK_CALL_LOG" "sf alias unset sf-tools-PROD"                             "一時エイリアスを sf alias unset で消す"
     assert_file_not_contains  "$MOCK_CALL_LOG" "org logout"                                               "sf org logout は使わない"
+    # JWT 接続テストは、一時的なホームフォルダの中で実行される（ユーザーの sf のエイリアス・認証を変えない）
+    local jwt_home
+    jwt_home=$(grep "^sf-jwt-env HOME=" "$MOCK_CALL_LOG" | head -1 | sed -E 's/^sf-jwt-env HOME=([^ ]*) .*/\1/')
+    [[ -n "$jwt_home" && "$jwt_home" == *"sf-tools-home."* && "$jwt_home" != "$mock_home" ]] \
+        && pass "JWT 接続テストは、一時的なホーム（sf-tools-home.*）の中で実行される" || fail "JWT 接続テストは、一時的なホームの中で実行される" "HOME=${jwt_home}"
+    [[ -n "$jwt_home" && ! -e "$jwt_home" ]] \
+        && pass "JWT 接続テストの一時的なホームは、実行後に削除されている" || fail "JWT 接続テストの一時的なホームは、実行後に削除されている" "${jwt_home}"
     assert_file_contains      "$MOCK_CALL_LOG" "gh secret set SF_CONSUMER_KEY_PROD"                       "SF_CONSUMER_KEY_PROD が登録される"
     assert_file_not_contains  "$MOCK_CALL_LOG" "--body 3MVGMOCKCONSUMERKEY"                               "コンシューマー鍵を --body（引数）で渡さない"
     assert_file_contains      "$MOCK_CALL_LOG" "gh variable set SF_USERNAME_PROD --body admin@example.com" "SF_USERNAME_PROD にログインしたユーザー名が登録される"

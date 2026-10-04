@@ -134,13 +134,14 @@ register_jwt_secret() {
     log "INFO" "  [jwt cmd] sf org login jwt --client-id ***masked*** --jwt-key-file ${key_file} --username ${username} --instance-url ${instance_url} --alias ${org_alias}"
     # run 不使用: sf org login jwt は exit code が信頼できない場合があるため直接実行して確認
     # VAR=$(cmd) 形式のため run 不使用（stderr をキャプチャしてログに残す）
+    # 一時的なホームフォルダの中で実行する: エイリアスが増えず、同じユーザーの既存の sf の認証も置き換わらない
     local jwt_err
-    jwt_err=$(sf org login jwt \
+    jwt_err=$(run_isolated_home sf org login jwt \
         --client-id    "$consumer_key" \
         --jwt-key-file "$key_file" \
         --username     "$username" \
         --instance-url "$instance_url" \
-        --alias        "$org_alias" 2>&1)
+        --alias        "$org_alias")
     local jwt_exit=$?
     # sf org login jwt は成功時でも非0終了コードを返す場合がある（stderr に成功メッセージを出力）
     # そのため終了コードが非0でも "Successfully authorized" が含まれていれば成功とみなす
@@ -409,6 +410,8 @@ ECAEOF
 #   ・sf の認証はユーザー名単位で、エイリアスは別名にすぎない。ログイン用の一時エイリアスは
 #     sf alias unset で消す（sf org logout は同じユーザー名の全エイリアスの認証を消すため使わない）
 #   ・リトライ回数・間隔は環境変数 SF_INIT_JWT_RETRIES（既定 20）/ SF_INIT_JWT_INTERVAL（既定 30 秒）で変更できる
+#   ・JWT 接続テスト（sf org login jwt）は、run_isolated_home で、一時的なホームフォルダの中で実行する。
+#     ユーザーの sf に、エイリアス（prod 等）が増えず、同じユーザーの既存の認証も、JWT の認証に置き換わらない
 # ------------------------------------------------------------------------------
 register_jwt_secret_eca() {
     local org_alias="$1" suffix="$2" label="$3" key_file="$4" cert_file="$5"
@@ -472,8 +475,9 @@ register_jwt_secret_eca() {
     for ((i = 1; i <= retries; i++)); do
         # run 不使用: sf org login jwt は exit code が信頼できない場合があるため直接実行して確認する
         # VAR=$(cmd) 形式のため run 不使用（コンシューマー鍵をコマンドのログに残さない）
-        jwt_out=$(sf org login jwt --client-id "$consumer_key" --jwt-key-file "$key_file" \
-            --username "$username" --instance-url "$instance_url" --alias "$org_alias" 2>&1)
+        # 一時的なホームフォルダの中で実行する: エイリアスが増えず、同じユーザーの既存の sf の認証も置き換わらない
+        jwt_out=$(run_isolated_home sf org login jwt --client-id "$consumer_key" --jwt-key-file "$key_file" \
+            --username "$username" --instance-url "$instance_url" --alias "$org_alias")
         if [[ $? -eq 0 ]] || echo "$jwt_out" | grep -q "Successfully authorized"; then
             jwt_ok=1
             break

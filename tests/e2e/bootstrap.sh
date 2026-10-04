@@ -98,8 +98,9 @@ echo ""
 log "INFO" "ブラウザが開きます。テスト用の Salesforce 組織に、管理者でログインしてください（2 分以内）。"
 run sf alias unset "$BOOT_ALIAS" || true  # 未設定でも続行（意図的エラー無視）
 run sf org login web --instance-url https://login.salesforce.com --alias "$BOOT_ALIAS" || true  # 終了コードを信頼できないため無視
-B_SFDX_URL=$(sf org display --target-org "$BOOT_ALIAS" --verbose --json 2>/dev/null \
-    | grep -oE '"sfdxAuthUrl": *"[^"]*"' | head -1 | sed -E 's/.*: *"(.*)"/\1/')  # VAR=$(cmd) のため run 不使用（値を画面・ログに出さない）
+# 新しい sf は、sf org display --verbose で認証 URL を隠すため、sf org auth show-sfdx-auth-url を使う
+# （古い sf では、sf org display --verbose にフォールバックする）。形式を確認し、合わなければ保存しない
+B_SFDX_URL=$(e2e_get_sfdx_auth_url "$BOOT_ALIAS")  # VAR=$(cmd) のため run 不使用（値を画面・ログに出さない）
 run sf alias unset "$BOOT_ALIAS" || true  # 後始末（意図的エラー無視）
 [[ -n "$B_SFDX_URL" ]] || die "認証 URL を取得できませんでした（ログインに失敗したか、Sandbox の組織です）。"
 log "SUCCESS" "認証 URL を取得しました。"

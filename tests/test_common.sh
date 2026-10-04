@@ -341,6 +341,95 @@ test_check_sf_cli() {
     teardown "$mb"
 }
 
+# ------------------------------------------------------------------------------
+# check_sf_cli --cache: 24 時間の省略 / 失敗は記録しない / GitHub Actions では何もしない
+# ------------------------------------------------------------------------------
+_sf_version_calls() { grep -c "^sf --version" "$MOCK_CALL_LOG" 2>/dev/null || true; }
+
+test_check_sf_cli_cache() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] check_sf_cli --cache: 成功は 24 時間省略 / 失敗は毎回確認 / Actions では何もしない${CLR_RST}"
+    local mb stamp out
+    mb=$(setup_mock_bin)
+    export MOCK_CALL_LOG="$mb/calls.log"
+    create_mock_sf "$mb"
+    stamp="$mb/sf-check-stamp"
+    local P="$mb:/usr/bin:/bin"
+
+    # 1 回目: 成功 → 記録を作り、sf --version を実行する
+    : > "$MOCK_CALL_LOG"
+    out=$(SF_TOOLS_SF_CHECK_STAMP="$stamp" _csc_run "$P" "--warn-only --cache")
+    [[ "$out" == "RET=0" && "$(_sf_version_calls)" == "1" ]] \
+        && pass "1 回目: sf --version を実行して成功する" || fail "1 回目: sf --version を実行して成功する" "$out / 呼び出し $(_sf_version_calls)"
+    [[ "$(cat "$stamp" 2>/dev/null)" == "$mb/sf" ]] \
+        && pass "成功を、sf の場所つきで記録する" || fail "成功を、sf の場所つきで記録する" "$(cat "$stamp" 2>/dev/null)"
+
+    # 2 回目: 記録があるので、sf --version を実行せずに省略する
+    out=$(SF_TOOLS_SF_CHECK_STAMP="$stamp" _csc_run "$P" "--warn-only --cache")
+    [[ "$out" == "RET=0" && "$(_sf_version_calls)" == "1" ]] \
+        && pass "2 回目: 24 時間以内なので、sf --version を実行せずに省略する" || fail "2 回目: sf --version を実行せずに省略する" "呼び出し $(_sf_version_calls)"
+
+    # 記録が古い（2 日前）→ 省略しない
+    touch -d "2 days ago" "$stamp"
+    SF_TOOLS_SF_CHECK_STAMP="$stamp" _csc_run "$P" "--warn-only --cache" > /dev/null
+    [[ "$(_sf_version_calls)" == "2" ]] \
+        && pass "記録が 24 時間より古い → 省略せず、確認する" || fail "記録が 24 時間より古い → 省略せず、確認する" "呼び出し $(_sf_version_calls)"
+
+    # 記録の sf の場所が違う → 省略しない
+    printf '%s' "/another/path/sf" > "$stamp"
+    SF_TOOLS_SF_CHECK_STAMP="$stamp" _csc_run "$P" "--warn-only --cache" > /dev/null
+    [[ "$(_sf_version_calls)" == "3" ]] \
+        && pass "記録の sf の場所が違う → 省略せず、確認する" || fail "記録の sf の場所が違う → 省略せず、確認する" "呼び出し $(_sf_version_calls)"
+
+    # --cache なし → 記録があっても、毎回確認する
+    SF_TOOLS_SF_CHECK_STAMP="$stamp" _csc_run "$P" "--warn-only" > /dev/null
+    [[ "$(_sf_version_calls)" == "4" ]] \
+        && pass "--cache なし → 毎回確認する" || fail "--cache なし → 毎回確認する" "呼び出し $(_sf_version_calls)"
+
+    # 失敗（終了コード 1）→ 記録を作らず、毎回警告する
+    rm -f "$stamp"; : > "$MOCK_CALL_LOG"
+    out=$(MOCK_SF_VERSION_EXIT=1 SF_TOOLS_SF_CHECK_STAMP="$stamp" _csc_run "$P" "--warn-only --cache")
+    [[ "$out" == *"終了コードが 0 ではありません"* && "$out" == *"RET=1"* && ! -f "$stamp" ]] \
+        && pass "失敗 → 警告し、記録は作らない" || fail "失敗 → 警告し、記録は作らない" "$out"
+    MOCK_SF_VERSION_EXIT=1 SF_TOOLS_SF_CHECK_STAMP="$stamp" _csc_run "$P" "--warn-only --cache" > /dev/null
+    [[ "$(_sf_version_calls)" == "2" ]] \
+        && pass "失敗は、毎回確認する（省略されない）" || fail "失敗は、毎回確認する" "呼び出し $(_sf_version_calls)"
+
+    # GitHub Actions 上 → 何もしない（sf --version も実行しない）
+    : > "$MOCK_CALL_LOG"
+    out=$(GITHUB_ACTIONS=true MOCK_SF_VERSION_EXIT=1 SF_TOOLS_SF_CHECK_STAMP="$stamp" _csc_run "$P" "--cache")
+    [[ "$out" == "RET=0" && "$(_sf_version_calls)" == "0" ]] \
+        && pass "GitHub Actions 上 → 何もせず、sf --version も実行しない" || fail "GitHub Actions 上 → 何もしない" "$out / 呼び出し $(_sf_version_calls)"
+
+    unset MOCK_CALL_LOG
+    teardown "$mb"
+}
+
+# ------------------------------------------------------------------------------
+# run_isolated_home: 一時的なホームフォルダの中で実行する（sf の認証・エイリアスの隔離）
+# ------------------------------------------------------------------------------
+test_run_isolated_home() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] run_isolated_home: 一時的なホームの中で実行し、出力と終了コードを返し、後で削除する${CLR_RST}"
+    local out rc home_line tmp_home
+    out=$(bash -c "
+        readonly SCRIPT_NAME=test; readonly LOG_FILE=/dev/null; readonly LOG_MODE=NEW; export SF_INIT_MODE=1
+        source '${SF_TOOLS_DIR}/lib/common.sh'
+        o=\$(run_isolated_home bash -c 'echo \"H=\$HOME U=\$USERPROFILE\"; echo ERRLINE >&2; exit 3'); rc=\$?
+        echo \"RC=\$rc\"; echo \"\$o\"
+        echo \"REALHOME=\$HOME\"" 2>&1)
+    rc=$(printf '%s\n' "$out" | sed -n 's/^RC=//p')
+    home_line=$(printf '%s\n' "$out" | grep '^H=')
+    tmp_home=$(printf '%s' "$home_line" | sed -E 's/^H=([^ ]*) U=.*/\1/')
+
+    [[ "$rc" == "3" ]] && pass "コマンドの終了コードを返す" || fail "コマンドの終了コードを返す" "$out"
+    [[ "$out" == *"ERRLINE"* ]] && pass "標準エラーも、出力として返す" || fail "標準エラーも、出力として返す" "$out"
+    [[ "$tmp_home" == *"sf-tools-home."* ]] && pass "HOME が、一時フォルダ（sf-tools-home.*）になる" || fail "HOME が一時フォルダになる" "$home_line"
+    [[ "$home_line" == *"U=$tmp_home"* ]] && pass "USERPROFILE も、同じ一時フォルダになる（Windows は USERPROFILE を見る）" || fail "USERPROFILE も同じ一時フォルダになる" "$home_line"
+    [[ ! -e "$tmp_home" ]] && pass "実行後に、一時フォルダは削除されている" || fail "実行後に、一時フォルダは削除されている" "$tmp_home"
+    [[ "$out" == *"REALHOME=$HOME"* ]] && pass "呼び出し元の HOME は変わらない" || fail "呼び出し元の HOME は変わらない" "$out"
+}
+
 test_check_gh_owner_match
 test_check_gh_owner_mismatch
 test_check_gh_owner_skip_on_empty
@@ -353,5 +442,7 @@ test_mask_secrets
 test_is_gitbash
 test_open_browser_gitbash
 test_check_sf_cli
+test_check_sf_cli_cache
+test_run_isolated_home
 
 print_summary

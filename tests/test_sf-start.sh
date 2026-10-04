@@ -109,7 +109,29 @@ test_outside_force_dir() {
 test_connected_org
 test_config_files_written
 test_force_relogin
+# sf の終了コードが 0 以外（インストーラー版の不具合）→ 警告を表示するが、続行する
+test_sf_cli_warning_only() {
+    local td mb mh
+    setup_std_env td mb mh
+    create_all_mocks "$mb"
+    mkdir -p "$mh/sf-tools/bin"
+    printf '#!/bin/bash\nexit 0\n' > "$mh/sf-tools/bin/sf-launcher.sh"
+    chmod +x "$mh/sf-tools/bin/sf-launcher.sh"
+    echo '{"target-org":"testorg"}' > "$td/.sf/config.json"
+    export MOCK_SF_ORG_JSON='{"result":{"alias":"testorg","id":"00D000000000001AAA"}}'
+
+    local out; out=$(cd "$td" && HOME="$mh" PATH="$mb:$PATH" MOCK_SF_VERSION_EXIT=1 bash "$SF_TOOLS_DIR/bin/sf-start.sh" 2>&1)
+    local ec=$?
+
+    assert_exit_ok $ec "sf の終了コード 1 → 警告のみで、終了コード 0（続行する）"
+    assert_output_contains "$out" "終了コードが 0 ではありません" "警告が表示された"
+    assert_file_contains "$MOCK_CALL_LOG" "code ." "VS Code の起動まで、続行された"
+    unset MOCK_SF_ORG_JSON
+    teardown "$td" "$mb" "$mh"
+}
+
 test_launcher_called
+test_sf_cli_warning_only
 test_outside_force_dir
 
 print_summary

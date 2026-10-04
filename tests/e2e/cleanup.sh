@@ -8,6 +8,8 @@
 #   1. GitHub    : {E2E_OWNER}/force-e2e-YYYYMMDD-HHMMSS のリポジトリ
 #   2. Salesforce: SF_TOOLS_force_e2e_YYYYMMDD_HHMMSS の外部クライアントアプリ（5 つの構成要素）
 #   3. ローカル  : {E2E_HOME_ROOT}/{E2E_OWNER}/e2e-YYYYMMDD-HHMMSS と ~/.sf-jwt/force-e2e-YYYYMMDD-HHMMSS
+#                  と、強制終了で残った一時ファイル・フォルダ（$TMPDIR の e2e-run.* / e2e-eca-del.* / e2e-sfdx-url.*。
+#                  認証 URL を含むことがある。30 分以内のものは、実行中の可能性があるため対象外）
 #
 # 【オプション】
 #   --yes         : 実際に削除する（確認のため、delete と入力させる）
@@ -18,6 +20,7 @@
 #   ・Salesforce の一覧・削除のため、認証 URL でテスト用組織にログインし直す（組織の認証が置き換わる）
 #   ・リポジトリの削除には、gh に delete_repo の権限が必要
 #       gh auth refresh -h github.com -s delete_repo
+#   ・一覧の取得に失敗したときは、数回やり直し、それでも失敗なら「対象なし」とは表示せず、エラーで終わる
 # ==============================================================================
 
 readonly SCRIPT_NAME="e2e-cleanup"
@@ -57,7 +60,7 @@ trap 'sf alias unset "$E2E_ADMIN_ALIAS" >/dev/null 2>&1 || true' EXIT  # 後始�
 log "HEADER" "e2e のテスト用リソースの削除 (${SCRIPT_NAME}.sh)"
 
 if [[ $DO_DELETE -eq 0 ]]; then
-    e2e_cleanup_all list
+    e2e_cleanup_all list || die "一覧を取得できなかったものがあります。"
     log "INFO" "一覧の表示のみです。削除するには --yes を付けて実行してください。"
     exit $RET_OK
 fi
@@ -69,7 +72,7 @@ if [[ $NO_CONFIRM -eq 0 ]]; then
     echo -e "${CLR_ERR}║      ローカルのフォルダが対象です（名前が一致する    ║${CLR_RESET}" >&2
     echo -e "${CLR_ERR}║      e2e 用のものだけ）。元に戻せません。            ║${CLR_RESET}" >&2
     echo -e "${CLR_ERR}╚══════════════════════════════════════════════════════╝${CLR_RESET}" >&2
-    e2e_cleanup_all list
+    e2e_cleanup_all list || die "一覧を取得できなかったものがあります。"
     ask_yn "上の一覧を削除しますか？" || die "中断しました。"
     answer=""
     read_input answer "  確認のため delete と入力してください: " || die "中断しました。"

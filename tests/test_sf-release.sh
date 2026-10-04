@@ -186,7 +186,24 @@ test_unknown_option
 test_outside_force_dir
 test_protected_org_local_blocked
 test_protected_org_github_actions_allowed
+# sf の終了コードが 0 以外（インストーラー版の不具合）→ 警告を表示するが、続行する
+test_sf_cli_warning_only() {
+    local td mb mh
+    setup_std_env td mb mh
+    create_all_mocks "$mb"
+    setup_release_dir "$td"
+    export MOCK_SF_ORG_JSON='{"result":{"alias":"testorg","id":"00D000000000001AAA"}}'
+
+    local out; out=$(cd "$td" && PATH="$mb:$PATH" MOCK_SF_VERSION_EXIT=1 bash "$SF_TOOLS_DIR/bin/sf-release.sh" 2>&1)
+
+    assert_output_contains "$out" "終了コードが 0 ではありません" "sf の終了コード 1 → 警告が表示された"
+    assert_file_contains "$MOCK_CALL_LOG" "project deploy" "sf の終了コード 1 → デプロイの処理まで、続行された"
+    unset MOCK_SF_ORG_JSON
+    teardown "$td" "$mb"
+}
+
 test_unprotected_org_local_allowed
 test_protected_org_staging_blocked
+test_sf_cli_warning_only
 
 print_summary

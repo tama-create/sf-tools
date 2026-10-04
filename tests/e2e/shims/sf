@@ -1,0 +1,28 @@
+#!/bin/bash
+# ==============================================================================
+# sf（差し替え用）- e2e テストで PATH の先頭に置く
+# ==============================================================================
+# sf-init が呼ぶ「sf org login web」だけを、認証 URL でのログイン（sf org login sfdx-url）に置き換える。
+# （ブラウザでのログインを自動化するため。ログイン後の deploy / retrieve / JWT ログインは本物の sf が動く）
+# それ以外のコマンドは、本物の sf にそのまま渡す。
+#
+# 環境変数（run.sh が設定する）:
+#   E2E_SHIM_DIR       この差し替えを置いたフォルダ（本物の sf を探すときに PATH から除く）
+#   E2E_SFDX_URL_FILE  認証 URL を書いたファイル（値は環境変数に載せない）
+# ==============================================================================
+_real_sf=$(PATH="${PATH//${E2E_SHIM_DIR}:/}" command -v sf)
+[[ -n "$_real_sf" ]] || { echo "sf shim: 本物の sf が見つかりません" >&2; exit 127; }
+
+if [[ "$1" == "org" && "$2" == "login" && "$3" == "web" ]]; then
+    _alias=""
+    _prev=""
+    for _a in "$@"; do
+        [[ "$_prev" == "--alias" || "$_prev" == "-a" ]] && _alias="$_a"
+        _prev="$_a"
+    done
+    [[ -f "${E2E_SFDX_URL_FILE:-}" ]] || { echo "sf shim: E2E_SFDX_URL_FILE がありません" >&2; exit 1; }
+    "$_real_sf" org login sfdx-url --sfdx-url-file "$E2E_SFDX_URL_FILE" ${_alias:+--alias "$_alias"}
+    exit $?
+fi
+
+exec "$_real_sf" "$@"

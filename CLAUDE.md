@@ -178,9 +178,11 @@ git pull origin main                     # main の最新を取り込む
 bash tests/run_tests.sh                        # 全テスト実行（mm 前に必ず実行）
 bash tests/run_tests.sh test_sf-metasync.sh   # 単体実行
 bash tests/run_tests.sh --changed             # 変更ファイルに対応するテストのみ実行
+bash tests/e2e/run.sh                          # 実環境の通し検証（開発者が手動実行。通常のテストには含まれない）
 ```
 
 > **開発中は `--changed`、mm 前は全件** が基本ワークフロー。
+> `tests/e2e/` は実際の GitHub / Salesforce にテスト用のものを作って削除する。**削除の安全ガード（名前の形式・オーナーの一致）を緩めないこと**。詳細は `doc/dev-reference.md` 9.6。
 
 ### 3.2 デグレ防止チェックリスト
 
@@ -205,6 +207,7 @@ Salesforce 開発の環境構築と日々の作業を自動化するシェルス
 - 実行場所は各 Salesforce プロジェクト (`force-*`) 側
 - `sf-hook.sh` は `hooks/pre-push` をコピーする設計
 - husky が設定されている場合は `core.hooksPath` を削除する設計
+- Salesforce CLI（`sf`）は **npm 版が前提**（`check_sf_cli`）。Windows の Git Bash で公式インストーラー版を使うと、成功しても終了コード 1 になるため非対応（`run` は終了コードのみで判定する。詳細は `doc/dev-reference.md` 3.3）
 
 ### 4.2 ディレクトリ構成
 
@@ -218,6 +221,7 @@ Salesforce 開発の環境構築と日々の作業を自動化するシェルス
 | `hooks/pre-push` | git push フックの実体 |
 | `templates/` | force-* へ配布する雛形。**参照は sf-init 専用**（`phase_setup_release_dir` のみ日常運用でも参照可） |
 | `tests/` | モックベースの単体テスト一式 |
+| `tests/e2e/` | 実環境での `sf-init` の通し検証（自動実行・自動削除）。通常のテストには含めない |
 | `doc/` | 設計思想・戦略・開発リファレンス |
 
 **サブスクリプトのフォルダ構成ルール:** メインスクリプトからフェーズ単位で呼ばれるサブスクリプトは **`phases/<script名>/`** に配置すること（`lib/` はライブラリ専用）。
@@ -251,4 +255,4 @@ Salesforce 開発の環境構築と日々の作業を自動化するシェルス
 | 6. スクリプト依存関係マップ | 呼び出し関係 |
 | 7. デバッグコマンド集 | Salesforce CLI / Git コマンド |
 | 8. force-* ローカル環境 | ディレクトリ構成 |
-| 9. 開発・リリース手順 | 検証環境・検証チェックリスト・rr の前提 |
+| 9. 開発・リリース手順 | 検証環境・検証チェックリスト・rr の前提・e2e（9.6） |

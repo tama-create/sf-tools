@@ -25,6 +25,11 @@
 #   Phase 10: JWT 認証情報の設定（Salesforce GitHub Secrets 登録）
 #   Phase 11: SF_TOOLS_TOKEN の設定（Actions が Private の sf-tools を clone するための Token を Secret 登録）
 #
+# 【前提】
+#   Salesforce CLI（sf）は npm 版（npm install -g @salesforce/cli）であること。
+#   起動時に sf --version の終了コードを確認し、0 以外なら案内を表示して中断する
+#   （Windows の Git Bash で公式インストーラー版を使うと、成功しても終了コード 1 になるため）。
+#
 # 【手動操作が必要なステップ】
 #   - Salesforce 組織へのブラウザログイン
 #   - GitHub Classic PAT トークンの作成（repo + workflow スコープ）
@@ -109,6 +114,10 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+# sf が終了コードを正しく返すか確認する（npm 版が前提。NG なら案内を表示して中断する）
+# --resume / --only / --add-tier のときも確認する（どの Phase でも sf を使うため）
+check_sf_cli
 
 # --add-tier モードは通常のフェーズループとは別処理
 if [[ -n "$ADD_TIER_MODE" ]]; then

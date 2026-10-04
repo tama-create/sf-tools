@@ -214,7 +214,24 @@ test_release_dir_init_fail() {
     teardown "$td" "$mb" "$mh"
 }
 
+# sf の終了コードが 0 以外（インストーラー版の不具合）→ 警告を表示するが、中断せず、sf-tools の最新化は続行する
+test_sf_cli_warning_only() {
+    local td mb mh
+    setup_std_env td mb mh
+    create_all_mocks "$mb"
+
+    local out; out=$(cd "$td" && HOME="$mh" PATH="$mb:$PATH" MOCK_SF_VERSION_EXIT=1 bash "$SF_TOOLS_DIR/bin/sf-install.sh" 2>&1)
+    local ec=$?
+
+    assert_exit_ok $ec "sf の終了コード 1 → 警告のみで、終了コード 0（中断しない）"
+    assert_output_contains "$out" "終了コードが 0 ではありません" "sf の終了コード 1 → 警告が表示された"
+    assert_output_contains "$out" "npm install -g @salesforce/cli" "sf の終了コード 1 → npm 版の案内が表示された"
+    assert_file_contains "$MOCK_CALL_LOG" "git -C" "sf の終了コード 1 → sf-tools の git pull は、続行される"
+    teardown "$td" "$mb" "$mh"
+}
+
 test_normal_run
+test_sf_cli_warning_only
 test_gitmessage_created
 test_upgrade_skipped_within_24h
 test_upgrade_triggered_on_first_run

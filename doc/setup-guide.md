@@ -18,6 +18,7 @@
 - GitHub CLI（`gh` コマンド） — GitHub 操作の自動化
 - Node.js / npm — ビルドツール・依存管理
 - Salesforce CLI（`sf` コマンド） — Salesforce 組織との接続・デプロイ
+  - **npm 版**（`npm install -g @salesforce/cli`）を使うこと。Windows の Git Bash で公式インストーラー版を使うと、`sf` が成功しても終了コード 1 を返し、sf-tools の処理が失敗扱いになる（README 1.1 参照）
 - Visual Studio Code — コードエディタ
   - Salesforce Extension Pack (Expanded) を事前にインストールしておくこと
 - Slack — ワークフローの通知先

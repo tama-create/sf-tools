@@ -20,7 +20,7 @@ Salesforce 開発で毎回発生する環境構築、デプロイ、事前チェ
 | ツール | 確認コマンド | 用途 | 取得先 | Windows インストール方法 |
 |---|---|---|---|---|
 | Git (Git Bash) | `git --version` | Git Bash / フック / バージョン管理 | https://git-scm.com/download/win | インストーラ実行 |
-| Salesforce CLI | `sf --version` | 組織接続、デプロイ、retrieve | https://developer.salesforce.com/tools/salesforcecli | `winget install --id Salesforce.sf` または公式インストーラ |
+| Salesforce CLI（**npm 版**） | `sf --version` | 組織接続、デプロイ、retrieve | https://developer.salesforce.com/tools/salesforcecli | `npm install -g @salesforce/cli`（Node.js が必要。**公式インストーラー版は非対応**。1.1 参照） |
 | GitHub CLI | `gh --version` | PR 作成・Secrets 登録・リポジトリ操作 | https://cli.github.com/ | `winget install --id GitHub.cli` |
 | Visual Studio Code | `code --version` | エディタ起動 | https://code.visualstudio.com/ | `winget install --id Microsoft.VisualStudioCode` |
 | Slack | — | デプロイ通知の受信 | https://slack.com/downloads/windows | インストーラ実行 |
@@ -31,6 +31,36 @@ Salesforce 開発で毎回発生する環境構築、デプロイ、事前チェ
 - Git Bash で実行してください（PowerShell / コマンドプロンプトは非対応）
 - `sf-init.sh` を除くすべてのスクリプトは `force-*` ディレクトリ内から実行してください
 - `sf-init.sh` のみ `force-*` の**外**（親ディレクトリ）から実行します
+
+### 1.1 Salesforce CLI は npm 版を使う
+
+sf-tools は、**Salesforce CLI（`sf`）の npm 版**（`npm install -g @salesforce/cli`）を前提としています。npm 版も、Salesforce が案内しているインストール方法の一つです。
+
+**理由:** Windows の Git Bash で、Salesforce CLI の**公式インストーラー版**（`winget` 版を含む可能性があります）を使い、自動更新が入った状態になると、`sf` が**成功しても、終了コード 1 を返し続ける**ことがあります（同じバージョンの npm 版は、正しく返します。Salesforce の起動用ファイルの問題と考えられます）。sf-tools は、コマンドの成否を終了コードで判定するため、この環境では、成功した処理も失敗扱いになります。
+
+**確認方法:** 次のコマンドで、`終了コード=0` と表示されれば問題ありません。
+
+```bash
+command -v sf; sf --version; echo "終了コード=$?"
+```
+
+`sf-init.sh` は、起動時にこれを確認し、0 以外なら案内を表示して中断します。`sf-install.sh` は、警告を表示するだけで続行します（中断すると、sf-tools 自身の最新化が止まってしまうためです）。
+
+**インストーラー版から npm 版への入れ替え（Windows）:**
+
+1. npm 版を入れます（`C:\Program Files\nodejs` に書き込むため、管理者権限の Git Bash が必要な場合があります）。
+   ```bash
+   npm install -g @salesforce/cli
+   ```
+2. 公式インストーラー版をアンインストールします（「設定 → アプリ」の「Salesforce CLI」、または `C:\sf\Uninstall.exe`）。
+3. 自動更新で増えた `%LOCALAPPDATA%\sf\client` を削除します。
+4. **新しい** Git Bash を開いて、上の確認コマンドを実行します。あわせて `sf org list` で、既存の組織が表示されることを確認してください。
+
+> ⚠️ `~/.sf` と `~/.sfdx` は、組織のログイン情報が入っているため、**削除しないでください**。入れ替えても、ログイン情報は残ります。VS Code を使っている場合は、入れ替え後に VS Code を再起動してください。
+
+**更新:** `sf-upgrade.sh` が、npm 版は `npm install -g @salesforce/cli@latest` で更新します（手動で行う場合も同じコマンドです）。
+
+**macOS / Linux:** 同じく npm 版をおすすめします。ほかの方法（pkg・Homebrew など）で入れた場合も、上の確認コマンドで終了コード 0 になれば、そのまま使えます。
 
 ---
 
@@ -778,6 +808,7 @@ sf-tools/
 │   ├── setup-guide.md
 │   └── sf-cicd-strategy.md
 ├── tests/                      ← 単体テスト一式
+│   └── e2e/                    ← 実環境での通し検証（sf-init の自動実行。9.3 参照）
 ├── CLAUDE.md
 └── README.md
 ```
@@ -812,8 +843,47 @@ sf-tools の `main` ブランチは、**そのまま全ユーザーに配布さ�
 
 変更内容に応じて確認します。詳細は `doc/dev-reference.md` セクション 9 を参照してください。
 
-- 新規セットアップ（`sf-init.sh`）が最後まで通ること（Phase 11 の `SF_TOOLS_TOKEN` の登録を含む）
+- 新規セットアップ（`sf-init.sh`）が最後まで通ること（Phase 11 の `SF_TOOLS_TOKEN` の登録を含む）。9.3 の e2e で自動化できます
 - メタデータ同期（`wf-metasync`）を手動実行して成功すること
 - デプロイ対象を含む PR で `wf-validate` が通ること（動作確認だけの PR はマージせずに閉じる）
 
 > ⚠️ `main` のブランチ保護は GitHub の無料プラン（Private リポジトリ）では設定できません。誤ったリリースを防ぐため、上記の運用を守ってください。
+
+### 9.3 e2e: `sf-init.sh` の通し検証を自動で行う
+
+`sf-init.sh` を検証するたびに、Token の作成、Slack の設定、Salesforce へのログイン、前回のテスト用リポジトリの削除などを手作業で繰り返すのは大変です。`tests/e2e/` は、これを自動化します。実際の GitHub と Salesforce を使うため、通常のテスト（`bash tests/run_tests.sh`）には含まれず、開発者が手動で実行します。
+
+**仕組み:** `sf-init.sh` 自体は変えません。質問への答えを標準入力に流し、`sf org login web`（ブラウザでのログイン）だけを「認証 URL でのログイン」に差し替え、ブラウザは開かないようにします。それ以外（リポジトリの作成、外部クライアントアプリの作成、JWT のログイン、Secret の登録など）は、本物がそのまま動きます。
+
+**最初の 1 回だけ（手動）:**
+
+```bash
+gh auth refresh -h github.com -s delete_repo   # テスト用リポジトリを削除するための権限
+bash tests/e2e/bootstrap.sh                    # 鍵一式（Token など）を、リポジトリの外に保存する
+```
+
+`bootstrap.sh` では、Classic PAT、Slack の Bot Token と通知先の共有チャンネルの ID、`SF_TOOLS_TOKEN` 用の Fine-grained PAT を入力し、ブラウザでテスト用の Salesforce 組織にログインします（認証 URL を取得して保存するため）。これらは `~/.sf-tools-e2e/fixture.env` に、本人だけが読める権限で保存され、リポジトリには入りません。テスト用の組織は、本番または Developer Edition（Sandbox ではない）にしてください。
+
+**毎回の実行:**
+
+```bash
+bash tests/e2e/run.sh
+```
+
+| 順 | 内容 |
+|---|---|
+| 1. 前掃除 | 前回の失敗で残ったテスト用のもの（名前が決まった形式で、オーナーが一致するものだけ）を削除する |
+| 2. 実行 | `force-e2e-日時` というリポジトリを作り、`sf-init.sh` を Phase 1〜11 まで自動で実行する（検証環境・main のみの構成） |
+| 3. 確認 | Secret・Variable・ブランチ・ワークフローが揃っていること、Token が画面・ログに出ていないこと、`wf-metasync` と `wf-release`（JWT ログイン・Private の sf-tools の取得・Slack 通知）が動くことを確認する |
+| 4. 後掃除 | テスト用のリポジトリ、Salesforce の外部クライアントアプリ、ローカルのフォルダを削除し、`sf` のエイリアスを実行前の状態に戻す |
+
+テスト用のリポジトリは毎回別の名前（`force-e2e-日時`）なので、前回の削除が終わっていなくても実行できます。`--keep` を付けると後掃除をしないので、失敗の原因を調べられます。残ったものは、次のコマンドで確認・削除できます。
+
+```bash
+bash tests/e2e/cleanup.sh          # 削除対象の一覧を表示するだけ（何も削除しない）
+bash tests/e2e/cleanup.sh --yes    # 一覧を見せたうえで、delete と入力すると削除する
+```
+
+**安全のために:** 削除できるのは、`force-e2e-YYYYMMDD-HHMMSS` のようなテスト用の名前のものだけです。`SF_TOOLS`（元からあるアプリ）や、ふだん使っているリポジトリは、削除の対象になりません。オーナーも、鍵一式で指定したものだけです。GitHub Actions 上では動きません。
+
+**できないこと:** Token の作成と、テスト用組織への最初のログインは自動化できません（最初の 1 回だけ手動です）。また、`sf-init.sh` の質問の順番を変えたときは、`tests/e2e/lib.sh` の入力の台本（`e2e_make_input`）も直す必要があります（直し忘れは、通常のテストで検知されます）。

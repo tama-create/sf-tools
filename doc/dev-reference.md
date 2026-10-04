@@ -18,7 +18,7 @@
 
 | 目的 | 使う方法 | 理由 |
 |---|---|---|
-| GitBash 検出 | `[[ "$OSTYPE" == "msys"* \|\| "$OSTYPE" == "mingw"* ]]` | Bash 組み込み・サブプロセス不要 |
+| GitBash 検出 | `is_gitbash`（`lib/common.sh`。`$OSTYPE` が `msys*` / `mingw*` / `cygwin*`） | Bash 組み込み・サブプロセス不要。Git Bash でも、環境により `$OSTYPE` が `cygwin` になるため、`msys` / `mingw` だけを見ない |
 | macOS 検出 | `[[ "$OSTYPE" == "darwin"* ]]` | 同上 |
 | WSL 検出 | `grep -qi microsoft /proc/version 2>/dev/null` | `/proc` 非存在環境は `2>/dev/null` で抑制 |
 | macOS/Linux 分岐が必要な場合のみ | `uname -s` | `stat` 書式差異など限定的に使用 |
@@ -118,7 +118,9 @@
 | `check_force_dir` | `check_force_dir` | `force-*` ディレクトリか検証 |
 | `check_home_dir` | `check_home_dir` | `~/home/{owner}/{company}/` の階層を検証し `GITHUB_OWNER` / `COMPANY_NAME` をセット |
 | `check_gh_owner` | `check_gh_owner OWNER` | gh 認証ユーザーがリポジトリオーナーと一致するか確認（不一致は die。オーナーが組織で、ユーザーがその有効な admin なら通過。gh が空を返す場合はスキップ） |
-| `open_browser` | `open_browser URL` | OS 判定してブラウザを開く（WSL/GitBash/macOS/Linux 対応） |
+| `is_gitbash` | `if is_gitbash; then ...` | Windows の Git Bash か判定（`$OSTYPE` が `msys*` / `mingw*` / `cygwin*`） |
+| `check_sf_cli` | `check_sf_cli [--warn-only]` | `sf --version` の終了コードが 0 か確認する（sf は npm 版が前提）。0 以外なら、sf の場所と対処を ERROR で表示して `die`（`--warn-only` は表示のみで戻り値 1）。sf 未インストールなら何もしない |
+| `open_browser` | `open_browser URL` | OS 判定してブラウザを開く（GitBash/WSL/macOS/Linux 対応。GitBash の判定を先に行う） |
 | `read_input` | `read_input VAR [PROMPT]` | readline 対応テキスト入力（矢印キー・BS 有効） |
 | `read_key` | `read_key VAR [PROMPT] [VALID]` | 1文字即時入力（Enter 不要・空 Enter 無視・EOF 対応） |
 | `press_enter` | `press_enter [MSG]` | Enter 待ち（q で中断） |
@@ -138,6 +140,10 @@
 | `RET_OK` | 0 | 成功 |
 | `RET_NG` | 1 | 失敗（`logs/error.log` にも記録） |
 | `RET_NO_CHANGE` | 2 | `NothingToDeploy` など変更なし |
+
+**成功判定のルール:** `run()` は、**終了コードのみ**で成否を判定する（出力の文字列では判定しない）。ただし、出力に `NothingToDeploy` / `No local changes to deploy` が含まれる場合は `RET_NO_CHANGE`（終了コードより優先）。以前（〜2026-03-23）は、出力の成功キーワード（`Success` / `Succeeded` / `Deployed` / `status": 0` など）でも `RET_OK` にしていたが、失敗を成功と誤判定する恐れがあるため、2026-03-24 に削除した。
+
+**Salesforce CLI の前提:** Windows の Git Bash で、Salesforce CLI の公式インストーラー版（自動更新後）を使うと、`sf` が成功しても終了コード 1 を返す（`sf --version` や `sf alias unset` も 1。同じバージョンの npm 版は正しく返す）。このため sf-tools は **npm 版を前提**とし、`sf-init.sh`（NG なら中断）と `sf-install.sh`（警告のみ）の起動時に、`check_sf_cli`（`sf --version` の終了コードが 0 か）で確認する。`sf-install.sh` を警告のみにしているのは、中断すると sf-tools 自身の最新化（`git pull`）まで止まるため。個別に出力で成否を判定している箇所（`sf org login jwt` の `Successfully authorized` など）は、npm 版でも、そのまま動く。
 
 ### 3.4 安全ガードパターン
 
@@ -242,6 +248,7 @@ check_gh_owner "$GITHUB_OWNER"   # 認証ユーザーの一致確認
 ### 4.4 sf-install.sh
 
 処理順（順序変更禁止）:
+0. `check_sf_cli --warn-only`（`sf --version` の終了コードを確認し、0 以外なら警告のみ。中断しない）
 1. `~/sf-tools` を `git pull` で更新
 2. `config/*.txt` を不足時のみ補充
 3. `sf-hook.sh` で Git Hook をインストール
@@ -310,8 +317,9 @@ check_gh_owner "$GITHUB_OWNER"   # 認証ユーザーの一致確認
 ### 4.9 sf-upgrade.sh
 
 - npm / Salesforce CLI / Git を更新
+- Salesforce CLI は、npm 版（`npm ls -g @salesforce/cli` が成功）なら `npm install -g @salesforce/cli@latest`、それ以外（公式インストーラー・pkg など）なら `sf update` で更新する
 - `sf-install.sh` から 24 時間間隔でバックグラウンド起動される
-- Git の更新は GitBash（`$OSTYPE == "msys"*` / `"mingw"*`）のみ実行（他環境はパッケージマネージャーを案内）
+- Git の更新は GitBash（`is_gitbash`: `$OSTYPE` が `msys*` / `mingw*` / `cygwin*`）のみ実行（他環境はパッケージマネージャーを案内）
 
 ### 4.10 sf-push.sh
 
@@ -378,6 +386,8 @@ tr -d '\r' < "$key_file" | base64 -w 0 | gh secret set "SF_PRIVATE_KEY" -R "$REP
 ### 4.13 sf-init.sh
 
 新規 Salesforce プロジェクトの初期セットアップ。`phases/init/` 配下のフェーズスクリプトを順次実行する。
+
+起動時（フェーズの実行・`--resume` / `--only` / `--add-tier` の前）に `check_sf_cli` で、`sf --version` の終了コードを確認し、0 以外なら案内（npm 版への入れ替え）を表示して中断する（3.3 参照）。
 
 実行フロー:
 1. 環境チェック（ツール確認・GitHub CLI 認証確認）
@@ -494,6 +504,14 @@ cat logs/run_tests.log | grep '\[FAIL\]'          # 失敗行のみ抽出
 cat logs/error.log                                # run 失敗コマンドのログ
 ```
 
+実環境で `sf-init.sh` を通しで検証する e2e は、通常のテストには含まれない（9.6 参照）。
+
+```bash
+bash tests/e2e/bootstrap.sh                       # 鍵一式の作成（最初の 1 回だけ）
+bash tests/e2e/run.sh                             # 前掃除 → sf-init の通し実行 → 確認 → 後掃除
+bash tests/e2e/cleanup.sh                         # 削除対象の一覧（何も消さない）。--yes で削除
+```
+
 ### 7.2 Salesforce CLI
 
 ```bash
@@ -566,7 +584,7 @@ sf-tools の `main` への反映は、全ユーザーへの配布と同義であ
 | 確認項目 | 方法 |
 |---|---|
 | テスト | `bash tests/run_tests.sh` が全件 PASS |
-| `sf-init.sh` を変更した場合 | 検証環境の新規 force-* を作成し、最後まで通ること（Phase 11 の `SF_TOOLS_TOKEN` の登録を含む） |
+| `sf-init.sh` を変更した場合 | 検証環境の新規 force-* を作成し、最後まで通ること（Phase 11 の `SF_TOOLS_TOKEN` の登録を含む）。`bash tests/e2e/run.sh` で自動化できる（9.6） |
 | ワークフロー・`sf-metasync.sh` を変更した場合 | `wf-metasync` を `workflow_dispatch` で手動実行して成功すること |
 | `sf-release.sh` / `wf-validate` / `wf-release` を変更した場合 | デプロイ対象を含む PR を作り、`wf-validate` が通ること（動作確認のみの PR はマージせずに閉じる。マージすると `wf-release` が実際にデプロイする） |
 
@@ -583,3 +601,41 @@ sf-tools の `main` への反映は、全ユーザーへの配布と同義であ
 - `main` のブランチ保護・Ruleset は、GitHub 無料プラン（Private リポジトリ）では設定できない（`Upgrade to GitHub Pro or make this repository public`）
 - そのため、`CLAUDE.md` 1.1 の運用ルール（mm / rr は明示された場合のみ、rr は検証報告が前提）で守る
 - プランの変更、またはリポジトリを公開にできるようになった場合は、`main` に Required reviewers を設定すること
+
+### 9.6 e2e（sf-init の通し検証の自動化）
+
+実際の GitHub / Salesforce で `sf-init.sh` を Phase 1〜11 まで自動実行し、検証し、削除する。`tests/e2e/` に置き、通常の `bash tests/run_tests.sh` には含めない（実環境を使うため）。安全ガードと部品は `tests/test_e2e.sh`（モック）で確認する。
+
+**方式:** `sf-init.sh` 本体は変えず、外から標準入力と PATH の差し替えで操作する（本番のコードに近道を入れない）。
+
+| 部品 | 役割 |
+|---|---|
+| `tests/e2e/lib.sh` | 共通関数。名前の判定、ガード、鍵一式の読み込み、削除、エイリアスの保存・復元、`e2e_make_input`（標準入力の台本） |
+| `tests/e2e/run.sh` | 前掃除 → `sf-init.sh` の実行 → 確認 → 後掃除。`--keep`（後掃除なし）、`--no-actions`（Actions の確認を省略） |
+| `tests/e2e/cleanup.sh` | 削除。既定は一覧のみ、`--yes` で削除（確認で `delete` の入力が必要。`--no-confirm` で省略） |
+| `tests/e2e/bootstrap.sh` | 鍵一式（`~/.sf-tools-e2e/fixture.env`）の作成。最初の 1 回だけ。雛形は `fixture.example.env` |
+| `tests/e2e/shims/sf` | `sf org login web` だけを `sf org login sfdx-url`（認証 URL）に差し替える。他のコマンドは本物の `sf` に渡す |
+| `tests/e2e/shims/browser` | `start` / `xdg-open` / `open` の名前でコピーされ、ブラウザを開かない |
+
+**テスト用の名前:** プロジェクト `e2e-YYYYMMDD-HHMMSS` → リポジトリ `force-e2e-YYYYMMDD-HHMMSS` → 外部クライアントアプリ `SF_TOOLS_force_e2e_YYYYMMDD_HHMMSS`。毎回別の名前なので、前回の削除を待たずに実行できる。
+
+**確認する内容:** Secret / Variable / ブランチ / ワークフローの存在、`SF_TOOLS_BRANCH=development`、`SLACK_CHANNEL_ID` の一致、トークンが出力・ログに出ていないこと、`wf-metasync` の成功、`wf-release` の途中のステップ（JWT ログイン・Private の `sf-tools` の取得）と Slack 通知（`"ok":true`）。`wf-release` は `main` に release 用のファイルが無く、最終的に失敗するのが正常。
+
+**削除の安全ガード:**
+
+- 削除対象は、名前の形式（上記のタイムスタンプ付き）が一致するものだけ。`SF_TOOLS`、`force-test-win` などは対象外（`e2e_is_target_*`）
+- オーナーは、鍵一式の `E2E_OWNER` のみ。gh のログインユーザーが `E2E_GH_USER` と一致しないと動かない
+- `e2e_guard_env` を通らないと、削除系の関数は動かない（`E2E_GUARD_OK=1`）。GitHub Actions 上では動かない
+- `cleanup.sh` は既定で何も消さない。`--yes` でも、一覧を見せたうえで `delete` の入力を求める
+
+**Salesforce の外部クライアントアプリの削除:** 削除用のデプロイ（`sf project deploy start --manifest package.xml --post-destructive-changes destructiveChanges.xml`）で、5 つの構成要素を消す（`ExternalClientApplication` / `ExtlClntAppGlobalOauthSettings` / `ExtlClntAppOauthSettings` / `ExtlClntAppOauthConfigurablePolicies` / `ExtlClntAppConfigurablePolicies`）。ローカルのソースは要らない。アプリを消すと、そのアプリでの JWT のセッションも無効になるため、削除の前に、認証 URL（`sfdxAuthUrl`）で管理用にログインし直す。これで、テスト後の `sf` の認証は、健全な状態に戻る。
+
+**sf のエイリアス:** `sf-init` は `prod` / `staging` / `develop` を付けるため、実行前の状態を保存し、終了時に復元する（増えたものは外し、変わったものは戻す）。
+
+**前提と限界:**
+
+- 台本（`e2e_make_input`）は、`sf-init` の質問の順番に依存する。質問を変えたら、台本も直す。`tests/test_sf-init.sh` の `test_e2e_input_sequence`（モック）が、ずれを検知する
+- Token の作成と、テスト用組織への最初のログインは自動化できない（`bootstrap.sh` で 1 回だけ手動）
+- 実機の Windows（Git Bash）で動かす前提。`sf` は npm 版が前提（`sf-init.sh` の `check_sf_cli` が確認する）。公式インストーラー版で、`sf` が成功しても終了コード 1 を返す環境では、`E2E_SF_REDIRECTED=1`（`bootstrap.sh` が判定して設定）で一時的に回避できるが、npm 版に入れ替えれば不要
+- テスト用組織は、本番または Developer Edition（Sandbox ではない）
+- リポジトリの削除には、`gh` の `delete_repo` の権限が要る（`gh auth refresh -h github.com -s delete_repo`）

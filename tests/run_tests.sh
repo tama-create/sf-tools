@@ -62,6 +62,7 @@ TEST_FILES=(
     test_sf-launcher.sh
     test_sf-precommit.sh
     test_security.sh
+    test_e2e.sh
 )
 
 # ------------------------------------------------------------------------------
@@ -111,6 +112,9 @@ if [[ "${1:-}" == "--changed" ]]; then
                 ;;
             hooks/pre-push)
                 _changed_tests+=("test_sf-prepush.sh")
+                ;;
+            tests/e2e/*)
+                _changed_tests+=("test_e2e.sh")
                 ;;
             tests/test_helper.sh)
                 # 共通ヘルパー変更は全テストに影響するため全件実行

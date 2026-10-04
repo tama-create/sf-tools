@@ -1034,6 +1034,100 @@ test_phase10_eca_auto() {
 }
 
 # ==============================================================================
+# テスト 20: e2e の入力の台本（tests/e2e/lib.sh の e2e_make_input）で、sf-init が最後まで進む
+#   実環境の通し検証（tests/e2e/run.sh）が流す標準入力が、sf-init の質問の順番と合っているかを、
+#   モックで確認する（質問の順番を変えたとき、台本の直し忘れをここで検知する）
+#   構成: 検証環境（SF_TOOLS_BRANCH=development）・main のみ・外部クライアントアプリ・DM ではない共有チャンネル
+# ==============================================================================
+test_e2e_input_sequence() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] e2e の入力の台本で、sf-init が Phase 1〜11 を最後まで進む${CLR_RST}"
+
+    local mb mock_home init_base init_dir exit_code input
+    mb=$(setup_mock_bin)
+    export MOCK_CALL_LOG="$mb/calls.log"
+    mock_home=$(setup_mock_home)
+    init_base=$(_setup_init_dir "tamashimon" "e2e-20260101-000000")
+    init_dir="$init_base/home/tamashimon/e2e-20260101-000000"
+    create_all_mocks "$mb"
+    create_mock_gh_for_init "$mb"
+    _stub_subscripts "$mock_home"
+    export MOCK_SF_ORG_JSON='{"result":{"username":"admin@example.com","alias":"x"}}'
+    export SF_INIT_JWT_INTERVAL=0
+
+    input=$(E2E_PAT_TOKEN=ghp_fakepat E2E_SLACK_BOT_TOKEN=xoxb-fakeslack E2E_SLACK_CHANNEL_ID=C01ABCDEFGH \
+            E2E_SF_TOOLS_TOKEN=github_pat_faketools \
+            bash -c "source '$SF_TOOLS_DIR/tests/e2e/lib.sh'; e2e_make_input")
+    printf '%s\n' "$input" \
+        | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
+              bash "$mock_home/sf-tools/bin/sf-init.sh" ) > "$mb/out.log" 2>&1
+    exit_code=$?
+
+    assert_exit_ok            "$exit_code"                                                          "台本で最後まで正常終了する"
+    assert_file_contains      "$mb/out.log" "検証環境（sf-tools: development）"                      "環境種別は検証環境になる"
+    assert_file_contains      "$MOCK_CALL_LOG" "gh variable set SF_TOOLS_BRANCH --body development"   "SF_TOOLS_BRANCH=development が登録される"
+    assert_file_contains      "$MOCK_CALL_LOG" "gh secret set PAT_TOKEN"                              "PAT_TOKEN が登録される"
+    assert_file_contains      "$MOCK_CALL_LOG" "gh secret set SLACK_BOT_TOKEN"                        "SLACK_BOT_TOKEN が登録される"
+    assert_file_contains      "$mb/var_SLACK_CHANNEL_ID.txt" "C01ABCDEFGH"                            "SLACK_CHANNEL_ID に、台本のチャンネル ID が登録される"
+    assert_file_contains      "$MOCK_CALL_LOG" "sf org login web --instance-url https://login.salesforce.com --alias sf-tools-PROD" "メイン組織のログインが呼ばれる"
+    assert_file_contains      "$MOCK_CALL_LOG" "project deploy start --source-dir force-app"          "外部クライアントアプリが作成される"
+    assert_file_contains      "$MOCK_CALL_LOG" "gh secret set SF_CONSUMER_KEY_PROD"                   "SF_CONSUMER_KEY_PROD が登録される"
+    assert_file_not_contains  "$MOCK_CALL_LOG" "SF_CONSUMER_KEY_STG"                                  "main のみの構成なので、ステージング組織は設定しない"
+    assert_file_contains      "$MOCK_CALL_LOG" "gh secret set SF_TOOLS_TOKEN"                         "SF_TOOLS_TOKEN が登録される"
+    assert_dir_exists         "$init_dir/init"                                                        "最後の質問に N と答えて、init フォルダが残る（台本の最後までずれていない）"
+    assert_file_not_contains  "$mb/out.log" "ghp_fakepat"                                            "PAT_TOKEN の値が出力に出ない"
+    assert_file_not_contains  "$mb/out.log" "github_pat_faketools"                                   "SF_TOOLS_TOKEN の値が出力に出ない"
+
+    unset MOCK_SF_ORG_JSON SF_INIT_JWT_INTERVAL MOCK_CALL_LOG
+    teardown "$mb" "$mock_home" "$init_base"
+}
+
+# ==============================================================================
+# テスト 21: sf の終了コードの確認（check_sf_cli）
+#   sf --version が終了コード 1 を返す環境（Windows の Git Bash で、公式インストーラー版を自動更新した場合）では、
+#   案内を表示して、リポジトリの作成などに進まずに中断する。--resume / --only のときも確認する
+# ==============================================================================
+test_sf_cli_check() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] sf の終了コードが 0 以外なら、sf-init は案内して中断する${CLR_RST}"
+
+    local mb mock_home init_base init_dir exit_code
+    mb=$(setup_mock_bin)
+    export MOCK_CALL_LOG="$mb/calls.log"
+    mock_home=$(setup_mock_home)
+    init_base=$(_setup_init_dir "tamashimon" "testproject")
+    init_dir="$init_base/home/tamashimon/testproject"
+    create_all_mocks "$mb"
+    create_mock_gh_for_init "$mb"
+    _stub_subscripts "$mock_home"
+
+    _run_init() {  # 引数: sf-init.sh のオプション。標準入力は、確認に進まないため、Y だけ
+        : > "$MOCK_CALL_LOG"
+        printf 'Y\n' | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" MOCK_SF_VERSION_EXIT=1 \
+              bash "$mock_home/sf-tools/bin/sf-init.sh" "$@" ) > "$mb/out.log" 2>&1
+        exit_code=$?
+    }
+
+    _run_init
+    assert_exit_fail         "$exit_code"                                                 "終了コード 1 → 中断する"
+    assert_file_contains     "$mb/out.log" "終了コードが 0 ではありません"                  "終了コード 1 → 案内が表示される"
+    assert_file_contains     "$mb/out.log" "npm install -g @salesforce/cli"                "終了コード 1 → npm 版のインストール方法が案内される"
+    assert_file_not_contains "$MOCK_CALL_LOG" "gh repo create"                             "終了コード 1 → リポジトリを作成しない"
+    assert_file_not_contains "$mb/out.log" "続行しますか"                                    "終了コード 1 → 管理者向けの確認まで進まない"
+
+    _run_init --resume 10
+    assert_exit_fail         "$exit_code"                                                 "終了コード 1 + --resume 10 → 中断する"
+    assert_file_contains     "$mb/out.log" "終了コードが 0 ではありません"                  "終了コード 1 + --resume 10 → 案内が表示される"
+
+    _run_init --only 10
+    assert_exit_fail         "$exit_code"                                                 "終了コード 1 + --only 10 → 中断する"
+
+    unset -f _run_init
+    unset MOCK_CALL_LOG
+    teardown "$mb" "$mock_home" "$init_base"
+}
+
+# ==============================================================================
 # テスト実行
 # ==============================================================================
 echo ""
@@ -1060,5 +1154,7 @@ test_phase11_sf_tools_token
 test_phase9_ruleset_id
 test_phase7_channel_id
 test_phase10_eca_auto
+test_e2e_input_sequence
+test_sf_cli_check
 
 print_summary

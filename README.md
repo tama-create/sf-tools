@@ -44,7 +44,7 @@ sf-tools は、**Salesforce CLI（`sf`）の npm 版**（`npm install -g @salesf
 command -v sf; sf --version; echo "終了コード=$?"
 ```
 
-`sf-init.sh` は、起動時にこれを確認し、0 以外なら案内を表示して中断します。`sf-install.sh` は、警告を表示するだけで続行します（中断すると、sf-tools 自身の最新化が止まってしまうためです）。日常のコマンド（`sf-start.sh`、`sf-release.sh`、`sf-metasync.sh`、`sf-update-secret.sh`）も、起動時に確認し、問題があれば**警告を表示して続行**します（`git push` のフックなどを、環境の問題で突然止めないためです）。確認に成功した場合は、24 時間は、確認を省略します（`~/.sf-tools-sf-check`）。
+`sf-init.sh` は、起動時にこれを確認し、0 以外なら案内を表示して中断します。`sf-install.sh` は、警告を表示するだけで続行します（中断すると、sf-tools 自身の最新化が止まってしまうためです）。日常のコマンド（`sf-start.sh`、`sf-release.sh`、`sf-metasync.sh`、`sf-update-secret.sh`）も、起動時に確認し、問題があれば案内を表示して**中断**します（`sf` の成否は、すべて終了コードで判定するため、終了コードが正しくない `sf` では、途中で中途半端に止まるより、最初に止めるほうが安全だからです）。確認に成功した場合は、24 時間は、確認を省略します（`~/.sf-tools-sf-check`）。
 
 **インストーラー版から npm 版への入れ替え（Windows）:**
 

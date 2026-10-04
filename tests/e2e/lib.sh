@@ -30,8 +30,8 @@
 #   E2E_SLACK_CHANNEL_ID  通知先（共有チャンネル）の ID
 #   E2E_SF_TOOLS_TOKEN    SF_TOOLS_TOKEN に登録する Fine-grained PAT
 #   E2E_SFDX_AUTH_URL     テスト用組織の認証 URL（sf org login sfdx-url 用。リフレッシュトークンを含む）
-#   E2E_SF_REDIRECTED     （任意）1 を指定すると sf の起動方式を切り替える。Git Bash で sf の終了コードが
-#                         常に 1 になる環境（公式インストーラー版 + 自動更新版）の回避用
+#
+# 【前提】 sf は npm 版（終了コードで成否を判定する。run.sh / bootstrap.sh の冒頭の check_sf_cli が確認する）
 # ==============================================================================
 
 E2E_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -99,7 +99,6 @@ e2e_load_fixture() {
     done
     e2e_valid_sfdx_url "$E2E_SFDX_AUTH_URL" \
         || die "E2E_SFDX_AUTH_URL が認証 URL の形式ではありません（${f}）。"
-    [[ -n "${E2E_SF_REDIRECTED:-}" ]] && export SF_REDIRECTED="$E2E_SF_REDIRECTED"
     return 0
 }
 
@@ -153,11 +152,7 @@ e2e_alias_restore() {
 # ------------------------------------------------------------------------------
 # テスト用組織への管理用ログイン（認証 URL を使うため、ブラウザは開かない）
 # ------------------------------------------------------------------------------
-# sf は成功しても終了コード 1 を返す環境があるため、成否は出力の username で判定する
-e2e_sf_connected() {
-    sf org display --target-org "$1" --json 2>/dev/null | grep -q '"username": *"[^"]*"'  # 判定のみのため run 不使用
-}
-
+# 成否は sf の終了コードで判定する（sf は npm 版が前提）
 # 失敗したら、sf の出力（原因）を表示し、一時的な失敗に備えて、待ってから 1 回だけやり直す
 #   E2E_ADMIN_RETRY_WAIT: やり直すまでの待ち時間（秒。既定 5）
 e2e_sf_admin_login() {
@@ -166,9 +161,8 @@ e2e_sf_admin_login() {
     chmod 600 "$urlfile" 2>/dev/null || true  # run 不使用: ファイル権限保護（Windows は効果なし・意図的エラー無視）
     printf '%s' "$E2E_SFDX_AUTH_URL" > "$urlfile"
     for ((try = 1; try <= max; try++)); do
-        # 終了コードを信頼できない環境があるため無視し、接続できたかで判定する。出力は、失敗時の表示のために受け取る
-        out=$(run sf org login sfdx-url --sfdx-url-file "$urlfile" --alias "$E2E_ADMIN_ALIAS" || true)  # 終了コードを信頼できないため無視
-        if e2e_sf_connected "$E2E_ADMIN_ALIAS"; then
+        # 成否は終了コードで判定する。出力は、失敗時の表示のために受け取る
+        if out=$(run sf org login sfdx-url --sfdx-url-file "$urlfile" --alias "$E2E_ADMIN_ALIAS"); then  # 条件チェック
             rm -f "$urlfile"
             return 0
         fi
@@ -221,14 +215,12 @@ e2e_delete_repo() {
 }
 
 # Salesforce のテスト用外部クライアントアプリの一覧（名前のみ。管理用ログイン済みであること）
-#   sf の終了コードは信頼できない環境があるため、取得の成否は、応答の "status": 0 で判定する。
-#   取得に失敗したら、戻り値 1（何も出力しない）
+#   取得の成否は、sf の終了コードで判定する。取得に失敗したら、戻り値 1（何も出力しない）
 e2e_list_target_ecas() {
     local name out try
     e2e_require_guard
     for (( try = 1; try <= E2E_LIST_RETRY; try++ )); do
-        out=$(sf org list metadata --metadata-type ExternalClientApplication --target-org "$E2E_ADMIN_ALIAS" --json 2>/dev/null) || true  # 終了コードを信頼できないため無視（成否は status で判定）
-        if printf '%s' "$out" | grep -qE '"status": *0[,[:space:]}]'; then  # パイプのみのため run 不使用
+        if out=$(sf org list metadata --metadata-type ExternalClientApplication --target-org "$E2E_ADMIN_ALIAS" --json 2>/dev/null); then  # 条件チェック（出力の取得のため run 不使用）
             printf '%s\n' "$out" | grep -oE '"fullName": *"[^"]*"' | sed -E 's/.*: *"(.*)"/\1/' \
                 | while IFS= read -r name; do
                       name="${name%$'\r'}"
@@ -263,10 +255,12 @@ e2e_delete_eca() {
             "${name}_plcy"      "ExtlClntAppConfigurablePolicies"
         printf '%s\n' '  <version>64.0</version>' '</Package>'
     } > "$work/destructiveChanges.xml"
-    # 終了コードを信頼できない環境があるため、成否は呼び出し側が一覧の再取得で確認する
+    # 成否は終了コードで判定する（呼び出し側は、さらに一覧の再取得で、消えたことを確認する）
+    local rc=0
     (cd "$work" && run sf project deploy start --manifest package.xml \
-        --post-destructive-changes destructiveChanges.xml --target-org "$E2E_ADMIN_ALIAS" --wait 10) || true  # 終了コードを信頼できないため無視
+        --post-destructive-changes destructiveChanges.xml --target-org "$E2E_ADMIN_ALIAS" --wait 10) || rc=$?
     rm -rf "$work"
+    return $rc
 }
 
 # ローカルのテスト用フォルダ（作業フォルダと JWT 用の証明書フォルダ）の一覧（フルパス）
@@ -344,8 +338,12 @@ e2e_cleanup_all() {
             [[ -z "$name" ]] && continue
             log "INFO" "  Salesforce: ${name}"
             if [[ "$mode" == "delete" ]]; then
-                e2e_delete_eca "$name"
-                # 削除できたかは、一覧の再取得で確認する（再取得に失敗した場合も、削除できたとはみなさない）
+                if ! e2e_delete_eca "$name"; then  # 条件チェック
+                    log "ERROR" "  Salesforce: ${name} の削除（deploy）に失敗しました。"
+                    failed=1
+                    continue
+                fi
+                # 消えたかは、一覧の再取得で確認する（再取得に失敗した場合も、削除できたとはみなさない）
                 if ! after=$(e2e_list_target_ecas); then  # 条件チェック
                     log "ERROR" "  Salesforce: ${name} の削除後の一覧を取得できませんでした（削除できたか確認できません）。"
                     failed=1

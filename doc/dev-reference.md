@@ -144,9 +144,9 @@
 
 **成功判定のルール:** `run()` は、**終了コードのみ**で成否を判定する（出力の文字列では判定しない）。ただし、出力に `NothingToDeploy` / `No local changes to deploy` が含まれる場合は `RET_NO_CHANGE`（終了コードより優先）。以前（〜2026-03-23）は、出力の成功キーワード（`Success` / `Succeeded` / `Deployed` / `status": 0` など）でも `RET_OK` にしていたが、失敗を成功と誤判定する恐れがあるため、2026-03-24 に削除した。
 
-**Salesforce CLI の前提:** Windows の Git Bash で、Salesforce CLI の公式インストーラー版（自動更新後）を使うと、`sf` が成功しても終了コード 1 を返す（`sf --version` や `sf alias unset` も 1。同じバージョンの npm 版は正しく返す）。このため sf-tools は **npm 版を前提**とし、`sf-init.sh`（NG なら中断）と `sf-install.sh`（警告のみ）の起動時に、`check_sf_cli`（`sf --version` の終了コードが 0 か）で確認する。`sf-install.sh` を警告のみにしているのは、中断すると sf-tools 自身の最新化（`git pull`）まで止まるため。日常のコマンド（`sf-start.sh` / `sf-release.sh`（`sf-deploy` / `sf-dryrun` / pre-push の検証を含む）/ `sf-metasync.sh` / `sf-update-secret.sh`）も、起動時に `check_sf_cli --warn-only --cache`（警告のみ・成功は 24 時間省略。`git push` のフックなどを環境の問題で突然止めないため）で確認する。
+**Salesforce CLI の前提:** Windows の Git Bash で、Salesforce CLI の公式インストーラー版（自動更新後）を使うと、`sf` が成功しても終了コード 1 を返す（`sf --version` や `sf alias unset` も 1。同じバージョンの npm 版は正しく返す）。このため sf-tools は **npm 版を前提**とし、`sf-init.sh` / `sf-start.sh` / `sf-release.sh`（`sf-deploy` / `sf-dryrun` / pre-push の検証を含む）/ `sf-metasync.sh` / `sf-update-secret.sh` の起動時に、`check_sf_cli`（`sf --version` の終了コードが 0 か）で確認し、NG なら案内を表示して**中断する**（日常のコマンドは `--cache`: 成功は 24 時間省略）。`sf` の成否は、すべて終了コードで判定する（`run` と同じ。出力の文言や、終了コードの無視による判定はしない）。`sf-install.sh` だけは `check_sf_cli --warn-only`（警告のみ）で、中断しない。中断すると、sf-tools 自身の最新化（`git pull`）まで止まるため。
 
-**JWT 接続テストの隔離:** `sf` の認証はユーザー名単位なので、JWT 接続テスト（`sf org login jwt`）をそのまま実行すると、エイリアス（`prod` / `staging` / `develop`）が増え、同じユーザーの既存の認証が JWT の認証に置き換わる（その鍵・アプリを後で消すと、そのユーザーの `sf` が使えなくなる）。そのため、JWT 接続テスト（`init-common.sh` の `register_jwt_secret` / `register_jwt_secret_eca`、`sf-update-secret.sh`）は `run_isolated_home`（一時的なホームフォルダ）の中で実行する。ほかの場所では、この JWT 用のエイリアスは使われない（`sf-start.sh` は、ユーザーが指定したエイリアスで `sf org login web` をする）。個別に出力で成否を判定している箇所（`sf org login jwt` の `Successfully authorized` など）は、npm 版でも、そのまま動く。
+**JWT 接続テストの隔離:** `sf` の認証はユーザー名単位なので、JWT 接続テスト（`sf org login jwt`）をそのまま実行すると、エイリアス（`prod` / `staging` / `develop`）が増え、同じユーザーの既存の認証が JWT の認証に置き換わる（その鍵・アプリを後で消すと、そのユーザーの `sf` が使えなくなる）。そのため、JWT 接続テスト（`init-common.sh` の `register_jwt_secret` / `register_jwt_secret_eca`、`sf-update-secret.sh`）は `run_isolated_home`（一時的なホームフォルダ）の中で実行する。ほかの場所では、この JWT 用のエイリアスは使われない（`sf-start.sh` は、ユーザーが指定したエイリアスで `sf org login web` をする）。JWT 接続テストの成否は、`run_isolated_home` の戻り値（`sf org login jwt` の終了コード）で判定する。
 
 ### 3.4 安全ガードパターン
 
@@ -251,7 +251,7 @@ check_gh_owner "$GITHUB_OWNER"   # 認証ユーザーの一致確認
 ### 4.4 sf-install.sh
 
 処理順（順序変更禁止）:
-0. `check_sf_cli --warn-only`（`sf --version` の終了コードを確認し、0 以外なら警告のみ。中断しない）
+0. `check_sf_cli --warn-only`（`sf --version` の終了コードを確認し、0 以外なら警告のみ。中断しない。`sf-tools` 自身の最新化を止めないため）
 1. `~/sf-tools` を `git pull` で更新
 2. `config/*.txt` を不足時のみ補充
 3. `sf-hook.sh` で Git Hook をインストール
@@ -379,7 +379,7 @@ tr -d '\r' < "$key_file" | base64 -w 0 | gh secret set "SF_PRIVATE_KEY" -R "$REP
 > `tr -d '\r'` は Windows 改行コード（CRLF）を除去するため。`-w 0` は base64 の折り返しなし（1行）。
 
 **JWT 接続テスト（内部処理）:**
-`sf org login jwt` は終了コードが不安定なため、終了コードではなく stdout の `Successfully authorized` 文字列で成功を判定する。実行コマンドと出力はログに記録する。
+`sf org login jwt` の成否は、終了コードで判定する（`sf` は npm 版が前提）。実行コマンドと出力はログに記録する（コンシューマー鍵は伏せ字）。
 
 ### 4.12 sf-hook.sh / sf-unhook.sh
 
@@ -402,7 +402,7 @@ tr -d '\r' < "$key_file" | base64 -w 0 | gh secret set "SF_PRIVATE_KEY" -R "$REP
 7. Slack 連携の設定（SLACK_BOT_TOKEN を Secret / SLACK_CHANNEL_ID を Variable に登録。チャンネル ID は C または G で始まる形式かを検証し、それ以外（D=DM、U=ユーザーなど）は警告して拒否し、入力し直させる。通知先は全員が参加する共有チャンネルのため）
 8. 初回コミット＆プッシュ（PAT は GIT_ASKPASS で渡しコマンドのログに残さない。push 後に .sf-init.env から PAT を削除する）
 9. GitHub リポジトリ設定・Ruleset の適用（既存 Ruleset の ID は数字のときだけ削除対象にする）
-10. JWT 認証情報の設定（SF_PRIVATE_KEY / SF_CONSUMER_KEY_* を Secret / SF_USERNAME_* / SF_INSTANCE_URL_* を Variable に登録）。アプリ種別が外部クライアントアプリ（2）のときは、組織ごとに `register_jwt_secret_eca`（`init-common.sh`）が自動作成する（`sf org login web` → ユーザー名・プロファイル名（表示名）を取得 → `generate_eca_metadata` で 5 ファイルを生成して `sf project deploy` → `sf project retrieve` でコンシューマー鍵を取得 → JWT 接続テスト（反映待ちのためリトライ。`SF_INIT_JWT_RETRIES` / `SF_INIT_JWT_INTERVAL`）→ 登録）。ログイン用の一時エイリアス（`sf-tools-PROD` / `sf-tools-STG` / `sf-tools-DEV`。ユーザーが運用中のエイリアスと重ならないよう `sf-tools-` を付ける）は、ログイン前に `sf alias unset` で外し（前回の古い認証による誤判定の防止）、終了後にも `sf alias unset` で消す（`sf org logout` は同じユーザー名の全エイリアスの認証を消すため使わない）。`sf` は、Windows の Git Bash で、公式インストーラー版 + 自動更新版の組み合わせのとき、成功しても終了コード 1 を返すことがある（`sf org login web` / `sf org display` ほか。`SF_REDIRECTED=1` で回避できる）。そのためログインの成否は、終了コードを一切見ず、一時エイリアスの接続情報（`sf org display --json` の出力の `username`）が取れるかで判定する。接続アプリ（1）は従来の手動案内
+10. JWT 認証情報の設定（SF_PRIVATE_KEY / SF_CONSUMER_KEY_* を Secret / SF_USERNAME_* / SF_INSTANCE_URL_* を Variable に登録）。アプリ種別が外部クライアントアプリ（2）のときは、組織ごとに `register_jwt_secret_eca`（`init-common.sh`）が自動作成する（`sf org login web` → ユーザー名・プロファイル名（表示名）を取得 → `generate_eca_metadata` で 5 ファイルを生成して `sf project deploy` → `sf project retrieve` でコンシューマー鍵を取得 → JWT 接続テスト（反映待ちのためリトライ。`SF_INIT_JWT_RETRIES` / `SF_INIT_JWT_INTERVAL`）→ 登録）。ログイン用の一時エイリアス（`sf-tools-PROD` / `sf-tools-STG` / `sf-tools-DEV`。ユーザーが運用中のエイリアスと重ならないよう `sf-tools-` を付ける）は、ログイン前に `sf alias unset` で外し（前回の古い認証による誤判定の防止）、終了後にも `sf alias unset` で消す（`sf org logout` は同じユーザー名の全エイリアスの認証を消すため使わない）。`sf` は npm 版が前提（Windows の Git Bash で公式インストーラー版を使うと、成功しても終了コード 1 になるため）。ログイン（`sf org login web`）、接続情報の取得（`sf org display --json`。ユーザー名はその出力から取り出す）、プロファイル名の取得（`sf data query`）、JWT 接続テストの成否は、すべて終了コードで判定し、0 以外なら中断する（JWT 接続テストはリトライ後、スキップの確認）。接続アプリ（1）は従来の手動案内
 11. SF_TOOLS_TOKEN の設定（`11_sf_tools_token.sh`。Fine-grained PAT の作成画面を事前入力 URL で開く → `read_secret` で Token を入力（画面に表示しない）→ `GH_TOKEN` 環境変数で `gh api repos/<sf-tools>` を実行して読み取りを確認（コマンドの文字列・ログに Token を含めない）→ `printf '%s' "$TOKEN" | run gh secret set SF_TOOLS_TOKEN`。確認に失敗した場合は再入力かスキップを選ぶ。Token は `.sf-init.env` に書き出さない。sf-tools の OWNER/REPO は `init-common.sh` の `SF_TOOLS_REPO_FULL_NAME`）
 
 オプション:
@@ -638,7 +638,7 @@ sf-tools の `main` への反映は、全ユーザーへの配布と同義であ
 
 **管理用ログイン（`e2e_sf_admin_login`）:** 認証 URL で、テスト用組織にログインし直す（削除・一覧の前）。失敗したら、`sf` の出力（原因。トークン・認証 URL のリフレッシュトークンは伏せ字）を表示し、`E2E_ADMIN_RETRY_WAIT` 秒（既定 5）待って、1 回だけやり直す。実機で、一度だけ原因不明の失敗（`RefreshTokenAuthError`）があり、同じ認証 URL での再実行は成功したため、一時的な失敗に備えている。
 
-**一覧の取得失敗（「対象なし」と取り違えない）:** 削除の前に、GitHub のリポジトリ一覧（`e2e_list_target_repos`）と Salesforce のアプリ一覧（`e2e_list_target_ecas`）を取得する。取得の成否を確認せず、失敗を「対象なし」とみなすと、削除されないまま e2e が「成功」と報告する（実機で、アプリが 1 つ残る実例があった）。そのため、(1) 取得に失敗したら、`E2E_LIST_RETRY` 回（既定 3）、`E2E_LIST_RETRY_WAIT` 秒（既定 5）おいて再試行し、(2) それでも失敗なら、戻り値 1（何も出力しない）、(3) `e2e_cleanup_all` は、「対象なし」とは表示せず、ERROR を表示して失敗として記録する（`cleanup.sh` / `run.sh` の前掃除は中断、後掃除は結果を失敗にする。ほかの掃除は止めずに続ける）。Salesforce 側は、`sf` の終了コードを信頼できない環境があるため、成否を応答の `"status": 0` で判定する。削除後の再取得に失敗した場合も、削除できたとはみなさない。
+**一覧の取得失敗（「対象なし」と取り違えない）:** 削除の前に、GitHub のリポジトリ一覧（`e2e_list_target_repos`）と Salesforce のアプリ一覧（`e2e_list_target_ecas`）を取得する。取得の成否を確認せず、失敗を「対象なし」とみなすと、削除されないまま e2e が「成功」と報告する（実機で、アプリが 1 つ残る実例があった）。そのため、(1) 取得に失敗したら、`E2E_LIST_RETRY` 回（既定 3）、`E2E_LIST_RETRY_WAIT` 秒（既定 5）おいて再試行し、(2) それでも失敗なら、戻り値 1（何も出力しない）、(3) `e2e_cleanup_all` は、「対象なし」とは表示せず、ERROR を表示して失敗として記録する（`cleanup.sh` / `run.sh` の前掃除は中断、後掃除は結果を失敗にする。ほかの掃除は止めずに続ける）。取得の成否は、`gh` / `sf` の終了コードで判定する。アプリの削除（deploy）が失敗した場合は、失敗として記録し、削除後の再取得に失敗した場合も、削除できたとはみなさない。
 
 **強制終了後の後始末:** `run.sh` が強制終了（ウィンドウが閉じるなど）すると、一時フォルダ（`$TMPDIR/e2e-run.XXXXXX`。認証 URL のファイルを含む）と、作成済みのテスト用リソースが残る。次回の前掃除、または `cleanup.sh` が、残った一時ファイル・フォルダ（`e2e-run.*` / `e2e-eca-del.*` / `e2e-sfdx-url.*`）も、掃除の対象にする。ただし、いま実行中の `run.sh` の一時フォルダ（`E2E_TMP`）と、30 分以内のもの（`E2E_TMP_MIN_AGE`。別の実行の途中かもしれない）は、対象外。
 
@@ -650,6 +650,6 @@ sf-tools の `main` への反映は、全ユーザーへの配布と同義であ
 
 - 台本（`e2e_make_input`）は、`sf-init` の質問の順番に依存する。質問を変えたら、台本も直す。`tests/test_sf-init.sh` の `test_e2e_input_sequence`（モック）が、ずれを検知する
 - Token の作成と、テスト用組織への最初のログインは自動化できない（`bootstrap.sh` で 1 回だけ手動）
-- 実機の Windows（Git Bash）で動かす前提。`sf` は npm 版が前提（`sf-init.sh` の `check_sf_cli` が確認する）。公式インストーラー版で、`sf` が成功しても終了コード 1 を返す環境では、`E2E_SF_REDIRECTED=1`（`bootstrap.sh` が判定して設定）で一時的に回避できるが、npm 版に入れ替えれば不要
+- 実機の Windows（Git Bash）で動かす前提。`sf` は npm 版が前提（`sf-init.sh` の `check_sf_cli` が確認する）。`run.sh` / `cleanup.sh` / `bootstrap.sh` も、冒頭の `check_sf_cli` で、終了コードが 0 でなければ中断する。e2e の `sf` の成否も、すべて終了コードで判定する（回避用の `E2E_SF_REDIRECTED` は廃止）
 - テスト用組織は、本番または Developer Edition（Sandbox ではない）
 - リポジトリの削除には、`gh` の `delete_repo` の権限が要る（`gh auth refresh -h github.com -s delete_repo`）

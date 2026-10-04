@@ -932,9 +932,8 @@ test_phase7_channel_id() {
 # テスト 19: Phase 10 — 外部クライアントアプリ（ECA）の自動作成（--only 10）
 #   入力列: 警告確認 Y → アプリ種別 2 → メイン組織は Sandbox? N（ブランチ構成 1 階層 = メイン組織のみ）
 #   - 正常                  : ブラウザログイン → deploy → 鍵を retrieve → JWT → 登録。メタデータの内容も検証
-#   - ログイン成功 + 終了コード 1 : login / display とも終了コード 1 でも、出力の username が取れれば成功とみなして続行
-#                                   （Windows の sf で実際に発生。終了コードは見ない）
-#   - ログイン失敗          : 接続情報が取れなければ中断。deploy・登録は行われない
+#   - 終了コード 1          : login web / org display の終了コードが 1 なら中断（成否は終了コードで判定。sf は npm 版が前提）
+#   - ログイン失敗          : 待ち時間切れなどで login web が失敗したら中断。deploy・登録は行われない
 #   - JWT が最初の 2 回失敗 : リトライして 3 回目で成功
 #   - deploy が失敗         : 中断。retrieve・登録は行われない
 #   - JWT が成功しない      : 確認で N → 中断 / Y → 接続テストをスキップして登録
@@ -999,11 +998,19 @@ test_phase10_eca_auto() {
     assert_file_not_contains  "$d/extlClntAppGlobalOauthSets/SF_TOOLS_force_testproject_glbloauth.ecaGlblOauth-meta.xml" "consumerKey" "consumerKey は書かない（出力項目）"
     rm -rf "$init_base"
 
-    # ログインは成功するが sf の終了コードが 1（Windows で実際に発生。org display も終了コード 1）→ 出力で判定して続行
-    MOCK_SF_LOGIN_WEB_EXIT=1 MOCK_SF_ORG_DISPLAY_EXIT=1 _p10_run 'Y\n2\nN\n'
-    assert_exit_ok            "$exit_code"                                                              "ログイン成功 + 終了コード 1（login / display とも）→ 続行して終了コード 0"
-    assert_file_contains      "$MOCK_CALL_LOG" "project deploy start"                                     "ログイン成功 + 終了コード 1 → deploy まで進む"
-    assert_file_contains      "$MOCK_CALL_LOG" "gh secret set SF_CONSUMER_KEY_PROD"                       "ログイン成功 + 終了コード 1 → 登録される"
+    # sf の終了コードが 1 → 失敗として中断（成否は終了コードで判定する。sf は npm 版が前提）
+    #   出力に成功の文言（Successfully authorized）があっても、終了コードが 1 なら、成功とはみなさない
+    MOCK_SF_LOGIN_WEB_EXIT=1 _p10_run 'Y\n2\nN\n'
+    assert_exit_fail          "$exit_code"                                                              "login web の終了コード 1 → 中断（出力に成功の文言があっても、成功とみなさない）"
+    assert_file_contains      "$out" "へのログインに失敗しました"                                          "login web の終了コード 1 → 失敗の旨が表示される"
+    assert_file_not_contains  "$MOCK_CALL_LOG" "project deploy start"                                     "login web の終了コード 1 → deploy しない"
+    assert_file_not_contains  "$MOCK_CALL_LOG" "gh secret set SF_CONSUMER_KEY_PROD"                       "login web の終了コード 1 → 登録しない"
+    rm -rf "$init_base"
+
+    MOCK_SF_ORG_DISPLAY_EXIT=1 _p10_run 'Y\n2\nN\n'
+    assert_exit_fail          "$exit_code"                                                              "org display の終了コード 1 → 中断"
+    assert_file_contains      "$out" "接続情報を取得できませんでした"                                      "org display の終了コード 1 → 失敗の旨が表示される"
+    assert_file_not_contains  "$MOCK_CALL_LOG" "project deploy start"                                     "org display の終了コード 1 → deploy しない"
     rm -rf "$init_base"
 
     # ログイン失敗（待ち時間切れなどで接続できていない）→ 中断

@@ -14,7 +14,7 @@
 # 【処理の流れ】
 #   1. 保存先の確認（既にあれば、上書きの確認）
 #   2. オーナー・gh ユーザー・作業フォルダの root・各 Token・チャンネル ID の入力
-#   3. sf の終了コードの確認（成功しても 1 を返す環境なら、E2E_SF_REDIRECTED=1 を設定する）
+#   3. sf の終了コードの確認（npm 版が前提。終了コードが 0 でなければ中断する）
 #   4. ブラウザで Salesforce にログイン（1 回だけ）→ 認証 URL を取得して保存
 #   5. 保存したファイルの読み込みとガードの確認
 #
@@ -81,14 +81,7 @@ read_secret B_TOOLS      "  SF_TOOLS_TOKEN 用の Fine-grained PAT（画面に�
 # ------------------------------------------------------------------------------
 # 3. sf の終了コードの確認
 # ------------------------------------------------------------------------------
-B_REDIRECTED=""
-if ! sf --version >/dev/null 2>&1; then  # 判定のみのため run 不使用
-    if SF_REDIRECTED=1 sf --version >/dev/null 2>&1; then  # 判定のみのため run 不使用
-        log "WARNING" "sf が成功しても終了コード 1 を返す環境です。E2E_SF_REDIRECTED=1 を設定します。"
-        B_REDIRECTED="1"
-        export SF_REDIRECTED=1
-    fi
-fi
+check_sf_cli
 
 # ------------------------------------------------------------------------------
 # 4. ブラウザでログイン → 認証 URL を取得
@@ -97,7 +90,8 @@ BOOT_ALIAS="sf-tools-e2e-bootstrap"
 echo ""
 log "INFO" "ブラウザが開きます。テスト用の Salesforce 組織に、管理者でログインしてください（2 分以内）。"
 run sf alias unset "$BOOT_ALIAS" || true  # 未設定でも続行（意図的エラー無視）
-run sf org login web --instance-url https://login.salesforce.com --alias "$BOOT_ALIAS" || true  # 終了コードを信頼できないため無視
+run sf org login web --instance-url https://login.salesforce.com --alias "$BOOT_ALIAS" \
+    || die "Salesforce へのログインに失敗しました。"
 # 新しい sf は、sf org display --verbose で認証 URL を隠すため、sf org auth show-sfdx-auth-url を使う
 # （古い sf では、sf org display --verbose にフォールバックする）。形式を確認し、合わなければ保存しない
 B_SFDX_URL=$(e2e_get_sfdx_auth_url "$BOOT_ALIAS")  # VAR=$(cmd) のため run 不使用（値を画面・ログに出さない）
@@ -122,7 +116,6 @@ chmod 700 "$(dirname "$FIXTURE")" 2>/dev/null || true  # run 不使用: 権限�
         printf 'E2E_SLACK_CHANNEL_ID=%q\n' "$B_CHANNEL"
         printf 'E2E_SF_TOOLS_TOKEN=%q\n'   "$B_TOOLS"
         printf 'E2E_SFDX_AUTH_URL=%q\n'    "$B_SFDX_URL"
-        [[ -n "$B_REDIRECTED" ]] && printf 'E2E_SF_REDIRECTED=%q\n' "$B_REDIRECTED"
     } > "$FIXTURE"
 )
 chmod 600 "$FIXTURE" 2>/dev/null || true  # run 不使用: 権限保護（Windows は効果なし・意図的エラー無視）

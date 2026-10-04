@@ -131,8 +131,8 @@ test_changes_are_committed
 test_no_changes
 test_non_main_branch_switches
 test_staging_fail_dev_merges_main
-# sf の終了コードが 0 以外（インストーラー版の不具合）→ 警告を表示するが、続行する
-test_sf_cli_warning_only() {
+# sf の終了コードが 0 以外（インストーラー版の不具合）→ 案内を表示して中断する
+test_sf_cli_abort() {
     local td mb mh
     setup_std_env td mb mh
     create_all_mocks "$mb"
@@ -143,14 +143,14 @@ test_sf_cli_warning_only() {
 
     local out; out=$( echo "Y" | ( cd "$td" && PATH="$mb:$PATH" MOCK_SF_VERSION_EXIT=1 bash "$SF_TOOLS_DIR/bin/sf-metasync.sh" ) 2>&1 )
 
-    assert_output_contains "$out" "終了コードが 0 ではありません" "sf の終了コード 1 → 警告が表示された"
-    assert_file_contains "$MOCK_CALL_LOG" "sf org display" "sf の終了コード 1 → 処理が続行された（組織の確認まで進んだ）"
+    assert_output_contains "$out" "終了コードが 0 ではありません" "sf の終了コード 1 → 案内が表示された"
+    assert_file_not_contains "$MOCK_CALL_LOG" "sf org display" "sf の終了コード 1 → 組織の確認まで、進まない"
     unset MOCK_GIT_BRANCH MOCK_GIT_DIFF_EXIT MOCK_SF_ORG_JSON
     teardown "$td" "$mb"
 }
 
 test_outside_force_dir
 test_stash_pop_on_exit
-test_sf_cli_warning_only
+test_sf_cli_abort
 
 print_summary

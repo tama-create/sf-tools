@@ -241,7 +241,8 @@ _mask_secrets() {
 #     恐れがあるため削除した（2026-03-24）。
 #   ※ Salesforce CLI が、成功しても終了コード 1 を返す環境（Windows の Git Bash で、公式インストーラー版を
 #     自動更新した場合）では、終了コードに頼る処理が失敗扱いになる。そのため sf-tools は Salesforce CLI の
-#     npm 版を前提とし、sf-init.sh / sf-install.sh の最初に check_sf_cli で確認する。
+#     npm 版を前提とし、sf-init.sh / sf-start.sh / sf-release.sh / sf-metasync.sh / sf-update-secret.sh の
+#     最初に check_sf_cli で確認する（NG なら中断。sf-install.sh だけは警告のみ）。sf の成否は、すべて終了コードで判定する。
 #
 # 【使用例】
 #   run bash "./sf-install.sh"                      || die "失敗"
@@ -600,8 +601,8 @@ run_isolated_home() {
 #
 # 【使い方】
 #   check_sf_cli                       # 終了コードが 0 以外なら、案内を表示して die する
-#   check_sf_cli --warn-only           # 案内を表示するだけで、続行する（戻り値 1）。die したくない呼び出し元用
-#   check_sf_cli --warn-only --cache   # 日常のコマンド用。成功したら 24 時間は、確認を省略する（下記）
+#   check_sf_cli --warn-only           # 案内を表示するだけで、続行する（戻り値 1）。die したくない呼び出し元用（sf-install.sh）
+#   check_sf_cli --cache               # 日常のコマンド用。成功したら 24 時間は、確認を省略する（下記）。NG なら die する
 #
 # 【動作】
 #   ・GitHub Actions 上（GITHUB_ACTIONS=true）では、何もしない（Linux の npm 版のため）

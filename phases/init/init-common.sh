@@ -132,20 +132,15 @@ register_jwt_secret() {
     # JWT 接続テスト
     log "INFO" "  JWT 接続テストを実行中..."
     log "INFO" "  [jwt cmd] sf org login jwt --client-id ***masked*** --jwt-key-file ${key_file} --username ${username} --instance-url ${instance_url} --alias ${org_alias}"
-    # run 不使用: sf org login jwt は exit code が信頼できない場合があるため直接実行して確認
-    # VAR=$(cmd) 形式のため run 不使用（stderr をキャプチャしてログに残す）
+    # run 不使用: 失敗時の出力（stderr 含む）をキャプチャしてログに残すため（成否は sf の終了コードで判定する。sf は npm 版が前提）
     # 一時的なホームフォルダの中で実行する: エイリアスが増えず、同じユーザーの既存の sf の認証も置き換わらない
     local jwt_err
-    jwt_err=$(run_isolated_home sf org login jwt \
+    if ! jwt_err=$(run_isolated_home sf org login jwt \
         --client-id    "$consumer_key" \
         --jwt-key-file "$key_file" \
         --username     "$username" \
         --instance-url "$instance_url" \
-        --alias        "$org_alias")
-    local jwt_exit=$?
-    # sf org login jwt は成功時でも非0終了コードを返す場合がある（stderr に成功メッセージを出力）
-    # そのため終了コードが非0でも "Successfully authorized" が含まれていれば成功とみなす
-    if [[ $jwt_exit -ne 0 ]] && ! echo "$jwt_err" | grep -q "Successfully authorized"; then
+        --alias        "$org_alias"); then  # 条件チェック
         log "ERROR" "  [jwt error] ${jwt_err}"
         log "WARNING" "  JWT 接続テストに失敗しました。以下を確認してください:"
         log "WARNING" "  ・コンシューマーキーが正しいか（コピーミスに注意）"
@@ -399,7 +394,7 @@ ECAEOF
 # 【処理フロー】
 #   1. 本番 / Sandbox を確認して接続 URL を決める
 #   2. sf org login web（ブラウザでログイン。接続ユーザーは管理者権限のユーザー）
-#      終了コードは信頼できないため一切見ず、一時エイリアス（sf-tools-<suffix>）の接続情報（出力の username）が取れるかで成否を判定する
+#      成否は sf の終了コードで判定する（失敗・時間切れ・ブラウザを閉じた場合は、非 0 になり中断する。一時エイリアスは sf-tools-<suffix>）
 #   3. ログインしたユーザー名と、そのプロファイル名（表示名）を取得する
 #   4. generate_eca_metadata でメタデータを生成し、sf project deploy でアプリを作成する
 #   5. sf project retrieve でコンシューマー鍵を自動取得する（値はログに出さない）
@@ -435,20 +430,24 @@ register_jwt_secret_eca() {
     log "INFO" "  ブラウザが開きます。${label}に、接続ユーザー（管理者権限）でログインしてください。"
     # 前回の古い認証が残っていて「ログイン済み」と誤判定しないよう、先に一時エイリアスを外す
     run sf alias unset "$tmp_alias" || true  # 未設定でも続行（意図的エラー無視）
-    # sf は、成功しても終了コード 1 を返すことがある（Windows の Git Bash で、公式インストーラー版 + 自動更新版の組み合わせ時に確認。
-    # sf org login web / sf org display などで発生）。そのため、ここでは終了コードを一切信用せず、
-    # 一時エイリアスの接続情報（出力の username）が取れるかどうかで、ログインの成否を判定する
-    run sf org login web --instance-url "$instance_url" --alias "$tmp_alias" || true  # 終了コードを信頼できないため無視
+    # 成否は sf の終了コードで判定する（sf は npm 版が前提。check_sf_cli が確認する）。
+    # 失敗・時間切れ（約 2 分）・ブラウザを閉じた場合は、終了コードが 0 以外になる
+    run sf org login web --instance-url "$instance_url" --alias "$tmp_alias" \
+        || die "${label}へのログインに失敗しました。"
 
     # 3. ユーザー名とプロファイル名（表示名）
-    username=$(sf org display --target-org "$tmp_alias" --json 2>/dev/null \
-        | grep -o '"username": *"[^"]*"' | head -1 | sed 's/.*: *"\(.*\)"/\1/')  # VAR=$(cmd) のため run 不使用（終了コードは見ず、出力で判定）
-    [[ -n "$username" ]] || die "${label}へのログインに失敗しました（接続情報を取得できませんでした）。"
-    log "INFO" "  ログインに成功しました（sf の終了コードが 0 以外でも、接続情報が取得できれば成功とみなします）。"
+    local org_info
+    org_info=$(sf org display --target-org "$tmp_alias" --json 2>/dev/null) \
+        || die "${label}の接続情報を取得できませんでした。"  # VAR=$(cmd) のため run 不使用（出力の取得。成否は終了コードで判定）
+    username=$(printf '%s\n' "$org_info" | grep -o '"username": *"[^"]*"' | head -1 | sed 's/.*: *"\(.*\)"/\1/')  # VAR=$(cmd) のため run 不使用（値の抽出のみ）
+    [[ -n "$username" ]] || die "${label}の接続ユーザー名を取得できませんでした。"
+    log "INFO" "  ログインに成功しました。"
     log "INFO" "  接続ユーザー: ${username}"
-    profile=$(sf data query --query "SELECT Profile.Name FROM User WHERE Username='${username}'" \
-        --target-org "$tmp_alias" --json 2>/dev/null \
-        | grep -o '"Name": *"[^"]*"' | head -1 | sed 's/.*: *"\(.*\)"/\1/')  # VAR=$(cmd) のため run 不使用
+    local prof_info
+    prof_info=$(sf data query --query "SELECT Profile.Name FROM User WHERE Username='${username}'" \
+        --target-org "$tmp_alias" --json 2>/dev/null) \
+        || die "接続ユーザーのプロファイル名を取得できませんでした。"  # VAR=$(cmd) のため run 不使用（出力の取得。成否は終了コードで判定）
+    profile=$(printf '%s\n' "$prof_info" | grep -o '"Name": *"[^"]*"' | head -1 | sed 's/.*: *"\(.*\)"/\1/')  # VAR=$(cmd) のため run 不使用（値の抽出のみ）
     [[ -n "$profile" ]] || die "接続ユーザーのプロファイル名を取得できませんでした。"
     log "INFO" "  プロファイル: ${profile}"
 
@@ -473,12 +472,10 @@ register_jwt_secret_eca() {
     # 6. JWT 接続テスト（作成直後は反映待ちで失敗することがあるため、成功するまでリトライする）
     log "INFO" "  JWT 接続テストを実行中...（反映待ちのため、成功するまで最大 ${retries} 回リトライします）"
     for ((i = 1; i <= retries; i++)); do
-        # run 不使用: sf org login jwt は exit code が信頼できない場合があるため直接実行して確認する
-        # VAR=$(cmd) 形式のため run 不使用（コンシューマー鍵をコマンドのログに残さない）
+        # run 不使用: VAR=$(cmd) 形式（コンシューマー鍵をコマンドのログに残さない）。成否は sf の終了コードで判定する
         # 一時的なホームフォルダの中で実行する: エイリアスが増えず、同じユーザーの既存の sf の認証も置き換わらない
-        jwt_out=$(run_isolated_home sf org login jwt --client-id "$consumer_key" --jwt-key-file "$key_file" \
-            --username "$username" --instance-url "$instance_url" --alias "$org_alias")
-        if [[ $? -eq 0 ]] || echo "$jwt_out" | grep -q "Successfully authorized"; then
+        if jwt_out=$(run_isolated_home sf org login jwt --client-id "$consumer_key" --jwt-key-file "$key_file" \
+            --username "$username" --instance-url "$instance_url" --alias "$org_alias"); then  # 条件チェック
             jwt_ok=1
             break
         fi

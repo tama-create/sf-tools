@@ -68,10 +68,10 @@ test_update_all_success() {
     rm -f /tmp/update-secret-test.log
 }
 
-# --- sf の終了コードが 0 以外（インストーラー版の不具合）→ 警告のみで、処理は続行される ---
-test_update_sf_cli_warning_only() {
+# --- sf の終了コードが 0 以外（インストーラー版の不具合）→ 案内を表示して中断する ---
+test_update_sf_cli_abort() {
     echo ""
-    echo -e "${CLR_HEAD}[TEST] sf の終了コード 1 → 警告を表示するが、続行する${CLR_RST}"
+    echo -e "${CLR_HEAD}[TEST] sf の終了コード 1 → 案内を表示して中断する${CLR_RST}"
 
     local td mb mh
     setup_std_env td mb mh
@@ -83,9 +83,9 @@ test_update_sf_cli_warning_only() {
               bash "$SF_TOOLS_DIR/bin/sf-update-secret.sh" ) > /tmp/update-secret-test2.log 2>&1
     local ec=$?
 
-    assert_exit_ok $ec "sf の終了コード 1 → 警告のみで、終了コード 0（続行する）"
-    assert_file_contains "/tmp/update-secret-test2.log" "終了コードが 0 ではありません" "警告が表示された"
-    assert_file_contains "$mb/calls.log" "gh secret set SF_CONSUMER_KEY_PROD" "更新の処理まで、続行された"
+    assert_exit_fail $ec "sf の終了コード 1 → 中断する（終了コード 0 以外）"
+    assert_file_contains "/tmp/update-secret-test2.log" "終了コードが 0 ではありません" "案内が表示された"
+    assert_file_not_contains "$mb/calls.log" "gh secret set SF_CONSUMER_KEY_PROD" "更新の処理まで、進まない"
 
     teardown "$td" "$mb"
     rm -f /tmp/update-secret-test2.log
@@ -209,7 +209,7 @@ test_update_warning_cancel() {
 }
 
 test_update_all_success
-test_update_sf_cli_warning_only
+test_update_sf_cli_abort
 test_update_jwt_login_fail
 test_update_gh_fail
 test_update_not_force_dir

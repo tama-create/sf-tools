@@ -13,7 +13,7 @@
 #
 # 【前提・動作】
 #   Salesforce CLI（sf）は npm 版であること。起動時に check_sf_cli（sf --version の終了コード）で確認し、
-#   0 以外なら警告を表示する（続行する）。成功は 24 時間は確認を省略する。
+#   0 以外なら、案内を表示して中断する。成功は 24 時間は確認を省略する。
 #   JWT 接続テスト（sf org login jwt）は、一時的なホームフォルダの中で実行する（run_isolated_home）。
 #   そのため、ユーザーの sf に、エイリアスが増えず、同じユーザーの既存の認証も置き換わらない。
 #
@@ -92,8 +92,8 @@ check_gh_owner "${REPO_FULL_NAME%%/*}"
 log "HEADER" "GitHub Secrets（JWT 認証情報）を更新します (${SCRIPT_NAME}.sh)"
 log "INFO" "リポジトリ: ${REPO_FULL_NAME}"
 
-# sf が終了コードを正しく返すか確認する（npm 版が前提）。警告のみで続行し、成功は 24 時間は確認を省略する
-check_sf_cli --warn-only --cache || true  # 警告のみのため、戻り値は無視（意図的エラー無視）
+# sf が終了コードを正しく返すか確認する（npm 版が前提。異常なら中断する）。成功は 24 時間は確認を省略する
+check_sf_cli --cache
 
 # ------------------------------------------------------------------------------
 # 共通: JWT 接続テスト関数
@@ -107,21 +107,20 @@ _test_jwt_login() {
     log "INFO" "JWT 接続テスト中: ${label}..."
     log "INFO" "  sf org login jwt --client-id *** --jwt-key-file ${key_file} --username ${username} --instance-url ${instance_url} --alias ${org_alias}"
 
-    # exit code が不安定なため stdout/stderr をキャプチャして成否を判定する
+    # 出力（stderr 含む）をキャプチャしてログに残し、成否は sf の終了コードで判定する（sf は npm 版が前提）
     # 一時的なホームフォルダの中で実行する: エイリアスが増えず、同じユーザーの既存の sf の認証も置き換わらない
     local jwt_out
-    jwt_out=$(run_isolated_home sf org login jwt \
+    if ! jwt_out=$(run_isolated_home sf org login jwt \
         --client-id    "$consumer_key" \
         --jwt-key-file "$key_file" \
         --username     "$username" \
         --instance-url "$instance_url" \
-        --alias        "$org_alias") || true
-
-    log "INFO" "  ${jwt_out}"
-
-    if ! echo "$jwt_out" | grep -q "Successfully authorized"; then
+        --alias        "$org_alias"); then  # 条件チェック
+        log "ERROR" "  ${jwt_out//$consumer_key/***masked***}"
         die "JWT 接続テストに失敗しました（${label}）。"
     fi
+
+    log "INFO" "  ${jwt_out}"
     log "SUCCESS" "JWT 接続テスト成功: ${label}"
 }
 

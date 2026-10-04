@@ -53,6 +53,7 @@ done
 
 e2e_load_fixture
 e2e_guard_env
+check_sf_cli  # sf が終了コードを正しく返すか確認（npm 版が前提。異常なら中断）
 
 # 管理用ログインで付けた一時エイリアスは、終了時に外す（認証そのものは残る）
 trap 'sf alias unset "$E2E_ADMIN_ALIAS" >/dev/null 2>&1 || true' EXIT  # 後始末のため run 不使用・エラー無視

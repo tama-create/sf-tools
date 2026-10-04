@@ -93,11 +93,9 @@ case "$1 $2" in
         exit 0 ;;
     "org list")
         # 一覧の取得失敗の再現（MOCK_SF_LIST_FAIL_FIRST=N: 最初の N 回は失敗。all なら、ずっと失敗）
-        #   MOCK_SF_LIST_FAIL_MODE=empty: 終了コード 0 で、何も出力しない（終了コードを信頼できない環境の再現）
         if [[ -n "${MOCK_SF_LIST_FAIL_FIRST:-}" ]]; then
             _n=$(( $(cat "$_dir/sflist.cnt" 2>/dev/null || echo 0) + 1 )); echo "$_n" > "$_dir/sflist.cnt"
             if [[ "$MOCK_SF_LIST_FAIL_FIRST" == "all" || $_n -le $MOCK_SF_LIST_FAIL_FIRST ]]; then
-                [[ "${MOCK_SF_LIST_FAIL_MODE:-}" == "empty" ]] && exit 0
                 echo '{"status":1,"name":"Error","message":"connection reset"}'; exit 1
             fi
         fi
@@ -110,6 +108,8 @@ case "$1 $2" in
     "project deploy")
         if [[ -f destructiveChanges.xml ]]; then
             cat destructiveChanges.xml >> "${MOCK_CALL_LOG}"
+            # 削除用のデプロイの失敗の再現（MOCK_SF_DEPLOY_EXIT=1: 失敗。アプリは消えない）
+            [[ "${MOCK_SF_DEPLOY_EXIT:-0}" -ne 0 ]] && exit "$MOCK_SF_DEPLOY_EXIT"
             grep -oE '<members>[^<]*</members><name>ExternalClientApplication</name>' destructiveChanges.xml \
                 | sed -E 's:<members>([^<]*)</members>.*:\1:' >> "$_dir/deleted.txt"
         fi
@@ -637,8 +637,6 @@ test_e2e_list_failure() {
     assert_file_contains "$MB/out.log" "RC=1 OUT=[]" "ずっと失敗 → 戻り値 1（何も出力しない）"
     [[ "$(grep -c '^sf org list' "$MOCK_CALL_LOG")" -eq 3 ]] && pass "ずっと失敗 → 3 回で諦める" || fail "ずっと失敗 → 3 回で諦める" "回数: $(grep -c '^sf org list' "$MOCK_CALL_LOG")"
 
-    _reset; MOCK_SF_LIST_FAIL_FIRST=all MOCK_SF_LIST_FAIL_MODE=empty _e2e_call "$fn"
-    assert_file_contains "$MB/out.log" "RC=1 OUT=[]" "終了コード 0 で何も出力しない場合も、失敗として扱う（status で判定）"
 
     # --- Salesforce 側（cleanup.sh）---
     _reset; MOCK_SF_LIST_FAIL_FIRST=all _run_cleanup --yes --no-confirm; local rc=$?
@@ -648,6 +646,13 @@ test_e2e_list_failure() {
     assert_file_not_contains "$MOCK_CALL_LOG" "post-destructive" "取得できないときは、アプリの削除をしない"
     assert_file_contains     "$MOCK_CALL_LOG" "gh repo delete tamashimon-org/force-e2e-20260101-000000 --yes" "GitHub 側の削除は、続けて行う（途中で止まらない）"
     assert_dir_not_exists "$CB/root/home/tamashimon-org/e2e-20260101-000000" "ローカルの掃除も、続けて行う（途中で止まらない）"
+
+    # --- アプリの削除（deploy）が失敗したとき（終了コードで判定する）---
+    teardown "$CB"
+    _mk_cleanup_env
+    _reset; MOCK_SF_DEPLOY_EXIT=1 _run_cleanup --yes --no-confirm; rc=$?
+    assert_exit_fail         "$rc" "削除用の deploy が失敗 → 失敗で終わる"
+    assert_file_contains     "$MB/out.log" "の削除（deploy）に失敗しました" "削除の失敗が表示される"
 
     _reset; MOCK_SF_LIST_FAIL_FIRST=all _run_cleanup; rc=$?
     assert_exit_fail "$rc" "一覧のみの表示でも、取れなければ失敗で終わる"

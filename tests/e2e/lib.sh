@@ -715,3 +715,24 @@ e2e_step_conclusion() {
     done
     printf '%s' "$out"
 }
+
+# 失敗したワークフローの実行を、1 回だけ再実行し（gh run rerun --failed）、完了するまで待つ。
+#   Salesforce や通信側の一時的なエラー（MetadataTransferError など）で、失敗することがある。開発者が GitHub の画面で
+#   「Re-run」を押すのと同じ操作。引数: リポジトリ 実行ID。再実行できて、完了したら戻り値 0（結果は e2e_run_conclusion で読む）
+#   再実行の前の試行番号（attempt）を覚え、試行番号が増えて、完了するまで待つ（再実行の直後は、前の試行の「完了」が見えるため）
+#   E2E_WF_TIMEOUT 秒（既定 1200）以内に完了しなければ、戻り値 1
+e2e_rerun_and_wait() {
+    local repo="$1" id="$2" a0 a st waited=0
+    local timeout="${E2E_WF_TIMEOUT:-1200}" poll="${E2E_POLL_SEC:-5}"
+    _e2e_check_repo "$repo"
+    a0=$(_e2e_gh run view "$id" -R "$repo" --json attempt --jq .attempt 2>/dev/null)  # VAR=$(cmd) のため run 不使用
+    [[ "$a0" =~ ^[0-9]+$ ]] || return 1
+    _e2e_gh run rerun "$id" -R "$repo" --failed >/dev/null 2>&1 || return 1  # 戻り値で判定するため run 不使用
+    while (( waited < timeout )); do
+        a=$(_e2e_gh run view "$id" -R "$repo" --json attempt --jq .attempt 2>/dev/null)    # VAR=$(cmd) のため run 不使用
+        st=$(_e2e_gh run view "$id" -R "$repo" --json status --jq .status 2>/dev/null)     # VAR=$(cmd) のため run 不使用
+        [[ "$a" =~ ^[0-9]+$ ]] && (( a > a0 )) && [[ "$st" == "completed" ]] && return 0
+        sleep "$poll"; waited=$((waited + poll))  # run 不使用: 待機
+    done
+    return 1
+}

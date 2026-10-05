@@ -51,12 +51,22 @@ case "$*" in
         printf 'job1\tステップA\t2026-10-05T08:00:00.1Z \033[31mError\033[0m: 失敗の本文 ghp_fakepat\n'
         printf 'job1\tステップA\t2026-10-05T08:00:01.2Z 2 行目\n'
         exit 0 ;;
+    # 再実行（gh run rerun）: 再実行したことを記録する。試行番号（attempt）は、再実行のあとで 2 になる
+    #   MOCK_GH_RERUN_EXIT=1: 再実行の呼び出しが失敗する。MOCK_GH_ATTEMPT_STUCK=1: 試行番号が増えない（完了が見えない再現）
+    "run rerun"*)
+        [[ "${MOCK_GH_RERUN_EXIT:-0}" -ne 0 ]] && exit "$MOCK_GH_RERUN_EXIT"
+        : > "${MOCK_CALL_LOG%/*}/rerun.flag"; exit 0 ;;
+    "run view"*"--json attempt"*)
+        if [[ -f "${MOCK_CALL_LOG%/*}/rerun.flag" && "${MOCK_GH_ATTEMPT_STUCK:-}" != "1" ]]; then echo 2; else echo 1; fi
+        exit 0 ;;
     # 実行の結果（conclusion）/ ステップの結果。MOCK_GH_CONCL_EMPTY_FIRST=N: 最初の N 回は、空を返す（反映の遅れの再現）
+    #   MOCK_GH_CONCL_AFTER: 再実行のあとの結果（既定は、再実行の前と同じ MOCK_GH_CONCL）
     "run view"*"--json conclusion"*|"run view"*"--json jobs"*)
         _d="${MOCK_CALL_LOG%/*}"
         _n=$(( $(cat "$_d/concl.cnt" 2>/dev/null || echo 0) + 1 )); echo "$_n" > "$_d/concl.cnt"
         [[ -n "${MOCK_GH_CONCL_EMPTY_FIRST:-}" && ( "$MOCK_GH_CONCL_EMPTY_FIRST" == "all" || $_n -le $MOCK_GH_CONCL_EMPTY_FIRST ) ]] && exit 0
-        echo "${MOCK_GH_CONCL:-success}"; exit 0 ;;
+        if [[ -f "$_d/rerun.flag" && -n "${MOCK_GH_CONCL_AFTER:-}" ]]; then echo "$MOCK_GH_CONCL_AFTER"; else echo "${MOCK_GH_CONCL:-success}"; fi
+        exit 0 ;;
     "run view"*)                         echo "${MOCK_GH_RUN_STATUS:-completed}"; exit 0 ;;
 esac
 case "$1 $2" in
@@ -958,6 +968,42 @@ EOF
     [[ "$(grep -c 'json conclusion' "$MOCK_CALL_LOG")" -eq 1 ]] && pass "結果の読み取り: failure は、やり直さない" || fail "結果の読み取り: failure は、やり直さない" "回数: $(grep -c 'json conclusion' "$MOCK_CALL_LOG")"
     _creset; MOCK_GH_CONCL_EMPTY_FIRST=1 _e2e_call "$pre"" $rcp; out=\$(e2e_step_conclusion $r 555 'ステップ'); echo \"OUT=[\$out]\""
     assert_file_contains "$MB/out.log" "OUT=[success]"  "ステップの結果の読み取り: 空のときは、やり直す"
+
+    # 失敗したワークフローの再実行（1 回だけ）: 試行番号が増えて、完了するまで待つ
+    _creset
+    _e2e_call "$pre"" E2E_POLL_SEC=0 e2e_rerun_and_wait $r 555; echo RC=\$?"
+    assert_file_contains "$MB/out.log" "RC=0"                                "再実行: 試行番号が増えて完了したら、戻り値 0"
+    assert_file_contains "$MOCK_CALL_LOG" "run rerun 555 -R ${r} --failed"   "再実行: 失敗したジョブだけを再実行する（gh run rerun --failed）"
+    _creset; rm -f "$MB/rerun.flag"
+    MOCK_GH_RERUN_EXIT=1 _e2e_call "$pre"" E2E_POLL_SEC=0 e2e_rerun_and_wait $r 555; echo RC=\$?"
+    assert_file_contains "$MB/out.log" "RC=1"                                "再実行: 再実行の呼び出しが失敗したら、戻り値 1"
+    _creset; rm -f "$MB/rerun.flag"
+    MOCK_GH_ATTEMPT_STUCK=1 E2E_WF_TIMEOUT=2 E2E_POLL_SEC=1 _e2e_call "$pre"" e2e_rerun_and_wait $r 555; echo RC=\$?"
+    assert_file_contains "$MB/out.log" "RC=1"                                "再実行: 試行番号が増えない（完了が見えない）ときは、時間切れで戻り値 1"
+    rm -f "$MB/rerun.flag"
+
+    # run.sh の _run_ok（失敗したら、ログを表示し、1 回だけ再実行する）: run.sh から関数を取り出して、動かす
+    { echo "REPO_FULL=$r"; echo '_run_conclusion() { e2e_run_conclusion "$REPO_FULL" "$1"; }'; awk '/^FLAKY_RUNS=0/,/^}/' "$E2E_DIR/run.sh"; } > "$CB/okfuncs.sh"
+    local ok="E2E_CONCLUSION_TRIES=1 E2E_POLL_SEC=0; source $CB/okfuncs.sh"
+    _creset; rm -f "$MB/rerun.flag"
+    _e2e_call "$pre"" $ok; _run_ok 555 wf-x; echo RC=\$? FLAKY=\$FLAKY_RUNS"
+    assert_file_contains "$MB/out.log" "RC=0 FLAKY=0"                        "_run_ok: 最初から成功 → 戻り値 0、再実行しない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "run rerun"                    "_run_ok: 最初から成功 → 再実行しない"
+    _creset; rm -f "$MB/rerun.flag"
+    MOCK_GH_CONCL=failure MOCK_GH_CONCL_AFTER=success _e2e_call "$pre"" $ok; _run_ok 555 wf-x; echo RC=\$? FLAKY=\$FLAKY_RUNS"
+    assert_file_contains "$MB/out.log" "RC=0 FLAKY=1"                        "_run_ok: 失敗 → 再実行で成功 → 戻り値 0（一時的な失敗として数える）"
+    assert_file_contains "$MB/out.log" "再実行で成功しました"                  "_run_ok: 再実行で成功したことを、警告として表示する"
+    assert_file_contains "$MB/out.log" "失敗したステップのログ"                "_run_ok: 最初の失敗のログを表示する"
+    assert_file_contains "$MOCK_CALL_LOG" "run rerun 555"                    "_run_ok: 1 回、再実行する"
+    _creset; rm -f "$MB/rerun.flag"
+    MOCK_GH_CONCL=failure _e2e_call "$pre"" $ok; _run_ok 555 wf-x; echo RC=\$? FLAKY=\$FLAKY_RUNS"
+    assert_file_contains "$MB/out.log" "RC=1 FLAKY=0"                        "_run_ok: 失敗 → 再実行でも失敗 → 戻り値 1（FAIL）"
+    assert_file_contains "$MB/out.log" "再実行でも失敗しました"                "_run_ok: 再実行でも失敗したことを表示する"
+    [[ "$(grep -c 'run rerun' "$MOCK_CALL_LOG")" -eq 1 ]] && pass "_run_ok: 再実行は、1 回だけ" || fail "_run_ok: 再実行は、1 回だけ" "回数: $(grep -c 'run rerun' "$MOCK_CALL_LOG")"
+    _creset; rm -f "$MB/rerun.flag"
+    MOCK_GH_CONCL=failure MOCK_GH_RERUN_EXIT=1 _e2e_call "$pre"" $ok; _run_ok 555 wf-x; echo RC=\$?"
+    assert_file_contains "$MB/out.log" "RC=1"                                "_run_ok: 再実行できなかったら、戻り値 1"
+    assert_file_contains "$MB/out.log" "再実行できなかった"                    "_run_ok: 再実行できなかったことを表示する"
     unset -f _creset
 
     # 失敗した実行のログの表示: ステップ名を付け、色の指定を除き、Token は伏せる。戻り値は 0
@@ -971,7 +1017,8 @@ EOF
     assert_file_contains     "$MB/out.log" "RC=0"                               "失敗ログ: 取得できなくても、戻り値は 0"
     _e2e_call "$pre"' e2e_show_run_failure tamashimon-org/force-test-win 1 x; echo DONE'
     assert_file_not_contains "$MB/out.log" "DONE"                               "失敗ログ: テスト用ではないリポジトリは、拒否する"
-    assert_file_contains "$E2E_DIR/run.sh" 'e2e_show_run_failure "$REPO_FULL" "$_meta_id" "wf-metasync"' "run.sh: wf-metasync の失敗時にログを表示する"
+    assert_file_contains "$E2E_DIR/run.sh" '_run_ok "$_meta_id" "wf-metasync"' "run.sh: wf-metasync の失敗時は、ログを表示し、1 回だけ再実行する"
+    assert_file_contains "$E2E_DIR/run.sh" "再実行で成功したワークフローが" "run.sh: 再実行で成功したワークフローの数を、結果に警告として表示する"
     assert_file_contains "$E2E_DIR/run.sh" '"${label}: wf-validate"' "run.sh: wf-validate の失敗時にログを表示する"
     assert_file_contains "$E2E_DIR/run.sh" '"${label}: wf-release"'  "run.sh: wf-release の失敗時にログを表示する"
     assert_file_contains "$E2E_DIR/run.sh" 'wf-propagate.yml "$br"' "run.sh: マージ時の wf-propagate の実行と成功を確認する"

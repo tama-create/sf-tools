@@ -235,6 +235,26 @@ _hello_local_job() {
     chk "${label}: push した内容が、GitHub のブランチ ${job} に届いている" \
         test "$(git -C "$repo" rev-parse HEAD 2>/dev/null)" == "$(git -C "$repo" ls-remote origin "refs/heads/${job}" 2>/dev/null | awk '{print $1}')"
 }
+# ワークフローの実行が成功したか。失敗したら、ログを表示し、1 回だけ再実行する（一時的な失敗への対策）。
+#   再実行で成功したら、PASS（警告を表示し、FLAKY_RUNS に数える）。再実行でも失敗したら、FAIL
+#   引数: 実行ID ラベル
+FLAKY_RUNS=0
+_run_ok() {
+    local id="$1" label="$2"
+    [[ "$(_run_conclusion "$id")" == "success" ]] && return 0
+    e2e_show_run_failure "$REPO_FULL" "$id" "$label"
+    log "WARNING" "${label}: 失敗しました。一時的な失敗（Salesforce・通信側）の可能性があるため、1 回だけ再実行します（gh run rerun --failed）。"
+    e2e_rerun_and_wait "$REPO_FULL" "$id" || { log "ERROR" "${label}: 再実行できなかった、または、完了しませんでした。"; return 1; }
+    if [[ "$(_run_conclusion "$id")" == "success" ]]; then
+        FLAKY_RUNS=$((FLAKY_RUNS + 1))
+        log "WARNING" "${label}: 再実行で成功しました。一時的な失敗だった可能性があります（最初の失敗のログは、上に表示しています）。"
+        return 0
+    fi
+    log "ERROR" "${label}: 再実行でも失敗しました。"
+    e2e_show_run_failure "$REPO_FULL" "$id" "${label}（再実行後）"
+    return 1
+}
+
 # PR の作成 → wf-validate → マージ → wf-release → wf-propagate。成功したら、実行 ID を HELLO_RELEASE_RUN に入れる
 #   引数: ラベル ブランチ名（push 済み） PR のタイトル
 _hello_pr_flow() {
@@ -243,17 +263,16 @@ _hello_pr_flow() {
     chk "${label}: PR を作成した" test -n "$prn" || return 1
     runid=$(e2e_wait_pr_run "$REPO_FULL" wf-validate.yml "$br") || runid=""   # VAR=$(cmd) のため run 不使用
     chk "${label}: wf-validate（検証）が実行され、完了した" test -n "$runid" || return 1
-    chk "${label}: wf-validate が成功した" test "$(_run_conclusion "$runid")" == "success" || { e2e_show_run_failure "$REPO_FULL" "$runid" "${label}: wf-validate"; return 1; }
+    chk "${label}: wf-validate が成功した（失敗したら、1 回だけ再実行）" _run_ok "$runid" "${label}: wf-validate" || return 1
     chk "${label}: PR をマージした" e2e_gh_pr_merge "$REPO_FULL" "$prn" || return 1
     runid=$(e2e_wait_pr_run "$REPO_FULL" wf-release.yml "$br") || runid=""   # VAR=$(cmd) のため run 不使用
     chk "${label}: wf-release が実行され、完了した" test -n "$runid" || return 1
-    chk "${label}: wf-release が成功した" test "$(_run_conclusion "$runid")" == "success" || { e2e_show_run_failure "$REPO_FULL" "$runid" "${label}: wf-release"; return 1; }
+    chk "${label}: wf-release が成功した（失敗したら、1 回だけ再実行）" _run_ok "$runid" "${label}: wf-release" || return 1
     # wf-propagate（main へのマージ時。staging / develop がない構成では、スキップして成功になる）。失敗しても、続きの確認は進める
     local pid
     pid=$(e2e_wait_pr_run "$REPO_FULL" wf-propagate.yml "$br") || pid=""   # VAR=$(cmd) のため run 不使用
     if chk "${label}: wf-propagate が実行され、完了した" test -n "$pid"; then
-        chk "${label}: wf-propagate が成功した（staging / develop がない構成では、スキップ）" test "$(_run_conclusion "$pid")" == "success" \
-            || e2e_show_run_failure "$REPO_FULL" "$pid" "${label}: wf-propagate"
+        chk "${label}: wf-propagate が成功した（staging / develop がない構成では、スキップ。失敗したら、1 回だけ再実行）" _run_ok "$pid" "${label}: wf-propagate"
     fi
     HELLO_RELEASE_RUN="$runid"
     return 0
@@ -333,9 +352,7 @@ if [[ "$INIT_RC" -eq 0 ]]; then
         chk "wf-metasync が起動した" test -n "$_meta_id"
         if [[ -n "$_meta_id" ]]; then
             chk "wf-metasync が完了した" _wait_run "$_meta_id"
-            chk "wf-metasync が成功した（JWT ログイン・sf-tools の取得を含む）" \
-                test "$(_run_conclusion "$_meta_id")" == "success" \
-                || e2e_show_run_failure "$REPO_FULL" "$_meta_id" "wf-metasync"
+            chk "wf-metasync が成功した（JWT ログイン・sf-tools の取得を含む。失敗したら、1 回だけ再実行）" _run_ok "$_meta_id" "wf-metasync"
         fi
         # Hello World を、PR 経由でリリースし（wf-validate → マージ → wf-release）、続けて削除する
         _hello_flow
@@ -363,6 +380,9 @@ fi
 echo ""
 log "HEADER" "結果"
 log "INFO" "  確認: ${CHECK_PASS} 件成功 / ${CHECK_FAIL} 件失敗"
+if [[ $FLAKY_RUNS -gt 0 ]]; then
+    log "WARNING" "  再実行で成功したワークフローが ${FLAKY_RUNS} 件あります（一時的な失敗の可能性。上の、最初の失敗のログを確認してください）。"
+fi
 if [[ $CLEAN_RC -ne 0 ]]; then
     log "ERROR" "  後掃除に失敗したものがあります。tests/e2e/cleanup.sh で確認してください。"
 fi

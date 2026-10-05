@@ -890,7 +890,8 @@ bash tests/e2e/run.sh
 2. `wf-validate`（検証）が成功することを確認し、PR をマージする
 3. `wf-release` が成功し（JWT ログイン・sf-tools の取得（公開リポジトリを Token なしで clone）・Slack 通知）、Salesforce にクラスができたことを確認する
    （マージ時には `wf-propagate` も動きます。`staging` / `develop` がない構成では、失敗にせずスキップして成功します）
-4. 続けて、ブランチ `e2e-hello-delete` に `remove-target.txt` を追加して、同じ流れで削除する。Salesforce からクラスが消えたことを確認する
+4. リリースしたジョブのクローンで、`sf-next.sh`（マージ済みと表示されること）と、`sf-deploy.sh -t prod`（共有環境への、ローカルからの強制リリースが、拒否されること）も確認します
+5. 続けて、削除も、同じ道で行います。`sf-job.sh`（ブランチ `e2e-hello-delete`）→ `remove-target.txt` を書く → `sf-dryrun.sh` → `sf-push.sh` → `gh` で PR → `wf-validate` → マージ → `wf-release`。Salesforce からクラスが消えたことを確認します
 
 ワークフローが失敗したときは、失敗したステップのログの末尾が、その場で画面に表示されます。
 

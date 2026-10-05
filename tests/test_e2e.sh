@@ -979,7 +979,9 @@ EOF
     assert_file_contains "$E2E_DIR/run.sh" "sf-dryrun.sh" "run.sh: リリースは、sf-dryrun.sh でローカルの検証をする"
     assert_file_contains "$E2E_DIR/run.sh" "sf-push.sh" "run.sh: リリースは、sf-push.sh で commit・push する"
     assert_file_contains "$E2E_DIR/run.sh" 'release/${job}/remove-target.txt' "run.sh: sf-install が用意した remove-target.txt の雛形を確認する"
-    assert_file_contains "$E2E_DIR/run.sh" "_put_empty_deploy_target \"\$1\""  "run.sh: 削除の PR に、空の deploy-target.txt も置く"
+    assert_file_contains "$E2E_DIR/run.sh" "_hello_write_remove" "run.sh: 削除も、sf-job.sh のジョブで、remove-target.txt を書いて sf-push.sh する"
+    assert_file_contains "$E2E_DIR/run.sh" "sf-next.sh" "run.sh: sf-next.sh で、マージ済みの表示を確認する"
+    assert_file_contains "$E2E_DIR/run.sh" "sf-deploy.sh" "run.sh: sf-deploy.sh が、共有環境（予約名）への強制リリースを拒否することを確認する"
 
     # fixtures: Apex のソースが、揃っている
     local f
@@ -1030,6 +1032,17 @@ EOF2
     _e2e_call "$pre"" e2e_run_sf_cmd lbl4 $CB/root/home/tamashimon-org/test-win '' $CB/fake.sh; echo DONE"
     assert_file_not_contains "$MB/out.log" "DONE"                            "安全ガード: 名前が e2e- で始まらないフォルダ（test-win）では、実行しない"
     assert_file_not_exists "$tmp/lbl3.out"                                   "安全ガード: 拒否したときは、実行しない（出力ファイルがない）"
+
+    # 拒否されること（終了コード 0 以外）の確認: 拒否されれば戻り値 0、成功してしまえば 1
+    printf '#!/bin/bash\necho "prod は共有環境のため、拒否します"\nexit 1\n' > "$CB/refuse.sh"
+    _e2e_call "$pre"" e2e_run_sf_cmd_refused rf $root '' $CB/refuse.sh; echo RC=\$?"
+    assert_file_contains "$MB/out.log" "RC=0"                                "拒否の確認: 終了コード 1 → 拒否された → 戻り値 0"
+    assert_file_contains "$tmp/rf.out" "共有環境のため"                       "拒否の確認: 出力が、ファイルに残る"
+    _e2e_call "$pre"" e2e_run_sf_cmd_refused rf2 $root '' $CB/fake.sh; echo RC=\$?"
+    assert_file_contains "$MB/out.log" "RC=1"                                "拒否の確認: 成功してしまった → 戻り値 1"
+    assert_file_contains "$MB/out.log" "拒否されるはずが"                     "拒否の確認: 成功してしまったことを表示する"
+    _e2e_call "$pre"" e2e_run_sf_cmd_refused rf3 $HM '' $CB/refuse.sh; echo DONE"
+    assert_file_not_contains "$MB/out.log" "DONE"                            "拒否の確認: テスト用の作業フォルダの外では、実行しない"
 
     # sf-install の完了待ち（ログの完了メッセージ）
     mkdir -p "$root/clone1/sf-tools/logs" "$root/clone2/sf-tools/logs"

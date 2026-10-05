@@ -635,25 +635,43 @@ e2e_show_file_tail() {
 #   引数: ラベル フォルダ 標準入力（printf の %b 形式。例: 'e2e-hello\nY\nalias\n'。なければ空） スクリプト [引数...]
 #   フォルダは、テスト用の作業フォルダ（{E2E_HOME_ROOT}/{E2E_OWNER}/e2e-…）の中だけ
 #   SF_LAUNCHER_ACTIVE=1: sf-start.sh が、対話のメニュー（sf-launcher.sh）を起動しないようにする
-e2e_run_sf_cmd() {
-    local label="$1" dir="$2" input="$3" outf rc
+_e2e_exec_sf_cmd() {   # 実行して、スクリプトの終了コードを返す（失敗の表示はしない）。引数は e2e_run_sf_cmd と同じ
+    local label="$1" dir="$2" input="$3" outf
     shift 3
     e2e_require_guard
     case "$dir" in
         "${E2E_HOME_ROOT}/${E2E_OWNER}/e2e-"*) ;;
         *) die "テスト用の作業フォルダの外では、実行できません: ${dir}" ;;
     esac
-    [[ -d "$dir" ]] || { log "ERROR" "  ${label}: フォルダがありません: ${dir}"; return 1; }
+    [[ -d "$dir" ]] || { log "ERROR" "  ${label}: フォルダがありません: ${dir}"; return 125; }
     outf="${E2E_TMP:?}/${label}.out"
     log "INFO" "  実行: bash $(basename "$1") ${*:2}（出力: ${outf}）"
     (
-        cd "$dir" || exit 1
+        cd "$dir" || exit 125
         printf '%b' "$input" | PATH="${E2E_SHIM_DIR:-}:${PATH}" SF_LAUNCHER_ACTIVE=1 bash "$@"
     ) > "$outf" 2>&1
+}
+
+e2e_run_sf_cmd() {
+    local rc
+    _e2e_exec_sf_cmd "$@"
     rc=$?
     if [[ $rc -ne 0 ]]; then
-        log "ERROR" "  ${label}: 終了コード ${rc}"
-        e2e_show_file_tail "$outf" "$label"
+        log "ERROR" "  ${1}: 終了コード ${rc}"
+        e2e_show_file_tail "${E2E_TMP}/${1}.out" "$1"
+        return 1
+    fi
+    return 0
+}
+
+# 拒否されること（終了コードが 0 以外）を確認する。拒否されれば戻り値 0、成功してしまったら戻り値 1
+#   出力の内容は、呼び出し側が ${E2E_TMP}/{ラベル}.out で確認する。引数は e2e_run_sf_cmd と同じ
+e2e_run_sf_cmd_refused() {
+    local rc
+    _e2e_exec_sf_cmd "$@"
+    rc=$?
+    if [[ $rc -eq 0 ]]; then
+        log "ERROR" "  ${1}: 拒否されるはずが、成功しました"
         return 1
     fi
     return 0

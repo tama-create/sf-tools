@@ -14,8 +14,9 @@
 #   3. 確認        : Secret / Variable / ブランチ / ワークフローの存在、トークンがログに出ていないこと、
 #                    GitHub Actions の実行: wf-metasync（手動起動。完了を待つ。Hello World と同時に動かすと、組織へのデプロイと取得が重なって失敗する）、続けて Hello World の Apex を PR 経由で
 #                    リリース（wf-validate → マージ → wf-release）し、続けて削除する（sf-tools の本来の機能の通し）。
-#                    リリース側の作業は、通常の運用と同じく、sf-tools のコマンドで行う: sf-job.sh（ブランチ作成・clone・sf-start.sh）
-#                    → ファイルを書く → sf-dryrun.sh（ローカルの検証）→ sf-push.sh（commit・push・pre-push フック）。PR の作成・マージは gh
+#                    リリース・削除の作業は、通常の運用と同じく、sf-tools のコマンドで行う: sf-job.sh（ブランチ作成・clone・sf-start.sh）
+#                    → ファイルを書く → sf-dryrun.sh（ローカルの検証）→ sf-push.sh（commit・push・pre-push フック）。PR の作成・マージは gh。
+#                    リリース後は、sf-next.sh（マージ済みの表示）と、sf-deploy.sh（共有環境への強制リリースの拒否）も確認する
 #   4. 終了        : sf のエイリアスを実行前の状態に戻す。テスト用のリポジトリ・外部クライアントアプリなどは、既定では削除せずに残す
 #                    （終了後に、GitHub の画面で、Actions の実行・PR・ファイルを見返せるようにするため。次回の前掃除で、自動で削除される）。
 #                    --cleanup を付けると、終了時に削除する（途中で止まって残った Hello World の Apex も含む）
@@ -199,14 +200,11 @@ _step_conclusion() {
 #   失敗した手順があれば、そこで止める（残ったクラスは、後掃除で削除される）
 # ------------------------------------------------------------------------------
 _admin_login_ok() { ( e2e_sf_admin_login ); }
-_put_remove_target() { e2e_hello_remove_target_text | e2e_gh_file_put "$REPO_FULL" "$1" "sf-tools/release/$1/remove-target.txt" -; }
-# 使わない側のファイルは、空の雛形で置く（sf-release.sh は、両方のファイルが無いと止まるため）
-_put_empty_deploy_target() { e2e_empty_target_text | e2e_gh_file_put "$REPO_FULL" "$1" "sf-tools/release/$1/deploy-target.txt" -; }
 
-# リリース側: 開発者の作業を、sf-tools のコマンドで再現する（通常の運用と同じ道）
+# Hello World の作業は、開発者の作業を、sf-tools のコマンドで再現する（通常の運用と同じ道）
 #   sf-job.sh（ブランチ作成・clone・sf-start.sh）→ ファイルを書く → sf-dryrun.sh（ローカルの検証）→ sf-push.sh（commit・push・pre-push フック）
-#   ファイルの書き込みだけが、開発者の手作業にあたる部分
-_hello_write_files() {   # 引数: クローンのフォルダ ブランチ名
+#   ファイルの書き込みだけが、開発者の手作業にあたる部分。そのあと、gh で PR を作る（通常の運用では GitHub の画面）
+_hello_write_release() {   # 引数: クローンのフォルダ ブランチ名（リリース: クラスと deploy-target.txt。remove-target.txt は雛形のまま）
     local repo="$1" job="$2" f
     mkdir -p "${repo}/force-app/main/default/classes" || return 1  # run 不使用: テスト用の作業フォルダへの書き込み
     for f in "${E2E_APEX_HELLO}.cls" "${E2E_APEX_HELLO}.cls-meta.xml" "${E2E_APEX_HELLO_TEST}.cls" "${E2E_APEX_HELLO_TEST}.cls-meta.xml"; do
@@ -214,33 +212,32 @@ _hello_write_files() {   # 引数: クローンのフォルダ ブランチ名
     done
     e2e_hello_deploy_target_text > "${repo}/sf-tools/release/${job}/deploy-target.txt"
 }
+_hello_write_remove() {   # 引数: クローンのフォルダ ブランチ名（削除: remove-target.txt。deploy-target.txt は雛形のまま）
+    e2e_hello_remove_target_text > "${1}/sf-tools/release/${2}/remove-target.txt"
+}
 _hello_push() { E2E_COMMIT_MSG="$2" e2e_run_sf_cmd "sf-push-$1" "$3" "" "${SF_TOOLS_ROOT}/bin/sf-push.sh"; }   # 引数: ジョブ名 メッセージ クローンのフォルダ
-_hello_local_release() {   # 引数: ブランチ名（= ジョブ名） コミットメッセージ
-    local job="$1" msg="$2" repo="${WORK}/$1/${REPO_NAME}"
-    chk "sf-job.sh で、ジョブ（ブランチ ${job}）を開始した（ブランチ作成・clone・sf-start.sh）" \
+
+# ジョブの開始から push まで。引数: ラベル ブランチ名（= ジョブ名） コミットメッセージ ファイルを書く関数名 テストクラスを検出するか（1 / 0）
+_hello_local_job() {
+    local label="$1" job="$2" msg="$3" writefn="$4" expect_tests="$5" repo="${WORK}/$2/${REPO_NAME}"
+    chk "${label}: sf-job.sh で、ジョブ（ブランチ ${job}）を開始した（ブランチ作成・clone・sf-start.sh）" \
         e2e_run_sf_cmd "sf-job-${job}" "$WORK" "${job}\nY\n${E2E_JOB_ALIAS}\n" "${SF_TOOLS_ROOT}/bin/sf-job.sh" || return 1
-    chk "sf-install.sh（sf-start.sh が背景で実行）が完了した" e2e_wait_sf_install "$repo" || return 1
-    chk "Git フック（pre-push）が設置された" test -f "${repo}/.git/hooks/pre-push"
-    chk "リリース管理フォルダ release/${job}/ が用意された（雛形）" \
+    chk "${label}: sf-install.sh（sf-start.sh が背景で実行）が完了した" e2e_wait_sf_install "$repo" || return 1
+    chk "${label}: Git フック（pre-push）が設置された" test -f "${repo}/.git/hooks/pre-push"
+    chk "${label}: リリース管理フォルダ release/${job}/ が用意された（雛形）" \
         test -f "${repo}/sf-tools/release/${job}/deploy-target.txt" -a -f "${repo}/sf-tools/release/${job}/remove-target.txt" || return 1
-    chk "Apex のクラスと deploy-target.txt を書いた" _hello_write_files "$repo" "$job" || return 1
-    chk "sf-dryrun.sh で、ローカルから検証できた" \
+    chk "${label}: ファイルを書いた" "$writefn" "$repo" "$job" || return 1
+    chk "${label}: sf-dryrun.sh で、ローカルから検証できた" \
         e2e_run_sf_cmd "sf-dryrun-${job}" "$repo" "" "${SF_TOOLS_ROOT}/bin/sf-dryrun.sh" --no-open || return 1
-    chk "sf-dryrun.sh が、@isTest のクラスを検出した（--tests の指定）" \
-        grep -q "テストクラス合計: 1件" "${E2E_TMP}/sf-dryrun-${job}.out" || return 1
-    chk "sf-push.sh で、commit と push ができた" \
-        _hello_push "$job" "$msg" "$repo" || return 1
-    chk "pre-push フック（sf-prepush.sh）が動いた" test -s "${repo}/sf-tools/logs/sf-prepush.log"
-    chk "push した内容が、GitHub のブランチ ${job} に届いている" \
+    if [[ "$expect_tests" == "1" ]]; then
+        chk "${label}: sf-dryrun.sh が、@isTest のクラスを検出した（--tests の指定）" \
+            grep -q "テストクラス合計: 1件" "${E2E_TMP}/sf-dryrun-${job}.out" || return 1
+    fi
+    chk "${label}: sf-push.sh で、commit と push ができた" _hello_push "$job" "$msg" "$repo" || return 1
+    chk "${label}: pre-push フック（sf-prepush.sh）が動いた" test -s "${repo}/sf-tools/logs/sf-prepush.log"
+    chk "${label}: push した内容が、GitHub のブランチ ${job} に届いている" \
         test "$(git -C "$repo" rev-parse HEAD 2>/dev/null)" == "$(git -C "$repo" ls-remote origin "refs/heads/${job}" 2>/dev/null | awk '{print $1}')"
 }
-
-# 削除用のファイル（remove-target.txt）を、ブランチに追加する
-_hello_add_remove_files() {
-    chk "削除: remove-target.txt を追加した" _put_remove_target "$1" || return 1
-    chk "削除: deploy-target.txt（空の雛形）を追加した" _put_empty_deploy_target "$1"
-}
-
 # PR の作成 → wf-validate → マージ → wf-release → wf-propagate。成功したら、実行 ID を HELLO_RELEASE_RUN に入れる
 #   引数: ラベル ブランチ名（push 済み） PR のタイトル
 _hello_pr_flow() {
@@ -265,19 +262,20 @@ _hello_pr_flow() {
     return 0
 }
 
-# 削除側（今は GitHub の API で、ブランチとファイルを作る）: ブランチ作成 → ファイル追加 → PR 以降
-#   引数: ラベル ブランチ名 PR のタイトル ファイルを追加する関数名
+# 1 回分: ジョブ → PR → wf-validate → マージ → wf-release → wf-propagate。引数: ラベル ブランチ名 PR のタイトル ファイルを書く関数名 テストを検出するか
 _hello_cycle() {
-    local label="$1" br="$2" title="$3" addfn="$4"
-    chk "${label}: ブランチ ${br} を作成した" e2e_gh_branch_create "$REPO_FULL" "$br" || return 1
-    "$addfn" "$br" || return 1
+    local label="$1" br="$2" title="$3" writefn="$4" expect_tests="$5"
+    _hello_local_job "$label" "$br" "$title" "$writefn" "$expect_tests" || return 1
     _hello_pr_flow "$label" "$br" "$title"
 }
-# リリース側: sf-tools のコマンドでローカルから push → PR 以降
-_hello_release_cycle() {
-    local br="$1" title="$2"
-    _hello_local_release "$br" "$title" || return 1
-    _hello_pr_flow "リリース" "$br" "$title"
+
+# sf-next.sh: リリースしたジョブのクローンで実行し、マージ済みのブランチが「マージ済み」と表示されること（質問には N で答える）
+_hello_sf_next() { e2e_run_sf_cmd "sf-next" "$1" "N\n" "${SF_TOOLS_ROOT}/bin/sf-next.sh" && grep -q "マージ済み" "${E2E_TMP}/sf-next.out"; }
+# sf-deploy.sh: 予約名（prod）の組織へのローカルからの強制リリースは、確認の前に拒否される（終了コード 0 以外、拒否の文言、デプロイしない）
+_hello_deploy_refused() {
+    e2e_run_sf_cmd_refused "sf-deploy-refused" "$1" "N\n" "${SF_TOOLS_ROOT}/bin/sf-deploy.sh" -t prod --no-open \
+        && grep -q "共有環境のため" "${E2E_TMP}/sf-deploy-refused.out" \
+        && ! grep -q "project deploy start" "${E2E_TMP}/sf-deploy-refused.out"
 }
 
 _hello_flow() {
@@ -285,7 +283,7 @@ _hello_flow() {
     chk "Hello World: Salesforce への管理用ログイン（問い合わせ用）ができた" _admin_login_ok || return 0
     chk "Hello World: リリース前は、Salesforce にクラスがない" test "$(e2e_apex_count "$E2E_APEX_HELLO")" == "0" || return 0
 
-    _hello_release_cycle "e2e-hello" "e2e: Hello World をリリース" || return 0
+    _hello_cycle "リリース" "e2e-hello" "e2e: Hello World をリリース" _hello_write_release 1 || return 0
     # wf-release の途中のステップ（JWT ログイン・sf-tools の取得・Slack 通知）
     chk "wf-release: 本番組織へのログイン（JWT）が成功した" \
         test "$(_step_conclusion "$HELLO_RELEASE_RUN" "本番組織にログイン（JWT）")" == "success"
@@ -296,7 +294,12 @@ _hello_flow() {
     chk "リリース後: Salesforce に ${E2E_APEX_HELLO} ができた" test "$(e2e_apex_count "$E2E_APEX_HELLO")" == "1"
     chk "リリース後: Salesforce に ${E2E_APEX_HELLO_TEST} ができた" test "$(e2e_apex_count "$E2E_APEX_HELLO_TEST")" == "1"
 
-    _hello_cycle "削除" "e2e-hello-delete" "e2e: Hello World を削除" _hello_add_remove_files || return 0
+    # 通常の運用で使う、そのほかの sf-tools のコマンド（リリースしたジョブのクローンで実行する）
+    local repo="${WORK}/e2e-hello/${REPO_NAME}"
+    chk "sf-next.sh: マージ済みのブランチを、マージ済みと表示する" _hello_sf_next "$repo"
+    chk "sf-deploy.sh: 共有環境（予約名 prod）へのローカルからの強制リリースを、拒否する" _hello_deploy_refused "$repo"
+
+    _hello_cycle "削除" "e2e-hello-delete" "e2e: Hello World を削除" _hello_write_remove 0 || return 0
     chk "削除後: Salesforce から ${E2E_APEX_HELLO} が消えた" test "$(e2e_apex_count "$E2E_APEX_HELLO")" == "0"
     chk "削除後: Salesforce から ${E2E_APEX_HELLO_TEST} が消えた" test "$(e2e_apex_count "$E2E_APEX_HELLO_TEST")" == "0"
 }

@@ -242,7 +242,8 @@ test_npm_install_skipped_when_sf_init_running() {
     local out; out=$(cd "$td" && SF_INIT_RUNNING=1 HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-install.sh" 2>&1)
 
     assert_output_contains "$out" "npm install をスキップします（初期セットアップ用の一時フォルダのため）" "sf-init 中 → npm install のスキップメッセージが表示された"
-    assert_file_not_contains "$MOCK_CALL_LOG" "npm install" "sf-init 中 → npm install が呼び出されていない"
+    # 背景で動く sf-upgrade.sh の npm install -g（別のコマンド）と区別するため、引数なしの行だけを見る
+    if grep -qx "npm install" "$MOCK_CALL_LOG"; then fail "sf-init 中 → npm install が呼び出されていない" "引数なしの npm install が呼ばれた"; else pass "sf-init 中 → npm install が呼び出されていない"; fi
     teardown "$td" "$mb" "$mh"
 }
 

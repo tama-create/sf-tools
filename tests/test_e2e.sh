@@ -918,6 +918,14 @@ test_e2e_gh_flow() {
     assert_file_contains "$MB/out.log" "force-app/main/default/classes/SfToolsE2eHelloTest.cls" "deploy-target: テストクラスも指定する（テストの自動実行のため）"
     assert_file_contains "$MB/out.log" "ApexClass:SfToolsE2eHelloTest" "remove-target: テストクラスを [members] で指定する"
     assert_file_contains "$MB/out.log" "ApexClass:SfToolsE2eHello"     "remove-target: クラスを [members] で指定する"
+    # 空の雛形: セクションだけで、中身（パス・メンバー）がない
+    _e2e_call "$pre"' e2e_empty_target_text'
+    assert_file_contains     "$MB/out.log" "[files]"   "空の雛形: [files] がある"
+    assert_file_contains     "$MB/out.log" "[members]" "空の雛形: [members] がある"
+    assert_file_not_contains "$MB/out.log" "SfToolsE2e"  "空の雛形: クラスの指定は入っていない"
+    # run.sh: 各 PR に、deploy-target.txt と remove-target.txt の両方を置く（sf-release.sh は両方が無いと止まる）
+    assert_file_contains "$E2E_DIR/run.sh" "_put_empty_remove_target \"\$br\"" "run.sh: リリースの PR に、空の remove-target.txt も置く"
+    assert_file_contains "$E2E_DIR/run.sh" "_put_empty_deploy_target \"\$1\""  "run.sh: 削除の PR に、空の deploy-target.txt も置く"
 
     # fixtures: Apex のソースが、揃っている
     local f

@@ -194,6 +194,9 @@ _step_conclusion() {
 _admin_login_ok() { ( e2e_sf_admin_login ); }
 _put_deploy_target() { e2e_hello_deploy_target_text | e2e_gh_file_put "$REPO_FULL" "$1" "sf-tools/release/$1/deploy-target.txt" -; }
 _put_remove_target() { e2e_hello_remove_target_text | e2e_gh_file_put "$REPO_FULL" "$1" "sf-tools/release/$1/remove-target.txt" -; }
+# 使わない側のファイルは、空の雛形で置く（sf-release.sh は、両方のファイルが無いと止まるため）
+_put_empty_remove_target() { e2e_empty_target_text | e2e_gh_file_put "$REPO_FULL" "$1" "sf-tools/release/$1/remove-target.txt" -; }
+_put_empty_deploy_target() { e2e_empty_target_text | e2e_gh_file_put "$REPO_FULL" "$1" "sf-tools/release/$1/deploy-target.txt" -; }
 
 # リリース用のファイル（クラス 2 つ・メタデータ 2 つ・deploy-target.txt）を、ブランチに追加する
 _hello_add_deploy_files() {
@@ -201,11 +204,13 @@ _hello_add_deploy_files() {
     for f in "${E2E_APEX_HELLO}.cls" "${E2E_APEX_HELLO}.cls-meta.xml" "${E2E_APEX_HELLO_TEST}.cls" "${E2E_APEX_HELLO_TEST}.cls-meta.xml"; do
         chk "リリース: ${f} を追加した" e2e_gh_file_put "$REPO_FULL" "$br" "force-app/main/default/classes/${f}" "${E2E_SCRIPT_DIR}/fixtures/${f}" || return 1
     done
-    chk "リリース: deploy-target.txt を追加した" _put_deploy_target "$br"
+    chk "リリース: deploy-target.txt を追加した" _put_deploy_target "$br" || return 1
+    chk "リリース: remove-target.txt（空の雛形）を追加した" _put_empty_remove_target "$br"
 }
 # 削除用のファイル（remove-target.txt）を、ブランチに追加する
 _hello_add_remove_files() {
-    chk "削除: remove-target.txt を追加した" _put_remove_target "$1"
+    chk "削除: remove-target.txt を追加した" _put_remove_target "$1" || return 1
+    chk "削除: deploy-target.txt（空の雛形）を追加した" _put_empty_deploy_target "$1"
 }
 
 # 1 回分: ブランチ作成 → ファイル追加 → PR → wf-validate → マージ → wf-release。成功したら、実行 ID を HELLO_RELEASE_RUN に入れる

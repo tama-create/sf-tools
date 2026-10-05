@@ -223,7 +223,7 @@ phase_generate_manifest() {
         ((i++))
     done
     if [[ ${#RUN_TESTS[@]} -gt 0 ]]; then
-        log "INFO" "テストクラス合計: ${#RUN_TESTS[@]}件 → --run-tests に自動設定します"
+        log "INFO" "テストクラス合計: ${#RUN_TESTS[@]}件 → --tests に自動設定します"
     fi
 
     # デプロイ対象がゼロの場合は sf CLI に渡す前に早期終了
@@ -262,10 +262,14 @@ phase_release() {
 
     # テストクラスが検出されていれば RunSpecifiedTests を指定
     if [[ ${#RUN_TESTS[@]} -gt 0 ]]; then
-        local IFS=","
-        local tests_csv="${RUN_TESTS[*]}"
-        deploy_cmd+=("--test-level" "RunSpecifiedTests" "--run-tests" "$tests_csv")
-        log "INFO" "テスト実行: --test-level RunSpecifiedTests --run-tests ${tests_csv}"
+        # sf project deploy start のフラグは --tests（--run-tests は存在しない）。複数のクラスは、--tests を繰り返して渡す
+        local t tests_args=""
+        deploy_cmd+=("--test-level" "RunSpecifiedTests")
+        for t in "${RUN_TESTS[@]}"; do
+            deploy_cmd+=("--tests" "$t")
+            tests_args+=" --tests ${t}"
+        done
+        log "INFO" "テスト実行: --test-level RunSpecifiedTests${tests_args}"
     fi
 
     if [[ "$IS_VALIDATE_MODE" -eq 1 ]]; then

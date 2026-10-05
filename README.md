@@ -461,7 +461,7 @@ sf-release.sh [オプション]
 補足:
 - `--json`, `-j` で `sf` コマンド出力を JSON 形式で表示できます
 - `--verbose`, `-v` でコマンド出力をコンソールにも表示できます
-- `deploy-target.txt` に記述した `.cls` ファイルに `@isTest` アノテーションがあれば自動検出し、`--test-level RunSpecifiedTests --run-tests` を自動設定します（ユーザーが手動で指定する必要はありません）
+- `deploy-target.txt` に記述した `.cls` ファイルに `@isTest` アノテーションがあれば自動検出し、`--test-level RunSpecifiedTests --tests <クラス名>` を自動設定します（ユーザーが手動で指定する必要はありません）
 
 ### 4.7 `sf-deploy.sh`
 
@@ -692,7 +692,7 @@ force-app/main/default/lwc/myComponent
 - `[files]` と `[members]` の 2 セクション構成
 - 行頭 `#` はコメント
 - 空行は無視
-- `@isTest` アノテーションを持つ `.cls` ファイルを記述すると、`sf-release.sh` が `--test-level RunSpecifiedTests --run-tests <クラス名>` を自動設定します
+- `@isTest` アノテーションを持つ `.cls` ファイルを記述すると、`sf-release.sh` が `--test-level RunSpecifiedTests --tests <クラス名>（クラスごとに繰り返す）` を自動設定します
 - テストクラスを記述するかどうかはユーザーの責任です。`sf-check.sh` がローカルに存在するテストクラスの記述漏れを WARNING で通知します
 
 ### 5.2 `remove-target.txt`

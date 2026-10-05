@@ -401,6 +401,11 @@ e2e_hello_deploy_target_text() {
         "force-app/main/default/classes/${E2E_APEX_HELLO_TEST}.cls" \
         '' '[members]'
 }
+# 空の雛形（中身のない deploy-target.txt / remove-target.txt）。
+# sf-release.sh は両方のファイルが無いと止まる（通常は sf-install.sh が雛形から作る）ため、使わない側に置く
+e2e_empty_target_text() {
+    printf '%s\n' '[files]' '' '[members]'
+}
 e2e_hello_remove_target_text() {
     printf '%s\n' '[files]' '' '[members]' \
         "ApexClass:${E2E_APEX_HELLO_TEST}" \

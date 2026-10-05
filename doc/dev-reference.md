@@ -235,7 +235,7 @@ check_gh_owner "$GITHUB_OWNER"   # 認証ユーザーの一致確認
 `@isTest` 自動検出フロー:
 1. `phase_generate_manifest` 内で `deploy_args` を走査し、`--source-dir` に続く `.cls` ファイルを `grep -qi "@isTest"` で検査
 2. 検出されたクラス名をスクリプトレベル変数 `RUN_TESTS=()` に追加
-3. `phase_release` で `${#RUN_TESTS[@]} -gt 0` の場合、`--test-level RunSpecifiedTests --run-tests <CSV>` を `deploy_cmd` に追加して実行
+3. `phase_release` で `${#RUN_TESTS[@]} -gt 0` の場合、`--test-level RunSpecifiedTests` と、クラスごとの `--tests <クラス名>`（繰り返し。`--run-tests` は存在しないフラグ）を `deploy_cmd` に追加して実行
 4. テストクラスが 0 件の場合は従来通り（`--test-level` 未指定）の動作を維持
 
 ### 4.3 sf-metasync.sh
@@ -632,6 +632,7 @@ sf-tools の `main` への反映は、全ユーザーへの配布と同義であ
 **Hello World のリリース・削除（`_hello_flow`）:** 実際の PR の流れで、`wf-validate` → マージ → `wf-release` を通す（`wf-release` の途中のステップ（JWT ログイン・公開 `sf-tools` の clone）と Slack 通知（`"ok":true`）、成功の通知）。
 - 部品は `tests/e2e/lib.sh`: `e2e_gh_branch_create` / `e2e_gh_file_put` / `e2e_gh_pr_create` / `e2e_gh_pr_merge` / `e2e_wait_pr_run`（`gh run list --workflow … --branch … --event pull_request` で実行を探し、完了まで `E2E_POLL_SEC` 秒（既定 5）おきに確認。起動待ちは `E2E_RUN_FIND_TRIES` 回（既定 24）、完了待ちは `E2E_WF_TIMEOUT` 秒）。これらは `_e2e_check_repo` で、オーナー（`E2E_OWNER`）とテスト用リポジトリの名前の形式が一致しないと動かない
 - リリース: ブランチ `e2e-hello` に `tests/e2e/fixtures/` の 4 ファイル（`SfToolsE2eHello` / `SfToolsE2eHelloTest` の `.cls` と `.cls-meta.xml`）と `sf-tools/release/e2e-hello/deploy-target.txt`（`[files]` と `[members]`）を追加 → PR → マージ。`@isTest` のクラスが含まれるため、`sf-release.sh` が `RunSpecifiedTests` を自動で選ぶ
+- どちらの PR にも、`deploy-target.txt` と `remove-target.txt` の両方を置く（`sf-release.sh` は、どちらかが無いと止まる。通常は `sf-install.sh` が雛形から作る）。使わない側は、空の雛形（`e2e_empty_target_text`: `[files]` と `[members]` のみ）。`wf-validate` の「対象ファイル確認」は、実質の中身がある側だけを見る（2026-10-05 の初回の実機で、`remove-target.txt` が無く検証が失敗した）
 - 削除: ブランチ `e2e-hello-delete` に `release/e2e-hello-delete/remove-target.txt`（`ApexClass:SfToolsE2eHelloTest` / `ApexClass:SfToolsE2eHello`）を追加 → 同様
 - 組織側の確認は `e2e_apex_count`（SOQL `SELECT COUNT() FROM ApexClass WHERE Name = '…'`。`totalSize` を読む）。前後で 0 → 1 → 0 になること
 - 後掃除（`e2e_cleanup_all`）は、組織に残った `SfToolsE2eHello` / `SfToolsE2eHelloTest` も、一覧（`e2e_list_target_apex`。名前の完全一致のみ）→ 削除（`e2e_delete_apex`。削除用のデプロイ）→ 再取得で確認する。一覧の取得失敗は、ECA と同様に「対象なし」とせず、失敗として記録する

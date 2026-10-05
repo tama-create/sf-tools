@@ -149,8 +149,32 @@ test_sf_cli_abort() {
     teardown "$td" "$mb"
 }
 
+# コミット&プッシュの確認で N → 中断する（commit / push しない）
+#   以前は ask_yn の戻り値を見ておらず、N と答えても main に commit / push されていた
+test_commit_confirm_no_aborts() {
+    local td mb mh
+    setup_std_env td mb mh
+    create_all_mocks "$mb"
+
+    export MOCK_GIT_BRANCH="main"
+    export MOCK_GIT_DIFF_EXIT=0
+    export MOCK_GIT_DIFF_EXIT_2ND=1
+    export MOCK_SF_ORG_JSON='{"result":{"alias":"testorg","id":"00D000000000001AAA"}}'
+
+    local out; out=$( printf 'Y\nN\n' | ( cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-metasync.sh" ) 2>&1 )
+    local ec=$?
+
+    assert_exit_fail $ec "コミットの確認で N → 中断（終了コード 0 以外）"
+    assert_output_contains "$out" "中断しました" "コミットの確認で N → 中断の旨が表示される"
+    assert_file_not_contains "$MOCK_CALL_LOG" "git commit" "コミットの確認で N → commit しない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "git push" "コミットの確認で N → push しない"
+    unset MOCK_GIT_BRANCH MOCK_GIT_DIFF_EXIT MOCK_GIT_DIFF_EXIT_2ND MOCK_SF_ORG_JSON
+    teardown "$td" "$mb"
+}
+
 test_outside_force_dir
 test_stash_pop_on_exit
 test_sf_cli_abort
+test_commit_confirm_no_aborts
 
 print_summary

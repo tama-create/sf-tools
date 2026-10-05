@@ -316,6 +316,7 @@ check_gh_owner "$GITHUB_OWNER"   # 認証ユーザーの一致確認
 - `main` / `staging` / `develop` ブランチでは実行禁止
 - **安全ガード:** `log "WARNING"` で `--force` の意味を表示 → `ask_yn || die` で続行確認（**赤い警告ボックスなし**。赤いボックスは sf-init / sf-metasync / sf-update-secret / sf-release 直接実行のみ）
 - `export SF_DEPLOY_CONFIRMED=1` で sf-release.sh 側の二重確認を抑制
+- **接続先が Sandbox かは検証しない。** 保護されるのは、エイリアスが `main` / `staging` / `develop` の組織だけ（`sf-release.sh` の 5.1「保護組織へのローカル直接実行を禁止」）。それ以外のエイリアス（本番組織の別名を含む）は、確認で `Y` なら強制リリースされる。確認の `N` / `q` は、`ask_yn ... || die` で中断する（2026-10-05 に修正。以前は `|| die` が無く、`N` でも実行されていた）
 
 ### 4.9 sf-upgrade.sh
 
@@ -630,6 +631,8 @@ sf-tools の `main` への反映は、全ユーザーへの配布と同義であ
 - オーナーは、鍵一式の `E2E_OWNER` のみ。gh のログインユーザーが `E2E_GH_USER` と一致しないと動かない
 - `e2e_guard_env` を通らないと、削除系の関数は動かない（`E2E_GUARD_OK=1`）。GitHub Actions 上では動かない
 - `cleanup.sh` は既定で何も消さない。`--yes` でも、一覧を見せたうえで `delete` の入力を求める
+- JWT 用の証明書フォルダ（`~/.sf-jwt/force-e2e-…`）は、中身が `server.key` / `server.crt` だけのときに限り削除する。ほかのファイルが入っていれば、消さずに失敗として返す（ほかの掃除は続ける）。シンボリックリンクは、対象外
+- `$TMPDIR` の一時ファイル・フォルダ（`e2e-run.*` など）は、名前の形式・30 分以上経過・所有者が自分・シンボリックリンクでない、のすべてを満たすものだけ（2026-10-05 に、Codex のレビューを受けて補強）
 
 **鍵一式の認証 URL（`E2E_SFDX_AUTH_URL`）:**
 

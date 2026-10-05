@@ -273,7 +273,7 @@ e2e_list_target_local() {
         e2e_is_target_project "$base" && printf '%s\n' "$d"
     done
     for d in "$HOME/.sf-jwt"/force-e2e-*; do
-        [[ -d "$d" ]] || continue
+        [[ -d "$d" && ! -L "$d" ]] || continue  # シンボリックリンクは対象外
         base=$(basename "$d")  # VAR=$(cmd) のため run 不使用
         e2e_is_target_jwt_dir "$base" && printf '%s\n' "$d"
     done
@@ -282,7 +282,8 @@ e2e_list_target_local() {
     #   ・新しいもの（E2E_TMP_MIN_AGE 分以内。既定 30。別の実行の途中かもしれない）
     local tdir="${TMPDIR:-/tmp}" age="${E2E_TMP_MIN_AGE:-30}"
     for d in "$tdir"/e2e-run.* "$tdir"/e2e-eca-del.* "$tdir"/e2e-sfdx-url.*; do
-        [[ -e "$d" ]] || continue
+        # 自分が作ったもの（所有者が自分）だけを対象にする。シンボリックリンクは対象外（共有の一時フォルダ対策）
+        [[ -e "$d" && ! -L "$d" && -O "$d" ]] || continue
         base=$(basename "$d")  # VAR=$(cmd) のため run 不使用
         e2e_is_target_tmp "$base" || continue
         [[ -n "${E2E_TMP:-}" && "$d" == "$E2E_TMP" ]] && continue
@@ -296,6 +297,18 @@ e2e_delete_local() {
     base=$(basename "$d")  # VAR=$(cmd) のため run 不使用
     e2e_is_target_project "$base" || e2e_is_target_jwt_dir "$base" || e2e_is_target_tmp "$base" \
         || die "削除対象外のフォルダ名です: ${d}"
+    # JWT 用の証明書フォルダは、sf-init が作る中身（server.key / server.crt）だけのときに限り、削除する
+    #   名前が一致しても、ほかのファイルが入っている（e2e が作ったものではない可能性がある）場合は、消さずに失敗として返す
+    if e2e_is_target_jwt_dir "$base"; then
+        local f
+        for f in "$d"/* "$d"/.[!.]*; do
+            [[ -e "$f" || -L "$f" ]] || continue
+            case "$(basename "$f")" in
+                server.key|server.crt) ;;
+                *) log "ERROR" "  ${d} に、想定外のファイル（$(basename "$f")）があるため、削除しません。"; return 1 ;;
+            esac
+        done
+    fi
     run rm -rf "${d:?}" || die "フォルダの削除に失敗しました: ${d}"
 }
 

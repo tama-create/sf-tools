@@ -112,7 +112,29 @@ test_non_admin_can_deploy() {
     teardown "$td" "$mb"
 }
 
+# 確認で N → 中断する（強制デプロイを実行しない）
+#   以前は ask_yn の戻り値を見ておらず、N と答えても強制デプロイが実行されていた
+test_confirm_no_aborts() {
+    local td mb mh
+    setup_std_env td mb mh
+    create_all_mocks "$mb"
+    setup_release_dir "$td" "feature/deploy-test"
+
+    export MOCK_GIT_BRANCH="feature/deploy-test"
+    export MOCK_SF_ORG_JSON='{"result":{"alias":"testorg","id":"00D000000000001AAA"}}'
+
+    local out; out=$( echo "N" | ( cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-deploy.sh" --no-open ) 2>&1 )
+    local ec=$?
+
+    assert_exit_fail $ec "確認で N → 中断（終了コード 0 以外）"
+    assert_output_contains "$out" "中断しました" "確認で N → 中断の旨が表示される"
+    assert_file_not_contains "$MOCK_CALL_LOG" "project deploy" "確認で N → 強制デプロイは実行されない"
+    unset MOCK_GIT_BRANCH MOCK_SF_ORG_JSON
+    teardown "$td" "$mb"
+}
+
 test_feature_branch
+test_confirm_no_aborts
 test_main_branch_blocked
 test_staging_branch_blocked
 test_development_branch_blocked

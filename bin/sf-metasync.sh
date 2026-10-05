@@ -192,7 +192,7 @@ phase_git_sync() {
     # ローカル実行時はコミット前に変更内容を表示して確認する
     if [[ "${GITHUB_ACTIONS:-false}" != "true" ]]; then
         git status --short >&2  # run 不使用: 確認表示のため
-        ask_yn "上記の変更を main にコミット&プッシュします。よろしいですか？"
+        ask_yn "上記の変更を main にコミット&プッシュします。よろしいですか？" || die "中断しました。"
     fi
 
     run git commit -m "$COMMIT_MSG" || return $RET_NG

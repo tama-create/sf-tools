@@ -675,6 +675,51 @@ test_e2e_list_failure() {
     teardown "$CB"
 }
 
+# ------------------------------------------------------------------------------
+# 16. ローカルの削除の補強（名前が一致しても、中身が想定外・シンボリックリンクなら消さない）
+#   背景: Codex のレビューで、JWT 用フォルダを、名前だけで rm -rf していることを指摘された
+# ------------------------------------------------------------------------------
+test_e2e_local_guard() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] ローカルの削除: 中身が想定外のフォルダ・シンボリックリンクは、消さない${CLR_RST}"
+    _mk_cleanup_env
+    local j="$HM/.sf-jwt/force-e2e-20260101-000000"
+    printf 'k' > "$j/server.key"; printf 'c' > "$j/server.crt"
+
+    # 想定どおりの中身（server.key / server.crt だけ）→ 削除される
+    _run_cleanup --yes --no-confirm; local rc=$?
+    assert_exit_ok "$rc" "中身が server.key / server.crt だけ → 削除できる（終了コード 0）"
+    assert_dir_not_exists "$j" "中身が server.key / server.crt だけのフォルダは、削除される"
+    teardown "$CB"
+
+    # 想定外のファイルが入っている → 削除しない（失敗として返す）
+    _mk_cleanup_env
+    j="$HM/.sf-jwt/force-e2e-20260101-000000"
+    printf 'k' > "$j/server.key"; printf 'important' > "$j/notes.txt"
+    _run_cleanup --yes --no-confirm; rc=$?
+    assert_exit_fail "$rc" "想定外のファイルあり → 失敗で終わる"
+    assert_dir_exists "$j" "想定外のファイルが入っているフォルダは、削除しない"
+    assert_file_exists "$j/notes.txt" "想定外のファイルが残っている"
+    assert_file_contains "$MB/out.log" "想定外のファイル（notes.txt）があるため、削除しません" "削除しない理由が表示される"
+    assert_dir_not_exists "$CB/root/home/tamashimon-org/e2e-20260101-000000" "ほかの掃除（作業フォルダ）は、続けて行う"
+    teardown "$CB"
+
+    # シンボリックリンクは、一覧に出さない
+    _mk_cleanup_env
+    local t="$CB/tmpdir" real="$CB/real-target"; mkdir -p "$t" "$real"
+    ln -s "$real" "$t/e2e-run.LnKdIr" 2>/dev/null
+    ln -s "$real" "$HM/.sf-jwt/force-e2e-20260202-020202" 2>/dev/null
+    touch -h -d "2 hours ago" "$t/e2e-run.LnKdIr" 2>/dev/null
+    if [[ -L "$t/e2e-run.LnKdIr" ]]; then
+        TMPDIR="$t" _e2e_call 'e2e_load_fixture; e2e_guard_env; e2e_list_target_local'
+        assert_file_not_contains "$MB/out.log" "e2e-run.LnKdIr" "一時フォルダのシンボリックリンクは、対象外"
+        assert_file_not_contains "$MB/out.log" "force-e2e-20260202-020202" "証明書フォルダのシンボリックリンクは、対象外"
+    else
+        pass "（シンボリックリンクを作れない環境のため省略）"
+    fi
+    unset MOCK_CALL_LOG MOCK_GH_REPOS MOCK_SF_ECAS
+    teardown "$CB"
+}
+
 test_e2e_names
 test_e2e_guard
 test_e2e_delete_guards
@@ -690,5 +735,6 @@ test_e2e_sfdx_url
 test_e2e_admin_login_retry
 test_e2e_tmp_cleanup
 test_e2e_list_failure
+test_e2e_local_guard
 
 print_summary

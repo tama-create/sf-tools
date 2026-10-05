@@ -1,5 +1,7 @@
 # sf-logwatch.sh 設計書
 
+> **ステータス: 未実装（設計のみ）。** `bin/sf-logwatch.sh` と `tests/test_sf-logwatch.sh` は、まだ存在しない。
+
 ## 1. 概要
 
 Salesforce 開発中に、ターゲットファイルのメタデータ種別を自動判定し、

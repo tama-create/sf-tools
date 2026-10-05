@@ -280,8 +280,39 @@ test_syntax_skip_when_no_branch_name() {
 }
 
 # ------------------------------------------------------------------------------
+# git fetch に渡すブランチ名は、1 つずつ引用して渡し、使えない名前は渡さない
+#   branches.txt はリポジトリで共有されるため、空白・ワイルドカード・"-" で始まる値が
+#   git fetch のオプションや別の引数として解釈されないようにする
+# ------------------------------------------------------------------------------
+test_fetch_targets_safe() {
+    local td mb
+    td=$(setup_force_dir); mb=$(setup_mock_bin)
+    export MOCK_CALL_LOG="$mb/calls.log"
+    export MOCK_GIT_BRANCH="feature/test"
+    export MOCK_GIT_LOG_BRANCH_OUTPUT=""
+    export MOCK_GIT_LOG_MAIN_OUTPUT=""
+    create_mock_git "$mb"
+    # 正常な名前（前後に空白あり）と、使えない名前（オプション形式・空白入り・ワイルドカード）を混ぜる
+    printf 'main\n  staging  \n--upload-pack=evil\nbad name\nfeat*\ndevelop\n' > "$td/sf-tools/config/branches.txt"
+
+    local out; out=$(run_prepush "$td" "$mb")
+    local ec=$?
+
+    assert_exit_ok $ec "使えないブランチ名が混ざっていても → 正常終了"
+    assert_file_contains "$mb/calls.log" "git fetch -q origin -- feature/test main staging develop" \
+        "正常な名前だけを、1 つずつ、-- の後ろで git fetch に渡す（前後の空白は除去）"
+    assert_file_not_contains "$mb/calls.log" "--upload-pack" "オプション形式の名前は、git fetch に渡さない"
+    assert_file_not_contains "$mb/calls.log" "bad" "空白入りの名前は、分割して渡さない"
+    assert_file_not_contains "$mb/calls.log" "feat*" "ワイルドカードの名前は、渡さない"
+    assert_output_contains "$out" "使えないブランチ名があります" "使えない名前は、警告を表示してスキップする"
+    teardown "$td" "$mb"
+    unset MOCK_GIT_BRANCH MOCK_GIT_LOG_BRANCH_OUTPUT MOCK_GIT_LOG_MAIN_OUTPUT
+}
+
+# ------------------------------------------------------------------------------
 # 実行
 # ------------------------------------------------------------------------------
+test_fetch_targets_safe
 test_block_push_to_main
 test_block_push_to_staging
 test_block_push_to_develop

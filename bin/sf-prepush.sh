@@ -10,6 +10,11 @@
 #   - rebase でコンフリクトが発生した場合のみプッシュを中断
 #   - ターゲットファイルの構文チェック（sf-check.sh）
 #
+# 【備考】
+#   - リモートの取得（git fetch）の対象は、現在のブランチと branches.txt のブランチ。
+#     branches.txt はリポジトリで共有されるため、英数字で始まり英数字・. _ / - だけで構成される名前のみ渡す
+#     （使えない名前は、警告を表示してスキップ。1 つずつ引用して、-- の後ろで渡す）
+#
 # 【オプション】
 #   -v, --verbose       : コマンドの応答（出力）をコンソールにも表示します
 # ==============================================================================
@@ -70,12 +75,27 @@ phase_fetch() {
     log "INFO" "リモート(origin)の最新情報を確認中..."
     local branches
     branches=$(get_branch_list)
+    # fetch 対象は配列で持ち、1 つずつ引用して渡す（branches.txt はリポジトリで共有されるファイルのため、
+    # 空白・ワイルドカード・"-" で始まる値が、git fetch のオプションや別の引数として解釈されないようにする）
+    local -a fetch_targets=()
+    local b
     # 現在のブランチがリモートに存在する場合のみ fetch 対象に含める（新規ブランチは除外）
-    local fetch_targets="$branches"
     if git ls-remote --exit-code origin "$current_branch" > /dev/null 2>&1; then
-        fetch_targets="$current_branch $branches"
+        fetch_targets+=("$current_branch")
     fi
-    run git fetch origin $fetch_targets -q || return $RET_NG
+    while IFS= read -r b; do
+        b="${b#"${b%%[![:space:]]*}"}"   # 前後の空白を除去
+        b="${b%"${b##*[![:space:]]}"}"
+        [[ -z "$b" ]] && continue
+        # 英数字で始まり、英数字・. _ / - だけで構成されるブランチ名のみ許可する（それ以外は、取得せずスキップ）
+        if [[ ! "$b" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ ]]; then
+            log "WARNING" "branches.txt に、使えないブランチ名があります（取得しません）: ${b}"
+            continue
+        fi
+        fetch_targets+=("$b")
+    done <<< "$branches"
+    [[ ${#fetch_targets[@]} -gt 0 ]] || return $RET_OK
+    run git fetch -q origin -- "${fetch_targets[@]}" || return $RET_NG
     return $RET_OK
 }
 

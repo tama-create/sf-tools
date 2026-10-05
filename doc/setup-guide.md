@@ -12,7 +12,7 @@
 
 > **⚠️ Windows ユーザーへ:** 本ガイドのすべての操作は **Git Bash** で行ってください。コマンドプロンプトや PowerShell は非対応です。
 
-### 1.1. 🖥️ ローカル環境
+### 1.1 🖥️ ローカル環境
 
 - Git（Git Bash 含む） — ソースコード管理
 - GitHub CLI（`gh` コマンド） — GitHub 操作の自動化
@@ -25,12 +25,12 @@
 
 > 各ツールの取得先・Windows でのインストール方法は `README.md` §1 を参照してください。
 
-### 1.2. ☁️ Salesforce 環境
+### 1.2 ☁️ Salesforce 環境
 
 - 開発用の Sandbox（Developer / Developer Pro）が作成済みであること
 - 接続先の Sandbox 名を把握していること
 
-### 1.3. 🐙 GitHub アカウント
+### 1.3 🐙 GitHub アカウント
 
 - リポジトリ作成権限があること
 - GitHub CLI で認証済みであること（`gh auth login` で事前にログインしておく）
@@ -81,7 +81,7 @@ GitHub リポジトリの作成から Salesforce 組織への接続、ブラン�
 | JWT Secrets 登録 | JWT 認証情報（SF_PRIVATE_KEY 等）を GitHub Secrets に登録 |
 | SF_TOOLS_TOKEN 登録 | Actions が Private の sf-tools を clone するための Token（Fine-grained PAT）を Secrets に登録 |
 
-### 3.1. 入力が必要な項目
+### 3.1 入力が必要な項目
 
 GitHub オーナー名とプロジェクト名はフォルダ構成から自動取得されます。
 以下の階層で `sf-init.sh` を実行してください:
@@ -133,7 +133,7 @@ GitHub オーナー名とプロジェクト名はフォルダ構成から自動�
 
 > クローン先は sf-init.sh を実行したディレクトリに自動設定されます。
 
-### 3.2. SF_TOOLS_TOKEN の登録
+### 3.2 SF_TOOLS_TOKEN の登録
 
 GitHub Actions（wf-metasync / wf-validate / wf-release）は、実行のたびに Private リポジトリ `tama-create/sf-tools` を clone します。この clone に使う読み取り専用 Token を `SF_TOOLS_TOKEN` として登録します。
 
@@ -158,12 +158,12 @@ GitHub Actions（wf-metasync / wf-validate / wf-release）は、実行のたび�
 sf-init.sh によるセットアップが正しく完了したことを確認します。
 メタデータ同期とワークフローの2点を検証することで、Salesforce 組織との接続・GitHub Actions の動作・ブランチ保護ルールがすべて正しく機能しているかを確かめます。
 
-### 4.1. 🔄 sf-metasync の確認
+### 4.1 🔄 sf-metasync の確認
 
 GitHub → Actions → 「[metasync] メタ同期」→ 「Run workflow」で手動実行。
 ✅ 正常に完了すれば本番組織のメタデータが main に同期される。
 
-### 4.2. 📝 PR ワークフローの確認
+### 4.2 📝 PR ワークフローの確認
 
 ```bash
 # 1. ジョブブランチを作成・クローン・sf-start 起動
@@ -250,7 +250,7 @@ force-xxx/
 
 ## 7. トラブルシューティング
 
-### 7.1. ❌ sf-init.sh が途中でエラー終了した
+### 7.1 ❌ sf-init.sh が途中でエラー終了した
 
 ログファイルを確認する:
 
@@ -260,30 +260,30 @@ cat ~/sf-tools/logs/sf-init.log
 
 エラー内容を確認して対処後、再実行する。すでに作成されたリポジトリは手動で削除してからやり直すこと。
 
-### 7.2. ❌ sf-metasync が「push declined due to repository rule violations」で失敗
+### 7.2 ❌ sf-metasync が「push declined due to repository rule violations」で失敗
 
 PAT_TOKEN が未設定、または権限不足。3.1 の PAT_TOKEN 登録を確認。
 
-### 7.3. ❌ wf-validate / wf-sequence が動かない
+### 7.3 ❌ wf-validate / wf-sequence が動かない
 
 ワークフローファイルが `.github/workflows/` にあるか確認。
 ファイルが存在しない場合は、`~/sf-tools/templates/.github/workflows/` から `wf-*.yml` を手動でコピーすること。
 
-### 7.4. ⚠️ CRLF の警告が出る
+### 7.4 ⚠️ CRLF の警告が出る
 
 Windows 環境での改行コードの違い。動作に影響はない。
 `git checkout -- <file>` でリセット可能。
 
-### 7.5. ⚠️ pre-push フックがプッシュをブロックする
+### 7.5 ⚠️ pre-push フックがプッシュをブロックする
 
 main ブランチへの直接プッシュは禁止。PR 経由でマージすること。
 テスト等でバイパスが必要な場合は `git push --no-verify`。
 
-### 7.6. ❌ wf-metasync / wf-validate / wf-release が「自動化ツール（sf-tools）を取得」で失敗する
+### 7.6 ❌ wf-metasync / wf-validate / wf-release が「自動化ツール（sf-tools）を取得」で失敗する
 
 `SF_TOOLS_TOKEN` が未設定・有効期限切れ・対象リポジトリ違い（Resource owner が sf-tools の所有者と異なる）のいずれか。3.2 の手順で Token を作り直し、Secret を更新する。
 
-### 7.7. ❌ 「差分抽出ツール（Salesforce Git Delta）をインストール」で TypeError が出て失敗する
+### 7.7 ❌ 「差分抽出ツール（Salesforce Git Delta）をインストール」で TypeError が出て失敗する
 
 エラー例: `TypeError: webidl.util.markAsUncloneable is not a function`
 

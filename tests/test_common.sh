@@ -270,6 +270,20 @@ test_is_gitbash() {
     done
 }
 
+test_is_reserved_org_alias() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] is_reserved_org_alias: prod / staging / develop / main は共有環境（予約名）、それ以外は個人用${CLR_RST}"
+    local a out
+    for a in prod staging develop main; do
+        out=$(_osd_run linux-gnu "is_reserved_org_alias '$a' && echo YES || echo NO")
+        [[ "$out" == "YES" ]] && pass "${a} → 予約名（共有環境）" || fail "${a} → 予約名（共有環境）" "$out"
+    done
+    for a in dev00 my-sandbox DevHub production Prod prod2 "" "prod staging"; do
+        out=$(_osd_run linux-gnu "is_reserved_org_alias '$a' && echo YES || echo NO")
+        [[ "$out" == "NO" ]] && pass "「${a}」→ 予約名ではない（完全一致のみ。大文字小文字・部分一致は対象外）" || fail "「${a}」→ 予約名ではない" "$out"
+    done
+}
+
 test_open_browser_gitbash() {
     echo ""
     echo -e "${CLR_HEAD}[TEST] open_browser: Git Bash（msys / mingw / cygwin）では start を呼ぶ${CLR_RST}"
@@ -440,6 +454,7 @@ test_check_gh_owner_org_api_failure
 test_read_secret
 test_mask_secrets
 test_is_gitbash
+test_is_reserved_org_alias
 test_open_browser_gitbash
 test_check_sf_cli
 test_check_sf_cli_cache

@@ -105,6 +105,7 @@ test_happy_path() {
     assert_file_contains "$MOCK_CALL_LOG" "gh repo view"    "リポジトリ確認が呼ばれる"
     assert_file_contains "$MOCK_CALL_LOG" "git/refs"        "ブランチ作成 API が呼ばれる"
     assert_file_contains "$MOCK_CALL_LOG" "git clone"       "git clone が呼ばれる"
+    assert_file_contains "$MOCK_CALL_LOG" "git clone -c core.longpaths=true" "git clone に core.longpaths=true が付く（Windows のパス長の上限対策）"
 
     teardown "$mb" "$mock_home" "$(dirname "$(dirname "$(dirname "$cdir")")")"
 }

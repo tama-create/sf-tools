@@ -164,6 +164,8 @@ sf-job.sh
 2. 作業ディレクトリを準備（worktree または clone）
 3. `sf-start.sh` を自動起動（ログイン・フック設定・VS Code 起動）
 
+> **Windows のパス長について:** クローンは `core.longpaths=true` 付きで行います（Windows のパスの長さの上限（260 文字）対策）。組織に長い名前のメタデータ（例: DevOps Center の `objectTranslations`）があっても、チェックアウトに失敗しません。この設定はクローン先に残るので、以降の `git add` / `commit` / `push` にも効きます。
+
 ### 3.4 作業を再開する（sf-start）
 
 前日の続きなど既存ブランチで再開するときは `force-*` ディレクトリ内で実行します。

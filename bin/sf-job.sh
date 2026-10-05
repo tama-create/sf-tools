@@ -17,7 +17,7 @@
 #   Phase 2: プロジェクト情報の確認（フォルダ構成からOWNERとREPO_NAMEを自動導出）
 #   Phase 3: ジョブ名の入力と重複チェック（ローカル・GitHub ブランチ）
 #   Phase 4: GitHub 上にジョブブランチを作成
-#   Phase 5: ローカルにクローン
+#   Phase 5: ローカルにクローン（Windows のパス長の上限対策で、core.longpaths=true を付ける）
 #   Phase 6: sf-start.sh を起動（Sandbox 接続・VSCode 起動・sf-launcher.sh 起動）
 #
 # 【使い方】
@@ -225,7 +225,10 @@ phase_clone_repository() {
     run mkdir -p "$JOB_DIR" || die "ジョブフォルダを作成できません: ${JOB_DIR}"
 
     log "INFO" "リポジトリをクローン中（ブランチ: ${JOB_NAME}）..."
-    run git clone \
+    # Windows のパスの長さの上限（260 文字）対策: core.longpaths=true を付ける。
+    # 設定はクローン先に残り、以降の git add / commit / push にも効く。Windows 以外では無視される。
+    # 組織に長い名前のメタデータ（例: DevOps Center の objectTranslations）があると、付けないと clone のチェックアウトに失敗する
+    run git clone -c core.longpaths=true \
         --branch "${JOB_NAME}" \
         "https://github.com/${REPO_FULL_NAME}.git" \
         "$REPO_DIR" \

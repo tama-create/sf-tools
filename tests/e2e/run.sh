@@ -13,7 +13,9 @@
 #                    ・ブラウザは開かない（tests/e2e/shims の start / xdg-open / open）
 #   3. 確認        : Secret / Variable / ブランチ / ワークフローの存在、トークンがログに出ていないこと、
 #                    GitHub Actions の実行: wf-metasync（手動起動。完了を待つ。Hello World と同時に動かすと、組織へのデプロイと取得が重なって失敗する）、続けて Hello World の Apex を PR 経由で
-#                    リリース（wf-validate → マージ → wf-release）し、続けて削除する（sf-tools の本来の機能の通し）
+#                    リリース（wf-validate → マージ → wf-release）し、続けて削除する（sf-tools の本来の機能の通し）。
+#                    リリース側の作業は、通常の運用と同じく、sf-tools のコマンドで行う: sf-job.sh（ブランチ作成・clone・sf-start.sh）
+#                    → ファイルを書く → sf-dryrun.sh（ローカルの検証）→ sf-push.sh（commit・push・pre-push フック）。PR の作成・マージは gh
 #   4. 終了        : sf のエイリアスを実行前の状態に戻す。テスト用のリポジトリ・外部クライアントアプリなどは、既定では削除せずに残す
 #                    （終了後に、GitHub の画面で、Actions の実行・PR・ファイルを見返せるようにするため。次回の前掃除で、自動で削除される）。
 #                    --cleanup を付けると、終了時に削除する（途中で止まって残った Hello World の Apex も含む）
@@ -103,6 +105,7 @@ e2e_alias_snapshot "${E2E_TMP}/aliases.txt"
 SHIM_DIR="${E2E_TMP}/shims"
 mkdir -p "$SHIM_DIR"
 cp "${E2E_SCRIPT_DIR}/shims/sf" "${SHIM_DIR}/sf"
+cp "${E2E_SCRIPT_DIR}/shims/code" "${SHIM_DIR}/code"
 for _n in start xdg-open open; do cp "${E2E_SCRIPT_DIR}/shims/browser" "${SHIM_DIR}/${_n}"; done
 chmod +x "${SHIM_DIR}"/* 2>/dev/null || true  # run 不使用: 実行権限の付与（Windows は効果なし・意図的エラー無視）
 export E2E_SHIM_DIR="$SHIM_DIR"
@@ -196,33 +199,52 @@ _step_conclusion() {
 #   失敗した手順があれば、そこで止める（残ったクラスは、後掃除で削除される）
 # ------------------------------------------------------------------------------
 _admin_login_ok() { ( e2e_sf_admin_login ); }
-_put_deploy_target() { e2e_hello_deploy_target_text | e2e_gh_file_put "$REPO_FULL" "$1" "sf-tools/release/$1/deploy-target.txt" -; }
 _put_remove_target() { e2e_hello_remove_target_text | e2e_gh_file_put "$REPO_FULL" "$1" "sf-tools/release/$1/remove-target.txt" -; }
 # 使わない側のファイルは、空の雛形で置く（sf-release.sh は、両方のファイルが無いと止まるため）
-_put_empty_remove_target() { e2e_empty_target_text | e2e_gh_file_put "$REPO_FULL" "$1" "sf-tools/release/$1/remove-target.txt" -; }
 _put_empty_deploy_target() { e2e_empty_target_text | e2e_gh_file_put "$REPO_FULL" "$1" "sf-tools/release/$1/deploy-target.txt" -; }
 
-# リリース用のファイル（クラス 2 つ・メタデータ 2 つ・deploy-target.txt）を、ブランチに追加する
-_hello_add_deploy_files() {
-    local br="$1" f
+# リリース側: 開発者の作業を、sf-tools のコマンドで再現する（通常の運用と同じ道）
+#   sf-job.sh（ブランチ作成・clone・sf-start.sh）→ ファイルを書く → sf-dryrun.sh（ローカルの検証）→ sf-push.sh（commit・push・pre-push フック）
+#   ファイルの書き込みだけが、開発者の手作業にあたる部分
+_hello_write_files() {   # 引数: クローンのフォルダ ブランチ名
+    local repo="$1" job="$2" f
+    mkdir -p "${repo}/force-app/main/default/classes" || return 1  # run 不使用: テスト用の作業フォルダへの書き込み
     for f in "${E2E_APEX_HELLO}.cls" "${E2E_APEX_HELLO}.cls-meta.xml" "${E2E_APEX_HELLO_TEST}.cls" "${E2E_APEX_HELLO_TEST}.cls-meta.xml"; do
-        chk "リリース: ${f} を追加した" e2e_gh_file_put "$REPO_FULL" "$br" "force-app/main/default/classes/${f}" "${E2E_SCRIPT_DIR}/fixtures/${f}" || return 1
+        cp "${E2E_SCRIPT_DIR}/fixtures/${f}" "${repo}/force-app/main/default/classes/${f}" || return 1  # run 不使用: 同上
     done
-    chk "リリース: deploy-target.txt を追加した" _put_deploy_target "$br" || return 1
-    chk "リリース: remove-target.txt（空の雛形）を追加した" _put_empty_remove_target "$br"
+    e2e_hello_deploy_target_text > "${repo}/sf-tools/release/${job}/deploy-target.txt"
 }
+_hello_push() { E2E_COMMIT_MSG="$2" e2e_run_sf_cmd "sf-push-$1" "$3" "" "${SF_TOOLS_ROOT}/bin/sf-push.sh"; }   # 引数: ジョブ名 メッセージ クローンのフォルダ
+_hello_local_release() {   # 引数: ブランチ名（= ジョブ名） コミットメッセージ
+    local job="$1" msg="$2" repo="${WORK}/$1/${REPO_NAME}"
+    chk "sf-job.sh で、ジョブ（ブランチ ${job}）を開始した（ブランチ作成・clone・sf-start.sh）" \
+        e2e_run_sf_cmd "sf-job-${job}" "$WORK" "${job}\nY\n${E2E_JOB_ALIAS}\n" "${SF_TOOLS_ROOT}/bin/sf-job.sh" || return 1
+    chk "sf-install.sh（sf-start.sh が背景で実行）が完了した" e2e_wait_sf_install "$repo" || return 1
+    chk "Git フック（pre-push）が設置された" test -f "${repo}/.git/hooks/pre-push"
+    chk "リリース管理フォルダ release/${job}/ が用意された（雛形）" \
+        test -f "${repo}/sf-tools/release/${job}/deploy-target.txt" -a -f "${repo}/sf-tools/release/${job}/remove-target.txt" || return 1
+    chk "Apex のクラスと deploy-target.txt を書いた" _hello_write_files "$repo" "$job" || return 1
+    chk "sf-dryrun.sh で、ローカルから検証できた" \
+        e2e_run_sf_cmd "sf-dryrun-${job}" "$repo" "" "${SF_TOOLS_ROOT}/bin/sf-dryrun.sh" --no-open || return 1
+    chk "sf-dryrun.sh が、@isTest のクラスを検出した（--tests の指定）" \
+        grep -q "テストクラス合計: 1件" "${E2E_TMP}/sf-dryrun-${job}.out" || return 1
+    chk "sf-push.sh で、commit と push ができた" \
+        _hello_push "$job" "$msg" "$repo" || return 1
+    chk "pre-push フック（sf-prepush.sh）が動いた" test -s "${repo}/sf-tools/logs/sf-prepush.log"
+    chk "push した内容が、GitHub のブランチ ${job} に届いている" \
+        test "$(git -C "$repo" rev-parse HEAD 2>/dev/null)" == "$(git -C "$repo" ls-remote origin "refs/heads/${job}" 2>/dev/null | awk '{print $1}')"
+}
+
 # 削除用のファイル（remove-target.txt）を、ブランチに追加する
 _hello_add_remove_files() {
     chk "削除: remove-target.txt を追加した" _put_remove_target "$1" || return 1
     chk "削除: deploy-target.txt（空の雛形）を追加した" _put_empty_deploy_target "$1"
 }
 
-# 1 回分: ブランチ作成 → ファイル追加 → PR → wf-validate → マージ → wf-release。成功したら、実行 ID を HELLO_RELEASE_RUN に入れる
-#   引数: ラベル ブランチ名 PR のタイトル ファイルを追加する関数名
-_hello_cycle() {
-    local label="$1" br="$2" title="$3" addfn="$4" prn runid
-    chk "${label}: ブランチ ${br} を作成した" e2e_gh_branch_create "$REPO_FULL" "$br" || return 1
-    "$addfn" "$br" || return 1
+# PR の作成 → wf-validate → マージ → wf-release → wf-propagate。成功したら、実行 ID を HELLO_RELEASE_RUN に入れる
+#   引数: ラベル ブランチ名（push 済み） PR のタイトル
+_hello_pr_flow() {
+    local label="$1" br="$2" title="$3" prn runid
     prn=$(e2e_gh_pr_create "$REPO_FULL" "$br" "$title") || prn=""   # VAR=$(cmd) のため run 不使用
     chk "${label}: PR を作成した" test -n "$prn" || return 1
     runid=$(e2e_wait_pr_run "$REPO_FULL" wf-validate.yml "$br") || runid=""   # VAR=$(cmd) のため run 不使用
@@ -243,12 +265,27 @@ _hello_cycle() {
     return 0
 }
 
+# 削除側（今は GitHub の API で、ブランチとファイルを作る）: ブランチ作成 → ファイル追加 → PR 以降
+#   引数: ラベル ブランチ名 PR のタイトル ファイルを追加する関数名
+_hello_cycle() {
+    local label="$1" br="$2" title="$3" addfn="$4"
+    chk "${label}: ブランチ ${br} を作成した" e2e_gh_branch_create "$REPO_FULL" "$br" || return 1
+    "$addfn" "$br" || return 1
+    _hello_pr_flow "$label" "$br" "$title"
+}
+# リリース側: sf-tools のコマンドでローカルから push → PR 以降
+_hello_release_cycle() {
+    local br="$1" title="$2"
+    _hello_local_release "$br" "$title" || return 1
+    _hello_pr_flow "リリース" "$br" "$title"
+}
+
 _hello_flow() {
     HELLO_RELEASE_RUN=""
     chk "Hello World: Salesforce への管理用ログイン（問い合わせ用）ができた" _admin_login_ok || return 0
     chk "Hello World: リリース前は、Salesforce にクラスがない" test "$(e2e_apex_count "$E2E_APEX_HELLO")" == "0" || return 0
 
-    _hello_cycle "リリース" "e2e-hello" "e2e: Hello World をリリース" _hello_add_deploy_files || return 0
+    _hello_release_cycle "e2e-hello" "e2e: Hello World をリリース" || return 0
     # wf-release の途中のステップ（JWT ログイン・sf-tools の取得・Slack 通知）
     chk "wf-release: 本番組織へのログイン（JWT）が成功した" \
         test "$(_step_conclusion "$HELLO_RELEASE_RUN" "本番組織にログイン（JWT）")" == "success"

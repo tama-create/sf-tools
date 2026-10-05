@@ -22,6 +22,7 @@
 #  16. ローカルの削除の補強（想定外の中身・シンボリックリンクは消さない）
 #  17. Hello World の Apex（名前の判定・一覧・件数・削除・後掃除）
 #  18. GitHub の PR を使った流れ（ブランチ・ファイル・PR・マージ・Actions の待ち）
+#  19. sf-tools のコマンドの実行（sf-job.sh / sf-push.sh など）と、code の差し替え
 # ==============================================================================
 source "$(dirname "${BASH_SOURCE[0]}")/test_helper.sh"
 echo -e "${CLR_HEAD}=== tests/e2e（安全ガードと部品）===${CLR_RST}"
@@ -974,7 +975,10 @@ EOF
     assert_file_contains     "$MB/out.log" "[members]" "空の雛形: [members] がある"
     assert_file_not_contains "$MB/out.log" "SfToolsE2e"  "空の雛形: クラスの指定は入っていない"
     # run.sh: 各 PR に、deploy-target.txt と remove-target.txt の両方を置く（sf-release.sh は両方が無いと止まる）
-    assert_file_contains "$E2E_DIR/run.sh" "_put_empty_remove_target \"\$br\"" "run.sh: リリースの PR に、空の remove-target.txt も置く"
+    assert_file_contains "$E2E_DIR/run.sh" "sf-job.sh" "run.sh: リリースは、sf-job.sh でブランチ作成・clone する（通常の運用と同じ道）"
+    assert_file_contains "$E2E_DIR/run.sh" "sf-dryrun.sh" "run.sh: リリースは、sf-dryrun.sh でローカルの検証をする"
+    assert_file_contains "$E2E_DIR/run.sh" "sf-push.sh" "run.sh: リリースは、sf-push.sh で commit・push する"
+    assert_file_contains "$E2E_DIR/run.sh" 'release/${job}/remove-target.txt' "run.sh: sf-install が用意した remove-target.txt の雛形を確認する"
     assert_file_contains "$E2E_DIR/run.sh" "_put_empty_deploy_target \"\$1\""  "run.sh: 削除の PR に、空の deploy-target.txt も置く"
 
     # fixtures: Apex のソースが、揃っている
@@ -987,6 +991,70 @@ EOF
     teardown "$CB"
 }
 
+
+# ------------------------------------------------------------------------------
+# 19. sf-tools のコマンドを、通常の運用と同じように実行する部品（sf-job.sh / sf-push.sh などの実行・待ち・code の差し替え）
+# ------------------------------------------------------------------------------
+test_e2e_sf_cmd() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] sf-tools のコマンドの実行（標準入力・出力の記録・失敗時の表示・安全ガード）と、code の差し替え${CLR_RST}"
+    _mk_cleanup_env
+    local root="$CB/root/home/tamashimon-org/e2e-20260101-000000"   # _mk_cleanup_env が作る、テスト用の作業フォルダ
+    local tmp="$CB/tmp"; mkdir -p "$tmp"
+    local pre='e2e_load_fixture; e2e_guard_env; export E2E_TMP='"$tmp"';'
+
+    # 実行するスクリプト（標準入力をそのまま出力し、cwd と SF_LAUNCHER_ACTIVE を記録する）
+    cat > "$CB/fake.sh" << 'EOF2'
+#!/bin/bash
+echo "cwd=$(basename "$PWD") launcher=${SF_LAUNCHER_ACTIVE:-} args=$*"
+while IFS= read -r l; do echo "in=[$l]"; done
+exit "${FAKE_EXIT:-0}"
+EOF2
+    _e2e_call "$pre"" e2e_run_sf_cmd lbl $root 'job-1\nY\nalias\n' $CB/fake.sh --opt x; echo RC=\$?"
+    assert_file_contains "$MB/out.log" "RC=0"                               "コマンド実行: 成功 → 戻り値 0"
+    assert_file_contains "$tmp/lbl.out" "cwd=e2e-20260101-000000 launcher=1 args=--opt x" "コマンド実行: 指定のフォルダで、SF_LAUNCHER_ACTIVE=1 で、引数付きで実行される"
+    assert_file_contains "$tmp/lbl.out" "in=[job-1]"                         "コマンド実行: 標準入力（1 行目）が渡る"
+    assert_file_contains "$tmp/lbl.out" "in=[Y]"                             "コマンド実行: 標準入力（2 行目）が渡る"
+    assert_file_contains "$tmp/lbl.out" "in=[alias]"                         "コマンド実行: 標準入力（3 行目）が渡る"
+
+    # 失敗: 終了コードが 0 以外 → 戻り値 1 と、出力の末尾の表示（鍵の値は伏せる）
+    printf '#!/bin/bash\necho "失敗の本文 ghp_fakepat"\nexit 3\n' > "$CB/fail.sh"
+    _e2e_call "$pre"" e2e_run_sf_cmd lbl2 $root '' $CB/fail.sh; echo RC=\$?"
+    assert_file_contains     "$MB/out.log" "RC=1"                            "コマンド実行: 失敗 → 戻り値 1"
+    assert_file_contains     "$MB/out.log" "終了コード 3"                    "コマンド実行: 失敗 → 終了コードを表示する"
+    assert_file_contains     "$MB/out.log" "失敗の本文 ***"                  "コマンド実行: 失敗 → 出力の末尾を表示する（Token は *** に置き換える）"
+    assert_file_not_contains "$MB/out.log" "ghp_fakepat"                     "コマンド実行: 失敗 → Token の値は表示しない"
+
+    # 安全ガード: テスト用の作業フォルダの外では、実行しない
+    _e2e_call "$pre"" e2e_run_sf_cmd lbl3 $HM '' $CB/fake.sh; echo DONE"
+    assert_file_not_contains "$MB/out.log" "DONE"                            "安全ガード: テスト用の作業フォルダの外では、実行しない"
+    _e2e_call "$pre"" e2e_run_sf_cmd lbl4 $CB/root/home/tamashimon-org/test-win '' $CB/fake.sh; echo DONE"
+    assert_file_not_contains "$MB/out.log" "DONE"                            "安全ガード: 名前が e2e- で始まらないフォルダ（test-win）では、実行しない"
+    assert_file_not_exists "$tmp/lbl3.out"                                   "安全ガード: 拒否したときは、実行しない（出力ファイルがない）"
+
+    # sf-install の完了待ち（ログの完了メッセージ）
+    mkdir -p "$root/clone1/sf-tools/logs" "$root/clone2/sf-tools/logs"
+    echo "[SUCCESS] npm install の確認が完了しました。" > "$root/clone1/sf-tools/logs/sf-install.log"
+    echo "[INFO] 途中" > "$root/clone2/sf-tools/logs/sf-install.log"
+    _e2e_call "$pre"" E2E_INSTALL_TIMEOUT=2 E2E_POLL_SEC=1 e2e_wait_sf_install $root/clone1; echo RC=\$?"
+    assert_file_contains "$MB/out.log" "RC=0"                                "sf-install の待ち: 完了メッセージがあれば、戻り値 0"
+    _e2e_call "$pre"" E2E_INSTALL_TIMEOUT=2 E2E_POLL_SEC=1 e2e_wait_sf_install $root/clone2; echo RC=\$?"
+    assert_file_contains "$MB/out.log" "RC=1"                                "sf-install の待ち: 完了しなければ、時間切れで戻り値 1"
+    _e2e_call "$pre"" E2E_INSTALL_TIMEOUT=2 E2E_POLL_SEC=1 e2e_wait_sf_install $root/none; echo RC=\$?"
+    assert_file_contains "$MB/out.log" "RC=1"                                "sf-install の待ち: ログがなければ、戻り値 1"
+
+    # code の差し替え: --wait とファイルでメッセージを書き込む。code . は何もしない
+    local sh="$E2E_DIR/shims/code" f="$CB/msg.txt"
+    printf '# コメント\n' > "$f"
+    E2E_COMMIT_MSG="e2e: テスト" bash "$sh" --new-window --wait "$f"; local rc=$?
+    assert_exit_ok "$rc" "code の差し替え: --wait → 終了コード 0"
+    assert_file_contains "$f" "e2e: テスト" "code の差し替え: --wait → コミットメッセージを書き込む"
+    printf '# コメント\n' > "$f"
+    bash "$sh" .; rc=$?
+    assert_exit_ok "$rc" "code の差し替え: code . → 終了コード 0"
+    assert_file_not_contains "$f" "e2e" "code の差し替え: code . → ファイルは変えない"
+    unset MOCK_CALL_LOG MOCK_GH_REPOS MOCK_SF_ECAS
+    teardown "$CB"
+}
 
 test_e2e_names
 test_e2e_guard
@@ -1006,5 +1074,6 @@ test_e2e_list_failure
 test_e2e_local_guard
 test_e2e_apex
 test_e2e_gh_flow
+test_e2e_sf_cmd
 
 print_summary

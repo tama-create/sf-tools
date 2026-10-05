@@ -884,7 +884,7 @@ bash tests/e2e/run.sh
 
 **9.3.1 Hello World のリリースと削除:** sf-tools の本来の機能（PR → 検証 → マージ → リリース、削除用の PR）を通しで確認します。
 
-1. ブランチ `e2e-hello` に、Apex クラスと `release/e2e-hello/deploy-target.txt` を追加して PR を作る
+1. **通常の運用と同じく、sf-tools のコマンドで作業します。** `sf-job.sh`（ブランチ `e2e-hello` の作成・clone・`sf-start.sh`）→ Apex クラスと `release/e2e-hello/deploy-target.txt` を書く → `sf-dryrun.sh`（ローカルで検証。`@isTest` を検出して `--tests` を付ける）→ `sf-push.sh`（commit・push。`pre-push` フックも動く）。ここまでは、開発者がターミナルで行う操作と同じです（VS Code の起動・メッセージ入力、ブラウザでのログインだけを、自動化のために差し替えています）。そのあと、`gh` で PR を作ります
 2. `wf-validate`（検証）が成功することを確認し、PR をマージする
 3. `wf-release` が成功し（JWT ログイン・sf-tools の取得（公開リポジトリを Token なしで clone）・Slack 通知）、Salesforce にクラスができたことを確認する
    （マージ時には `wf-propagate` も動きます。`staging` / `develop` がない構成では、失敗にせずスキップして成功します）

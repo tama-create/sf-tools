@@ -269,6 +269,7 @@ e2e_delete_eca() {
 # ------------------------------------------------------------------------------
 E2E_APEX_HELLO="SfToolsE2eHello"
 E2E_APEX_HELLO_TEST="SfToolsE2eHelloTest"
+E2E_JOB_ALIAS="sf-tools-e2e-job"          # sf-start.sh で、接続する組織に付けるエイリアス（予約名ではない。終了時に、実行前の状態へ戻る）
 e2e_is_target_apex() { [[ "$1" =~ ^SfToolsE2eHello(Test)?$ ]]; }
 
 # Salesforce のテスト用 Apex クラスの一覧（名前のみ。管理用ログイン済みであること）
@@ -604,4 +605,68 @@ e2e_show_run_failure() {
         printf '    %s\n' "$line"
     done <<< "$out"
     return 0
+}
+
+# ------------------------------------------------------------------------------
+# sf-tools のコマンド（sf-job.sh / sf-dryrun.sh / sf-push.sh など）を、通常の運用と同じように実行する
+#   通常の運用: 開発者が、ターミナルで、sf-tools のコマンドを使って作業する。e2e も、同じコマンドを使う。
+#   質問への答えは標準入力に流し、sf org login web / code / ブラウザは、差し替え（shims）で、自動化する。
+# ------------------------------------------------------------------------------
+# ファイルの末尾を、鍵一式の値を *** に置き換えて、表示する。表示だけで、戻り値は常に 0
+#   引数: ファイル ラベル [行数。既定は E2E_FAIL_LOG_LINES（40）]
+e2e_show_file_tail() {
+    local f="$1" label="$2" n="${3:-${E2E_FAIL_LOG_LINES:-40}}" line v
+    log "WARNING" "${label}: 出力の末尾（${n} 行）:"
+    if [[ ! -s "$f" ]]; then
+        log "WARNING" "  （出力がありません）"
+        return 0
+    fi
+    while IFS= read -r line; do
+        for v in "${E2E_PAT_TOKEN:-}" "${E2E_SLACK_BOT_TOKEN:-}" "${E2E_SFDX_AUTH_URL:-}"; do
+            [[ -n "$v" ]] && line="${line//"$v"/***}"
+        done
+        printf '    %s\n' "$line"
+    done < <(sed -E 's/\x1b\[[0-9;]*[A-Za-z]//g' "$f" | tail -n "$n")
+    return 0
+}
+
+# sf-tools のスクリプトを、指定のフォルダで実行する。出力は ${E2E_TMP}/{ラベル}.out に残す。
+#   失敗（終了コード 0 以外）なら、出力の末尾を表示して、戻り値 1
+#   引数: ラベル フォルダ 標準入力（printf の %b 形式。例: 'e2e-hello\nY\nalias\n'。なければ空） スクリプト [引数...]
+#   フォルダは、テスト用の作業フォルダ（{E2E_HOME_ROOT}/{E2E_OWNER}/e2e-…）の中だけ
+#   SF_LAUNCHER_ACTIVE=1: sf-start.sh が、対話のメニュー（sf-launcher.sh）を起動しないようにする
+e2e_run_sf_cmd() {
+    local label="$1" dir="$2" input="$3" outf rc
+    shift 3
+    e2e_require_guard
+    case "$dir" in
+        "${E2E_HOME_ROOT}/${E2E_OWNER}/e2e-"*) ;;
+        *) die "テスト用の作業フォルダの外では、実行できません: ${dir}" ;;
+    esac
+    [[ -d "$dir" ]] || { log "ERROR" "  ${label}: フォルダがありません: ${dir}"; return 1; }
+    outf="${E2E_TMP:?}/${label}.out"
+    log "INFO" "  実行: bash $(basename "$1") ${*:2}（出力: ${outf}）"
+    (
+        cd "$dir" || exit 1
+        printf '%b' "$input" | PATH="${E2E_SHIM_DIR:-}:${PATH}" SF_LAUNCHER_ACTIVE=1 bash "$@"
+    ) > "$outf" 2>&1
+    rc=$?
+    if [[ $rc -ne 0 ]]; then
+        log "ERROR" "  ${label}: 終了コード ${rc}"
+        e2e_show_file_tail "$outf" "$label"
+        return 1
+    fi
+    return 0
+}
+
+# sf-start.sh が背景で実行する sf-install.sh（フック設置・release フォルダの準備・npm install）が終わるまで待つ。
+#   引数: クローンのフォルダ。E2E_INSTALL_TIMEOUT 秒（既定 600）以内に終わらなければ、戻り値 1
+e2e_wait_sf_install() {
+    local log_file="$1/sf-tools/logs/sf-install.log" waited=0
+    local timeout="${E2E_INSTALL_TIMEOUT:-600}" poll="${E2E_POLL_SEC:-5}"
+    while (( waited < timeout )); do
+        grep -q "npm install の確認が完了しました" "$log_file" 2>/dev/null && return 0
+        sleep "$poll"; waited=$((waited + poll))  # run 不使用: 待機
+    done
+    return 1
 }

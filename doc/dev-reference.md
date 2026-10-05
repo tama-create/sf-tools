@@ -606,7 +606,7 @@ sf-tools の `main` への反映は、全ユーザーへの配布と同義であ
 
 ### 9.5 ガードレール
 
-- `main` のブランチ保護・Ruleset: `sf-tools` 自身は公開リポジトリのため、無料プランでも設定できる（force-* のような Private リポジトリでは、`Upgrade to GitHub Pro or make this repository public` で設定できない）。Actions は実行のたびに `sf-tools` の `main`（検証環境は `development`）を取得してコードを実行するため、`main` の書き換え権限の管理が重要
+- `main` のブランチ保護・Ruleset: `sf-tools` 自身は公開リポジトリのため、無料プランでも設定でき、**設定済み**（Ruleset `protect-main`: `deletion` / `non_fast_forward` / `pull_request`（承認者 0 人）。バイパスなし。2026-10-05）。force-* のような Private リポジトリでは、`Upgrade to GitHub Pro or make this repository public` で設定できない。Actions は実行のたびに `sf-tools` の `main`（検証環境は `development`）を取得してコードを実行するため、`main` の書き換え権限の管理が重要。rr は PR 経由（`gh pr merge`）なので、この Ruleset の影響を受けない
 - そのため、`CLAUDE.md` 1.1 の運用ルール（mm / rr は明示された場合のみ、rr は検証報告が前提）で守る
 - プランの変更、またはリポジトリを公開にできるようになった場合は、`main` に Required reviewers を設定すること
 

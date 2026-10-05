@@ -227,6 +227,8 @@ check_gh_owner "$GITHUB_OWNER"   # 認証ユーザーの一致確認
 
 主なオプション: `--release` / `--no-open` / `--force` / `--target`
 
+**共有環境の保護（5.1）:** 接続先のエイリアスが予約名（`prod` / `staging` / `develop` / `main`。`is_reserved_org_alias`）なら、ローカル（`GITHUB_ACTIONS` が `true` 以外）からは `die` する（dry-run を含む）。共有環境へのリリースは、GitHub Actions だけ。
+
 **安全ガード（セクション 3.4）:**
 ローカル実行 + `--release` + `SF_DEPLOY_CONFIRMED!=1` の条件をすべて満たす場合のみ警告ボックス + `ask_yn` を実行する。`GITHUB_ACTIONS=true` / validate モード / `SF_DEPLOY_CONFIRMED=1`（sf-deploy.sh 経由）の場合はスキップ。
 
@@ -316,7 +318,10 @@ check_gh_owner "$GITHUB_OWNER"   # 認証ユーザーの一致確認
 - `main` / `staging` / `develop` ブランチでは実行禁止
 - **安全ガード:** `log "WARNING"` で `--force` の意味を表示 → `ask_yn || die` で続行確認（**赤い警告ボックスなし**。赤いボックスは sf-init / sf-metasync / sf-update-secret / sf-release 直接実行のみ）
 - `export SF_DEPLOY_CONFIRMED=1` で sf-release.sh 側の二重確認を抑制
-- **接続先が Sandbox かは検証しない。** 保護されるのは、エイリアスが `main` / `staging` / `develop` の組織だけ（`sf-release.sh` の 5.1「保護組織へのローカル直接実行を禁止」）。それ以外のエイリアス（本番組織の別名を含む）は、確認で `Y` なら強制リリースされる。確認の `N` / `q` は、`ask_yn ... || die` で中断する（2026-10-05 に修正。以前は `|| die` が無く、`N` でも実行されていた）
+- **共有環境には、ローカルからリリースできない。** 用途は、個人用の Sandbox / Developer Edition / Scratch Org への強制リリース。共有環境（本番・staging・develop）は、GitHub にコミットし、レビューを通して、GitHub Actions で行う。そのため、接続先のエイリアスが予約名（`SF_RESERVED_ORG_ALIASES` = `prod` / `staging` / `develop` / `main`。`is_reserved_org_alias`、`lib/common.sh`）なら、**確認の前に** `die` する（`-t` / `--target` の指定、なければ `SF_TARGET_ORG`、接続中の組織の順で特定。`GITHUB_ACTIONS=true` ではスキップ）。`sf-release.sh` の 5.1 も、同じ関数で判定する
+- `-t` / `--target` の解析規則は、`sf-deploy.sh`（事前判定）と `sf-release.sh` で同じ: 値（エイリアス）が無い、または `-` で始まる値（次のオプションを取り込む指定）は `die`。`--target=ALIAS` 形式は、どちらも未対応（`sf-deploy.sh` は確認の前に `die`、`sf-release.sh` は「不明なオプション」）。`GITHUB_ACTIONS=true` による解除は、ローカルで設定すれば誰でも解除できるが、これは誤操作を防ぐための設計（悪意ある回避は対象外。共有環境への実際の認証情報は、GitHub Secrets にあり、手元にはない）
+- 名前で判断する設計（組織の種別や組織 ID は確認しない）。`sf-init` が付ける名前が `prod` / `staging` / `develop`、`sf-start.sh` は `prod` 以外のエイリアスに Sandbox 用のログイン URL を使うため、通常の流れでは、本番に接続できるのは `prod` のときだけ。予約名以外の名前に付け替えた場合は、動作を保証しない（2026-10-05 に、予約名に `prod` が含まれていなかった不具合を修正）
+- 確認の `N` / `q` は、`ask_yn ... || die` で中断する（2026-10-05 に修正。以前は `|| die` が無く、`N` でも実行されていた）
 
 ### 4.9 sf-upgrade.sh
 

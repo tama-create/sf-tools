@@ -177,6 +177,56 @@ test_protected_org_staging_blocked() {
     teardown "$td" "$mb"
 }
 
+# 共有環境の予約名（prod / develop / main も）は、ローカルからは拒否する
+#   以前は main / staging / develop だけで、本番の標準のエイリアス（prod）が抜けていた
+test_reserved_aliases_blocked() {
+    local a td mb mh out ec
+    for a in prod develop main; do
+        setup_std_env td mb mh
+        create_all_mocks "$mb"
+        setup_release_dir "$td"
+        unset GITHUB_ACTIONS
+        out=$(cd "$td" && PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-release.sh" --release --target "$a" 2>&1)
+        ec=$?
+        assert_exit_fail $ec "共有環境(${a}) + ローカル → エラー終了"
+        assert_output_contains "$out" "ローカルから実行できません" "共有環境(${a}) + ローカル → 拒否の旨が表示される"
+        assert_file_not_contains "$MOCK_CALL_LOG" "project deploy" "共有環境(${a}) + ローカル → デプロイしない"
+        teardown "$td" "$mb"
+    done
+}
+
+# -t / --target の値が無い・次のオプションを値として取り込む指定は、受け付けない（デプロイしない）
+test_target_without_value_rejected() {
+    local td mb mh out ec args
+    for args in "--release --target" "--release -t" "--release -t --no-open" "--release --target --force"; do
+        setup_std_env td mb mh
+        create_all_mocks "$mb"
+        setup_release_dir "$td"
+        unset GITHUB_ACTIONS
+        # shellcheck disable=SC2086
+        out=$(cd "$td" && PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-release.sh" $args 2>&1)
+        ec=$?
+        assert_exit_fail $ec "値のない -t / --target（${args}）→ エラー終了"
+        assert_output_contains "$out" "組織のエイリアスを指定してください" "値のない -t / --target（${args}）→ 理由が表示される"
+        assert_file_not_contains "$MOCK_CALL_LOG" "project deploy" "値のない -t / --target（${args}）→ デプロイしない"
+        teardown "$td" "$mb"
+    done
+}
+
+# 予約名以外（個人用の組織）は、ローカルからリリースできる
+test_personal_alias_allowed() {
+    local td mb mh out ec
+    setup_std_env td mb mh
+    create_all_mocks "$mb"
+    setup_release_dir "$td"
+    unset GITHUB_ACTIONS
+    out=$(cd "$td" && PATH="$mb:$PATH" SF_DEPLOY_CONFIRMED=1 bash "$SF_TOOLS_DIR/bin/sf-release.sh" --release --target dev00 2>&1)
+    ec=$?
+    assert_exit_ok $ec "個人用の組織(dev00) + ローカル → 実行できる"
+    assert_file_contains "$MOCK_CALL_LOG" "project deploy" "個人用の組織(dev00) + ローカル → デプロイされる"
+    teardown "$td" "$mb"
+}
+
 test_dry_run_default
 test_release_mode
 test_force_flag
@@ -204,6 +254,9 @@ test_sf_cli_abort() {
 
 test_unprotected_org_local_allowed
 test_protected_org_staging_blocked
+test_reserved_aliases_blocked
+test_target_without_value_rejected
+test_personal_alias_allowed
 test_sf_cli_abort
 
 print_summary

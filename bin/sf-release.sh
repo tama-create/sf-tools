@@ -9,6 +9,12 @@
 #   Salesforce CLI（sf）は npm 版であること。起動時に check_sf_cli（sf --version の終了コード）で確認し、
 #   0 以外なら、案内を表示して中断する。成功は 24 時間は確認を省略する（GitHub Actions 上では省略）。
 #
+# 【共有環境の保護】
+#   接続先のエイリアスが予約名（prod / staging / develop / main）の組織（共有環境）には、
+#   ローカルからは実行できません（dry-run を含む）。リリースは、GitHub にコミットし、
+#   レビューを通して、GitHub Actions で行います。個人用の Sandbox / Developer Edition / Scratch Org は、
+#   ローカルから実行できます。予約名以外の名前に付け替えた場合は、動作を保証しません。
+#
 # 【オプション】
 #   デフォルト          : 最も安全な「検証モード (Dry-Run)」で実行します。
 #   -r, --release       : 実際に組織への本番リリースを実行します。
@@ -75,7 +81,10 @@ while [[ "$#" -gt 0 ]]; do
         --release|-r)         IS_VALIDATE_MODE=0 ;;
         --no-open|-n)         OPEN_BROWSER=0 ;;
         --force|-f)           IGNORE_CONFLICTS=1 ;;
-        --target|-t)          TARGET_ORG="$2"; shift ;;
+        --target|-t)
+            # 値（組織のエイリアス）が無い、または次のオプションを値として取り込む指定は、受け付けない
+            [[ -n "${2:-}" && "${2:-}" != -* ]] || die "-t / --target には、組織のエイリアスを指定してください。"
+            TARGET_ORG="$2"; shift ;;
         --json|-j)            JSON_OUTPUT=1; JSON_FLAG=("--json") ;;
         --verbose|-v)         : ;;  # SILENT_EXEC は common.sh が設定済み
         --*)
@@ -98,9 +107,9 @@ log "INFO" "接続先組織: ${TARGET_ORG}"
 # ------------------------------------------------------------------------------
 # 5.1 保護組織へのローカル直接実行を禁止
 # ------------------------------------------------------------------------------
-# main / staging / develop はGitHub Actions専用。ローカルからは実行不可。
+# 共有環境（予約名: prod / staging / develop / main。is_reserved_org_alias）は GitHub Actions 専用。ローカルからは実行不可。
 if [[ "${GITHUB_ACTIONS:-false}" != "true" ]]; then
-    if [[ "$TARGET_ORG" == "main" || "$TARGET_ORG" == "staging" || "$TARGET_ORG" == "develop" ]]; then
+    if is_reserved_org_alias "$TARGET_ORG"; then
         die "${TARGET_ORG} へのデプロイはローカルから実行できません。PR 経由で GitHub Actions を使用してください。"
     fi
 fi

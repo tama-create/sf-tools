@@ -483,6 +483,33 @@ get_branch_list() {
     return $RET_OK
 }
 
+# is_reserved_org_alias - 共有環境の組織エイリアス（sf-tools の予約名）かを返す
+# ------------------------------------------------------------------------------
+# 【背景】
+#   共有環境（本番・staging・develop）へのリリースは、ローカルの PC からはできない。
+#   GitHub にコミットし、レビューを通して、GitHub Actions で行う。
+#   sf-init は、組織のエイリアスとして prod / staging / develop を付ける（sf-start.sh も prod を本番として扱う）。
+#   この名前を予約名とし、ローカルからのリリースを禁止する（sf-release.sh / sf-deploy.sh）。
+#   main は、ブランチ名と同じ名前（互換のため、予約名に含める）。
+#   予約名以外の名前に付け替えた場合は、動作を保証しない（個人用の Sandbox / Developer Edition / Scratch Org の想定）。
+#
+# 【使い方】
+#   is_reserved_org_alias "$TARGET_ORG" && die "ローカルからは実行できません。"
+#
+# 【戻り値】
+#   RET_OK (0) : 予約名（共有環境）
+#   RET_NG (1) : それ以外
+# ------------------------------------------------------------------------------
+readonly SF_RESERVED_ORG_ALIASES="prod staging develop main"
+
+is_reserved_org_alias() {
+    local alias_name="$1" reserved
+    for reserved in $SF_RESERVED_ORG_ALIASES; do
+        [[ "$alias_name" == "$reserved" ]] && return $RET_OK
+    done
+    return $RET_NG
+}
+
 # is_protected_branch - 指定ブランチが branches.txt の保護対象かを返す
 # ------------------------------------------------------------------------------
 # 【使い方】

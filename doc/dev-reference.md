@@ -636,6 +636,7 @@ sf-tools の `main` への反映は、全ユーザーへの配布と同義であ
 - 削除（リリースと同じ道。`_hello_cycle` に、`_hello_write_remove` を渡す）: `sf-job.sh`（ブランチ `e2e-hello-delete`。新しいクローン）→ `release/e2e-hello-delete/remove-target.txt`（`ApexClass:SfToolsE2eHelloTest` / `ApexClass:SfToolsE2eHello`）を書く（`deploy-target.txt` は雛形のまま）→ `sf-dryrun.sh` → `sf-push.sh` → PR → マージ。`@isTest` の検出の確認は、リリースだけ
 - そのほかの sf-tools のコマンド: リリース後に、リリースしたジョブのクローンで、`sf-next.sh`（出力に「マージ済み」。質問には N で答える。`_hello_sf_next`）と、`sf-deploy.sh -t prod --no-open`（予約名の組織への、ローカルからの強制リリースの拒否。終了コード 0 以外・「共有環境のため」の文言・`project deploy start` が出ないこと。`e2e_run_sf_cmd_refused`・`_hello_deploy_refused`）を確認する
 - `e2e_gh_branch_create` / `e2e_gh_file_put`（API でブランチとファイルを作る部品）は、run.sh では使わなくなった（部品とテストは残している）
+- ワークフローの結果（`conclusion`）とステップの結果の読み取り（`e2e_run_conclusion` / `e2e_step_conclusion`）は、空のときだけ、`E2E_POLL_SEC` 秒（既定 5）おきに、最大 `E2E_CONCLUSION_TRIES` 回（既定 6）やり直す。完了した直後に、API の反映の遅れや `gh` の一時的な失敗で空になり、成功した実行が FAIL になった（2026-10-05 の実機）。`failure` などの値は、やり直さず、そのまま使う（本当の失敗を、成功にしない）
 - 組織側の確認は `e2e_apex_count`（SOQL `SELECT COUNT() FROM ApexClass WHERE Name = '…'`。`totalSize` を読む）。前後で 0 → 1 → 0 になること
 - 後掃除（`e2e_cleanup_all`。前掃除、`--cleanup`、`cleanup.sh` で動く）は、組織に残った `SfToolsE2eHello` / `SfToolsE2eHelloTest` も、一覧（`e2e_list_target_apex`。名前の完全一致のみ）→ 削除（`e2e_delete_apex`。削除用のデプロイ）→ 再取得で確認する。一覧の取得失敗は、ECA と同様に「対象なし」とせず、失敗として記録する
 - `gh` の呼び出し（`_e2e_gh`）は、`timeout`（`E2E_GH_TIMEOUT` 秒。既定 120）と標準入力の遮断付き。応答しない `gh` で、e2e が止まり続けないようにする（Git Bash で、`gh` の起動前に止まる現象が一度あったが、その場合は、この上限では防げない）

@@ -688,3 +688,30 @@ e2e_wait_sf_install() {
     done
     return 1
 }
+
+# ワークフローの実行の結果（conclusion）を、標準出力に返す。引数: リポジトリ 実行ID
+#   実行が完了した直後は、API の反映の遅れや、gh の一時的な失敗で、空になることがある（実機で、成功した実行が、
+#   空と読まれて FAIL になった）。空のときだけ、E2E_POLL_SEC 秒（既定 5）おきに、最大 E2E_CONCLUSION_TRIES 回（既定 6）やり直す。
+#   success / failure などの値が返ったら、やり直さない
+e2e_run_conclusion() {
+    local out="" i
+    for (( i = 1; i <= ${E2E_CONCLUSION_TRIES:-6}; i++ )); do
+        out=$(_e2e_gh run view "$2" -R "$1" --json conclusion --jq .conclusion 2>/dev/null)  # VAR=$(cmd) のため run 不使用
+        [[ -n "$out" ]] && break
+        (( i < ${E2E_CONCLUSION_TRIES:-6} )) && sleep "${E2E_POLL_SEC:-5}"  # run 不使用: 待機
+    done
+    printf '%s' "$out"
+}
+
+# ワークフローの実行の、特定のステップの結果を、標準出力に返す（空のときは、e2e_run_conclusion と同じ扱い）
+#   引数: リポジトリ 実行ID ステップ名
+e2e_step_conclusion() {
+    local out="" i
+    for (( i = 1; i <= ${E2E_CONCLUSION_TRIES:-6}; i++ )); do
+        out=$(_e2e_gh run view "$2" -R "$1" --json jobs \
+            --jq ".jobs[].steps[] | select(.name==\"$3\") | .conclusion" 2>/dev/null | head -1)  # VAR=$(cmd) のため run 不使用
+        [[ -n "$out" ]] && break
+        (( i < ${E2E_CONCLUSION_TRIES:-6} )) && sleep "${E2E_POLL_SEC:-5}"  # run 不使用: 待機
+    done
+    printf '%s' "$out"
+}

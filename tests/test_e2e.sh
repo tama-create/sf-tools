@@ -51,6 +51,12 @@ case "$*" in
         printf 'job1\tステップA\t2026-10-05T08:00:00.1Z \033[31mError\033[0m: 失敗の本文 ghp_fakepat\n'
         printf 'job1\tステップA\t2026-10-05T08:00:01.2Z 2 行目\n'
         exit 0 ;;
+    # 実行の結果（conclusion）/ ステップの結果。MOCK_GH_CONCL_EMPTY_FIRST=N: 最初の N 回は、空を返す（反映の遅れの再現）
+    "run view"*"--json conclusion"*|"run view"*"--json jobs"*)
+        _d="${MOCK_CALL_LOG%/*}"
+        _n=$(( $(cat "$_d/concl.cnt" 2>/dev/null || echo 0) + 1 )); echo "$_n" > "$_d/concl.cnt"
+        [[ -n "${MOCK_GH_CONCL_EMPTY_FIRST:-}" && ( "$MOCK_GH_CONCL_EMPTY_FIRST" == "all" || $_n -le $MOCK_GH_CONCL_EMPTY_FIRST ) ]] && exit 0
+        echo "${MOCK_GH_CONCL:-success}"; exit 0 ;;
     "run view"*)                         echo "${MOCK_GH_RUN_STATUS:-completed}"; exit 0 ;;
 esac
 case "$1 $2" in
@@ -934,6 +940,25 @@ EOF
     assert_file_not_contains "$MB/out.log" "RC=0" "gh の時間の上限: 応答しない gh は、失敗として返す"
     [[ $((t1 - t0)) -lt 15 ]] && pass "gh の時間の上限: 設定した秒数で打ち切る（待ち続けない）" || fail "gh の時間の上限: 設定した秒数で打ち切る（待ち続けない）" "所要: $((t1 - t0)) 秒"
     _mk_mocks "$MB"
+
+    # ワークフローの結果の読み取り: 空のときだけ、やり直す（完了直後の、反映の遅れ・gh の一時的な失敗への対策）
+    local r="tamashimon-org/force-e2e-20260101-000000" rcp='E2E_CONCLUSION_TRIES=4 E2E_POLL_SEC=0'
+    _creset() { rm -f "$MB/concl.cnt"; : > "$MOCK_CALL_LOG"; }
+    _creset; _e2e_call "$pre"" $rcp; out=\$(e2e_run_conclusion $r 555); echo \"OUT=[\$out]\""
+    assert_file_contains "$MB/out.log" "OUT=[success]"  "結果の読み取り: 値があれば、そのまま返す"
+    [[ "$(grep -c 'json conclusion' "$MOCK_CALL_LOG")" -eq 1 ]] && pass "結果の読み取り: 値があれば、やり直さない（1 回）" || fail "結果の読み取り: 値があれば、やり直さない" "回数: $(grep -c 'json conclusion' "$MOCK_CALL_LOG")"
+    _creset; MOCK_GH_CONCL_EMPTY_FIRST=2 _e2e_call "$pre"" $rcp; out=\$(e2e_run_conclusion $r 555); echo \"OUT=[\$out]\""
+    assert_file_contains "$MB/out.log" "OUT=[success]"  "結果の読み取り: 最初の 2 回が空でも、3 回目で値が取れる"
+    [[ "$(grep -c 'json conclusion' "$MOCK_CALL_LOG")" -eq 3 ]] && pass "結果の読み取り: 取れたら止まる（3 回）" || fail "結果の読み取り: 取れたら止まる" "回数: $(grep -c 'json conclusion' "$MOCK_CALL_LOG")"
+    _creset; MOCK_GH_CONCL_EMPTY_FIRST=all _e2e_call "$pre"" $rcp; out=\$(e2e_run_conclusion $r 555); echo \"OUT=[\$out]\""
+    assert_file_contains "$MB/out.log" "OUT=[]"         "結果の読み取り: ずっと空なら、空のまま返す"
+    [[ "$(grep -c 'json conclusion' "$MOCK_CALL_LOG")" -eq 4 ]] && pass "結果の読み取り: 上限（4 回）で諦める" || fail "結果の読み取り: 上限で諦める" "回数: $(grep -c 'json conclusion' "$MOCK_CALL_LOG")"
+    _creset; MOCK_GH_CONCL=failure _e2e_call "$pre"" $rcp; out=\$(e2e_run_conclusion $r 555); echo \"OUT=[\$out]\""
+    assert_file_contains "$MB/out.log" "OUT=[failure]"  "結果の読み取り: failure は、そのまま返す（本当の失敗を、成功にしない）"
+    [[ "$(grep -c 'json conclusion' "$MOCK_CALL_LOG")" -eq 1 ]] && pass "結果の読み取り: failure は、やり直さない" || fail "結果の読み取り: failure は、やり直さない" "回数: $(grep -c 'json conclusion' "$MOCK_CALL_LOG")"
+    _creset; MOCK_GH_CONCL_EMPTY_FIRST=1 _e2e_call "$pre"" $rcp; out=\$(e2e_step_conclusion $r 555 'ステップ'); echo \"OUT=[\$out]\""
+    assert_file_contains "$MB/out.log" "OUT=[success]"  "ステップの結果の読み取り: 空のときは、やり直す"
+    unset -f _creset
 
     # 失敗した実行のログの表示: ステップ名を付け、色の指定を除き、Token は伏せる。戻り値は 0
     _e2e_call "$pre"" e2e_show_run_failure $repo 555 'wf-validate'; echo RC=\$?"

@@ -188,11 +188,8 @@ _wait_run() {
     done
     return 1
 }
-_run_conclusion() { gh run view "$1" -R "$REPO_FULL" --json conclusion --jq .conclusion 2>/dev/null; }
-_step_conclusion() {
-    gh run view "$1" -R "$REPO_FULL" --json jobs \
-        --jq ".jobs[].steps[] | select(.name==\"$2\") | .conclusion" 2>/dev/null | head -1
-}
+_run_conclusion() { e2e_run_conclusion "$REPO_FULL" "$1"; }   # 空のときは、やり直す（lib.sh）
+_step_conclusion() { e2e_step_conclusion "$REPO_FULL" "$1" "$2"; }
 
 # ------------------------------------------------------------------------------
 # Hello World の Apex を、PR 経由でリリースし、続けて削除する（sf-tools の本来の機能の通しの確認）

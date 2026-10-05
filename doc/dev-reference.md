@@ -627,7 +627,7 @@ sf-tools の `main` への反映は、全ユーザーへの配布と同義であ
 
 **テスト用の名前:** プロジェクト `e2e-YYYYMMDD-HHMMSS` → リポジトリ `force-e2e-YYYYMMDD-HHMMSS` → 外部クライアントアプリ `SF_TOOLS_force_e2e_YYYYMMDD_HHMMSS`。毎回別の名前なので、前回の削除を待たずに実行できる。
 
-**確認する内容:** Secret / Variable / ブランチ / ワークフローの存在、`SF_TOOLS_BRANCH=development`、`SLACK_CHANNEL_ID` の一致、トークンが出力・ログに出ていないこと、`wf-metasync` の成功（`workflow_dispatch` で先に起動し、Hello World の流れと並行して待つ）、Hello World のリリース・削除（下記）。
+**確認する内容:** Secret / Variable / ブランチ / ワークフローの存在、`SF_TOOLS_BRANCH=development`、`SLACK_CHANNEL_ID` の一致、トークンが出力・ログに出ていないこと、`wf-metasync` の成功（`workflow_dispatch` で起動し、完了を待ってから Hello World の流れに進む。並行すると、組織からの取得（retrieve）と Hello World のデプロイが重なり、`MetadataTransferError` で失敗した（2026-10-05 の実機））、Hello World のリリース・削除（下記）。
 
 **Hello World のリリース・削除（`_hello_flow`）:** 実際の PR の流れで、`wf-validate` → マージ → `wf-release` を通す（`wf-release` の途中のステップ（JWT ログイン・公開 `sf-tools` の clone）と Slack 通知（`"ok":true`）、成功の通知）。
 - 部品は `tests/e2e/lib.sh`: `e2e_gh_branch_create` / `e2e_gh_file_put` / `e2e_gh_pr_create` / `e2e_gh_pr_merge` / `e2e_wait_pr_run`（`gh run list --workflow … --branch … --event pull_request` で実行を探し、完了まで `E2E_POLL_SEC` 秒（既定 5）おきに確認。起動待ちは `E2E_RUN_FIND_TRIES` 回（既定 24）、完了待ちは `E2E_WF_TIMEOUT` 秒）。これらは `_e2e_check_repo` で、オーナー（`E2E_OWNER`）とテスト用リポジトリの名前の形式が一致しないと動かない

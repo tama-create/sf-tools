@@ -948,6 +948,13 @@ EOF
     assert_file_contains "$E2E_DIR/run.sh" 'e2e_show_run_failure "$REPO_FULL" "$_meta_id" "wf-metasync"' "run.sh: wf-metasync の失敗時にログを表示する"
     assert_file_contains "$E2E_DIR/run.sh" '"${label}: wf-validate"' "run.sh: wf-validate の失敗時にログを表示する"
     assert_file_contains "$E2E_DIR/run.sh" '"${label}: wf-release"'  "run.sh: wf-release の失敗時にログを表示する"
+    # wf-metasync は、Hello World の流れの前に、完了まで待つ（同時に動かすと、取得とデプロイが重なって失敗する）
+    local ln_meta ln_hello
+    ln_meta=$(grep -n 'chk "wf-metasync が成功した' "$E2E_DIR/run.sh" | head -1 | cut -d: -f1)
+    ln_hello=$(grep -n '^        _hello_flow$' "$E2E_DIR/run.sh" | head -1 | cut -d: -f1)
+    [[ -n "$ln_meta" && -n "$ln_hello" && "$ln_meta" -lt "$ln_hello" ]] \
+        && pass "run.sh: wf-metasync の完了を待ってから、Hello World の流れに進む" \
+        || fail "run.sh: wf-metasync の完了を待ってから、Hello World の流れに進む" "metasync=${ln_meta} hello=${ln_hello}"
 
     # deploy-target.txt / remove-target.txt の本文
     _e2e_call "$pre"' e2e_hello_deploy_target_text; echo "-----"; e2e_hello_remove_target_text'

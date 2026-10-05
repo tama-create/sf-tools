@@ -12,7 +12,7 @@
 #                    ・sf org login web は、認証 URL でのログインに差し替える（tests/e2e/shims/sf）
 #                    ・ブラウザは開かない（tests/e2e/shims の start / xdg-open / open）
 #   3. 確認        : Secret / Variable / ブランチ / ワークフローの存在、トークンがログに出ていないこと、
-#                    GitHub Actions の実行: wf-metasync（手動起動。並行して動かす）と、Hello World の Apex を PR 経由で
+#                    GitHub Actions の実行: wf-metasync（手動起動。完了を待つ。Hello World と同時に動かすと、組織へのデプロイと取得が重なって失敗する）、続けて Hello World の Apex を PR 経由で
 #                    リリース（wf-validate → マージ → wf-release）し、続けて削除する（sf-tools の本来の機能の通し）
 #   4. 後掃除      : 前掃除と同じものを削除し（途中で止まって残った Hello World の Apex も含む）、sf のエイリアスを実行前の状態に戻す
 #
@@ -279,11 +279,9 @@ if [[ "$INIT_RC" -eq 0 ]]; then
 
     if [[ $SKIP_ACTIONS -eq 0 ]]; then
         log "INFO" "GitHub Actions を実行します（各待ち: 最大 ${E2E_WF_TIMEOUT:-1200} 秒）..."
-        # wf-metasync を起動する（待たない。次の Hello World の流れと並行して動く）
+        # wf-metasync を起動して、完了を待つ。Hello World の流れと並行させない
+        #   （組織からの取得と、組織へのデプロイが重なると、MetadataTransferError で失敗する）
         _meta_id=$(_dispatch_workflow wf-metasync.yml) || _meta_id=""   # VAR=$(cmd) のため run 不使用
-        # Hello World を、PR 経由でリリースし（wf-validate → マージ → wf-release）、続けて削除する
-        _hello_flow
-        # wf-metasync の完了を待つ
         chk "wf-metasync が起動した" test -n "$_meta_id"
         if [[ -n "$_meta_id" ]]; then
             chk "wf-metasync が完了した" _wait_run "$_meta_id"
@@ -291,6 +289,8 @@ if [[ "$INIT_RC" -eq 0 ]]; then
                 test "$(_run_conclusion "$_meta_id")" == "success" \
                 || e2e_show_run_failure "$REPO_FULL" "$_meta_id" "wf-metasync"
         fi
+        # Hello World を、PR 経由でリリースし（wf-validate → マージ → wf-release）、続けて削除する
+        _hello_flow
     else
         log "INFO" "GitHub Actions の実行確認を省略しました（--no-actions）。"
     fi

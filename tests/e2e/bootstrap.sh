@@ -8,8 +8,8 @@
 # 【事前に用意するもの】
 #   1. Classic PAT（repo・workflow）            → sf-init の Phase 6 と同じもの
 #   2. Slack の Bot Token と、通知先の共有チャンネルの ID（Bot をそのチャンネルに招待済み）
-#   3. Fine-grained PAT（sf-tools の Contents: Read-only）→ sf-init の Phase 11 と同じもの
-#   4. テスト用の Salesforce 組織（本番または Developer Edition。Sandbox ではない）の管理者ユーザー
+#   3. テスト用の Salesforce 組織（本番または Developer Edition。Sandbox ではない）の管理者ユーザー
+#   （SF_TOOLS_TOKEN は不要: sf-tools は公開リポジトリ）
 #
 # 【処理の流れ】
 #   1. 保存先の確認（既にあれば、上書きの確認）
@@ -76,7 +76,6 @@ while true; do
     [[ "$B_CHANNEL" =~ ^[CG][A-Z0-9]{8,}$ ]] && break
     log "WARNING" "「${B_CHANNEL}」はチャンネル ID の形式ではありません。入力し直してください。"
 done
-read_secret B_TOOLS      "  SF_TOOLS_TOKEN 用の Fine-grained PAT（画面には表示されません・q で中断）："
 
 # ------------------------------------------------------------------------------
 # 3. sf の終了コードの確認
@@ -114,7 +113,6 @@ chmod 700 "$(dirname "$FIXTURE")" 2>/dev/null || true  # run 不使用: 権限�
         printf 'E2E_PAT_TOKEN=%q\n'        "$B_PAT"
         printf 'E2E_SLACK_BOT_TOKEN=%q\n'  "$B_SLACK"
         printf 'E2E_SLACK_CHANNEL_ID=%q\n' "$B_CHANNEL"
-        printf 'E2E_SF_TOOLS_TOKEN=%q\n'   "$B_TOOLS"
         printf 'E2E_SFDX_AUTH_URL=%q\n'    "$B_SFDX_URL"
     } > "$FIXTURE"
 )

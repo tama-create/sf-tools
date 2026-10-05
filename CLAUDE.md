@@ -217,7 +217,7 @@ Salesforce 開発の環境構築と日々の作業を自動化するシェルス
 |---|---|
 | `bin/sf-*.sh` | 各種自動化スクリプト本体 |
 | `lib/common.sh` | 全スクリプト共通ライブラリ。`log` / `run` / `die` / 入力関数群を提供 |
-| `phases/init/` | sf-init.sh のサブスクリプト（Phase 02〜11 + `add_tier.sh`） |
+| `phases/init/` | sf-init.sh のサブスクリプト（Phase 02〜10 + `add_tier.sh`） |
 | `hooks/pre-push` | git push フックの実体 |
 | `templates/` | force-* へ配布する雛形。**参照は sf-init 専用**（`phase_setup_release_dir` のみ日常運用でも参照可） |
 | `tests/` | モックベースの単体テスト一式 |
@@ -237,7 +237,7 @@ Salesforce 開発の環境構築と日々の作業を自動化するシェルス
 - mm = commit → push（`development` まで。`main` には入らない）
 - rr = PR 作成 → `main` へマージ（配布）。実施前に検証環境の force-* で確認すること
 - 検証環境 = Variable `SF_TOOLS_BRANCH=development` の force-*（Actions が sf-tools の `development` を使う）。詳細は `doc/dev-reference.md` セクション 9
-- `main` のブランチ保護は GitHub 無料プランでは設定できないため、上記の運用ルールで守る
+- `main` のブランチ保護は、`sf-tools` が公開リポジトリのため、GitHub 無料プランでも設定できる（設定は任意。設定の有無にかかわらず、上記の運用ルールを守る）
 
 ---
 

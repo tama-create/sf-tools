@@ -19,7 +19,7 @@
 #   13. --add-tier develop → staging なしはエラー
 #   14. 不明なオプション → エラー終了
 #   15. 環境種別の選択（本番 / 検証で続行 / 検証を取り消して選び直し / 検証で中断）
-#   16. Phase 11（SF_TOOLS_TOKEN）: 登録 / 読み取り失敗で再入力 / 読み取り失敗でスキップ / q で中断
+#   16. Phase 11 は廃止（sf-tools は公開リポジトリのため、SF_TOOLS_TOKEN は不要）: --only 11 はエラー、ひな形に Token がない
 #   17. Phase 9: 既存 Ruleset の ID 検証（403 のエラー本文を ID として扱わない / 数字の ID は削除）
 #   18. Phase 7: SLACK_CHANNEL_ID の形式チェック（C… / G… のみ受け付け。D… / U… は拒否して再入力）
 #   19. Phase 10: 外部クライアントアプリの自動作成（正常 / JWT リトライ / deploy 失敗 / JWT 不成功で中断・スキップ）
@@ -89,9 +89,6 @@ case "$1 $2" in
                 *)     exit 0 ;;
             esac
         fi
-        # Phase 11 の読み取り確認: Token（環境変数 GH_TOKEN）が "badtoken" で始まる場合、または
-        # MOCK_GH_API_REPO_EXIT が非ゼロの場合は失敗させる
-        [[ "${GH_TOKEN:-}" == badtoken* ]] && exit 1
         exit "${MOCK_GH_API_REPO_EXIT:-0}" ;;
     *) exit 0 ;;
 esac
@@ -153,13 +150,11 @@ _stub_subscripts() {
 #  19. Y                  (develop Sandbox? - ask_yn read_key)
 #  20. fake_dev_key       (develop コンシューマーキー - read_or_quit)
 #  21. dev@example.com    (develop ユーザー名 - read_or_quit)
-# 入力順（Phase 11: SF_TOOLS_TOKEN）:
-#  22. \n                 (press_enter - Token 作成案内)
-#  23. ghp_faketoolstoken (SF_TOOLS_TOKEN - read_secret。画面に表示されない)
-#  24. N                  (init フォルダ削除をスキップ)
+# 入力順（後処理）:
+#  22. N                  (init フォルダ削除をスキップ。Phase 10 が最後。SF_TOOLS_TOKEN は不要になった)
 # ==============================================================================
 _make_input_3branches() {
-    printf 'Y\nY\n1\n1\nghp_faketoken\n\nxoxb-faketoken\nC01ABCDEFGH\n\n1\nN\nfake_prod_key\nprod@example.com\nY\nfake_stg_key\nstg@example.com\nY\nfake_dev_key\ndev@example.com\n\nghp_faketoolstoken\nN\n'
+    printf 'Y\nY\n1\n1\nghp_faketoken\n\nxoxb-faketoken\nC01ABCDEFGH\n\n1\nN\nfake_prod_key\nprod@example.com\nY\nfake_stg_key\nstg@example.com\nY\nfake_dev_key\ndev@example.com\nN\n'
 }
 
 # ==============================================================================
@@ -201,8 +196,7 @@ test_happy_path_3branches() {
     assert_file_contains "$MOCK_CALL_LOG" "gh secret set PAT_TOKEN"                  "PAT_TOKEN が登録される"
     assert_file_contains "$MOCK_CALL_LOG" "gh secret set SLACK_BOT_TOKEN"            "SLACK_BOT_TOKEN が登録される"
     assert_file_contains "$MOCK_CALL_LOG" "gh variable set SLACK_CHANNEL_ID"          "SLACK_CHANNEL_ID が登録される"
-    assert_file_contains "$MOCK_CALL_LOG" "gh secret set SF_TOOLS_TOKEN"             "SF_TOOLS_TOKEN が登録される"
-    assert_file_not_contains "$MOCK_CALL_LOG" "ghp_faketoolstoken"                   "SF_TOOLS_TOKEN の値がコマンドのログに含まれない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "SF_TOOLS_TOKEN"                       "SF_TOOLS_TOKEN は登録しない（sf-tools は公開リポジトリのため不要）"
     assert_file_not_contains "$MOCK_CALL_LOG" "ghp_faketoken"                        "PAT_TOKEN の値がコマンド（git push 等）のログに含まれない"
     assert_file_not_contains "$MOCK_CALL_LOG" "--body fake_prod_key"                 "コンシューマー鍵を --body（コマンドの引数）で渡さない（標準入力で渡す）"
     # 接続アプリ版の JWT 接続テストも、一時的なホームフォルダの中で実行される（ユーザーの sf の認証を変えない）
@@ -753,65 +747,44 @@ test_env_type_selection() {
 }
 
 # ==============================================================================
-# テスト 16: Phase 11（SF_TOOLS_TOKEN）— --only 11 で単体実行
-#   入力列: 警告確認 Y →（\n は press_enter が消費）→ Token ...
-#   - 正常                : Token で読み取れる → SF_TOOLS_TOKEN が登録される
-#   - 失敗 → Y → 再入力   : 1回目の Token で読めず、入力し直して成功 → 登録される
-#   - 失敗 → N            : 登録をスキップして正常終了（SF_TOOLS_TOKEN は登録されない）
-#   - q                   : 中断（登録されない）
-#   いずれも Token の値が MOCK_CALL_LOG（コマンドのログ）に含まれないこと
+# テスト 16: Phase 11 は廃止（sf-tools は公開リポジトリのため、SF_TOOLS_TOKEN は不要）
+#   - --only 11 はエラー（Phase 11 のスクリプトが無い）
+#   - ワークフローのひな形は、Token なしで sf-tools を clone する（SF_TOOLS_TOKEN / x-access-token を使わない）
+#   - sf-init のコード・ドキュメントが、SF_TOOLS_TOKEN を要求しない
 # ==============================================================================
-test_phase11_sf_tools_token() {
+test_phase11_removed() {
     echo ""
-    echo -e "${CLR_HEAD}[TEST] Phase 11: SF_TOOLS_TOKEN（登録 / 再入力 / スキップ / 中断）${CLR_RST}"
+    echo -e "${CLR_HEAD}[TEST] Phase 11 は廃止: SF_TOOLS_TOKEN は不要（sf-tools は公開リポジトリ）${CLR_RST}"
 
-    local mb mock_home init_base init_dir exit_code
+    local mb mock_home init_base init_dir exit_code out
     mb=$(setup_mock_bin)
     export MOCK_CALL_LOG="$mb/calls.log"
     mock_home=$(setup_mock_home)
     create_all_mocks "$mb"
     create_mock_gh_for_init "$mb"
     _stub_subscripts "$mock_home"
+    init_base=$(_setup_init_dir "tamashimon" "testproject")
+    init_dir="$init_base/home/tamashimon/testproject"
+    mkdir -p "$init_dir/init"
+    printf 'REPO_FULL_NAME="tamashimon/force-testproject"\nPROJECT_NAME="testproject"\n' > "$init_dir/init/.sf-init.env"
+    : > "$MOCK_CALL_LOG"
 
-    # ケースごとに init フォルダと .sf-init.env（REPO_DIR なし = 最後の削除確認が出ない）を用意して実行する
-    _p11_run() {
-        init_base=$(_setup_init_dir "tamashimon" "testproject")
-        init_dir="$init_base/home/tamashimon/testproject"
-        mkdir -p "$init_dir/init"
-        printf 'REPO_FULL_NAME="tamashimon/force-testproject"\nPROJECT_NAME="testproject"\n' > "$init_dir/init/.sf-init.env"
-        : > "$MOCK_CALL_LOG"
-        printf '%b' "$1" \
-            | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
-                  bash "$mock_home/sf-tools/bin/sf-init.sh" --only 11 ) > /dev/null 2>&1
-        exit_code=$?
-    }
+    out=$( printf 'Y\n' | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
+              bash "$mock_home/sf-tools/bin/sf-init.sh" --only 11 ) 2>&1 )
+    exit_code=$?
+    assert_exit_fail         "$exit_code"                                              "--only 11 → エラー終了（Phase 11 は無い）"
+    assert_file_not_contains "$MOCK_CALL_LOG" "gh secret set SF_TOOLS_TOKEN"           "--only 11 → SF_TOOLS_TOKEN は登録されない"
+    [[ ! -e "$SF_TOOLS_DIR/phases/init/11_sf_tools_token.sh" ]] \
+        && pass "Phase 11 のスクリプト（11_sf_tools_token.sh）が存在しない" || fail "Phase 11 のスクリプトが存在しない" "残っている"
 
-    # 正常
-    _p11_run 'Y\nghp_goodtoken\n'
-    assert_exit_ok       "$exit_code"                                                 "正常 → 終了コード 0"
-    assert_file_contains "$MOCK_CALL_LOG" "gh secret set SF_TOOLS_TOKEN"              "正常 → SF_TOOLS_TOKEN が登録される"
-    assert_file_not_contains "$MOCK_CALL_LOG" "ghp_goodtoken"                         "正常 → Token の値がコマンドのログに含まれない"
-    rm -rf "$init_base"
+    # ワークフローのひな形: Token なしで clone する
+    local wf
+    for wf in wf-metasync wf-release wf-validate; do
+        assert_file_contains     "$SF_TOOLS_DIR/templates/.github/workflows/${wf}.yml" "git clone -b \${{ vars.SF_TOOLS_BRANCH || 'main' }} https://github.com/tama-create/sf-tools.git" "${wf}: Token なしで sf-tools を clone する"
+        assert_file_not_contains "$SF_TOOLS_DIR/templates/.github/workflows/${wf}.yml" "SF_TOOLS_TOKEN"   "${wf}: SF_TOOLS_TOKEN を使わない"
+        assert_file_not_contains "$SF_TOOLS_DIR/templates/.github/workflows/${wf}.yml" "x-access-token"   "${wf}: Token 付きの URL を使わない"
+    done
 
-    # 失敗 → Y → 再入力
-    _p11_run 'Y\nbadtoken_first\nY\nghp_secondtoken\n'
-    assert_exit_ok       "$exit_code"                                                 "失敗 → 再入力 → 終了コード 0"
-    assert_file_contains "$MOCK_CALL_LOG" "gh secret set SF_TOOLS_TOKEN"              "失敗 → 再入力 → SF_TOOLS_TOKEN が登録される"
-    assert_file_not_contains "$MOCK_CALL_LOG" "badtoken_first"                        "失敗した Token の値もログに含まれない"
-    rm -rf "$init_base"
-
-    # 失敗 → N: スキップ
-    _p11_run 'Y\nbadtoken_only\nN\n'
-    assert_exit_ok       "$exit_code"                                                 "失敗 → N → 正常終了（スキップ）"
-    assert_file_not_contains "$MOCK_CALL_LOG" "gh secret set SF_TOOLS_TOKEN"          "失敗 → N → SF_TOOLS_TOKEN は登録されない"
-    rm -rf "$init_base"
-
-    # q: 中断
-    _p11_run 'Y\nq\n'
-    assert_exit_fail     "$exit_code"                                                 "q → 中断（異常終了）"
-    assert_file_not_contains "$MOCK_CALL_LOG" "gh secret set SF_TOOLS_TOKEN"          "q → SF_TOOLS_TOKEN は登録されない"
-
-    unset -f _p11_run
     teardown "$mb" "$mock_home" "$init_base"
 }
 
@@ -1060,7 +1033,7 @@ test_phase10_eca_auto() {
 # ==============================================================================
 test_e2e_input_sequence() {
     echo ""
-    echo -e "${CLR_HEAD}[TEST] e2e の入力の台本で、sf-init が Phase 1〜11 を最後まで進む${CLR_RST}"
+    echo -e "${CLR_HEAD}[TEST] e2e の入力の台本で、sf-init が Phase 1〜10 を最後まで進む${CLR_RST}"
 
     local mb mock_home init_base init_dir exit_code input
     mb=$(setup_mock_bin)
@@ -1075,7 +1048,6 @@ test_e2e_input_sequence() {
     export SF_INIT_JWT_INTERVAL=0
 
     input=$(E2E_PAT_TOKEN=ghp_fakepat E2E_SLACK_BOT_TOKEN=xoxb-fakeslack E2E_SLACK_CHANNEL_ID=C01ABCDEFGH \
-            E2E_SF_TOOLS_TOKEN=github_pat_faketools \
             bash -c "source '$SF_TOOLS_DIR/tests/e2e/lib.sh'; e2e_make_input")
     printf '%s\n' "$input" \
         | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
@@ -1092,10 +1064,9 @@ test_e2e_input_sequence() {
     assert_file_contains      "$MOCK_CALL_LOG" "project deploy start --source-dir force-app"          "外部クライアントアプリが作成される"
     assert_file_contains      "$MOCK_CALL_LOG" "gh secret set SF_CONSUMER_KEY_PROD"                   "SF_CONSUMER_KEY_PROD が登録される"
     assert_file_not_contains  "$MOCK_CALL_LOG" "SF_CONSUMER_KEY_STG"                                  "main のみの構成なので、ステージング組織は設定しない"
-    assert_file_contains      "$MOCK_CALL_LOG" "gh secret set SF_TOOLS_TOKEN"                         "SF_TOOLS_TOKEN が登録される"
+    assert_file_not_contains  "$MOCK_CALL_LOG" "SF_TOOLS_TOKEN"                                       "SF_TOOLS_TOKEN は登録しない（sf-tools は公開リポジトリのため不要）"
     assert_dir_exists         "$init_dir/init"                                                        "最後の質問に N と答えて、init フォルダが残る（台本の最後までずれていない）"
     assert_file_not_contains  "$mb/out.log" "ghp_fakepat"                                            "PAT_TOKEN の値が出力に出ない"
-    assert_file_not_contains  "$mb/out.log" "github_pat_faketools"                                   "SF_TOOLS_TOKEN の値が出力に出ない"
 
     unset MOCK_SF_ORG_JSON SF_INIT_JWT_INTERVAL MOCK_CALL_LOG
     teardown "$mb" "$mock_home" "$init_base"
@@ -1169,7 +1140,7 @@ test_add_tier_staging_already_exists
 test_add_tier_develop_without_staging
 test_unknown_option_fails
 test_env_type_selection
-test_phase11_sf_tools_token
+test_phase11_removed
 test_phase9_ruleset_id
 test_phase7_channel_id
 test_phase10_eca_auto

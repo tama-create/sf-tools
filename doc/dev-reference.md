@@ -373,7 +373,7 @@ GitHub Secrets / Variables の JWT 認証情報を再登録する。実行フロ
 
 > Secret は暗号化されており `gh secret get` で値を読み取れないが、Variable は `gh variable get` で取得できる。ユーザー名はメニュー表示時に現在値を自動取得して表示する。
 
-> `SF_TOOLS_TOKEN`（Secret）は `sf-update-secret.sh` では登録しない。`sf-init.sh` の Phase 11 が登録する（スキップ時・作り直しは手動登録）。wf-metasync / wf-validate / wf-release が Private の `tama-create/sf-tools` を clone するための Fine-grained PAT（Contents: Read-only・Resource owner は sf-tools の所有者）。`SF_TOOLS_BRANCH`（Variable）は、sf-init.sh を環境変数 `SF_TOOLS_BRANCH=development` 付きで実行した場合のみ `phases/init/09_repo_rules.sh` が `development` を登録する（検証環境用）。未設定なら Actions は `main` を clone する。手順は `doc/setup-guide.md` 3.2 を参照。
+> `SF_TOOLS_TOKEN` は不要（2026-10-05 に廃止）。`sf-tools` は公開リポジトリのため、wf-metasync / wf-validate / wf-release は、Token なしで `https://github.com/tama-create/sf-tools.git` を clone する（`sf-init.sh` の Phase 11 は無い。以前のバージョンで作ったプロジェクトのワークフローは、Token 付きで clone しているため、その Token を無効にしないこと）。`SF_TOOLS_BRANCH`（Variable）は、sf-init.sh を環境変数 `SF_TOOLS_BRANCH=development` 付きで実行した場合のみ `phases/init/09_repo_rules.sh` が `development` を登録する（検証環境用）。未設定なら Actions は `main` を clone する。
 
 **SF_PRIVATE_KEY の base64 エンコーディング:**
 GitHub Actions のワークフローは Secret から取得した値を `base64 -d` でデコードして使用する。そのため `SF_PRIVATE_KEY` は **base64 エンコード済みの文字列** として登録しなければならない。`sf-update-secret.sh` の `_update_private_key` は以下のパイプで登録する:
@@ -409,7 +409,6 @@ tr -d '\r' < "$key_file" | base64 -w 0 | gh secret set "SF_PRIVATE_KEY" -R "$REP
 8. 初回コミット＆プッシュ（PAT は GIT_ASKPASS で渡しコマンドのログに残さない。push 後に .sf-init.env から PAT を削除する）
 9. GitHub リポジトリ設定・Ruleset の適用（既存 Ruleset の ID は数字のときだけ削除対象にする）
 10. JWT 認証情報の設定（SF_PRIVATE_KEY / SF_CONSUMER_KEY_* を Secret / SF_USERNAME_* / SF_INSTANCE_URL_* を Variable に登録）。アプリ種別が外部クライアントアプリ（2）のときは、組織ごとに `register_jwt_secret_eca`（`init-common.sh`）が自動作成する（`sf org login web` → ユーザー名・プロファイル名（表示名）を取得 → `generate_eca_metadata` で 5 ファイルを生成して `sf project deploy` → `sf project retrieve` でコンシューマー鍵を取得 → JWT 接続テスト（反映待ちのためリトライ。`SF_INIT_JWT_RETRIES` / `SF_INIT_JWT_INTERVAL`）→ 登録）。ログイン用の一時エイリアス（`sf-tools-PROD` / `sf-tools-STG` / `sf-tools-DEV`。ユーザーが運用中のエイリアスと重ならないよう `sf-tools-` を付ける）は、ログイン前に `sf alias unset` で外し（前回の古い認証による誤判定の防止）、終了後にも `sf alias unset` で消す（`sf org logout` は同じユーザー名の全エイリアスの認証を消すため使わない）。`sf` は npm 版が前提（Windows の Git Bash で公式インストーラー版を使うと、成功しても終了コード 1 になるため）。ログイン（`sf org login web`）、接続情報の取得（`sf org display --json`。ユーザー名はその出力から取り出す）、プロファイル名の取得（`sf data query`）、JWT 接続テストの成否は、すべて終了コードで判定し、0 以外なら中断する（JWT 接続テストはリトライ後、スキップの確認）。接続アプリ（1）は従来の手動案内
-11. SF_TOOLS_TOKEN の設定（`11_sf_tools_token.sh`。Fine-grained PAT の作成画面を事前入力 URL で開く → `read_secret` で Token を入力（画面に表示しない）→ `GH_TOKEN` 環境変数で `gh api repos/<sf-tools>` を実行して読み取りを確認（コマンドの文字列・ログに Token を含めない）→ `printf '%s' "$TOKEN" | run gh secret set SF_TOOLS_TOKEN`。確認に失敗した場合は再入力かスキップを選ぶ。Token は `.sf-init.env` に書き出さない。sf-tools の OWNER/REPO は `init-common.sh` の `SF_TOOLS_REPO_FULL_NAME`）
 
 オプション:
 - `--resume N`: Phase N から再開（エラー後の再試行）
@@ -584,7 +583,7 @@ sf-tools の `main` への反映は、全ユーザーへの配布と同義であ
 | 既存の force-* | `gh variable set SF_TOOLS_BRANCH --body "development" -R <owner>/<repo>` |
 | ローカル | `~/sf-tools` を `development` にチェックアウトしておく |
 
-- `SF_TOOLS_TOKEN`（Secret）は `sf-init.sh` の Phase 11 が登録する（スキップした場合のみ手動登録が必要。`doc/setup-guide.md` 3.2）
+- `SF_TOOLS_TOKEN` は不要（`sf-tools` は公開リポジトリのため、Actions は Token なしで clone する。2026-10-05 に廃止。`sf-init.sh` の Phase 11 は無い）。以前のバージョンで作ったプロジェクトのワークフローは、Token 付きで clone しているため、その Token を無効にしないこと
 
 ### 9.3 検証チェックリスト（rr の前提）
 
@@ -593,7 +592,7 @@ sf-tools の `main` への反映は、全ユーザーへの配布と同義であ
 | 確認項目 | 方法 |
 |---|---|
 | テスト | `bash tests/run_tests.sh` が全件 PASS |
-| `sf-init.sh` を変更した場合 | 検証環境の新規 force-* を作成し、最後まで通ること（Phase 11 の `SF_TOOLS_TOKEN` の登録を含む）。`bash tests/e2e/run.sh` で自動化できる（9.6） |
+| `sf-init.sh` を変更した場合 | 検証環境の新規 force-* を作成し、最後まで通ること。`bash tests/e2e/run.sh` で自動化できる（9.6） |
 | ワークフロー・`sf-metasync.sh` を変更した場合 | `wf-metasync` を `workflow_dispatch` で手動実行して成功すること |
 | `sf-release.sh` / `wf-validate` / `wf-release` を変更した場合 | デプロイ対象を含む PR を作り、`wf-validate` が通ること（動作確認のみの PR はマージせずに閉じる。マージすると `wf-release` が実際にデプロイする） |
 
@@ -607,13 +606,13 @@ sf-tools の `main` への反映は、全ユーザーへの配布と同義であ
 
 ### 9.5 ガードレール
 
-- `main` のブランチ保護・Ruleset は、GitHub 無料プラン（Private リポジトリ）では設定できない（`Upgrade to GitHub Pro or make this repository public`）
+- `main` のブランチ保護・Ruleset: `sf-tools` 自身は公開リポジトリのため、無料プランでも設定できる（force-* のような Private リポジトリでは、`Upgrade to GitHub Pro or make this repository public` で設定できない）。Actions は実行のたびに `sf-tools` の `main`（検証環境は `development`）を取得してコードを実行するため、`main` の書き換え権限の管理が重要
 - そのため、`CLAUDE.md` 1.1 の運用ルール（mm / rr は明示された場合のみ、rr は検証報告が前提）で守る
 - プランの変更、またはリポジトリを公開にできるようになった場合は、`main` に Required reviewers を設定すること
 
 ### 9.6 e2e（sf-init の通し検証の自動化）
 
-実際の GitHub / Salesforce で `sf-init.sh` を Phase 1〜11 まで自動実行し、検証し、削除する。`tests/e2e/` に置き、通常の `bash tests/run_tests.sh` には含めない（実環境を使うため）。安全ガードと部品は `tests/test_e2e.sh`（モック）で確認する。
+実際の GitHub / Salesforce で `sf-init.sh` を Phase 1〜10 まで自動実行し、検証し、削除する。`tests/e2e/` に置き、通常の `bash tests/run_tests.sh` には含めない（実環境を使うため）。安全ガードと部品は `tests/test_e2e.sh`（モック）で確認する。
 
 **方式:** `sf-init.sh` 本体は変えず、外から標準入力と PATH の差し替えで操作する（本番のコードに近道を入れない）。
 

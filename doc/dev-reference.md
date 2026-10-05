@@ -235,7 +235,7 @@ check_gh_owner "$GITHUB_OWNER"   # 認証ユーザーの一致確認
 `@isTest` 自動検出フロー:
 1. `phase_generate_manifest` 内で `deploy_args` を走査し、`--source-dir` に続く `.cls` ファイルを `grep -qi "@isTest"` で検査
 2. 検出されたクラス名をスクリプトレベル変数 `RUN_TESTS=()` に追加
-3. `phase_release` で `${#RUN_TESTS[@]} -gt 0` の場合、`--test-level RunSpecifiedTests --run-tests <CSV>` を `deploy_cmd` に追加して実行
+3. `phase_release` で `${#RUN_TESTS[@]} -gt 0` の場合、`--test-level RunSpecifiedTests` と、クラスごとの `--tests <クラス名>`（繰り返し。`--run-tests` は存在しないフラグ）を `deploy_cmd` に追加して実行
 4. テストクラスが 0 件の場合は従来通り（`--test-level` 未指定）の動作を維持
 
 ### 4.3 sf-metasync.sh
@@ -258,7 +258,7 @@ check_gh_owner "$GITHUB_OWNER"   # 認証ユーザーの一致確認
 2. `config/*.txt` を不足時のみ補充
 3. `sf-hook.sh` で Git Hook をインストール
 4. `release/<branch>/` と `branch_name.txt` を準備
-5. `package.json` がある場合は `npm install`
+5. `package.json` がある場合は `npm install`（`sf-init.sh` から実行中（`SF_INIT_RUNNING` あり）は、初期セットアップ用の一時フォルダなのでスキップする。約 90 秒の短縮）
 6. 24 時間以上経過していれば `sf-upgrade.sh` をバックグラウンド起動
 
 ### 4.5 sf-next.sh
@@ -516,7 +516,7 @@ cat logs/error.log                                # run 失敗コマンドのロ
 
 ```bash
 bash tests/e2e/bootstrap.sh                       # 鍵一式の作成（最初の 1 回だけ）
-bash tests/e2e/run.sh                             # 前掃除 → sf-init の通し実行 → 確認 → 後掃除
+bash tests/e2e/run.sh                             # 前掃除 → sf-init の通し実行 → 確認 → 終了（既定では、テスト用のものを残す。--cleanup で削除）
 bash tests/e2e/cleanup.sh                         # 削除対象の一覧（何も消さない）。--yes で削除
 ```
 
@@ -606,7 +606,7 @@ sf-tools の `main` への反映は、全ユーザーへの配布と同義であ
 
 ### 9.5 ガードレール
 
-- `main` のブランチ保護・Ruleset: `sf-tools` 自身は公開リポジトリのため、無料プランでも設定できる（force-* のような Private リポジトリでは、`Upgrade to GitHub Pro or make this repository public` で設定できない）。Actions は実行のたびに `sf-tools` の `main`（検証環境は `development`）を取得してコードを実行するため、`main` の書き換え権限の管理が重要
+- `main` のブランチ保護・Ruleset: `sf-tools` 自身は公開リポジトリのため、無料プランでも設定でき、**設定済み**（Ruleset `protect-main`: `deletion` / `non_fast_forward` / `pull_request`（承認者 0 人）。バイパスなし。2026-10-05）。force-* のような Private リポジトリでは、`Upgrade to GitHub Pro or make this repository public` で設定できない。Actions は実行のたびに `sf-tools` の `main`（検証環境は `development`）を取得してコードを実行するため、`main` の書き換え権限の管理が重要。rr は PR 経由（`gh pr merge`）なので、この Ruleset の影響を受けない
 - そのため、`CLAUDE.md` 1.1 の運用ルール（mm / rr は明示された場合のみ、rr は検証報告が前提）で守る
 - プランの変更、またはリポジトリを公開にできるようになった場合は、`main` に Required reviewers を設定すること
 
@@ -619,7 +619,7 @@ sf-tools の `main` への反映は、全ユーザーへの配布と同義であ
 | 部品 | 役割 |
 |---|---|
 | `tests/e2e/lib.sh` | 共通関数。名前の判定、ガード、鍵一式の読み込み、削除、エイリアスの保存・復元、`e2e_make_input`（標準入力の台本） |
-| `tests/e2e/run.sh` | 前掃除 → `sf-init.sh` の実行 → 確認 → 後掃除。`--keep`（後掃除なし）、`--no-actions`（Actions の確認を省略） |
+| `tests/e2e/run.sh` | 前掃除 → `sf-init.sh` の実行 → 確認 → 終了。既定では、終了時にテスト用のリポジトリなどを削除せず残す（あとから見返せる。次回の前掃除で削除）。`--cleanup`（終了時に削除）、`--no-actions`（Actions の確認を省略）。`--keep` は、以前の名残り（何もしない） |
 | `tests/e2e/cleanup.sh` | 削除。既定は一覧のみ、`--yes` で削除（確認で `delete` の入力が必要。`--no-confirm` で省略） |
 | `tests/e2e/bootstrap.sh` | 鍵一式（`~/.sf-tools-e2e/fixture.env`）の作成。最初の 1 回だけ。雛形は `fixture.example.env` |
 | `tests/e2e/shims/sf` | `sf org login web` だけを `sf org login sfdx-url`（認証 URL）に差し替える。他のコマンドは本物の `sf` に渡す |
@@ -627,7 +627,18 @@ sf-tools の `main` への反映は、全ユーザーへの配布と同義であ
 
 **テスト用の名前:** プロジェクト `e2e-YYYYMMDD-HHMMSS` → リポジトリ `force-e2e-YYYYMMDD-HHMMSS` → 外部クライアントアプリ `SF_TOOLS_force_e2e_YYYYMMDD_HHMMSS`。毎回別の名前なので、前回の削除を待たずに実行できる。
 
-**確認する内容:** Secret / Variable / ブランチ / ワークフローの存在、`SF_TOOLS_BRANCH=development`、`SLACK_CHANNEL_ID` の一致、トークンが出力・ログに出ていないこと、`wf-metasync` の成功、`wf-release` の途中のステップ（JWT ログイン・Private の `sf-tools` の取得）と Slack 通知（`"ok":true`）。`wf-release` は `main` に release 用のファイルが無く、最終的に失敗するのが正常。
+**確認する内容:** Secret / Variable / ブランチ / ワークフローの存在、`SF_TOOLS_BRANCH=development`、`SLACK_CHANNEL_ID` の一致、トークンが出力・ログに出ていないこと、`wf-metasync` の成功（`workflow_dispatch` で起動し、完了を待ってから Hello World の流れに進む。並行すると、組織からの取得（retrieve）と Hello World のデプロイが重なり、`MetadataTransferError` で失敗した（2026-10-05 の実機））、Hello World のリリース・削除（下記）。
+
+**Hello World のリリース・削除（`_hello_flow`）:** 実際の PR の流れで、`wf-validate` → マージ → `wf-release` を通す（`wf-release` の途中のステップ（JWT ログイン・公開 `sf-tools` の clone）と Slack 通知（`"ok":true`）、成功の通知）。
+- 部品は `tests/e2e/lib.sh`: `e2e_gh_branch_create` / `e2e_gh_file_put` / `e2e_gh_pr_create` / `e2e_gh_pr_merge` / `e2e_wait_pr_run`（`gh run list --workflow … --branch … --event pull_request` で実行を探し、完了まで `E2E_POLL_SEC` 秒（既定 5）おきに確認。起動待ちは `E2E_RUN_FIND_TRIES` 回（既定 24）、完了待ちは `E2E_WF_TIMEOUT` 秒）。これらは `_e2e_check_repo` で、オーナー（`E2E_OWNER`）とテスト用リポジトリの名前の形式が一致しないと動かない
+- リリース: ブランチ `e2e-hello` に `tests/e2e/fixtures/` の 4 ファイル（`SfToolsE2eHello` / `SfToolsE2eHelloTest` の `.cls` と `.cls-meta.xml`）と `sf-tools/release/e2e-hello/deploy-target.txt`（`[files]` と `[members]`）を追加 → PR → マージ。`@isTest` のクラスが含まれるため、`sf-release.sh` が `RunSpecifiedTests` を自動で選ぶ
+- どちらの PR にも、`deploy-target.txt` と `remove-target.txt` の両方を置く（`sf-release.sh` は、どちらかが無いと止まる。通常は `sf-install.sh` が雛形から作る）。使わない側は、空の雛形（`e2e_empty_target_text`: `[files]` と `[members]` のみ）。`wf-validate` の「対象ファイル確認」は、実質の中身がある側だけを見る（2026-10-05 の初回の実機で、`remove-target.txt` が無く検証が失敗した）
+- 削除: ブランチ `e2e-hello-delete` に `release/e2e-hello-delete/remove-target.txt`（`ApexClass:SfToolsE2eHelloTest` / `ApexClass:SfToolsE2eHello`）を追加 → 同様
+- 組織側の確認は `e2e_apex_count`（SOQL `SELECT COUNT() FROM ApexClass WHERE Name = '…'`。`totalSize` を読む）。前後で 0 → 1 → 0 になること
+- 後掃除（`e2e_cleanup_all`。前掃除、`--cleanup`、`cleanup.sh` で動く）は、組織に残った `SfToolsE2eHello` / `SfToolsE2eHelloTest` も、一覧（`e2e_list_target_apex`。名前の完全一致のみ）→ 削除（`e2e_delete_apex`。削除用のデプロイ）→ 再取得で確認する。一覧の取得失敗は、ECA と同様に「対象なし」とせず、失敗として記録する
+- `gh` の呼び出し（`_e2e_gh`）は、`timeout`（`E2E_GH_TIMEOUT` 秒。既定 120）と標準入力の遮断付き。応答しない `gh` で、e2e が止まり続けないようにする（Git Bash で、`gh` の起動前に止まる現象が一度あったが、その場合は、この上限では防げない）
+- ワークフロー（`wf-validate` / `wf-release` / `wf-metasync`）が失敗したら、後掃除の前に、失敗したステップのログの末尾（`E2E_FAIL_LOG_LINES` 行。既定 40）を表示する（`e2e_show_run_failure`。鍵一式の値は `***` に置き換える）。リポジトリは既定で残る（`--cleanup` のときは消える）が、その場で原因を追えるようにするため
+- マージ時には `wf-propagate`（main へのマージ）も動く。e2e のリポジトリは `main` のみで `staging` / `develop` がないため、スキップして成功になること（`wf-propagate.yml` は、ブランチがなければスキップする。以前は `git checkout staging` が失敗して、赤い ✗ になっていた）を確認する。`wf-sequence` は、PR を開いたときに動き、成功する
 
 **削除の安全ガード:**
 

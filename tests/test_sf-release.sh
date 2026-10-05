@@ -227,8 +227,33 @@ test_personal_alias_allowed() {
     teardown "$td" "$mb"
 }
 
+# @isTest のクラスを含む → --test-level RunSpecifiedTests と、クラスごとの --tests が渡される（--run-tests は存在しないフラグ）
+test_run_specified_tests() {
+    local td mb mh
+    setup_std_env td mb mh
+    create_all_mocks "$mb"
+    setup_release_dir "$td"
+    local cls="$td/force-app/main/default/classes"
+    printf '@isTest\nprivate class FooTest {}\n' > "$cls/FooTest.cls"
+    printf '@isTest\nprivate class BarTest {}\n' > "$cls/BarTest.cls"
+    printf '[files]\nforce-app/main/default/classes/TestClass.cls\nforce-app/main/default/classes/FooTest.cls\nforce-app/main/default/classes/BarTest.cls\n' \
+        > "$td/sf-tools/release/feature/test/deploy-target.txt"
+    export MOCK_SF_ORG_JSON='{"result":{"alias":"testorg","id":"00D000000000001AAA"}}'
+
+    cd "$td" && PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-release.sh" --no-open 2>&1 >/dev/null
+
+    local line; line=$(grep "project deploy" "$MOCK_CALL_LOG" | head -1)
+    [[ "$line" == *"--test-level RunSpecifiedTests"* ]] && pass "テストクラスあり → --test-level RunSpecifiedTests" || fail "テストクラスあり → --test-level RunSpecifiedTests" "$line"
+    [[ "$line" == *"--tests FooTest"* ]] && pass "FooTest が --tests で渡された" || fail "FooTest が --tests で渡された" "$line"
+    [[ "$line" == *"--tests BarTest"* ]] && pass "BarTest が --tests で渡された（クラスごとに繰り返す）" || fail "BarTest が --tests で渡された" "$line"
+    [[ "$line" != *"--run-tests"* ]] && pass "存在しないフラグ --run-tests は渡さない" || fail "存在しないフラグ --run-tests は渡さない" "$line"
+    unset MOCK_SF_ORG_JSON
+    teardown "$td" "$mb"
+}
+
 test_dry_run_default
 test_release_mode
+test_run_specified_tests
 test_force_flag
 test_target_option
 test_empty_deploy_target

@@ -11,7 +11,7 @@
 #   3. Git フック (pre-push) をインストール
 #   4. リリース管理ディレクトリの準備 & branch_name.txt を更新
 #   5. コミットメッセージテンプレートを設置（.gitmessage）
-#   6. package.json があれば npm install を実行（時間がかかる場合あり）
+#   6. package.json があれば npm install を実行（時間がかかる場合あり。sf-init.sh から呼ばれた場合は、一時フォルダのためスキップ）
 #   7. 開発ツールのアップデート（sf-upgrade.sh をバックグラウンドで起動）※24 時間に 1 回のみ
 #
 # 【WF について】
@@ -134,6 +134,14 @@ phase_init_config() {
 phase_npm_install() {
     if [[ ! -f "./package.json" ]]; then
         log "INFO" "package.json が見つかりません。npm install をスキップします。"
+        return $RET_OK
+    fi
+    # sf-init.sh から呼ばれた場合は、スキップする。
+    # （sf-init の作業フォルダ（init/）は、設定とプッシュだけに使い、最後に削除する一時フォルダのため、
+    #   node_modules は不要。開発者は、プロジェクトを clone し直して sf-start.sh を実行するときに、npm install される。
+    #   eslint / prettier / jest などの取得に、約 90 秒かかっていた）
+    if [[ -n "${SF_INIT_RUNNING:-}" ]]; then
+        log "INFO" "sf-init.sh から実行中のため npm install をスキップします（初期セットアップ用の一時フォルダのため）。"
         return $RET_OK
     fi
     # node_modules/.package-lock.json が package-lock.json より新しければスキップ

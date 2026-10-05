@@ -230,7 +230,39 @@ test_sf_cli_warning_only() {
     teardown "$td" "$mb" "$mh"
 }
 
+
+# sf-init.sh から呼ばれた場合（SF_INIT_RUNNING=1）は、package.json があっても npm install をスキップする
+#   （init フォルダは、設定とプッシュだけに使い、最後に削除する一時フォルダのため。約 90 秒の短縮）
+test_npm_install_skipped_when_sf_init_running() {
+    local td mb mh
+    setup_std_env td mb mh
+    create_all_mocks "$mb"
+    echo '{"name":"x","version":"1.0.0"}' > "$td/package.json"
+
+    local out; out=$(cd "$td" && SF_INIT_RUNNING=1 HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-install.sh" 2>&1)
+
+    assert_output_contains "$out" "npm install をスキップします（初期セットアップ用の一時フォルダのため）" "sf-init 中 → npm install のスキップメッセージが表示された"
+    # 背景で動く sf-upgrade.sh の npm install -g（別のコマンド）と区別するため、引数なしの行だけを見る
+    if grep -qx "npm install" "$MOCK_CALL_LOG"; then fail "sf-init 中 → npm install が呼び出されていない" "引数なしの npm install が呼ばれた"; else pass "sf-init 中 → npm install が呼び出されていない"; fi
+    teardown "$td" "$mb" "$mh"
+}
+
+# 通常の起動（sf-start.sh からなど）では、package.json があれば npm install する
+test_npm_install_runs_normally() {
+    local td mb mh
+    setup_std_env td mb mh
+    create_all_mocks "$mb"
+    echo '{"name":"x","version":"1.0.0"}' > "$td/package.json"
+    rm -f "$td/node_modules/.package-lock.json"
+
+    local out; out=$(cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-install.sh" 2>&1)
+
+    assert_file_contains "$MOCK_CALL_LOG" "npm install" "通常起動 → npm install が呼び出される"
+    teardown "$td" "$mb" "$mh"
+}
 test_normal_run
+test_npm_install_skipped_when_sf_init_running
+test_npm_install_runs_normally
 test_sf_cli_warning_only
 test_gitmessage_created
 test_upgrade_skipped_within_24h

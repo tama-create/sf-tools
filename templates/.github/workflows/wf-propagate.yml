@@ -4,6 +4,8 @@
 #
 # 【概要】
 #   main への PR マージ後、staging と develop ブランチへ変更を直接伝播する。
+#   staging / develop ブランチがない構成（main のみ・main + staging）では、そのブランチへの伝播を
+#   スキップする（失敗にしない）。
 #
 # 【必要な GitHub Secrets（このリポジトリに設定すること）】
 #   PAT_TOKEN        : GitHub PAT（ブランチ保護ルールのバイパスに使用）
@@ -53,6 +55,12 @@ jobs:
         id: merge_staging
         if: ${{ (github.event.pull_request.base.ref || github.ref_name) == 'main' }}
         run: |
+          # ブランチがない構成（main のみ・main + staging など）では、失敗にせずスキップする
+          if ! git rev-parse --verify --quiet origin/staging >/dev/null; then
+            echo "result=skipped" >> "$GITHUB_OUTPUT"
+            echo "::notice title=スキップ::staging ブランチがないため、main → staging の伝播をスキップしました。"
+            exit 0
+          fi
           git checkout staging
           if git merge origin/main --no-edit; then
             git push origin staging
@@ -70,6 +78,12 @@ jobs:
         id: merge_develop
         if: ${{ (github.event.pull_request.base.ref || github.ref_name) == 'main' }}
         run: |
+          # ブランチがない構成（main のみ・main + staging など）では、失敗にせずスキップする
+          if ! git rev-parse --verify --quiet origin/develop >/dev/null; then
+            echo "result=skipped" >> "$GITHUB_OUTPUT"
+            echo "::notice title=スキップ::develop ブランチがないため、main → develop の伝播をスキップしました。"
+            exit 0
+          fi
           git checkout develop
           if git merge origin/main --no-edit; then
             git push origin develop

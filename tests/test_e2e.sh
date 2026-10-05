@@ -19,6 +19,9 @@
 #  10. sf-init に流す入力の台本
 #  11. run.sh のガード（GitHub Actions 上・鍵一式なしでは動かない）
 #  15. 一覧の取得に失敗したとき（再試行・「対象なし」と取り違えない）
+#  16. ローカルの削除の補強（想定外の中身・シンボリックリンクは消さない）
+#  17. Hello World の Apex（名前の判定・一覧・件数・削除・後掃除）
+#  18. GitHub の PR を使った流れ（ブランチ・ファイル・PR・マージ・Actions の待ち）
 # ==============================================================================
 source "$(dirname "${BASH_SOURCE[0]}")/test_helper.sh"
 echo -e "${CLR_HEAD}=== tests/e2e（安全ガードと部品）===${CLR_RST}"
@@ -33,6 +36,22 @@ _mk_mocks() {
     cat > "$mb/gh" << 'EOF'
 #!/bin/bash
 echo "gh $*" >> "${MOCK_CALL_LOG:-/dev/null}"
+# PR を使った流れの再現（ブランチ作成・ファイル追加・PR・Actions の実行）
+case "$*" in
+    "api repos/"*"/git/ref/heads/main"*) echo "abc123def456"; exit 0 ;;
+    "api -X POST repos/"*"/git/refs"*)   exit "${MOCK_GH_BRANCH_EXIT:-0}" ;;
+    "api -X PUT repos/"*"/contents/"*)   exit "${MOCK_GH_PUT_EXIT:-0}" ;;
+    "pr create"*)                        [[ "${MOCK_GH_PR_EXIT:-0}" -ne 0 ]] && exit "$MOCK_GH_PR_EXIT"; echo "https://github.com/tamashimon-org/force-e2e-20260101-000000/pull/${MOCK_GH_PR_NUMBER:-7}"; exit 0 ;;
+    "pr merge"*)                         exit "${MOCK_GH_MERGE_EXIT:-0}" ;;
+    "run list"*)                         [[ "${MOCK_GH_RUN_NONE:-}" == "1" ]] && exit 0; echo "${MOCK_GH_RUN_ID:-555}"; exit 0 ;;
+    # 失敗したステップのログ（形式: ジョブ名 TAB ステップ名 TAB 時刻 本文。色の指定と Token を含む）
+    "run view"*"--log-failed"*)
+        [[ "${MOCK_GH_LOG_NONE:-}" == "1" ]] && exit 0
+        printf 'job1\tステップA\t2026-10-05T08:00:00.1Z \033[31mError\033[0m: 失敗の本文 ghp_fakepat\n'
+        printf 'job1\tステップA\t2026-10-05T08:00:01.2Z 2 行目\n'
+        exit 0 ;;
+    "run view"*)                         echo "${MOCK_GH_RUN_STATUS:-completed}"; exit 0 ;;
+esac
 case "$1 $2" in
     "api user")    echo "${MOCK_GH_API_USER:-tamashimon}" ;;
     "repo list")
@@ -105,6 +124,30 @@ case "$1 $2" in
             echo "    { \"fullName\": \"$n\", \"type\": \"ExternalClientApplication\" },"
         done
         echo '  ]'; echo '}' ;;
+    "data query")
+        # Apex クラスの問い合わせの再現（MOCK_SF_APEX: 組織にあるクラス名。削除用デプロイで消えたものは除く）
+        #   MOCK_SF_APEX_FAIL_FIRST=N: 最初の N 回は失敗（all なら、ずっと失敗）
+        if [[ -n "${MOCK_SF_APEX_FAIL_FIRST:-}" ]]; then
+            _n=$(( $(cat "$_dir/sfapex.cnt" 2>/dev/null || echo 0) + 1 )); echo "$_n" > "$_dir/sfapex.cnt"
+            if [[ "$MOCK_SF_APEX_FAIL_FIRST" == "all" || $_n -le $MOCK_SF_APEX_FAIL_FIRST ]]; then
+                echo '{"status":1,"name":"Error","message":"connection reset"}'; exit 1
+            fi
+        fi
+        _names=""
+        for n in ${MOCK_SF_APEX:-}; do
+            grep -qx "$n" "$_dir/deleted.txt" 2>/dev/null && continue
+            _names="$_names $n"
+        done
+        if [[ "$*" == *"COUNT()"* ]]; then
+            _target=$(echo "$*" | grep -oE "Name = '[^']*'" | sed -E "s/Name = '(.*)'/\1/")
+            _c=0; for n in $_names; do [[ "$n" == "$_target" ]] && _c=1; done
+            echo "{\"status\":0,\"result\":{\"totalSize\":${_c},\"records\":[]}}"
+        else
+            echo '{"status":0,"result":{"records":['
+            _f=1; for n in $_names; do [[ $_f -eq 0 ]] && echo ','; _f=0; echo "  {\"attributes\": {\"type\": \"ApexClass\"}, \"Name\": \"$n\"}"; done
+            echo '],"totalSize":0}}'
+        fi
+        exit 0 ;;
     "project deploy")
         if [[ -f destructiveChanges.xml ]]; then
             cat destructiveChanges.xml >> "${MOCK_CALL_LOG}"
@@ -112,6 +155,10 @@ case "$1 $2" in
             [[ "${MOCK_SF_DEPLOY_EXIT:-0}" -ne 0 ]] && exit "$MOCK_SF_DEPLOY_EXIT"
             grep -oE '<members>[^<]*</members><name>ExternalClientApplication</name>' destructiveChanges.xml \
                 | sed -E 's:<members>([^<]*)</members>.*:\1:' >> "$_dir/deleted.txt"
+            # Apex クラスの削除: <name>ApexClass</name> のとき、<members> の名前をすべて記録する
+            if grep -q '<name>ApexClass</name>' destructiveChanges.xml; then
+                grep -oE '<members>[^<]*</members>' destructiveChanges.xml | sed -E 's:<members>([^<]*)</members>:\1:' >> "$_dir/deleted.txt"
+            fi
         fi
         exit 0 ;;
     *) exit 0 ;;
@@ -718,6 +765,228 @@ test_e2e_local_guard() {
     unset MOCK_CALL_LOG MOCK_GH_REPOS MOCK_SF_ECAS
     teardown "$CB"
 }
+# ------------------------------------------------------------------------------
+# 17. Hello World の Apex（名前の判定・一覧・件数・削除・後掃除）
+# ------------------------------------------------------------------------------
+test_e2e_apex() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] Hello World の Apex: 名前の判定・一覧・件数・削除・後掃除${CLR_RST}"
+    _mk_cleanup_env
+    export MOCK_SF_APEX="SfToolsE2eHello SfToolsE2eHelloTest OtherClass"
+    export E2E_LIST_RETRY_WAIT=0
+    local pre='e2e_load_fixture; e2e_guard_env;'
+    local rc
+
+    # 名前の判定: 完全に一致する 2 つだけ
+    _e2e_call 'for n in SfToolsE2eHello SfToolsE2eHelloTest SfToolsE2eHelloX sftoolse2ehello OtherClass "SfToolsE2eHello "; do if e2e_is_target_apex "$n"; then echo "OK:[$n]"; else echo "NO:[$n]"; fi; done'
+    assert_file_contains "$MB/out.log" "OK:[SfToolsE2eHello]"     "名前の判定: SfToolsE2eHello は対象"
+    assert_file_contains "$MB/out.log" "OK:[SfToolsE2eHelloTest]" "名前の判定: SfToolsE2eHelloTest は対象"
+    assert_file_contains "$MB/out.log" "NO:[SfToolsE2eHelloX]"    "名前の判定: 前方一致だけのものは対象外"
+    assert_file_contains "$MB/out.log" "NO:[sftoolse2ehello]"     "名前の判定: 大文字小文字が違うものは対象外"
+    assert_file_contains "$MB/out.log" "NO:[OtherClass]"          "名前の判定: 無関係のクラスは対象外"
+    assert_file_contains "$MB/out.log" "NO:[SfToolsE2eHello ]"    "名前の判定: 末尾に空白があるものは対象外"
+
+    # 一覧: 対象だけが出る
+    _e2e_call "$pre"' out=$(e2e_list_target_apex); echo "RC=$? OUT=[$(echo $out)]"'
+    assert_file_contains     "$MB/out.log" "RC=0 OUT=[SfToolsE2eHello SfToolsE2eHelloTest]" "一覧: 対象の 2 つだけが出る"
+    assert_file_not_contains "$MB/out.log" "OtherClass" "一覧: 無関係のクラスは出ない"
+
+    # 一覧: 失敗は再試行し、ずっと失敗なら戻り値 1
+    rm -f "$MB/sfapex.cnt"; MOCK_SF_APEX_FAIL_FIRST=2 _e2e_call "$pre"' out=$(e2e_list_target_apex); echo "RC=$? OUT=[$(echo $out)]"'
+    assert_file_contains "$MB/out.log" "RC=0 OUT=[SfToolsE2eHello SfToolsE2eHelloTest]" "一覧: 2 回失敗しても、3 回目で取れる（再試行）"
+    rm -f "$MB/sfapex.cnt"; MOCK_SF_APEX_FAIL_FIRST=all _e2e_call "$pre"' out=$(e2e_list_target_apex); echo "RC=$? OUT=[$out]"'
+    assert_file_contains "$MB/out.log" "RC=1 OUT=[]" "一覧: ずっと失敗 → 戻り値 1（何も出力しない）"
+
+    # 件数
+    _e2e_call "$pre"' echo "HELLO=$(e2e_apex_count SfToolsE2eHello) TEST=$(e2e_apex_count SfToolsE2eHelloTest)"'
+    assert_file_contains "$MB/out.log" "HELLO=1 TEST=1" "件数: あるクラスは 1"
+    _e2e_call "$pre"' e2e_apex_count OtherClass; echo DONE'
+    assert_file_not_contains "$MB/out.log" "DONE" "件数: 対象外のクラス名は、拒否する（異常終了）"
+    rm -f "$MB/sfapex.cnt"; MOCK_SF_APEX_FAIL_FIRST=all _e2e_call "$pre"' e2e_apex_count SfToolsE2eHello; echo "RC=$?"'
+    assert_file_contains "$MB/out.log" "RC=1" "件数: 取得に失敗 → 戻り値 1"
+
+    # 削除: 対象外の名前は、拒否する
+    : > "$MOCK_CALL_LOG"
+    _e2e_call "$pre"' e2e_delete_apex OtherClass; echo DONE'
+    assert_file_not_contains "$MB/out.log" "DONE" "削除: 対象外のクラス名は、拒否する（異常終了）"
+    assert_file_not_contains "$MOCK_CALL_LOG" "post-destructive" "削除: 対象外のクラス名では、削除用のデプロイをしない"
+    _e2e_call "$pre"' e2e_delete_apex SfToolsE2eHello OtherClass; echo DONE'
+    assert_file_not_contains "$MOCK_CALL_LOG" "post-destructive" "削除: 1 つでも対象外が混ざれば、何も削除しない"
+
+    # 削除: 対象の 2 つを、削除用のデプロイで消す
+    _e2e_call "$pre"' e2e_delete_apex SfToolsE2eHello SfToolsE2eHelloTest; echo "RC=$?"'
+    assert_file_contains "$MB/out.log" "RC=0" "削除: 成功 → 戻り値 0"
+    assert_file_contains "$MOCK_CALL_LOG" "post-destructive-changes destructiveChanges.xml" "削除: 削除用のデプロイを使う"
+    assert_file_contains "$MOCK_CALL_LOG" "<members>SfToolsE2eHello</members>"     "削除: SfToolsE2eHello を指定する"
+    assert_file_contains "$MOCK_CALL_LOG" "<members>SfToolsE2eHelloTest</members>" "削除: SfToolsE2eHelloTest を指定する"
+    assert_file_contains "$MOCK_CALL_LOG" "<name>ApexClass</name>"                 "削除: メタデータの種類は ApexClass"
+    assert_file_not_contains "$MOCK_CALL_LOG" "OtherClass" "削除: 無関係のクラスは、指定しない"
+    _e2e_call "$pre"' echo "HELLO=$(e2e_apex_count SfToolsE2eHello) TEST=$(e2e_apex_count SfToolsE2eHelloTest)"'
+    assert_file_contains "$MB/out.log" "HELLO=0 TEST=0" "削除後: 件数は 0"
+    MOCK_SF_DEPLOY_EXIT=1 _e2e_call "$pre"' e2e_delete_apex SfToolsE2eHello; echo "RC=$?"'
+    assert_file_contains "$MB/out.log" "RC=1" "削除: デプロイが失敗 → 戻り値 1"
+    teardown "$CB"
+
+    # 後掃除（cleanup.sh）: 一覧のみ → 何も消さない / --yes → 対象だけ消す
+    _mk_cleanup_env
+    export MOCK_SF_APEX="SfToolsE2eHello SfToolsE2eHelloTest OtherClass"
+    _run_cleanup; rc=$?
+    assert_exit_ok "$rc" "後掃除（一覧のみ）→ 終了コード 0"
+    assert_file_contains     "$MB/out.log" "Salesforce: Apex クラス SfToolsE2eHello"     "後掃除（一覧）: テスト用の Apex クラスが一覧に出る"
+    assert_file_not_contains "$MB/out.log" "Apex クラス OtherClass"                      "後掃除（一覧）: 無関係のクラスは出ない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "<name>ApexClass</name>"                    "後掃除（一覧のみ）: Apex を削除しない"
+    _run_cleanup --yes --no-confirm; rc=$?
+    assert_exit_ok "$rc" "後掃除（削除）→ 終了コード 0"
+    assert_file_contains     "$MOCK_CALL_LOG" "<members>SfToolsE2eHello</members>"       "後掃除（削除）: テスト用の Apex クラスを削除する"
+    assert_file_not_contains "$MOCK_CALL_LOG" "OtherClass"                                "後掃除（削除）: 無関係のクラスは、削除しない"
+
+    # 後掃除: 一覧が取れなければ「対象なし」とは言わず、ほかの掃除は続ける
+    rm -f "$MB/sfapex.cnt" "$MB/deleted.txt"; : > "$MOCK_CALL_LOG"
+    MOCK_SF_APEX_FAIL_FIRST=all _run_cleanup --yes --no-confirm; rc=$?
+    assert_exit_fail "$rc" "後掃除: Apex の一覧を取れない → 失敗で終わる"
+    assert_file_contains     "$MB/out.log" "Apex クラスの一覧を取得できませんでした" "後掃除: 取得失敗の旨が表示される"
+    assert_file_not_contains "$MB/out.log" "対象の Apex クラスはありません"          "後掃除: 「対象なし」とは表示しない"
+    assert_file_contains     "$MOCK_CALL_LOG" "gh repo delete tamashimon-org/force-e2e-20260101-000000 --yes" "後掃除: ほかの掃除（リポジトリ）は続ける"
+    unset MOCK_SF_APEX MOCK_CALL_LOG MOCK_GH_REPOS MOCK_SF_ECAS E2E_LIST_RETRY_WAIT
+    teardown "$CB"
+}
+
+# ------------------------------------------------------------------------------
+# 18. GitHub での PR を使った流れ（ブランチ・ファイル・PR・マージ・Actions の待ち）
+# ------------------------------------------------------------------------------
+test_e2e_gh_flow() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] GitHub の PR を使った流れ（テスト用のリポジトリだけを操作する）${CLR_RST}"
+    _mk_cleanup_env
+    local pre='e2e_load_fixture; e2e_guard_env;'
+    local repo="tamashimon-org/force-e2e-20260101-000000"
+    local b64; b64=$(printf 'hello' | base64 | tr -d '\n\r')
+
+    # ガード: テスト用ではないリポジトリ・別のオーナーは、操作しない
+    : > "$MOCK_CALL_LOG"
+    _e2e_call "$pre"' e2e_gh_branch_create "tamashimon-org/force-test-win" b; echo DONE'
+    assert_file_not_contains "$MB/out.log" "DONE" "ガード: テスト用ではないリポジトリは、拒否する（異常終了）"
+    _e2e_call "$pre"' e2e_gh_branch_create "other-org/force-e2e-20260101-000000" b; echo DONE'
+    assert_file_not_contains "$MB/out.log" "DONE" "ガード: 別のオーナーは、拒否する（異常終了）"
+    _e2e_call "$pre"' e2e_gh_pr_merge "tamashimon-org/force-test-win" 1; echo DONE'
+    assert_file_not_contains "$MB/out.log" "DONE" "ガード: テスト用ではないリポジトリの PR は、マージしない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "pr merge" "ガード: マージのコマンドは、実行されない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "git/refs" "ガード: ブランチ作成のコマンドは、実行されない"
+
+    # ブランチの作成: main の先頭コミットから
+    _e2e_call "$pre"" e2e_gh_branch_create $repo e2e-hello; echo RC=\$?"
+    assert_file_contains "$MB/out.log" "RC=0" "ブランチ作成: 成功 → 戻り値 0"
+    assert_file_contains "$MOCK_CALL_LOG" "api repos/${repo}/git/ref/heads/main" "ブランチ作成: main の先頭コミットを取得する"
+    assert_file_contains "$MOCK_CALL_LOG" "api -X POST repos/${repo}/git/refs -f ref=refs/heads/e2e-hello -f sha=abc123def456" "ブランチ作成: その先頭コミットから作る"
+    MOCK_GH_BRANCH_EXIT=1 _e2e_call "$pre"" e2e_gh_branch_create $repo e2e-hello; echo RC=\$?"
+    assert_file_contains "$MB/out.log" "RC=1" "ブランチ作成: 失敗 → 戻り値 1"
+
+    # ファイルの追加（ファイル・標準入力）
+    printf 'hello' > "$CB/f.txt"
+    _e2e_call "$pre"" e2e_gh_file_put $repo e2e-hello some/path.txt $CB/f.txt; echo RC=\$?"
+    assert_file_contains "$MB/out.log" "RC=0" "ファイル追加: 成功 → 戻り値 0"
+    assert_file_contains "$MOCK_CALL_LOG" "api -X PUT repos/${repo}/contents/some/path.txt" "ファイル追加: 指定のパスに追加する"
+    assert_file_contains "$MOCK_CALL_LOG" "-f branch=e2e-hello" "ファイル追加: 指定のブランチに追加する"
+    assert_file_contains "$MOCK_CALL_LOG" "-f content=${b64}"   "ファイル追加: 内容を base64 で渡す（ファイル）"
+    : > "$MOCK_CALL_LOG"
+    _e2e_call "$pre"" printf hello | e2e_gh_file_put $repo e2e-hello other.txt -; echo RC=\$?"
+    assert_file_contains "$MOCK_CALL_LOG" "-f content=${b64}"   "ファイル追加: 内容を base64 で渡す（標準入力）"
+    MOCK_GH_PUT_EXIT=1 _e2e_call "$pre"" e2e_gh_file_put $repo e2e-hello some/path.txt $CB/f.txt; echo RC=\$?"
+    assert_file_contains "$MB/out.log" "RC=1" "ファイル追加: 失敗 → 戻り値 1"
+    : > "$CB/empty.txt"
+    _e2e_call "$pre"" e2e_gh_file_put $repo e2e-hello some/empty.txt $CB/empty.txt; echo RC=\$?"
+    assert_file_contains "$MB/out.log" "RC=1" "ファイル追加: 空の内容は、追加しない（戻り値 1）"
+
+    # PR の作成・マージ
+    : > "$MOCK_CALL_LOG"
+    _e2e_call "$pre"" n=\$(e2e_gh_pr_create $repo e2e-hello 'e2e: Hello'); echo \"PR=[\$n]\""
+    assert_file_contains "$MB/out.log" "PR=[7]" "PR 作成: PR 番号を返す"
+    assert_file_contains "$MOCK_CALL_LOG" "pr create -R ${repo} --base main --head e2e-hello --title e2e: Hello" "PR 作成: main への PR を作る"
+    MOCK_GH_PR_EXIT=1 _e2e_call "$pre"" n=\$(e2e_gh_pr_create $repo e2e-hello t); echo \"RC=\$? PR=[\$n]\""
+    assert_file_contains "$MB/out.log" "RC=1 PR=[]" "PR 作成: 失敗 → 戻り値 1（番号なし）"
+    _e2e_call "$pre"" e2e_gh_pr_merge $repo 7; echo RC=\$?"
+    assert_file_contains "$MOCK_CALL_LOG" "pr merge 7 -R ${repo} --merge" "PR マージ: マージコミットでマージする"
+    assert_file_contains "$MB/out.log" "RC=0" "PR マージ: 成功 → 戻り値 0"
+    MOCK_GH_MERGE_EXIT=1 _e2e_call "$pre"" e2e_gh_pr_merge $repo 7; echo RC=\$?"
+    assert_file_contains "$MB/out.log" "RC=1" "PR マージ: 失敗 → 戻り値 1"
+
+    # Actions の実行の待ち
+    : > "$MOCK_CALL_LOG"
+    E2E_POLL_SEC=1 _e2e_call "$pre"" id=\$(e2e_wait_pr_run $repo wf-validate.yml e2e-hello); echo \"RC=\$? ID=[\$id]\""
+    assert_file_contains "$MB/out.log" "RC=0 ID=[555]" "Actions の待ち: 完了した実行の ID を返す"
+    assert_file_contains "$MOCK_CALL_LOG" "run list -R ${repo} --workflow wf-validate.yml --branch e2e-hello --event pull_request" "Actions の待ち: ブランチと PR のイベントで、実行を探す"
+    MOCK_GH_RUN_NONE=1 E2E_RUN_FIND_TRIES=2 E2E_POLL_SEC=0 _e2e_call "$pre"" id=\$(e2e_wait_pr_run $repo wf-release.yml e2e-hello); echo \"RC=\$? ID=[\$id]\""
+    assert_file_contains "$MB/out.log" "RC=1 ID=[]" "Actions の待ち: 実行が起動しない → 戻り値 1"
+    MOCK_GH_RUN_STATUS=in_progress E2E_WF_TIMEOUT=2 E2E_POLL_SEC=1 _e2e_call "$pre"" id=\$(e2e_wait_pr_run $repo wf-release.yml e2e-hello); echo \"RC=\$? ID=[\$id]\""
+    assert_file_contains "$MB/out.log" "RC=1 ID=[]" "Actions の待ち: 時間内に完了しない → 戻り値 1"
+
+    # gh の時間の上限: 応答しない gh は、E2E_GH_TIMEOUT 秒で打ち切り、失敗（戻り値 1 以上）として返す
+    cat > "$MB/gh" << 'EOF'
+#!/bin/bash
+echo "gh $*" >> "${MOCK_CALL_LOG:-/dev/null}"
+[[ "$1 $2" == "api user" ]] && { echo "${MOCK_GH_API_USER:-tamashimon}"; exit 0; }  # ガード（e2e_guard_env）の確認は、すぐ返す
+exec sleep 20
+EOF
+    chmod +x "$MB/gh"
+    local t0 t1
+    t0=$(date +%s)
+    E2E_GH_TIMEOUT=1 _e2e_call "$pre"" e2e_gh_pr_merge $repo 7; echo RC=\$?"
+    t1=$(date +%s)
+    assert_file_not_contains "$MB/out.log" "RC=0" "gh の時間の上限: 応答しない gh は、失敗として返す"
+    [[ $((t1 - t0)) -lt 15 ]] && pass "gh の時間の上限: 設定した秒数で打ち切る（待ち続けない）" || fail "gh の時間の上限: 設定した秒数で打ち切る（待ち続けない）" "所要: $((t1 - t0)) 秒"
+    _mk_mocks "$MB"
+
+    # 失敗した実行のログの表示: ステップ名を付け、色の指定を除き、Token は伏せる。戻り値は 0
+    _e2e_call "$pre"" e2e_show_run_failure $repo 555 'wf-validate'; echo RC=\$?"
+    assert_file_contains     "$MB/out.log" "[ステップA] Error: 失敗の本文 ***" "失敗ログ: ステップ名付きで表示され、色の指定が除かれる"
+    assert_file_contains     "$MB/out.log" "[ステップA] 2 行目"                "失敗ログ: 複数行を表示する"
+    assert_file_not_contains "$MB/out.log" "ghp_fakepat"                        "失敗ログ: Token の値は、表示しない（*** に置き換える）"
+    assert_file_contains     "$MB/out.log" "RC=0"                               "失敗ログ: 戻り値は 0（表示だけ）"
+    MOCK_GH_LOG_NONE=1 _e2e_call "$pre"" e2e_show_run_failure $repo 555 'wf-validate'; echo RC=\$?"
+    assert_file_contains     "$MB/out.log" "ログを取得できませんでした"        "失敗ログ: 取得できないときは、その旨を表示する"
+    assert_file_contains     "$MB/out.log" "RC=0"                               "失敗ログ: 取得できなくても、戻り値は 0"
+    _e2e_call "$pre"' e2e_show_run_failure tamashimon-org/force-test-win 1 x; echo DONE'
+    assert_file_not_contains "$MB/out.log" "DONE"                               "失敗ログ: テスト用ではないリポジトリは、拒否する"
+    assert_file_contains "$E2E_DIR/run.sh" 'e2e_show_run_failure "$REPO_FULL" "$_meta_id" "wf-metasync"' "run.sh: wf-metasync の失敗時にログを表示する"
+    assert_file_contains "$E2E_DIR/run.sh" '"${label}: wf-validate"' "run.sh: wf-validate の失敗時にログを表示する"
+    assert_file_contains "$E2E_DIR/run.sh" '"${label}: wf-release"'  "run.sh: wf-release の失敗時にログを表示する"
+    assert_file_contains "$E2E_DIR/run.sh" 'wf-propagate.yml "$br"' "run.sh: マージ時の wf-propagate の実行と成功を確認する"
+    assert_file_contains "$E2E_DIR/run.sh" '"${label}: wf-propagate"' "run.sh: wf-propagate の失敗時にログを表示する"
+    # 終了時の掃除: 既定は、削除せずに残す（あとから見返せる）。--cleanup で削除する
+    assert_file_contains "$E2E_DIR/run.sh" "KEEP=1   # 既定は、終了時に削除しない" "run.sh: 既定は、終了時に削除しない"
+    assert_file_contains "$E2E_DIR/run.sh" "--cleanup)    KEEP=0"         "run.sh: --cleanup で、終了時に削除する"
+    assert_file_contains "$E2E_DIR/run.sh" 'https://github.com/${REPO_FULL}/actions' "run.sh: 残したリポジトリの URL を表示する"
+    # wf-metasync は、Hello World の流れの前に、完了まで待つ（同時に動かすと、取得とデプロイが重なって失敗する）
+    local ln_meta ln_hello
+    ln_meta=$(grep -n 'chk "wf-metasync が成功した' "$E2E_DIR/run.sh" | head -1 | cut -d: -f1)
+    ln_hello=$(grep -n '^        _hello_flow$' "$E2E_DIR/run.sh" | head -1 | cut -d: -f1)
+    [[ -n "$ln_meta" && -n "$ln_hello" && "$ln_meta" -lt "$ln_hello" ]] \
+        && pass "run.sh: wf-metasync の完了を待ってから、Hello World の流れに進む" \
+        || fail "run.sh: wf-metasync の完了を待ってから、Hello World の流れに進む" "metasync=${ln_meta} hello=${ln_hello}"
+
+    # deploy-target.txt / remove-target.txt の本文
+    _e2e_call "$pre"' e2e_hello_deploy_target_text; echo "-----"; e2e_hello_remove_target_text'
+    assert_file_contains "$MB/out.log" "force-app/main/default/classes/SfToolsE2eHello.cls"     "deploy-target: クラスを [files] で指定する"
+    assert_file_contains "$MB/out.log" "force-app/main/default/classes/SfToolsE2eHelloTest.cls" "deploy-target: テストクラスも指定する（テストの自動実行のため）"
+    assert_file_contains "$MB/out.log" "ApexClass:SfToolsE2eHelloTest" "remove-target: テストクラスを [members] で指定する"
+    assert_file_contains "$MB/out.log" "ApexClass:SfToolsE2eHello"     "remove-target: クラスを [members] で指定する"
+    # 空の雛形: セクションだけで、中身（パス・メンバー）がない
+    _e2e_call "$pre"' e2e_empty_target_text'
+    assert_file_contains     "$MB/out.log" "[files]"   "空の雛形: [files] がある"
+    assert_file_contains     "$MB/out.log" "[members]" "空の雛形: [members] がある"
+    assert_file_not_contains "$MB/out.log" "SfToolsE2e"  "空の雛形: クラスの指定は入っていない"
+    # run.sh: 各 PR に、deploy-target.txt と remove-target.txt の両方を置く（sf-release.sh は両方が無いと止まる）
+    assert_file_contains "$E2E_DIR/run.sh" "_put_empty_remove_target \"\$br\"" "run.sh: リリースの PR に、空の remove-target.txt も置く"
+    assert_file_contains "$E2E_DIR/run.sh" "_put_empty_deploy_target \"\$1\""  "run.sh: 削除の PR に、空の deploy-target.txt も置く"
+
+    # fixtures: Apex のソースが、揃っている
+    local f
+    for f in SfToolsE2eHello.cls SfToolsE2eHello.cls-meta.xml SfToolsE2eHelloTest.cls SfToolsE2eHelloTest.cls-meta.xml; do
+        assert_file_exists "$E2E_DIR/fixtures/$f" "fixtures: $f がある"
+    done
+    assert_file_contains "$E2E_DIR/fixtures/SfToolsE2eHelloTest.cls" "@isTest" "fixtures: テストクラスに @isTest がある（RunSpecifiedTests の自動検出に必要）"
+    unset MOCK_CALL_LOG MOCK_GH_REPOS MOCK_SF_ECAS
+    teardown "$CB"
+}
+
 
 test_e2e_names
 test_e2e_guard
@@ -735,5 +1004,7 @@ test_e2e_admin_login_retry
 test_e2e_tmp_cleanup
 test_e2e_list_failure
 test_e2e_local_guard
+test_e2e_apex
+test_e2e_gh_flow
 
 print_summary

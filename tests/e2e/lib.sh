@@ -331,6 +331,16 @@ e2e_apex_count() {
 #   gh の API だけで、ブランチの作成・ファイルの追加・PR の作成・マージを行う（ローカルの clone は使わない）。
 #   操作できるのは、テスト用のリポジトリ（{E2E_OWNER}/force-e2e-日時）だけ。
 # ------------------------------------------------------------------------------
+# gh を、時間の上限（E2E_GH_TIMEOUT 秒。既定 120）付きで実行する。応答がないまま、e2e が止まり続けないようにする。
+# 標準入力は閉じる（対話の待ちを避ける。引数は、すべてフラグで渡す）。timeout がない環境では、そのまま実行する
+_e2e_gh() {
+    if command -v timeout >/dev/null 2>&1; then  # 存在確認のため run 不使用
+        timeout "${E2E_GH_TIMEOUT:-120}" gh "$@" </dev/null
+    else
+        gh "$@" </dev/null
+    fi
+}
+
 _e2e_check_repo() {
     e2e_require_guard
     [[ "${1%%/*}" == "${E2E_OWNER:-}" ]] && e2e_is_target_repo "${1#*/}" \
@@ -341,9 +351,9 @@ _e2e_check_repo() {
 e2e_gh_branch_create() {
     local sha
     _e2e_check_repo "$1"
-    sha=$(gh api "repos/$1/git/ref/heads/main" --jq .object.sha 2>/dev/null) || return 1  # VAR=$(cmd) のため run 不使用
+    sha=$(_e2e_gh api "repos/$1/git/ref/heads/main" --jq .object.sha 2>/dev/null) || return 1  # VAR=$(cmd) のため run 不使用
     [[ -n "$sha" ]] || return 1
-    gh api -X POST "repos/$1/git/refs" -f "ref=refs/heads/$2" -f "sha=$sha" >/dev/null 2>&1  # 戻り値で判定するため run 不使用
+    _e2e_gh api -X POST "repos/$1/git/refs" -f "ref=refs/heads/$2" -f "sha=$sha" >/dev/null 2>&1  # 戻り値で判定するため run 不使用
 }
 
 # ブランチに、ファイルを 1 つ追加する。引数: リポジトリ ブランチ名 パス ファイル（- なら標準入力）
@@ -356,21 +366,21 @@ e2e_gh_file_put() {
         content=$(base64 < "$4" | tr -d '\n\r')   # VAR=$(cmd) のため run 不使用
     fi
     [[ -n "$content" ]] || return 1
-    gh api -X PUT "repos/$1/contents/$3" -f "message=e2e: $3" -f "branch=$2" -f "content=$content" >/dev/null 2>&1  # 戻り値で判定するため run 不使用
+    _e2e_gh api -X PUT "repos/$1/contents/$3" -f "message=e2e: $3" -f "branch=$2" -f "content=$content" >/dev/null 2>&1  # 戻り値で判定するため run 不使用
 }
 
 # main への PR を作り、PR 番号を標準出力に返す。引数: リポジトリ ブランチ名 タイトル
 e2e_gh_pr_create() {
     local out
     _e2e_check_repo "$1"
-    out=$(gh pr create -R "$1" --base main --head "$2" --title "$3" --body "e2e の通し検証（自動作成）。マージ後に、リポジトリごと削除されます。" 2>/dev/null) || return 1  # VAR=$(cmd) のため run 不使用
+    out=$(_e2e_gh pr create -R "$1" --base main --head "$2" --title "$3" --body "e2e の通し検証（自動作成）。マージ後に、リポジトリごと削除されます。" 2>/dev/null) || return 1  # VAR=$(cmd) のため run 不使用
     printf '%s\n' "$out" | grep -oE '[0-9]+$' | tail -1
 }
 
 # PR をマージする（マージコミット）。引数: リポジトリ PR 番号
 e2e_gh_pr_merge() {
     _e2e_check_repo "$1"
-    gh pr merge "$2" -R "$1" --merge >/dev/null 2>&1  # 戻り値で判定するため run 不使用
+    _e2e_gh pr merge "$2" -R "$1" --merge >/dev/null 2>&1  # 戻り値で判定するため run 不使用
 }
 
 # PR のイベントで起動したワークフローの実行が、完了するまで待ち、実行 ID を標準出力に返す。
@@ -381,13 +391,13 @@ e2e_wait_pr_run() {
     local timeout="${E2E_WF_TIMEOUT:-1200}" poll="${E2E_POLL_SEC:-5}"
     _e2e_check_repo "$repo"
     for (( i = 1; i <= ${E2E_RUN_FIND_TRIES:-24}; i++ )); do   # 起動までの待ち（既定 24 回 × poll 秒）
-        id=$(gh run list -R "$repo" --workflow "$wf" --branch "$br" --event pull_request --limit 1 --json databaseId --jq '.[0].databaseId' 2>/dev/null)  # VAR=$(cmd) のため run 不使用
+        id=$(_e2e_gh run list -R "$repo" --workflow "$wf" --branch "$br" --event pull_request --limit 1 --json databaseId --jq '.[0].databaseId' 2>/dev/null)  # VAR=$(cmd) のため run 不使用
         [[ -n "$id" ]] && break
         sleep "$poll"  # run 不使用: 待機
     done
     [[ -n "$id" ]] || return 1
     while (( waited < timeout )); do
-        status=$(gh run view "$id" -R "$repo" --json status --jq .status 2>/dev/null)  # VAR=$(cmd) のため run 不使用
+        status=$(_e2e_gh run view "$id" -R "$repo" --json status --jq .status 2>/dev/null)  # VAR=$(cmd) のため run 不使用
         [[ "$status" == "completed" ]] && { printf '%s' "$id"; return 0; }
         sleep "$poll"; waited=$((waited + poll))  # run 不使用: 待機
     done

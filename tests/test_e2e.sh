@@ -912,6 +912,22 @@ test_e2e_gh_flow() {
     MOCK_GH_RUN_STATUS=in_progress E2E_WF_TIMEOUT=2 E2E_POLL_SEC=1 _e2e_call "$pre"" id=\$(e2e_wait_pr_run $repo wf-release.yml e2e-hello); echo \"RC=\$? ID=[\$id]\""
     assert_file_contains "$MB/out.log" "RC=1 ID=[]" "Actions の待ち: 時間内に完了しない → 戻り値 1"
 
+    # gh の時間の上限: 応答しない gh は、E2E_GH_TIMEOUT 秒で打ち切り、失敗（戻り値 1 以上）として返す
+    cat > "$MB/gh" << 'EOF'
+#!/bin/bash
+echo "gh $*" >> "${MOCK_CALL_LOG:-/dev/null}"
+[[ "$1 $2" == "api user" ]] && { echo "${MOCK_GH_API_USER:-tamashimon}"; exit 0; }  # ガード（e2e_guard_env）の確認は、すぐ返す
+exec sleep 20
+EOF
+    chmod +x "$MB/gh"
+    local t0 t1
+    t0=$(date +%s)
+    E2E_GH_TIMEOUT=1 _e2e_call "$pre"" e2e_gh_pr_merge $repo 7; echo RC=\$?"
+    t1=$(date +%s)
+    assert_file_not_contains "$MB/out.log" "RC=0" "gh の時間の上限: 応答しない gh は、失敗として返す"
+    [[ $((t1 - t0)) -lt 15 ]] && pass "gh の時間の上限: 設定した秒数で打ち切る（待ち続けない）" || fail "gh の時間の上限: 設定した秒数で打ち切る（待ち続けない）" "所要: $((t1 - t0)) 秒"
+    _mk_mocks "$MB"
+
     # deploy-target.txt / remove-target.txt の本文
     _e2e_call "$pre"' e2e_hello_deploy_target_text; echo "-----"; e2e_hello_remove_target_text'
     assert_file_contains "$MB/out.log" "force-app/main/default/classes/SfToolsE2eHello.cls"     "deploy-target: クラスを [files] で指定する"

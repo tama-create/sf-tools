@@ -1,13 +1,13 @@
 #!/bin/bash
 # ==============================================================================
-# run.sh - sf-init の通し検証（e2e）。実際の GitHub / Salesforce で Phase 1〜11 を自動実行する
+# run.sh - sf-init の通し検証（e2e）。実際の GitHub / Salesforce で Phase 1〜10 を自動実行する
 # ==============================================================================
 # テスト用のリポジトリ（force-e2e-日時）と外部クライアントアプリを実際に作り、検証して、削除する。
 # 通常のテスト（bash tests/run_tests.sh）には含まれない。実環境を使うため、開発者が手動で実行する。
 #
 # 【処理の流れ】
 #   1. 前掃除      : 前回の失敗で残ったテスト用リソースを削除する（名前の形式とオーナーが一致するものだけ）
-#   2. 実行        : sf-init を Phase 1〜11 まで自動で実行する（検証環境 = SF_TOOLS_BRANCH=development、main のみの構成）
+#   2. 実行        : sf-init を Phase 1〜10 まで自動で実行する（検証環境 = SF_TOOLS_BRANCH=development、main のみの構成）
 #                    ・質問への答えは標準入力に流す
 #                    ・sf org login web は、認証 URL でのログインに差し替える（tests/e2e/shims/sf）
 #                    ・ブラウザは開かない（tests/e2e/shims の start / xdg-open / open）
@@ -111,7 +111,7 @@ chmod 600 "$E2E_SFDX_URL_FILE" 2>/dev/null || true  # run 不使用: ファイ�
 e2e_cleanup_all delete || die "前回のテスト用リソースを削除できませんでした。"
 
 # ------------------------------------------------------------------------------
-# 2. 実行（sf-init を Phase 1〜11 まで）
+# 2. 実行（sf-init を Phase 1〜10 まで）
 # ------------------------------------------------------------------------------
 PROJECT=$(e2e_new_project_name)
 REPO_NAME="force-${PROJECT}"
@@ -181,7 +181,7 @@ log "HEADER" "確認"
 chk "sf-init が正常終了した（終了コード ${INIT_RC}）" test "$INIT_RC" -eq 0
 
 if [[ "$INIT_RC" -eq 0 ]]; then
-    for _s in PAT_TOKEN SF_PRIVATE_KEY SF_CONSUMER_KEY_PROD SF_TOOLS_TOKEN SLACK_BOT_TOKEN; do
+    for _s in PAT_TOKEN SF_PRIVATE_KEY SF_CONSUMER_KEY_PROD SLACK_BOT_TOKEN; do
         chk "Secret ${_s} が登録されている" _has_secret "$_s"
     done
     for _v in SF_USERNAME_PROD SF_INSTANCE_URL_PROD SF_TOOLS_BRANCH SLACK_CHANNEL_ID; do
@@ -198,7 +198,6 @@ if [[ "$INIT_RC" -eq 0 ]]; then
     for _f in "$INIT_OUT" "$HOME/sf-tools/logs/sf-init.log" "$HOME/sf-tools/logs/error.log"; do
         chk "PAT_TOKEN の値が $(basename "$_f") に出ていない"      _not_in_file "$E2E_PAT_TOKEN"       "$_f"
         chk "SLACK_BOT_TOKEN の値が $(basename "$_f") に出ていない" _not_in_file "$E2E_SLACK_BOT_TOKEN" "$_f"
-        chk "SF_TOOLS_TOKEN の値が $(basename "$_f") に出ていない"  _not_in_file "$E2E_SF_TOOLS_TOKEN"  "$_f"
         chk "認証 URL が $(basename "$_f") に出ていない"            _not_in_file "$E2E_SFDX_AUTH_URL"   "$_f"
     done
 
@@ -214,7 +213,7 @@ if [[ "$INIT_RC" -eq 0 ]]; then
             # wf-release は main に release 用のファイルが無く失敗するのが正常。確認するのは、途中のステップ
             chk "wf-release: 本番組織へのログイン（JWT）が成功した" \
                 test "$(_step_conclusion "$_rel_id" "本番組織にログイン（JWT）")" == "success"
-            chk "wf-release: sf-tools（Private）の取得が成功した" \
+            chk "wf-release: sf-tools の取得が成功した（公開リポジトリを、Token なしで clone）" \
                 test "$(_step_conclusion "$_rel_id" "自動化ツール（sf-tools）を取得")" == "success"
             chk "wf-release: Slack への通知が成功した（ok:true）" \
                 bash -c 'gh run view "$1" -R "$2" --log 2>/dev/null | grep -F "Slack response" | grep -q "\"ok\":true"' _ "$_rel_id" "$REPO_FULL"

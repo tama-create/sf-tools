@@ -28,7 +28,6 @@
 #   E2E_PAT_TOKEN         PAT_TOKEN に登録する Classic PAT
 #   E2E_SLACK_BOT_TOKEN   Slack の Bot Token
 #   E2E_SLACK_CHANNEL_ID  通知先（共有チャンネル）の ID
-#   E2E_SF_TOOLS_TOKEN    SF_TOOLS_TOKEN に登録する Fine-grained PAT
 #   E2E_SFDX_AUTH_URL     テスト用組織の認証 URL（sf org login sfdx-url 用。リフレッシュトークンを含む）
 #
 # 【前提】 sf は npm 版（終了コードで成否を判定する。run.sh / bootstrap.sh の冒頭の check_sf_cli が確認する）
@@ -94,7 +93,7 @@ e2e_load_fixture() {
     # shellcheck disable=SC1090
     source "$f"
     for v in E2E_OWNER E2E_GH_USER E2E_HOME_ROOT E2E_PAT_TOKEN E2E_SLACK_BOT_TOKEN \
-             E2E_SLACK_CHANNEL_ID E2E_SF_TOOLS_TOKEN E2E_SFDX_AUTH_URL; do
+             E2E_SLACK_CHANNEL_ID E2E_SFDX_AUTH_URL; do
         [[ -n "${!v:-}" ]] || die "${v} が未設定です（${f}）。"
     done
     e2e_valid_sfdx_url "$E2E_SFDX_AUTH_URL" \
@@ -389,11 +388,11 @@ e2e_cleanup_all() {
 #   Phase 1 続行 Y → Phase 2 確認 Y → 環境種別 2（検証）→ 検証環境で続行 Y → Phase 5 ブランチ 3（main のみ）
 #   → Phase 6 PAT（先頭の改行は、直前の入力の残りを press_enter が消費）→ 空行（Phase 7 の press_enter）
 #   → Slack Token → チャンネル ID → 空行（招待の press_enter）→ Phase 10 アプリ種別 2 → Sandbox? N
-#   → Phase 11 SF_TOOLS_TOKEN（直前の入力の残りを press_enter が消費）→ init フォルダ削除 N
+#   → init フォルダ削除 N（Phase 10 が最後。SF_TOOLS_TOKEN は不要になった: sf-tools は公開リポジトリ）
 e2e_make_input() {
     printf '%s\n' "Y" "Y" "2" "Y" "3" \
         "$E2E_PAT_TOKEN" "" \
         "$E2E_SLACK_BOT_TOKEN" "$E2E_SLACK_CHANNEL_ID" "" \
         "2" "N" \
-        "$E2E_SF_TOOLS_TOKEN" "N"
+        "N"
 }

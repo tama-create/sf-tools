@@ -9,8 +9,6 @@
 #   SF_PRIVATE_KEY       : 秘密鍵（PEM 形式・全組織共通）
 #   SF_CONSUMER_KEY_PROD : 本番組織の Connected App コンシューマーキー
 #   PAT_TOKEN            : GitHub PAT（ブランチ保護ルールのバイパスに使用）
-#   SF_TOOLS_TOKEN       : sf-tools（Private）を clone する Fine-grained PAT（Contents: Read-only）
-#                          sf-init.sh の Phase 11 が登録する（スキップ時・作り直しは手動: doc/setup-guide.md 3.2 参照）
 #
 # 【必要な GitHub Variables（このリポジトリに設定すること）】
 #   SF_USERNAME_PROD     : 本番組織の接続ユーザー名
@@ -98,7 +96,7 @@ jobs:
       # --------------------------------------------------------------------------
       - name: 自動化ツール（sf-tools）を取得
         run: |
-          git clone -b ${{ vars.SF_TOOLS_BRANCH || 'main' }} https://x-access-token:${{ secrets.SF_TOOLS_TOKEN }}@github.com/tama-create/sf-tools.git ~/sf-tools
+          git clone -b ${{ vars.SF_TOOLS_BRANCH || 'main' }} https://github.com/tama-create/sf-tools.git ~/sf-tools
           chmod +x ~/sf-tools/bin/sf-metasync.sh
 
       # --------------------------------------------------------------------------

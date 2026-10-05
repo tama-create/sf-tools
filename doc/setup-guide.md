@@ -79,7 +79,6 @@ GitHub リポジトリの作成から Salesforce 組織への接続、ブラン�
 | 初回コミット | セットアップ内容をまとめてコミット＆プッシュ |
 | Ruleset 設定 | ブランチ保護ルールを自動設定 |
 | JWT Secrets 登録 | JWT 認証情報（SF_PRIVATE_KEY 等）を GitHub Secrets に登録 |
-| SF_TOOLS_TOKEN 登録 | Actions が Private の sf-tools を clone するための Token（Fine-grained PAT）を Secrets に登録 |
 
 ### 3.1 入力が必要な項目
 
@@ -125,31 +124,17 @@ GitHub オーナー名とプロジェクト名はフォルダ構成から自動�
    - いずれの場合も、次が GitHub に登録されます
      - `SF_PRIVATE_KEY`: PEM 秘密鍵（全組織共通）
      - `SF_CONSUMER_KEY_*` / `SF_USERNAME_*` / `SF_INSTANCE_URL_*`（例: `https://login.salesforce.com`）
-8. **SF_TOOLS_TOKEN の作成**（ブラウザで操作・Token を貼り付け。詳細は 3.2）
-   - `sf-init.sh` が、Fine-grained PAT の作成画面を事前入力した URL で開き、URL を画面にも表示します
-   - Token は画面に表示されません。入力後に sf-tools を読めるか確認してから登録します
 
 > JWT 秘密鍵の事前準備: `openssl genrsa -out server.key 2048` で生成し、公開鍵を各 Salesforce 組織の Connected App に登録しておくこと。
 
 > クローン先は sf-init.sh を実行したディレクトリに自動設定されます。
 
-### 3.2 SF_TOOLS_TOKEN の登録
+### 3.2 SF_TOOLS_TOKEN は不要です
 
-GitHub Actions（wf-metasync / wf-validate / wf-release）は、実行のたびに Private リポジトリ `tama-create/sf-tools` を clone します。この clone に使う読み取り専用 Token を `SF_TOOLS_TOKEN` として登録します。
+`sf-tools` は**公開リポジトリ**のため、GitHub Actions（wf-metasync / wf-validate / wf-release）は、Token なしで `sf-tools` を clone します。以前のバージョンにあった Token（`SF_TOOLS_TOKEN`）の作成・登録（`sf-init.sh` の Phase 11）は、ありません。
 
-`sf-init.sh` の **Phase 11 が、この登録を行います**（作成画面を開く → Token を入力 → sf-tools を読めることを確認 → Secret に登録）。以下の手順は、Phase 11 の画面で行う操作の説明です。Phase 11 をスキップした場合や、Token を作り直す場合は、同じ手順で作成し、手動で登録してください（`gh secret set SF_TOOLS_TOKEN -R <owner>/<repo>`）。
-
-1. sf-tools の所有者アカウント（`tama-create`）で、GitHub の **Settings → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token** を開く
-2. 次のとおり設定する
-   - Resource owner: `tama-create`
-   - Repository access: **Only select repositories** → `sf-tools` のみ
-   - Permissions: **Contents = Read-only**（他は追加しない）
-   - Expiration: 運用方針に合わせて設定する（期限が切れると全 force-* の Actions が止まるため、期限日をメモしておくこと）
-3. 発行直後の値をコピーし、force-* リポジトリの **Settings → Secrets and variables → Actions** で `SF_TOOLS_TOKEN` として登録する
-
-> ⚠️ Token の値はチャット・コード・ログに貼らないこと。漏れた疑いがあるときは Delete して作り直す。
-
-> ⚠️ Resource owner が sf-tools の所有者と異なると clone に失敗する。sf-tools の所有者を変更した場合は Token を作り直すこと。
+- 以前のバージョンで作ったプロジェクトに `SF_TOOLS_TOKEN` が登録されていても、そのままで構いません。
+- ただし、そのプロジェクトのワークフローが、Token 付きで clone している間は、その Token を**無効にしないでください**（無効な Token では、公開リポジトリでも clone に失敗します）。ワークフローを、新しいひな形（Token なし）に更新したあとなら、Token と Secret を削除して構いません。更新の手順は、7.6 を参照してください。
 
 ---
 
@@ -281,7 +266,7 @@ main ブランチへの直接プッシュは禁止。PR 経由でマージする
 
 ### 7.6 ❌ wf-metasync / wf-validate / wf-release が「自動化ツール（sf-tools）を取得」で失敗する
 
-`SF_TOOLS_TOKEN` が未設定・有効期限切れ・対象リポジトリ違い（Resource owner が sf-tools の所有者と異なる）のいずれか。3.2 の手順で Token を作り直し、Secret を更新する。
+`sf-tools` は公開リポジトリのため、新しい `wf-*.yml`（`sf-tools/templates/`）は、Token なしで clone します。このエラーは、**以前のバージョンのひな形で作ったプロジェクト**で、ワークフローが `SF_TOOLS_TOKEN` 付きで clone している場合に、その Token が未設定・期限切れ・無効のときに起きます。force-* 側の `wf-metasync.yml` / `wf-validate.yml` / `wf-release.yml` の clone 行を、新しいひな形と同じ Token なしの形（`git clone -b ${{ vars.SF_TOOLS_BRANCH || 'main' }} https://github.com/tama-create/sf-tools.git ...`）に直してください。配布済みの force-* には自動反映されません。
 
 ### 7.7 ❌ 「差分抽出ツール（Salesforce Git Delta）をインストール」で TypeError が出て失敗する
 

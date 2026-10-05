@@ -761,7 +761,7 @@ read_or_quit() {
 #   - 末尾の CR（Windows の貼り付け）は除去する
 #
 # 【使用例】
-#   read_secret SF_TOOLS_TOKEN_VALUE "  Token を貼り付けてください（画面には表示されません・q で中断）："
+#   read_secret PAT_TOKEN_VALUE "  Token を貼り付けてください（画面には表示されません・q で中断）："
 # ------------------------------------------------------------------------------
 read_secret() {
     local -n _rs_var=$1

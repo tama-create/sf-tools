@@ -131,7 +131,6 @@ sf-init.sh
 8. 初回コミット＆プッシュ
 9. GitHub リポジトリ設定・Ruleset 適用
 10. JWT 認証情報（Salesforce → GitHub Secrets / Variables）の設定（外部クライアントアプリは、ブラウザでログインするだけで自動作成）
-11. SF_TOOLS_TOKEN の設定（Actions が Private の sf-tools を clone するための Token を Secret に登録）
 
 > リポジトリ名は必ず `force-` で始めてください。
 
@@ -359,7 +358,6 @@ sf-init.sh が登録する認証情報は、機密性に応じて **Secret（暗
 | `SF_CONSUMER_KEY_*` | Secret | Connected App のコンシューマキー |
 | `PAT_TOKEN` | Secret | GitHub Personal Access Token |
 | `SLACK_BOT_TOKEN` | Secret | Slack Bot のアクセストークン |
-| `SF_TOOLS_TOKEN` | Secret | GitHub Actions が Private の sf-tools を clone するための Fine-grained PAT（**sf-init.sh の Phase 11 で登録**。スキップした場合・作り直しは手動登録） |
 | `SF_USERNAME_*` | Variable | Salesforce ユーザー名（平文で問題なし） |
 | `SF_INSTANCE_URL_*` | Variable | Salesforce インスタンス URL（平文で問題なし） |
 | `SLACK_CHANNEL_ID` | Variable | 通知先 Slack チャンネル ID（平文で問題なし） |
@@ -367,7 +365,7 @@ sf-init.sh が登録する認証情報は、機密性に応じて **Secret（暗
 
 > `*` は組織ごとのサフィックス（`PROD` / `STG` / `DEV`）。
 
-> ⚠️ `SF_TOOLS_TOKEN` は sf-init.sh の Phase 11 で登録します（Token の作成画面を事前入力した URL で開き、入力した Token で sf-tools を読めることを確認してから登録します）。wf-metasync / wf-validate / wf-release は、実行のたびに Private リポジトリの sf-tools を clone するため、未設定・有効期限切れ・対象リポジトリ違いのいずれかで **全ワークフローが「自動化ツール（sf-tools）を取得」ステップで失敗します**。Phase 11 をスキップした場合や、Token を作り直す場合の手順は `doc/setup-guide.md` の 3.2 を参照してください。
+> ℹ️ `sf-tools` は**公開リポジトリ**のため、`wf-metasync` / `wf-validate` / `wf-release` は、Token なしで `sf-tools` を clone します（`SF_TOOLS_TOKEN` は不要です）。以前のバージョンで作ったプロジェクトに `SF_TOOLS_TOKEN` が登録されていても、そのままで構いません。ただし、そのプロジェクトのワークフローが Token 付きで clone している間は、その Token を無効にしないでください（無効な Token では、公開リポジトリでも clone に失敗します）。
 
 #### 4.4.2 ブランチ tier のスケールアップ
 
@@ -788,8 +786,7 @@ sf-tools/
 │       ├── 07_slack.sh
 │       ├── 08_initial_commit.sh
 │       ├── 09_repo_rules.sh
-│       ├── 10_sf_auth.sh
-│       └── 11_sf_tools_token.sh
+│       └── 10_sf_auth.sh
 ├── hooks/
 │   ├── pre-push                ← sf-hook.sh がプロジェクト側へコピー
 │   └── pre-commit
@@ -850,11 +847,11 @@ sf-tools の `main` ブランチは、**そのまま全ユーザーに配布さ�
 
 変更内容に応じて確認します。詳細は `doc/dev-reference.md` セクション 9 を参照してください。
 
-- 新規セットアップ（`sf-init.sh`）が最後まで通ること（Phase 11 の `SF_TOOLS_TOKEN` の登録を含む）。9.3 の e2e で自動化できます
+- 新規セットアップ（`sf-init.sh`）が最後まで通ること。9.3 の e2e で自動化できます
 - メタデータ同期（`wf-metasync`）を手動実行して成功すること
 - デプロイ対象を含む PR で `wf-validate` が通ること（動作確認だけの PR はマージせずに閉じる）
 
-> ⚠️ `main` のブランチ保護は GitHub の無料プラン（Private リポジトリ）では設定できません。誤ったリリースを防ぐため、上記の運用を守ってください。
+> ℹ️ `sf-tools` は公開リポジトリのため、`main` のブランチ保護・Ruleset を、GitHub の無料プランでも設定できます（以前の Private リポジトリでは設定できませんでした）。設定は、リポジトリの **Settings → Rules** で行います。GitHub Actions は、実行のたびに sf-tools の `main` を取得して、その中のコードを、秘密鍵を持つ環境で実行するため、`main` を誰が書き換えられるかが、最も重要です。設定の有無にかかわらず、上記の運用（mm / rr）を守ってください。
 
 ### 9.3 e2e: `sf-init.sh` の通し検証を自動で行う
 
@@ -869,7 +866,7 @@ gh auth refresh -h github.com -s delete_repo   # テスト用リポジトリを�
 bash tests/e2e/bootstrap.sh                    # 鍵一式（Token など）を、リポジトリの外に保存する
 ```
 
-`bootstrap.sh` では、Classic PAT、Slack の Bot Token と通知先の共有チャンネルの ID、`SF_TOOLS_TOKEN` 用の Fine-grained PAT を入力し、ブラウザでテスト用の Salesforce 組織にログインします（認証 URL を取得して保存するため）。これらは `~/.sf-tools-e2e/fixture.env` に、本人だけが読める権限で保存され、リポジトリには入りません。テスト用の組織は、本番または Developer Edition（Sandbox ではない）にしてください。
+`bootstrap.sh` では、Classic PAT、Slack の Bot Token と通知先の共有チャンネルの ID を入力し、ブラウザでテスト用の Salesforce 組織にログインします（認証 URL を取得して保存するため）。これらは `~/.sf-tools-e2e/fixture.env` に、本人だけが読める権限で保存され、リポジトリには入りません。テスト用の組織は、本番または Developer Edition（Sandbox ではない）にしてください。
 
 **毎回の実行:**
 
@@ -880,8 +877,8 @@ bash tests/e2e/run.sh
 | 順 | 内容 |
 |---|---|
 | 1. 前掃除 | 前回の失敗で残ったテスト用のもの（名前が決まった形式で、オーナーが一致するものだけ）を削除する |
-| 2. 実行 | `force-e2e-日時` というリポジトリを作り、`sf-init.sh` を Phase 1〜11 まで自動で実行する（検証環境・main のみの構成） |
-| 3. 確認 | Secret・Variable・ブランチ・ワークフローが揃っていること、Token が画面・ログに出ていないこと、`wf-metasync` と `wf-release`（JWT ログイン・Private の sf-tools の取得・Slack 通知）が動くことを確認する |
+| 2. 実行 | `force-e2e-日時` というリポジトリを作り、`sf-init.sh` を Phase 1〜10 まで自動で実行する（検証環境・main のみの構成） |
+| 3. 確認 | Secret・Variable・ブランチ・ワークフローが揃っていること、Token が画面・ログに出ていないこと、`wf-metasync` と `wf-release`（JWT ログイン・sf-tools の取得（公開リポジトリを Token なしで clone）・Slack 通知）が動くことを確認する |
 | 4. 後掃除 | テスト用のリポジトリ、Salesforce の外部クライアントアプリ、ローカルのフォルダを削除し、`sf` のエイリアスを実行前の状態に戻す |
 
 テスト用のリポジトリは毎回別の名前（`force-e2e-日時`）なので、前回の削除が終わっていなくても実行できます。`--keep` を付けると後掃除をしないので、失敗の原因を調べられます。残ったものは、次のコマンドで確認・削除できます。
@@ -900,3 +897,12 @@ bash tests/e2e/cleanup.sh --yes    # 一覧を見せたうえで、delete と入
 **安全のために:** 削除できるのは、`force-e2e-YYYYMMDD-HHMMSS` のようなテスト用の名前のものだけです。`SF_TOOLS`（元からあるアプリ）や、ふだん使っているリポジトリは、削除の対象になりません。オーナーも、鍵一式で指定したものだけです。GitHub Actions 上では動きません。
 
 **できないこと:** Token の作成と、テスト用組織への最初のログインは自動化できません（最初の 1 回だけ手動です）。また、`sf-init.sh` の質問の順番を変えたときは、`tests/e2e/lib.sh` の入力の台本（`e2e_make_input`）も直す必要があります（直し忘れは、通常のテストで検知されます）。
+
+---
+
+## 10. ライセンス
+
+`sf-tools` は、公開リポジトリです。ライセンスは、制限のない「パブリックドメイン」（The Unlicense。`LICENSE` を参照）で、誰でも自由に、コピー・改変・公開・使用・販売できます。無保証です。
+
+- GitHub Actions は、`sf-tools` を Token なしで clone します（`SF_TOOLS_TOKEN` は不要です）。
+- `sf-tools` に、認証情報や個人の秘密情報を含めないでください（履歴を含め、すべて公開されます）。

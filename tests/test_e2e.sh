@@ -130,7 +130,6 @@ _mk_fixture() {
         echo "E2E_PAT_TOKEN=ghp_fakepat"
         echo "E2E_SLACK_BOT_TOKEN=xoxb-fakeslack"
         echo "E2E_SLACK_CHANNEL_ID=C01ABCDEFGH"
-        echo "E2E_SF_TOOLS_TOKEN=github_pat_faketools"
         echo "E2E_SFDX_AUTH_URL=force://PlatformCLI::fakeurl@example.my.salesforce.com"
     } > "$f"
     chmod 600 "$f"
@@ -442,8 +441,8 @@ test_e2e_input() {
     _e2e_call 'e2e_load_fixture; e2e_make_input'
     out=$(cat "$mb/out.log")
     local expected
-    expected=$'Y\nY\n2\nY\n3\nghp_fakepat\n\nxoxb-fakeslack\nC01ABCDEFGH\n\n2\nN\ngithub_pat_faketools\nN'
-    assert_equals "$out" "$expected" "台本が、質問の順番どおりである（Y→Y→2→Y→3→PAT→空→Slack→ID→空→2→N→Token→N）"
+    expected=$'Y\nY\n2\nY\n3\nghp_fakepat\n\nxoxb-fakeslack\nC01ABCDEFGH\n\n2\nN\nN'
+    assert_equals "$out" "$expected" "台本が、質問の順番どおりである（Y→Y→2→Y→3→PAT→空→Slack→ID→空→2→N→N）"
     unset MOCK_CALL_LOG
     teardown "$mb"
 }

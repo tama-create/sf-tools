@@ -223,11 +223,11 @@ _hello_cycle() {
     chk "${label}: PR を作成した" test -n "$prn" || return 1
     runid=$(e2e_wait_pr_run "$REPO_FULL" wf-validate.yml "$br") || runid=""   # VAR=$(cmd) のため run 不使用
     chk "${label}: wf-validate（検証）が実行され、完了した" test -n "$runid" || return 1
-    chk "${label}: wf-validate が成功した" test "$(_run_conclusion "$runid")" == "success" || return 1
+    chk "${label}: wf-validate が成功した" test "$(_run_conclusion "$runid")" == "success" || { e2e_show_run_failure "$REPO_FULL" "$runid" "${label}: wf-validate"; return 1; }
     chk "${label}: PR をマージした" e2e_gh_pr_merge "$REPO_FULL" "$prn" || return 1
     runid=$(e2e_wait_pr_run "$REPO_FULL" wf-release.yml "$br") || runid=""   # VAR=$(cmd) のため run 不使用
     chk "${label}: wf-release が実行され、完了した" test -n "$runid" || return 1
-    chk "${label}: wf-release が成功した" test "$(_run_conclusion "$runid")" == "success" || return 1
+    chk "${label}: wf-release が成功した" test "$(_run_conclusion "$runid")" == "success" || { e2e_show_run_failure "$REPO_FULL" "$runid" "${label}: wf-release"; return 1; }
     HELLO_RELEASE_RUN="$runid"
     return 0
 }
@@ -288,7 +288,8 @@ if [[ "$INIT_RC" -eq 0 ]]; then
         if [[ -n "$_meta_id" ]]; then
             chk "wf-metasync が完了した" _wait_run "$_meta_id"
             chk "wf-metasync が成功した（JWT ログイン・sf-tools の取得を含む）" \
-                test "$(_run_conclusion "$_meta_id")" == "success"
+                test "$(_run_conclusion "$_meta_id")" == "success" \
+                || e2e_show_run_failure "$REPO_FULL" "$_meta_id" "wf-metasync"
         fi
     else
         log "INFO" "GitHub Actions の実行確認を省略しました（--no-actions）。"

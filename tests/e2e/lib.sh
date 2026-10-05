@@ -581,3 +581,27 @@ e2e_make_input() {
         "2" "N" \
         "N"
 }
+
+# 失敗したワークフローの実行の、失敗したステップのログ（末尾 E2E_FAIL_LOG_LINES 行。既定 40）を表示する。
+#   後掃除でリポジトリが消えると、失敗の原因を追えなくなるため。引数: リポジトリ 実行ID ラベル
+#   鍵一式の値（Token・認証 URL）は、念のため、*** に置き換える。表示だけで、戻り値は常に 0
+e2e_show_run_failure() {
+    local repo="$1" id="$2" label="$3" out line v
+    _e2e_check_repo "$repo"
+    log "WARNING" "${label}: 失敗したステップのログ（末尾 ${E2E_FAIL_LOG_LINES:-40} 行）:"
+    # 形式: ジョブ名 TAB ステップ名 TAB 時刻 本文 → [ステップ名] 本文。色の指定は除く
+    out=$(_e2e_gh run view "$id" -R "$repo" --log-failed 2>/dev/null \
+        | sed -E 's/\x1b\[[0-9;]*m//g; s/^([^\t]*)\t([^\t]*)\t[^ ]+Z /[\2] /' \
+        | tail -n "${E2E_FAIL_LOG_LINES:-40}") || true  # VAR=$(cmd) のため run 不使用
+    if [[ -z "$out" ]]; then
+        log "WARNING" "  （ログを取得できませんでした。実行 ID: ${id}）"
+        return 0
+    fi
+    while IFS= read -r line; do
+        for v in "${E2E_PAT_TOKEN:-}" "${E2E_SLACK_BOT_TOKEN:-}" "${E2E_SFDX_AUTH_URL:-}"; do
+            [[ -n "$v" ]] && line="${line//"$v"/***}"
+        done
+        printf '    %s\n' "$line"
+    done <<< "$out"
+    return 0
+}

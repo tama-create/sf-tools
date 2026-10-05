@@ -44,6 +44,12 @@ case "$*" in
     "pr create"*)                        [[ "${MOCK_GH_PR_EXIT:-0}" -ne 0 ]] && exit "$MOCK_GH_PR_EXIT"; echo "https://github.com/tamashimon-org/force-e2e-20260101-000000/pull/${MOCK_GH_PR_NUMBER:-7}"; exit 0 ;;
     "pr merge"*)                         exit "${MOCK_GH_MERGE_EXIT:-0}" ;;
     "run list"*)                         [[ "${MOCK_GH_RUN_NONE:-}" == "1" ]] && exit 0; echo "${MOCK_GH_RUN_ID:-555}"; exit 0 ;;
+    # 失敗したステップのログ（形式: ジョブ名 TAB ステップ名 TAB 時刻 本文。色の指定と Token を含む）
+    "run view"*"--log-failed"*)
+        [[ "${MOCK_GH_LOG_NONE:-}" == "1" ]] && exit 0
+        printf 'job1\tステップA\t2026-10-05T08:00:00.1Z \033[31mError\033[0m: 失敗の本文 ghp_fakepat\n'
+        printf 'job1\tステップA\t2026-10-05T08:00:01.2Z 2 行目\n'
+        exit 0 ;;
     "run view"*)                         echo "${MOCK_GH_RUN_STATUS:-completed}"; exit 0 ;;
 esac
 case "$1 $2" in
@@ -927,6 +933,21 @@ EOF
     assert_file_not_contains "$MB/out.log" "RC=0" "gh の時間の上限: 応答しない gh は、失敗として返す"
     [[ $((t1 - t0)) -lt 15 ]] && pass "gh の時間の上限: 設定した秒数で打ち切る（待ち続けない）" || fail "gh の時間の上限: 設定した秒数で打ち切る（待ち続けない）" "所要: $((t1 - t0)) 秒"
     _mk_mocks "$MB"
+
+    # 失敗した実行のログの表示: ステップ名を付け、色の指定を除き、Token は伏せる。戻り値は 0
+    _e2e_call "$pre"" e2e_show_run_failure $repo 555 'wf-validate'; echo RC=\$?"
+    assert_file_contains     "$MB/out.log" "[ステップA] Error: 失敗の本文 ***" "失敗ログ: ステップ名付きで表示され、色の指定が除かれる"
+    assert_file_contains     "$MB/out.log" "[ステップA] 2 行目"                "失敗ログ: 複数行を表示する"
+    assert_file_not_contains "$MB/out.log" "ghp_fakepat"                        "失敗ログ: Token の値は、表示しない（*** に置き換える）"
+    assert_file_contains     "$MB/out.log" "RC=0"                               "失敗ログ: 戻り値は 0（表示だけ）"
+    MOCK_GH_LOG_NONE=1 _e2e_call "$pre"" e2e_show_run_failure $repo 555 'wf-validate'; echo RC=\$?"
+    assert_file_contains     "$MB/out.log" "ログを取得できませんでした"        "失敗ログ: 取得できないときは、その旨を表示する"
+    assert_file_contains     "$MB/out.log" "RC=0"                               "失敗ログ: 取得できなくても、戻り値は 0"
+    _e2e_call "$pre"' e2e_show_run_failure tamashimon-org/force-test-win 1 x; echo DONE'
+    assert_file_not_contains "$MB/out.log" "DONE"                               "失敗ログ: テスト用ではないリポジトリは、拒否する"
+    assert_file_contains "$E2E_DIR/run.sh" 'e2e_show_run_failure "$REPO_FULL" "$_meta_id" "wf-metasync"' "run.sh: wf-metasync の失敗時にログを表示する"
+    assert_file_contains "$E2E_DIR/run.sh" '"${label}: wf-validate"' "run.sh: wf-validate の失敗時にログを表示する"
+    assert_file_contains "$E2E_DIR/run.sh" '"${label}: wf-release"'  "run.sh: wf-release の失敗時にログを表示する"
 
     # deploy-target.txt / remove-target.txt の本文
     _e2e_call "$pre"' e2e_hello_deploy_target_text; echo "-----"; e2e_hello_remove_target_text'

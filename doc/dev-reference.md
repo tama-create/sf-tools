@@ -516,7 +516,7 @@ cat logs/error.log                                # run 失敗コマンドのロ
 
 ```bash
 bash tests/e2e/bootstrap.sh                       # 鍵一式の作成（最初の 1 回だけ）
-bash tests/e2e/run.sh                             # 前掃除 → sf-init の通し実行 → 確認 → 後掃除
+bash tests/e2e/run.sh                             # 前掃除 → sf-init の通し実行 → 確認 → 終了（既定では、テスト用のものを残す。--cleanup で削除）
 bash tests/e2e/cleanup.sh                         # 削除対象の一覧（何も消さない）。--yes で削除
 ```
 
@@ -619,7 +619,7 @@ sf-tools の `main` への反映は、全ユーザーへの配布と同義であ
 | 部品 | 役割 |
 |---|---|
 | `tests/e2e/lib.sh` | 共通関数。名前の判定、ガード、鍵一式の読み込み、削除、エイリアスの保存・復元、`e2e_make_input`（標準入力の台本） |
-| `tests/e2e/run.sh` | 前掃除 → `sf-init.sh` の実行 → 確認 → 後掃除。`--keep`（後掃除なし）、`--no-actions`（Actions の確認を省略） |
+| `tests/e2e/run.sh` | 前掃除 → `sf-init.sh` の実行 → 確認 → 終了。既定では、終了時にテスト用のリポジトリなどを削除せず残す（あとから見返せる。次回の前掃除で削除）。`--cleanup`（終了時に削除）、`--no-actions`（Actions の確認を省略）。`--keep` は、以前の名残り（何もしない） |
 | `tests/e2e/cleanup.sh` | 削除。既定は一覧のみ、`--yes` で削除（確認で `delete` の入力が必要。`--no-confirm` で省略） |
 | `tests/e2e/bootstrap.sh` | 鍵一式（`~/.sf-tools-e2e/fixture.env`）の作成。最初の 1 回だけ。雛形は `fixture.example.env` |
 | `tests/e2e/shims/sf` | `sf org login web` だけを `sf org login sfdx-url`（認証 URL）に差し替える。他のコマンドは本物の `sf` に渡す |
@@ -635,10 +635,10 @@ sf-tools の `main` への反映は、全ユーザーへの配布と同義であ
 - どちらの PR にも、`deploy-target.txt` と `remove-target.txt` の両方を置く（`sf-release.sh` は、どちらかが無いと止まる。通常は `sf-install.sh` が雛形から作る）。使わない側は、空の雛形（`e2e_empty_target_text`: `[files]` と `[members]` のみ）。`wf-validate` の「対象ファイル確認」は、実質の中身がある側だけを見る（2026-10-05 の初回の実機で、`remove-target.txt` が無く検証が失敗した）
 - 削除: ブランチ `e2e-hello-delete` に `release/e2e-hello-delete/remove-target.txt`（`ApexClass:SfToolsE2eHelloTest` / `ApexClass:SfToolsE2eHello`）を追加 → 同様
 - 組織側の確認は `e2e_apex_count`（SOQL `SELECT COUNT() FROM ApexClass WHERE Name = '…'`。`totalSize` を読む）。前後で 0 → 1 → 0 になること
-- 後掃除（`e2e_cleanup_all`）は、組織に残った `SfToolsE2eHello` / `SfToolsE2eHelloTest` も、一覧（`e2e_list_target_apex`。名前の完全一致のみ）→ 削除（`e2e_delete_apex`。削除用のデプロイ）→ 再取得で確認する。一覧の取得失敗は、ECA と同様に「対象なし」とせず、失敗として記録する
+- 後掃除（`e2e_cleanup_all`。前掃除、`--cleanup`、`cleanup.sh` で動く）は、組織に残った `SfToolsE2eHello` / `SfToolsE2eHelloTest` も、一覧（`e2e_list_target_apex`。名前の完全一致のみ）→ 削除（`e2e_delete_apex`。削除用のデプロイ）→ 再取得で確認する。一覧の取得失敗は、ECA と同様に「対象なし」とせず、失敗として記録する
 - `gh` の呼び出し（`_e2e_gh`）は、`timeout`（`E2E_GH_TIMEOUT` 秒。既定 120）と標準入力の遮断付き。応答しない `gh` で、e2e が止まり続けないようにする（Git Bash で、`gh` の起動前に止まる現象が一度あったが、その場合は、この上限では防げない）
-- ワークフロー（`wf-validate` / `wf-release` / `wf-metasync`）が失敗したら、後掃除の前に、失敗したステップのログの末尾（`E2E_FAIL_LOG_LINES` 行。既定 40）を表示する（`e2e_show_run_failure`。鍵一式の値は `***` に置き換える）。後掃除でリポジトリが消えても、原因を追えるようにするため
-- 未確認の点（実機で調整する）: main のみの構成で `wf-propagate` / `wf-sequence` が、マージ時に動いた場合の影響
+- ワークフロー（`wf-validate` / `wf-release` / `wf-metasync`）が失敗したら、後掃除の前に、失敗したステップのログの末尾（`E2E_FAIL_LOG_LINES` 行。既定 40）を表示する（`e2e_show_run_failure`。鍵一式の値は `***` に置き換える）。リポジトリは既定で残る（`--cleanup` のときは消える）が、その場で原因を追えるようにするため
+- マージ時には `wf-propagate`（main へのマージ）も動く。e2e のリポジトリは `main` のみで `staging` / `develop` がないため、スキップして成功になること（`wf-propagate.yml` は、ブランチがなければスキップする。以前は `git checkout staging` が失敗して、赤い ✗ になっていた）を確認する。`wf-sequence` は、PR を開いたときに動き、成功する
 
 **削除の安全ガード:**
 

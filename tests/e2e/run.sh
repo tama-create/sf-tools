@@ -2,7 +2,7 @@
 # ==============================================================================
 # run.sh - sf-init の通し検証（e2e）。実際の GitHub / Salesforce で Phase 1〜10 を自動実行する
 # ==============================================================================
-# テスト用のリポジトリ（force-e2e-日時）と外部クライアントアプリを実際に作り、検証して、削除する。
+# テスト用のリポジトリ（force-e2e-日時）と外部クライアントアプリを実際に作り、検証する（既定では、終了後も残し、次回の最初に削除する）。
 # 通常のテスト（bash tests/run_tests.sh）には含まれない。実環境を使うため、開発者が手動で実行する。
 #
 # 【処理の流れ】
@@ -14,7 +14,9 @@
 #   3. 確認        : Secret / Variable / ブランチ / ワークフローの存在、トークンがログに出ていないこと、
 #                    GitHub Actions の実行: wf-metasync（手動起動。完了を待つ。Hello World と同時に動かすと、組織へのデプロイと取得が重なって失敗する）、続けて Hello World の Apex を PR 経由で
 #                    リリース（wf-validate → マージ → wf-release）し、続けて削除する（sf-tools の本来の機能の通し）
-#   4. 後掃除      : 前掃除と同じものを削除し（途中で止まって残った Hello World の Apex も含む）、sf のエイリアスを実行前の状態に戻す
+#   4. 終了        : sf のエイリアスを実行前の状態に戻す。テスト用のリポジトリ・外部クライアントアプリなどは、既定では削除せずに残す
+#                    （終了後に、GitHub の画面で、Actions の実行・PR・ファイルを見返せるようにするため。次回の前掃除で、自動で削除される）。
+#                    --cleanup を付けると、終了時に削除する（途中で止まって残った Hello World の Apex も含む）
 #
 # 【前提】
 #   ・~/.sf-tools-e2e/fixture.env（鍵一式。bootstrap.sh で作成。E2E_FIXTURE 環境変数で場所を変更できる）
@@ -24,7 +26,8 @@
 #     （GitHub Actions は sf-tools の origin/development を使うため）
 #
 # 【オプション】
-#   --keep        : 後掃除をしない（失敗の調査用。残ったものは cleanup.sh で削除できる）
+#   --cleanup     : 終了時に、テスト用のものを削除する（既定は削除しない。次回の前掃除、または cleanup.sh で削除される）
+#   --keep        : 何もしない（以前の名残り。既定が「削除しない」になったため）
 #   --no-actions  : GitHub Actions の実行確認（wf-metasync・Hello World のリリースと削除）を省略する（約 8〜12 分短くなる）
 #   -h, --help    : このヘルプを表示する
 # ==============================================================================
@@ -46,11 +49,12 @@ fi
 source "${SF_TOOLS_ROOT}/lib/common.sh"
 source "${E2E_SCRIPT_DIR}/lib.sh"
 
-KEEP=0
+KEEP=1   # 既定は、終了時に削除しない（あとから見返せるように。次回の前掃除で削除される）
 SKIP_ACTIONS=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --keep)       KEEP=1 ;;
+        --cleanup)    KEEP=0 ;;
         --no-actions) SKIP_ACTIONS=1 ;;
         *) die "不明なオプションです: $1" ;;
     esac
@@ -69,9 +73,9 @@ echo -e "${CLR_ERR}╔═══════════════════�
 echo -e "${CLR_ERR}║  !!  実際の GitHub / Salesforce を操作します         ║${CLR_RESET}" >&2
 echo -e "${CLR_ERR}║                                                      ║${CLR_RESET}" >&2
 echo -e "${CLR_ERR}║  ・テスト用のリポジトリ・外部クライアントアプリ・    ║${CLR_RESET}" >&2
-echo -e "${CLR_ERR}║    Hello World の Apex を作成し、終了時に削除します  ║${CLR_RESET}" >&2
-echo -e "${CLR_ERR}║  ・前回の残り（名前が一致する e2e 用のもの）も       ║${CLR_RESET}" >&2
-echo -e "${CLR_ERR}║    最初に削除します                                  ║${CLR_RESET}" >&2
+echo -e "${CLR_ERR}║    Hello World の Apex を作成します（Apex は削除）    ║${CLR_RESET}" >&2
+echo -e "${CLR_ERR}║  ・終了後も、リポジトリなどは残します（見返す用）    ║${CLR_RESET}" >&2
+echo -e "${CLR_ERR}║    前回の残りは、最初に削除します                    ║${CLR_RESET}" >&2
 echo -e "${CLR_ERR}║  ・sf の認証が、テスト用組織の認証 URL で置き換わり  ║${CLR_RESET}" >&2
 echo -e "${CLR_ERR}╚══════════════════════════════════════════════════════╝${CLR_RESET}" >&2
 log "INFO" "  オーナー: ${E2E_OWNER}  /  gh ユーザー: ${E2E_GH_USER}"
@@ -228,6 +232,13 @@ _hello_cycle() {
     runid=$(e2e_wait_pr_run "$REPO_FULL" wf-release.yml "$br") || runid=""   # VAR=$(cmd) のため run 不使用
     chk "${label}: wf-release が実行され、完了した" test -n "$runid" || return 1
     chk "${label}: wf-release が成功した" test "$(_run_conclusion "$runid")" == "success" || { e2e_show_run_failure "$REPO_FULL" "$runid" "${label}: wf-release"; return 1; }
+    # wf-propagate（main へのマージ時。staging / develop がない構成では、スキップして成功になる）。失敗しても、続きの確認は進める
+    local pid
+    pid=$(e2e_wait_pr_run "$REPO_FULL" wf-propagate.yml "$br") || pid=""   # VAR=$(cmd) のため run 不使用
+    if chk "${label}: wf-propagate が実行され、完了した" test -n "$pid"; then
+        chk "${label}: wf-propagate が成功した（staging / develop がない構成では、スキップ）" test "$(_run_conclusion "$pid")" == "success" \
+            || e2e_show_run_failure "$REPO_FULL" "$pid" "${label}: wf-propagate"
+    fi
     HELLO_RELEASE_RUN="$runid"
     return 0
 }
@@ -301,7 +312,10 @@ fi
 # ------------------------------------------------------------------------------
 CLEAN_RC=0
 if [[ $KEEP -eq 1 ]]; then
-    log "WARNING" "後掃除を省略しました（--keep）。残ったものは tests/e2e/cleanup.sh で削除できます。"
+    log "INFO" "テスト用のものは、削除せずに残しました（あとから見返せます。次回の e2e の最初に、自動で削除されます）。"
+    log "INFO" "  リポジトリ: https://github.com/${REPO_FULL}"
+    log "INFO" "  Actions   : https://github.com/${REPO_FULL}/actions"
+    log "INFO" "  すぐに削除する場合: tests/e2e/cleanup.sh --yes"
 else
     e2e_cleanup_all delete || CLEAN_RC=1
 fi

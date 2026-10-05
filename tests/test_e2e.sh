@@ -948,6 +948,12 @@ EOF
     assert_file_contains "$E2E_DIR/run.sh" 'e2e_show_run_failure "$REPO_FULL" "$_meta_id" "wf-metasync"' "run.sh: wf-metasync の失敗時にログを表示する"
     assert_file_contains "$E2E_DIR/run.sh" '"${label}: wf-validate"' "run.sh: wf-validate の失敗時にログを表示する"
     assert_file_contains "$E2E_DIR/run.sh" '"${label}: wf-release"'  "run.sh: wf-release の失敗時にログを表示する"
+    assert_file_contains "$E2E_DIR/run.sh" 'wf-propagate.yml "$br"' "run.sh: マージ時の wf-propagate の実行と成功を確認する"
+    assert_file_contains "$E2E_DIR/run.sh" '"${label}: wf-propagate"' "run.sh: wf-propagate の失敗時にログを表示する"
+    # 終了時の掃除: 既定は、削除せずに残す（あとから見返せる）。--cleanup で削除する
+    assert_file_contains "$E2E_DIR/run.sh" "KEEP=1   # 既定は、終了時に削除しない" "run.sh: 既定は、終了時に削除しない"
+    assert_file_contains "$E2E_DIR/run.sh" "--cleanup)    KEEP=0"         "run.sh: --cleanup で、終了時に削除する"
+    assert_file_contains "$E2E_DIR/run.sh" 'https://github.com/${REPO_FULL}/actions' "run.sh: 残したリポジトリの URL を表示する"
     # wf-metasync は、Hello World の流れの前に、完了まで待つ（同時に動かすと、取得とデプロイが重なって失敗する）
     local ln_meta ln_hello
     ln_meta=$(grep -n 'chk "wf-metasync が成功した' "$E2E_DIR/run.sh" | head -1 | cut -d: -f1)

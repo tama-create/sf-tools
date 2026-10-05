@@ -262,6 +262,151 @@ e2e_delete_eca() {
     return $rc
 }
 
+# ------------------------------------------------------------------------------
+# Hello World の Apex（リリースと削除の通しの確認用）
+#   e2e は、Hello World のクラス（SfToolsE2eHello・そのテスト）を、PR 経由でリリースし、続けて削除する。
+#   途中で止まって残った場合に備え、後掃除でも、名前が完全に一致するものだけを削除する。
+# ------------------------------------------------------------------------------
+E2E_APEX_HELLO="SfToolsE2eHello"
+E2E_APEX_HELLO_TEST="SfToolsE2eHelloTest"
+e2e_is_target_apex() { [[ "$1" =~ ^SfToolsE2eHello(Test)?$ ]]; }
+
+# Salesforce のテスト用 Apex クラスの一覧（名前のみ。管理用ログイン済みであること）
+#   取得の成否は、sf の終了コードで判定する。取得に失敗したら、戻り値 1（何も出力しない）
+e2e_list_target_apex() {
+    local name out try
+    e2e_require_guard
+    for (( try = 1; try <= E2E_LIST_RETRY; try++ )); do
+        if out=$(sf data query --query "SELECT Name FROM ApexClass WHERE Name IN ('${E2E_APEX_HELLO}','${E2E_APEX_HELLO_TEST}')" --target-org "$E2E_ADMIN_ALIAS" --json 2>/dev/null); then  # 条件チェック（出力の取得のため run 不使用）
+            printf '%s\n' "$out" | grep -oE '"Name": *"[^"]*"' | sed -E 's/.*: *"(.*)"/\1/' \
+                | while IFS= read -r name; do
+                      name="${name%$'\r'}"
+                      e2e_is_target_apex "$name" && printf '%s\n' "$name"
+                  done  # パイプのみのため run 不使用
+            return 0
+        fi
+        (( try < E2E_LIST_RETRY )) && sleep "$E2E_LIST_RETRY_WAIT"  # run 不使用: 待機
+    done
+    return 1
+}
+
+# テスト用 Apex クラスを、削除用のデプロイ（destructiveChanges）で消す。引数: クラス名（1 つ以上）
+e2e_delete_apex() {
+    local name work rc=0
+    e2e_require_guard
+    [[ $# -gt 0 ]] || die "削除する Apex クラスが指定されていません。"
+    for name in "$@"; do
+        e2e_is_target_apex "$name" || die "削除対象外の Apex クラス名です: ${name}"
+    done
+    work=$(mktemp -d "${TMPDIR:-/tmp}/e2e-eca-del.XXXXXX") || die "一時ディレクトリを作成できません。"  # VAR=$(cmd) のため run 不使用（後掃除の対象になる名前）
+    mkdir -p "$work/force-app/main/default"
+    printf '%s\n' '{ "packageDirectories": [ { "path": "force-app", "default": true } ], "namespace": "", "sourceApiVersion": "64.0" }' \
+        > "$work/sfdx-project.json"
+    printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' \
+        '<Package xmlns="http://soap.sforce.com/2006/04/metadata"><version>64.0</version></Package>' \
+        > "$work/package.xml"
+    {
+        printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' '<Package xmlns="http://soap.sforce.com/2006/04/metadata">' '  <types>'
+        for name in "$@"; do printf '    <members>%s</members>\n' "$name"; done
+        printf '%s\n' '    <name>ApexClass</name>' '  </types>' '  <version>64.0</version>' '</Package>'
+    } > "$work/destructiveChanges.xml"
+    # 成否は終了コードで判定する（呼び出し側は、さらに一覧の再取得で、消えたことを確認する）
+    (cd "$work" && run sf project deploy start --manifest package.xml \
+        --post-destructive-changes destructiveChanges.xml --target-org "$E2E_ADMIN_ALIAS" --wait 10) || rc=$?
+    rm -rf "$work"
+    return $rc
+}
+
+# Salesforce にある、テスト用 Apex クラスの件数を返す（標準出力）。取得に失敗したら、戻り値 1
+e2e_apex_count() {
+    local out
+    e2e_require_guard
+    e2e_is_target_apex "$1" || die "対象外の Apex クラス名です: ${1}"
+    out=$(sf data query --query "SELECT COUNT() FROM ApexClass WHERE Name = '${1}'" --target-org "$E2E_ADMIN_ALIAS" --json 2>/dev/null) || return 1  # VAR=$(cmd) のため run 不使用
+    printf '%s\n' "$out" | grep -oE '"totalSize": *[0-9]+' | grep -oE '[0-9]+$' | head -1
+}
+
+# ------------------------------------------------------------------------------
+# GitHub での PR を使った流れ（Hello World のリリースと削除の通しの確認用）
+#   gh の API だけで、ブランチの作成・ファイルの追加・PR の作成・マージを行う（ローカルの clone は使わない）。
+#   操作できるのは、テスト用のリポジトリ（{E2E_OWNER}/force-e2e-日時）だけ。
+# ------------------------------------------------------------------------------
+_e2e_check_repo() {
+    e2e_require_guard
+    [[ "${1%%/*}" == "${E2E_OWNER:-}" ]] && e2e_is_target_repo "${1#*/}" \
+        || die "テスト用ではないリポジトリには、操作できません: ${1}"
+}
+
+# main の先頭コミットから、ブランチを作る。引数: リポジトリ（オーナー/名前） ブランチ名
+e2e_gh_branch_create() {
+    local sha
+    _e2e_check_repo "$1"
+    sha=$(gh api "repos/$1/git/ref/heads/main" --jq .object.sha 2>/dev/null) || return 1  # VAR=$(cmd) のため run 不使用
+    [[ -n "$sha" ]] || return 1
+    gh api -X POST "repos/$1/git/refs" -f "ref=refs/heads/$2" -f "sha=$sha" >/dev/null 2>&1  # 戻り値で判定するため run 不使用
+}
+
+# ブランチに、ファイルを 1 つ追加する。引数: リポジトリ ブランチ名 パス ファイル（- なら標準入力）
+e2e_gh_file_put() {
+    local content
+    _e2e_check_repo "$1"
+    if [[ "$4" == "-" ]]; then
+        content=$(base64 | tr -d '\n\r')          # VAR=$(cmd) のため run 不使用（標準入力）
+    else
+        content=$(base64 < "$4" | tr -d '\n\r')   # VAR=$(cmd) のため run 不使用
+    fi
+    [[ -n "$content" ]] || return 1
+    gh api -X PUT "repos/$1/contents/$3" -f "message=e2e: $3" -f "branch=$2" -f "content=$content" >/dev/null 2>&1  # 戻り値で判定するため run 不使用
+}
+
+# main への PR を作り、PR 番号を標準出力に返す。引数: リポジトリ ブランチ名 タイトル
+e2e_gh_pr_create() {
+    local out
+    _e2e_check_repo "$1"
+    out=$(gh pr create -R "$1" --base main --head "$2" --title "$3" --body "e2e の通し検証（自動作成）。マージ後に、リポジトリごと削除されます。" 2>/dev/null) || return 1  # VAR=$(cmd) のため run 不使用
+    printf '%s\n' "$out" | grep -oE '[0-9]+$' | tail -1
+}
+
+# PR をマージする（マージコミット）。引数: リポジトリ PR 番号
+e2e_gh_pr_merge() {
+    _e2e_check_repo "$1"
+    gh pr merge "$2" -R "$1" --merge >/dev/null 2>&1  # 戻り値で判定するため run 不使用
+}
+
+# PR のイベントで起動したワークフローの実行が、完了するまで待ち、実行 ID を標準出力に返す。
+#   引数: リポジトリ ワークフロー名 ブランチ名（PR の head ブランチ）
+#   E2E_WF_TIMEOUT（既定 1200 秒）以内に完了しなければ、戻り値 1。E2E_POLL_SEC（既定 5 秒）おきに確認する
+e2e_wait_pr_run() {
+    local repo="$1" wf="$2" br="$3" i id status waited=0
+    local timeout="${E2E_WF_TIMEOUT:-1200}" poll="${E2E_POLL_SEC:-5}"
+    _e2e_check_repo "$repo"
+    for (( i = 1; i <= ${E2E_RUN_FIND_TRIES:-24}; i++ )); do   # 起動までの待ち（既定 24 回 × poll 秒）
+        id=$(gh run list -R "$repo" --workflow "$wf" --branch "$br" --event pull_request --limit 1 --json databaseId --jq '.[0].databaseId' 2>/dev/null)  # VAR=$(cmd) のため run 不使用
+        [[ -n "$id" ]] && break
+        sleep "$poll"  # run 不使用: 待機
+    done
+    [[ -n "$id" ]] || return 1
+    while (( waited < timeout )); do
+        status=$(gh run view "$id" -R "$repo" --json status --jq .status 2>/dev/null)  # VAR=$(cmd) のため run 不使用
+        [[ "$status" == "completed" ]] && { printf '%s' "$id"; return 0; }
+        sleep "$poll"; waited=$((waited + poll))  # run 不使用: 待機
+    done
+    return 1
+}
+
+# deploy-target.txt / remove-target.txt の本文（Hello World）
+e2e_hello_deploy_target_text() {
+    printf '%s\n' '[files]' \
+        "force-app/main/default/classes/${E2E_APEX_HELLO}.cls" \
+        "force-app/main/default/classes/${E2E_APEX_HELLO_TEST}.cls" \
+        '' '[members]'
+}
+e2e_hello_remove_target_text() {
+    printf '%s\n' '[files]' '' '[members]' \
+        "ApexClass:${E2E_APEX_HELLO_TEST}" \
+        "ApexClass:${E2E_APEX_HELLO}"
+}
+
 # ローカルのテスト用フォルダ（作業フォルダと JWT 用の証明書フォルダ）の一覧（フルパス）
 e2e_list_target_local() {
     local d base
@@ -365,6 +510,31 @@ e2e_cleanup_all() {
                 fi
             fi
         done <<< "$list"
+    fi
+
+    # Salesforce の Apex クラス（Hello World。途中で止まって残った場合のため）
+    if ! list=$(e2e_list_target_apex); then  # 条件チェック
+        log "ERROR" "  Salesforce: Apex クラスの一覧を取得できませんでした（対象の有無を判断できません）。"
+        failed=1
+    elif [[ -z "$list" ]]; then
+        log "INFO" "  Salesforce: 対象の Apex クラスはありません。"
+    else
+        local -a apex_names=()
+        local after_apex
+        mapfile -t apex_names <<< "$list"
+        for name in "${apex_names[@]}"; do log "INFO" "  Salesforce: Apex クラス ${name}"; done
+        if [[ "$mode" == "delete" ]]; then
+            if ! e2e_delete_apex "${apex_names[@]}"; then  # 条件チェック
+                log "ERROR" "  Salesforce: Apex クラスの削除（deploy）に失敗しました。"
+                failed=1
+            elif ! after_apex=$(e2e_list_target_apex); then  # 条件チェック
+                log "ERROR" "  Salesforce: Apex クラスの削除後の一覧を取得できませんでした（削除できたか確認できません）。"
+                failed=1
+            elif [[ -n "$after_apex" ]]; then
+                log "ERROR" "  Salesforce: Apex クラスを削除できませんでした。"
+                failed=1
+            fi
+        fi
     fi
 
     # ローカル

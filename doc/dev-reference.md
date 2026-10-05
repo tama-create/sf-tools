@@ -258,7 +258,7 @@ check_gh_owner "$GITHUB_OWNER"   # 認証ユーザーの一致確認
 2. `config/*.txt` を不足時のみ補充
 3. `sf-hook.sh` で Git Hook をインストール
 4. `release/<branch>/` と `branch_name.txt` を準備
-5. `package.json` がある場合は `npm install`
+5. `package.json` がある場合は `npm install`（`sf-init.sh` から実行中（`SF_INIT_RUNNING` あり）は、初期セットアップ用の一時フォルダなのでスキップする。約 90 秒の短縮）
 6. 24 時間以上経過していれば `sf-upgrade.sh` をバックグラウンド起動
 
 ### 4.5 sf-next.sh
@@ -627,7 +627,15 @@ sf-tools の `main` への反映は、全ユーザーへの配布と同義であ
 
 **テスト用の名前:** プロジェクト `e2e-YYYYMMDD-HHMMSS` → リポジトリ `force-e2e-YYYYMMDD-HHMMSS` → 外部クライアントアプリ `SF_TOOLS_force_e2e_YYYYMMDD_HHMMSS`。毎回別の名前なので、前回の削除を待たずに実行できる。
 
-**確認する内容:** Secret / Variable / ブランチ / ワークフローの存在、`SF_TOOLS_BRANCH=development`、`SLACK_CHANNEL_ID` の一致、トークンが出力・ログに出ていないこと、`wf-metasync` の成功、`wf-release` の途中のステップ（JWT ログイン・Private の `sf-tools` の取得）と Slack 通知（`"ok":true`）。`wf-release` は `main` に release 用のファイルが無く、最終的に失敗するのが正常。
+**確認する内容:** Secret / Variable / ブランチ / ワークフローの存在、`SF_TOOLS_BRANCH=development`、`SLACK_CHANNEL_ID` の一致、トークンが出力・ログに出ていないこと、`wf-metasync` の成功（`workflow_dispatch` で先に起動し、Hello World の流れと並行して待つ）、Hello World のリリース・削除（下記）。
+
+**Hello World のリリース・削除（`_hello_flow`）:** 実際の PR の流れで、`wf-validate` → マージ → `wf-release` を通す（`wf-release` の途中のステップ（JWT ログイン・公開 `sf-tools` の clone）と Slack 通知（`"ok":true`）、成功の通知）。
+- 部品は `tests/e2e/lib.sh`: `e2e_gh_branch_create` / `e2e_gh_file_put` / `e2e_gh_pr_create` / `e2e_gh_pr_merge` / `e2e_wait_pr_run`（`gh run list --workflow … --branch … --event pull_request` で実行を探し、完了まで `E2E_POLL_SEC` 秒（既定 5）おきに確認。起動待ちは `E2E_RUN_FIND_TRIES` 回（既定 24）、完了待ちは `E2E_WF_TIMEOUT` 秒）。これらは `_e2e_check_repo` で、オーナー（`E2E_OWNER`）とテスト用リポジトリの名前の形式が一致しないと動かない
+- リリース: ブランチ `e2e-hello` に `tests/e2e/fixtures/` の 4 ファイル（`SfToolsE2eHello` / `SfToolsE2eHelloTest` の `.cls` と `.cls-meta.xml`）と `sf-tools/release/e2e-hello/deploy-target.txt`（`[files]` と `[members]`）を追加 → PR → マージ。`@isTest` のクラスが含まれるため、`sf-release.sh` が `RunSpecifiedTests` を自動で選ぶ
+- 削除: ブランチ `e2e-hello-delete` に `release/e2e-hello-delete/remove-target.txt`（`ApexClass:SfToolsE2eHelloTest` / `ApexClass:SfToolsE2eHello`）を追加 → 同様
+- 組織側の確認は `e2e_apex_count`（SOQL `SELECT COUNT() FROM ApexClass WHERE Name = '…'`。`totalSize` を読む）。前後で 0 → 1 → 0 になること
+- 後掃除（`e2e_cleanup_all`）は、組織に残った `SfToolsE2eHello` / `SfToolsE2eHelloTest` も、一覧（`e2e_list_target_apex`。名前の完全一致のみ）→ 削除（`e2e_delete_apex`。削除用のデプロイ）→ 再取得で確認する。一覧の取得失敗は、ECA と同様に「対象なし」とせず、失敗として記録する
+- 未確認の点（実機で調整する）: main のみの構成で `wf-propagate` / `wf-sequence` が、マージ時に動いた場合の影響
 
 **削除の安全ガード:**
 

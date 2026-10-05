@@ -7,7 +7,9 @@
 # 【削除の対象】（名前の形式とオーナーが一致するものだけ。他のものは絶対に消えない）
 #   1. GitHub    : {E2E_OWNER}/force-e2e-YYYYMMDD-HHMMSS のリポジトリ
 #   2. Salesforce: SF_TOOLS_force_e2e_YYYYMMDD_HHMMSS の外部クライアントアプリ（5 つの構成要素）
-#   3. ローカル  : {E2E_HOME_ROOT}/{E2E_OWNER}/e2e-YYYYMMDD-HHMMSS と ~/.sf-jwt/force-e2e-YYYYMMDD-HHMMSS
+#   3. Salesforce: Hello World の Apex クラス SfToolsE2eHello / SfToolsE2eHelloTest（e2e が一度、リリースして削除する。
+#                  失敗して組織に残ったときの後始末。この 2 つの名前だけ。他のクラスは絶対に消えない）
+#   4. ローカル  : {E2E_HOME_ROOT}/{E2E_OWNER}/e2e-YYYYMMDD-HHMMSS と ~/.sf-jwt/force-e2e-YYYYMMDD-HHMMSS
 #                  と、強制終了で残った一時ファイル・フォルダ（$TMPDIR の e2e-run.* / e2e-eca-del.* / e2e-sfdx-url.*。
 #                  認証 URL を含むことがある。30 分以内のものは、実行中の可能性があるため対象外）
 #

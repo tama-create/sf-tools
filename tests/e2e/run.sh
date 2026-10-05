@@ -12,8 +12,9 @@
 #                    ・sf org login web は、認証 URL でのログインに差し替える（tests/e2e/shims/sf）
 #                    ・ブラウザは開かない（tests/e2e/shims の start / xdg-open / open）
 #   3. 確認        : Secret / Variable / ブランチ / ワークフローの存在、トークンがログに出ていないこと、
-#                    GitHub Actions の実行（wf-metasync・wf-release。JWT ログイン・sf-tools の取得・Slack 通知）
-#   4. 後掃除      : 前掃除と同じものを削除し、sf のエイリアスを実行前の状態に戻す
+#                    GitHub Actions の実行: wf-metasync（手動起動。並行して動かす）と、Hello World の Apex を PR 経由で
+#                    リリース（wf-validate → マージ → wf-release）し、続けて削除する（sf-tools の本来の機能の通し）
+#   4. 後掃除      : 前掃除と同じものを削除し（途中で止まって残った Hello World の Apex も含む）、sf のエイリアスを実行前の状態に戻す
 #
 # 【前提】
 #   ・~/.sf-tools-e2e/fixture.env（鍵一式。bootstrap.sh で作成。E2E_FIXTURE 環境変数で場所を変更できる）
@@ -24,7 +25,7 @@
 #
 # 【オプション】
 #   --keep        : 後掃除をしない（失敗の調査用。残ったものは cleanup.sh で削除できる）
-#   --no-actions  : GitHub Actions の実行確認を省略する（約 3〜5 分短くなる）
+#   --no-actions  : GitHub Actions の実行確認（wf-metasync・Hello World のリリースと削除）を省略する（約 8〜12 分短くなる）
 #   -h, --help    : このヘルプを表示する
 # ==============================================================================
 
@@ -67,8 +68,8 @@ log "HEADER" "sf-init の通し検証（e2e）を開始します (${SCRIPT_NAME}
 echo -e "${CLR_ERR}╔══════════════════════════════════════════════════════╗${CLR_RESET}" >&2
 echo -e "${CLR_ERR}║  !!  実際の GitHub / Salesforce を操作します         ║${CLR_RESET}" >&2
 echo -e "${CLR_ERR}║                                                      ║${CLR_RESET}" >&2
-echo -e "${CLR_ERR}║  ・テスト用のリポジトリと外部クライアントアプリを    ║${CLR_RESET}" >&2
-echo -e "${CLR_ERR}║    作成し、終了時に削除します                        ║${CLR_RESET}" >&2
+echo -e "${CLR_ERR}║  ・テスト用のリポジトリ・外部クライアントアプリ・    ║${CLR_RESET}" >&2
+echo -e "${CLR_ERR}║    Hello World の Apex を作成し、終了時に削除します  ║${CLR_RESET}" >&2
 echo -e "${CLR_ERR}║  ・前回の残り（名前が一致する e2e 用のもの）も       ║${CLR_RESET}" >&2
 echo -e "${CLR_ERR}║    最初に削除します                                  ║${CLR_RESET}" >&2
 echo -e "${CLR_ERR}║  ・sf の認証が、テスト用組織の認証 URL で置き換わり  ║${CLR_RESET}" >&2
@@ -132,15 +133,17 @@ INIT_RC=${PIPESTATUS[1]}
 CHECK_PASS=0
 CHECK_FAIL=0
 # chk 説明 コマンド...  : コマンドが成功すれば PASS、失敗すれば FAIL（失敗しても止まらない）
+#   戻り値: PASS なら 0、FAIL なら 1（続きの手順を進められるかの判断に使える。失敗しても、run.sh 自体は止まらない）
 chk() {
     local desc="$1"; shift
     if "$@"; then
         log "SUCCESS" "  [PASS] ${desc}"
         CHECK_PASS=$((CHECK_PASS + 1))
-    else
-        log "ERROR" "  [FAIL] ${desc}"
-        CHECK_FAIL=$((CHECK_FAIL + 1))
+        return 0
     fi
+    log "ERROR" "  [FAIL] ${desc}"
+    CHECK_FAIL=$((CHECK_FAIL + 1))
+    return 1
 }
 
 _has_secret()   { gh secret list -R "$REPO_FULL" 2>/dev/null | awk '{print $1}' | grep -qx "$1"; }
@@ -151,9 +154,9 @@ _has_workflow() { gh api "repos/${REPO_FULL}/contents/.github/workflows" --jq '.
 # ファイルに値が含まれていないこと（トークンの漏れの確認）
 _not_in_file()  { [[ ! -f "$2" ]] || ! grep -qF -- "$1" "$2"; }
 
-# Actions: ワークフローを実行して、完了まで待つ。実行 ID を標準出力に返す
-_run_workflow() {
-    local wf="$1" i id timeout="${E2E_WF_TIMEOUT:-1200}" waited=0 status
+# Actions: ワークフローを手動で起動し、実行 ID を標準出力に返す（完了は待たない）
+_dispatch_workflow() {
+    local wf="$1" i id
     for ((i = 1; i <= 12; i++)); do   # 登録直後はワークフローが認識されるまで少しかかる
         gh workflow run "$wf" -R "$REPO_FULL" --ref main >/dev/null 2>&1 && break
         sleep 5  # run 不使用: 待機
@@ -164,10 +167,16 @@ _run_workflow() {
         sleep 5  # run 不使用: 待機
     done
     [[ -n "$id" ]] || return 1
+    printf '%s' "$id"
+}
+
+# Actions: 実行 ID の実行が、完了するまで待つ（E2E_WF_TIMEOUT 秒（既定 1200）以内。E2E_POLL_SEC 秒（既定 5）おきに確認）
+_wait_run() {
+    local id="$1" timeout="${E2E_WF_TIMEOUT:-1200}" poll="${E2E_POLL_SEC:-5}" waited=0 status
     while (( waited < timeout )); do
         status=$(gh run view "$id" -R "$REPO_FULL" --json status --jq .status 2>/dev/null)  # VAR=$(cmd) のため run 不使用
-        [[ "$status" == "completed" ]] && { printf '%s' "$id"; return 0; }
-        sleep 15; waited=$((waited + 15))  # run 不使用: 待機
+        [[ "$status" == "completed" ]] && return 0
+        sleep "$poll"; waited=$((waited + poll))  # run 不使用: 待機
     done
     return 1
 }
@@ -175,6 +184,68 @@ _run_conclusion() { gh run view "$1" -R "$REPO_FULL" --json conclusion --jq .con
 _step_conclusion() {
     gh run view "$1" -R "$REPO_FULL" --json jobs \
         --jq ".jobs[].steps[] | select(.name==\"$2\") | .conclusion" 2>/dev/null | head -1
+}
+
+# ------------------------------------------------------------------------------
+# Hello World の Apex を、PR 経由でリリースし、続けて削除する（sf-tools の本来の機能の通しの確認）
+#   wf-validate（検証）→ PR のマージ → wf-release（リリース / 削除）。テスト用の組織（本番相当）に対して行う。
+#   失敗した手順があれば、そこで止める（残ったクラスは、後掃除で削除される）
+# ------------------------------------------------------------------------------
+_admin_login_ok() { ( e2e_sf_admin_login ); }
+_put_deploy_target() { e2e_hello_deploy_target_text | e2e_gh_file_put "$REPO_FULL" "$1" "sf-tools/release/$1/deploy-target.txt" -; }
+_put_remove_target() { e2e_hello_remove_target_text | e2e_gh_file_put "$REPO_FULL" "$1" "sf-tools/release/$1/remove-target.txt" -; }
+
+# リリース用のファイル（クラス 2 つ・メタデータ 2 つ・deploy-target.txt）を、ブランチに追加する
+_hello_add_deploy_files() {
+    local br="$1" f
+    for f in "${E2E_APEX_HELLO}.cls" "${E2E_APEX_HELLO}.cls-meta.xml" "${E2E_APEX_HELLO_TEST}.cls" "${E2E_APEX_HELLO_TEST}.cls-meta.xml"; do
+        chk "リリース: ${f} を追加した" e2e_gh_file_put "$REPO_FULL" "$br" "force-app/main/default/classes/${f}" "${E2E_SCRIPT_DIR}/fixtures/${f}" || return 1
+    done
+    chk "リリース: deploy-target.txt を追加した" _put_deploy_target "$br"
+}
+# 削除用のファイル（remove-target.txt）を、ブランチに追加する
+_hello_add_remove_files() {
+    chk "削除: remove-target.txt を追加した" _put_remove_target "$1"
+}
+
+# 1 回分: ブランチ作成 → ファイル追加 → PR → wf-validate → マージ → wf-release。成功したら、実行 ID を HELLO_RELEASE_RUN に入れる
+#   引数: ラベル ブランチ名 PR のタイトル ファイルを追加する関数名
+_hello_cycle() {
+    local label="$1" br="$2" title="$3" addfn="$4" prn runid
+    chk "${label}: ブランチ ${br} を作成した" e2e_gh_branch_create "$REPO_FULL" "$br" || return 1
+    "$addfn" "$br" || return 1
+    prn=$(e2e_gh_pr_create "$REPO_FULL" "$br" "$title") || prn=""   # VAR=$(cmd) のため run 不使用
+    chk "${label}: PR を作成した" test -n "$prn" || return 1
+    runid=$(e2e_wait_pr_run "$REPO_FULL" wf-validate.yml "$br") || runid=""   # VAR=$(cmd) のため run 不使用
+    chk "${label}: wf-validate（検証）が実行され、完了した" test -n "$runid" || return 1
+    chk "${label}: wf-validate が成功した" test "$(_run_conclusion "$runid")" == "success" || return 1
+    chk "${label}: PR をマージした" e2e_gh_pr_merge "$REPO_FULL" "$prn" || return 1
+    runid=$(e2e_wait_pr_run "$REPO_FULL" wf-release.yml "$br") || runid=""   # VAR=$(cmd) のため run 不使用
+    chk "${label}: wf-release が実行され、完了した" test -n "$runid" || return 1
+    chk "${label}: wf-release が成功した" test "$(_run_conclusion "$runid")" == "success" || return 1
+    HELLO_RELEASE_RUN="$runid"
+    return 0
+}
+
+_hello_flow() {
+    HELLO_RELEASE_RUN=""
+    chk "Hello World: Salesforce への管理用ログイン（問い合わせ用）ができた" _admin_login_ok || return 0
+    chk "Hello World: リリース前は、Salesforce にクラスがない" test "$(e2e_apex_count "$E2E_APEX_HELLO")" == "0" || return 0
+
+    _hello_cycle "リリース" "e2e-hello" "e2e: Hello World をリリース" _hello_add_deploy_files || return 0
+    # wf-release の途中のステップ（JWT ログイン・sf-tools の取得・Slack 通知）
+    chk "wf-release: 本番組織へのログイン（JWT）が成功した" \
+        test "$(_step_conclusion "$HELLO_RELEASE_RUN" "本番組織にログイン（JWT）")" == "success"
+    chk "wf-release: sf-tools の取得が成功した（公開リポジトリを、Token なしで clone）" \
+        test "$(_step_conclusion "$HELLO_RELEASE_RUN" "自動化ツール（sf-tools）を取得")" == "success"
+    chk "wf-release: Slack への通知が成功した（ok:true）" \
+        bash -c 'gh run view "$1" -R "$2" --log 2>/dev/null | grep -F "Slack response" | grep -q "\"ok\":true"' _ "$HELLO_RELEASE_RUN" "$REPO_FULL"
+    chk "リリース後: Salesforce に ${E2E_APEX_HELLO} ができた" test "$(e2e_apex_count "$E2E_APEX_HELLO")" == "1"
+    chk "リリース後: Salesforce に ${E2E_APEX_HELLO_TEST} ができた" test "$(e2e_apex_count "$E2E_APEX_HELLO_TEST")" == "1"
+
+    _hello_cycle "削除" "e2e-hello-delete" "e2e: Hello World を削除" _hello_add_remove_files || return 0
+    chk "削除後: Salesforce から ${E2E_APEX_HELLO} が消えた" test "$(e2e_apex_count "$E2E_APEX_HELLO")" == "0"
+    chk "削除後: Salesforce から ${E2E_APEX_HELLO_TEST} が消えた" test "$(e2e_apex_count "$E2E_APEX_HELLO_TEST")" == "0"
 }
 
 log "HEADER" "確認"
@@ -202,21 +273,17 @@ if [[ "$INIT_RC" -eq 0 ]]; then
     done
 
     if [[ $SKIP_ACTIONS -eq 0 ]]; then
-        log "INFO" "GitHub Actions を実行します（最大 ${E2E_WF_TIMEOUT:-1200} 秒待ちます）..."
-        _meta_id=$(_run_workflow wf-metasync.yml) || _meta_id=""   # VAR=$(cmd) のため run 不使用
-        _rel_id=$(_run_workflow wf-release.yml)   || _rel_id=""    # VAR=$(cmd) のため run 不使用
-        chk "wf-metasync が実行され、完了した"  test -n "$_meta_id"
-        [[ -n "$_meta_id" ]] && chk "wf-metasync が成功した（JWT ログイン・sf-tools の取得を含む）" \
-            test "$(_run_conclusion "$_meta_id")" == "success"
-        chk "wf-release が実行され、完了した"   test -n "$_rel_id"
-        if [[ -n "$_rel_id" ]]; then
-            # wf-release は main に release 用のファイルが無く失敗するのが正常。確認するのは、途中のステップ
-            chk "wf-release: 本番組織へのログイン（JWT）が成功した" \
-                test "$(_step_conclusion "$_rel_id" "本番組織にログイン（JWT）")" == "success"
-            chk "wf-release: sf-tools の取得が成功した（公開リポジトリを、Token なしで clone）" \
-                test "$(_step_conclusion "$_rel_id" "自動化ツール（sf-tools）を取得")" == "success"
-            chk "wf-release: Slack への通知が成功した（ok:true）" \
-                bash -c 'gh run view "$1" -R "$2" --log 2>/dev/null | grep -F "Slack response" | grep -q "\"ok\":true"' _ "$_rel_id" "$REPO_FULL"
+        log "INFO" "GitHub Actions を実行します（各待ち: 最大 ${E2E_WF_TIMEOUT:-1200} 秒）..."
+        # wf-metasync を起動する（待たない。次の Hello World の流れと並行して動く）
+        _meta_id=$(_dispatch_workflow wf-metasync.yml) || _meta_id=""   # VAR=$(cmd) のため run 不使用
+        # Hello World を、PR 経由でリリースし（wf-validate → マージ → wf-release）、続けて削除する
+        _hello_flow
+        # wf-metasync の完了を待つ
+        chk "wf-metasync が起動した" test -n "$_meta_id"
+        if [[ -n "$_meta_id" ]]; then
+            chk "wf-metasync が完了した" _wait_run "$_meta_id"
+            chk "wf-metasync が成功した（JWT ログイン・sf-tools の取得を含む）" \
+                test "$(_run_conclusion "$_meta_id")" == "success"
         fi
     else
         log "INFO" "GitHub Actions の実行確認を省略しました（--no-actions）。"

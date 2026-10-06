@@ -444,6 +444,112 @@ test_run_isolated_home() {
     [[ "$out" == *"REALHOME=$HOME"* ]] && pass "呼び出し元の HOME は変わらない" || fail "呼び出し元の HOME は変わらない" "$out"
 }
 
+# ------------------------------------------------------------------------------
+# ensure_sf_tools_latest のテスト（実際の Git で確認する）
+# ------------------------------------------------------------------------------
+# origin(bare) と、更新用の作業用 clone(w)、検証対象の clone(sf-tools) を作る。戻り値（標準出力）: ベースディレクトリ
+_esl_repos() {
+    local b
+    b=$(mktemp -d "${TMPDIR:-/tmp}/test-esl-XXXX")
+    git init -q --bare --initial-branch=main "$b/origin.git"   # HOME が違う環境でも、既定のブランチ名に依存しない
+    git clone -q "$b/origin.git" "$b/w" 2>/dev/null
+    (
+        cd "$b/w" || exit 1
+        git -c user.name=t -c user.email=t@example.com checkout -q -b main && echo 1 > f && git add f \
+            && git -c user.name=t -c user.email=t@example.com commit -qm c1 && git push -q origin main
+    ) > /dev/null 2>&1
+    git clone -q "$b/origin.git" "$b/sf-tools" 2>/dev/null
+    echo "$b"
+}
+# origin の main に、新しいコミットを 1 つ追加する（検証対象を、1 コミット遅れさせる）
+_esl_advance() {
+    ( cd "$1/w" || exit 1
+      echo "$RANDOM" >> f && git -c user.name=t -c user.email=t@example.com commit -qam new && git push -q origin main ) > /dev/null 2>&1
+}
+# 実行する。引数: ベースdir 標準入力 [ensure_sf_tools_latest の引数...]。出力は ベースdir/out.log。終了コードを返す
+_esl_run() {
+    local b="$1" input="$2"; shift 2
+    printf '%b' "$input" | (
+        export SF_INIT_MODE=1
+        readonly SCRIPT_NAME=test; readonly LOG_FILE=/dev/null; readonly LOG_MODE=NEW
+        source "$SF_TOOLS_DIR/lib/common.sh"
+        ensure_sf_tools_latest "$@"
+        echo "RC=$?"
+    ) > "$b/out.log" 2>&1
+}
+
+test_ensure_sf_tools_latest() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] ensure_sf_tools_latest: sf-tools が最新であることの確認（必須）${CLR_RST}"
+    local b before after
+
+    # 最新 → 通過（RC=0）。--no-update でも同じ
+    b=$(_esl_repos)
+    _esl_run "$b" "" "$b/sf-tools"
+    assert_exit_ok $? "最新 → 終了コード 0"
+    assert_file_contains "$b/out.log" "RC=0" "最新 → 戻り値 0"
+    assert_file_contains "$b/out.log" "最新です" "最新 → 「最新です」と表示される"
+    _esl_run "$b" "" --no-update "$b/sf-tools"
+    assert_file_contains "$b/out.log" "RC=0" "最新 + --no-update → 戻り値 0"
+    teardown "$b"
+
+    # 遅れ + Y → git pull --ff-only で更新し、戻り値 2（呼び出し元が、再実行する）
+    b=$(_esl_repos); _esl_advance "$b"
+    before=$(git -C "$b/sf-tools" rev-list --count HEAD)
+    _esl_run "$b" 'Y\n' "$b/sf-tools"
+    assert_exit_ok $? "遅れ + Y → 終了コード 0"
+    assert_file_contains "$b/out.log" "RC=2" "遅れ + Y → 更新した（戻り値 2）"
+    after=$(git -C "$b/sf-tools" rev-list --count HEAD)
+    [[ "$after" -eq $((before + 1)) ]] && pass "遅れ + Y → 1 コミット進んだ" || fail "遅れ + Y → 1 コミット進んだ" "前=${before} 後=${after}"
+    teardown "$b"
+
+    # 遅れ + N → 更新せず、中断（最新でないと、続行しない）
+    b=$(_esl_repos); _esl_advance "$b"
+    before=$(git -C "$b/sf-tools" rev-list --count HEAD)
+    _esl_run "$b" 'N\n' "$b/sf-tools"
+    assert_exit_fail $? "遅れ + N → 中断（異常終了）"
+    assert_file_contains "$b/out.log" "最新ではないため、続行できません" "遅れ + N → 理由が表示される"
+    after=$(git -C "$b/sf-tools" rev-list --count HEAD)
+    [[ "$after" -eq "$before" ]] && pass "遅れ + N → 更新されない" || fail "遅れ + N → 更新されない"
+    teardown "$b"
+
+    # 遅れ + --no-update → 質問せず、更新せず、中断
+    b=$(_esl_repos); _esl_advance "$b"
+    before=$(git -C "$b/sf-tools" rev-list --count HEAD)
+    _esl_run "$b" "" --no-update "$b/sf-tools"
+    assert_exit_fail $? "遅れ + --no-update → 中断（異常終了）"
+    assert_file_contains "$b/out.log" "最新ではありません" "遅れ + --no-update → 理由が表示される"
+    after=$(git -C "$b/sf-tools" rev-list --count HEAD)
+    [[ "$after" -eq "$before" ]] && pass "遅れ + --no-update → 更新されない" || fail "遅れ + --no-update → 更新されない"
+    teardown "$b"
+
+    # 遅れ + 未コミットの変更 → 自動では更新できず、中断（開発者の作業を守る）
+    b=$(_esl_repos); _esl_advance "$b"
+    echo "local change" >> "$b/sf-tools/f"
+    before=$(git -C "$b/sf-tools" rev-list --count HEAD)
+    _esl_run "$b" 'Y\n' "$b/sf-tools"
+    assert_exit_fail $? "遅れ + 未コミットの変更 → 中断（異常終了）"
+    assert_file_contains "$b/out.log" "未コミットの変更" "遅れ + 未コミットの変更 → 理由が表示される"
+    after=$(git -C "$b/sf-tools" rev-list --count HEAD)
+    [[ "$after" -eq "$before" ]] && pass "遅れ + 未コミットの変更 → 更新されない" || fail "遅れ + 未コミットの変更 → 更新されない"
+    teardown "$b"
+
+    # origin に接続できない → 最新か確認できないため、中断（続行しない）
+    b=$(_esl_repos)
+    rm -rf "$b/origin.git"
+    _esl_run "$b" "" "$b/sf-tools"
+    assert_exit_fail $? "origin に接続できない → 中断（異常終了）"
+    assert_file_contains "$b/out.log" "最新かどうかを確認できません" "origin に接続できない → 理由が表示される"
+    teardown "$b"
+
+    # Git リポジトリでない → 確認できないため、WARNING を出して続行
+    b=$(mktemp -d "${TMPDIR:-/tmp}/test-esl-XXXX"); mkdir -p "$b/sf-tools"
+    _esl_run "$b" "" "$b/sf-tools"
+    assert_exit_ok $? "Git リポジトリでない → 終了コード 0（確認できないため、続行）"
+    assert_file_contains "$b/out.log" "RC=0" "Git リポジトリでない → 戻り値 0"
+    assert_file_contains "$b/out.log" "確認できません" "Git リポジトリでない → 警告が表示される"
+    teardown "$b"
+}
+
 test_check_gh_owner_match
 test_check_gh_owner_mismatch
 test_check_gh_owner_skip_on_empty
@@ -459,5 +565,6 @@ test_open_browser_gitbash
 test_check_sf_cli
 test_check_sf_cli_cache
 test_run_isolated_home
+test_ensure_sf_tools_latest
 
 print_summary

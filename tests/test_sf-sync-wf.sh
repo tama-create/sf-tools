@@ -66,12 +66,18 @@ test_guards() {
 test_up_to_date() {
     local td mb mh out ec
     _wf_env td mb mh
-    out=$(_wf_run "$td" "$mb" "$mh" ""); ec=$?
+    out=$(_wf_run "$td" "$mb" "$mh" "Y"); ec=$?
     assert_exit_ok "$ec" "差分なし → 終了コード 0"
     assert_output_contains "$out" "最新です" "差分なし → 「最新です」と表示される"
+    assert_output_contains "$out" "管理者以外は、実行しないでください" "差分なしでも、冒頭に、管理者向けの警告ボックスが表示される"
+    out=$(_wf_run "$td" "$mb" "$mh" "N"); ec=$?
+    assert_exit_fail "$ec" "冒頭の確認で N → 中断（差分なしでも、確認を出す）"
+    out=$(_wf_run "$td" "$mb" "$mh" "" --check); ec=$?
+    assert_exit_ok "$ec" "--check → 確認なしで、終了コード 0（何も変更しないため）"
+    echo "$out" | grep -q "管理者以外は、実行しないでください" && fail "--check → 警告ボックスを表示しない" || pass "--check → 警告ボックスを表示しない"
 
     sed -i 's/$/\r/' "$td/.github/workflows/wf-a.yml"   # CRLF にする（Windows の改行）
-    out=$(_wf_run "$td" "$mb" "$mh" ""); ec=$?
+    out=$(_wf_run "$td" "$mb" "$mh" "Y"); ec=$?
     assert_exit_ok "$ec" "CRLF だけの違い → 終了コード 0"
     assert_output_contains "$out" "最新です" "CRLF だけの違い → 差分とみなさない"
     unset MOCK_GIT_BRANCH
@@ -86,19 +92,28 @@ test_sync() {
     echo "# project customized" >> "$td/.github/workflows/wf-a.yml"
     rm -f "$td/.github/workflows/wf-b.yml"   # このプロジェクトにない（新規）
 
+    # 冒頭の確認で N / q → 差分を表示する前に中断する（何も変更しない）
     out=$(_wf_run "$td" "$mb" "$mh" "N"); ec=$?
-    assert_exit_fail "$ec" "差分あり + N → 中断（エラー終了）"
+    assert_exit_fail "$ec" "冒頭の確認で N → 中断（エラー終了）"
+    assert_output_contains "$out" "管理者以外は、実行しないでください" "冒頭の確認 → 警告ボックスが表示される"
+    echo "$out" | grep -q "差分あり: wf-a.yml" && fail "冒頭の確認で N → 差分は、表示されない" || pass "冒頭の確認で N → 差分は、表示されない"
+    out=$(_wf_run "$td" "$mb" "$mh" "q"); ec=$?
+    assert_exit_fail "$ec" "冒頭の確認で q → 中断（エラー終了）"
+    grep -q "project customized" "$td/.github/workflows/wf-a.yml" && pass "冒頭の確認で N / q → ファイルは変更されない" || fail "冒頭の確認で N / q → ファイルは変更されない"
+
+    out=$(_wf_run "$td" "$mb" "$mh" "YN"); ec=$?
+    assert_exit_fail "$ec" "差分あり + 2 回目 N → 中断（エラー終了）"
     assert_output_contains "$out" "差分あり: wf-a.yml" "差分あり → 差分のあるファイルが表示される"
     assert_output_contains "$out" "new-a" "差分あり → diff の内容（雛形側）が表示される"
     assert_output_contains "$out" "新規（雛形にあり、このプロジェクトにない）: wf-b.yml" "差分あり → 新規のファイルが表示される"
     grep -q "project customized" "$td/.github/workflows/wf-a.yml" && pass "N → ファイルは変更されない" || fail "N → ファイルは変更されない"
     assert_file_not_exists "$td/.github/workflows/wf-b.yml" "N → 新規のファイルは、追加されない"
 
-    out=$(_wf_run "$td" "$mb" "$mh" "q"); ec=$?
-    assert_exit_fail "$ec" "差分あり + q → 中断（エラー終了）"
+    out=$(_wf_run "$td" "$mb" "$mh" "Yq"); ec=$?
+    assert_exit_fail "$ec" "差分あり + 2 回目 q → 中断（エラー終了）"
     grep -q "project customized" "$td/.github/workflows/wf-a.yml" && pass "q → ファイルは変更されない" || fail "q → ファイルは変更されない"
 
-    out=$(_wf_run "$td" "$mb" "$mh" "Y"); ec=$?
+    out=$(_wf_run "$td" "$mb" "$mh" "YY"); ec=$?
     assert_exit_ok "$ec" "差分あり + Y → 終了コード 0"
     cmp -s "$tmpl/wf-a.yml" "$td/.github/workflows/wf-a.yml" && pass "Y → 差分のあるファイルが、雛形の内容になる" || fail "Y → 差分のあるファイルが、雛形の内容になる"
     cmp -s "$tmpl/wf-b.yml" "$td/.github/workflows/wf-b.yml" && pass "Y → 新規のファイルが追加される" || fail "Y → 新規のファイルが追加される"
@@ -106,13 +121,13 @@ test_sync() {
     assert_file_not_contains "$MOCK_CALL_LOG" "git commit" "Y → 自動でコミットしない"
     assert_file_not_contains "$MOCK_CALL_LOG" "git push" "Y → 自動でプッシュしない"
 
-    out=$(_wf_run "$td" "$mb" "$mh" ""); ec=$?
+    out=$(_wf_run "$td" "$mb" "$mh" "Y"); ec=$?
     assert_output_contains "$out" "最新です" "更新後 → 「最新です」になる"
 
     # 雛形にないファイルは、変更しない（情報として、表示するだけ）
     echo "name: Extra" > "$td/.github/workflows/wf-old.yml"
     echo "# again" >> "$td/.github/workflows/wf-a.yml"
-    out=$(_wf_run "$td" "$mb" "$mh" "Y"); ec=$?
+    out=$(_wf_run "$td" "$mb" "$mh" "YY"); ec=$?
     assert_output_contains "$out" "雛形にないワークフロー" "雛形にないファイルが、情報として表示される"
     assert_file_exists "$td/.github/workflows/wf-old.yml" "雛形にないファイルは、削除されない"
     unset MOCK_GIT_BRANCH
@@ -124,7 +139,7 @@ test_no_workflows_dir() {
     local td mb mh out ec
     _wf_env td mb mh
     rm -rf "$td/.github"
-    out=$(_wf_run "$td" "$mb" "$mh" "Y"); ec=$?
+    out=$(_wf_run "$td" "$mb" "$mh" "YY"); ec=$?
     assert_exit_ok "$ec" ".github/workflows/ がない + Y → 終了コード 0"
     assert_file_exists "$td/.github/workflows/wf-a.yml" ".github/workflows/ がない → wf-a.yml が追加される"
     assert_file_exists "$td/.github/workflows/wf-b.yml" ".github/workflows/ がない → wf-b.yml が追加される"

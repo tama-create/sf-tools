@@ -319,11 +319,23 @@ e2e_delete_apex() {
 }
 
 # Salesforce にある、テスト用 Apex クラスの件数を返す（標準出力）。取得に失敗したら、戻り値 1
+#   失敗したときは、sf のエラーの要点（先頭の数行。Token・認証 URL は伏せる）を警告として表示する（標準エラー）。
+#   これまで、エラーを捨てていたため、削除後の確認の失敗の原因が分からなかった
 e2e_apex_count() {
-    local out
+    local out errf line
     e2e_require_guard
     e2e_is_target_apex "$1" || die "対象外の Apex クラス名です: ${1}"
-    out=$(sf data query --query "SELECT COUNT() FROM ApexClass WHERE Name = '${1}'" --target-org "$E2E_ADMIN_ALIAS" --json 2>/dev/null) || return 1  # VAR=$(cmd) のため run 不使用
+    errf=$(mktemp "${TMPDIR:-/tmp}/e2e-apex-count.XXXXXX") || return 1  # VAR=$(cmd) のため run 不使用
+    if ! out=$(sf data query --query "SELECT COUNT() FROM ApexClass WHERE Name = '${1}'" --target-org "$E2E_ADMIN_ALIAS" --json 2>"$errf"); then  # 条件チェック
+        log "WARNING" "  Apex クラス ${1} の件数の取得に失敗しました。sf の出力:"
+        { printf '%s\n' "$out"; cat "$errf"; } | grep -v '^[[:space:]]*$' | head -6 | while IFS= read -r line; do
+            line=$(printf '%s' "$line" | sed -E 's#(force://[^:@ ]*:[^:@ ]*:)[^@ ]*@#\1***masked***@#')  # パイプのみのため run 不使用
+            log "WARNING" "    $(_mask_secrets "$line")"
+        done
+        rm -f "$errf"
+        return 1
+    fi
+    rm -f "$errf"
     printf '%s\n' "$out" | grep -oE '"totalSize": *[0-9]+' | grep -oE '[0-9]+$' | head -1
 }
 

@@ -820,6 +820,7 @@ test_e2e_apex() {
     assert_file_not_contains "$MB/out.log" "DONE" "件数: 対象外のクラス名は、拒否する（異常終了）"
     rm -f "$MB/sfapex.cnt"; MOCK_SF_APEX_FAIL_FIRST=all _e2e_call "$pre"' e2e_apex_count SfToolsE2eHello; echo "RC=$?"'
     assert_file_contains "$MB/out.log" "RC=1" "件数: 取得に失敗 → 戻り値 1"
+assert_file_contains "$MB/out.log" "件数の取得に失敗しました"  "件数: 取得に失敗 → 警告を表示する（原因が分かるように）"    assert_file_contains "$MB/out.log" "connection reset"        "件数: 取得に失敗 → sf のエラーの要点を表示する"
 
     # 削除: 対象外の名前は、拒否する
     : > "$MOCK_CALL_LOG"
@@ -1017,6 +1018,7 @@ EOF
     assert_file_contains     "$MB/out.log" "RC=0"                               "失敗ログ: 取得できなくても、戻り値は 0"
     _e2e_call "$pre"' e2e_show_run_failure tamashimon-org/force-test-win 1 x; echo DONE'
     assert_file_not_contains "$MB/out.log" "DONE"                               "失敗ログ: テスト用ではないリポジトリは、拒否する"
+assert_file_contains "$E2E_DIR/run.sh" "削除後: Salesforce への管理用ログイン（問い合わせ用）をやり直した" "run.sh: 削除後の件数の確認の前に、管理用ログインをやり直す"    assert_file_contains "$E2E_DIR/run.sh" "リリース後: Salesforce への管理用ログイン（問い合わせ用）をやり直した" "run.sh: リリース後の件数の確認の前に、管理用ログインをやり直す"
     assert_file_contains "$E2E_DIR/run.sh" '_run_ok "$_meta_id" "wf-metasync"' "run.sh: wf-metasync の失敗時は、ログを表示し、1 回だけ再実行する"
     assert_file_contains "$E2E_DIR/run.sh" "再実行で成功したワークフローが" "run.sh: 再実行で成功したワークフローの数を、結果に警告として表示する"
     assert_file_contains "$E2E_DIR/run.sh" '"${label}: wf-validate"' "run.sh: wf-validate の失敗時にログを表示する"

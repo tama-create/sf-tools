@@ -307,6 +307,7 @@ _hello_flow() {
         test "$(_step_conclusion "$HELLO_RELEASE_RUN" "自動化ツール（sf-tools）を取得")" == "success"
     chk "wf-release: Slack への通知が成功した（ok:true）" \
         bash -c 'gh run view "$1" -R "$2" --log 2>/dev/null | grep -F "Slack response" | grep -q "\"ok\":true"' _ "$HELLO_RELEASE_RUN" "$REPO_FULL"
+    chk "リリース後: Salesforce への管理用ログイン（問い合わせ用）をやり直した" _admin_login_ok || return 0
     chk "リリース後: Salesforce に ${E2E_APEX_HELLO} ができた" test "$(e2e_apex_count "$E2E_APEX_HELLO")" == "1"
     chk "リリース後: Salesforce に ${E2E_APEX_HELLO_TEST} ができた" test "$(e2e_apex_count "$E2E_APEX_HELLO_TEST")" == "1"
 
@@ -316,6 +317,9 @@ _hello_flow() {
     chk "sf-deploy.sh: 共有環境（予約名 prod）へのローカルからの強制リリースを、拒否する" _hello_deploy_refused "$repo"
 
     _hello_cycle "削除" "e2e-hello-delete" "e2e: Hello World を削除" _hello_write_remove 0 || return 0
+    # 2 回目の sf-job.sh（sf-start.sh）が、同じ組織の接続を、いったんログアウトして、ログインし直す。
+    # 同じユーザーの認証は、エイリアスが違っても、共通の保存先を使うため、問い合わせ用の管理用ログインを、やり直してから確認する
+    chk "削除後: Salesforce への管理用ログイン（問い合わせ用）をやり直した" _admin_login_ok || return 0
     chk "削除後: Salesforce から ${E2E_APEX_HELLO} が消えた" test "$(e2e_apex_count "$E2E_APEX_HELLO")" == "0"
     chk "削除後: Salesforce から ${E2E_APEX_HELLO_TEST} が消えた" test "$(e2e_apex_count "$E2E_APEX_HELLO_TEST")" == "0"
 }

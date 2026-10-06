@@ -73,6 +73,9 @@ jobs:
       # --------------------------------------------------------------------------
       - name: Salesforce 組織にログイン
         run: |
+          # 秘密鍵は、本人だけが読める権限で作り、ログインの成否にかかわらず（失敗しても）、必ず消す
+          umask 077
+          trap 'rm -f /tmp/server.key' EXIT
           echo "${{ secrets.SF_PRIVATE_KEY }}" | base64 -d > /tmp/server.key
           sf org login jwt \
             --client-id    "${{ secrets.SF_CONSUMER_KEY_PROD }}" \

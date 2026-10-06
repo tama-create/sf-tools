@@ -6,7 +6,7 @@
 # 次にPRを出すべきブランチを表示します。
 #
 # 【使い方】
-#   bash ~/sf-tools/sf-next.sh
+#   bash ~/sf-tools/bin/sf-next.sh
 #
 # 【状態遷移】
 #   ✗ なし  →  ▶ 次のPR先  →  → PR発行中  →  ✓ マージ済み

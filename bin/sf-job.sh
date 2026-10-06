@@ -22,7 +22,7 @@
 #
 # 【使い方】
 #   cd ~/home/{github-owner}/{company}
-#   ~/sf-tools/sf-job.sh
+#   ~/sf-tools/bin/sf-job.sh
 # ==============================================================================
 
 # ------------------------------------------------------------------------------
@@ -85,13 +85,13 @@ phase_check_environment() {
         die "sf-job.sh は init フォルダからは実行できません。
   company フォルダに移動して実行してください:
     cd ..
-    ~/sf-tools/sf-job.sh"
+    ~/sf-tools/bin/sf-job.sh"
     fi
     if [[ "$current_dir" == force-* ]]; then
         die "sf-job.sh は force-* フォルダからは実行できません。
   company フォルダに移動して実行してください:
     cd ../..
-    ~/sf-tools/sf-job.sh"
+    ~/sf-tools/bin/sf-job.sh"
     fi
 
     log "INFO" "GitHub CLI の認証状態を確認中..."

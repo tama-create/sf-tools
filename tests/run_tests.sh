@@ -63,6 +63,7 @@ TEST_FILES=(
     test_sf-precommit.sh
     test_security.sh
     test_e2e.sh
+    test_sf-sync-wf.sh
 )
 
 # ------------------------------------------------------------------------------

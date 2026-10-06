@@ -106,19 +106,29 @@ jobs:
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           SLACK_CHANNEL_ID: ${{ vars.SLACK_CHANNEL_ID }}
+          # PR のタイトルなど、利用者が決められる値は、シェルのスクリプトに直接埋め込まず、環境変数で受け取る
+          STAGING_RESULT: ${{ steps.merge_staging.outputs.result }}
+          DEVELOP_RESULT: ${{ steps.merge_develop.outputs.result }}
+          PR_TITLE_RAW: ${{ github.event.pull_request.title || '' }}
+          PR_NUMBER_RAW: ${{ github.event.pull_request.number || '' }}
+          PR_URL_RAW: ${{ github.event.pull_request.html_url || '' }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
         run: |
+          # Slack に送る JSON の文字列として安全にする（" と \ のエスケープ・制御文字の除去・Slack の特殊文字 & < > の置き換え）
+          json_escape() { printf '%s' "$1" | tr -d '\000-\037' | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'; }
           CONFLICTS=""
-          if [ "${{ steps.merge_staging.outputs.result }}" = "conflict" ]; then
+          if [ "$STAGING_RESULT" = "conflict" ]; then
             CONFLICTS="staging"
           fi
-          if [ "${{ steps.merge_develop.outputs.result }}" = "conflict" ]; then
+          if [ "$DEVELOP_RESULT" = "conflict" ]; then
             CONFLICTS="${CONFLICTS:+$CONFLICTS, }develop"
           fi
 
-          PR_TITLE="${{ github.event.pull_request.title || '' }}"
-          PR_NUMBER="${{ github.event.pull_request.number || '' }}"
-          PR_URL="${{ github.event.pull_request.html_url || '' }}"
-          RUN_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          PR_TITLE=$(json_escape "$PR_TITLE_RAW")
+          PR_NUMBER=$(json_escape "$PR_NUMBER_RAW")
+          PR_URL=$(json_escape "$PR_URL_RAW")
+          RUN_URL="https://github.com/${REPOSITORY}/actions/runs/${RUN_ID}"
           DATETIME=$(TZ='Asia/Tokyo' date '+%Y-%m-%d %H:%M:%S JST')
 
           PR_TEXT=""

@@ -841,6 +841,43 @@ test_wf_propagate_skip_missing_branch() {
 }
 
 # ==============================================================================
+# ワークフローのひな形: 利用者が決められる値（PR のタイトル・ブランチ名）を、シェルや JavaScript に直接埋め込まない
+#   背景: Codex のレビュー（2026-10-06）。PR のタイトルやブランチ名に `"`・バッククォート・$( ) があると、
+#         通知のステップが壊れる、または、任意のコマンドが実行される（スクリプトの注入）。env: で環境変数に渡す
+# ==============================================================================
+test_wf_no_script_injection() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] ワークフロー: PR のタイトル・ブランチ名を、スクリプトに直接埋め込まない（注入の防止）${CLR_RST}"
+    local d="$SF_TOOLS_DIR/templates/.github/workflows" f name bad
+    for f in "$d"/wf-*.yml; do
+        name=$(basename "$f")
+        # env: の代入行（NAME: ${{ ... }}）と、if: / ref: の行は、除く。残った行が、スクリプトへの直接の埋め込み
+        bad=$(grep -nE '\$\{\{ *github\.(event\.pull_request\.(title|head\.ref|base\.ref|html_url)|ref_name|head_ref)|steps\.sequence_check\.outputs\.(feature|prev)' "$f" \
+              | grep -vE '^[0-9]+:[[:space:]]+(if:|ref:)|^[0-9]+:[[:space:]]+[A-Z_]+: \$\{\{' || true)
+        if [[ -z "$bad" ]]; then pass "${name}: 利用者が決められる値を、スクリプトに直接埋め込んでいない"
+        else fail "${name}: 利用者が決められる値を、スクリプトに直接埋め込んでいない" "$(echo "$bad" | head -2)"; fi
+    done
+
+    # Slack に送る JSON のエスケープ（json_escape）: 3 つのワークフローで、同じ関数。悪意のある・壊れやすい値で確認する
+    local je t out
+    for name in wf-release wf-propagate wf-sequence; do
+        je=$(grep -h 'json_escape()' "$d/${name}.yml" | sed 's/^ *//')
+        [[ -n "$je" ]] && pass "${name}: json_escape を使っている" || { fail "${name}: json_escape を使っている"; continue; }
+        t='x"; touch /tmp/pwned_wf_test; echo "a\b <b>&</b>'
+        out=$(bash -c "$je"'; json_escape "$1"' _ "$t")
+        [[ ! -e /tmp/pwned_wf_test ]] && pass "${name}: タイトルに含まれるコマンドは、実行されない" || { fail "${name}: タイトルに含まれるコマンドは、実行されない"; rm -f /tmp/pwned_wf_test; }
+        [[ "$out" == 'x\"; touch /tmp/pwned_wf_test; echo \"a\\b &lt;b&gt;&amp;&lt;/b&gt;' ]] \
+            && pass "${name}: \" と \ を JSON 用にエスケープし、& < > を Slack 用に置き換える" \
+            || fail "${name}: \" と \ を JSON 用にエスケープし、& < > を Slack 用に置き換える" "$out"
+    done
+
+    # JWT の秘密鍵は、ログインに失敗しても、必ず消す（trap）。本人だけが読める権限（umask 077）で作る
+    for name in wf-release wf-validate wf-metasync; do
+        assert_file_contains "$d/${name}.yml" "trap 'rm -f /tmp/server.key' EXIT" "${name}: 秘密鍵は、失敗しても、必ず消す（trap）"
+        assert_file_contains "$d/${name}.yml" "umask 077" "${name}: 秘密鍵は、本人だけが読める権限で作る"
+    done
+}
+
+# ==============================================================================
 # テスト 17: Phase 9 の既存 Ruleset の削除（--only 9）
 #   - エラー本文が返る（無料プランの 403）: 削除を試みない・「確認できなかった」と表示（誤った ID で DELETE しない）
 #   - 数字の ID が返る                    : その ID で DELETE が呼ばれ、「削除しました」と表示
@@ -1199,5 +1236,6 @@ test_phase10_eca_auto
 test_e2e_input_sequence
 test_sf_cli_check
 test_wf_propagate_skip_missing_branch
+test_wf_no_script_injection
 
 print_summary

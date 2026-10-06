@@ -119,6 +119,7 @@
 | `check_force_dir` | `check_force_dir` | `force-*` ディレクトリか検証 |
 | `check_home_dir` | `check_home_dir` | `~/home/{owner}/{company}/` の階層を検証し `GITHUB_OWNER` / `COMPANY_NAME` をセット |
 | `check_gh_owner` | `check_gh_owner OWNER` | gh 認証ユーザーがリポジトリオーナーと一致するか確認（不一致は die。オーナーが組織で、ユーザーがその有効な admin なら通過。gh が空を返す場合はスキップ） |
+| `ensure_sf_tools_latest` | `ensure_sf_tools_latest [--no-update] DIR` | sf-tools（DIR）が origin の最新か確認し、遅れていれば確認のうえ `git pull --ff-only` で更新する。戻り値: 0=最新（または判定できない）／2=更新した（呼び出し側は、更新した sf-tools で、再実行すること）。die: fetch 失敗・遅れていて未コミットの変更または未プッシュのコミットがある・更新を断った・pull 失敗・`--no-update` で遅れている |
 | `is_gitbash` | `if is_gitbash; then ...` | Windows の Git Bash か判定（`$OSTYPE` が `msys*` / `mingw*` / `cygwin*`） |
 | `check_sf_cli` | `check_sf_cli [--warn-only] [--cache]` | `sf --version` の終了コードが 0 か確認する（sf は npm 版が前提）。0 以外なら、sf の場所と対処を ERROR で表示して `die`（`--warn-only` は表示のみで戻り値 1）。`--cache`（日常のコマンド用）は、成功を `~/.sf-tools-sf-check`（`SF_TOOLS_SF_CHECK_STAMP` で変更可）に sf の場所つきで記録し、24 時間は確認を省略する（失敗は記録せず、毎回確認する）。sf 未インストール・GitHub Actions 上（`GITHUB_ACTIONS=true`）では何もしない |
 | `run_isolated_home` | `out=$(run_isolated_home CMD [ARGS])` | 一時的なホームフォルダ（`HOME` と `USERPROFILE` を `mktemp -d` のフォルダに）の中でコマンドを実行し、出力と終了コードを返す。終了後に一時フォルダを削除する。sf の認証・エイリアスを隔離するために使う（JWT 接続テスト） |
@@ -467,18 +468,19 @@ sf-init.sh --add-tier develop    # main+staging → main+staging+develop
 ### 4.15 sf-sync-wf.sh
 
 作成済みの `force-*` の `.github/workflows/` を、sf-tools の雛形（`templates/.github/workflows/`）に合わせる管理者向けコマンド（設計: `doc/wf-distribution-strategy.md`）。`sf-install.sh` などから自動では実行しない（利用者の意思なく、ワークフローが書き換わるのを防ぐため）。実行フロー（順序変更禁止）:
-
 1. オプション解析（`--check` / `--remove <ファイル名>` / `-v` / `-h`。不明なオプションは die）
 2. `check_force_dir`（force-* 以外は die）→ 現在のブランチが `is_protected_branch`（`branches.txt` のブランチ）なら die
-3. `--remove`: ファイル名を `^[A-Za-z0-9][A-Za-z0-9._-]*\.ya?ml$` で検証（パスの区切り・`..` は拒否）→ 存在確認 → **雛形にあるファイルは拒否**（廃止されたものだけが対象）→ 警告ボックス + `ask_yn` → 2 回目の `ask_yn`（削除は二重確認）→ `rm`。コミットはしない
-4. 雛形と比較（`diff -q --strip-trailing-cr`。CRLF だけの違いは無視）: 内容が違う `CHANGED`・プロジェクトにない `NEW`・雛形にない `EXTRA`（情報として表示するだけで、変更しない）
-5. 差分なし → 「最新です」で終了（0）。差分あり → `diff -u` を表示
-6. `--check`: ここで終了（差分あり: 終了コード 1）。何も変更せず、確認も出さない
-7. 警告ボックス + `ask_yn`（N / q は die。`GITHUB_ACTIONS=true` でも省略しない）→ `cp`（上書き）。コミット・プッシュはしない
+3. **sf-tools が最新であること（必須）**: `ensure_sf_tools_latest "$SF_TOOLS_DIR"`（`--check` のときは `--no-update`）。戻り値 2（更新した）なら、`SF_SYNC_WF_RESTARTED=1` を export して、同じ引数（`ORIG_ARGS`）で `exec` して再実行する（実行中のスクリプトが書き換わるため）。すでに再実行済み（`SF_SYNC_WF_RESTARTED` あり）でまだ 2 なら die（無限ループ防止）。古い雛形で、プロジェクトのワークフローを書き換えないための必須の手順
+4. **冒頭の警告ボックス + `ask_yn || die`**（CLAUDE.md 2.4。N / q は die。`GITHUB_ACTIONS=true` でも省略しない）。`--check` は、何も変更しないため、表示しない
+5. `--remove`: ファイル名を `^[A-Za-z0-9][A-Za-z0-9._-]*.ya?ml$` で検証（パスの区切り・`..` は拒否）→ 存在確認 → **雛形にあるファイルは拒否**（廃止されたものだけが対象）→ 2 回目の `ask_yn`（削除は二重確認）→ `rm`。コミットはしない
+6. 雛形と比較（`diff -q --strip-trailing-cr`。CRLF だけの違いは無視）: 内容が違う `CHANGED`・プロジェクトにない `NEW`・雛形にない `EXTRA`（情報として表示するだけで、変更しない）
+7. 差分なし → 「最新です」で終了（0）。差分あり → `diff -u` を表示
+8. `--check`: ここで終了（差分あり: 終了コード 1）
+9. 差分を見たうえで、2 回目の `ask_yn`（N / q は die）→ `cp`（上書き）。コミット・プッシュはしない
 
 **更新の手順（推奨）:** `sf-job.sh` でジョブ名 `system-日付` の作業用ブランチを作る（固定の `system` ブランチは、あらかじめ作らない。`sf-job.sh` は同名のブランチを拒否し、長く残るブランチは古くなるため）→ `sf-sync-wf.sh` → `git diff` → `sf-push.sh` → PR・マージ（複数の環境がある構成では `develop` → `staging` → `main` の順。`sf-next.sh` が案内する）。ワークフローをプッシュするには、`workflow` スコープのある権限が必要。
 
-テスト: `tests/test_sf-sync-wf.sh`（モックの HOME に雛形を置き、ガード・差分・N/q/Y・CRLF・`--check`・`--remove` を確認。実際の雛形のコピーが `--check` で差分なしであることも確認）
+テスト: `tests/test_sf-sync-wf.sh`（モックの HOME に雛形を置き、ガード・差分・N/q/Y・CRLF・`--check`・`--remove` を確認。実際の雛形のコピーが `--check` で差分なしであることも確認）、`tests/test_common.sh` の `test_ensure_sf_tools_latest`（本物の git で、最新・遅れ・未コミット・未プッシュ・更新を断る・`--no-update` などを確認。bare の origin は `--initial-branch=main` で作る。環境によって既定のブランチ名が違うため）
 ---
 
 ## 5. ドキュメント連動ルール

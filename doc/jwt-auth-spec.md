@@ -167,7 +167,7 @@ Phase 10 は Step 3（SF_PRIVATE_KEY 登録）まで完了していれば、`--r
     rm -f /tmp/server.key
 ```
 
-`sf-tools/templates/.github/workflows/` が正本。変更時は `sf-sync-wf.sh`（未実装）で各プロジェクトへ配布する。
+`sf-tools/templates/.github/workflows/` が正本。変更時は `sf-sync-wf.sh` で各プロジェクトへ反映する（管理者が手動で実行する）。
 
 ---
 

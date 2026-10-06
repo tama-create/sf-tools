@@ -66,6 +66,7 @@
 | `test_sf-prepush.sh` | hooks/pre-push |
 | `test_sf-push.sh` | sf-push.sh |
 | `test_sf-update-secret.sh` | sf-update-secret.sh |
+| `test_sf-sync-wf.sh` | sf-sync-wf.sh |
 
 ### 2.2 `test_helper.sh` の前提
 
@@ -378,7 +379,7 @@ GitHub Secrets / Variables の JWT 認証情報を再登録する。実行フロ
 **SF_PRIVATE_KEY の base64 エンコーディング:**
 GitHub Actions のワークフローは Secret から取得した値を `base64 -d` でデコードして使用する。そのため `SF_PRIVATE_KEY` は **base64 エンコード済みの文字列** として登録しなければならない。`sf-update-secret.sh` の `_update_private_key` は以下のパイプで登録する:
 
-**ワークフローを書くときの規約（スクリプトの注入の防止。2026-10-06）:** PR のタイトル・ブランチ名（`github.event.pull_request.title` / `head.ref` / `base.ref`、`github.ref_name`）や、そこから作った Step の出力など、**利用者が決められる値は、`run:` のシェルや、`github-script` の JavaScript に、`${{ }}` で直接埋め込まない**。`env:` で環境変数に渡し、スクリプトでは `$変数` / `process.env.変数` で参照する（ブランチ名・PR のタイトルには、`"`・バッククォート・`$( )` などが入れられるため。直接埋め込むと、通知のステップが壊れる、または、任意のコマンドが実行される）。Slack に送る JSON には、値を `json_escape`（`"` と `\` のエスケープ・制御文字の除去・`& < >` の置き換え）に通して入れる。JWT の秘密鍵の一時ファイルは、`umask 077` で作り、`trap 'rm -f /tmp/server.key' EXIT` で、失敗しても消す。`tests/test_sf-init.sh` の `test_wf_no_script_injection` が、直接の埋め込みが無いことを確認する。**既存の `force-*` には、自動では届かない**（配布用の `sf-sync-wf.sh` は未実装）。各リポジトリの `.github/workflows/` を、新しい雛形で、手動で更新すること
+**ワークフローを書くときの規約（スクリプトの注入の防止。2026-10-06）:** PR のタイトル・ブランチ名（`github.event.pull_request.title` / `head.ref` / `base.ref`、`github.ref_name`）や、そこから作った Step の出力など、**利用者が決められる値は、`run:` のシェルや、`github-script` の JavaScript に、`${{ }}` で直接埋め込まない**。`env:` で環境変数に渡し、スクリプトでは `$変数` / `process.env.変数` で参照する（ブランチ名・PR のタイトルには、`"`・バッククォート・`$( )` などが入れられるため。直接埋め込むと、通知のステップが壊れる、または、任意のコマンドが実行される）。Slack に送る JSON には、値を `json_escape`（`"` と `\` のエスケープ・制御文字の除去・`& < >` の置き換え）に通して入れる。JWT の秘密鍵の一時ファイルは、`umask 077` で作り、`trap 'rm -f /tmp/server.key' EXIT` で、失敗しても消す。`tests/test_sf-init.sh` の `test_wf_no_script_injection` が、直接の埋め込みが無いことを確認する。**既存の `force-*` には、自動では届かない**（配布用の `sf-sync-wf.sh`（4.15）で、管理者が、各リポジトリに、手動で反映する）
 
 ```bash
 tr -d '\r' < "$key_file" | base64 -w 0 | gh secret set "SF_PRIVATE_KEY" -R "$REPO_FULL_NAME"
@@ -462,6 +463,22 @@ sf-init.sh --add-tier develop    # main+staging → main+staging+develop
 - 見つかったテストクラスが `deployed_files` に含まれていなければ `print_gcc_warning` を出力
 - 設計思想: 本番/Sandbox に既存のテストクラスは含めなくてよい → WARNING 扱い（エラーにはしない）
 
+
+### 4.15 sf-sync-wf.sh
+
+作成済みの `force-*` の `.github/workflows/` を、sf-tools の雛形（`templates/.github/workflows/`）に合わせる管理者向けコマンド（設計: `doc/wf-distribution-strategy.md`）。`sf-install.sh` などから自動では実行しない（利用者の意思なく、ワークフローが書き換わるのを防ぐため）。実行フロー（順序変更禁止）:
+
+1. オプション解析（`--check` / `--remove <ファイル名>` / `-v` / `-h`。不明なオプションは die）
+2. `check_force_dir`（force-* 以外は die）→ 現在のブランチが `is_protected_branch`（`branches.txt` のブランチ）なら die
+3. `--remove`: ファイル名を `^[A-Za-z0-9][A-Za-z0-9._-]*\.ya?ml$` で検証（パスの区切り・`..` は拒否）→ 存在確認 → **雛形にあるファイルは拒否**（廃止されたものだけが対象）→ 警告ボックス + `ask_yn` → 2 回目の `ask_yn`（削除は二重確認）→ `rm`。コミットはしない
+4. 雛形と比較（`diff -q --strip-trailing-cr`。CRLF だけの違いは無視）: 内容が違う `CHANGED`・プロジェクトにない `NEW`・雛形にない `EXTRA`（情報として表示するだけで、変更しない）
+5. 差分なし → 「最新です」で終了（0）。差分あり → `diff -u` を表示
+6. `--check`: ここで終了（差分あり: 終了コード 1）。何も変更せず、確認も出さない
+7. 警告ボックス + `ask_yn`（N / q は die。`GITHUB_ACTIONS=true` でも省略しない）→ `cp`（上書き）。コミット・プッシュはしない
+
+**更新の手順（推奨）:** `sf-job.sh` でジョブ名 `system-日付` の作業用ブランチを作る（固定の `system` ブランチは、あらかじめ作らない。`sf-job.sh` は同名のブランチを拒否し、長く残るブランチは古くなるため）→ `sf-sync-wf.sh` → `git diff` → `sf-push.sh` → PR・マージ（複数の環境がある構成では `develop` → `staging` → `main` の順。`sf-next.sh` が案内する）。ワークフローをプッシュするには、`workflow` スコープのある権限が必要。
+
+テスト: `tests/test_sf-sync-wf.sh`（モックの HOME に雛形を置き、ガード・差分・N/q/Y・CRLF・`--check`・`--remove` を確認。実際の雛形のコピーが `--check` で差分なしであることも確認）
 ---
 
 ## 5. ドキュメント連動ルール

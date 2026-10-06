@@ -134,7 +134,7 @@ templates/.github/workflows/  ─sf-init→   .github/workflows/
 └── wf-metasync.yml                        └── wf-metasync.yml
 ```
 
-**設計理由:** sf-tools リポジトリへの依存をなくし、各プロジェクトが独立して動作する。WF を変更する場合は `sf-tools/templates/` を更新し、`sf-sync-wf.sh`（未実装）で各プロジェクトへ配布する。
+**設計理由:** sf-tools リポジトリへの依存をなくし、各プロジェクトが独立して動作する。WF を変更する場合は `sf-tools/templates/` を更新し、`sf-sync-wf.sh` で各プロジェクトへ反映する（管理者が手動で実行する）。
 
 ### 4.2 ワークフロー一覧
 
@@ -316,7 +316,7 @@ PAT の作成: GitHub → Settings → Developer Settings → Personal access to
 | マージ順序チェックを警告のみ（ブロックしない）にした | 緊急 Hotfix を妨げないため。Slack 通知で可視性は確保。 |
 | 環境ブランチ間の直接マージはブロック | 意図しない変更の混入を防止。feature 経由を強制し、各環境のデプロイ内容を追跡可能にする。 |
 | deploy-target.txt が空なら正常終了（内部的には RET_NO_CHANGE、終了コードは 0） | CI でリリース定義だけ先に準備する運用を許容するため。 |
-| セルフコンテインド WF + `sf-tools/templates/` 一元管理 | sf-tools への実行時依存をなくし、各プロジェクトが独立して動作する。WF 変更は sf-sync-wf.sh（未実装）で各プロジェクトへ配布。 |
+| セルフコンテインド WF + `sf-tools/templates/` 一元管理 | sf-tools への実行時依存をなくし、各プロジェクトが独立して動作する。WF 変更は sf-sync-wf.sh で各プロジェクトへ反映（管理者が手動で実行）。 |
 | 24 時間スロットルでツール更新 | 毎回 sf-start.sh 実行時にアップデートすると起動が遅くなるため。 |
 | 下流伝播のコンフリクトは自動解決しない | 本番と開発で同じ箇所が変更された状況は人間が判断すべき。Slack 通知で検知し手動対応。 |
 | 本番の変更を 1 時間以内に全環境へ伝播 | 古いコードベースでの開発によるデグレを防止する。 |

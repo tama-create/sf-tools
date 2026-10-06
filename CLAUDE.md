@@ -145,6 +145,7 @@ git pull origin main                     # main の最新を取り込む
 | `sf-init.sh` | ✅ 実装済み |
 | `sf-metasync.sh` | ✅ 実装済み |
 | `sf-update-secret.sh` | ✅ 実装済み |
+| `sf-sync-wf.sh` | ✅ 実装済み |
 | `sf-release.sh`（`--release` 時） | ✅ 実装済み |
 
 > 警告ボックスの実装例は `doc/dev-reference.md` セクション 3.4 参照

@@ -49,8 +49,11 @@ jobs:
       - uses: actions/checkout@v4
       - id: check
         name: デプロイ対象ファイルを確認
+        env:
+          # ブランチ名・PR のタイトルなど、利用者が決められる値は、シェルのスクリプトに直接埋め込まず、環境変数で受け取る
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
         run: |
-          HEAD="${{ github.event.pull_request.head.ref }}"
+          HEAD="$HEAD_REF"
           DEPLOY="sf-tools/release/${HEAD}/deploy-target.txt"
           REMOVE="sf-tools/release/${HEAD}/remove-target.txt"
           # コメント行・空行を除いた実質的な内容があるか確認
@@ -108,8 +111,10 @@ jobs:
       # Step 5: 接続先 Salesforce 組織の選択
       # --------------------------------------------------------------------------
       - name: 接続先組織を選択（マージ先ブランチに応じて切り替え）
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref || github.ref_name }}
         run: |
-          BASE="${{ github.event.pull_request.base.ref || github.ref_name }}"
+          BASE="$BASE_REF"
           if   [[ "$BASE" == "main"    ]]; then
             echo "SF_CONSUMER_KEY=${{ secrets.SF_CONSUMER_KEY_PROD }}" >> "$GITHUB_ENV"
             echo "SF_USERNAME=${{ vars.SF_USERNAME_PROD }}"            >> "$GITHUB_ENV"
@@ -132,6 +137,9 @@ jobs:
       # --------------------------------------------------------------------------
       - name: Salesforce 組織にログイン
         run: |
+          # 秘密鍵は、本人だけが読める権限で作り、ログインの成否にかかわらず（失敗しても）、必ず消す
+          umask 077
+          trap 'rm -f /tmp/server.key' EXIT
           echo "${{ secrets.SF_PRIVATE_KEY }}" | base64 -d > /tmp/server.key
           sf org login jwt \
             --client-id    "$SF_CONSUMER_KEY" \
@@ -146,10 +154,12 @@ jobs:
       # Step 7: デプロイ対象ブランチの設定
       # --------------------------------------------------------------------------
       - name: デプロイ対象ブランチを設定
+        env:
+          SOURCE_BRANCH: ${{ github.event.pull_request.head.ref || github.ref_name }}
         run: |
           mkdir -p sf-tools/release
-          echo "${{ github.event.pull_request.head.ref || github.ref_name }}" > sf-tools/release/branch_name.txt
-          echo "対象ブランチ: ${{ github.event.pull_request.head.ref || github.ref_name }}"
+          printf '%s\n' "$SOURCE_BRANCH" > sf-tools/release/branch_name.txt
+          echo "対象ブランチ: ${SOURCE_BRANCH}"
 
       # --------------------------------------------------------------------------
       # Step 8: Salesforce へのデプロイ検証（本番反映なし）
@@ -171,9 +181,15 @@ jobs:
       - name: 検証結果を PR に投稿
         if: always()
         uses: actions/github-script@v7
+        env:
+          # ブランチ名は、JavaScript のソースに直接埋め込まず、環境変数で受け取る
+          HEAD_REF: ${{ github.event.pull_request.head.ref || github.ref_name }}
+          BASE_REF: ${{ github.event.pull_request.base.ref || github.ref_name }}
         with:
           script: |
             const fs = require('fs');
+            const ヘッドブランチ = process.env.HEAD_REF;
+            const ベースブランチ = process.env.BASE_REF;
             let ログ = '';
             try {
               ログ = fs.readFileSync('/tmp/sf_result.txt', 'utf8');
@@ -192,7 +208,7 @@ jobs:
               '',
               `| 項目 | 値 |`,
               `| --- | --- |`,
-              `| ブランチ | \`${{ github.event.pull_request.head.ref || github.ref_name }}\` → \`${{ github.event.pull_request.base.ref || github.ref_name }}\` |`,
+              `| ブランチ | \`${ヘッドブランチ}\` → \`${ベースブランチ}\` |`,
               `| コミット | \`${{ github.event.pull_request.head.sha || '' }}\` |`,
               `| 実行モード | 検証のみ（本番反映なし） |`,
               '',

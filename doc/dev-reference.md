@@ -301,7 +301,7 @@ check_gh_owner "$GITHUB_OWNER"   # 認証ユーザーの一致確認
 
 - `sf-release.sh` のラッパー（オプションなし = dry-run がデフォルト）
 - ランチャーから呼ばれる dry-run 専用コマンド
-- `--release` を転送した場合は sf-release.sh の安全ガード（セクション 5.2）が働く
+- `--release` を転送した場合は sf-release.sh の安全ガード（セクション 3.4）が働く
 
 ### 4.7 sf-launcher.sh
 
@@ -377,6 +377,8 @@ GitHub Secrets / Variables の JWT 認証情報を再登録する。実行フロ
 
 **SF_PRIVATE_KEY の base64 エンコーディング:**
 GitHub Actions のワークフローは Secret から取得した値を `base64 -d` でデコードして使用する。そのため `SF_PRIVATE_KEY` は **base64 エンコード済みの文字列** として登録しなければならない。`sf-update-secret.sh` の `_update_private_key` は以下のパイプで登録する:
+
+**ワークフローを書くときの規約（スクリプトの注入の防止。2026-10-06）:** PR のタイトル・ブランチ名（`github.event.pull_request.title` / `head.ref` / `base.ref`、`github.ref_name`）や、そこから作った Step の出力など、**利用者が決められる値は、`run:` のシェルや、`github-script` の JavaScript に、`${{ }}` で直接埋め込まない**。`env:` で環境変数に渡し、スクリプトでは `$変数` / `process.env.変数` で参照する（ブランチ名・PR のタイトルには、`"`・バッククォート・`$( )` などが入れられるため。直接埋め込むと、通知のステップが壊れる、または、任意のコマンドが実行される）。Slack に送る JSON には、値を `json_escape`（`"` と `\` のエスケープ・制御文字の除去・`& < >` の置き換え）に通して入れる。JWT の秘密鍵の一時ファイルは、`umask 077` で作り、`trap 'rm -f /tmp/server.key' EXIT` で、失敗しても消す。`tests/test_sf-init.sh` の `test_wf_no_script_injection` が、直接の埋め込みが無いことを確認する。**既存の `force-*` には、自動では届かない**（配布用の `sf-sync-wf.sh` は未実装）。各リポジトリの `.github/workflows/` を、新しい雛形で、手動で更新すること
 
 ```bash
 tr -d '\r' < "$key_file" | base64 -w 0 | gh secret set "SF_PRIVATE_KEY" -R "$REPO_FULL_NAME"

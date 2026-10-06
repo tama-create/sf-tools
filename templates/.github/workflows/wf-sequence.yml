@@ -30,8 +30,11 @@ jobs:
       - uses: actions/checkout@v4
       - id: check
         name: デプロイ対象ファイルを確認
+        env:
+          # ブランチ名・PR のタイトルなど、利用者が決められる値は、シェルのスクリプトに直接埋め込まず、環境変数で受け取る
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
         run: |
-          HEAD="${{ github.event.pull_request.head.ref }}"
+          HEAD="$HEAD_REF"
           DEPLOY="sf-tools/release/${HEAD}/deploy-target.txt"
           REMOVE="sf-tools/release/${HEAD}/remove-target.txt"
           has_content() {
@@ -66,9 +69,12 @@ jobs:
       # --------------------------------------------------------------------------
       - name: マージ順序を検証
         id: sequence_check
+        env:
+          FEATURE_REF: ${{ github.event.pull_request.head.ref || github.ref_name }}
+          BASE_REF: ${{ github.event.pull_request.base.ref || github.ref_name }}
         run: |
-          FEATURE="${{ github.event.pull_request.head.ref || github.ref_name }}"
-          BASE="${{ github.event.pull_request.base.ref || github.ref_name }}"
+          FEATURE="$FEATURE_REF"
+          BASE="$BASE_REF"
 
           # branches.txt は常に main ブランチから読み込む
           BRANCH_FILE=$(mktemp)
@@ -83,13 +89,13 @@ jobs:
           BRANCHES=$(grep -v '^[[:space:]]*#' "$BRANCH_FILE" | grep -v '^[[:space:]]*$' | tr -d '\r')
 
           # 環境ブランチ間の直接 PR はエラーでブロック
-          if echo "$BRANCHES" | grep -qx "$FEATURE"; then
+          if echo "$BRANCHES" | grep -qxF -- "$FEATURE"; then
             echo "::error title=マージ元ブランチ不正::${FEATURE} からのPRは許可されていません。必ずフィーチャーブランチからPRを作成してください。"
             exit 1
           fi
 
           # base_ref が branches.txt に含まれていない場合はスキップ
-          if ! echo "$BRANCHES" | grep -qx "$BASE"; then
+          if ! echo "$BRANCHES" | grep -qxF -- "$BASE"; then
             echo "::notice::チェック対象外のブランチです: $BASE"
             exit 0
           fi
@@ -117,7 +123,7 @@ jobs:
           MISSING=""
           for PREV in $PREV_LIST; do
             git fetch origin $PREV
-            if git merge-base --is-ancestor origin/$FEATURE origin/$PREV; then
+            if git merge-base --is-ancestor "origin/$FEATURE" "origin/$PREV"; then
               echo "::notice title=プロモーション順序OK::✓ ${FEATURE} は ${PREV} にマージ済みです"
             else
               echo "::warning title=⚠ プロモーション順序未確認::${FEATURE} は ${PREV} にまだマージされていません。意図的な場合はそのまま進めてください。"
@@ -141,13 +147,22 @@ jobs:
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           SLACK_CHANNEL_ID: ${{ vars.SLACK_CHANNEL_ID }}
+          # ブランチ名・PR のタイトルは、シェルのスクリプトに直接埋め込まず、環境変数で受け取る
+          FEATURE_RAW: ${{ steps.sequence_check.outputs.feature }}
+          PREV_RAW: ${{ steps.sequence_check.outputs.prev }}
+          PR_TITLE_RAW: ${{ github.event.pull_request.title || '' }}
+          PR_NUMBER_RAW: ${{ github.event.pull_request.number || '' }}
+          PR_URL_RAW: ${{ github.event.pull_request.html_url || '' }}
+          BASE_RAW: ${{ github.event.pull_request.base.ref || github.ref_name }}
         run: |
-          FEATURE="${{ steps.sequence_check.outputs.feature }}"
-          PREV="${{ steps.sequence_check.outputs.prev }}"
-          PR_TITLE="${{ github.event.pull_request.title || '' }}"
-          PR_NUMBER="${{ github.event.pull_request.number || '' }}"
-          PR_URL="${{ github.event.pull_request.html_url || '' }}"
-          BASE="${{ github.event.pull_request.base.ref || github.ref_name }}"
+          # Slack に送る JSON の文字列として安全にする（" と \ のエスケープ・制御文字の除去・Slack の特殊文字 & < > の置き換え）
+          json_escape() { printf '%s' "$1" | tr -d '\000-\037' | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'; }
+          FEATURE=$(json_escape "$FEATURE_RAW")
+          PREV=$(json_escape "$PREV_RAW")
+          PR_TITLE=$(json_escape "$PR_TITLE_RAW")
+          PR_NUMBER=$(json_escape "$PR_NUMBER_RAW")
+          PR_URL=$(json_escape "$PR_URL_RAW")
+          BASE=$(json_escape "$BASE_RAW")
           DATETIME=$(TZ='Asia/Tokyo' date '+%Y-%m-%d %H:%M:%S JST')
 
           MESSAGE=":warning: *マージ順序の確認が必要です*\n• ブランチ \`${FEATURE}\` は \`${PREV}\` にまだマージされていません\n• PR: <${PR_URL}|#${PR_NUMBER} ${PR_TITLE}>\n• 対象: \`${FEATURE}\` → \`${BASE}\`\n• 実行日時: ${DATETIME}\n• 意図的な場合はそのままマージを進めてください"

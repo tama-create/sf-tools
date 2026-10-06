@@ -102,7 +102,7 @@ openssl req -new -x509 -days 3650 \
 
 ---
 
-## 4. sf-init Phase 6 の処理フロー
+## 4. sf-init Phase 10 の処理フロー
 
 ### 4.1 フロー概要
 
@@ -141,7 +141,7 @@ openssl req -new -x509 -days 3650 \
 
 ### 4.2 再開（--resume）時の考慮
 
-Phase 6 は Step 3（SF_PRIVATE_KEY 登録）まで完了していれば、`--resume 6` で Step 4 から再開できるよう設計する。
+Phase 10 は Step 3（SF_PRIVATE_KEY 登録）まで完了していれば、`--resume 10` で Step 4 から再開できるよう設計する。
 
 ---
 

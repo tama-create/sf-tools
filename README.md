@@ -164,6 +164,8 @@ sf-job.sh
 2. 作業ディレクトリを準備（worktree または clone）
 3. `sf-start.sh` を自動起動（ログイン・フック設定・VS Code 起動）
 
+> **Windows のパス長について:** クローンは `core.longpaths=true` 付きで行います（Windows のパスの長さの上限（260 文字）対策）。組織に長い名前のメタデータ（例: DevOps Center の `objectTranslations`）があっても、チェックアウトに失敗しません。この設定はクローン先に残るので、以降の `git add` / `commit` / `push` にも効きます。
+
 ### 3.4 作業を再開する（sf-start）
 
 前日の続きなど既存ブランチで再開するときは `force-*` ディレクトリ内で実行します。
@@ -884,17 +886,26 @@ bash tests/e2e/run.sh
 
 **9.3.1 Hello World のリリースと削除:** sf-tools の本来の機能（PR → 検証 → マージ → リリース、削除用の PR）を通しで確認します。
 
-1. ブランチ `e2e-hello` に、Apex クラスと `release/e2e-hello/deploy-target.txt` を追加して PR を作る
+1. **通常の運用と同じく、sf-tools のコマンドで作業します。** `sf-job.sh`（ブランチ `e2e-hello` の作成・clone・`sf-start.sh`）→ Apex クラスと `release/e2e-hello/deploy-target.txt` を書く → `sf-dryrun.sh`（ローカルで検証。`@isTest` を検出して `--tests` を付ける）→ `sf-push.sh`（commit・push。`pre-push` フックも動く）。ここまでは、開発者がターミナルで行う操作と同じです（VS Code の起動・メッセージ入力、ブラウザでのログインだけを、自動化のために差し替えています）。そのあと、`gh` で PR を作ります
 2. `wf-validate`（検証）が成功することを確認し、PR をマージする
 3. `wf-release` が成功し（JWT ログイン・sf-tools の取得（公開リポジトリを Token なしで clone）・Slack 通知）、Salesforce にクラスができたことを確認する
    （マージ時には `wf-propagate` も動きます。`staging` / `develop` がない構成では、失敗にせずスキップして成功します）
-4. 続けて、ブランチ `e2e-hello-delete` に `remove-target.txt` を追加して、同じ流れで削除する。Salesforce からクラスが消えたことを確認する
+4. リリースしたジョブのクローンで、`sf-next.sh`（マージ済みと表示されること）と、`sf-deploy.sh -t main`（共有環境への、ローカルからの強制リリースが、拒否されること）も確認します
+5. 続けて、削除も、同じ道で行います。`sf-job.sh`（ブランチ `e2e-hello-delete`）→ `remove-target.txt` を書く → `sf-dryrun.sh` → `sf-push.sh` → `gh` で PR → `wf-validate` → マージ → `wf-release`。Salesforce からクラスが消えたことを確認します
 
-ワークフローが失敗したときは、失敗したステップのログの末尾が、その場で画面に表示されます。
+ワークフローが失敗したときは、失敗したステップのログの末尾が、その場で画面に表示されます。失敗したワークフローは、Salesforce や通信側の一時的なエラーの可能性があるため、**1 回だけ自動で再実行**します（開発者が GitHub の画面で「Re-run」を押すのと同じです）。再実行で成功した場合は PASS にしますが、警告を表示し、結果にも件数を出します。再実行でも失敗したら FAIL です。
 
 これで、Slack には、失敗ではなく、成功の通知が届きます。テスト用の組織は、Sandbox ではなく本番相当なので、**テスト用の 2 つのクラスだけ**（名前が完全に一致するもの）を、リリース・削除します。途中で失敗して組織に残ったときは、次回の前掃除（または `cleanup.sh`）が、同じ名前のものだけを削除します。実行の時間は、環境により、10〜15 分ほどです（各待ちの上限: `E2E_WF_TIMEOUT` 秒、確認の間隔: `E2E_POLL_SEC` 秒）。
 
 テスト用のリポジトリは毎回別の名前（`force-e2e-日時`）です。終了後も残るのは、直前の 1 回分だけで、次回の `e2e` の最初（前掃除）に、自動で削除されます（Token は、GitHub の Secret として暗号化された状態です）。終了時に削除したいときは、`--cleanup` を付けます。すぐに削除したいときは、次のコマンドを使います。
+
+**途中から再実行する（`--resume`）:** `e2e` は、`sf-init` と `wf-metasync` の確認に、15 分ほどかかります。Hello World の部分だけを直して確認したいときは、前回残したテスト用リポジトリ（最新の 1 つ）を使って、その部分だけを、約 15 分で再実行できます。
+
+```bash
+bash tests/e2e/run.sh --resume
+```
+
+`--resume` では、前掃除・`sf-init`・`wf-metasync` を行いません。ジョブ名は、毎回、時刻付きの別の名前（`e2e-hello-時刻`）になるので、同じリポジトリで、何度でも実行できます。前回の失敗で、Hello World の Apex クラスが組織に残っていたら、最初に削除します（名前が完全に一致するものだけ）。前回残したリポジトリがない場合は、エラーになります（通常の実行をしてください）。
 
 ```bash
 bash tests/e2e/cleanup.sh          # 削除対象の一覧を表示するだけ（何も削除しない）

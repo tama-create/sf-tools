@@ -46,6 +46,17 @@ e2e_is_target_jwt_dir() { [[ "$1" =~ ^force-e2e-[0-9]{8}-[0-9]{6}$ ]]; }
 # 一時ファイル・フォルダ（mktemp が作る 6 文字の英数字つき）: e2e-run.XXXXXX / e2e-eca-del.XXXXXX / e2e-sfdx-url.XXXXXX
 e2e_is_target_tmp()     { [[ "$1" =~ ^e2e-(run|eca-del|sfdx-url)\.[A-Za-z0-9]{6}$ ]]; }
 
+# 1 行の文字列から、秘密情報を伏せる（表示・ログに出す前に、必ず通す）。
+#   鍵一式の値（完全一致）→ 認証 URL の形式（リフレッシュトークン）→ Token らしい文字列（lib/common.sh の _mask_secrets）
+_e2e_mask_line() {
+    local line="$1" v
+    for v in "${E2E_PAT_TOKEN:-}" "${E2E_SLACK_BOT_TOKEN:-}" "${E2E_SFDX_AUTH_URL:-}"; do
+        [[ -n "$v" ]] && line="${line//"$v"/***}"
+    done
+    line=$(printf '%s' "$line" | sed -E 's#(force://[^:@ ]*:[^:@ ]*:)[^@ ]*@#\1***masked***@#')  # パイプのみのため run 不使用
+    _mask_secrets "$line"
+}
+
 # Windows（Git Bash）かどうか（lib/common.sh の is_gitbash を使う。$OSTYPE は msys / mingw / cygwin のいずれにもなる）
 e2e_is_windows() { is_gitbash; }
 
@@ -123,18 +134,29 @@ e2e_require_guard() {
 # sf のエイリアスの保存・復元（sf-init は prod / staging / develop を付けるため、テスト後に元へ戻す）
 # ------------------------------------------------------------------------------
 # 出力形式: 1 行に 1 つ「エイリアス=値」
+# sf alias list の失敗（戻り値 1）を、空の一覧と取り違えない。取り違えると、保存した一覧が空になり、
+# 復元のときに、開発者の本物のエイリアス（prod / staging / develop など）を、すべて外してしまう
 e2e_alias_dump() {
-    sf alias list --json 2>/dev/null | tr -d '\n\r' \
+    local out
+    out=$(sf alias list --json 2>/dev/null) || return 1  # VAR=$(cmd) のため run 不使用
+    printf '%s' "$out" | tr -d '\n\r' \
         | grep -oE '"alias": *"[^"]*", *"value": *"[^"]*"' \
-        | sed -E 's/"alias": *"([^"]*)", *"value": *"([^"]*)"/\1=\2/'  # パイプのみのため run 不使用
+        | sed -E 's/"alias": *"([^"]*)", *"value": *"([^"]*)"/\1=\2/' || true  # パイプのみのため run 不使用。エイリアスが 0 件なら、grep が 1 を返す（正常）
 }
 
-e2e_alias_snapshot() { e2e_alias_dump > "$1"; }
+# 戻り値 1: sf alias list に失敗した（保存できていない。呼び出し側は、中断すること）
+e2e_alias_snapshot() {
+    local out
+    out=$(e2e_alias_dump) || return 1  # VAR=$(cmd) のため run 不使用
+    printf '%s\n' "$out" > "$1"
+    : > "${1}.ok"  # 保存に成功した目印（これがないと、復元しない）
+}
 
 # 保存時点に戻す: いま増えているものは外し、変わった・消えたものは付け直す
 e2e_alias_restore() {
     local snap="$1" now line key val cur
-    now=$(e2e_alias_dump)  # VAR=$(cmd) のため run 不使用
+    [[ -f "${snap}.ok" ]] || { log "WARNING" "  sf のエイリアスの保存に成功していないため、復元しません。"; return 1; }
+    now=$(e2e_alias_dump) || { log "WARNING" "  sf alias list に失敗したため、エイリアスを復元できません（開発者のエイリアスを、誤って外さないため、何もしません）。"; return 1; }  # VAR=$(cmd) のため run 不使用
     while IFS= read -r line; do
         [[ -z "$line" ]] && continue
         key="${line%%=*}"
@@ -162,20 +184,18 @@ e2e_sf_admin_login() {
     for ((try = 1; try <= max; try++)); do
         # 成否は終了コードで判定する。出力は、失敗時の表示のために受け取る
         if out=$(run sf org login sfdx-url --sfdx-url-file "$urlfile" --alias "$E2E_ADMIN_ALIAS"); then  # 条件チェック
-            rm -f "$urlfile"
+            rm -f "$urlfile"  # run 不使用: 認証 URL の一時ファイルの削除（秘密情報を残さない）
             return 0
         fi
         log "WARNING" "  管理用ログインに失敗しました（${try}/${max}）。sf の出力:"
         printf '%s\n' "$out" | grep -v '^[[:space:]]*$' | head -6 | while IFS= read -r line; do
-            # トークン・認証 URL のリフレッシュトークンは、伏せ字にして表示する
-            line=$(printf '%s' "$line" | sed -E 's#(force://[^:@ ]*:[^:@ ]*:)[^@ ]*@#\1***masked***@#')  # パイプのみのため run 不使用
-            log "WARNING" "    $(_mask_secrets "$line")"
+            log "WARNING" "    $(_e2e_mask_line "$line")"  # トークン・認証 URL のリフレッシュトークンは、伏せ字にして表示する
         done
         if (( try < max )); then
             sleep "$wait_sec"  # run 不使用: 待機
         fi
     done
-    rm -f "$urlfile"
+    rm -f "$urlfile"  # run 不使用: 認証 URL の一時ファイルの削除（秘密情報を残さない）
     die "テスト用組織への管理用ログインに失敗しました。"
 }
 
@@ -238,7 +258,7 @@ e2e_delete_eca() {
     e2e_require_guard
     e2e_is_target_eca "$name" || die "削除対象外のアプリ名です: ${name}"
     work=$(mktemp -d "${TMPDIR:-/tmp}/e2e-eca-del.XXXXXX") || die "一時ディレクトリを作成できません。"  # VAR=$(cmd) のため run 不使用
-    mkdir -p "$work/force-app/main/default"
+    mkdir -p "$work/force-app/main/default"  # run 不使用: 削除用デプロイの一時フォルダの準備
     printf '%s\n' '{ "packageDirectories": [ { "path": "force-app", "default": true } ], "namespace": "", "sourceApiVersion": "64.0" }' \
         > "$work/sfdx-project.json"
     printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' \
@@ -258,7 +278,7 @@ e2e_delete_eca() {
     local rc=0
     (cd "$work" && run sf project deploy start --manifest package.xml \
         --post-destructive-changes destructiveChanges.xml --target-org "$E2E_ADMIN_ALIAS" --wait 10) || rc=$?
-    rm -rf "$work"
+    rm -rf "$work"  # run 不使用: 削除用デプロイの一時フォルダの後始末
     return $rc
 }
 
@@ -269,6 +289,7 @@ e2e_delete_eca() {
 # ------------------------------------------------------------------------------
 E2E_APEX_HELLO="SfToolsE2eHello"
 E2E_APEX_HELLO_TEST="SfToolsE2eHelloTest"
+E2E_JOB_ALIAS="sf-tools-e2e-job"          # sf-start.sh で、接続する組織に付けるエイリアス（予約名ではない。終了時に、実行前の状態へ戻る）
 e2e_is_target_apex() { [[ "$1" =~ ^SfToolsE2eHello(Test)?$ ]]; }
 
 # Salesforce のテスト用 Apex クラスの一覧（名前のみ。管理用ログイン済みであること）
@@ -299,7 +320,7 @@ e2e_delete_apex() {
         e2e_is_target_apex "$name" || die "削除対象外の Apex クラス名です: ${name}"
     done
     work=$(mktemp -d "${TMPDIR:-/tmp}/e2e-eca-del.XXXXXX") || die "一時ディレクトリを作成できません。"  # VAR=$(cmd) のため run 不使用（後掃除の対象になる名前）
-    mkdir -p "$work/force-app/main/default"
+    mkdir -p "$work/force-app/main/default"  # run 不使用: 削除用デプロイの一時フォルダの準備
     printf '%s\n' '{ "packageDirectories": [ { "path": "force-app", "default": true } ], "namespace": "", "sourceApiVersion": "64.0" }' \
         > "$work/sfdx-project.json"
     printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' \
@@ -313,22 +334,34 @@ e2e_delete_apex() {
     # 成否は終了コードで判定する（呼び出し側は、さらに一覧の再取得で、消えたことを確認する）
     (cd "$work" && run sf project deploy start --manifest package.xml \
         --post-destructive-changes destructiveChanges.xml --target-org "$E2E_ADMIN_ALIAS" --wait 10) || rc=$?
-    rm -rf "$work"
+    rm -rf "$work"  # run 不使用: 削除用デプロイの一時フォルダの後始末
     return $rc
 }
 
 # Salesforce にある、テスト用 Apex クラスの件数を返す（標準出力）。取得に失敗したら、戻り値 1
+#   失敗したときは、sf のエラーの要点（先頭の数行。Token・認証 URL は伏せる）を警告として表示する（標準エラー）。
+#   これまで、エラーを捨てていたため、削除後の確認の失敗の原因が分からなかった
 e2e_apex_count() {
-    local out
+    local out errf line
     e2e_require_guard
     e2e_is_target_apex "$1" || die "対象外の Apex クラス名です: ${1}"
-    out=$(sf data query --query "SELECT COUNT() FROM ApexClass WHERE Name = '${1}'" --target-org "$E2E_ADMIN_ALIAS" --json 2>/dev/null) || return 1  # VAR=$(cmd) のため run 不使用
+    errf=$(mktemp "${E2E_TMP:-${TMPDIR:-/tmp}}/e2e-run.XXXXXX") || return 1  # VAR=$(cmd) のため run 不使用
+    if ! out=$(sf data query --query "SELECT COUNT() FROM ApexClass WHERE Name = '${1}'" --target-org "$E2E_ADMIN_ALIAS" --json 2>"$errf"); then  # 条件チェック
+        log "WARNING" "  Apex クラス ${1} の件数の取得に失敗しました。sf の出力:"
+        { printf '%s\n' "$out"; cat "$errf"; } | grep -v '^[[:space:]]*$' | head -6 | while IFS= read -r line; do
+            log "WARNING" "    $(_e2e_mask_line "$line")"
+        done
+        rm -f "$errf"  # run 不使用: エラー出力の一時ファイルの削除
+        return 1
+    fi
+    rm -f "$errf"  # run 不使用: エラー出力の一時ファイルの削除
     printf '%s\n' "$out" | grep -oE '"totalSize": *[0-9]+' | grep -oE '[0-9]+$' | head -1
 }
 
 # ------------------------------------------------------------------------------
-# GitHub での PR を使った流れ（Hello World のリリースと削除の通しの確認用）
-#   gh の API だけで、ブランチの作成・ファイルの追加・PR の作成・マージを行う（ローカルの clone は使わない）。
+# GitHub での PR の作成・マージ・Actions の待ち（Hello World のリリースと削除の通しの確認用）
+#   ブランチの作成・ファイルの追加・commit・push は、sf-tools のコマンド（sf-job.sh / sf-push.sh）で行う（通常の運用と同じ道）。
+#   ここの部品が行うのは、PR の作成・マージ（通常の運用では GitHub の画面）と、Actions の実行の確認だけ。
 #   操作できるのは、テスト用のリポジトリ（{E2E_OWNER}/force-e2e-日時）だけ。
 # ------------------------------------------------------------------------------
 # gh を、時間の上限（E2E_GH_TIMEOUT 秒。既定 120）付きで実行する。応答がないまま、e2e が止まり続けないようにする。
@@ -345,28 +378,6 @@ _e2e_check_repo() {
     e2e_require_guard
     [[ "${1%%/*}" == "${E2E_OWNER:-}" ]] && e2e_is_target_repo "${1#*/}" \
         || die "テスト用ではないリポジトリには、操作できません: ${1}"
-}
-
-# main の先頭コミットから、ブランチを作る。引数: リポジトリ（オーナー/名前） ブランチ名
-e2e_gh_branch_create() {
-    local sha
-    _e2e_check_repo "$1"
-    sha=$(_e2e_gh api "repos/$1/git/ref/heads/main" --jq .object.sha 2>/dev/null) || return 1  # VAR=$(cmd) のため run 不使用
-    [[ -n "$sha" ]] || return 1
-    _e2e_gh api -X POST "repos/$1/git/refs" -f "ref=refs/heads/$2" -f "sha=$sha" >/dev/null 2>&1  # 戻り値で判定するため run 不使用
-}
-
-# ブランチに、ファイルを 1 つ追加する。引数: リポジトリ ブランチ名 パス ファイル（- なら標準入力）
-e2e_gh_file_put() {
-    local content
-    _e2e_check_repo "$1"
-    if [[ "$4" == "-" ]]; then
-        content=$(base64 | tr -d '\n\r')          # VAR=$(cmd) のため run 不使用（標準入力）
-    else
-        content=$(base64 < "$4" | tr -d '\n\r')   # VAR=$(cmd) のため run 不使用
-    fi
-    [[ -n "$content" ]] || return 1
-    _e2e_gh api -X PUT "repos/$1/contents/$3" -f "message=e2e: $3" -f "branch=$2" -f "content=$content" >/dev/null 2>&1  # 戻り値で判定するため run 不使用
 }
 
 # main への PR を作り、PR 番号を標準出力に返す。引数: リポジトリ ブランチ名 タイトル
@@ -410,11 +421,6 @@ e2e_hello_deploy_target_text() {
         "force-app/main/default/classes/${E2E_APEX_HELLO}.cls" \
         "force-app/main/default/classes/${E2E_APEX_HELLO_TEST}.cls" \
         '' '[members]'
-}
-# 空の雛形（中身のない deploy-target.txt / remove-target.txt）。
-# sf-release.sh は両方のファイルが無いと止まる（通常は sf-install.sh が雛形から作る）ため、使わない側に置く
-e2e_empty_target_text() {
-    printf '%s\n' '[files]' '' '[members]'
 }
 e2e_hello_remove_target_text() {
     printf '%s\n' '[files]' '' '[members]' \
@@ -476,36 +482,16 @@ e2e_delete_local() {
 #   e2e_cleanup_all MODE   MODE = list（一覧のみ。何も消さない）/ delete（消す）
 #   失敗が残った場合は、非ゼロを返す
 # ------------------------------------------------------------------------------
-e2e_cleanup_all() {
-    local mode="$1" failed=0 name d list
-    e2e_require_guard
-
-    log "HEADER" "e2e の掃除（${mode}）"
-
-    # GitHub
-    #   一覧の取得に失敗したときは「対象なし」とみなさず、失敗として記録して次へ進む（後始末を途中で止めないため）
-    if ! list=$(e2e_list_target_repos); then  # 条件チェック
-        log "ERROR" "  GitHub: リポジトリの一覧を取得できませんでした（対象の有無を判断できません）。"
-        failed=1
-    elif [[ -z "$list" ]]; then
-        log "INFO" "  GitHub: 対象のリポジトリはありません。"
-    else
-        while IFS= read -r name; do
-            [[ -z "$name" ]] && continue
-            log "INFO" "  GitHub: ${E2E_OWNER}/${name}"
-            [[ "$mode" == "delete" ]] && { e2e_delete_repo "$name" || failed=1; }
-        done <<< "$list"
-    fi
-
-    # Salesforce
-    e2e_sf_admin_login
+# Salesforce 側の掃除（外部クライアントアプリ・Apex クラス）。戻り値 1: 失敗したものがある（ほかの掃除は止めずに続ける）
+#   管理用ログインは、呼び出し側で済ませておくこと
+_e2e_cleanup_salesforce() {
+    local mode="$1" failed=0 name list after after_apex
     if ! list=$(e2e_list_target_ecas); then  # 条件チェック
         log "ERROR" "  Salesforce: 外部クライアントアプリの一覧を取得できませんでした（対象の有無を判断できません）。"
         failed=1
     elif [[ -z "$list" ]]; then
         log "INFO" "  Salesforce: 対象の外部クライアントアプリはありません。"
     else
-        local after
         while IFS= read -r name; do
             [[ -z "$name" ]] && continue
             log "INFO" "  Salesforce: ${name}"
@@ -535,7 +521,6 @@ e2e_cleanup_all() {
         log "INFO" "  Salesforce: 対象の Apex クラスはありません。"
     else
         local -a apex_names=()
-        local after_apex
         mapfile -t apex_names <<< "$list"
         for name in "${apex_names[@]}"; do log "INFO" "  Salesforce: Apex クラス ${name}"; done
         if [[ "$mode" == "delete" ]]; then
@@ -550,6 +535,38 @@ e2e_cleanup_all() {
                 failed=1
             fi
         fi
+    fi
+
+    return $failed
+}
+
+e2e_cleanup_all() {
+    local mode="$1" failed=0 name d list
+    e2e_require_guard
+
+    log "HEADER" "e2e の掃除（${mode}）"
+
+    # GitHub
+    #   一覧の取得に失敗したときは「対象なし」とみなさず、失敗として記録して次へ進む（後始末を途中で止めないため）
+    if ! list=$(e2e_list_target_repos); then  # 条件チェック
+        log "ERROR" "  GitHub: リポジトリの一覧を取得できませんでした（対象の有無を判断できません）。"
+        failed=1
+    elif [[ -z "$list" ]]; then
+        log "INFO" "  GitHub: 対象のリポジトリはありません。"
+    else
+        while IFS= read -r name; do
+            [[ -z "$name" ]] && continue
+            log "INFO" "  GitHub: ${E2E_OWNER}/${name}"
+            [[ "$mode" == "delete" ]] && { e2e_delete_repo "$name" || failed=1; }
+        done <<< "$list"
+    fi
+
+    # Salesforce（管理用ログインに失敗しても、ほかの掃除（ローカル）は止めずに続ける）
+    if ( e2e_sf_admin_login ); then  # 条件チェック（失敗は、サブシェルの die で、ここに戻る）
+        _e2e_cleanup_salesforce "$mode" || failed=1
+    else
+        log "ERROR" "  Salesforce: 管理用ログインに失敗したため、Salesforce の掃除（アプリ・Apex クラス）を行えませんでした。"
+        failed=1
     fi
 
     # ローカル
@@ -598,10 +615,158 @@ e2e_show_run_failure() {
         return 0
     fi
     while IFS= read -r line; do
-        for v in "${E2E_PAT_TOKEN:-}" "${E2E_SLACK_BOT_TOKEN:-}" "${E2E_SFDX_AUTH_URL:-}"; do
-            [[ -n "$v" ]] && line="${line//"$v"/***}"
-        done
-        printf '    %s\n' "$line"
+        printf '    %s\n' "$(_e2e_mask_line "$line")"
     done <<< "$out"
     return 0
+}
+
+# ------------------------------------------------------------------------------
+# sf-tools のコマンド（sf-job.sh / sf-dryrun.sh / sf-push.sh など）を、通常の運用と同じように実行する
+#   通常の運用: 開発者が、ターミナルで、sf-tools のコマンドを使って作業する。e2e も、同じコマンドを使う。
+#   質問への答えは標準入力に流し、sf org login web / code / ブラウザは、差し替え（shims）で、自動化する。
+# ------------------------------------------------------------------------------
+# ファイルの末尾を、鍵一式の値を *** に置き換えて、表示する。表示だけで、戻り値は常に 0
+#   引数: ファイル ラベル [行数。既定は E2E_FAIL_LOG_LINES（40）]
+e2e_show_file_tail() {
+    local f="$1" label="$2" n="${3:-${E2E_FAIL_LOG_LINES:-40}}" line v
+    log "WARNING" "${label}: 出力の末尾（${n} 行）:"
+    if [[ ! -s "$f" ]]; then
+        log "WARNING" "  （出力がありません）"
+        return 0
+    fi
+    while IFS= read -r line; do
+        printf '    %s\n' "$(_e2e_mask_line "$line")"
+    done < <(sed -E 's/\x1b\[[0-9;]*[A-Za-z]//g' "$f" | tail -n "$n")
+    return 0
+}
+
+# sf-tools のスクリプトを、指定のフォルダで実行する。出力は ${E2E_TMP}/{ラベル}.out に残す。
+#   失敗（終了コード 0 以外）なら、出力の末尾を表示して、戻り値 1
+#   引数: ラベル フォルダ 標準入力（printf の %b 形式。例: 'e2e-hello\nY\nalias\n'。なければ空） スクリプト [引数...]
+#   フォルダは、テスト用の作業フォルダ（{E2E_HOME_ROOT}/{E2E_OWNER}/e2e-…）の中だけ
+#   SF_LAUNCHER_ACTIVE=1: sf-start.sh が、対話のメニュー（sf-launcher.sh）を起動しないようにする
+# 実行して、スクリプトの終了コードを返す（失敗の表示はしない）。引数は e2e_run_sf_cmd と同じ
+#   長い処理（sf-job の clone と npm install、sf-dryrun など）が、止まったのか、動いているのか分かるように、
+#   E2E_HEARTBEAT_SEC 秒（既定 30）おきに、経過時間を表示する。
+#   E2E_CMD_TIMEOUT 秒（既定 1200）を超えたら、打ち切る（終了コード 124）。止まったまま、e2e 全体が止まり続けないための保険
+_e2e_exec_sf_cmd() {
+    local label="$1" dir="$2" input="$3" outf pid start=$SECONDS next
+    local hb="${E2E_HEARTBEAT_SEC:-30}" to="${E2E_CMD_TIMEOUT:-1200}" poll="${E2E_CMD_POLL_SEC:-5}"
+    shift 3
+    e2e_require_guard
+    case "$dir" in
+        "${E2E_HOME_ROOT}/${E2E_OWNER}/e2e-"*) ;;
+        *) die "テスト用の作業フォルダの外では、実行できません: ${dir}" ;;
+    esac
+    [[ -d "$dir" ]] || { log "ERROR" "  ${label}: フォルダがありません: ${dir}"; return 125; }
+    outf="${E2E_TMP:?}/${label}.out"
+    log "INFO" "  実行: bash $(basename "$1") ${*:2}（出力: ${outf}。上限 ${to} 秒）"
+    (
+        cd "$dir" || exit 125
+        if command -v timeout >/dev/null 2>&1; then  # 存在確認のため run 不使用
+            printf '%b' "$input" | PATH="${E2E_SHIM_DIR:-}:${PATH}" SF_LAUNCHER_ACTIVE=1 timeout "$to" bash "$@"
+        else
+            printf '%b' "$input" | PATH="${E2E_SHIM_DIR:-}:${PATH}" SF_LAUNCHER_ACTIVE=1 bash "$@"
+        fi
+    ) > "$outf" 2>&1 &  # 背景で動かし、経過を表示しながら待つ
+    pid=$!
+    next=$hb
+    while kill -0 "$pid" 2>/dev/null; do  # 存在確認のため run 不使用
+        sleep "$poll"  # run 不使用: 待機
+        if (( SECONDS - start >= next )); then
+            log "INFO" "    … 実行中: ${label}（経過 $(( SECONDS - start )) 秒）"
+            next=$(( next + hb ))
+        fi
+    done
+    wait "$pid"
+}
+
+e2e_run_sf_cmd() {
+    local rc
+    _e2e_exec_sf_cmd "$@"
+    rc=$?
+    if [[ $rc -ne 0 ]]; then
+        log "ERROR" "  ${1}: 終了コード ${rc}$([[ $rc -eq 124 ]] && echo "（時間切れ: E2E_CMD_TIMEOUT 秒を超えたため、打ち切りました）")"
+        e2e_show_file_tail "${E2E_TMP}/${1}.out" "$1"
+        return 1
+    fi
+    return 0
+}
+
+# 拒否されること（終了コードが 0 以外）を確認する。拒否されれば戻り値 0、成功してしまったら戻り値 1
+#   出力の内容は、呼び出し側が ${E2E_TMP}/{ラベル}.out で確認する。引数は e2e_run_sf_cmd と同じ
+e2e_run_sf_cmd_refused() {
+    local rc
+    _e2e_exec_sf_cmd "$@"
+    rc=$?
+    if [[ $rc -eq 0 ]]; then
+        log "ERROR" "  ${1}: 拒否されるはずが、成功しました"
+        return 1
+    fi
+    # 125（フォルダがない）・126・127（bash が起動できない・コマンドがない）は、拒否ではなく、実行の失敗
+    if [[ $rc -ge 125 && $rc -le 127 ]]; then
+        log "ERROR" "  ${1}: 拒否ではなく、実行そのものに失敗しました（終了コード ${rc}）"
+        return 1
+    fi
+    return 0
+}
+
+# sf-start.sh が背景で実行する sf-install.sh（フック設置・release フォルダの準備・npm install）が終わるまで待つ。
+#   引数: クローンのフォルダ。E2E_INSTALL_TIMEOUT 秒（既定 600）以内に終わらなければ、戻り値 1
+e2e_wait_sf_install() {
+    local log_file="$1/sf-tools/logs/sf-install.log" waited=0
+    local timeout="${E2E_INSTALL_TIMEOUT:-600}" poll="${E2E_POLL_SEC:-5}"
+    while (( waited < timeout )); do
+        grep -q "npm install の確認が完了しました" "$log_file" 2>/dev/null && return 0
+        sleep "$poll"; waited=$((waited + poll))  # run 不使用: 待機
+    done
+    return 1
+}
+
+# ワークフローの実行の結果（conclusion）を、標準出力に返す。引数: リポジトリ 実行ID
+#   実行が完了した直後は、API の反映の遅れや、gh の一時的な失敗で、空になることがある（実機で、成功した実行が、
+#   空と読まれて FAIL になった）。空のときだけ、E2E_POLL_SEC 秒（既定 5）おきに、最大 E2E_CONCLUSION_TRIES 回（既定 6）やり直す。
+#   success / failure などの値が返ったら、やり直さない
+e2e_run_conclusion() {
+    local out="" i
+    for (( i = 1; i <= ${E2E_CONCLUSION_TRIES:-6}; i++ )); do
+        out=$(_e2e_gh run view "$2" -R "$1" --json conclusion --jq .conclusion 2>/dev/null)  # VAR=$(cmd) のため run 不使用
+        [[ -n "$out" ]] && break
+        (( i < ${E2E_CONCLUSION_TRIES:-6} )) && sleep "${E2E_POLL_SEC:-5}"  # run 不使用: 待機
+    done
+    printf '%s' "$out"
+}
+
+# ワークフローの実行の、特定のステップの結果を、標準出力に返す（空のときは、e2e_run_conclusion と同じ扱い）
+#   引数: リポジトリ 実行ID ステップ名
+e2e_step_conclusion() {
+    local out="" i
+    for (( i = 1; i <= ${E2E_CONCLUSION_TRIES:-6}; i++ )); do
+        out=$(_e2e_gh run view "$2" -R "$1" --json jobs \
+            --jq ".jobs[].steps[] | select(.name==\"$3\") | .conclusion" 2>/dev/null | head -1)  # VAR=$(cmd) のため run 不使用
+        [[ -n "$out" ]] && break
+        (( i < ${E2E_CONCLUSION_TRIES:-6} )) && sleep "${E2E_POLL_SEC:-5}"  # run 不使用: 待機
+    done
+    printf '%s' "$out"
+}
+
+# 失敗したワークフローの実行を、1 回だけ再実行し（gh run rerun --failed）、完了するまで待つ。
+#   Salesforce や通信側の一時的なエラー（MetadataTransferError など）で、失敗することがある。開発者が GitHub の画面で
+#   「Re-run」を押すのと同じ操作。引数: リポジトリ 実行ID。再実行できて、完了したら戻り値 0（結果は e2e_run_conclusion で読む）
+#   再実行の前の試行番号（attempt）を覚え、試行番号が増えて、完了するまで待つ（再実行の直後は、前の試行の「完了」が見えるため）
+#   E2E_WF_TIMEOUT 秒（既定 1200）以内に完了しなければ、戻り値 1
+e2e_rerun_and_wait() {
+    local repo="$1" id="$2" a0 a st waited=0
+    local timeout="${E2E_WF_TIMEOUT:-1200}" poll="${E2E_POLL_SEC:-5}"
+    _e2e_check_repo "$repo"
+    a0=$(_e2e_gh run view "$id" -R "$repo" --json attempt --jq .attempt 2>/dev/null)  # VAR=$(cmd) のため run 不使用
+    [[ "$a0" =~ ^[0-9]+$ ]] || return 1
+    _e2e_gh run rerun "$id" -R "$repo" --failed >/dev/null 2>&1 || return 1  # 戻り値で判定するため run 不使用
+    while (( waited < timeout )); do
+        a=$(_e2e_gh run view "$id" -R "$repo" --json attempt --jq .attempt 2>/dev/null)    # VAR=$(cmd) のため run 不使用
+        st=$(_e2e_gh run view "$id" -R "$repo" --json status --jq .status 2>/dev/null)     # VAR=$(cmd) のため run 不使用
+        [[ "$a" =~ ^[0-9]+$ ]] && (( a > a0 )) && [[ "$st" == "completed" ]] && return 0
+        sleep "$poll"; waited=$((waited + poll))  # run 不使用: 待機
+    done
+    return 1
 }

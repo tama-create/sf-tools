@@ -25,7 +25,7 @@
 # ==============================================================================
 
 readonly SCRIPT_NAME="e2e-bootstrap"
-mkdir -p "$HOME/sf-tools/logs" 2>/dev/null || true
+mkdir -p "$HOME/sf-tools/logs" 2>/dev/null || true  # run 不使用: ログフォルダの準備（log が使える前の処理）
 readonly LOG_FILE="$HOME/sf-tools/logs/${SCRIPT_NAME}.log"
 readonly LOG_MODE="NEW"
 
@@ -101,7 +101,7 @@ log "SUCCESS" "認証 URL を取得しました。"
 # ------------------------------------------------------------------------------
 # 保存（権限は本人のみ）
 # ------------------------------------------------------------------------------
-mkdir -p "$(dirname "$FIXTURE")"
+mkdir -p "$(dirname "$FIXTURE")"  # run 不使用: 鍵一式の保存先フォルダの作成
 chmod 700 "$(dirname "$FIXTURE")" 2>/dev/null || true  # run 不使用: 権限保護（Windows は効果なし・意図的エラー無視）
 (
     umask 077

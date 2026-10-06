@@ -22,6 +22,7 @@
 #  16. ローカルの削除の補強（想定外の中身・シンボリックリンクは消さない）
 #  17. Hello World の Apex（名前の判定・一覧・件数・削除・後掃除）
 #  18. GitHub の PR を使った流れ（ブランチ・ファイル・PR・マージ・Actions の待ち）
+#  19. sf-tools のコマンドの実行（sf-job.sh / sf-push.sh など）と、code の差し替え
 # ==============================================================================
 source "$(dirname "${BASH_SOURCE[0]}")/test_helper.sh"
 echo -e "${CLR_HEAD}=== tests/e2e（安全ガードと部品）===${CLR_RST}"
@@ -38,17 +39,38 @@ _mk_mocks() {
 echo "gh $*" >> "${MOCK_CALL_LOG:-/dev/null}"
 # PR を使った流れの再現（ブランチ作成・ファイル追加・PR・Actions の実行）
 case "$*" in
-    "api repos/"*"/git/ref/heads/main"*) echo "abc123def456"; exit 0 ;;
-    "api -X POST repos/"*"/git/refs"*)   exit "${MOCK_GH_BRANCH_EXIT:-0}" ;;
-    "api -X PUT repos/"*"/contents/"*)   exit "${MOCK_GH_PUT_EXIT:-0}" ;;
     "pr create"*)                        [[ "${MOCK_GH_PR_EXIT:-0}" -ne 0 ]] && exit "$MOCK_GH_PR_EXIT"; echo "https://github.com/tamashimon-org/force-e2e-20260101-000000/pull/${MOCK_GH_PR_NUMBER:-7}"; exit 0 ;;
     "pr merge"*)                         exit "${MOCK_GH_MERGE_EXIT:-0}" ;;
+    # 手動起動（gh workflow run / 起動した実行の ID）。MOCK_GH_WORKFLOW_EXIT=1: 起動の呼び出しが失敗する
+    #   起動した実行の ID: 最初の問い合わせ（起動の前）は MOCK_GH_DISPATCH_BEFORE（既定 100）、以後は MOCK_GH_DISPATCH_AFTER（既定 101）
+    "workflow run"*)                     exit "${MOCK_GH_WORKFLOW_EXIT:-0}" ;;
+    "run list"*"--event workflow_dispatch"*)
+        _d="${MOCK_CALL_LOG%/*}"
+        _n=$(( $(cat "$_d/disp.cnt" 2>/dev/null || echo 0) + 1 )); echo "$_n" > "$_d/disp.cnt"
+        if [[ $_n -eq 1 ]]; then echo "${MOCK_GH_DISPATCH_BEFORE:-100}"; else echo "${MOCK_GH_DISPATCH_AFTER:-101}"; fi
+        exit 0 ;;
     "run list"*)                         [[ "${MOCK_GH_RUN_NONE:-}" == "1" ]] && exit 0; echo "${MOCK_GH_RUN_ID:-555}"; exit 0 ;;
     # 失敗したステップのログ（形式: ジョブ名 TAB ステップ名 TAB 時刻 本文。色の指定と Token を含む）
     "run view"*"--log-failed"*)
         [[ "${MOCK_GH_LOG_NONE:-}" == "1" ]] && exit 0
         printf 'job1\tステップA\t2026-10-05T08:00:00.1Z \033[31mError\033[0m: 失敗の本文 ghp_fakepat\n'
         printf 'job1\tステップA\t2026-10-05T08:00:01.2Z 2 行目\n'
+        exit 0 ;;
+    # 再実行（gh run rerun）: 再実行したことを記録する。試行番号（attempt）は、再実行のあとで 2 になる
+    #   MOCK_GH_RERUN_EXIT=1: 再実行の呼び出しが失敗する。MOCK_GH_ATTEMPT_STUCK=1: 試行番号が増えない（完了が見えない再現）
+    "run rerun"*)
+        [[ "${MOCK_GH_RERUN_EXIT:-0}" -ne 0 ]] && exit "$MOCK_GH_RERUN_EXIT"
+        : > "${MOCK_CALL_LOG%/*}/rerun.flag"; exit 0 ;;
+    "run view"*"--json attempt"*)
+        if [[ -f "${MOCK_CALL_LOG%/*}/rerun.flag" && "${MOCK_GH_ATTEMPT_STUCK:-}" != "1" ]]; then echo 2; else echo 1; fi
+        exit 0 ;;
+    # 実行の結果（conclusion）/ ステップの結果。MOCK_GH_CONCL_EMPTY_FIRST=N: 最初の N 回は、空を返す（反映の遅れの再現）
+    #   MOCK_GH_CONCL_AFTER: 再実行のあとの結果（既定は、再実行の前と同じ MOCK_GH_CONCL）
+    "run view"*"--json conclusion"*|"run view"*"--json jobs"*)
+        _d="${MOCK_CALL_LOG%/*}"
+        _n=$(( $(cat "$_d/concl.cnt" 2>/dev/null || echo 0) + 1 )); echo "$_n" > "$_d/concl.cnt"
+        [[ -n "${MOCK_GH_CONCL_EMPTY_FIRST:-}" && ( "$MOCK_GH_CONCL_EMPTY_FIRST" == "all" || $_n -le $MOCK_GH_CONCL_EMPTY_FIRST ) ]] && exit 0
+        if [[ -f "$_d/rerun.flag" && -n "${MOCK_GH_CONCL_AFTER:-}" ]]; then echo "$MOCK_GH_CONCL_AFTER"; else echo "${MOCK_GH_CONCL:-success}"; fi
         exit 0 ;;
     "run view"*)                         echo "${MOCK_GH_RUN_STATUS:-completed}"; exit 0 ;;
 esac
@@ -74,6 +96,7 @@ echo "sf $*" >> "${MOCK_CALL_LOG:-/dev/null}"
 _dir="${MOCK_CALL_LOG%/*}"
 case "$1 $2" in
     "alias list")
+        [[ "${MOCK_SF_ALIAS_FAIL:-}" == "1" ]] && { echo "error" >&2; exit 1; }
         echo '{'; echo '  "status": 0,'; echo '  "result": ['
         _first=1
         for kv in ${MOCK_SF_ALIASES:-}; do
@@ -803,6 +826,7 @@ test_e2e_apex() {
     assert_file_not_contains "$MB/out.log" "DONE" "件数: 対象外のクラス名は、拒否する（異常終了）"
     rm -f "$MB/sfapex.cnt"; MOCK_SF_APEX_FAIL_FIRST=all _e2e_call "$pre"' e2e_apex_count SfToolsE2eHello; echo "RC=$?"'
     assert_file_contains "$MB/out.log" "RC=1" "件数: 取得に失敗 → 戻り値 1"
+assert_file_contains "$MB/out.log" "件数の取得に失敗しました"  "件数: 取得に失敗 → 警告を表示する（原因が分かるように）"    assert_file_contains "$MB/out.log" "connection reset"        "件数: 取得に失敗 → sf のエラーの要点を表示する"
 
     # 削除: 対象外の名前は、拒否する
     : > "$MOCK_CALL_LOG"
@@ -858,42 +882,17 @@ test_e2e_gh_flow() {
     _mk_cleanup_env
     local pre='e2e_load_fixture; e2e_guard_env;'
     local repo="tamashimon-org/force-e2e-20260101-000000"
-    local b64; b64=$(printf 'hello' | base64 | tr -d '\n\r')
 
     # ガード: テスト用ではないリポジトリ・別のオーナーは、操作しない
     : > "$MOCK_CALL_LOG"
-    _e2e_call "$pre"' e2e_gh_branch_create "tamashimon-org/force-test-win" b; echo DONE'
+    _e2e_call "$pre"' e2e_gh_pr_create "tamashimon-org/force-test-win" b t; echo DONE'
     assert_file_not_contains "$MB/out.log" "DONE" "ガード: テスト用ではないリポジトリは、拒否する（異常終了）"
-    _e2e_call "$pre"' e2e_gh_branch_create "other-org/force-e2e-20260101-000000" b; echo DONE'
+    _e2e_call "$pre"' e2e_gh_pr_create "other-org/force-e2e-20260101-000000" b t; echo DONE'
     assert_file_not_contains "$MB/out.log" "DONE" "ガード: 別のオーナーは、拒否する（異常終了）"
     _e2e_call "$pre"' e2e_gh_pr_merge "tamashimon-org/force-test-win" 1; echo DONE'
     assert_file_not_contains "$MB/out.log" "DONE" "ガード: テスト用ではないリポジトリの PR は、マージしない"
     assert_file_not_contains "$MOCK_CALL_LOG" "pr merge" "ガード: マージのコマンドは、実行されない"
-    assert_file_not_contains "$MOCK_CALL_LOG" "git/refs" "ガード: ブランチ作成のコマンドは、実行されない"
-
-    # ブランチの作成: main の先頭コミットから
-    _e2e_call "$pre"" e2e_gh_branch_create $repo e2e-hello; echo RC=\$?"
-    assert_file_contains "$MB/out.log" "RC=0" "ブランチ作成: 成功 → 戻り値 0"
-    assert_file_contains "$MOCK_CALL_LOG" "api repos/${repo}/git/ref/heads/main" "ブランチ作成: main の先頭コミットを取得する"
-    assert_file_contains "$MOCK_CALL_LOG" "api -X POST repos/${repo}/git/refs -f ref=refs/heads/e2e-hello -f sha=abc123def456" "ブランチ作成: その先頭コミットから作る"
-    MOCK_GH_BRANCH_EXIT=1 _e2e_call "$pre"" e2e_gh_branch_create $repo e2e-hello; echo RC=\$?"
-    assert_file_contains "$MB/out.log" "RC=1" "ブランチ作成: 失敗 → 戻り値 1"
-
-    # ファイルの追加（ファイル・標準入力）
-    printf 'hello' > "$CB/f.txt"
-    _e2e_call "$pre"" e2e_gh_file_put $repo e2e-hello some/path.txt $CB/f.txt; echo RC=\$?"
-    assert_file_contains "$MB/out.log" "RC=0" "ファイル追加: 成功 → 戻り値 0"
-    assert_file_contains "$MOCK_CALL_LOG" "api -X PUT repos/${repo}/contents/some/path.txt" "ファイル追加: 指定のパスに追加する"
-    assert_file_contains "$MOCK_CALL_LOG" "-f branch=e2e-hello" "ファイル追加: 指定のブランチに追加する"
-    assert_file_contains "$MOCK_CALL_LOG" "-f content=${b64}"   "ファイル追加: 内容を base64 で渡す（ファイル）"
-    : > "$MOCK_CALL_LOG"
-    _e2e_call "$pre"" printf hello | e2e_gh_file_put $repo e2e-hello other.txt -; echo RC=\$?"
-    assert_file_contains "$MOCK_CALL_LOG" "-f content=${b64}"   "ファイル追加: 内容を base64 で渡す（標準入力）"
-    MOCK_GH_PUT_EXIT=1 _e2e_call "$pre"" e2e_gh_file_put $repo e2e-hello some/path.txt $CB/f.txt; echo RC=\$?"
-    assert_file_contains "$MB/out.log" "RC=1" "ファイル追加: 失敗 → 戻り値 1"
-    : > "$CB/empty.txt"
-    _e2e_call "$pre"" e2e_gh_file_put $repo e2e-hello some/empty.txt $CB/empty.txt; echo RC=\$?"
-    assert_file_contains "$MB/out.log" "RC=1" "ファイル追加: 空の内容は、追加しない（戻り値 1）"
+    assert_file_not_contains "$MOCK_CALL_LOG" "pr create" "ガード: PR 作成のコマンドは、実行されない"
 
     # PR の作成・マージ
     : > "$MOCK_CALL_LOG"
@@ -934,6 +933,61 @@ EOF
     [[ $((t1 - t0)) -lt 15 ]] && pass "gh の時間の上限: 設定した秒数で打ち切る（待ち続けない）" || fail "gh の時間の上限: 設定した秒数で打ち切る（待ち続けない）" "所要: $((t1 - t0)) 秒"
     _mk_mocks "$MB"
 
+    # ワークフローの結果の読み取り: 空のときだけ、やり直す（完了直後の、反映の遅れ・gh の一時的な失敗への対策）
+    local r="tamashimon-org/force-e2e-20260101-000000" rcp='E2E_CONCLUSION_TRIES=4 E2E_POLL_SEC=0'
+    _creset() { rm -f "$MB/concl.cnt"; : > "$MOCK_CALL_LOG"; }
+    _creset; _e2e_call "$pre"" $rcp; out=\$(e2e_run_conclusion $r 555); echo \"OUT=[\$out]\""
+    assert_file_contains "$MB/out.log" "OUT=[success]"  "結果の読み取り: 値があれば、そのまま返す"
+    [[ "$(grep -c 'json conclusion' "$MOCK_CALL_LOG")" -eq 1 ]] && pass "結果の読み取り: 値があれば、やり直さない（1 回）" || fail "結果の読み取り: 値があれば、やり直さない" "回数: $(grep -c 'json conclusion' "$MOCK_CALL_LOG")"
+    _creset; MOCK_GH_CONCL_EMPTY_FIRST=2 _e2e_call "$pre"" $rcp; out=\$(e2e_run_conclusion $r 555); echo \"OUT=[\$out]\""
+    assert_file_contains "$MB/out.log" "OUT=[success]"  "結果の読み取り: 最初の 2 回が空でも、3 回目で値が取れる"
+    [[ "$(grep -c 'json conclusion' "$MOCK_CALL_LOG")" -eq 3 ]] && pass "結果の読み取り: 取れたら止まる（3 回）" || fail "結果の読み取り: 取れたら止まる" "回数: $(grep -c 'json conclusion' "$MOCK_CALL_LOG")"
+    _creset; MOCK_GH_CONCL_EMPTY_FIRST=all _e2e_call "$pre"" $rcp; out=\$(e2e_run_conclusion $r 555); echo \"OUT=[\$out]\""
+    assert_file_contains "$MB/out.log" "OUT=[]"         "結果の読み取り: ずっと空なら、空のまま返す"
+    [[ "$(grep -c 'json conclusion' "$MOCK_CALL_LOG")" -eq 4 ]] && pass "結果の読み取り: 上限（4 回）で諦める" || fail "結果の読み取り: 上限で諦める" "回数: $(grep -c 'json conclusion' "$MOCK_CALL_LOG")"
+    _creset; MOCK_GH_CONCL=failure _e2e_call "$pre"" $rcp; out=\$(e2e_run_conclusion $r 555); echo \"OUT=[\$out]\""
+    assert_file_contains "$MB/out.log" "OUT=[failure]"  "結果の読み取り: failure は、そのまま返す（本当の失敗を、成功にしない）"
+    [[ "$(grep -c 'json conclusion' "$MOCK_CALL_LOG")" -eq 1 ]] && pass "結果の読み取り: failure は、やり直さない" || fail "結果の読み取り: failure は、やり直さない" "回数: $(grep -c 'json conclusion' "$MOCK_CALL_LOG")"
+    _creset; MOCK_GH_CONCL_EMPTY_FIRST=1 _e2e_call "$pre"" $rcp; out=\$(e2e_step_conclusion $r 555 'ステップ'); echo \"OUT=[\$out]\""
+    assert_file_contains "$MB/out.log" "OUT=[success]"  "ステップの結果の読み取り: 空のときは、やり直す"
+
+    # 失敗したワークフローの再実行（1 回だけ）: 試行番号が増えて、完了するまで待つ
+    _creset
+    _e2e_call "$pre"" E2E_POLL_SEC=0 e2e_rerun_and_wait $r 555; echo RC=\$?"
+    assert_file_contains "$MB/out.log" "RC=0"                                "再実行: 試行番号が増えて完了したら、戻り値 0"
+    assert_file_contains "$MOCK_CALL_LOG" "run rerun 555 -R ${r} --failed"   "再実行: 失敗したジョブだけを再実行する（gh run rerun --failed）"
+    _creset; rm -f "$MB/rerun.flag"
+    MOCK_GH_RERUN_EXIT=1 _e2e_call "$pre"" E2E_POLL_SEC=0 e2e_rerun_and_wait $r 555; echo RC=\$?"
+    assert_file_contains "$MB/out.log" "RC=1"                                "再実行: 再実行の呼び出しが失敗したら、戻り値 1"
+    _creset; rm -f "$MB/rerun.flag"
+    MOCK_GH_ATTEMPT_STUCK=1 E2E_WF_TIMEOUT=2 E2E_POLL_SEC=1 _e2e_call "$pre"" e2e_rerun_and_wait $r 555; echo RC=\$?"
+    assert_file_contains "$MB/out.log" "RC=1"                                "再実行: 試行番号が増えない（完了が見えない）ときは、時間切れで戻り値 1"
+    rm -f "$MB/rerun.flag"
+
+    # run.sh の _run_ok（失敗したら、ログを表示し、1 回だけ再実行する）: run.sh から関数を取り出して、動かす
+    { echo "REPO_FULL=$r"; echo '_run_conclusion() { e2e_run_conclusion "$REPO_FULL" "$1"; }'; awk '/^FLAKY_RUNS=0/,/^}/' "$E2E_DIR/run.sh"; } > "$CB/okfuncs.sh"
+    local ok="E2E_CONCLUSION_TRIES=1 E2E_POLL_SEC=0; source $CB/okfuncs.sh"
+    _creset; rm -f "$MB/rerun.flag"
+    _e2e_call "$pre"" $ok; _run_ok 555 wf-x; echo RC=\$? FLAKY=\$FLAKY_RUNS"
+    assert_file_contains "$MB/out.log" "RC=0 FLAKY=0"                        "_run_ok: 最初から成功 → 戻り値 0、再実行しない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "run rerun"                    "_run_ok: 最初から成功 → 再実行しない"
+    _creset; rm -f "$MB/rerun.flag"
+    MOCK_GH_CONCL=failure MOCK_GH_CONCL_AFTER=success _e2e_call "$pre"" $ok; _run_ok 555 wf-x; echo RC=\$? FLAKY=\$FLAKY_RUNS"
+    assert_file_contains "$MB/out.log" "RC=0 FLAKY=1"                        "_run_ok: 失敗 → 再実行で成功 → 戻り値 0（一時的な失敗として数える）"
+    assert_file_contains "$MB/out.log" "再実行で成功しました"                  "_run_ok: 再実行で成功したことを、警告として表示する"
+    assert_file_contains "$MB/out.log" "失敗したステップのログ"                "_run_ok: 最初の失敗のログを表示する"
+    assert_file_contains "$MOCK_CALL_LOG" "run rerun 555"                    "_run_ok: 1 回、再実行する"
+    _creset; rm -f "$MB/rerun.flag"
+    MOCK_GH_CONCL=failure _e2e_call "$pre"" $ok; _run_ok 555 wf-x; echo RC=\$? FLAKY=\$FLAKY_RUNS"
+    assert_file_contains "$MB/out.log" "RC=1 FLAKY=0"                        "_run_ok: 失敗 → 再実行でも失敗 → 戻り値 1（FAIL）"
+    assert_file_contains "$MB/out.log" "再実行でも失敗しました"                "_run_ok: 再実行でも失敗したことを表示する"
+    [[ "$(grep -c 'run rerun' "$MOCK_CALL_LOG")" -eq 1 ]] && pass "_run_ok: 再実行は、1 回だけ" || fail "_run_ok: 再実行は、1 回だけ" "回数: $(grep -c 'run rerun' "$MOCK_CALL_LOG")"
+    _creset; rm -f "$MB/rerun.flag"
+    MOCK_GH_CONCL=failure MOCK_GH_RERUN_EXIT=1 _e2e_call "$pre"" $ok; _run_ok 555 wf-x; echo RC=\$?"
+    assert_file_contains "$MB/out.log" "RC=1"                                "_run_ok: 再実行できなかったら、戻り値 1"
+    assert_file_contains "$MB/out.log" "再実行できなかった"                    "_run_ok: 再実行できなかったことを表示する"
+    unset -f _creset
+
     # 失敗した実行のログの表示: ステップ名を付け、色の指定を除き、Token は伏せる。戻り値は 0
     _e2e_call "$pre"" e2e_show_run_failure $repo 555 'wf-validate'; echo RC=\$?"
     assert_file_contains     "$MB/out.log" "[ステップA] Error: 失敗の本文 ***" "失敗ログ: ステップ名付きで表示され、色の指定が除かれる"
@@ -945,7 +999,9 @@ EOF
     assert_file_contains     "$MB/out.log" "RC=0"                               "失敗ログ: 取得できなくても、戻り値は 0"
     _e2e_call "$pre"' e2e_show_run_failure tamashimon-org/force-test-win 1 x; echo DONE'
     assert_file_not_contains "$MB/out.log" "DONE"                               "失敗ログ: テスト用ではないリポジトリは、拒否する"
-    assert_file_contains "$E2E_DIR/run.sh" 'e2e_show_run_failure "$REPO_FULL" "$_meta_id" "wf-metasync"' "run.sh: wf-metasync の失敗時にログを表示する"
+assert_file_contains "$E2E_DIR/run.sh" "削除後: Salesforce への管理用ログイン（問い合わせ用）をやり直した" "run.sh: 削除後の件数の確認の前に、管理用ログインをやり直す"    assert_file_contains "$E2E_DIR/run.sh" "リリース後: Salesforce への管理用ログイン（問い合わせ用）をやり直した" "run.sh: リリース後の件数の確認の前に、管理用ログインをやり直す"
+    assert_file_contains "$E2E_DIR/run.sh" '_run_ok "$_meta_id" "wf-metasync"' "run.sh: wf-metasync の失敗時は、ログを表示し、1 回だけ再実行する"
+    assert_file_contains "$E2E_DIR/run.sh" "再実行で成功したワークフローが" "run.sh: 再実行で成功したワークフローの数を、結果に警告として表示する"
     assert_file_contains "$E2E_DIR/run.sh" '"${label}: wf-validate"' "run.sh: wf-validate の失敗時にログを表示する"
     assert_file_contains "$E2E_DIR/run.sh" '"${label}: wf-release"'  "run.sh: wf-release の失敗時にログを表示する"
     assert_file_contains "$E2E_DIR/run.sh" 'wf-propagate.yml "$br"' "run.sh: マージ時の wf-propagate の実行と成功を確認する"
@@ -968,14 +1024,14 @@ EOF
     assert_file_contains "$MB/out.log" "force-app/main/default/classes/SfToolsE2eHelloTest.cls" "deploy-target: テストクラスも指定する（テストの自動実行のため）"
     assert_file_contains "$MB/out.log" "ApexClass:SfToolsE2eHelloTest" "remove-target: テストクラスを [members] で指定する"
     assert_file_contains "$MB/out.log" "ApexClass:SfToolsE2eHello"     "remove-target: クラスを [members] で指定する"
-    # 空の雛形: セクションだけで、中身（パス・メンバー）がない
-    _e2e_call "$pre"' e2e_empty_target_text'
-    assert_file_contains     "$MB/out.log" "[files]"   "空の雛形: [files] がある"
-    assert_file_contains     "$MB/out.log" "[members]" "空の雛形: [members] がある"
-    assert_file_not_contains "$MB/out.log" "SfToolsE2e"  "空の雛形: クラスの指定は入っていない"
     # run.sh: 各 PR に、deploy-target.txt と remove-target.txt の両方を置く（sf-release.sh は両方が無いと止まる）
-    assert_file_contains "$E2E_DIR/run.sh" "_put_empty_remove_target \"\$br\"" "run.sh: リリースの PR に、空の remove-target.txt も置く"
-    assert_file_contains "$E2E_DIR/run.sh" "_put_empty_deploy_target \"\$1\""  "run.sh: 削除の PR に、空の deploy-target.txt も置く"
+    assert_file_contains "$E2E_DIR/run.sh" "sf-job.sh" "run.sh: リリースは、sf-job.sh でブランチ作成・clone する（通常の運用と同じ道）"
+    assert_file_contains "$E2E_DIR/run.sh" "sf-dryrun.sh" "run.sh: リリースは、sf-dryrun.sh でローカルの検証をする"
+    assert_file_contains "$E2E_DIR/run.sh" "sf-push.sh" "run.sh: リリースは、sf-push.sh で commit・push する"
+    assert_file_contains "$E2E_DIR/run.sh" 'release/${job}/remove-target.txt' "run.sh: sf-install が用意した remove-target.txt の雛形を確認する"
+    assert_file_contains "$E2E_DIR/run.sh" "_hello_write_remove" "run.sh: 削除も、sf-job.sh のジョブで、remove-target.txt を書いて sf-push.sh する"
+    assert_file_contains "$E2E_DIR/run.sh" "sf-next.sh" "run.sh: sf-next.sh で、マージ済みの表示を確認する"
+    assert_file_contains "$E2E_DIR/run.sh" "sf-deploy.sh" "run.sh: sf-deploy.sh が、共有環境（予約名）への強制リリースを拒否することを確認する"
 
     # fixtures: Apex のソースが、揃っている
     local f
@@ -987,6 +1043,206 @@ EOF
     teardown "$CB"
 }
 
+
+# ------------------------------------------------------------------------------
+# 19. sf-tools のコマンドを、通常の運用と同じように実行する部品（sf-job.sh / sf-push.sh などの実行・待ち・code の差し替え）
+# ------------------------------------------------------------------------------
+test_e2e_sf_cmd() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] sf-tools のコマンドの実行（標準入力・出力の記録・失敗時の表示・安全ガード）と、code の差し替え${CLR_RST}"
+    _mk_cleanup_env
+    local root="$CB/root/home/tamashimon-org/e2e-20260101-000000"   # _mk_cleanup_env が作る、テスト用の作業フォルダ
+    local tmp="$CB/tmp"; mkdir -p "$tmp"
+    local pre='e2e_load_fixture; e2e_guard_env; export E2E_TMP='"$tmp"';'
+
+    # 実行するスクリプト（標準入力をそのまま出力し、cwd と SF_LAUNCHER_ACTIVE を記録する）
+    cat > "$CB/fake.sh" << 'EOF2'
+#!/bin/bash
+echo "cwd=$(basename "$PWD") launcher=${SF_LAUNCHER_ACTIVE:-} args=$*"
+while IFS= read -r l; do echo "in=[$l]"; done
+exit "${FAKE_EXIT:-0}"
+EOF2
+    _e2e_call "$pre"" e2e_run_sf_cmd lbl $root 'job-1\nY\nalias\n' $CB/fake.sh --opt x; echo RC=\$?"
+    assert_file_contains "$MB/out.log" "RC=0"                               "コマンド実行: 成功 → 戻り値 0"
+    assert_file_contains "$tmp/lbl.out" "cwd=e2e-20260101-000000 launcher=1 args=--opt x" "コマンド実行: 指定のフォルダで、SF_LAUNCHER_ACTIVE=1 で、引数付きで実行される"
+    assert_file_contains "$tmp/lbl.out" "in=[job-1]"                         "コマンド実行: 標準入力（1 行目）が渡る"
+    assert_file_contains "$tmp/lbl.out" "in=[Y]"                             "コマンド実行: 標準入力（2 行目）が渡る"
+    assert_file_contains "$tmp/lbl.out" "in=[alias]"                         "コマンド実行: 標準入力（3 行目）が渡る"
+
+    # 失敗: 終了コードが 0 以外 → 戻り値 1 と、出力の末尾の表示（鍵の値は伏せる）
+    printf '#!/bin/bash\necho "失敗の本文 ghp_fakepat"\nexit 3\n' > "$CB/fail.sh"
+    _e2e_call "$pre"" e2e_run_sf_cmd lbl2 $root '' $CB/fail.sh; echo RC=\$?"
+    assert_file_contains     "$MB/out.log" "RC=1"                            "コマンド実行: 失敗 → 戻り値 1"
+    assert_file_contains     "$MB/out.log" "終了コード 3"                    "コマンド実行: 失敗 → 終了コードを表示する"
+    assert_file_contains     "$MB/out.log" "失敗の本文 ***"                  "コマンド実行: 失敗 → 出力の末尾を表示する（Token は *** に置き換える）"
+    assert_file_not_contains "$MB/out.log" "ghp_fakepat"                     "コマンド実行: 失敗 → Token の値は表示しない"
+
+    # 安全ガード: テスト用の作業フォルダの外では、実行しない
+    _e2e_call "$pre"" e2e_run_sf_cmd lbl3 $HM '' $CB/fake.sh; echo DONE"
+    assert_file_not_contains "$MB/out.log" "DONE"                            "安全ガード: テスト用の作業フォルダの外では、実行しない"
+    _e2e_call "$pre"" e2e_run_sf_cmd lbl4 $CB/root/home/tamashimon-org/test-win '' $CB/fake.sh; echo DONE"
+    assert_file_not_contains "$MB/out.log" "DONE"                            "安全ガード: 名前が e2e- で始まらないフォルダ（test-win）では、実行しない"
+    assert_file_not_exists "$tmp/lbl3.out"                                   "安全ガード: 拒否したときは、実行しない（出力ファイルがない）"
+
+    # 経過の表示と、時間の上限: 長い処理が、止まったのか動いているのか分かる。上限を超えたら、打ち切る
+    printf '#!/bin/bash\nsleep 3\necho done\n' > "$CB/slow.sh"
+    _e2e_call "$pre"" E2E_HEARTBEAT_SEC=1 E2E_CMD_POLL_SEC=1 e2e_run_sf_cmd hb $root '' $CB/slow.sh; echo RC=\$?"
+    assert_file_contains "$MB/out.log" "RC=0"                                "経過の表示: 時間内に終われば、成功"
+    assert_file_contains "$MB/out.log" "実行中: hb（経過"                     "経過の表示: 長い処理の途中で、経過時間を表示する"
+    printf '#!/bin/bash\nexec sleep 30\n' > "$CB/hang.sh"
+    local t0 t1; t0=$(date +%s)
+    _e2e_call "$pre"" E2E_CMD_TIMEOUT=2 E2E_CMD_POLL_SEC=1 e2e_run_sf_cmd to $root '' $CB/hang.sh; echo RC=\$?"
+    t1=$(date +%s)
+    assert_file_contains "$MB/out.log" "RC=1"                                "時間の上限: 止まったままの処理は、打ち切って、戻り値 1"
+    assert_file_contains "$MB/out.log" "時間切れ"                             "時間の上限: 時間切れであることを表示する"
+    [[ $((t1 - t0)) -lt 20 ]] && pass "時間の上限: 上限の秒数で打ち切る（待ち続けない）" || fail "時間の上限: 上限の秒数で打ち切る（待ち続けない）" "所要: $((t1 - t0)) 秒"
+
+    # 拒否されること（終了コード 0 以外）の確認: 拒否されれば戻り値 0、成功してしまえば 1
+    printf '#!/bin/bash\necho "prod は共有環境のため、拒否します"\nexit 1\n' > "$CB/refuse.sh"
+    _e2e_call "$pre"" e2e_run_sf_cmd_refused rf $root '' $CB/refuse.sh; echo RC=\$?"
+    assert_file_contains "$MB/out.log" "RC=0"                                "拒否の確認: 終了コード 1 → 拒否された → 戻り値 0"
+    assert_file_contains "$tmp/rf.out" "共有環境のため"                       "拒否の確認: 出力が、ファイルに残る"
+    _e2e_call "$pre"" e2e_run_sf_cmd_refused rf2 $root '' $CB/fake.sh; echo RC=\$?"
+    assert_file_contains "$MB/out.log" "RC=1"                                "拒否の確認: 成功してしまった → 戻り値 1"
+    assert_file_contains "$MB/out.log" "拒否されるはずが"                     "拒否の確認: 成功してしまったことを表示する"
+    _e2e_call "$pre"" e2e_run_sf_cmd_refused rf3 $HM '' $CB/refuse.sh; echo DONE"
+    assert_file_not_contains "$MB/out.log" "DONE"                            "拒否の確認: テスト用の作業フォルダの外では、実行しない"
+
+    # sf-install の完了待ち（ログの完了メッセージ）
+    mkdir -p "$root/clone1/sf-tools/logs" "$root/clone2/sf-tools/logs"
+    echo "[SUCCESS] npm install の確認が完了しました。" > "$root/clone1/sf-tools/logs/sf-install.log"
+    echo "[INFO] 途中" > "$root/clone2/sf-tools/logs/sf-install.log"
+    _e2e_call "$pre"" E2E_INSTALL_TIMEOUT=2 E2E_POLL_SEC=1 e2e_wait_sf_install $root/clone1; echo RC=\$?"
+    assert_file_contains "$MB/out.log" "RC=0"                                "sf-install の待ち: 完了メッセージがあれば、戻り値 0"
+    _e2e_call "$pre"" E2E_INSTALL_TIMEOUT=2 E2E_POLL_SEC=1 e2e_wait_sf_install $root/clone2; echo RC=\$?"
+    assert_file_contains "$MB/out.log" "RC=1"                                "sf-install の待ち: 完了しなければ、時間切れで戻り値 1"
+    _e2e_call "$pre"" E2E_INSTALL_TIMEOUT=2 E2E_POLL_SEC=1 e2e_wait_sf_install $root/none; echo RC=\$?"
+    assert_file_contains "$MB/out.log" "RC=1"                                "sf-install の待ち: ログがなければ、戻り値 1"
+
+    # code の差し替え: --wait とファイルでメッセージを書き込む。code . は何もしない
+    local sh="$E2E_DIR/shims/code" f="$CB/msg.txt"
+    printf '# コメント\n' > "$f"
+    E2E_COMMIT_MSG="e2e: テスト" bash "$sh" --new-window --wait "$f"; local rc=$?
+    assert_exit_ok "$rc" "code の差し替え: --wait → 終了コード 0"
+    assert_file_contains "$f" "e2e: テスト" "code の差し替え: --wait → コミットメッセージを書き込む"
+    printf '# コメント\n' > "$f"
+    bash "$sh" .; rc=$?
+    assert_exit_ok "$rc" "code の差し替え: code . → 終了コード 0"
+    assert_file_not_contains "$f" "e2e" "code の差し替え: code . → ファイルは変えない"
+    unset MOCK_CALL_LOG MOCK_GH_REPOS MOCK_SF_ECAS
+    teardown "$CB"
+}
+
+# ------------------------------------------------------------------------------
+# 20. コードレビュー（2026-10-06）の指摘への対応: 本物のエイリアスを守る・掃除を止めない・取り違えを防ぐ
+# ------------------------------------------------------------------------------
+test_e2e_review_fixes() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] レビューの指摘への対応（エイリアスの保護・掃除の継続・実行の取り違え・秘密の伏せ字）${CLR_RST}"
+    _mk_cleanup_env
+    local snap="$CB/snap.txt"
+    local pre='e2e_load_fixture; e2e_guard_env;'
+
+    # エイリアスの保存: sf alias list に失敗したら、空の一覧を保存せず、失敗として返す（復元で、本物のエイリアスを外さないため）
+    MOCK_SF_ALIAS_FAIL=1 _e2e_call "e2e_alias_snapshot $snap; echo RC=\$?"
+    assert_file_contains "$MB/out.log" "RC=1"                                "エイリアスの保存: sf alias list の失敗 → 戻り値 1"
+    assert_file_not_exists "${snap}.ok"                                      "エイリアスの保存: 失敗 → 保存成功の目印を作らない"
+    MOCK_SF_ALIASES="prod=real@example.com" _e2e_call "e2e_alias_snapshot $snap; echo RC=\$?"
+    assert_file_contains "$MB/out.log" "RC=0"                                "エイリアスの保存: 成功 → 戻り値 0"
+    assert_file_exists "${snap}.ok"                                          "エイリアスの保存: 成功 → 目印ができる"
+    # エイリアスが 0 件でも、正常に保存できる
+    rm -f "$snap" "${snap}.ok"
+    _e2e_call "e2e_alias_snapshot $snap; echo RC=\$?"
+    assert_file_contains "$MB/out.log" "RC=0"                                "エイリアスの保存: エイリアスが 0 件でも、成功する"
+
+    # 復元: 目印がなければ、何もしない。sf alias list に失敗したときも、何も外さない
+    : > "$MOCK_CALL_LOG"; rm -f "${snap}.ok"; printf '' > "$snap"
+    MOCK_SF_ALIASES="prod=real@example.com" _e2e_call "e2e_alias_restore $snap; echo RC=\$?"
+    assert_file_contains "$MB/out.log" "RC=1"                                "エイリアスの復元: 保存の目印がない → 戻り値 1"
+    assert_file_not_contains "$MOCK_CALL_LOG" "alias unset"                  "エイリアスの復元: 保存の目印がない → 何も外さない（本物の prod を守る）"
+    : > "${snap}.ok"; : > "$MOCK_CALL_LOG"
+    MOCK_SF_ALIAS_FAIL=1 _e2e_call "e2e_alias_restore $snap; echo RC=\$?"
+    assert_file_contains "$MB/out.log" "RC=1"                                "エイリアスの復元: sf alias list の失敗 → 戻り値 1"
+    assert_file_not_contains "$MOCK_CALL_LOG" "alias unset"                  "エイリアスの復元: sf alias list の失敗 → 何も外さない"
+
+    # 掃除: 管理用ログインに失敗しても、ローカルの掃除は続ける（失敗として終わる）
+    : > "$MOCK_CALL_LOG"
+    MOCK_SF_ADMIN_FAIL_FIRST=99 E2E_ADMIN_RETRY_WAIT=0 _run_cleanup --yes --no-confirm; local rc=$?
+    assert_exit_fail "$rc"                                                   "掃除: 管理用ログインに失敗 → 失敗で終わる"
+    assert_file_contains "$MB/out.log" "管理用ログインに失敗したため"          "掃除: 管理用ログインの失敗を表示する"
+    assert_file_contains "$MOCK_CALL_LOG" "gh repo delete tamashimon-org/force-e2e-20260101-000000 --yes" "掃除: ログインに失敗しても、GitHub の掃除はする"
+    assert_dir_not_exists "$CB/root/home/tamashimon-org/e2e-20260101-000000" "掃除: ログインに失敗しても、ローカルの掃除は続ける"
+    assert_file_not_contains "$MOCK_CALL_LOG" "post-destructive"             "掃除: ログインに失敗 → Salesforce の削除は、しない"
+
+    # 秘密の伏せ字: 鍵一式の値・認証 URL の形式・Token らしい文字列
+    _e2e_call "$pre"' _e2e_mask_line "a ghp_fakepat b xoxb-fakeslack c force://PlatformCLI::someothertoken@x.my.salesforce.com d ghp_ANOTHERtoken123"'
+    assert_file_not_contains "$MB/out.log" "ghp_fakepat"                     "伏せ字: 鍵一式の PAT を伏せる"
+    assert_file_not_contains "$MB/out.log" "xoxb-fakeslack"                  "伏せ字: 鍵一式の Slack Token を伏せる"
+    assert_file_not_contains "$MB/out.log" "someothertoken"                  "伏せ字: 認証 URL の形式のリフレッシュトークンを伏せる（鍵一式と別の値でも）"
+    assert_file_not_contains "$MB/out.log" "ANOTHERtoken123"                 "伏せ字: 鍵一式と別の PAT らしい文字列も伏せる"
+
+    # 拒否の確認: フォルダがない（実行そのものの失敗）を、拒否と取り違えない
+    _e2e_call "$pre"" E2E_TMP=$CB/tmp; mkdir -p \$E2E_TMP; e2e_run_sf_cmd_refused rf $CB/root/home/tamashimon-org/e2e-nothere '' $CB/fake.sh; echo RC=\$?"
+    assert_file_contains "$MB/out.log" "RC=1"                                "拒否の確認: フォルダがない（終了コード 125）→ 拒否とみなさない（戻り値 1）"
+    assert_file_contains "$MB/out.log" "実行そのものに失敗しました"             "拒否の確認: 実行そのものの失敗として表示する"
+
+    # run.sh から関数を取り出して動かす（_pushed_to_remote / _dispatch_workflow）
+    { echo "REPO_FULL=tamashimon-org/force-e2e-20260101-000000"; echo 'sleep() { :; }'
+      awk '/^_pushed_to_remote\(\) \{/,/^}/' "$E2E_DIR/run.sh"
+      awk '/^_dispatch_workflow\(\) \{/,/^}/' "$E2E_DIR/run.sh"; } > "$CB/runfuncs.sh"
+    # push した内容の一致: 空どうし（読めない）は、一致とみなさない。本物の git で、一致・不一致を確認する
+    _e2e_call "$pre"" source $CB/runfuncs.sh; _pushed_to_remote $CB/no-such-dir job; echo RC=\$?"
+    assert_file_contains "$MB/out.log" "RC=1"                                "push の一致: 両方読めない（空どうし）→ 一致とみなさない"
+    local g="git -c user.name=t -c user.email=t@example.com"
+    git init -q --bare "$CB/o.git" 2>/dev/null; git clone -q "$CB/o.git" "$CB/w" 2>/dev/null
+    ( cd "$CB/w" && git checkout -q -b job 2>/dev/null; echo a > a; git add a; $g commit -q -m i; git push -q origin job 2>/dev/null )
+    _e2e_call "$pre"" source $CB/runfuncs.sh; _pushed_to_remote $CB/w job; echo RC=\$?"
+    assert_file_contains "$MB/out.log" "RC=0"                                "push の一致: 手元の HEAD と、リモートが一致 → 一致"
+    ( cd "$CB/w" && echo b > b; git add b; $g commit -q -m j )
+    _e2e_call "$pre"" source $CB/runfuncs.sh; _pushed_to_remote $CB/w job; echo RC=\$?"
+    assert_file_contains "$MB/out.log" "RC=1"                                "push の一致: push していないコミットがある → 不一致"
+
+    # 手動起動した実行の特定: 起動の前の実行（古い実行）を取り違えない
+    : > "$MOCK_CALL_LOG"; rm -f "$MB/disp.cnt"
+    _e2e_call "$pre"" source $CB/runfuncs.sh; id=\$(_dispatch_workflow wf-metasync.yml); echo \"RC=\$? ID=[\$id]\""
+    assert_file_contains "$MB/out.log" "RC=0 ID=[101]"                       "手動起動: 起動のあとに現れた新しい実行の ID を返す"
+    assert_file_contains "$MOCK_CALL_LOG" "workflow run wf-metasync.yml"     "手動起動: 起動を呼び出す"
+    rm -f "$MB/disp.cnt"
+    MOCK_GH_DISPATCH_AFTER=100 _e2e_call "$pre"" source $CB/runfuncs.sh; id=\$(_dispatch_workflow wf-metasync.yml); echo \"RC=\$? ID=[\$id]\""
+    assert_file_contains "$MB/out.log" "RC=1 ID=[]"                          "手動起動: 新しい実行が現れない（古い実行のまま）→ 古い実行を返さず、戻り値 1"
+    rm -f "$MB/disp.cnt"; : > "$MOCK_CALL_LOG"
+    MOCK_GH_WORKFLOW_EXIT=1 _e2e_call "$pre"" source $CB/runfuncs.sh; id=\$(_dispatch_workflow wf-metasync.yml); echo \"RC=\$? ID=[\$id]\""
+    assert_file_contains "$MB/out.log" "RC=1 ID=[]"                          "手動起動: 起動の呼び出しがすべて失敗 → 戻り値 1（実行を探さない）"
+    [[ "$(grep -c 'event workflow_dispatch' "$MOCK_CALL_LOG")" -le 1 ]] && pass "手動起動: 起動に失敗したら、実行の ID を探さない" || fail "手動起動: 起動に失敗したら、実行の ID を探さない"
+
+
+    # --resume: 前回残したテスト用の作業フォルダ（最新の 1 つ）を使う / 前回の残りの Hello World の Apex を削除する
+    { echo 'sleep() { :; }'
+      awk '/^_find_resume_project\(\) \{/,/^}/' "$E2E_DIR/run.sh"
+      awk '/^_resume_clean_apex\(\) \{/,/^}/' "$E2E_DIR/run.sh"; } > "$CB/resumefuncs.sh"
+    mkdir -p "$CB/root/home/tamashimon-org/e2e-20260101-000000"   # 直前の掃除のテストで、消えているため、作り直す
+    _e2e_call "$pre"" source $CB/resumefuncs.sh; p=\$(_find_resume_project); echo \"RC=\$? P=[\$p]\""
+    assert_file_contains "$MB/out.log" "RC=0 P=[e2e-20260101-000000]"       "再開: 前回の作業フォルダがあれば、その名前を返す"
+    mkdir -p "$CB/root/home/tamashimon-org/e2e-20260202-020202" "$CB/root/home/tamashimon-org/e2e-notatimestamp"
+    _e2e_call "$pre"" source $CB/resumefuncs.sh; p=\$(_find_resume_project); echo \"RC=\$? P=[\$p]\""
+    assert_file_contains "$MB/out.log" "RC=0 P=[e2e-20260202-020202]"       "再開: 複数あれば、最新の（日時が新しい）ものを返す。形式が違う名前は、無視する"
+    rm -rf "$CB"/root/home/tamashimon-org/e2e-*
+    _e2e_call "$pre"" source $CB/resumefuncs.sh; p=\$(_find_resume_project); echo \"RC=\$? P=[\$p]\""
+    assert_file_contains "$MB/out.log" "RC=1 P=[]"                           "再開: 前回の作業フォルダがなければ、戻り値 1"
+    : > "$MOCK_CALL_LOG"
+    MOCK_SF_APEX="SfToolsE2eHello SfToolsE2eHelloTest OtherClass" _e2e_call "$pre"" source $CB/resumefuncs.sh; _resume_clean_apex; echo RC=\$?"
+    assert_file_contains "$MB/out.log" "RC=0"                                "再開: 前回の残りの Apex があれば、削除して、戻り値 0"
+    assert_file_contains "$MOCK_CALL_LOG" "<members>SfToolsE2eHello</members>"  "再開: 前回の残りの Hello World の Apex を削除する"
+    assert_file_not_contains "$MOCK_CALL_LOG" "OtherClass"                   "再開: 無関係のクラスは、削除しない"
+    : > "$MOCK_CALL_LOG"
+    MOCK_SF_APEX="OtherClass" _e2e_call "$pre"" source $CB/resumefuncs.sh; _resume_clean_apex; echo RC=\$?"
+    assert_file_contains "$MB/out.log" "RC=0"                                "再開: 残りがなければ、何もせず、戻り値 0"
+    assert_file_not_contains "$MOCK_CALL_LOG" "post-destructive"             "再開: 残りがなければ、削除のデプロイをしない"
+    assert_file_contains "$E2E_DIR/run.sh" "--resume)     RESUME=1 ;;"       "run.sh: --resume のオプションがある"
+    assert_file_contains "$E2E_DIR/run.sh" "if [[ \$RESUME -eq 0 ]]; then"   "run.sh: --resume では、wf-metasync を行わない"
+    assert_file_contains "$E2E_DIR/run.sh" 'JOB_RELEASE="e2e-hello-${RUN_ID}"' "run.sh: ジョブ名は、時刻付き（--resume で、同じリポジトリを使っても、ぶつからない）"
+    assert_file_contains "$E2E_DIR/run.sh" "-t main --no-open" "run.sh: sf-deploy の拒否の確認は、予約名 main で行う（開発者の本物の prod を避ける）"
+    unset MOCK_CALL_LOG MOCK_GH_REPOS MOCK_SF_ECAS
+    teardown "$CB"
+}
 
 test_e2e_names
 test_e2e_guard
@@ -1006,5 +1262,7 @@ test_e2e_list_failure
 test_e2e_local_guard
 test_e2e_apex
 test_e2e_gh_flow
+test_e2e_sf_cmd
+test_e2e_review_fixes
 
 print_summary

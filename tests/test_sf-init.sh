@@ -96,6 +96,8 @@ case "$1 $2" in
         [[ -n "${!_vn:-}" ]] && { echo "${!_vn}"; exit 0; }
         exit 1 ;;
     "secret list")
+        # MOCK_GH_SECRET_LIST_EXIT=1: 一覧の取得に失敗する（権限不足・通信エラーの再現）
+        [[ "${MOCK_GH_SECRET_LIST_EXIT:-0}" != "0" ]] && exit "$MOCK_GH_SECRET_LIST_EXIT"
         # --status の診断用: MOCK_GH_SECRETS（改行区切りの名前）。実際の gh と同じく、名前の後ろに TAB と日時が付く
         while IFS= read -r _n; do [[ -n "$_n" ]] && printf '%s\t2026-10-11T08:00:00Z\n' "$_n"; done <<< "${MOCK_GH_SECRETS:-}"
         exit 0 ;;
@@ -251,9 +253,9 @@ test_happy_path_3branches() {
     assert_file_contains "/tmp/sf-init-test-happy.log" "新しい Salesforce プロジェクトを作ります"   "開始画面: タイトルが出る"
     assert_file_contains "/tmp/sf-init-test-happy.log" "【先に、用意してください】"                "開始画面: 事前に用意するものが出る"
     assert_file_contains "/tmp/sf-init-test-happy.log" "【これから行うこと】"                      "開始画面: 全体のステップが出る"
-    assert_file_contains "/tmp/sf-init-test-happy.log" "ステップ 1 / 8: 準備の確認"               "ステップの見出し（現在地）: 1 / 8"
-    assert_file_contains "/tmp/sf-init-test-happy.log" "ステップ 5 / 8: GitHub の Token"          "ステップの見出し（現在地）: 5 / 8"
-    assert_file_contains "/tmp/sf-init-test-happy.log" "ステップ 8 / 8: Salesforce の接続"         "ステップの見出し（現在地）: 8 / 8"
+    assert_file_contains "/tmp/sf-init-test-happy.log" "ステップ 1 / 9: 準備の確認"               "ステップの見出し（現在地）: 1 / 8"
+    assert_file_contains "/tmp/sf-init-test-happy.log" "ステップ 5 / 9: GitHub の Token"          "ステップの見出し（現在地）: 5 / 8"
+    assert_file_contains "/tmp/sf-init-test-happy.log" "ステップ 8 / 9: Salesforce の接続"         "ステップの見出し（現在地）: 8 / 8"
     assert_file_contains "/tmp/sf-init-test-happy.log" "（完了: 準備の確認・プロジェクトの確認"      "ステップの見出し: 完了済みのステップが出る"
     assert_file_not_contains "/tmp/sf-init-test-happy.log" "Phase 6"                              "Phase の番号を、画面に出さない"
     assert_file_contains "/tmp/sf-init-test-happy.log" "【次にやること】"                          "完了画面: 次にやることが出る"
@@ -1401,6 +1403,7 @@ export SF_INIT_LOGIN_URL_PROD=login   # ログイン先を、質問せずに指�
         } > "$envf"
         [[ "${5:-}" == *REPO_DIR* ]] && mkdir -p "$init_dir/init/force-testproject"
         printf 'SF_INIT_DONE_PHASE=%s\nSF_INIT_DONE_AT="2026-10-11 14:32"\n' "$done_phase" > "$progf"
+        [[ -n "${6:-}" ]] && printf '%b\n' "$6" >> "$progf"   # 進捗ファイルに追加する行（段階ごとの完了の記録など）
         rm -rf "$mb/deployed_src" "$mb/jwt.cnt" "$mock_home/.sf-jwt" "$mb/.repo_view_called"
         : > "$MOCK_CALL_LOG"
         # shellcheck disable=SC2086
@@ -1417,8 +1420,8 @@ export SF_INIT_LOGIN_URL_PROD=login   # ログイン先を、質問せずに指�
     assert_file_contains      "$out" "2026-10-11 14:32"                                     "続き: 前回の時刻が表示される"
     assert_file_contains      "$out" "「Salesforce の接続」から、続きをやる"                                 "続き: 選択肢に次の Phase が表示される"
     assert_file_contains      "$MOCK_CALL_LOG" "gh auth status"                              "続き: Phase 1（環境チェック）は実行される"
-    assert_file_not_contains  "$out" "ステップ 2 / 8: プロジェクトの確認"                          "続き: Phase 2〜9 は実行しない"
-    assert_file_contains      "$out" "ステップ 8 / 8: Salesforce の接続"                                           "続き: Phase 10 から実行される"
+    assert_file_not_contains  "$out" "ステップ 2 / 9: プロジェクトの確認"                          "続き: Phase 2〜9 は実行しない"
+    assert_file_contains      "$out" "ステップ 8 / 9: Salesforce の接続"                                           "続き: Phase 10 から実行される"
     assert_file_contains      "$MOCK_CALL_LOG" "gh secret set SF_CONSUMER_KEY_PROD"          "続き: Phase 10 の処理が実行される"
     assert_file_not_contains  "$MOCK_CALL_LOG" "gh repo create"                              "続き: リポジトリを作り直さない"
     assert_file_contains      "$progf" "SF_INIT_DONE_PHASE=10"                                "続き: 完了後、進捗が Phase 10 になる"
@@ -1436,7 +1439,7 @@ export SF_INIT_LOGIN_URL_PROD=login   # ログイン先を、質問せずに指�
     # [2] 最初からやり直す: 保存した状態を消して、Phase 1 から（Y=警告 / 2=最初から / 以降は、通常の全 Phase の入力）
     _rc_run 5 "tamashimon/force-testproject" "--legacy-connected-app" "Y\n2\n$(_make_input_3branches | sed '1d')"
     assert_exit_ok            "$exit_code"                                                  "[2] 最初から: 正常終了する"
-    assert_file_contains      "$out" "ステップ 2 / 8: プロジェクトの確認"                          "最初から: Phase 2 から実行される"
+    assert_file_contains      "$out" "ステップ 2 / 9: プロジェクトの確認"                          "最初から: Phase 2 から実行される"
     assert_file_contains      "$MOCK_CALL_LOG" "gh repo create"                              "最初から: Phase 3 が実行される"
     assert_file_contains      "$progf" "SF_INIT_DONE_PHASE=10"                                "最初から: 完了後、進捗が Phase 10 になる"
     rm -rf "$init_base"
@@ -1464,6 +1467,97 @@ export SF_INIT_LOGIN_URL_PROD=login   # ログイン先を、質問せずに指�
     assert_file_contains      "$out" "init/force-testproject"                                  "完了済み・1: 管理者用のフォルダで実行される"
     assert_file_not_contains  "$MOCK_CALL_LOG" "gh repo create"                              "完了済み・1: 何も変更しない"
     rm -rf "$init_base"
+
+    # 完了済み・[2] 動作を確認する: 管理者用のフォルダで sf-verify.sh を実行し、その終了コードで終わる（何も作り直さない）
+    printf '#!/bin/bash\necho "VERIFY-FROM-MENU cwd=$(basename "$PWD")"\nexit 0\n' > "$mock_home/sf-tools/bin/sf-verify.sh"
+    chmod +x "$mock_home/sf-tools/bin/sf-verify.sh"
+    _rc_run 10 "tamashimon/force-testproject" "" 'Y\n2\n' 'REPO_DIR="@INIT@/force-testproject"'
+    assert_exit_ok            "$exit_code"                                                  "完了済み・2: 正常終了する"
+    assert_file_contains      "$out" "VERIFY-FROM-MENU cwd=force-testproject"                  "完了済み・2: 管理者用のフォルダで、sf-verify.sh が実行される"
+    assert_file_contains      "$out" "動作を、確認する"                                        "完了済み: 選択肢に、動作の確認が、表示される"
+    assert_file_not_contains  "$MOCK_CALL_LOG" "gh repo create"                              "完了済み・2: 何も作り直さない"
+    rm -rf "$init_base"
+    printf '#!/bin/bash\nexit 1\n' > "$mock_home/sf-tools/bin/sf-verify.sh"
+    _rc_run 10 "tamashimon/force-testproject" "" 'Y\n2\n' 'REPO_DIR="@INIT@/force-testproject"'
+    assert_exit_fail          "$exit_code"                                                  "完了済み・2: sf-verify.sh が失敗すれば、非ゼロで終了する"
+    rm -rf "$init_base"
+
+    # 完了済みのプロジェクトで、--resume N を明示 → 拒否する（接続処理を、確認なしで、やり直さない）
+    _rc_run 10 "tamashimon/force-testproject" "--resume 10" 'Y\n'
+    assert_exit_fail          "$exit_code"                                                  "完了済み・--resume 10: 拒否される"
+    assert_file_contains      "$out" "完了済みのプロジェクトでは、--resume は使えません"          "完了済み・--resume 10: 理由が表示される"
+    assert_file_contains      "$out" "sf-init.sh --reconnect"                                   "完了済み・--resume 10: --reconnect が案内される"
+    assert_file_not_contains  "$MOCK_CALL_LOG" "gh secret set"                              "完了済み・--resume 10: 何も登録しない"
+    rm -rf "$init_base"
+    # 境界: 完了済み・--resume 2 も拒否される（N > 1 は、すべて）
+    _rc_run 10 "tamashimon/force-testproject" "--resume 2" 'Y\n'
+    assert_exit_fail          "$exit_code"                                                  "完了済み・--resume 2: 拒否される"
+    assert_file_contains      "$out" "完了済みのプロジェクトでは、--resume は使えません"          "完了済み・--resume 2: 理由が表示される"
+    rm -rf "$init_base"
+    # 境界: 別のリポジトリの状態は、拒否しない（残骸として、扱う）
+    _rc_run 10 "other/force-other" "--resume 2" 'Y\n'
+    assert_file_not_contains  "$out" "完了済みのプロジェクトでは、--resume は使えません"          "別のリポジトリの状態・--resume: 拒否しない"
+    rm -rf "$init_base"
+    # 境界: 完了済み・--only 10 は、拒否しない（デバッグ用）
+    _rc_run 10 "tamashimon/force-testproject" "--only 10" 'Y\n'
+    assert_file_not_contains  "$out" "完了済みのプロジェクトでは、--resume は使えません"          "完了済み・--only 10: 拒否しない"
+    rm -rf "$init_base"
+    # 未完了なら、--resume N は、これまでどおり使える
+    _rc_run 9 "tamashimon/force-testproject" "--resume 10" 'Y\n'
+    assert_exit_ok            "$exit_code"                                                  "未完了・--resume 10: 実行できる"
+    assert_file_contains      "$MOCK_CALL_LOG" "gh secret set SF_CONSUMER_KEY_PROD"          "未完了・--resume 10: Phase 10 が実行される"
+    rm -rf "$init_base"
+
+    # --only: 進捗を更新しない旨が、表示される。段階ごとの記録も、しない
+    _rc_run 9 "tamashimon/force-testproject" "--only 10" 'Y\n'
+    assert_file_contains      "$out" "--only は、指定した Phase だけを実行します。進捗は、更新しません"  "--only: 進捗を更新しない旨が、表示される"
+    assert_file_not_contains  "$progf" "SF_INIT_DONE_TIER_"                                  "--only: 段階ごとの完了を、記録しない"
+    rm -rf "$init_base"
+
+    # Phase 10 の段階ごとの再開: 前回、main が完了していて、Secret も、あるなら、main をスキップして、staging だけ行う
+    export SF_INIT_LOGIN_URL_STG=login
+    export MOCK_GH_SECRETS=$'SF_CONSUMER_KEY_PROD'
+    _rc_run 9 "tamashimon/force-testproject" "" 'Y\n1\n' 'BRANCH_COUNT="2"' 'SF_INIT_DONE_TIER_PROD=1'
+    assert_exit_ok            "$exit_code"                                                  "段階ごとの再開: 正常終了する"
+    assert_file_contains      "$out" "メイン組織（PROD）は、前回、設定が完了しているため、スキップします"  "段階ごとの再開: 完了した段階を、スキップする"
+    assert_file_not_contains  "$MOCK_CALL_LOG" "alias sf-tools-PROD"                         "段階ごとの再開: main の組織には、ログインし直さない"
+    assert_file_contains      "$MOCK_CALL_LOG" "gh secret set SF_CONSUMER_KEY_STG"           "段階ごとの再開: 残りの段階（staging）は、実行される"
+    assert_file_not_contains  "$progf" "SF_INIT_DONE_TIER_"                                  "段階ごとの再開: 完了後、段階ごとの記録は、消える（Phase 10 の完了に、置き換わる）"
+    rm -rf "$init_base"
+    # 記録があっても、Secret が、もうなければ、やり直す（記録だけを、信じない）
+    export MOCK_GH_SECRETS=""
+    _rc_run 9 "tamashimon/force-testproject" "" 'Y\n1\n' 'BRANCH_COUNT="2"' 'SF_INIT_DONE_TIER_PROD=1'
+    assert_file_contains      "$MOCK_CALL_LOG" "gh secret set SF_CONSUMER_KEY_PROD"          "記録があっても、Secret がなければ、その段階を、やり直す"
+    rm -rf "$init_base"
+    # Secret の一覧を取得できないときは、スキップせずに、実行する（理由を表示する）
+    export MOCK_GH_SECRET_LIST_EXIT=1
+    _rc_run 9 "tamashimon/force-testproject" "" 'Y\n1\n' 'BRANCH_COUNT="2"' 'SF_INIT_DONE_TIER_PROD=1'
+    assert_file_contains      "$out" "Secret の一覧を確認できないため、PROD の段階は、スキップせずに、実行します"  "一覧を取得できない: 理由が表示される"
+    assert_file_contains      "$MOCK_CALL_LOG" "gh secret set SF_CONSUMER_KEY_PROD"          "一覧を取得できない: その段階を、実行する（誤ってスキップしない）"
+    unset MOCK_GH_SECRET_LIST_EXIT
+    rm -rf "$init_base"
+    # 記録がなければ、すべての段階を、実行する
+    export MOCK_GH_SECRETS=$'SF_CONSUMER_KEY_PROD'
+    _rc_run 9 "tamashimon/force-testproject" "" 'Y\n1\n' 'BRANCH_COUNT="2"'
+    assert_file_contains      "$MOCK_CALL_LOG" "gh secret set SF_CONSUMER_KEY_PROD"          "記録がなければ、Secret があっても、実行する（前回の続きではない）"
+    rm -rf "$init_base"
+    unset MOCK_GH_SECRETS SF_INIT_LOGIN_URL_STG
+
+    # 動作の確認の質問: --resume N では、聞かない（通しの実行と、中断後の「続きをやる」だけ）
+    printf '#!/bin/bash\necho VERIFY-CALLED >> "%s/verify.log"\n' "$mb" > "$mock_home/sf-tools/bin/sf-verify.sh"
+    chmod +x "$mock_home/sf-tools/bin/sf-verify.sh"
+    export SF_INIT_VERIFY_ASK=1
+    rm -f "$mb/verify.log"
+    _rc_run 9 "tamashimon/force-testproject" "--resume 10" 'Y\n\n'
+    assert_file_not_contains  "$out" "ステップ 9 / 9: 動作の確認"                              "--resume 10: 動作の確認を、聞かない"
+    assert_file_not_exists    "$mb/verify.log"                                                "--resume 10: sf-verify.sh を呼ばない"
+    rm -rf "$init_base"
+    # 中断後の「続きをやる」では、聞く（Enter = 確認する）
+    _rc_run 9 "tamashimon/force-testproject" "" 'Y\n1\n\n'
+    assert_file_contains      "$out" "ステップ 9 / 9: 動作の確認"                              "続きをやる: 動作の確認を、聞く"
+    assert_file_contains      "$mb/verify.log" "VERIFY-CALLED"                                 "続きをやる: Enter で、sf-verify.sh を呼ぶ"
+    rm -rf "$init_base"
+    unset SF_INIT_VERIFY_ASK
 
     # 完了時の後始末: 残った Token の値の行を、.sf-init.env から消す（init フォルダは、残すため）
     _rc_run 9 "tamashimon/force-testproject" "" 'Y\n1\n' 'PAT_TOKEN_VALUE="ghp_leftover"'
@@ -1563,7 +1657,7 @@ test_sf_tools_autoupdate() {
     assert_file_exists        "$mock_home/sf-tools/NEW_FILE"                                  "origin の新しい内容が、取り込まれた"
     assert_file_contains      "$out" "更新した sf-tools で、もう一度、はじめから実行します"      "自動で、実行しなおす旨が表示される"
     assert_file_contains      "$out" "更新した sf-tools で、はじめから実行しています"            "実行しなおした旨が表示される"
-    assert_file_contains      "$out" "ステップ 1 / 8: 準備の確認"                             "実行しなおしたあと、ステップの見出しから続く"
+    assert_file_contains      "$out" "ステップ 1 / 9: 準備の確認"                             "実行しなおしたあと、ステップの見出しから続く"
     assert_file_contains      "$out" "【先に、用意してください】"                              "実行しなおしたあと、開始画面（用意するもの）が出る"
     assert_equals "$(grep -c 'このコマンドは管理者専用です' "$out")" "2"                    "管理者向けの警告は、更新の前と、実行しなおしたあとの、2 回出る（確認を飛ばさない）"
 
@@ -1902,6 +1996,95 @@ test_e2e_input_sequence_layouts() {
     done
 }
 
+# ==============================================================================
+# テスト: ステップ 9「動作の確認」（sf-verify.sh を呼ぶ最後のステップ）
+#   sf-verify.sh は、スタブ（呼ばれたことと、環境変数・実行したフォルダを記録）に置き換える
+# ==============================================================================
+test_verify_step() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] ステップ 9: 動作の確認（Enter = 確認する / s = あとで / EOF = あとで / 失敗）${CLR_RST}"
+
+    local mb mock_home init_base init_dir exit_code input case_name answer stub_rc
+    for case_name in enter skip eof fail; do
+        mb=$(setup_mock_bin)
+        export MOCK_CALL_LOG="$mb/calls.log"
+        mock_home=$(setup_mock_home)
+        init_base=$(_setup_init_dir "tamashimon" "testproject")
+        init_dir="$init_base/home/tamashimon/testproject"
+        create_all_mocks "$mb"
+        create_mock_gh_for_init "$mb"
+        _stub_subscripts "$mock_home"
+        # sf-verify.sh のスタブ（呼ばれたこと・SF_VERIFY_CONFIRMED・実行したフォルダを記録して、指定の終了コードで終わる）
+        stub_rc=0; [[ "$case_name" == "fail" ]] && stub_rc=1
+        printf '#!/bin/bash\necho "VERIFY-CALLED confirmed=${SF_VERIFY_CONFIRMED:-} cwd=$(basename "$PWD")" >> "%s/verify.log"\nexit %s\n' "$mb" "$stub_rc" \
+            > "$mock_home/sf-tools/bin/sf-verify.sh"
+        chmod +x "$mock_home/sf-tools/bin/sf-verify.sh"
+        export MOCK_SF_ORG_JSON='{"result":{"username":"admin@example.com","alias":"x"}}'
+        export SF_INIT_JWT_INTERVAL=0 SF_INIT_VERIFY_ASK=1
+
+        input=$(E2E_PAT_TOKEN=ghp_fakepat E2E_SLACK_BOT_TOKEN=xoxb-fakeslack E2E_SLACK_CHANNEL_ID=C01ABCDEFGH \
+                bash -c "source '$SF_TOOLS_DIR/tests/e2e/lib.sh'; e2e_make_input")
+        case "$case_name" in
+            enter|fail) answer=$'\n' ;;
+            skip)       answer=$'s\n' ;;
+            eof)        answer="" ;;
+        esac
+        printf '%s\n%s' "$input" "$answer" \
+            | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
+                  bash "$mock_home/sf-tools/bin/sf-init.sh" ) > "$mb/out.log" 2>&1
+        exit_code=$?
+
+        assert_exit_ok "$exit_code" "${case_name}: sf-init は、正常終了する（確認の結果は、セットアップの成否に、影響しない）"
+        assert_file_contains "$mb/out.log" "ステップ 9 / 9: 動作の確認" "${case_name}: ステップ 9 の見出しが、表示される"
+        case "$case_name" in
+            enter)
+                assert_file_contains "$mb/verify.log" "VERIFY-CALLED" "enter: sf-verify.sh が呼ばれる"
+                assert_file_contains "$mb/verify.log" "confirmed=1" "enter: 確認は、二重に聞かない（SF_VERIFY_CONFIRMED=1）"
+                assert_file_contains "$mb/verify.log" "cwd=force-testproject" "enter: 管理者用のフォルダ（force-*）で実行される"
+                assert_file_contains "$mb/out.log" "動作の確認: 成功しました" "enter: 完了画面に、成功が表示される"
+                ;;
+            skip)
+                assert_file_not_exists "$mb/verify.log" "skip: sf-verify.sh は、呼ばれない"
+                assert_file_contains "$mb/out.log" "動作の確認は、あとで行えます" "skip: あとで実行するコマンドが、表示される"
+                ;;
+            eof)
+                assert_file_not_exists "$mb/verify.log" "eof: 標準入力が閉じていれば、あとで、とする（呼ばれない）"
+                assert_file_contains "$mb/out.log" "動作の確認は、あとで行えます" "eof: あとで実行するコマンドが、表示される"
+                ;;
+            fail)
+                assert_file_contains "$mb/verify.log" "VERIFY-CALLED" "fail: sf-verify.sh が呼ばれる"
+                assert_file_contains "$mb/out.log" "失敗した項目があります" "fail: 完了画面に、失敗と案内が、表示される"
+                assert_file_contains "$mb/out.log" "sf-verify.sh --cleanup" "fail: 削除のみのやり直しが、案内される"
+                ;;
+        esac
+        unset MOCK_SF_ORG_JSON SF_INIT_JWT_INTERVAL SF_INIT_VERIFY_ASK MOCK_CALL_LOG
+        teardown "$mb" "$mock_home" "$init_base"
+    done
+
+    # 端末でも、SF_INIT_VERIFY_ASK でもない（テスト・e2e・パイプ）: 聞かない（確認の質問が、入力を奪わない）
+    mb=$(setup_mock_bin)
+    export MOCK_CALL_LOG="$mb/calls.log"
+    mock_home=$(setup_mock_home)
+    init_base=$(_setup_init_dir "tamashimon" "testproject")
+    init_dir="$init_base/home/tamashimon/testproject"
+    create_all_mocks "$mb"; create_mock_gh_for_init "$mb"; _stub_subscripts "$mock_home"
+    printf '#!/bin/bash\necho CALLED >> "%s/verify.log"\n' "$mb" > "$mock_home/sf-tools/bin/sf-verify.sh"
+    chmod +x "$mock_home/sf-tools/bin/sf-verify.sh"
+    export MOCK_SF_ORG_JSON='{"result":{"username":"admin@example.com","alias":"x"}}' SF_INIT_JWT_INTERVAL=0
+    input=$(E2E_PAT_TOKEN=ghp_fakepat E2E_SLACK_BOT_TOKEN=xoxb-fakeslack E2E_SLACK_CHANNEL_ID=C01ABCDEFGH \
+            bash -c "source '$SF_TOOLS_DIR/tests/e2e/lib.sh'; e2e_make_input")
+    printf '%s\n\n' "$input" \
+        | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
+              bash "$mock_home/sf-tools/bin/sf-init.sh" ) > "$mb/out.log" 2>&1
+    exit_code=$?
+    assert_exit_ok "$exit_code" "非対話: 正常終了する"
+    assert_file_not_contains "$mb/out.log" "動作を確認しますか" "非対話（端末ではない）: 質問を出さない"
+    assert_file_not_exists "$mb/verify.log" "非対話: sf-verify.sh を呼ばない"
+    assert_file_contains "$mb/out.log" "動作の確認は、あとで行えます" "非対話: あとで実行するコマンドを、案内する"
+    unset MOCK_SF_ORG_JSON SF_INIT_JWT_INTERVAL MOCK_CALL_LOG
+    teardown "$mb" "$mock_home" "$init_base"
+}
+
 test_happy_path_3branches
 test_missing_tool_gh
 test_repo_create_failure
@@ -1923,6 +2106,7 @@ test_phase7_channel_id
 test_phase10_eca_auto
 test_e2e_input_sequence
 test_e2e_input_sequence_layouts
+test_verify_step
 test_sf_cli_check
 test_wf_propagate_skip_missing_branch
 test_wf_no_script_injection

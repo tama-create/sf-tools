@@ -188,11 +188,36 @@ log "HEADER" "各組織の JWT 認証情報を設定します。"
 # アプリ種別に応じた組織ごとの登録
 #   接続アプリ（1）      : コンシューマーキー・ユーザー名を入力 → JWT 接続テスト → 登録
 #   外部クライアントアプリ（2）: 自動作成（deploy）→ コンシューマー鍵を自動取得 → JWT 接続テスト → 登録
+#   段階ごとの再開: 完了した段階は、進捗ファイル（.sf-init.progress）に SF_INIT_DONE_TIER_<接尾辞>=1 を記録する。
+#   再実行では、記録があり、登録した Secret（SF_CONSUMER_KEY_<接尾辞>）が、いまもあるときだけ、その段階をスキップする
+#   （ブラウザのログインを、やり直さなくてよいように）。付け替えるときは、sf-init.sh --reconnect <段階>。
+#   進捗ファイルは、Phase 10 が成功したとき、sf-init.sh が書き直す（段階の記録は、消える）。--only 10 では、使わない
+_tier_done() {
+    [[ "${SF_INIT_TIER_RESUME:-}" == "1" && -f "${SF_INIT_PROGRESS_FILE:-}" ]] || return 1
+    grep -qx "SF_INIT_DONE_TIER_${1}=1" "$SF_INIT_PROGRESS_FILE" 2>/dev/null || return 1
+    local list
+    # Secret の一覧を取得できないとき（権限不足・通信エラー）は、「ない」と区別して、理由を表示し、その段階を実行する（安全側）
+    if ! list=$(gh secret list -R "$REPO_FULL_NAME" 2>/dev/null); then  # 条件チェック（取得のため run 不使用）
+        log "INFO" "  Secret の一覧を確認できないため、${1} の段階は、スキップせずに、実行します。"
+        return 1
+    fi
+    printf '%s\n' "$list" | awk '{print $1}' | tr -d '\r' | grep -qx "SF_CONSUMER_KEY_${1}"
+}
 _register_org() {
+    local alias="$1" suffix="$2" label="$3"
+    if _tier_done "$suffix"; then
+        log "INFO" "  ${label}（${suffix}）は、前回、設定が完了しているため、スキップします（付け替えるときは、sf-init.sh --reconnect <段階>）。"
+        return 0
+    fi
     if [[ "$APP_TYPE" == "1" ]]; then
-        register_jwt_secret "$1" "$2" "$3" "${JWT_DIR}/server.key"
+        register_jwt_secret "$alias" "$suffix" "$label" "${JWT_DIR}/server.key"
     else
-        register_jwt_secret_eca "$1" "$2" "$3" "${JWT_DIR}/server.key" "${JWT_DIR}/server.crt"
+        register_jwt_secret_eca "$alias" "$suffix" "$label" "${JWT_DIR}/server.key" "${JWT_DIR}/server.crt"
+    fi || return 1
+    # この段階が完了したことを、記録する（途中で失敗しても、完了した段階を、やり直さないため）
+    if [[ "${SF_INIT_TIER_RESUME:-}" == "1" && -n "${SF_INIT_PROGRESS_FILE:-}" ]]; then
+        printf 'SF_INIT_DONE_TIER_%s=1\n' "$suffix" >> "$SF_INIT_PROGRESS_FILE" \
+            || log "WARNING" "  進捗の記録に失敗しました（次回、この段階を、やり直します）。"
     fi
 }
 

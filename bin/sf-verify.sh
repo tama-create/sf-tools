@@ -12,6 +12,12 @@
 #   2. 実行内容の表示 : リポジトリ・段階ごとの組織の名前と種類・実行する内容・目安の時間。本番は、赤く表示する
 #   3. 確認          : 警告と、Enter の確認（Enter / Y で進む。N / q は、何も変更せずに中断）。本番（または種類を判定できない）
 #                      組織があるときは、質問の文面で、本番を含むことを明示する
+#   3b. 環境の確認   : 環境全体を、最初に確認する（e2e の確認と同じ観点）。NG があれば、そこで止める（組織に、何も変更しない。
+#                      wf-metasync は、手前の 2 つの確認が OK のときだけ、実行する）
+#                        ・SF_TOOLS_BRANCH が、main または development である
+#                        ・ローカルのログ（~/sf-tools/logs）に、Token・認証 URL が残っていない
+#                        ・wf-metasync（Salesforce → Git の同期）を、手動で 1 回実行し、成功する
+#                          （JWT ログイン・sf-tools の取得を含む。main の組織の変更が、main にコミットされることがある）
 #   4. リリース      : 同じブランチから、develop → staging → main の順（ない段階は、とばす）に、段階ごとの PR を出して、
 #                      wf-validate（検証）→ マージ → wf-release（リリース）。段階ごとに、次を確認する:
 #                        ・その段階の組織への JWT ログインが成功した
@@ -34,6 +40,7 @@
 #
 # 【オプション】
 #   --plan      : 診断と、実行内容の表示だけを行う（何も変更しない。確認も出さない）
+#   --no-metasync : 環境の確認のうち、wf-metasync の実行を、省略する（組織からの同期を、いま行いたくないとき）
 #   --cleanup   : 削除のみを行う（リリースの途中で止まって、組織に Hello World が残ったときの後始末）。
 #                 対象は、固定名のクラス（SfToolsE2eHello / SfToolsE2eHelloTest）だけ。ほかのクラスには、触れない
 #   -h, --help  : このヘルプを表示する
@@ -59,10 +66,12 @@ source "${SCRIPT_DIR}/../lib/sf-verify.sh"
 
 PLAN_ONLY=0
 CLEANUP_ONLY=0
+NO_METASYNC=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --plan)    PLAN_ONLY=1 ;;
         --cleanup) CLEANUP_ONLY=1 ;;
+        --no-metasync) NO_METASYNC=1 ;;
         *) die "不明なオプションです: $1" ;;
     esac
     shift
@@ -145,7 +154,17 @@ else
     echo "    内容       : Hello World（${SFV_APEX_HELLO} / ${SFV_APEX_HELLO_TEST}）を、各段階にリリースして、削除する" >&2
     echo "                 PR を $((n_tiers * 2)) 本（リリース ${n_tiers}・削除 ${n_tiers}）作成してマージする。組織のクラスと、リポジトリのファイルは、最後に消える" >&2
 fi
-echo "    目安の時間 : 約 $((n_tiers * (CLEANUP_ONLY == 1 ? 1 : 2) * 8)) 分" >&2
+if [[ $CLEANUP_ONLY -eq 0 ]]; then
+    _env_items="SF_TOOLS_BRANCH・ログに Token が残っていないこと"
+    [[ $NO_METASYNC -eq 1 ]] || _env_items+="・wf-metasync の実行"
+    echo "    最初の確認 : 環境全体（${_env_items}）。NG があれば、リリースへ進みません" >&2
+    if [[ $NO_METASYNC -eq 0 ]]; then
+        echo "                 ※ wf-metasync は、Salesforce（main の組織）の変更を、main に同期します。変更があれば、main にコミットされます" >&2
+    fi
+fi
+_est=$((n_tiers * (CLEANUP_ONLY == 1 ? 1 : 2) * 8))
+[[ $CLEANUP_ONLY -eq 0 && $NO_METASYNC -eq 0 ]] && _est=$((_est + 5))
+echo "    目安の時間 : 約 ${_est} 分" >&2
 echo "    残るもの   : リポジトリに、PR・コミットの履歴。Slack に、通知（段階ごとに数通）" >&2
 
 if [[ $PLAN_ONLY -eq 1 ]]; then
@@ -155,20 +174,23 @@ fi
 
 # ------------------------------------------------------------------------------
 # 3. 確認（管理者向けの警告・Enter の確認。本番を含むときは、文面で明示する）
+#    sf-init.sh から呼ばれたとき（SF_VERIFY_CONFIRMED=1）は、sf-init が、確認済みのため、二重には聞かない
 # ------------------------------------------------------------------------------
-echo "" >&2
-echo -e "${CLR_ERR}╔══════════════════════════════════════════════════════╗${CLR_RESET}" >&2
-echo -e "${CLR_ERR}║  !!  実際のリポジトリと組織に、リリースします        ║${CLR_RESET}" >&2
-echo -e "${CLR_ERR}║      Hello World を、リリースして、削除します        ║${CLR_RESET}" >&2
-echo -e "${CLR_ERR}║      管理者以外は、実行しないでください              ║${CLR_RESET}" >&2
-echo -e "${CLR_ERR}╚══════════════════════════════════════════════════════╝${CLR_RESET}" >&2
-echo "" >&2
-# 確認は、Enter を 1 回押すだけ（q で中断）。入力を、最小にするため。本番を含むときは、文面で、明示する
-if [[ $NEED_PROD_CONFIRM -eq 1 ]]; then
-    echo -e "  ${CLR_ERR}本番（または、種類を判定できない）組織に、Hello World を、リリースして、削除します。${CLR_RESET}" >&2
-    wizard_confirm "本番の組織を含みます。Enter で、${REPO} の検証を始めます（q で中断）"
-else
-    wizard_confirm "Enter で、${REPO} の検証を始めます（q で中断）"
+if [[ "${SF_VERIFY_CONFIRMED:-}" != "1" ]]; then
+    echo "" >&2
+    echo -e "${CLR_ERR}╔══════════════════════════════════════════════════════╗${CLR_RESET}" >&2
+    echo -e "${CLR_ERR}║  !!  実際のリポジトリと組織に、リリースします        ║${CLR_RESET}" >&2
+    echo -e "${CLR_ERR}║      Hello World を、リリースして、削除します        ║${CLR_RESET}" >&2
+    echo -e "${CLR_ERR}║      管理者以外は、実行しないでください              ║${CLR_RESET}" >&2
+    echo -e "${CLR_ERR}╚══════════════════════════════════════════════════════╝${CLR_RESET}" >&2
+    echo "" >&2
+    # 確認は、Enter を 1 回押すだけ（q で中断）。入力を、最小にするため。本番を含むときは、文面で、明示する
+    if [[ $NEED_PROD_CONFIRM -eq 1 ]]; then
+        echo -e "  ${CLR_ERR}本番（または、種類を判定できない）組織に、Hello World を、リリースして、削除します。${CLR_RESET}" >&2
+        wizard_confirm "本番の組織を含みます。Enter で、${REPO} の検証を始めます（q で中断）"
+    else
+        wizard_confirm "Enter で、${REPO} の検証を始めます（q で中断）"
+    fi
 fi
 
 # ------------------------------------------------------------------------------
@@ -325,11 +347,62 @@ _make_delete_branch() {
     sfv_hello_remove_target_text  | sfv_file_put "$REPO" "$br" "sf-tools/release/${br}/remove-target.txt" "verify: 削除対象" || return 1
 }
 
+# 環境全体の確認（リリースの前に行う。NG があれば、リリースへ進まない: 組織に、何も変更していない状態で止まる）
+# ローカルのログに、Token・認証 URL が、残っていないこと（sf-init・sf-verify などのログ）
+_logs_clean() {
+    local f found=0
+    for f in "$HOME"/sf-tools/logs/*.log; do
+        [[ -f "$f" ]] || continue
+        if grep -qE 'ghp_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|xox[bp]-[0-9A-Za-z-]{20,}|force://[^[:space:]]*:[^[:space:]]*:[^@[:space:]]{20,}@' "$f" 2>/dev/null; then
+            log "ERROR" "    Token（または認証 URL）らしい文字列が、ログに残っています: ${f}"
+            found=1
+        fi
+    done
+    [[ $found -eq 0 ]]
+}
+_tools_branch_ok() {
+    local v
+    v=$(_var SF_TOOLS_BRANCH)  # VAR=$(cmd) のため run 不使用
+    log "INFO" "    SF_TOOLS_BRANCH = ${v:-（未設定）}"
+    [[ "$v" == "main" || "$v" == "development" ]]
+}
+# wf-metasync を、手動で 1 回実行して、成功を確認する（JWT ログイン・sf-tools の取得を含む）
+_metasync_check() {
+    local id
+    id=$(sfv_dispatch_workflow "$REPO" wf-metasync.yml main) || id=""  # VAR=$(cmd) のため run 不使用
+    _vchk "環境（wf-metasync）: 起動した" test -n "$id" || return 1
+    _vchk "環境（wf-metasync）: 完了した" sfv_wait_run "$REPO" "$id" || return 1
+    _vchk "環境（wf-metasync）: 成功した（Salesforce → Git の同期）" _run_ok "$id" "wf-metasync" || return 1
+    _vchk "環境（wf-metasync）: Salesforce 組織への JWT ログインが成功した" \
+        test "$(sfv_step_conclusion "$REPO" "$id" "Salesforce 組織にログイン")" == "success"
+    _vchk "環境（wf-metasync）: sf-tools の取得が成功した（公開リポジトリを、Token なしで clone）" \
+        test "$(sfv_step_conclusion "$REPO" "$id" "自動化ツール（sf-tools）を取得")" == "success"
+}
+
 STAMP=$(date +%H%M%S)  # VAR=$(cmd) のため run 不使用
 JOB_RELEASE="verify-hello-${STAMP}"
 JOB_DELETE="verify-hello-delete-${STAMP}"
 
 if [[ $CLEANUP_ONLY -eq 0 ]]; then
+    log "HEADER" "環境の確認"
+    # 環境の確認で、NG があれば、そこで止める。組織・リポジトリに、何も変更しない状態で終わる
+    #   （wf-metasync は、組織の変更を main にコミットすることがあるため、手前の確認が、すべて OK のときだけ実行する）
+    _env_stop_if_ng() {
+        [[ $NG_COUNT -eq 0 ]] && return 0
+        echo "" >&2
+        log "ERROR" "環境の確認で、NG があります。これ以上は、進みません（リリースも、wf-metasync も、行っていません）。"
+        log "WARNING" "  上の [NG] を直してから、もう一度、実行してください。"
+        exit $RET_NG
+    }
+    _vchk "環境: SF_TOOLS_BRANCH が、main または development である" _tools_branch_ok || true
+    _vchk "環境: ローカルのログに、Token・認証 URL が残っていない" _logs_clean || true
+    _env_stop_if_ng
+    if [[ $NO_METASYNC -eq 0 ]]; then
+        _metasync_check || true
+    else
+        log "INFO" "  wf-metasync の実行は、省略しました（--no-metasync）。"
+    fi
+    _env_stop_if_ng
     log "HEADER" "リリース（${TIERS[*]}）"
     if _vchk "リリース用のブランチ ${JOB_RELEASE} を作成した（クラスのファイルとリリース対象）" _make_release_branch "$JOB_RELEASE"; then
         for t in "${TIERS[@]}"; do

@@ -12,6 +12,7 @@
 #   SFV_WF_TIMEOUT      ワークフローの完了を待つ上限（秒。既定 1200。E2E_WF_TIMEOUT も使える）
 #   SFV_RUN_FIND_TRIES  ワークフローの起動を待つ回数（既定 24。E2E_RUN_FIND_TRIES も使える）
 #   SFV_CONCLUSION_TRIES 結果の読み取りのやり直しの回数（既定 6。E2E_CONCLUSION_TRIES も使える）
+#   SFV_DISPATCH_TRIES  ワークフローの手動起動の、やり直しの回数（既定 12。起動直後は、認識まで少しかかる）
 # ==============================================================================
 
 # Hello World の Apex のクラス名（誰も使わない、単純なもの。リリースして、すぐ削除する）
@@ -172,6 +173,37 @@ sfv_rerun_and_wait() {
         a=$(sfv_gh run view "$id" -R "$repo" --json attempt --jq .attempt 2>/dev/null)    # VAR=$(cmd) のため run 不使用
         st=$(sfv_gh run view "$id" -R "$repo" --json status --jq .status 2>/dev/null)     # VAR=$(cmd) のため run 不使用
         [[ "$a" =~ ^[0-9]+$ ]] && (( a > a0 )) && [[ "$st" == "completed" ]] && return 0
+        sleep "$poll"; waited=$((waited + (poll > 0 ? poll : 1)))  # run 不使用: 待機（間隔が 0 でも、上限に達する）
+    done
+    return 1
+}
+# ワークフローを手動で起動し、起動した実行の ID を、標準出力に返す（完了は待たない）。
+#   起動の前の、最新の実行 ID を覚え、それより新しい実行だけを、起動した実行とみなす（古い実行を、取り違えないため）。
+#   起動の呼び出しが、すべて失敗したら、戻り値 1。引数: リポジトリ ワークフローのファイル名 [ブランチ（既定 main）]
+sfv_dispatch_workflow() {
+    local repo="$1" wf="$2" ref="${3:-main}" i id before dispatched=0 tries poll
+    tries="${SFV_DISPATCH_TRIES:-12}"; poll=$(_sfv_poll)
+    before=$(sfv_gh run list -R "$repo" --workflow "$wf" --event workflow_dispatch --limit 1 --json databaseId --jq '.[0].databaseId // 0' 2>/dev/null)  # VAR=$(cmd) のため run 不使用
+    [[ "$before" =~ ^[0-9]+$ ]] || before=0
+    for (( i = 1; i <= tries; i++ )); do   # 登録直後は、ワークフローが認識されるまで、少しかかる
+        if sfv_gh workflow run "$wf" -R "$repo" --ref "$ref" >/dev/null 2>&1; then dispatched=1; break; fi  # 条件チェック
+        sleep "$poll"  # run 不使用: 待機
+    done
+    [[ $dispatched -eq 1 ]] || return 1
+    for (( i = 1; i <= tries; i++ )); do
+        id=$(sfv_gh run list -R "$repo" --workflow "$wf" --event workflow_dispatch --limit 1 --json databaseId --jq '.[0].databaseId // empty' 2>/dev/null)  # VAR=$(cmd) のため run 不使用
+        if [[ "$id" =~ ^[0-9]+$ ]] && (( id > before )); then printf '%s' "$id"; return 0; fi
+        sleep "$poll"  # run 不使用: 待機
+    done
+    return 1
+}
+# 実行 ID の実行が、完了するまで待つ（上限 SFV_WF_TIMEOUT 秒）。完了したら 0・上限に達したら 1。引数: リポジトリ 実行 ID
+sfv_wait_run() {
+    local repo="$1" id="$2" status waited=0 poll timeout="${SFV_WF_TIMEOUT:-${E2E_WF_TIMEOUT:-1200}}"
+    poll=$(_sfv_poll)
+    while (( waited < timeout )); do
+        status=$(sfv_gh run view "$id" -R "$repo" --json status --jq .status 2>/dev/null)  # VAR=$(cmd) のため run 不使用
+        [[ "$status" == "completed" ]] && return 0
         sleep "$poll"; waited=$((waited + (poll > 0 ? poll : 1)))  # run 不使用: 待機（間隔が 0 でも、上限に達する）
     done
     return 1

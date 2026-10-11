@@ -63,6 +63,12 @@ case "$*" in
         echo "https://github.com/tamashimon/force-testproject/pull/${_n}"; exit 0 ;;
     "pr merge"*)             exit "${MOCK_GH_MERGE_EXIT:-0}" ;;
     "pr close"*)             exit 0 ;;
+    "workflow run"*)         exit "${MOCK_GH_WORKFLOW_EXIT:-0}" ;;
+    "run list"*"--event workflow_dispatch"*)
+        # 手動起動した実行の ID: 最初の問い合わせ（起動の前）は 100、以後は 101
+        _n=$(( $(cat "$_d/disp.cnt" 2>/dev/null || echo 0) + 1 )); echo "$_n" > "$_d/disp.cnt"
+        if [[ $_n -eq 1 ]]; then echo 100; else echo 101; fi
+        exit 0 ;;
     "run list"*)
         # 実行の ID: PR を作った数（pr.cnt）が増えると、新しい ID になる（基準より新しい実行だけを、対象にする仕組みの確認）
         _c=$(cat "$_d/pr.cnt" 2>/dev/null || echo 0)
@@ -77,7 +83,9 @@ case "$*" in
     "run view "*"--json status"*)     echo "completed"; exit 0 ;;
     "run view "*"--json conclusion"*)
         # MOCK_GH_RELEASE_FAIL=1: wf-release の実行（ID の下 1 桁が 2）だけ、失敗させる
-        if [[ "${MOCK_GH_RELEASE_FAIL:-}" == "1" && "${3: -1}" == "2" ]]; then echo "failure"; else echo "${MOCK_GH_CONCL:-success}"; fi
+        if [[ "${MOCK_GH_RELEASE_FAIL:-}" == "1" && "${3: -1}" == "2" ]]; then echo "failure"
+        elif [[ "${MOCK_GH_METASYNC_FAIL:-}" == "1" && "$3" == "101" ]]; then echo "failure"
+        else echo "${MOCK_GH_CONCL:-success}"; fi
         exit 0 ;;
     "run view "*"--json jobs"*)
         # ログインのステップ: 対象の段階（直前の PR の先）だけ success。ほかの段階は skipped
@@ -135,8 +143,10 @@ _env() {
     export MOCK_GH_VAR_SF_USERNAME_PROD=prod@example.com MOCK_GH_VAR_SF_USERNAME_STG=stg@example.com MOCK_GH_VAR_SF_USERNAME_DEV=dev@example.com
     export MOCK_GH_VAR_SF_ORG_NAME_PROD=TAMA_PROD MOCK_GH_VAR_SF_ORG_NAME_STG=TAMA_STAGING MOCK_GH_VAR_SF_ORG_NAME_DEV=TAMA_DEVELOP
     export MOCK_GH_LOG_USERS="prod@example.com stg@example.com dev@example.com"
+    export MOCK_GH_VAR_SF_TOOLS_BRANCH=development
+    rm -f "$MB/disp.cnt" "$HM"/sf-tools/logs/*.log
     export SFV_POLL_SEC=0 SFV_RUN_FIND_TRIES=3 SFV_CONCLUSION_TRIES=1 SFV_WF_TIMEOUT=5
-    unset MOCK_GH_CONCL MOCK_GH_MERGE_EXIT MOCK_GH_API_WRITE_EXIT MOCK_GH_RELEASE_FAIL MOCK_GH_OTHER_LOGIN MOCK_GH_OLD_STEPS MOCK_GH_HELLO_ON GITHUB_ACTIONS
+    unset MOCK_GH_CONCL MOCK_GH_MERGE_EXIT MOCK_GH_API_WRITE_EXIT MOCK_GH_RELEASE_FAIL MOCK_GH_METASYNC_FAIL MOCK_GH_WORKFLOW_EXIT SF_VERIFY_CONFIRMED MOCK_GH_OTHER_LOGIN MOCK_GH_OLD_STEPS MOCK_GH_HELLO_ON GITHUB_ACTIONS
     rm -f "$MB/pr.cnt"; : > "$MOCK_CALL_LOG"
 }
 
@@ -260,7 +270,7 @@ test_failure() {
     echo ""; echo -e "${CLR_HEAD}[TEST] 失敗 → マージしない・案内を表示する${CLR_RST}"
     _env
     export MOCK_GH_CONCL=failure
-    _run "Y\n"
+    _run "Y\n" --no-metasync   # すべての実行が失敗する設定のため、wf-metasync は省略（wf-validate の失敗を、確認する）
     assert_exit_fail "$RC" "検証が失敗すれば、非ゼロで終了する"
     assert_file_not_contains "$MOCK_CALL_LOG" "gh pr merge" "wf-validate が失敗: マージしない"
     assert_file_contains "$OUT" "検証を、途中で止めました" "案内が表示される"
@@ -329,6 +339,75 @@ test_review_fixes() {
     assert_exit_ok "$RC" "--cleanup は、同名のファイルがあっても、実行できる"
 }
 
+test_environment() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] 環境の確認（リリースの前。NG があれば、リリースへ進まない）${CLR_RST}"
+    # 正常: wf-metasync を実行して、成功する
+    _env
+    _run "\n" --plan
+    assert_file_contains "$OUT" "最初の確認 : 環境全体（SF_TOOLS_BRANCH・ログに Token が残っていないこと・wf-metasync の実行）" "--plan: 最初の確認の内容が表示される"
+    assert_file_contains "$OUT" "wf-metasync は、Salesforce（main の組織）の変更を、main に同期します" "--plan: wf-metasync の影響が表示される"
+    _env
+    _run "\n"
+    assert_exit_ok "$RC" "環境の確認とリリースが、成功する"
+    assert_file_contains "$OUT" "環境（wf-metasync）: 成功した" "wf-metasync の成功が確認される"
+    assert_file_contains "$OUT" "環境（wf-metasync）: sf-tools の取得が成功した" "wf-metasync の中の sf-tools の取得が確認される"
+    assert_file_contains "$MOCK_CALL_LOG" "workflow run wf-metasync.yml" "wf-metasync が手動で起動される"
+    # wf-metasync は、リリースの前に実行される（先に、PR を作らない）
+    local first_dispatch first_pr
+    first_dispatch=$(grep -n "workflow run wf-metasync" "$MOCK_CALL_LOG" | head -1 | cut -d: -f1)
+    first_pr=$(grep -n "gh pr create" "$MOCK_CALL_LOG" | head -1 | cut -d: -f1)
+    [[ -n "$first_dispatch" && -n "$first_pr" && "$first_dispatch" -lt "$first_pr" ]] \
+        && pass "wf-metasync は、リリースの PR より前に実行される" || fail "wf-metasync は、リリースの PR より前に実行される" "dispatch=$first_dispatch pr=$first_pr"
+
+    # SF_TOOLS_BRANCH が、不正 → リリースへ進まない
+    _env
+    export MOCK_GH_VAR_SF_TOOLS_BRANCH=feature-x
+    _run "\n"
+    assert_exit_fail "$RC" "SF_TOOLS_BRANCH が不正なら、中断する"
+    assert_file_contains "$OUT" "これ以上は、進みません" "先に進まないことが表示される"
+    assert_file_not_contains "$MOCK_CALL_LOG" "gh pr create" "環境の NG: PR を作らない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "git/refs" "環境の NG: ブランチを作らない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "workflow run" "環境の NG（SF_TOOLS_BRANCH）: wf-metasync も、起動しない（組織に、何も変更しない）"
+
+    # ログに、Token が残っている → リリースへ進まない
+    _env
+    mkdir -p "$HM/sf-tools/logs"
+    printf 'token=ghp_%s\n' "abcdefghijklmnopqrstuvwxyz0123456789" > "$HM/sf-tools/logs/old.log"
+    _run "\n"
+    assert_exit_fail "$RC" "ログに Token が残っていれば、中断する"
+    assert_file_contains "$OUT" "Token（または認証 URL）らしい文字列が、ログに残っています" "どのログかが表示される"
+    assert_file_not_contains "$MOCK_CALL_LOG" "gh pr create" "ログに Token: PR を作らない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "workflow run" "ログに Token: wf-metasync も、起動しない（組織に、何も変更しない）"
+    rm -f "$HM/sf-tools/logs/old.log"
+
+    # wf-metasync が、失敗 → リリースへ進まない
+    _env
+    export MOCK_GH_METASYNC_FAIL=1
+    _run "\n"
+    assert_exit_fail "$RC" "wf-metasync が失敗すれば、中断する"
+    assert_file_not_contains "$MOCK_CALL_LOG" "gh pr create" "wf-metasync の失敗: PR を作らない"
+
+    # --no-metasync: wf-metasync を実行しない
+    _env
+    _run "\n" --no-metasync
+    assert_exit_ok "$RC" "--no-metasync: 成功する"
+    assert_file_not_contains "$MOCK_CALL_LOG" "workflow run" "--no-metasync: wf-metasync を起動しない"
+
+    # --cleanup: 環境の確認は、行わない（後始末のため）
+    _env
+    export MOCK_GH_VAR_SF_TOOLS_BRANCH=feature-x
+    _run "\n" --cleanup
+    assert_exit_ok "$RC" "--cleanup: 環境の確認の NG に、影響されない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "workflow run" "--cleanup: wf-metasync を起動しない"
+
+    # sf-init から呼ばれたとき（SF_VERIFY_CONFIRMED=1）: 確認を、二重には聞かない（標準入力が空でも、進む）
+    _env
+    export SF_VERIFY_CONFIRMED=1
+    _run ""
+    assert_exit_ok "$RC" "SF_VERIFY_CONFIRMED=1: 確認なしで進む"
+    assert_file_not_contains "$OUT" "Enter で、" "SF_VERIFY_CONFIRMED=1: 確認の質問を出さない"
+}
+
 test_cleanup() {
     echo ""; echo -e "${CLR_HEAD}[TEST] --cleanup（削除のみ）${CLR_RST}"
     _env
@@ -379,6 +458,7 @@ test_three_tiers
 test_failure
 test_identity_mismatch
 test_review_fixes
+test_environment
 test_cleanup
 test_lib
 

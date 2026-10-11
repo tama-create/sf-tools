@@ -177,11 +177,10 @@ _stub_subscripts() {
 #  19. Y                  (develop Sandbox? - ask_yn read_key)
 #  20. fake_dev_key       (develop コンシューマーキー - read_or_quit)
 #  21. dev@example.com    (develop ユーザー名 - read_or_quit)
-# 入力順（後処理）:
-#  22. N                  (init フォルダ削除をスキップ。Phase 10 が最後。SF_TOOLS_TOKEN は不要になった)
+# 入力順（後処理）: なし（init フォルダの削除の質問は、廃止した。init フォルダは、管理者用として残す。Phase 10 が最後）
 # ==============================================================================
 _make_input_3branches() {
-    printf 'Y\nY\n1\n1\nghp_faketoken\n\nxoxb-faketoken\nC01ABCDEFGH\n\n\n1\nfake_prod_key\nprod@example.com\n\nY\nfake_stg_key\nstg@example.com\n\nY\nfake_dev_key\ndev@example.com\nN\n'
+    printf 'Y\nY\n1\n1\nghp_faketoken\n\nxoxb-faketoken\nC01ABCDEFGH\n\n\n1\nfake_prod_key\nprod@example.com\n\nY\nfake_stg_key\nstg@example.com\n\nY\nfake_dev_key\ndev@example.com\n'
 }
 
 # ==============================================================================
@@ -1208,7 +1207,8 @@ test_e2e_input_sequence() {
     assert_file_contains      "$MOCK_CALL_LOG" "gh secret set SF_CONSUMER_KEY_PROD"                   "SF_CONSUMER_KEY_PROD が登録される"
     assert_file_not_contains  "$MOCK_CALL_LOG" "SF_CONSUMER_KEY_STG"                                  "main のみの構成なので、ステージング組織は設定しない"
     assert_file_not_contains  "$MOCK_CALL_LOG" "SF_TOOLS_TOKEN"                                       "SF_TOOLS_TOKEN は登録しない（sf-tools は公開リポジトリのため不要）"
-    assert_dir_exists         "$init_dir/init"                                                        "最後の質問に N と答えて、init フォルダが残る（台本の最後までずれていない）"
+    assert_dir_exists         "$init_dir/init"                                                        "init フォルダが残る（削除の質問は、廃止した）"
+    assert_file_not_contains  "$mb/out.log" "削除してよいですか"                                       "init フォルダの削除の質問は、出さない"
     assert_file_not_contains  "$mb/out.log" "ghp_fakepat"                                            "PAT_TOKEN の値が出力に出ない"
 
     unset MOCK_SF_ORG_JSON SF_INIT_JWT_INTERVAL MOCK_CALL_LOG SF_INIT_LOGIN_URL_PROD
@@ -1279,7 +1279,7 @@ test_phase6_pat_token() {
     mkdir -p "$init_dir/init"
 
     # 引数: 標準入力（printf の書式）。先頭の Y は、管理者向けの確認。環境変数（MOCK_GH_*）は、呼ぶ前に export する
-    #   REPO_DIR は入れない（--only 6 の終了時に、init フォルダ削除の質問を出さないため）
+    #   REPO_DIR は入れない
     _p6_run() {
         : > "$MOCK_CALL_LOG"
         cat > "$init_dir/init/.sf-init.env" << 'ENVEOF'
@@ -1299,7 +1299,7 @@ ENVEOF
     assert_exit_ok            "$exit_code"                                                  "正常終了する"
     assert_file_not_contains  "$mb/out.log" "発行済み"                                       "「発行済みか」は、聞かない"
     assert_file_contains      "$mb/out.log" "【作るアカウント】 tamashimon"                   "Token を作るアカウント（オーナー）が表示される"
-    assert_file_contains      "$mb/out.log" "画面には何も表示されません"                       "貼り付けても表示されないことを、先に伝える"
+    assert_file_contains      "$mb/out.log" "文字の数だけ * が並びます"                         "貼り付けると * が並ぶことを、先に伝える"
     assert_file_contains      "$mb/out.log" "Generate token"                                "手順（やること）が表示される"
     assert_file_contains      "$MOCK_CALL_LOG" "tokens/new?description=sf-metasync-testproject&scopes=repo,workflow" "Token の作成ページ（Note・Scopes 入力済み）を、ブラウザで開く"
     assert_file_contains      "$mb/out.log" "Token を確認できました（tamashimon さんの Token"   "検証の結果が、人の言葉で表示される"
@@ -1372,7 +1372,7 @@ test_resume_choice() {
     export SF_INIT_JWT_INTERVAL=0
 export SF_INIT_LOGIN_URL_PROD=login   # ログイン先を、質問せずに指定する
 
-    # 引数: 前回の完了 Phase / リポジトリ / sf-init.sh の引数 / 標準入力（printf %b）
+    # 引数: 前回の完了 Phase / リポジトリ / sf-init.sh の引数 / 標準入力（printf %b） / 追加の .sf-init.env の行（省略可）
     #   前回の状態（.sf-init.env）を作ってから、sf-init.sh を実行する
     _rc_run() {
         local done_phase="$1" repo="$2" args="$3" input="$4"
@@ -1382,8 +1382,10 @@ export SF_INIT_LOGIN_URL_PROD=login   # ログイン先を、質問せずに指�
         mkdir -p "$init_dir/init"
         {
             printf 'GITHUB_OWNER="tamashimon"\nPROJECT_NAME="testproject"\nREPO_NAME="force-testproject"\n'
-            printf 'REPO_FULL_NAME="%s"\nBRANCH_COUNT="1"\n' "$repo"   # REPO_DIR は入れない（終了時の init フォルダ削除の質問を出さないため）
+            printf 'REPO_FULL_NAME="%s"\nBRANCH_COUNT="1"\n' "$repo"   # REPO_DIR は、5 番目の引数で渡す（既定は入れない）
+            [[ -n "${5:-}" ]] && printf '%s\n' "${5//@INIT@/$init_dir/init}"   # 追加の行（@INIT@ は、init フォルダのパスに置き換える）
         } > "$envf"
+        [[ "${5:-}" == *REPO_DIR* ]] && mkdir -p "$init_dir/init/force-testproject"
         printf 'SF_INIT_DONE_PHASE=%s\nSF_INIT_DONE_AT="2026-10-11 14:32"\n' "$done_phase" > "$progf"
         rm -rf "$mb/deployed_src" "$mb/jwt.cnt" "$mock_home/.sf-jwt" "$mb/.repo_view_called"
         : > "$MOCK_CALL_LOG"
@@ -1431,9 +1433,32 @@ export SF_INIT_LOGIN_URL_PROD=login   # ログイン先を、質問せずに指�
     [[ ! -e "$envf" ]] && pass "別のリポジトリの状態 → 残骸として消す" || fail "別のリポジトリの状態 → 残骸として消す"
     rm -rf "$init_base"
 
-    # 質問が出ない: 前回は最後まで完了している
-    _rc_run 10 "tamashimon/force-testproject" "" 'Y\n'
-    assert_file_not_contains  "$out" "前回のセットアップは"                                   "完了済み（Phase 10）→ 質問しない（最初から）"
+    # 完了済み（Phase 10）: 「続きをやる」ではなく、完了済みの案内を出す。[q] 終了: 何も実行しない・状態を消さない
+    _rc_run 10 "tamashimon/force-testproject" "" 'Y\nq\n'
+    assert_exit_ok            "$exit_code"                                                  "完了済み・q: 正常終了する"
+    assert_file_contains      "$out" "セットアップが、すでに完了しています"                       "完了済み: 完了済みであることが表示される"
+    assert_file_not_contains  "$out" "から、続きをやる"                                        "完了済み: 「続きをやる」は出さない"
+    assert_file_not_contains  "$MOCK_CALL_LOG" "gh repo create"                              "完了済み・q: 何も実行しない"
+    assert_file_contains      "$progf" "SF_INIT_DONE_PHASE=10"                                "完了済み・q: 保存した状態は、消さない"
+    rm -rf "$init_base"
+
+    # 完了済み・[1] 接続を見る: 管理者用のフォルダで status.sh が実行される（何も変更しない）
+    printf '#!/bin/bash\necho "STATUS-STUB cwd=$PWD"\nexit 0\n' > "$mock_home/sf-tools/phases/init/status.sh"
+    _rc_run 10 "tamashimon/force-testproject" "" 'Y\n1\n' 'REPO_DIR="@INIT@/force-testproject"'
+    assert_exit_ok            "$exit_code"                                                  "完了済み・1: 正常終了する"
+    assert_file_contains      "$out" "STATUS-STUB cwd="                                       "完了済み・1: 接続の確認（status.sh）が実行される"
+    assert_file_contains      "$out" "init/force-testproject"                                  "完了済み・1: 管理者用のフォルダで実行される"
+    assert_file_not_contains  "$MOCK_CALL_LOG" "gh repo create"                              "完了済み・1: 何も変更しない"
+    rm -rf "$init_base"
+
+    # 完了時の後始末: 残った Token の値の行を、.sf-init.env から消す（init フォルダは、残すため）
+    _rc_run 9 "tamashimon/force-testproject" "" 'Y\n1\n' 'PAT_TOKEN_VALUE="ghp_leftover"'
+    assert_exit_ok            "$exit_code"                                                  "完了時の掃除: 正常終了する"
+    assert_file_not_contains  "$envf" "PAT_TOKEN_VALUE"                                       "完了時の掃除: Token の値の行が、.sf-init.env から消える"
+    assert_file_contains      "$envf" "REPO_FULL_NAME"                                        "完了時の掃除: ほかの行は、残る"
+    assert_file_not_contains  "$out" "ghp_leftover"                                           "完了時の掃除: Token の値が、画面に出ない"
+    assert_file_contains      "$out" "管理者用フォルダ"                                         "完了画面: 管理者用のフォルダを案内する"
+    assert_file_not_contains  "$out" "削除してよいですか"                                      "init フォルダの削除の質問は、出さない"
     rm -rf "$init_base"
 
     # 質問が出ない: --resume N を明示

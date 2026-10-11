@@ -112,7 +112,8 @@ echo "           Note: sf-metasync-${PROJECT_NAME} / Expiration: No expiration /
 echo "    2. 表示された Token（ghp_ で始まる文字列）を、コピーする"
 echo "         ※ Token は、この 1 回しか表示されません"
 echo "    3. このターミナルに戻って、貼り付けて、Enter を押す"
-echo "         ※ 貼り付けても、画面には何も表示されません（Token を守るためです）。そのまま Enter を押してください"
+echo "         ※ 貼り付けると、文字の数だけ * が並びます（Token の中身は、画面に出ません）。そのまま Enter を押してください"
+echo "         ※ Git Bash は、右クリックで貼り付けます（Shift+Insert でも貼り付けられます）"
 echo ""
 echo "  ブラウザが開かない場合は、次の URL を開いてください:"
 echo "    ${PAT_NEW_URL}"
@@ -125,7 +126,7 @@ open_browser "$PAT_NEW_URL"
 PAT_TOKEN_VALUE=""
 attempt=0
 while true; do
-    read_secret PAT_TOKEN_VALUE "  ▶ ここに Token を貼り付けて、Enter を押してください（画面には表示されません・q で中断）："
+    read_secret PAT_TOKEN_VALUE "  ▶ ここに Token を貼り付けて、Enter を押してください（* で表示されます・q で中断）："
     attempt=$((attempt + 1))
     log "INFO" "Token を受け取りました。GitHub に問い合わせて、確認しています..."
     if verify_pat_token "$PAT_TOKEN_VALUE"; then

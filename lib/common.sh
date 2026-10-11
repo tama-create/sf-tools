@@ -26,7 +26,7 @@
 #   read_key VARNAME [PROMPT] [V]  ... 1文字即時入力（Enter 不要・空 Enter 無視）
 #   press_enter [MSG]              ... Enter 待ち（q で中断）
 #   read_or_quit VARNAME PROMPT    ... テキスト入力（空 Enter 無視・q で中断）
-#   read_secret VARNAME PROMPT     ... 秘密情報の入力（画面に表示しない・空 Enter 無視・q で中断）
+#   read_secret VARNAME PROMPT     ... 秘密情報の入力（* で表示・空 Enter は案内して再入力・q で中断）
 #   ask_yn QUESTION                ... Y/N/q 確認（1文字即時入力）
 #
 # 【戻り値定数】
@@ -810,29 +810,65 @@ read_or_quit() {
     done
 }
 
-# read_secret - 秘密情報の入力（画面に表示しない・空 Enter 無視・q で中断）
+# read_secret - 秘密情報の入力（入力した文字は * で表示する・空 Enter は案内して再入力・q で中断）
 # ------------------------------------------------------------------------------
 # 【使い方】
 #   read_secret VARNAME PROMPT
 #
 # 【動作】
-#   - 入力した文字を画面に表示しない（read -s）。貼り付けた Token が画面・スクロールバックに残らない
-#   - 空 Enter は無視して再入力。q / Q で die。EOF も die
-#   - 末尾の CR（Windows の貼り付け）は除去する
+#   - 入力（貼り付け）した文字は、1 文字ごとに * で表示する。値そのものは、画面・スクロールバックに残らない
+#     （貼り付けられたかどうかが、見て分かるようにするため。Git Bash は、右クリックで貼り付けるため、何も出ないと分からない）
+#   - BackSpace で 1 文字消せる。ESC などの制御文字は無視する。末尾の CR（Windows の貼り付け）は除去する
+#   - Enter で確定すると、「N 文字を受け取りました（先頭: ghp_…）」を表示する（値の先頭の「英字_」だけ。残りは出さない）
+#   - 空 Enter は無視して再入力（端末のときは、貼り付け方を案内する）。q / Q だけの入力は die。EOF も die
+#   - 標準入力が端末でない場合（テスト・e2e）も、同じように動く（* の表示だけ。案内は出さない）
 #
 # 【使用例】
-#   read_secret PAT_TOKEN_VALUE "  Token を貼り付けてください（画面には表示されません・q で中断）："
+#   read_secret PAT_TOKEN_VALUE "  Token を貼り付けてください（* で表示されます・q で中断）："
 # ------------------------------------------------------------------------------
 read_secret() {
     local -n _rs_var=$1
-    local prompt="$2"
+    local prompt="$2" _rs_ch _rs_buf _rs_prefix
     while true; do
         printf "%s" "$prompt" >&2
-        IFS= read -rs _rs_var || { printf "\n" >&2; die "入力が中断されました。"; }
+        _rs_buf=""
+        while true; do
+            if ! IFS= read -rsn1 _rs_ch; then
+                # EOF: 改行なしで終わった入力は、確定として扱う。何も入力がなければ中断
+                [[ -n "$_rs_buf" ]] && break
+                printf "\n" >&2
+                die "入力が中断されました。"
+            fi
+            # Enter（read は、区切りの改行を、空文字として返す）/ CR
+            [[ -z "$_rs_ch" || "$_rs_ch" == $'\r' ]] && break
+            # BackSpace / DEL: 1 文字消す
+            if [[ "$_rs_ch" == $'\x7f' || "$_rs_ch" == $'\b' ]]; then
+                if [[ -n "$_rs_buf" ]]; then
+                    _rs_buf="${_rs_buf%?}"
+                    printf '\b \b' >&2
+                fi
+                continue
+            fi
+            # そのほかの制御文字（ESC など）は無視する
+            [[ "$_rs_ch" == [[:cntrl:]] ]] && continue
+            _rs_buf+="$_rs_ch"
+            printf '*' >&2
+        done
         printf "\n" >&2
-        _rs_var="${_rs_var%$'\r'}"
-        [[ "$_rs_var" == "q" || "$_rs_var" == "Q" ]] && die "中断しました。"
-        [[ -n "$_rs_var" ]] && break  # 空 Enter → 再入力
+        _rs_buf="${_rs_buf%$'\r'}"
+        [[ "$_rs_buf" == "q" || "$_rs_buf" == "Q" ]] && die "中断しました。"
+        if [[ -n "$_rs_buf" ]]; then
+            # 受け取った内容の確認用の表示（文字数と、先頭の「英字_」だけ。残りは出さない）
+            _rs_prefix=""
+            [[ "$_rs_buf" =~ ^[A-Za-z]{2,12}_ ]] && _rs_prefix="${BASH_REMATCH[0]}"
+            printf "  → %d 文字を受け取りました%s\n" "${#_rs_buf}" "${_rs_prefix:+（先頭: ${_rs_prefix}…）}" >&2
+            _rs_var="$_rs_buf"
+            break
+        fi
+        # 空 Enter → 再入力（端末のときは、貼り付け方を案内する）
+        if [[ -t 0 ]]; then
+            echo "  何も入力されていません。コピーした内容を、貼り付けてください（Git Bash は、右クリック、または Shift+Insert）。" >&2
+        fi
     done
 }
 

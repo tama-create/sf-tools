@@ -69,8 +69,8 @@ read_or_quit B_HOME_ROOT "  作業フォルダの root（この下に {オーナ
 [[ "$B_HOME_ROOT" == */home ]] || die "作業フォルダの root は、/home で終わる必要があります: ${B_HOME_ROOT}"
 
 echo ""
-read_secret B_PAT        "  Classic PAT（repo・workflow）（画面には表示されません・q で中断）："
-read_secret B_SLACK      "  Slack の Bot Token（画面には表示されません・q で中断）："
+read_secret B_PAT        "  Classic PAT（repo・workflow）（* で表示されます・q で中断）："
+read_secret B_SLACK      "  Slack の Bot Token（* で表示されます・q で中断）："
 while true; do
     read_or_quit B_CHANNEL "  通知先の共有チャンネルの ID（C または G で始まる。q で中断）："
     [[ "$B_CHANNEL" =~ ^[CG][A-Z0-9]{8,}$ ]] && break

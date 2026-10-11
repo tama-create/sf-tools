@@ -131,7 +131,7 @@
 | `read_key` | `read_key VAR [PROMPT] [VALID]` | 1文字即時入力（Enter 不要・空 Enter 無視・EOF 対応） |
 | `press_enter` | `press_enter [MSG]` | Enter 待ち（q で中断） |
 | `read_or_quit` | `read_or_quit VAR PROMPT` | テキスト入力（空 Enter 無視・q で中断・EOF 対応） |
-| `read_secret` | `read_secret VAR PROMPT` | 秘密情報の入力（画面に表示しない・空 Enter 無視・q で中断・末尾の CR を除去）。Token の入力に使う |
+| `read_secret` | `read_secret VAR PROMPT` | 秘密情報の入力（1 文字ごとに `*` を表示・BackSpace 対応・制御文字は無視・Enter のあと「N 文字を受け取りました（先頭: ghp_…）」を表示・空 Enter は再入力（端末のときは貼り付け方を案内）・q で中断・末尾の CR を除去・改行なしの EOF は確定）。Token の入力に使う（値は画面・ログに出さない） |
 | `_mask_secrets` | `_mask_secrets TEXT` | `ghp_` / `gho_` / `github_pat_` / `xoxb-` などの Token らしい文字列を伏せ字にする。`run` のコマンドログに自動適用される（保険。Token はそもそも引数に含めず、環境変数・標準入力・`GIT_ASKPASS` で渡すこと） |
 | `ask_yn` | `ask_yn "質問"` | Y/N/q 確認（1文字即時入力・q は `die`） |
 
@@ -408,7 +408,7 @@ tr -d '\r' < "$key_file" | base64 -w 0 | gh secret set "SF_PRIVATE_KEY" -R "$REP
 - 利用者に見せるのは、Phase の番号ではなく、**全 8 ステップ**（`WIZ_STEP_TITLES`）。Phase とステップの対応は `WIZ_PHASE_STEP`（1→1, 2→2, 3・4→3, 5→4, 6→5, 7→6, 8・9→7, 10→8）。フェーズループが、新しいステップに入るときに `wizard_step`（現在地・完了済み・目的の 1 文）を出す。各 Phase スクリプトの見出しからは、「Phase N」を外した。
 - 開始画面（通常の新規実行のみ。`--only` / `--resume N` は従来の簡易表示）: `wizard_banner` → 作るもの・所要時間の目安 → 管理者向けの警告ボックス（従来どおり）→ `wizard_checklist`（先に用意するもの）→ 全ステップの一覧 → `wizard_confirm`（Enter / Y で進む。N / q は die。CLAUDE.md 2.4 の `ask_yn || die` と同じく、「N / q で必ず中断」）。`check_home_dir` は、開始画面の前に実行する（作るリポジトリ名を表示するため）。
 - sf-tools の最新化（P14）: 開始画面の、**管理者向けの警告のあと・確認の前**に、**現在のブランチを対象に** `ensure_sf_tools_branch` を呼ぶ（本番 / 検証の選択には依存しない。Git リポジトリのときだけ）。遅れていれば、確認のうえ `git pull --ff-only` し、戻り値 2 を返す。`sf-init.sh` は、`SF_INIT_RESTARTED=1` を付けて、同じ引数で `exec` する（実行しなおしたあとも、開始画面・管理者向けの警告・確認は、毎回出す。確認を飛ばさない）。確認済みのブランチは `SF_INIT_TOOLS_CHECKED_BRANCH` で Phase 2 に渡し、Phase 2 は、最新化を二重に確認せず、選んだ環境とのブランチ違いだけを確認する。Phase 2 が戻り値 2 を受けたとき（起動時に確認できなかった場合）は、終了コード 75 で終了し、`sf-init.sh` が実行しなおす。**実行しなおしは 1 回だけ**（`SF_INIT_RESTARTED` が立っているのに、再び 75 なら、die。無限に繰り返さない）。
-- 完了画面: `wizard_done`（できたこと・次にやること: `sf-job.sh` と、リポジトリの URL）。`init` フォルダの片付けの質問は、何のフォルダか・なぜ消してよいかを書いたうえで、聞く。
+- 完了画面: `wizard_done`（できたこと・次にやること: `sf-job.sh` と、リポジトリの URL）。`init` フォルダは、**削除せず、管理者用として残す**（削除の質問は廃止）。完了画面に、管理者用フォルダ（`REPO_DIR`）のパスと用途（メンテナンス用・日常の開発には使わない）を表示する。完了時（`END_PHASE` が 10 のときだけ）、`.sf-init.env` から `*TOKEN_VALUE=` の行を念のため消す（通常は Phase 8 の push 後に消えている）。
 - 失敗時: `wizard_fail` で、「どこから再開されるか」を、利用者向けの名前で出す（再開の単位は、Phase の先頭）。`die` は、事実のみ（従来の規約）。
 - テスト: `tests/test_wizard.sh`（部品）、`tests/test_sf-init.sh` の happy path（開始画面・見出し・完了画面）と `test_sf_tools_autoupdate`（本物の git で、更新 → 自動で実行しなおし）。
 
@@ -430,6 +430,7 @@ tr -d '\r' < "$key_file" | base64 -w 0 | gh secret set "SF_PRIVATE_KEY" -R "$REP
   - `1`: `START_PHASE=N+1`、`RESUMED=1`。`.sf-init.env` は消さない。Phase 1（環境チェック）を、先頭に付け足して、毎回実行する。
   - `2`: 従来どおり `.sf-init.env` を削除して Phase 1 から。リポジトリ・init フォルダは削除しない（Phase 3 が冪等のため）。
   - `q`: `die`。
+- `SF_INIT_DONE_PHASE` が `10`（完了済み）で、リポジトリが一致するとき: 続きの選択肢の代わりに「セットアップが、すでに完了しています」を表示し、`[1]` 管理者用フォルダ（`REPO_DIR`）で `phases/init/status.sh` を実行して終了（何も変更しない）／`[2]` 最初からやり直す（上の `2` と同じ）／`[q]` 終了、を選ばせる。
 - 質問しない場合: 状態なし・Phase 10 完了済み・別のリポジトリの状態（従来どおり `.sf-init.env` を削除して最初から）、`--resume N` / `--only N` の指定あり。
 - Phase 3 以降が失敗したときは、`die`（事実のみ）の前に、「もう一度 sf-init.sh を実行し、『続きをやる』を選ぶと、Phase N から再開できます」を INFO で表示する。
 - 値の取り出しは `source` せず、`_env_value KEY`（grep + sed）で行う。

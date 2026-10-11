@@ -51,6 +51,14 @@
 #     [2] 最初からやり直す（保存した状態を消して Phase 1 から。作成済みのリポジトリ・init フォルダは、そのまま使う）
 #   管理者向けの警告・確認と gh のオーナー確認は、どちらの場合も、毎回、実行する。
 #   --resume N / --only N を指定した場合は、この質問をせず、指定を優先する。
+#   セットアップが完了済み（SF_INIT_DONE_PHASE=10）のプロジェクトで起動したときは、「続きをやる」ではなく、
+#   [1] いまの Salesforce の接続を見る（status.sh。何も変更しない） / [2] 最初からやり直す / [q] 終了 を選ばせる。
+#
+# 【init フォルダ（管理者用フォルダ）】
+#   セットアップが終わっても、init フォルダは削除しない（削除の質問は廃止した）。管理者用のフォルダとして残し、
+#   ワークフローの更新（sf-sync-wf.sh）・接続の確認（--status）・接続先の付け替え（--reconnect）などのメンテナンスに使う。
+#   日常の開発には使わない（開発は、sf-job.sh の作業フォルダで行う）。完了画面に、このフォルダのパスを表示する。
+#   残るファイルに秘密情報が含まれないよう、完了時に .sf-init.env から Token の値の行（*TOKEN_VALUE=）を消す。
 #
 # 【オプション】
 #   --resume N            : Phase N から再開（Phase N 以降を、質問なしで実行する）
@@ -328,6 +336,25 @@ if [[ "$RESUME_PHASE" -eq 1 && -z "$ONLY_PHASE" && -f "$SF_INIT_ENV_FILE" && -f 
             2) ;;  # 最初から（下で .sf-init.env を削除する）
             *) die "中断しました。" ;;
         esac
+    elif [[ "$prev_done" == "10" && "$prev_repo" == "${GITHUB_OWNER}/force-${COMPANY_NAME}" ]]; then
+        # 完了済みのプロジェクト: 「続きをやる」は意味がないため、完了済みであることと、できることを案内する
+        prev_dir=$(_kv_value REPO_DIR "$SF_INIT_ENV_FILE")   # VAR=$(cmd) のため run 不使用
+        echo "" >&2
+        log "INFO" "このプロジェクトは、セットアップが、すでに完了しています${prev_at:+（${prev_at}）}。（${prev_repo}）"
+        echo "" >&2
+        echo "    [1] いまの Salesforce の接続を、見る（何も変更しません）   ← おすすめ" >&2
+        echo "    [2] 最初から、やり直す（作成済みのリポジトリは、そのまま使い、設定を、上書きします）" >&2
+        echo "    [q] 終了" >&2
+        echo "" >&2
+        read_key done_choice "  ▶ 番号を入力してください [1-2/q]: " "[12Qq]"
+        case "$done_choice" in
+            1) [[ -d "$prev_dir" ]] || die "管理者用のフォルダが見つかりません: ${prev_dir}"
+               ( cd "$prev_dir" && run bash "${SF_TOOLS_DIR}/phases/init/status.sh" ) || die "接続の確認に失敗しました。"
+               exit $RET_OK
+               ;;
+            2) ;;  # 最初から（下で .sf-init.env を削除する）
+            *) exit $RET_OK ;;
+        esac
     fi
 fi
 
@@ -399,42 +426,20 @@ done
 # ------------------------------------------------------------------------------
 # 8. 後処理（全フェーズ完了後）
 # ------------------------------------------------------------------------------
-# .sf-init.env から REPO_DIR などを取得（完了画面・init フォルダ削除の基準に使用）
+# .sf-init.env から REPO_DIR などを取得（完了画面の管理者用フォルダの案内に使用）
 [[ -f "$SF_INIT_ENV_FILE" ]] && source "$SF_INIT_ENV_FILE"
 
-# 作業用の一時フォルダ（init）の片付け。リポジトリは GitHub に作成済みで、このフォルダは、もう要らない
-#   （開発する人は、sf-job.sh で、自分の作業フォルダに、あらためて取得する）
-if [[ -n "$REPO_DIR" ]]; then
-    INIT_DIR="$(dirname "$REPO_DIR")"   # init フォルダのパス
-    cd "$(dirname "$INIT_DIR")" || true
-    if [[ -d "$INIT_DIR" ]]; then
-        echo "" >&2
-        echo "  作業用の一時フォルダ（init）を、片付けます。" >&2
-        echo "    ${INIT_DIR}" >&2
-        echo "  リポジトリは GitHub に作成済みのため、このフォルダは、もう要りません。" >&2
-        read_key answer "  ▶ 削除してよいですか？ [Y=削除する（おすすめ） / N=残す / q=残す]: " "[YyNnQq]"
-        if [[ "$answer" == "q" || "$answer" == "Q" ]]; then
-            log "INFO" "削除をスキップしました。不要になったら、手動で削除してください: ${INIT_DIR}"
-        elif [[ "$answer" =~ ^[Yy]$ ]]; then
-            run rm -rf "$INIT_DIR"
-            # Windows 環境では rm -rf で空フォルダが残る場合があるため cmd でも試みる
-            if [[ -d "$INIT_DIR" ]] && command -v cmd > /dev/null 2>&1; then
-                win_path=$(cygpath -w "$INIT_DIR" 2>/dev/null || echo "$INIT_DIR")  # VAR=$(cmd) のため run 不要
-                cmd //c "rmdir /s /q \"$win_path\"" 2>/dev/null || true  # 失敗しても続行
-            fi
-            if [[ -d "$INIT_DIR" ]]; then
-                log "WARNING" "init フォルダが残っています。手動で削除してください: rm -rf '${INIT_DIR}'"
-            else
-                log "SUCCESS" "init フォルダを削除しました。"
-            fi
-        else
-            log "INFO" "削除をスキップしました。不要になったら、手動で削除してください: ${INIT_DIR}"
-        fi
-    fi
+# init フォルダは、削除せずに残す（管理者用のフォルダ。更新・接続の確認・やり直しなどのメンテナンスに使う）
+#   以前は、最後に削除する質問を出していたが、廃止した。残るファイルに、秘密情報（Token の値）が含まれないように、
+#   念のため、Token の値の行を .sf-init.env から消す（通常は、Phase 8 の push 後に、消えている）。
+#   最後（Phase 10）まで実行したときだけ行う（--only 6 などの途中までの実行では、Phase 8 が、あとで使うため、消さない）
+if [[ "$END_PHASE" -eq 10 && -f "$SF_INIT_ENV_FILE" ]]; then
+    run sed -i '/^[A-Z_]*TOKEN_VALUE=/d' "$SF_INIT_ENV_FILE"
 fi
 
-# 完了画面（できたこと / 次にやること）
+# 完了画面（できたこと / 次にやること / 管理者用のフォルダ）
 _org_count=$(( ${BRANCH_COUNT:-1} ))
+_admin_dir="${REPO_DIR:-${PWD}/init/force-${COMPANY_NAME}}"
 wizard_done "できました: ${REPO_FULL_NAME:-${GITHUB_OWNER}/force-${COMPANY_NAME}}" \
     "GitHub リポジトリ / Token / Slack 通知 / Salesforce の接続（${_org_count} 組織）" \
     -- \
@@ -442,6 +447,10 @@ wizard_done "できました: ${REPO_FULL_NAME:-${GITHUB_OWNER}/force-${COMPANY_
     "     cd ~/home/${GITHUB_OWNER}/${COMPANY_NAME}" \
     "     sf-job.sh" \
     "2. リポジトリを見る:" \
-    "     https://github.com/${REPO_FULL_NAME:-${GITHUB_OWNER}/force-${COMPANY_NAME}}"
+    "     https://github.com/${REPO_FULL_NAME:-${GITHUB_OWNER}/force-${COMPANY_NAME}}" \
+    "3. 【管理者用フォルダ】は、残してあります（削除しないでください）:" \
+    "     ${_admin_dir}" \
+    "     ・ワークフローの更新・接続の確認・接続先の付け替えなど、管理者のメンテナンスに使います" \
+    "     ・日常の開発には使わないでください（開発は、上の sf-job.sh の作業フォルダで行います）"
 
 exit $RET_OK

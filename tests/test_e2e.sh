@@ -511,8 +511,8 @@ test_e2e_input() {
     _e2e_call 'e2e_load_fixture; e2e_make_input'
     out=$(cat "$mb/out.log")
     local expected
-    expected=$'Y\nY\n2\nY\n3\nghp_fakepat\n\nxoxb-fakeslack\nC01ABCDEFGH\n\n1\nN'
-    assert_equals "$out" "$expected" "台本が、質問の順番どおりである（Y→Y→2→Y→3→PAT→空→Slack→ID→空→ログイン先 1→N）"
+    expected=$'Y\nY\n2\nY\n3\nghp_fakepat\n\nxoxb-fakeslack\nC01ABCDEFGH\n\n1'
+    assert_equals "$out" "$expected" "台本が、質問の順番どおりである（Y→Y→2→Y→3→PAT→空→Slack→ID→空→ログイン先 1）"
     unset MOCK_CALL_LOG
     teardown "$mb"
 }

@@ -592,13 +592,12 @@ e2e_cleanup_all() {
 #     検証される。値は、画面に出ない）→ 空行（Phase 7 の press_enter）
 #   → Slack Token → チャンネル ID → 空行（招待の press_enter）→ Phase 10 ログイン先 1（login.salesforce.com。
 #     アプリの種類は聞かない: 既定は外部クライアントアプリ。ログイン先は、段階ごとに 3 択: main の 1 つだけ）
-#   → init フォルダ削除 N（Phase 10 が最後。SF_TOOLS_TOKEN は不要になった: sf-tools は公開リポジトリ）
+#   （Phase 10 が最後。init フォルダの削除の質問は、廃止した: init フォルダは、管理者用として残る）
 e2e_make_input() {
     printf '%s\n' "Y" "Y" "2" "Y" "3" \
         "$E2E_PAT_TOKEN" "" \
         "$E2E_SLACK_BOT_TOKEN" "$E2E_SLACK_CHANNEL_ID" "" \
-        "1" \
-        "N"
+        "1"
 }
 
 # 失敗したワークフローの実行の、失敗したステップのログ（末尾 E2E_FAIL_LOG_LINES 行。既定 40）を表示する。

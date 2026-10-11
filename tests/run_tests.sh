@@ -44,6 +44,7 @@ TEST_FILES=(
     test_wizard.sh
     test_sf-org.sh
     test_sf-diag.sh
+    test_sf-verify.sh
     test_init-common.sh
     test_sf-unhook.sh
     test_sf-hook.sh
@@ -119,6 +120,9 @@ if [[ "${1:-}" == "--changed" ]]; then
                 ;;
             lib/sf-diag.sh)
                 _changed_tests+=("test_sf-diag.sh")
+                ;;
+            lib/sf-verify.sh)
+                _changed_tests+=("test_sf-verify.sh")
                 ;;
             phases/init/*)
                 _changed_tests+=("test_sf-init.sh")

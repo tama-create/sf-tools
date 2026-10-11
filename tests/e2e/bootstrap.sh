@@ -9,6 +9,10 @@
 #   1. Classic PAT（repo・workflow）            → sf-init の Phase 6 と同じもの
 #   2. Slack の Bot Token と、通知先の共有チャンネルの ID（Bot をそのチャンネルに招待済み）
 #   3. テスト用の Salesforce 組織（本番または Developer Edition。Sandbox ではない）の管理者ユーザー
+#      ・1 層（main のみ）の検証には、1 つ。
+#      ・2 層（main + staging）には 2 つ、3 層（main + staging + develop）には 3 つ。**層の数だけ、別々の組織が要る**
+#        （段階ごとに、その組織にだけリリースされることを確認するため。同じ組織を、複数の段階には使えない）。
+#        2 つ目以降は、この最初の登録のあとで、--add-orgs で追加する
 #   （SF_TOOLS_TOKEN は不要: sf-tools は公開リポジトリ）
 #
 # 【処理の流れ】
@@ -19,6 +23,8 @@
 #   5. 保存したファイルの読み込みとガードの確認
 #
 # 【オプション】
+#   --add-orgs : 既にある鍵一式に、staging・develop 用のテスト用組織（認証 URL）だけを追加する
+#                （2 層・3 層の通し検証に必要。Token などは、入力し直さない。ブラウザでのログインが、組織の数だけ必要）
 #   -h, --help : このヘルプを表示する
 #
 # 【保存先】 ~/.sf-tools-e2e/fixture.env（権限は本人のみ。E2E_FIXTURE 環境変数で変更できる）
@@ -41,7 +47,123 @@ fi
 source "${SF_TOOLS_ROOT}/lib/common.sh"
 source "${E2E_SCRIPT_DIR}/lib.sh"
 
-log "HEADER" "e2e テストの鍵一式を作成します (${SCRIPT_NAME}.sh)"
+ADD_ORGS=0
+for _a in "$@"; do
+    case "$_a" in
+        --add-orgs) ADD_ORGS=1 ;;
+        *) die "不明なオプションです: ${_a}" ;;
+    esac
+done
+
+# ブラウザでログインして、認証 URL を取得する。引数: 仮のエイリアス 表示名
+#   成功: 認証 URL を B_URL に、組織 ID を B_ORG_ID に入れる。失敗: die
+_bootstrap_login() {
+    local alias="$1" label="$2"
+    echo ""
+    log "INFO" "ブラウザが開きます。${label}のテスト用 Salesforce 組織に、管理者でログインしてください（2 分以内）。"
+    run sf alias unset "$alias" || true  # 未設定でも続行（意図的エラー無視）
+    run sf org login web --instance-url https://login.salesforce.com --alias "$alias" \
+        || die "Salesforce へのログインに失敗しました。"
+    # 新しい sf は、sf org display --verbose で認証 URL を隠すため、sf org auth show-sfdx-auth-url を使う
+    # （古い sf では、sf org display --verbose にフォールバックする）。形式を確認し、合わなければ保存しない
+    B_URL=$(e2e_get_sfdx_auth_url "$alias")  # VAR=$(cmd) のため run 不使用（値を画面・ログに出さない）
+    B_ORG_ID=$(e2e_org_id "$alias")          # VAR=$(cmd) のため run 不使用
+    run sf alias unset "$alias" || true  # 後始末（意図的エラー無視）
+    [[ -n "$B_URL" ]] || die "認証 URL を取得できませんでした（ログインに失敗したか、Sandbox の組織です）。"
+    [[ -n "$B_ORG_ID" ]] || die "組織の ID を取得できませんでした。"
+    log "SUCCESS" "認証 URL を取得しました（${label}。組織 ID: ${B_ORG_ID}）。"
+}
+
+# 鍵一式のファイルに、1 行を追加する（同じ変数名の行があれば、置き換える）。引数: 変数名 値
+_bootstrap_put() {
+    local name="$1" value="$2" tmp
+    tmp=$(mktemp "${TMPDIR:-/tmp}/e2e-fixture.XXXXXX") || die "一時ファイルを作成できません。"  # VAR=$(cmd) のため run 不使用
+    (
+        umask 077
+        grep -v "^${name}=" "$FIXTURE" > "$tmp" || true  # 該当行がなくても続行（意図的エラー無視）
+        printf '%s=%q\n' "$name" "$value" >> "$tmp"
+    )
+    cat "$tmp" > "$FIXTURE"  # run 不使用: 権限・所有者を保つため、中身だけを書き戻す
+    rm -f "$tmp"  # run 不使用: 認証 URL を含む一時ファイルの削除
+    chmod 600 "$FIXTURE" 2>/dev/null || true  # run 不使用: 権限保護（Windows は効果なし・意図的エラー無視）
+}
+
+# 保存してある認証 URL でログインして、組織の ID を、標準出力に返す。取得できなければ、戻り値 1
+#   引数: 認証 URL 仮のエイリアス（ログインしたあと、エイリアスは、外す。認証そのものは、残る）
+_bootstrap_id_of_url() {
+    local url="$1" alias="$2" f id
+    f=$(mktemp "${TMPDIR:-/tmp}/e2e-sfdx-url.XXXXXX") || die "一時ファイルを作成できません。"  # VAR=$(cmd) のため run 不使用
+    chmod 600 "$f" 2>/dev/null || true  # run 不使用: 権限保護（Windows は効果なし・意図的エラー無視）
+    printf '%s' "$url" > "$f"
+    if ! run sf org login sfdx-url --sfdx-url-file "$f" --alias "$alias"; then  # 条件チェック
+        rm -f "$f"  # run 不使用: 認証 URL の一時ファイルの削除（秘密情報を残さない）
+        return 1
+    fi
+    rm -f "$f"  # run 不使用: 認証 URL の一時ファイルの削除（秘密情報を残さない）
+    id=$(e2e_org_id "$alias")  # VAR=$(cmd) のため run 不使用
+    run sf alias unset "$alias" || true  # 後始末（意図的エラー無視）
+    [[ -n "$id" ]] || return 1
+    printf '%s' "$id"
+}
+
+# staging・develop の組織を追加する（既存の鍵一式に）。3 つの組織が、別々の組織であることを確認する。
+#   比較の対象: main の組織・すでに登録済みの staging・develop の組織（保存してある認証 URL でログインして、ID を取得する）・
+#   今回、追加する組織。重複があれば、鍵一式を更新せずに、中断する
+_bootstrap_add_orgs() {
+    local id_main id_stg="" id_dev=""
+    log "INFO" "既存の鍵一式に、staging・develop 用のテスト用組織を追加します。"
+    log "INFO" "  3 つの組織（main・staging・develop）は、別々の組織にしてください（同じ組織を、複数の段階に使わない）。"
+    id_main=$(_bootstrap_id_of_url "$E2E_SFDX_AUTH_URL" "sf-tools-e2e-bootstrap-main") \
+        || die "main の組織へのログイン、または、組織の ID の取得に失敗しました。"  # VAR=$(cmd) のため run 不使用
+    log "INFO" "  main の組織 ID: ${id_main}"
+    # すでに登録済みの staging・develop（あれば）
+    if [[ -n "${E2E_SFDX_AUTH_URL_STG:-}" ]]; then
+        id_stg=$(_bootstrap_id_of_url "$E2E_SFDX_AUTH_URL_STG" "sf-tools-e2e-bootstrap-stg0") \
+            || die "登録済みの staging の組織へのログイン、または、組織の ID の取得に失敗しました。"  # VAR=$(cmd) のため run 不使用
+        log "INFO" "  登録済みの staging の組織 ID: ${id_stg}"
+        [[ "$id_stg" != "$id_main" ]] || die "登録済みの staging が、main と同じ組織です。鍵一式を、確認してください。"
+    fi
+    if [[ -n "${E2E_SFDX_AUTH_URL_DEV:-}" ]]; then
+        id_dev=$(_bootstrap_id_of_url "$E2E_SFDX_AUTH_URL_DEV" "sf-tools-e2e-bootstrap-dev0") \
+            || die "登録済みの develop の組織へのログイン、または、組織の ID の取得に失敗しました。"  # VAR=$(cmd) のため run 不使用
+        log "INFO" "  登録済みの develop の組織 ID: ${id_dev}"
+        [[ "$id_dev" != "$id_main" && "$id_dev" != "$id_stg" ]] || die "登録済みの develop が、ほかの段階と同じ組織です。鍵一式を、確認してください。"
+    fi
+
+    # 保存は、すべての確認が済んでから、まとめて行う（途中で中断したときに、一部だけが保存されないように）
+    local new_stg_url="" new_dev_url=""
+    if ask_yn "staging 用の組織を追加しますか？（2 層・3 層の通し検証に必要。登録済みなら、置き換えます）"; then
+        _bootstrap_login "sf-tools-e2e-bootstrap-stg" "staging 用の"
+        [[ "$B_ORG_ID" != "$id_main" && ( -z "$id_dev" || "$B_ORG_ID" != "$id_dev" ) ]] \
+            || die "ほかの段階（main・develop）と同じ組織です。別の組織でログインしてください。"
+        id_stg="$B_ORG_ID"
+        new_stg_url="$B_URL"
+    fi
+    if ask_yn "develop 用の組織を追加しますか？（3 層の通し検証に必要。登録済みなら、置き換えます）"; then
+        _bootstrap_login "sf-tools-e2e-bootstrap-dev" "develop 用の"
+        [[ "$B_ORG_ID" != "$id_main" && ( -z "$id_stg" || "$B_ORG_ID" != "$id_stg" ) ]] \
+            || die "ほかの段階（main・staging）と同じ組織です。別の組織でログインしてください。"
+        id_dev="$B_ORG_ID"
+        new_dev_url="$B_URL"
+    fi
+    [[ -z "$new_stg_url" ]] || _bootstrap_put E2E_SFDX_AUTH_URL_STG "$new_stg_url"
+    [[ -z "$new_dev_url" ]] || _bootstrap_put E2E_SFDX_AUTH_URL_DEV "$new_dev_url"
+    [[ -n "$new_stg_url$new_dev_url" ]] || log "WARNING" "何も追加しませんでした。"
+}
+
+# ------------------------------------------------------------------------------
+# --add-orgs: 既存の鍵一式に、staging・develop の組織だけを追加する
+# ------------------------------------------------------------------------------
+if [[ $ADD_ORGS -eq 1 ]]; then
+    FIXTURE=$(e2e_fixture_path)
+    [[ -f "$FIXTURE" ]] || die "鍵一式のファイルが見つかりません（先に、bootstrap.sh を実行してください）: ${FIXTURE}"
+    check_sf_cli
+    e2e_load_fixture
+    _bootstrap_add_orgs
+    e2e_load_fixture   # 保存した内容の形式を、確認する
+    log "SUCCESS" "保存しました: ${FIXTURE}"
+    exit $RET_OK
+fi
 
 # ------------------------------------------------------------------------------
 # 1. 保存先の確認

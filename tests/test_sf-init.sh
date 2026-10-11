@@ -1859,6 +1859,49 @@ echo -e "${CLR_HEAD}========================================"
 echo "  sf-init.sh テスト"
 echo -e "========================================${CLR_RST}"
 
+# ==============================================================================
+# テスト: e2e の入力の台本（2 層・3 層）で、sf-init が最後まで進む
+#   e2e_make_input の層数ごとの台本（Phase 5 の番号・ログイン先の答えの数）が、質問の順番と合っているかを、モックで確認する
+# ==============================================================================
+test_e2e_input_sequence_layouts() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] e2e の入力の台本（2 層・3 層）で、sf-init が最後まで進む${CLR_RST}"
+
+    local layout mb mock_home init_base init_dir exit_code input
+    for layout in 2 3; do
+        mb=$(setup_mock_bin)
+        export MOCK_CALL_LOG="$mb/calls.log"
+        mock_home=$(setup_mock_home)
+        init_base=$(_setup_init_dir "tamashimon" "e2e-20260101-000000")
+        init_dir="$init_base/home/tamashimon/e2e-20260101-000000"
+        create_all_mocks "$mb"
+        create_mock_gh_for_init "$mb"
+        _stub_subscripts "$mock_home"
+        export MOCK_SF_ORG_JSON='{"result":{"username":"admin@example.com","alias":"x"}}'
+        export SF_INIT_JWT_INTERVAL=0
+
+        input=$(E2E_PAT_TOKEN=ghp_fakepat E2E_SLACK_BOT_TOKEN=xoxb-fakeslack E2E_SLACK_CHANNEL_ID=C01ABCDEFGH \
+                bash -c "source '$SF_TOOLS_DIR/tests/e2e/lib.sh'; e2e_make_input $layout")
+        printf '%s\n' "$input" \
+            | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
+                  bash "$mock_home/sf-tools/bin/sf-init.sh" ) > "$mb/out.log" 2>&1
+        exit_code=$?
+
+        assert_exit_ok            "$exit_code"                                                   "${layout} 層の台本で、最後まで正常終了する"
+        assert_file_contains      "$MOCK_CALL_LOG" "gh secret set SF_CONSUMER_KEY_PROD"            "${layout} 層: main の接続情報が登録される"
+        assert_file_contains      "$MOCK_CALL_LOG" "gh secret set SF_CONSUMER_KEY_STG"             "${layout} 層: staging の接続情報が登録される"
+        if [[ "$layout" -eq 3 ]]; then
+            assert_file_contains  "$MOCK_CALL_LOG" "gh secret set SF_CONSUMER_KEY_DEV"             "3 層: develop の接続情報が登録される"
+        else
+            assert_file_not_contains "$MOCK_CALL_LOG" "SF_CONSUMER_KEY_DEV"                        "2 層: develop の接続情報は、登録しない"
+        fi
+        assert_file_not_contains  "$mb/out.log" "ghp_fakepat"                                     "${layout} 層: PAT_TOKEN の値が出力に出ない"
+
+        unset MOCK_SF_ORG_JSON SF_INIT_JWT_INTERVAL MOCK_CALL_LOG
+        teardown "$mb" "$mock_home" "$init_base"
+    done
+}
+
 test_happy_path_3branches
 test_missing_tool_gh
 test_repo_create_failure
@@ -1879,6 +1922,7 @@ test_phase9_ruleset_id
 test_phase7_channel_id
 test_phase10_eca_auto
 test_e2e_input_sequence
+test_e2e_input_sequence_layouts
 test_sf_cli_check
 test_wf_propagate_skip_missing_branch
 test_wf_no_script_injection

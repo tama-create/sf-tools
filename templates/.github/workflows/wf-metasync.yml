@@ -3,16 +3,16 @@
 # ==============================================================================
 #
 # 【概要】
-#   Salesforce 本番組織の最新メタデータを取得し、Git の main ブランチへ自動同期する。
+#   main の Salesforce 組織の最新メタデータを取得し、Git の main ブランチへ自動同期する。
 #
 # 【必要な GitHub Secrets（このリポジトリに設定すること）】
 #   SF_PRIVATE_KEY       : 秘密鍵（PEM 形式・全組織共通）
-#   SF_CONSUMER_KEY_PROD : 本番組織の Connected App コンシューマーキー
+#   SF_CONSUMER_KEY_PROD : main の組織の Connected App コンシューマーキー
 #   PAT_TOKEN            : GitHub PAT（ブランチ保護ルールのバイパスに使用）
 #
 # 【必要な GitHub Variables（このリポジトリに設定すること）】
-#   SF_USERNAME_PROD     : 本番組織の接続ユーザー名
-#   SF_INSTANCE_URL_PROD : 本番組織の接続 URL（https://login.salesforce.com 等）
+#   SF_USERNAME_PROD     : main の組織の接続ユーザー名
+#   SF_INSTANCE_URL_PROD : main の組織の接続 URL（https://login.salesforce.com 等）
 #   SF_TOOLS_BRANCH      : clone する sf-tools のブランチ（任意。未設定なら main）
 #
 # ==============================================================================
@@ -69,7 +69,7 @@ jobs:
         run: echo y | sf plugins install sfdx-git-delta
 
       # --------------------------------------------------------------------------
-      # Step 6: Salesforce 本番組織への認証
+      # Step 6: main の Salesforce 組織への認証
       # --------------------------------------------------------------------------
       - name: Salesforce 組織にログイン
         run: |

@@ -23,6 +23,7 @@
 #   17. Phase 9: 既存 Ruleset の ID 検証（403 のエラー本文を ID として扱わない / 数字の ID は削除）
 #   18. Phase 7: SLACK_CHANNEL_ID の形式チェック（C… / G… のみ受け付け。D… / U… は拒否して再入力）
 #   19. Phase 10: 外部クライアントアプリの自動作成（正常 / JWT リトライ / deploy 失敗 / JWT 不成功で中断・スキップ）
+#   24. Phase 6: PAT_TOKEN（発行済みの確認 Y/N・Token の検証〔スコープ・管理者〕・無効な Token の貼り直し・Token を画面とログに出さない）
 # ==============================================================================
 
 source "$(dirname "${BASH_SOURCE[0]}")/test_helper.sh"
@@ -73,13 +74,39 @@ case "$1 $2" in
         exit 0 ;;
     "repo create") exit "${MOCK_GH_REPO_CREATE_EXIT:-0}" ;;
     "secret set")  exit "${MOCK_GH_SECRET_SET_EXIT:-0}" ;;
-    "api user")    echo "${MOCK_GH_API_USER:-${github_owner}}" ;;
+    "api user")
+        # Phase 6 の Token 検証（GH_TOKEN 付きの呼び出し）:
+        #   MOCK_GH_BAD_TOKEN=<値>     → その Token のとき、認証に失敗（exit 1）
+        #   MOCK_GH_TOKEN_USER=<名前>  → Token のユーザー（既定 tamashimon）
+        #   MOCK_GH_TOKEN_SCOPES=<値>  → X-OAuth-Scopes（既定 "repo, workflow"。空なら、ヘッダーを出さない＝Fine-grained 相当）
+        if [[ -n "${GH_TOKEN:-}" ]]; then
+            if [[ -n "${MOCK_GH_BAD_TOKEN:-}" && "$GH_TOKEN" == "$MOCK_GH_BAD_TOKEN" ]]; then exit 1; fi
+            case " $* " in
+                *" --include "*)
+                    echo "HTTP/2.0 200 OK"
+                    [[ -n "${MOCK_GH_TOKEN_SCOPES-repo, workflow}" ]] && echo "X-Oauth-Scopes: ${MOCK_GH_TOKEN_SCOPES-repo, workflow}"
+                    echo ""; echo '{"login":"x"}'; exit 0 ;;
+            esac
+            echo "${MOCK_GH_TOKEN_USER:-tamashimon}"; exit 0
+        fi
+        echo "${MOCK_GH_API_USER:-${github_owner}}" ;;
+    "variable get")
+        # --status / --reconnect の確認用: 環境変数 MOCK_GH_VAR_<名前> の値を返す（未設定なら、exit 1）
+        _vn="MOCK_GH_VAR_$3"
+        [[ -n "${!_vn:-}" ]] && { echo "${!_vn}"; exit 0; }
+        exit 1 ;;
     "variable set")
         # --body で値が渡される場合は何もしない（標準入力を読むと、テストの入力列を消費してしまう）
         case " $* " in *" --body "*) exit 0 ;; esac
         # 標準入力で渡された値を、変数名ごとのファイルに保存する（テストで値を検証するため）
         cat > "${MOCK_CALL_LOG%/*}/var_$3.txt"; exit 0 ;;
     "api repos/"*)
+        # Phase 6 の Token 検証（リポジトリの管理者か）: MOCK_GH_PERM_ADMIN=false → 管理者ではない
+        case " $* " in
+            *" .permissions.admin "*|*" '.permissions.admin' "*)
+                if [[ -n "${MOCK_GH_BAD_TOKEN:-}" && "${GH_TOKEN:-}" == "$MOCK_GH_BAD_TOKEN" ]]; then exit 1; fi
+                echo "${MOCK_GH_PERM_ADMIN:-true}"; exit 0 ;;
+        esac
         # Ruleset 一覧: MOCK_GH_RULESETS=error → エラー本文を標準出力に出して exit 1（無料プランの 403 を再現）、
         #               MOCK_GH_RULESETS=id    → 既存の Ruleset の ID（12345）を返す
         if [[ "$2" == */rulesets ]]; then
@@ -128,8 +155,8 @@ _stub_subscripts() {
 #   4. 1                  (main/staging/develop 選択 - read_key [1-3Qq]。\n は buffer 残留)
 #   ★ 1\n の \n は次の press_enter が消費
 # 入力順（Phase 6: PAT）:
-#   5. \n                 (press_enter - PAT 取得案内。Phase 5 ブランチ選択残留 \n を消費)
-#   6. ghp_faketoken      (PAT トークン - read_or_quit)
+#   ★ Phase 5 のブランチ選択の \n は、read_secret が空行として無視（ブラウザは、質問なしですぐ開く）
+#   5. ghp_faketoken      (PAT トークン - read_secret。Token の検証は、モックの gh が通す)
 # 入力順（Phase 7: Slack）:
 #   7. \n                 (press_enter - Bot Token 取得案内)
 #   8. xoxb-faketoken     (Slack Bot Token - read_or_quit)
@@ -154,7 +181,7 @@ _stub_subscripts() {
 #  22. N                  (init フォルダ削除をスキップ。Phase 10 が最後。SF_TOOLS_TOKEN は不要になった)
 # ==============================================================================
 _make_input_3branches() {
-    printf 'Y\nY\n1\n1\nghp_faketoken\n\nxoxb-faketoken\nC01ABCDEFGH\n\n1\nN\nfake_prod_key\nprod@example.com\nY\nfake_stg_key\nstg@example.com\nY\nfake_dev_key\ndev@example.com\nN\n'
+    printf 'Y\nY\n1\n1\nghp_faketoken\n\nxoxb-faketoken\nC01ABCDEFGH\n\n\n1\nfake_prod_key\nprod@example.com\n\nY\nfake_stg_key\nstg@example.com\n\nY\nfake_dev_key\ndev@example.com\nN\n'
 }
 
 # ==============================================================================
@@ -178,7 +205,7 @@ test_happy_path_3branches() {
     local exit_code
     _make_input_3branches \
         | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
-              bash "$mock_home/sf-tools/bin/sf-init.sh" ) \
+              bash "$mock_home/sf-tools/bin/sf-init.sh" --legacy-connected-app ) \
           > /tmp/sf-init-test-happy.log 2>&1
     exit_code=$?
 
@@ -206,6 +233,18 @@ test_happy_path_3branches() {
         && pass "接続アプリ版: JWT 接続テストは、一時的なホームの中で実行され、実行後に削除される" || fail "接続アプリ版: JWT 接続テストの隔離" "HOME=${jwt_home_ca}"
     assert_file_contains "$MOCK_CALL_LOG" "git -c credential.helper= push"           "Phase 8: 認証ヘルパーを無効化して push する"
     assert_file_not_contains "$init_dir/init/.sf-init.env" "PAT_TOKEN_VALUE"         "push 後に .sf-init.env から PAT が削除される"
+    assert_file_contains "$init_dir/init/.sf-init.progress" "SF_INIT_DONE_PHASE=10"       "全 Phase 完了後、進捗に Phase 10 が記録される"
+    # ウィザード形式の画面（doc/wizard-ux-design.md）: 開始画面・ステップの見出し・完了画面
+    assert_file_contains "/tmp/sf-init-test-happy.log" "新しい Salesforce プロジェクトを作ります"   "開始画面: タイトルが出る"
+    assert_file_contains "/tmp/sf-init-test-happy.log" "【先に、用意してください】"                "開始画面: 事前に用意するものが出る"
+    assert_file_contains "/tmp/sf-init-test-happy.log" "【これから行うこと】"                      "開始画面: 全体のステップが出る"
+    assert_file_contains "/tmp/sf-init-test-happy.log" "ステップ 1 / 8: 準備の確認"               "ステップの見出し（現在地）: 1 / 8"
+    assert_file_contains "/tmp/sf-init-test-happy.log" "ステップ 5 / 8: GitHub の Token"          "ステップの見出し（現在地）: 5 / 8"
+    assert_file_contains "/tmp/sf-init-test-happy.log" "ステップ 8 / 8: Salesforce の接続"         "ステップの見出し（現在地）: 8 / 8"
+    assert_file_contains "/tmp/sf-init-test-happy.log" "（完了: 準備の確認・プロジェクトの確認"      "ステップの見出し: 完了済みのステップが出る"
+    assert_file_not_contains "/tmp/sf-init-test-happy.log" "Phase 6"                              "Phase の番号を、画面に出さない"
+    assert_file_contains "/tmp/sf-init-test-happy.log" "【次にやること】"                          "完了画面: 次にやることが出る"
+    assert_file_contains "/tmp/sf-init-test-happy.log" "sf-job.sh"                                 "完了画面: 次のコマンドが出る"
     assert_file_contains "$MOCK_CALL_LOG" "git add"                                  "git add が呼ばれる"
 
     teardown "$mb" "$mock_home" "$init_base"
@@ -304,13 +343,14 @@ test_sf_login_failure() {
     # 警告確認 → Phase2 confirm → ENV_TYPE選択 → Phase5 ブランチ選択 → PAT → Slack → Phase10 アプリ種別選択(1=接続アプリ) → Connected App press_enter → prod Sandbox? → consumer_key/username まで入力
     # （sf org login jwt で失敗するため以降は不要）
     local exit_code
-    printf 'Y\nY\n1\n1\nghp_faketoken\n\nxoxb-faketoken\nC01ABCDEFGH\n\n1\nN\nfake_prod_key\nprod@example.com\n' \
+    printf 'Y\nY\n1\n1\nghp_faketoken\n\nxoxb-faketoken\nC01ABCDEFGH\n\n\n1\nfake_prod_key\nprod@example.com\n' \
         | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
-              bash "$mock_home/sf-tools/bin/sf-init.sh" ) > /dev/null 2>&1
+              bash "$mock_home/sf-tools/bin/sf-init.sh" --legacy-connected-app ) > /dev/null 2>&1
     exit_code=$?
 
     assert_exit_fail "$exit_code"                                              "SF ログイン失敗で非ゼロ終了する"
     assert_file_contains "$MOCK_CALL_LOG" "sf org login"                      "sf org login jwt が試みられる"
+    assert_file_contains "$init_dir/init/.sf-init.progress" "SF_INIT_DONE_PHASE=9"  "Phase 10 が失敗 → 進捗は、成功した Phase 9 までが記録される"
 
     unset MOCK_SF_LOGIN_EXIT
     teardown "$mb" "$mock_home" "$init_base"
@@ -535,6 +575,9 @@ test_add_tier_staging_happy() {
         echo "FAKE"
         echo "-----END RSA PRIVATE KEY-----"
     } > "$mock_home/.sf-jwt/force-testproject/server.key"
+    printf -- "-----BEGIN CERTIFICATE-----\nFAKE\n-----END CERTIFICATE-----\n" > "$mock_home/.sf-jwt/force-testproject/server.crt"
+    export MOCK_SF_ORG_JSON='{"result":{"username":"stg@example.com","alias":"x"}}'
+    export SF_INIT_JWT_INTERVAL=0
 
     create_all_mocks "$mb"
     create_mock_gh_for_init "$mb"
@@ -552,19 +595,27 @@ GITEOF
     chmod +x "$mb/git"
 
     local exit_code
-    # staging Sandbox? → コンシューマーキー → ユーザー名 の順
-    printf 'Y\nfake_stg_key\nstg@example.com\n' \
+    # 入力: Y（管理者向けの確認。この改行が、次のログイン先の質問に、Enter = Sandbox として読まれる）。
+    # 既定は外部クライアントアプリ（自動で作成する）ため、鍵・ユーザー名の入力はない
+    printf 'Y\n' \
         | ( cd "$force_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
               bash "$mock_home/sf-tools/bin/sf-init.sh" --add-tier staging ) \
           > /tmp/sf-init-add-tier.log 2>&1
     exit_code=$?
 
     assert_exit_ok   "$exit_code"                                                   "正常終了する"
+    assert_file_contains "$MOCK_CALL_LOG" "sf org login web --instance-url https://test.salesforce.com --alias sf-tools-STG" "Enter → Sandbox（test.salesforce.com）でログインする"
     assert_file_contains "$MOCK_CALL_LOG" "gh secret set SF_CONSUMER_KEY_STG"       "SF_CONSUMER_KEY_STG が登録される"
     assert_file_contains "$MOCK_CALL_LOG" "gh variable set SF_USERNAME_STG"         "SF_USERNAME_STG が登録される"
     assert_file_contains "$MOCK_CALL_LOG" "gh variable set SF_INSTANCE_URL_STG"     "SF_INSTANCE_URL_STG が登録される"
+    assert_file_contains "$MOCK_CALL_LOG" "gh variable set SF_ORG_KIND_STG --body sandbox" "組織の種類（Sandbox）が保存される"
     assert_file_contains "$force_dir/sf-tools/config/branches.txt" "staging"        "branches.txt に staging が追記される"
+    # main への直接 push は、しない（PR を作成する）
+    assert_file_not_contains "$MOCK_CALL_LOG" "origin main"                         "main への直接 push をしない"
+    assert_file_contains "$MOCK_CALL_LOG" "gh pr create --base main"                "PR を作成する"
+    assert_file_contains "$MOCK_CALL_LOG" "origin system-add-tier-staging-"         "作業用のブランチを push する"
 
+    unset MOCK_SF_ORG_JSON SF_INIT_JWT_INTERVAL
     teardown "$mb" "$mock_home"
     rm -rf "$base_dir" /tmp/sf-init-add-tier.log
 }
@@ -1015,6 +1066,9 @@ test_phase10_eca_auto() {
     out="$mb/out.log"
     export MOCK_SF_ORG_JSON='{"result":{"username":"admin@example.com","alias":"x"}}'
     export SF_INIT_JWT_INTERVAL=0
+    # ログイン先は、環境変数で指定する（login = login.salesforce.com）。直前の質問（read_key）の改行が、
+    # 次の質問に、空 Enter（= 既定の Sandbox）として読まれるのを、避けるため。ログイン先の質問そのものは、tests/test_sf-org.sh で確認する
+    export SF_INIT_LOGIN_URL_PROD=login
 
     _p10_run() {
         init_base=$(_setup_init_dir "tamashimon" "testproject")
@@ -1032,7 +1086,7 @@ test_phase10_eca_auto() {
     }
 
     # 正常
-    _p10_run 'Y\n2\nN\n'
+    _p10_run 'Y\n'
     assert_exit_ok            "$exit_code"                                                              "正常 → 終了コード 0"
     assert_file_contains      "$MOCK_CALL_LOG" "sf org login web --instance-url https://login.salesforce.com --alias sf-tools-PROD" "ブラウザでログインする（一時エイリアス）"
     assert_file_contains      "$MOCK_CALL_LOG" "sf alias unset sf-tools-PROD"                             "ログイン前に前回の一時エイリアスを外す"
@@ -1062,21 +1116,21 @@ test_phase10_eca_auto() {
 
     # sf の終了コードが 1 → 失敗として中断（成否は終了コードで判定する。sf は npm 版が前提）
     #   出力に成功の文言（Successfully authorized）があっても、終了コードが 1 なら、成功とはみなさない
-    MOCK_SF_LOGIN_WEB_EXIT=1 _p10_run 'Y\n2\nN\n'
+    MOCK_SF_LOGIN_WEB_EXIT=1 _p10_run 'Y\n'
     assert_exit_fail          "$exit_code"                                                              "login web の終了コード 1 → 中断（出力に成功の文言があっても、成功とみなさない）"
     assert_file_contains      "$out" "へのログインに失敗しました"                                          "login web の終了コード 1 → 失敗の旨が表示される"
     assert_file_not_contains  "$MOCK_CALL_LOG" "project deploy start"                                     "login web の終了コード 1 → deploy しない"
     assert_file_not_contains  "$MOCK_CALL_LOG" "gh secret set SF_CONSUMER_KEY_PROD"                       "login web の終了コード 1 → 登録しない"
     rm -rf "$init_base"
 
-    MOCK_SF_ORG_DISPLAY_EXIT=1 _p10_run 'Y\n2\nN\n'
+    MOCK_SF_ORG_DISPLAY_EXIT=1 _p10_run 'Y\n'
     assert_exit_fail          "$exit_code"                                                              "org display の終了コード 1 → 中断"
     assert_file_contains      "$out" "接続情報を取得できませんでした"                                      "org display の終了コード 1 → 失敗の旨が表示される"
     assert_file_not_contains  "$MOCK_CALL_LOG" "project deploy start"                                     "org display の終了コード 1 → deploy しない"
     rm -rf "$init_base"
 
     # ログイン失敗（待ち時間切れなどで接続できていない）→ 中断
-    MOCK_SF_LOGIN_WEB_FAIL=1 _p10_run 'Y\n2\nN\n'
+    MOCK_SF_LOGIN_WEB_FAIL=1 _p10_run 'Y\n'
     assert_exit_fail          "$exit_code"                                                              "ログイン失敗 → 中断"
     assert_file_contains      "$out" "へのログインに失敗しました"                                          "ログイン失敗 → 失敗の旨が表示される"
     assert_file_not_contains  "$MOCK_CALL_LOG" "project deploy start"                                     "ログイン失敗 → deploy しない"
@@ -1084,7 +1138,7 @@ test_phase10_eca_auto() {
     rm -rf "$init_base"
 
     # JWT が最初の 2 回失敗 → リトライして成功
-    MOCK_SF_JWT_FAIL_FIRST=2 _p10_run 'Y\n2\nN\n'
+    MOCK_SF_JWT_FAIL_FIRST=2 _p10_run 'Y\n'
     jwt_calls=$(grep -c "^sf org login jwt" "$MOCK_CALL_LOG")
     assert_exit_ok            "$exit_code"                                                              "JWT リトライ → 終了コード 0"
     [[ "$jwt_calls" -eq 3 ]] && pass "JWT 接続テストを 3 回試行（2 回失敗 + 1 回成功）" || fail "JWT 接続テストを 3 回試行" "試行回数: ${jwt_calls}"
@@ -1092,25 +1146,25 @@ test_phase10_eca_auto() {
     rm -rf "$init_base"
 
     # deploy 失敗 → 中断
-    MOCK_SF_DEPLOY_EXIT=1 _p10_run 'Y\n2\nN\n'
+    MOCK_SF_DEPLOY_EXIT=1 _p10_run 'Y\n'
     assert_exit_fail          "$exit_code"                                                              "deploy 失敗 → 中断"
     assert_file_not_contains  "$MOCK_CALL_LOG" "project retrieve"                                         "deploy 失敗 → retrieve しない"
     assert_file_not_contains  "$MOCK_CALL_LOG" "gh secret set SF_CONSUMER_KEY_PROD"                       "deploy 失敗 → 登録しない"
     rm -rf "$init_base"
 
     # JWT が成功しない → 確認で N → 中断
-    MOCK_SF_JWT_FAIL_FIRST=99 SF_INIT_JWT_RETRIES=2 _p10_run 'Y\n2\nN\nN\n'
+    MOCK_SF_JWT_FAIL_FIRST=99 SF_INIT_JWT_RETRIES=2 _p10_run 'Y\nN\n'
     assert_exit_fail          "$exit_code"                                                              "JWT 不成功 + スキップしない → 中断"
     assert_file_not_contains  "$MOCK_CALL_LOG" "gh secret set SF_CONSUMER_KEY_PROD"                       "JWT 不成功 + スキップしない → 登録しない"
     rm -rf "$init_base"
 
     # JWT が成功しない → 確認で Y → スキップして登録
-    MOCK_SF_JWT_FAIL_FIRST=99 SF_INIT_JWT_RETRIES=2 _p10_run 'Y\n2\nN\nY\n'
+    MOCK_SF_JWT_FAIL_FIRST=99 SF_INIT_JWT_RETRIES=2 _p10_run 'Y\nY\n'
     assert_exit_ok            "$exit_code"                                                              "JWT 不成功 + スキップする → 終了コード 0"
     assert_file_contains      "$MOCK_CALL_LOG" "gh secret set SF_CONSUMER_KEY_PROD"                       "JWT 不成功 + スキップする → 登録される"
 
     unset -f _p10_run
-    unset MOCK_SF_ORG_JSON SF_INIT_JWT_INTERVAL
+    unset MOCK_SF_ORG_JSON SF_INIT_JWT_INTERVAL SF_INIT_LOGIN_URL_PROD
     teardown "$mb" "$mock_home" "$init_base"
 }
 
@@ -1144,7 +1198,7 @@ test_e2e_input_sequence() {
     exit_code=$?
 
     assert_exit_ok            "$exit_code"                                                          "台本で最後まで正常終了する"
-    assert_file_contains      "$mb/out.log" "検証環境（sf-tools: development）"                      "環境種別は検証環境になる"
+    assert_file_contains      "$mb/out.log" "開発版（sf-tools: development）"                      "sf-tools の版は、開発版になる"
     assert_file_contains      "$MOCK_CALL_LOG" "gh variable set SF_TOOLS_BRANCH --body development"   "SF_TOOLS_BRANCH=development が登録される"
     assert_file_contains      "$MOCK_CALL_LOG" "gh secret set PAT_TOKEN"                              "PAT_TOKEN が登録される"
     assert_file_contains      "$MOCK_CALL_LOG" "gh secret set SLACK_BOT_TOKEN"                        "SLACK_BOT_TOKEN が登録される"
@@ -1157,7 +1211,7 @@ test_e2e_input_sequence() {
     assert_dir_exists         "$init_dir/init"                                                        "最後の質問に N と答えて、init フォルダが残る（台本の最後までずれていない）"
     assert_file_not_contains  "$mb/out.log" "ghp_fakepat"                                            "PAT_TOKEN の値が出力に出ない"
 
-    unset MOCK_SF_ORG_JSON SF_INIT_JWT_INTERVAL MOCK_CALL_LOG
+    unset MOCK_SF_ORG_JSON SF_INIT_JWT_INTERVAL MOCK_CALL_LOG SF_INIT_LOGIN_URL_PROD
     teardown "$mb" "$mock_home" "$init_base"
 }
 
@@ -1207,6 +1261,534 @@ test_sf_cli_check() {
 }
 
 # ==============================================================================
+# テスト 24: Phase 6: PAT_TOKEN（ブラウザをすぐ開く・Token の検証・貼り直し）
+# ==============================================================================
+test_phase6_pat_token() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] Phase 6: PAT_TOKEN（ブラウザをすぐ開く・Token の検証・貼り直し）${CLR_RST}"
+
+    local mb mock_home init_base init_dir exit_code
+    mb=$(setup_mock_bin)
+    export MOCK_CALL_LOG="$mb/calls.log"
+    mock_home=$(setup_mock_home)
+    init_base=$(_setup_init_dir "tamashimon" "testproject")
+    init_dir="$init_base/home/tamashimon/testproject"
+    create_all_mocks "$mb"
+    create_mock_gh_for_init "$mb"
+    _stub_subscripts "$mock_home"
+    mkdir -p "$init_dir/init"
+
+    # 引数: 標準入力（printf の書式）。先頭の Y は、管理者向けの確認。環境変数（MOCK_GH_*）は、呼ぶ前に export する
+    #   REPO_DIR は入れない（--only 6 の終了時に、init フォルダ削除の質問を出さないため）
+    _p6_run() {
+        : > "$MOCK_CALL_LOG"
+        cat > "$init_dir/init/.sf-init.env" << 'ENVEOF'
+GITHUB_OWNER="tamashimon"
+PROJECT_NAME="testproject"
+REPO_NAME="force-testproject"
+REPO_FULL_NAME="tamashimon/force-testproject"
+ENVEOF
+        printf "$1" | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
+              bash "$mock_home/sf-tools/bin/sf-init.sh" --only 6 ) > "$mb/out.log" 2>&1
+        exit_code=$?
+    }
+    local envf="$init_dir/init/.sf-init.env"
+
+    # --- 正常: 質問なしで、ブラウザを開く → 検証 OK → 登録 ---
+    _p6_run 'Y\nghp_good\n'
+    assert_exit_ok            "$exit_code"                                                  "正常終了する"
+    assert_file_not_contains  "$mb/out.log" "発行済み"                                       "「発行済みか」は、聞かない"
+    assert_file_contains      "$mb/out.log" "【作るアカウント】 tamashimon"                   "Token を作るアカウント（オーナー）が表示される"
+    assert_file_contains      "$mb/out.log" "画面には何も表示されません"                       "貼り付けても表示されないことを、先に伝える"
+    assert_file_contains      "$mb/out.log" "Generate token"                                "手順（やること）が表示される"
+    assert_file_contains      "$MOCK_CALL_LOG" "tokens/new?description=sf-metasync-testproject&scopes=repo,workflow" "Token の作成ページ（Note・Scopes 入力済み）を、ブラウザで開く"
+    assert_file_contains      "$mb/out.log" "Token を確認できました（tamashimon さんの Token"   "検証の結果が、人の言葉で表示される"
+    assert_file_contains      "$MOCK_CALL_LOG" "gh api repos/tamashimon/force-testproject"   "リポジトリの管理者かを問い合わせる"
+    assert_file_contains      "$MOCK_CALL_LOG" "gh secret set PAT_TOKEN"                     "PAT_TOKEN が登録される"
+    assert_file_contains      "$envf" 'PAT_TOKEN_VALUE="ghp_good"'                          "Phase 8 用に .sf-init.env へ書き出される"
+    assert_file_not_contains  "$mb/out.log" "ghp_good"                                      "Token の値が画面（出力）に出ない"
+    assert_file_not_contains  "$MOCK_CALL_LOG" "ghp_good"                                   "Token の値がコマンドのログに出ない"
+
+    # --- 検証 NG: workflow の権限がない（3 回とも）→ 中断・登録しない ---
+    export MOCK_GH_TOKEN_SCOPES="repo"
+    _p6_run 'Y\nghp_a\nghp_b\nghp_c\n'
+    assert_exit_fail          "$exit_code"                                                  "workflow の権限なし（3 回）: 中断する"
+    assert_file_contains      "$mb/out.log" "「workflow」の権限がありません"                   "workflow の権限なし: 理由が表示される"
+    assert_file_contains      "$mb/out.log" "作り直してください"                               "workflow の権限なし: 直し方が表示される"
+    assert_file_contains      "$mb/out.log" "あと 2 回"                                       "貼り直せる残りの回数が表示される"
+    assert_file_not_contains  "$MOCK_CALL_LOG" "gh secret set PAT_TOKEN"                     "workflow の権限なし: 登録しない"
+
+    # --- 検証 NG: Fine-grained 相当（スコープのヘッダーなし）→ 中断 ---
+    export MOCK_GH_TOKEN_SCOPES=""
+    _p6_run 'Y\nghp_a\nghp_b\nghp_c\n'
+    assert_exit_fail          "$exit_code"                                                  "種類が違う Token: 中断する"
+    assert_file_contains      "$mb/out.log" "種類が違います"                                   "種類が違う: 理由が表示される"
+    unset MOCK_GH_TOKEN_SCOPES
+
+    # --- 検証 NG: リポジトリの管理者ではない → 中断・登録しない ---
+    export MOCK_GH_PERM_ADMIN=false MOCK_GH_TOKEN_USER=someone-else
+    _p6_run 'Y\nghp_a\nghp_b\nghp_c\n'
+    assert_exit_fail          "$exit_code"                                                  "管理者ではない Token: 中断する"
+    assert_file_contains      "$mb/out.log" "someone-else さんのものですが"                    "管理者ではない: Token のユーザーが表示される"
+    assert_file_contains      "$mb/out.log" "の管理者ではありません"                            "管理者ではない: 理由が表示される"
+    assert_file_not_contains  "$MOCK_CALL_LOG" "gh secret set PAT_TOKEN"                     "管理者ではない: 登録しない"
+    unset MOCK_GH_PERM_ADMIN MOCK_GH_TOKEN_USER
+
+    # --- 検証 NG: 無効な Token → 貼り直せる（2 回目で成功）---
+    export MOCK_GH_BAD_TOKEN=ghp_bad
+    _p6_run 'Y\nghp_bad\nghp_good\n'
+    assert_exit_ok            "$exit_code"                                                  "無効な Token → 貼り直して成功する"
+    assert_file_contains      "$mb/out.log" "Token を確認できませんでした"                      "無効な Token: 理由が表示される"
+    assert_file_contains      "$envf" 'PAT_TOKEN_VALUE="ghp_good"'                          "貼り直した Token が書き出される"
+    assert_file_not_contains  "$envf" "ghp_bad"                                             "無効な Token は書き出されない"
+    unset MOCK_GH_BAD_TOKEN
+
+    # --- q で中断 ---
+    _p6_run 'Y\nq\n'
+    assert_exit_fail          "$exit_code"                                                  "貼り付けの入力で q → 中断する"
+    assert_file_not_contains  "$MOCK_CALL_LOG" "gh secret set PAT_TOKEN"                     "q: 登録しない"
+
+    unset -f _p6_run
+    unset MOCK_CALL_LOG
+    teardown "$mb" "$mock_home" "$init_base"
+}
+
+# ==============================================================================
+# テスト 25: 途中で止まったときの「続きをやる / 最初からやり直す」
+# ==============================================================================
+test_resume_choice() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] 前回の続き（続きをやる / 最初からやり直す / 中断 / 質問が出ない条件）${CLR_RST}"
+
+    local mb mock_home init_base init_dir exit_code out envf progf
+    mb=$(setup_mock_bin)
+    export MOCK_CALL_LOG="$mb/calls.log"
+    mock_home=$(setup_mock_home)
+    create_all_mocks "$mb"
+    create_mock_gh_for_init "$mb"
+    _stub_subscripts "$mock_home"
+    out="$mb/out.log"
+    export MOCK_SF_ORG_JSON='{"result":{"username":"admin@example.com","alias":"x"}}'
+    export SF_INIT_JWT_INTERVAL=0
+export SF_INIT_LOGIN_URL_PROD=login   # ログイン先を、質問せずに指定する
+
+    # 引数: 前回の完了 Phase / リポジトリ / sf-init.sh の引数 / 標準入力（printf %b）
+    #   前回の状態（.sf-init.env）を作ってから、sf-init.sh を実行する
+    _rc_run() {
+        local done_phase="$1" repo="$2" args="$3" input="$4"
+        init_base=$(_setup_init_dir "tamashimon" "testproject")
+        init_dir="$init_base/home/tamashimon/testproject"
+        envf="$init_dir/init/.sf-init.env"; progf="$init_dir/init/.sf-init.progress"
+        mkdir -p "$init_dir/init"
+        {
+            printf 'GITHUB_OWNER="tamashimon"\nPROJECT_NAME="testproject"\nREPO_NAME="force-testproject"\n'
+            printf 'REPO_FULL_NAME="%s"\nBRANCH_COUNT="1"\n' "$repo"   # REPO_DIR は入れない（終了時の init フォルダ削除の質問を出さないため）
+        } > "$envf"
+        printf 'SF_INIT_DONE_PHASE=%s\nSF_INIT_DONE_AT="2026-10-11 14:32"\n' "$done_phase" > "$progf"
+        rm -rf "$mb/deployed_src" "$mb/jwt.cnt" "$mock_home/.sf-jwt" "$mb/.repo_view_called"
+        : > "$MOCK_CALL_LOG"
+        # shellcheck disable=SC2086
+        printf '%b' "$input" \
+            | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
+                  bash "$mock_home/sf-tools/bin/sf-init.sh" $args ) > "$out" 2>&1
+        exit_code=$?
+    }
+
+    # [1] 続きをやる: Phase 1 を実行したうえで、Phase 10 だけを実行する（Y=警告 / 1=続き / 2=外部クライアントアプリ / N=Sandbox?）
+    _rc_run 9 "tamashimon/force-testproject" "" 'Y\n1\n'   # ログイン先は、環境変数（SF_INIT_LOGIN_URL_PROD=login）で指定する
+    assert_exit_ok            "$exit_code"                                                  "[1] 続き: 正常終了する"
+    assert_file_contains      "$out" "前回のセットアップは、「リポジトリの設定」まで完了しています"   "続き: 前回の進捗が表示される"
+    assert_file_contains      "$out" "2026-10-11 14:32"                                     "続き: 前回の時刻が表示される"
+    assert_file_contains      "$out" "「Salesforce の接続」から、続きをやる"                                 "続き: 選択肢に次の Phase が表示される"
+    assert_file_contains      "$MOCK_CALL_LOG" "gh auth status"                              "続き: Phase 1（環境チェック）は実行される"
+    assert_file_not_contains  "$out" "ステップ 2 / 8: プロジェクトの確認"                          "続き: Phase 2〜9 は実行しない"
+    assert_file_contains      "$out" "ステップ 8 / 8: Salesforce の接続"                                           "続き: Phase 10 から実行される"
+    assert_file_contains      "$MOCK_CALL_LOG" "gh secret set SF_CONSUMER_KEY_PROD"          "続き: Phase 10 の処理が実行される"
+    assert_file_not_contains  "$MOCK_CALL_LOG" "gh repo create"                              "続き: リポジトリを作り直さない"
+    assert_file_contains      "$progf" "SF_INIT_DONE_PHASE=10"                                "続き: 完了後、進捗が Phase 10 になる"
+    assert_file_not_contains  "$progf" "SF_INIT_DONE_PHASE=9"                                 "続き: 進捗の行は 1 つだけ（更新される）"
+    rm -rf "$init_base"
+
+    # [q] 中断: 何も実行しない
+    _rc_run 5 "tamashimon/force-testproject" "" 'Y\nq\n'
+    assert_exit_fail          "$exit_code"                                                  "[q] 中断: 非ゼロで終了する"
+    assert_file_contains      "$out" "前回のセットアップは、「ブランチの構成」まで完了しています"          "q: 質問が表示される"
+    assert_file_not_contains  "$MOCK_CALL_LOG" "gh auth status"                              "q: Phase 1 も実行しない"
+    assert_file_contains      "$progf" "SF_INIT_DONE_PHASE=5"                                 "q: 保存した状態は、消さない"
+    rm -rf "$init_base"
+
+    # [2] 最初からやり直す: 保存した状態を消して、Phase 1 から（Y=警告 / 2=最初から / 以降は、通常の全 Phase の入力）
+    _rc_run 5 "tamashimon/force-testproject" "--legacy-connected-app" "Y\n2\n$(_make_input_3branches | sed '1d')"
+    assert_exit_ok            "$exit_code"                                                  "[2] 最初から: 正常終了する"
+    assert_file_contains      "$out" "ステップ 2 / 8: プロジェクトの確認"                          "最初から: Phase 2 から実行される"
+    assert_file_contains      "$MOCK_CALL_LOG" "gh repo create"                              "最初から: Phase 3 が実行される"
+    assert_file_contains      "$progf" "SF_INIT_DONE_PHASE=10"                                "最初から: 完了後、進捗が Phase 10 になる"
+    rm -rf "$init_base"
+
+    # 質問が出ない: リポジトリが、この作業フォルダのものではない
+    _rc_run 5 "other/force-other" "" 'Y\n'
+    assert_file_not_contains  "$out" "前回のセットアップは"                                   "別のリポジトリの状態 → 質問しない（最初から）"
+    [[ ! -e "$envf" ]] && pass "別のリポジトリの状態 → 残骸として消す" || fail "別のリポジトリの状態 → 残骸として消す"
+    rm -rf "$init_base"
+
+    # 質問が出ない: 前回は最後まで完了している
+    _rc_run 10 "tamashimon/force-testproject" "" 'Y\n'
+    assert_file_not_contains  "$out" "前回のセットアップは"                                   "完了済み（Phase 10）→ 質問しない（最初から）"
+    rm -rf "$init_base"
+
+    # 質問が出ない: --resume N を明示
+    _rc_run 5 "tamashimon/force-testproject" "--resume 6" 'Y\n'
+    assert_file_not_contains  "$out" "前回のセットアップは"                                   "--resume N → 質問しない（指定を優先）"
+    assert_file_contains      "$out" "実行フェーズ: Phase 6"                                  "--resume 6 → Phase 6 から実行される"
+    rm -rf "$init_base"
+
+    # --only N: 進捗を記録しない
+    _rc_run 5 "tamashimon/force-testproject" "--only 1" 'Y\n'
+    assert_file_contains      "$progf" "SF_INIT_DONE_PHASE=5"                                 "--only → 進捗を書き換えない"
+    rm -rf "$init_base"
+
+    # 境界値: Phase 2 まで完了（次は、リポジトリの作成）
+    _rc_run 2 "tamashimon/force-testproject" "" 'Y\nq\n'
+    assert_file_contains      "$out" "前回のセットアップは、「プロジェクトの確認」まで完了しています"  "Phase 2 完了: 質問が出る"
+    assert_file_contains      "$out" "「リポジトリの作成」から、続きをやる"                       "Phase 2 完了: 次は、リポジトリの作成"
+    rm -rf "$init_base"
+
+    # 境界値: Phase 8 まで完了（次は、リポジトリの設定）
+    _rc_run 8 "tamashimon/force-testproject" "" 'Y\nq\n'
+    assert_file_contains      "$out" "前回のセットアップは、「初回のコミット」まで完了しています"    "Phase 8 完了: 質問が出る"
+    assert_file_contains      "$out" "「リポジトリの設定」から、続きをやる"                       "Phase 8 完了: 次は、リポジトリの設定"
+    rm -rf "$init_base"
+
+    # 境界値: 進捗ファイルが壊れている（数字ではない）・範囲外 → 質問しない（最初から）
+    _rc_run abc "tamashimon/force-testproject" "" 'Y\n'
+    assert_file_not_contains  "$out" "前回のセットアップは"                                   "壊れた進捗（abc）→ 質問しない"
+    rm -rf "$init_base"
+    _rc_run 1 "tamashimon/force-testproject" "" 'Y\n'
+    assert_file_not_contains  "$out" "前回のセットアップは"                                   "Phase 1 のみ完了 → 質問しない（状態を持たないため）"
+    rm -rf "$init_base"
+
+    # 進捗ファイルがなく、.sf-init.env だけがある → 質問しない
+    _rc_run 5 "tamashimon/force-testproject" "" 'Y\n'
+    rm -f "$progf"
+    printf 'Y\n' | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" bash "$mock_home/sf-tools/bin/sf-init.sh" ) > "$out" 2>&1
+    assert_file_not_contains  "$out" "前回のセットアップは"                                   "進捗ファイルなし → 質問しない"
+    rm -rf "$init_base"
+
+    unset -f _rc_run
+    unset MOCK_SF_ORG_JSON SF_INIT_JWT_INTERVAL MOCK_CALL_LOG SF_INIT_LOGIN_URL_PROD
+    teardown "$mb" "$mock_home" "$init_base"
+}
+
+# ==============================================================================
+# テスト 26: sf-tools が古いとき、確認のうえ更新し、更新した sf-tools で自動的に実行しなおす（P14）
+# ==============================================================================
+test_sf_tools_autoupdate() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] sf-tools が古い → 更新して、自動で、はじめから実行しなおす${CLR_RST}"
+
+    local mb mock_home init_base init_dir exit_code out base before after
+    mb=$(setup_mock_bin)
+    export MOCK_CALL_LOG="$mb/calls.log"
+    mock_home=$(setup_mock_home)
+    init_base=$(_setup_init_dir "tamashimon" "testproject")
+    init_dir="$init_base/home/tamashimon/testproject"
+    create_all_mocks "$mb"
+    create_mock_gh_for_init "$mb"
+    rm -f "$mb/git"   # このテストは、本物の git で、sf-tools の更新を確認する
+    out="$mb/out.log"
+
+    # sf-tools（mock_home/sf-tools）を、本物の Git リポジトリにし、origin を 1 コミット先に進める
+    base=$(mktemp -d "${TMPDIR:-/tmp}/test-autoupd-XXXX")
+    export GIT_AUTHOR_NAME=test GIT_AUTHOR_EMAIL=test@example.com GIT_COMMITTER_NAME=test GIT_COMMITTER_EMAIL=test@example.com
+    (
+        cd "$mock_home/sf-tools" || exit 1
+        git init -q -b main && printf 'logs/\n' >> .git/info/exclude
+        git add -A && git commit -qm base
+        git init -q --bare -b main "$base/origin.git"
+        git remote add origin "$base/origin.git" && git push -q origin main
+        git clone -q "$base/origin.git" "$base/w" && cd "$base/w" \
+            && echo new > NEW_FILE && git add NEW_FILE && git commit -qm advance && git push -q origin main
+    ) > /dev/null 2>&1
+    before=$(git -C "$mock_home/sf-tools" rev-list --count HEAD)
+
+    # 入力: Y（sf-tools を更新しますか？）→ Y（実行しなおしたあとの、管理者向けの確認）。以降は、Phase 2 の確認で入力が尽きて中断する
+    printf 'Y\nY\n' \
+        | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
+              bash "$mock_home/sf-tools/bin/sf-init.sh" ) > "$out" 2>&1
+    exit_code=$?
+    after=$(git -C "$mock_home/sf-tools" rev-list --count HEAD)
+
+    assert_file_contains      "$out" "sf-tools（main）は origin より 1 コミット遅れています"  "遅れが、表示される"
+    assert_file_contains      "$out" "sf-tools を更新しました"                                "更新した旨が表示される"
+    assert_equals "$after" "$((before + 1))"                                                  "git pull で、1 コミット進んだ"
+    assert_file_exists        "$mock_home/sf-tools/NEW_FILE"                                  "origin の新しい内容が、取り込まれた"
+    assert_file_contains      "$out" "更新した sf-tools で、もう一度、はじめから実行します"      "自動で、実行しなおす旨が表示される"
+    assert_file_contains      "$out" "更新した sf-tools で、はじめから実行しています"            "実行しなおした旨が表示される"
+    assert_file_contains      "$out" "ステップ 1 / 8: 準備の確認"                             "実行しなおしたあと、ステップの見出しから続く"
+    assert_file_contains      "$out" "【先に、用意してください】"                              "実行しなおしたあと、開始画面（用意するもの）が出る"
+    assert_equals "$(grep -c 'このコマンドは管理者専用です' "$out")" "2"                    "管理者向けの警告は、更新の前と、実行しなおしたあとの、2 回出る（確認を飛ばさない）"
+
+    unset MOCK_CALL_LOG
+    teardown "$mb" "$mock_home" "$init_base" "$base"
+}
+
+# ==============================================================================
+# テスト 27: 起動時に確認済みのブランチと、選んだ環境が違う → Phase 2 で、ブランチ違いだけを確認する（二重に更新を確認しない）
+# ==============================================================================
+test_sf_tools_branch_mismatch() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] 現在のブランチ（main）と、選んだ環境（検証 = development）が違う → 確認 → N で中断${CLR_RST}"
+
+    local mb mock_home init_base init_dir exit_code out base
+    mb=$(setup_mock_bin)
+    export MOCK_CALL_LOG="$mb/calls.log"
+    mock_home=$(setup_mock_home)
+    init_base=$(_setup_init_dir "tamashimon" "testproject")
+    init_dir="$init_base/home/tamashimon/testproject"
+    create_all_mocks "$mb"
+    create_mock_gh_for_init "$mb"
+    rm -f "$mb/git"   # 本物の git で、ブランチを判定する
+    out="$mb/out.log"
+
+    base=$(mktemp -d "${TMPDIR:-/tmp}/test-mismatch-XXXX")
+    export GIT_AUTHOR_NAME=test GIT_AUTHOR_EMAIL=test@example.com GIT_COMMITTER_NAME=test GIT_COMMITTER_EMAIL=test@example.com
+    (
+        cd "$mock_home/sf-tools" || exit 1
+        git init -q -b main && printf 'logs/\n' >> .git/info/exclude
+        git add -A && git commit -qm base
+        git init -q --bare -b main "$base/origin.git"
+        git remote add origin "$base/origin.git" && git push -q origin main
+    ) > /dev/null 2>&1
+
+    # 入力: Y=開始の確認 / Y=プロジェクトの確認 / 2=検証環境 / Y=検証環境で続行 / N=ブランチ違いのまま続行しない
+    printf 'Y\nY\n2\nY\nN\n' \
+        | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
+              bash "$mock_home/sf-tools/bin/sf-init.sh" ) > "$out" 2>&1
+    exit_code=$?
+
+    assert_exit_fail          "$exit_code"                                                    "ブランチ違い + N → 中断する"
+    assert_file_contains      "$out" "sf-tools（main）は最新です"                              "起動時に、現在のブランチの最新化が確認される"
+    assert_file_contains      "$out" "ローカルの sf-tools は main ブランチですが、選択した環境は development です" "ブランチ違いが表示される"
+    assert_equals "$(grep -c 'は最新です' "$out")" "1"                                        "最新化の確認は、1 回だけ（Phase 2 で、二重に確認しない）"
+    assert_file_not_contains  "$MOCK_CALL_LOG" "gh repo create"                              "中断したので、リポジトリを作らない"
+
+    unset MOCK_CALL_LOG
+    teardown "$mb" "$mock_home" "$init_base" "$base"
+}
+
+# ==============================================================================
+# テスト 28: 段階と組織の種類の独立（本番は main のみ・--status・--reconnect・--legacy-connected-app）
+# ==============================================================================
+test_org_connection() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] 段階と組織の種類の独立: 本番は main のみ / --status / --reconnect / --legacy-connected-app${CLR_RST}"
+
+    local mb mock_home out exit_code base force_dir init_base init_dir
+    local PROD_JSON SBX_JSON DE_JSON
+    PROD_JSON='{"status":0,"result":{"records":[{"Id":"00D0000000PROD01","Name":"Acme Production","IsSandbox":false,"OrganizationType":"Enterprise Edition","TrialExpirationDate":null}]}}'
+    SBX_JSON='{"status":0,"result":{"records":[{"Id":"00D0000000SBX001","Name":"Acme Sandbox","IsSandbox":true,"OrganizationType":"Enterprise Edition","TrialExpirationDate":null}]}}'
+    DE_JSON='{"status":0,"result":{"records":[{"Id":"00D0000000DE0001","Name":"My Developer Org","IsSandbox":false,"OrganizationType":"Developer Edition","TrialExpirationDate":null}]}}'
+
+    mb=$(setup_mock_bin)
+    export MOCK_CALL_LOG="$mb/calls.log"
+    mock_home=$(setup_mock_home)
+    create_all_mocks "$mb"
+    create_mock_gh_for_init "$mb"
+    out="$mb/out.log"
+    export MOCK_SF_ORG_JSON='{"result":{"username":"admin@example.com","alias":"x"}}'
+    export SF_INIT_JWT_INTERVAL=0
+
+    # --- A. Phase 10: 本番は main のみ。staging に本番をつなぐと、アプリを作る前に、中断する ---
+    init_base=$(_setup_init_dir "tamashimon" "testproject")
+    init_dir="$init_base/home/tamashimon/testproject"
+    mkdir -p "$init_dir/init"
+    printf 'REPO_FULL_NAME="tamashimon/force-testproject"\nREPO_NAME="force-testproject"\nPROJECT_NAME="testproject"\nBRANCH_COUNT="2"\n' \
+        > "$init_dir/init/.sf-init.env"
+    : > "$MOCK_CALL_LOG"
+    printf 'Y\n' \
+        | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" MOCK_SF_ORG_INFO="$PROD_JSON" \
+              SF_INIT_LOGIN_URL_PROD=login SF_INIT_LOGIN_URL_STG=login \
+              bash "$mock_home/sf-tools/bin/sf-init.sh" --only 10 ) > "$out" 2>&1
+    exit_code=$?
+    assert_exit_fail          "$exit_code"                                                    "本番 → main は通り、本番 → staging で中断する"
+    assert_file_contains      "$out" "Salesforce の本番組織は、main にしか、つなげません"        "staging に本番: 理由が表示される"
+    assert_file_contains      "$MOCK_CALL_LOG" "gh secret set SF_CONSUMER_KEY_PROD"              "main（本番）は、登録される"
+    assert_file_not_contains  "$MOCK_CALL_LOG" "gh secret set SF_CONSUMER_KEY_STG"               "staging（本番）は、登録されない"
+    assert_equals "$(grep -c 'sf project deploy start' "$MOCK_CALL_LOG")" "1"                    "外部クライアントアプリは、main の 1 回だけ作る（staging の本番には、作らない）"
+    assert_file_contains      "$MOCK_CALL_LOG" "gh variable set SF_ORG_KIND_PROD --body production" "main に本番: 種類（production）が保存される"
+    rm -rf "$init_base"
+
+    # --- A2. main にも staging にも、Developer Edition / Sandbox を、つなげる（種類は、段階と関係ない）---
+    rm -rf "$mock_home/.sf-jwt" "$mb/deployed_src" "$mb/jwt.cnt"   # 前のケースで生成された証明書が残ると、「再利用しますか？」の質問が出るため
+    init_base=$(_setup_init_dir "tamashimon" "testproject")
+    init_dir="$init_base/home/tamashimon/testproject"
+    mkdir -p "$init_dir/init"
+    printf 'REPO_FULL_NAME="tamashimon/force-testproject"\nREPO_NAME="force-testproject"\nPROJECT_NAME="testproject"\nBRANCH_COUNT="2"\n' \
+        > "$init_dir/init/.sf-init.env"
+    : > "$MOCK_CALL_LOG"
+    printf 'Y\n' \
+        | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" MOCK_SF_ORG_INFO="$DE_JSON" \
+              SF_INIT_LOGIN_URL_PROD=login SF_INIT_LOGIN_URL_STG=login \
+              bash "$mock_home/sf-tools/bin/sf-init.sh" --only 10 ) > "$out" 2>&1
+    exit_code=$?
+    assert_exit_ok            "$exit_code"                                                    "Developer Edition を main・staging に、つなげられる"
+    assert_file_contains      "$MOCK_CALL_LOG" "gh secret set SF_CONSUMER_KEY_STG"             "staging（Developer Edition）も、登録される"
+    assert_file_contains      "$MOCK_CALL_LOG" "gh variable set SF_ORG_KIND_STG --body developer" "種類（developer）が保存される"
+    assert_file_contains      "$MOCK_CALL_LOG" "gh variable set SF_ORG_ID_STG --body 00D0000000DE0001" "組織 ID が保存される"
+    rm -rf "$init_base"
+
+    # --- 以降: force-* ディレクトリでの --status / --reconnect ---
+    # JWT の鍵・証明書（~/.sf-jwt/force-testproject/）。--reconnect が使う
+    mkdir -p "$mock_home/.sf-jwt/force-testproject"
+    printf -- "-----BEGIN RSA PRIVATE KEY-----\nFAKE\n-----END RSA PRIVATE KEY-----\n" > "$mock_home/.sf-jwt/force-testproject/server.key"
+    printf -- "-----BEGIN CERTIFICATE-----\nFAKE\n-----END CERTIFICATE-----\n" > "$mock_home/.sf-jwt/force-testproject/server.crt"
+    base=$(mktemp -d "${TMPDIR:-/tmp}/test-org-XXXX")
+    force_dir="$base/force-testproject"
+    mkdir -p "$force_dir/sf-tools/config"
+    printf 'main\nstaging\n' > "$force_dir/sf-tools/config/branches.txt"
+    cat > "$mb/git" << 'GITEOF'
+#!/bin/bash
+echo "git $*" >> "${MOCK_CALL_LOG:-/dev/null}"
+case "$1 $2" in
+    "remote get-url") echo "https://github.com/tamashimon/force-testproject.git" ;;
+    *) exit 0 ;;
+esac
+GITEOF
+    chmod +x "$mb/git"
+
+    # --- B. --status: 段階ごとの接続・同じ組織の重複・本番が main 以外にある場合の警告 ---
+    : > "$MOCK_CALL_LOG"
+    ( cd "$force_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
+        MOCK_GH_VAR_SF_INSTANCE_URL_PROD=https://login.salesforce.com MOCK_GH_VAR_SF_USERNAME_PROD=admin@example.com \
+        MOCK_GH_VAR_SF_ORG_KIND_PROD=developer MOCK_GH_VAR_SF_ORG_ID_PROD=00D0000000DE0001 \
+        MOCK_GH_VAR_SF_ORG_NAME_PROD="My Developer Org" MOCK_GH_VAR_SF_ORG_CHECKED_PROD="2026-10-11 14:32" \
+        MOCK_GH_VAR_SF_INSTANCE_URL_STG=https://login.salesforce.com MOCK_GH_VAR_SF_USERNAME_STG=admin@example.com \
+        MOCK_GH_VAR_SF_ORG_KIND_STG=production MOCK_GH_VAR_SF_ORG_ID_STG=00D0000000DE0001 \
+        bash "$mock_home/sf-tools/bin/sf-init.sh" --status ) > "$out" 2>&1
+    exit_code=$?
+    assert_exit_fail          "$exit_code"                                                    "--status: 本番が main 以外にあれば、非ゼロで終了する"
+    assert_file_contains      "$out" "main"                                                    "--status: main が表示される"
+    assert_file_contains      "$out" "種類: Developer Edition"                                  "--status: 組織の種類が表示される"
+    assert_file_contains      "$out" "組織: My Developer Org（ID 00D0000000DE0001）"            "--status: 組織名・組織 ID が表示される"
+    assert_file_contains      "$out" "最終確認: 2026-10-11 14:32"                               "--status: 最終確認日時が表示される"
+    assert_file_contains      "$out" "同じ組織につながっています"                                 "--status: 同じ組織の重複が警告される"
+    assert_file_contains      "$out" "本番組織は main のみです"                                  "--status: 本番が main 以外にあれば警告する"
+    assert_file_not_contains  "$MOCK_CALL_LOG" "gh variable set"                              "--status: 何も変更しない（読み取りのみ）"
+
+    # --- C. --reconnect main: 組織を付け替える（旧: Sandbox → 新: Developer Edition）---
+    : > "$MOCK_CALL_LOG"
+    printf 'Y\n' \
+        | ( cd "$force_dir" && HOME="$mock_home" PATH="$mb:$PATH" MOCK_SF_ORG_INFO="$DE_JSON" \
+              SF_INIT_LOGIN_URL_PROD=login \
+              MOCK_GH_VAR_SF_INSTANCE_URL_PROD=https://test.salesforce.com MOCK_GH_VAR_SF_USERNAME_PROD=old@example.com \
+              MOCK_GH_VAR_SF_ORG_KIND_PROD=sandbox MOCK_GH_VAR_SF_ORG_ID_PROD=00D0000000SBX001 MOCK_GH_VAR_SF_ORG_NAME_PROD="Acme Sandbox" \
+              bash "$mock_home/sf-tools/bin/sf-init.sh" --reconnect main ) > "$out" 2>&1
+    exit_code=$?
+    assert_exit_ok            "$exit_code"                                                    "--reconnect main: 正常終了する"
+    assert_file_contains      "$out" "ログイン先 : https://test.salesforce.com"                  "いまの接続（ログイン先）が表示される"
+    assert_file_contains      "$out" "組織       : Acme Sandbox（ID 00D0000000SBX001）"         "いまの接続（組織）が表示される"
+    assert_file_contains      "$MOCK_CALL_LOG" "gh variable set SF_INSTANCE_URL_PROD --body https://login.salesforce.com" "新しいログイン先が登録される"
+    assert_file_contains      "$MOCK_CALL_LOG" "gh variable set SF_ORG_ID_PROD --body 00D0000000DE0001"                   "新しい組織 ID が保存される"
+    assert_file_contains      "$out" "古い組織（Acme Sandbox / ID 00D0000000SBX001）には、外部クライアントアプリ"          "古い組織に残るものが、案内される"
+    assert_file_contains      "$out" "自動では、削除しません"                                    "古いアプリは、自動では削除しない"
+
+    # --- D. --reconnect staging に、本番をつなごうとする → 拒否（何も登録しない）---
+    : > "$MOCK_CALL_LOG"
+    printf 'Y\n' \
+        | ( cd "$force_dir" && HOME="$mock_home" PATH="$mb:$PATH" MOCK_SF_ORG_INFO="$PROD_JSON" \
+              SF_INIT_LOGIN_URL_STG=login \
+              bash "$mock_home/sf-tools/bin/sf-init.sh" --reconnect staging ) > "$out" 2>&1
+    exit_code=$?
+    assert_exit_fail          "$exit_code"                                                    "--reconnect staging に本番 → 拒否する"
+    assert_file_contains      "$out" "本番組織は、main にしか、つなげません"                      "拒否の理由が表示される"
+    assert_file_not_contains  "$MOCK_CALL_LOG" "gh secret set SF_CONSUMER_KEY_STG"             "何も登録しない"
+    assert_file_not_contains  "$MOCK_CALL_LOG" "sf project deploy start"                       "アプリを作らない"
+
+    # --- D2. 判定できない組織（種類を読み取れない）→ staging には、つなげない（確認では、通さない）---
+    : > "$MOCK_CALL_LOG"
+    printf 'Y\n' \
+        | ( cd "$force_dir" && HOME="$mock_home" PATH="$mb:$PATH" MOCK_SF_ORG_QUERY_EXIT=1 \
+              SF_INIT_LOGIN_URL_STG=test \
+              bash "$mock_home/sf-tools/bin/sf-init.sh" --reconnect staging ) > "$out" 2>&1
+    exit_code=$?
+    assert_exit_fail          "$exit_code"                                                    "--reconnect staging + 種類を判定できない → 拒否する"
+    assert_file_contains      "$out" "組織の種類を判定できませんでした"                          "判定不能: 理由が表示される"
+    assert_file_not_contains  "$MOCK_CALL_LOG" "gh secret set SF_CONSUMER_KEY_STG"             "判定不能: 何も登録しない"
+    assert_file_not_contains  "$MOCK_CALL_LOG" "sf project deploy start"                       "判定不能: アプリを作らない"
+
+    # --- D3. 従来の接続アプリ（--legacy-connected-app）でも、staging に本番は、つなげない（Secrets を登録する前に拒否）---
+    : > "$MOCK_CALL_LOG"
+    printf 'Y\nfake_key\nuser@example.com\n' \
+        | ( cd "$force_dir" && HOME="$mock_home" PATH="$mb:$PATH" MOCK_SF_ORG_INFO="$PROD_JSON" \
+              SF_INIT_LOGIN_URL_STG=login SF_INIT_LEGACY_CONNECTED_APP=1 \
+              bash "$mock_home/sf-tools/bin/sf-init.sh" --reconnect staging ) > "$out" 2>&1
+    exit_code=$?
+    assert_exit_fail          "$exit_code"                                                    "従来の接続アプリ + staging に本番 → 拒否する"
+    assert_file_contains      "$MOCK_CALL_LOG" "sf org login jwt"                              "従来の接続アプリ: JWT 接続テストは、行う（組織の種類を読み取るため）"
+    assert_file_not_contains  "$MOCK_CALL_LOG" "gh secret set SF_CONSUMER_KEY_STG"             "従来の接続アプリ: Secrets を登録しない（ガードの後に、登録する）"
+    assert_file_contains      "$out" "本番組織、または、種類を判定できない組織は、つなげません"    "従来の接続アプリ: 理由が表示される"
+
+    # --- D4. --add-tier staging に本番 → 拒否。ブランチも PR も作らない（接続を先に行い、できなければ、何も変更しない）---
+    local base2 force_dir2
+    base2=$(mktemp -d "${TMPDIR:-/tmp}/test-org2-XXXX")
+    force_dir2="$base2/force-testproject"
+    mkdir -p "$force_dir2/sf-tools/config"
+    printf 'main\n' > "$force_dir2/sf-tools/config/branches.txt"
+    : > "$MOCK_CALL_LOG"
+    printf 'Y\n' \
+        | ( cd "$force_dir2" && HOME="$mock_home" PATH="$mb:$PATH" MOCK_SF_ORG_INFO="$PROD_JSON" \
+              SF_INIT_LOGIN_URL_STG=login \
+              bash "$mock_home/sf-tools/bin/sf-init.sh" --add-tier staging ) > "$out" 2>&1
+    exit_code=$?
+    assert_exit_fail          "$exit_code"                                                    "--add-tier staging に本番 → 拒否する"
+    assert_file_not_contains  "$MOCK_CALL_LOG" "gh pr create"                                  "--add-tier: PR を作らない"
+    assert_file_not_contains  "$MOCK_CALL_LOG" "push --no-verify -u origin staging"            "--add-tier: staging ブランチを作らない"
+    assert_file_not_contains  "$MOCK_CALL_LOG" "gh secret set SF_CONSUMER_KEY_STG"             "--add-tier: Secrets を登録しない"
+    assert_equals "$(cat "$force_dir2/sf-tools/config/branches.txt")" "main"                  "--add-tier: branches.txt を変更しない"
+    rm -rf "$base2"
+
+    # --- H. --status: 本番が main にだけあれば、正常終了する ---
+    : > "$MOCK_CALL_LOG"
+    ( cd "$force_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
+        MOCK_GH_VAR_SF_INSTANCE_URL_PROD=https://login.salesforce.com MOCK_GH_VAR_SF_USERNAME_PROD=admin@example.com \
+        MOCK_GH_VAR_SF_ORG_KIND_PROD=production MOCK_GH_VAR_SF_ORG_ID_PROD=00D0000000PROD01 MOCK_GH_VAR_SF_ORG_NAME_PROD="Acme Production" \
+        MOCK_GH_VAR_SF_INSTANCE_URL_STG=https://test.salesforce.com MOCK_GH_VAR_SF_USERNAME_STG=admin@example.com.test \
+        MOCK_GH_VAR_SF_ORG_KIND_STG=sandbox MOCK_GH_VAR_SF_ORG_ID_STG=00D0000000SBX001 \
+        bash "$mock_home/sf-tools/bin/sf-init.sh" --status ) > "$out" 2>&1
+    exit_code=$?
+    assert_exit_ok            "$exit_code"                                                    "--status: main = 本番・staging = Sandbox → 正常終了する"
+    assert_file_contains      "$out" "種類: 本番"                                               "--status: main の種類（本番）が表示される"
+    assert_file_not_contains  "$out" "同じ組織につながっています"                               "--status: 別の組織なら、重複の警告は出ない"
+
+    # --- E. 段階の指定が正しくない / branches.txt にない ---
+    printf 'Y\n' | ( cd "$force_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
+        bash "$mock_home/sf-tools/bin/sf-init.sh" --reconnect develop ) > "$out" 2>&1
+    assert_exit_fail          "$?"                                                            "--reconnect develop（branches.txt にない）→ 中断する"
+    assert_file_contains      "$out" "develop は、branches.txt にありません"                       "理由が表示される"
+    printf 'Y\n' | ( cd "$force_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
+        bash "$mock_home/sf-tools/bin/sf-init.sh" --reconnect foo ) > "$out" 2>&1
+    assert_exit_fail          "$?"                                                            "--reconnect foo → 中断する"
+
+    # --- F. --legacy-connected-app と、保存済みの種別（外部クライアントアプリ）の食い違い ---
+    rm -rf "$mock_home/.sf-jwt"   # 「既存の証明書を再利用しますか？」の質問を、出さないため
+    init_base=$(_setup_init_dir "tamashimon" "testproject")
+    init_dir="$init_base/home/tamashimon/testproject"
+    mkdir -p "$init_dir/init"
+    printf 'REPO_FULL_NAME="tamashimon/force-testproject"\nREPO_NAME="force-testproject"\nPROJECT_NAME="testproject"\nBRANCH_COUNT="1"\nAPP_TYPE=2\n' \
+        > "$init_dir/init/.sf-init.env"
+    printf 'Y\n' \
+        | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
+              bash "$mock_home/sf-tools/bin/sf-init.sh" --only 10 --legacy-connected-app ) > "$out" 2>&1
+    exit_code=$?
+    assert_exit_fail          "$exit_code"                                                    "--legacy-connected-app + 保存済みの外部クライアントアプリ → 中断する"
+    assert_file_contains      "$out" "外部クライアントアプリ（APP_TYPE=2）で、設定を始めています"      "食い違いの理由が表示される"
+    rm -rf "$init_base"
+
+    unset MOCK_CALL_LOG MOCK_SF_ORG_JSON SF_INIT_JWT_INTERVAL
+    teardown "$mb" "$mock_home" "$base"
+}
+
+# ==============================================================================
 # テスト実行
 # ==============================================================================
 echo ""
@@ -1237,5 +1819,10 @@ test_e2e_input_sequence
 test_sf_cli_check
 test_wf_propagate_skip_missing_branch
 test_wf_no_script_injection
+test_phase6_pat_token
+test_resume_choice
+test_sf_tools_autoupdate
+test_sf_tools_branch_mismatch
+test_org_connection
 
 print_summary

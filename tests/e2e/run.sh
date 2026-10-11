@@ -82,7 +82,7 @@ echo -e "${CLR_ERR}╔═══════════════════�
 echo -e "${CLR_ERR}║  !!  実際の GitHub / Salesforce を操作します         ║${CLR_RESET}" >&2
 echo -e "${CLR_ERR}║                                                      ║${CLR_RESET}" >&2
 echo -e "${CLR_ERR}║  ・テスト用のリポジトリ・外部クライアントアプリ・    ║${CLR_RESET}" >&2
-echo -e "${CLR_ERR}║    Hello World の Apex を作成します（Apex は削除）    ║${CLR_RESET}" >&2
+echo -e "${CLR_ERR}║    Hello World の Apex を作成します（Apex は削除）   ║${CLR_RESET}" >&2
 echo -e "${CLR_ERR}║  ・終了後も、リポジトリなどは残します（見返す用）    ║${CLR_RESET}" >&2
 echo -e "${CLR_ERR}║    前回の残りは、最初に削除します                    ║${CLR_RESET}" >&2
 echo -e "${CLR_ERR}║  ・sf の認証が、テスト用組織の認証 URL で置き換わり  ║${CLR_RESET}" >&2
@@ -281,7 +281,9 @@ _hello_push() { E2E_COMMIT_MSG="$2" e2e_run_sf_cmd "sf-push-$1" "$3" "" "${SF_TO
 _hello_local_job() {
     local label="$1" job="$2" msg="$3" writefn="$4" expect_tests="$5" repo="${WORK}/$2/${REPO_NAME}"
     chk "${label}: sf-job.sh で、ジョブ（ブランチ ${job}）を開始した（ブランチ作成・clone・sf-start.sh）" \
-        e2e_run_sf_cmd "sf-job-${job}" "$WORK" "${job}\nY\n${E2E_JOB_ALIAS}\n" "${SF_TOOLS_ROOT}/bin/sf-job.sh" || return 1
+        # 入力: ジョブ名 → 確認（Y）→ 組織のエイリアス → ログイン先（2 = Sandbox。sf-start.sh の質問。e2e では、認証 URL で
+        # ログインするため、選んだ URL は、使われない）
+        e2e_run_sf_cmd "sf-job-${job}" "$WORK" "${job}\nY\n${E2E_JOB_ALIAS}\n2\n" "${SF_TOOLS_ROOT}/bin/sf-job.sh" || return 1
     chk "${label}: sf-install.sh（sf-start.sh が背景で実行）が完了した" e2e_wait_sf_install "$repo" || return 1
     chk "${label}: Git フック（pre-push）が設置された" test -f "${repo}/.git/hooks/pre-push"
     chk "${label}: リリース管理フォルダ release/${job}/ が用意された（雛形）" \
@@ -381,8 +383,9 @@ _hello_flow() {
     _hello_cycle "リリース" "$JOB_RELEASE" "e2e: Hello World をリリース" _hello_write_release 1 || return 0
     _elapsed "リリース側（sf-job → PR → wf-release）の終了"
     # wf-release の途中のステップ（JWT ログイン・sf-tools の取得・Slack 通知）
-    chk "wf-release: 本番組織へのログイン（JWT）が成功した" \
-        test "$(_step_conclusion "$HELLO_RELEASE_RUN" "本番組織にログイン（JWT）")" == "success"
+    # ステップ名は templates/.github/workflows/wf-release.yml の name と一致させる（e2e は main の組織だけをつなぐ）
+    chk "wf-release: main の組織へのログイン（JWT）が成功した" \
+        test "$(_step_conclusion "$HELLO_RELEASE_RUN" "main の組織にログイン（JWT）")" == "success"
     chk "wf-release: sf-tools の取得が成功した（公開リポジトリを、Token なしで clone）" \
         test "$(_step_conclusion "$HELLO_RELEASE_RUN" "自動化ツール（sf-tools）を取得")" == "success"
     chk "wf-release: Slack への通知が成功した（ok:true）" \

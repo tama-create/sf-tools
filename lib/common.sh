@@ -164,9 +164,9 @@ log() {
     if [[ "$dest" == "BOTH" || "$dest" == "SCREEN" ]]; then
         case "$level" in
             HEADER)
-                echo "-------------------------------------------------------" >&2
+                echo "--------------------------------------------------------" >&2
                 echo -e "${CLR_INFO}>> ${message}${CLR_RESET}" >&2
-                echo "-------------------------------------------------------" >&2 ;;
+                echo "--------------------------------------------------------" >&2 ;;
             INFO)
                 echo -e "${CLR_INFO}[INFO] ${message}${CLR_RESET}" >&2 ;;
             SUCCESS)
@@ -486,9 +486,9 @@ get_branch_list() {
 # is_reserved_org_alias - 共有環境の組織エイリアス（sf-tools の予約名）かを返す
 # ------------------------------------------------------------------------------
 # 【背景】
-#   共有環境（本番・staging・develop）へのリリースは、ローカルの PC からはできない。
+#   共有環境（main・staging・develop）へのリリースは、ローカルの PC からはできない。
 #   GitHub にコミットし、レビューを通して、GitHub Actions で行う。
-#   sf-init は、組織のエイリアスとして prod / staging / develop を付ける（sf-start.sh も prod を本番として扱う）。
+#   sf-init は、組織のエイリアスとして prod / staging / develop を付ける（prod は main の組織のエイリアス名。組織の種類は、問わない）。
 #   この名前を予約名とし、ローカルからのリリースを禁止する（sf-release.sh / sf-deploy.sh）。
 #   main は、ブランチ名と同じ名前（互換のため、予約名に含める）。
 #   予約名以外の名前に付け替えた場合は、動作を保証しない（個人用の Sandbox / Developer Edition / Scratch Org の想定）。

@@ -8,9 +8,11 @@
 # 【処理フロー】
 #   1. .sf-init.env を読み込んでプロジェクト情報を取得
 #   2. 追加 tier のバリデーション（すでに存在する場合はエラー）
-#   3. sf-branch.sh で branches.txt を更新・GitHub にブランチを作成
-#   4. JWT 認証情報（SF_CONSUMER_KEY_xxx / SF_USERNAME_xxx / SF_INSTANCE_URL_xxx）を登録
-#   5. branches.txt をコミット・プッシュ
+#   3. Salesforce 組織に接続する（先に行う）: ログイン先の選択 → ログイン → 種類の読み取り → 本番は main のみのガード
+#      → 外部クライアントアプリの自動作成 → JWT 認証情報（SF_CONSUMER_KEY_xxx / SF_USERNAME_xxx / SF_INSTANCE_URL_xxx）を登録
+#      （--legacy-connected-app のときは、コンシューマー鍵・ユーザー名を手動で入力）。接続できなければ、何も変更しない
+#   4. GitHub にブランチを作成
+#   5. 作業用ブランチで branches.txt を更新し、PR を作成する（main へは、直接 push しない）
 #
 # 【登録する Secrets / Variables】
 #   staging 追加時: SF_CONSUMER_KEY_STG（Secret）/ SF_USERNAME_STG / SF_INSTANCE_URL_STG（Variable）
@@ -98,13 +100,64 @@ fi
 log "INFO" "  対象リポジトリ: ${REPO_FULL_NAME}"
 log "INFO" "  追加 tier     : ${ADD_TIER}（${LABEL}）"
 
-# ------------------------------------------------------------------------------
-# 4. ブランチを追加（sf-branch.sh を利用）
-# ------------------------------------------------------------------------------
-log "HEADER" "Step 1: ${ADD_TIER} ブランチを追加します。"
+# 管理者向けの警告と確認（CLAUDE.md 2.4）。GITHUB_ACTIONS=true のときも、省略しない（Actions 上で実行する想定がない）
+echo -e "${CLR_ERR}╔══════════════════════════════════════════════════════╗${CLR_RESET}" >&2
+echo -e "${CLR_ERR}║  !!  このコマンドは管理者専用です                    ║${CLR_RESET}" >&2
+echo -e "${CLR_ERR}║      段階（ブランチ）と、Salesforce 組織への接続を   ║${CLR_RESET}" >&2
+echo -e "${CLR_ERR}║      追加します。Secrets / Variables が書き換わります║${CLR_RESET}" >&2
+echo -e "${CLR_ERR}╚══════════════════════════════════════════════════════╝${CLR_RESET}" >&2
+log "WARNING" "途中で失敗しても、Salesforce 側に作った外部クライアントアプリと、登録した Secrets は、自動では、元に戻しません。"
+check_gh_owner "${REPO_FULL_NAME%%/*}"
+ask_yn "  続行しますか？" || die "中断しました。"
 
-# sf-branch.sh を呼び出す（対話メニューをスキップするため直接 branches.txt を更新してブランチ作成）
-# branches.txt に ADD_TIER を追記
+# 未コミットの変更があると、main への切り替え・ブランチの作成で、衝突するため、先に確認する
+if [[ -n "$(git status --porcelain 2>/dev/null)" ]]; then  # 条件チェックのため run 不使用
+    die "未コミットの変更があります。コミットまたは退避してから、実行してください。"
+fi
+
+# ------------------------------------------------------------------------------
+# 4. Salesforce 組織に接続する（先に行う: 本番組織は main にしか、つなげない。接続できなければ、何も変更しない）
+# ------------------------------------------------------------------------------
+log "HEADER" "Step 1: ${LABEL} を、Salesforce 組織に接続します。"
+
+JWT_DIR="$HOME/.sf-jwt/${REPO_NAME}"
+[[ ! -f "${JWT_DIR}/server.key" ]] && die "秘密鍵が見つかりません: ${JWT_DIR}/server.key
+  sf-init Phase 10 を先に実行してください。"
+
+if [[ "${SF_INIT_LEGACY_CONNECTED_APP:-}" == "1" ]]; then
+    # 従来の接続アプリケーション（今後廃止予定）: コンシューマー鍵・ユーザー名を、手動で入力する
+    register_jwt_secret "$ORG_ALIAS" "$SUFFIX" "$LABEL" "${JWT_DIR}/server.key"
+else
+    # 既定: 外部クライアントアプリケーション（自動で作成する）
+    [[ ! -f "${JWT_DIR}/server.crt" ]] && die "証明書が見つかりません: ${JWT_DIR}/server.crt"
+    register_jwt_secret_eca "$ORG_ALIAS" "$SUFFIX" "$LABEL" "${JWT_DIR}/server.key" "${JWT_DIR}/server.crt"
+fi
+
+# ------------------------------------------------------------------------------
+# 5. branches.txt の更新と、ブランチの追加
+#    main への直接 push は、しない（main は、保護されているため）。作業用のブランチで、branches.txt を更新し、
+#    PR を作成する。PR をマージすると、branches.txt が main に反映される（管理者が、マージする）
+# ------------------------------------------------------------------------------
+log "HEADER" "Step 2: ${ADD_TIER} ブランチを追加します。"
+
+run git checkout main || die "main ブランチへの切り替えに失敗しました。"
+
+# 5-1. リモートに ${ADD_TIER} ブランチを作成（main から派生）
+if git ls-remote --exit-code --heads origin "$ADD_TIER" > /dev/null 2>&1; then
+    # 条件チェックのため run 不使用
+    log "INFO" "${ADD_TIER} ブランチはリモートに既に存在します（スキップ）。"
+else
+    run git checkout -b "$ADD_TIER"  || die "${ADD_TIER} ブランチの作成に失敗しました。"
+    run git push --no-verify -u origin "$ADD_TIER" \
+        || die "${ADD_TIER} ブランチのプッシュに失敗しました。"
+    run git checkout main            || die "main ブランチへの切り替えに失敗しました。"
+    log "SUCCESS" "${ADD_TIER} ブランチを作成しました。"
+fi
+
+# 5-2. 作業用のブランチで branches.txt を更新し、PR を作成する
+PR_BRANCH="system-add-tier-${ADD_TIER}-$(date +%Y%m%d%H%M%S)"   # 秒まで含める（同じ分の再実行で、衝突しないため）
+run git checkout -b "$PR_BRANCH" || die "作業用ブランチの作成に失敗しました: ${PR_BRANCH}"
+
 TMP_BRANCH_FILE="${BRANCHES_FILE}.tmp"
 {
     if [[ -f "$BRANCHES_FILE" ]]; then
@@ -119,44 +172,24 @@ TMP_BRANCH_FILE="${BRANCHES_FILE}.tmp"
 run mv "$TMP_BRANCH_FILE" "$BRANCHES_FILE"
 log "SUCCESS" "branches.txt に ${ADD_TIER} を追記しました。"
 
-# リモートにブランチを作成（main から派生）
-if git ls-remote --exit-code --heads origin "$ADD_TIER" > /dev/null 2>&1; then
-    # 条件チェックのため run 不使用
-    log "INFO" "${ADD_TIER} ブランチはリモートに既に存在します（スキップ）。"
-else
-    run git checkout main            || die "main ブランチへの切り替えに失敗しました。"
-    run git checkout -b "$ADD_TIER"  || die "${ADD_TIER} ブランチの作成に失敗しました。"
-    run git push --no-verify -u origin "$ADD_TIER" \
-        || die "${ADD_TIER} ブランチのプッシュに失敗しました。"
-    run git checkout main            || die "main ブランチへの切り替えに失敗しました。"
-    log "SUCCESS" "${ADD_TIER} ブランチを作成しました。"
-fi
-
-# ------------------------------------------------------------------------------
-# 5. JWT 認証情報を登録
-# ------------------------------------------------------------------------------
-log "HEADER" "Step 2: ${LABEL} の JWT 認証情報を設定します。"
-
-JWT_DIR="$HOME/.sf-jwt/${REPO_NAME}"
-[[ ! -f "${JWT_DIR}/server.key" ]] && die "秘密鍵が見つかりません: ${JWT_DIR}/server.key\n  sf-init Phase 10 を先に実行してください。"
-
-register_jwt_secret "$ORG_ALIAS" "$SUFFIX" "$LABEL" "${JWT_DIR}/server.key"
-
-# ------------------------------------------------------------------------------
-# 6. branches.txt をコミット・プッシュ
-# ------------------------------------------------------------------------------
-log "HEADER" "Step 3: branches.txt をコミット・プッシュします。"
-
 run git add sf-tools/config/branches.txt \
     || die "git add に失敗しました。"
 run git commit --no-verify -m "chore: ${ADD_TIER} tier を追加" \
     || die "git commit に失敗しました。"
-run git push --no-verify origin main \
-    || die "git push に失敗しました。"
+# --no-verify: この push は、作業用ブランチへの、管理者による自動の操作のため、pre-push フック（検証の実行）を省く
+run git push --no-verify -u origin "$PR_BRANCH" \
+    || die "git push に失敗しました（作業用ブランチ: ${PR_BRANCH}。Salesforce への接続は、完了しています）。"
 
-log "SUCCESS" "tier 追加完了: ${ADD_TIER}（${LABEL}）"
+PR_URL=$(run gh pr create --base main --head "$PR_BRANCH" -R "$REPO_FULL_NAME" \
+    --title "chore: ${ADD_TIER} tier を追加" \
+    --body "branches.txt に ${ADD_TIER} を追加します（sf-init.sh --add-tier ${ADD_TIER} で作成）。マージすると、段階として有効になります。") \
+    || die "PR の作成に失敗しました。"  # VAR=$(cmd) のため、PR の URL を取得する
+run git checkout main || die "main ブランチへの切り替えに失敗しました。"
+
+log "SUCCESS" "tier 追加の準備ができました: ${ADD_TIER}（${LABEL}）"
 log "INFO"    "次のステップ:"
-log "INFO"    "  ・Salesforce Sandbox の Connected App で ${ADD_TIER} 用プロファイルを追加してください。"
+log "INFO"    "  ・PR をマージしてください（マージすると、branches.txt が main に反映されます）: $(echo "$PR_URL" | tail -n 1)"
 log "INFO"    "  ・GitHub Actions（wf-release / wf-validate）が ${ADD_TIER} ブランチに対して動作することを確認してください。"
+log "INFO"    "  ・いまの接続を見る: sf-init.sh --status"
 
 exit $RET_OK

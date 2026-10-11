@@ -37,14 +37,14 @@ trap '[[ -n "$TMP_BRANCH_FILE" ]] && rm -f "$TMP_BRANCH_FILE"' EXIT
 # ------------------------------------------------------------------------------
 # メイン処理
 # ------------------------------------------------------------------------------
-log "HEADER" "Phase 5: ブランチ構成"
+log "HEADER" "ブランチ構成"
 
 cd "$REPO_DIR" || die "ディレクトリに移動できません: $REPO_DIR"
 
 # ブランチ構成の選択
 echo "" >&2
 echo -e "  ${CLR_INFO}ブランチ構成を選択してください:${CLR_RESET}" >&2
-echo -e "  ${CLR_INFO}─────────────────────────────────────────────${CLR_RESET}" >&2
+echo -e "  ${CLR_INFO}──────────────────────────────────────────────────────${CLR_RESET}" >&2
 echo -e "  ${CLR_INFO}[1]${CLR_RESET} main / staging / develop" >&2
 echo "      標準構成。開発→検証→本番の3段階リリース" >&2
 echo "" >&2
@@ -54,7 +54,7 @@ echo "" >&2
 echo -e "  ${CLR_INFO}[3]${CLR_RESET} main" >&2
 echo "      小規模プロジェクト・単独開発向け" >&2
 echo -e "  ${CLR_INFO}[q]${CLR_RESET} 中断" >&2
-echo -e "  ${CLR_INFO}─────────────────────────────────────────────${CLR_RESET}" >&2
+echo -e "  ${CLR_INFO}──────────────────────────────────────────────────────${CLR_RESET}" >&2
 echo "" >&2
 
 read_key choice "  番号を入力 [1-3/q]: " "[1-3Qq]"
@@ -90,5 +90,5 @@ log "SUCCESS" "branches.txt を更新しました: ${BRANCHES[*]}"
 BRANCH_COUNT="${#BRANCHES[@]}"
 printf 'BRANCH_COUNT="%s"\n' "$BRANCH_COUNT" >> "$SF_INIT_ENV_FILE"
 
-log "SUCCESS" "Phase 5 完了: ブランチ構成 OK（${BRANCH_COUNT} 階層）。"
+log "SUCCESS" "完了: ブランチ構成 OK（${BRANCH_COUNT} 階層）。"
 exit $RET_OK

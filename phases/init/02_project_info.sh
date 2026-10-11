@@ -14,15 +14,15 @@
 #   REPO_DIR      = {PWD}/force-{company}
 #
 # 【環境種別】
-#   本番環境 (production) : SF_TOOLS_BRANCH=main       → GitHub Actions は sf-tools main を使用（通常はこちら）
-#   検証環境 (staging)    : SF_TOOLS_BRANCH=development → GitHub Actions は sf-tools development を使用
+#   配布版 (production)    : SF_TOOLS_BRANCH=main       → GitHub Actions は sf-tools main を使用（通常はこちら）
+#   開発版 (staging)       : SF_TOOLS_BRANCH=development → GitHub Actions は sf-tools development を使用
 #                           sf-tools の開発者専用（未リリースのコードが使われる）。
 #                           誤選択を防ぐため、選択時に WARNING と Y/N/q 確認を行う（N なら選択に戻る）
 #
 # 【sf-tools の最新化確認】
 #   環境種別の選択直後に ensure_sf_tools_branch（init-common.sh）を呼び、~/sf-tools が
 #   選択した環境のブランチ（本番=main / 検証=development）かどうか、origin より遅れていないかを確認する。
-#   ・遅れていれば確認のうえ git pull --ff-only を実行し、実行中のスクリプトが書き換わるため die で中断する
+#   ・遅れていれば確認のうえ git pull --ff-only を実行し、終了コード 75 で終了する（sf-init.sh が、自動で、実行しなおす）する
 #   ・ブランチ違いは確認（Y/N/q）。ローカルに未コミット・未 push の変更があれば更新せず警告のみ
 # ==============================================================================
 
@@ -46,7 +46,7 @@ SF_INIT_ENV_FILE="${SF_INIT_ENV_FILE:-${PWD}/.sf-init.env}"
 # ------------------------------------------------------------------------------
 # メイン処理
 # ------------------------------------------------------------------------------
-log "HEADER" "Phase 2: プロジェクト情報の確認"
+log "HEADER" "プロジェクト情報の確認"
 
 log "INFO" "プロジェクト情報を確認中..."
 
@@ -80,34 +80,45 @@ ask_yn "▶ よろしいですか？" || die "セットアップを中断しま�
 
 # 環境種別の選択
 echo ""
-log "INFO" "環境種別を選択してください："
-log "INFO" "  1. 本番環境  - 通常はこちらを選択してください。"
-log "INFO" "                 GitHub Actions は sf-tools main ブランチ（リリース済みの配布版）を使用"
-log "INFO" "  2. 検証環境  - sf-tools の開発者専用です（リリース前の動作確認用）。"
-log "INFO" "                 GitHub Actions は sf-tools development ブランチ（未リリース版）を使用"
+log "INFO" "sf-tools の版を選択してください（Salesforce の本番・Sandbox とは、関係ありません）："
+log "INFO" "  1. 配布版（main）        - 通常は、こちらを選択してください。"
+log "INFO" "                             GitHub Actions は、リリース済みの sf-tools（main ブランチ）を使用"
+log "INFO" "  2. 開発版（development） - sf-tools の開発者専用です（リリース前の動作確認用）。"
+log "INFO" "                             GitHub Actions は、未リリースの sf-tools（development ブランチ）を使用"
 echo ""
 while true; do
-    read_key ENV_TYPE_KEY "▶ 環境種別を選択してください [1/2/q]：" "[12qQ]"
+    read_key ENV_TYPE_KEY "▶ sf-tools の版を選択してください [1/2/q]：" "[12qQ]"
     [[ "$ENV_TYPE_KEY" =~ ^[qQ]$ ]] && die "セットアップを中断しました。"
     if [[ "$ENV_TYPE_KEY" == "1" ]]; then
         ENV_TYPE="production"
         SF_TOOLS_BRANCH="main"
-        log "INFO" "  → 本番環境（sf-tools: main）"
+        log "INFO" "  → 配布版（sf-tools: main）"
         break
     fi
     # 検証環境は未リリースのコードを使うため、誤選択を防ぐ確認を挟む（N なら選択に戻る）
-    log "WARNING" "検証環境は sf-tools の開発者専用です。リリース前の未検証コード（sf-tools development）が使われます。"
-    if ask_yn "▶ 検証環境で続行しますか？"; then
+    log "WARNING" "開発版は、sf-tools の開発者専用です。リリース前の未検証コード（sf-tools development）が使われます。"
+    if ask_yn "▶ 開発版（development）で続行しますか？"; then
         ENV_TYPE="staging"
         SF_TOOLS_BRANCH="development"
-        log "INFO" "  → 検証環境（sf-tools: development）"
+        log "INFO" "  → 開発版（sf-tools: development）"
         break
     fi
     echo ""
 done
 
-# 選択した環境に合わせて ~/sf-tools の最新化を確認する（更新した場合は die で中断）
-ensure_sf_tools_branch "$SF_TOOLS_BRANCH"
+# 選択した環境に合わせて ~/sf-tools の最新化を確認する。更新した場合（戻り値 2）は、終了コード 75 で終了する
+#   （司令塔の sf-init.sh が、更新した sf-tools で、自動的に、最初から実行しなおす）
+#   起動時（sf-init.sh）に、現在のブランチの最新化を、確認済みなら（SF_INIT_TOOLS_CHECKED_BRANCH）、
+#   二重に確認せず、選んだ環境とのブランチ違いだけを確認する
+if [[ -n "${SF_INIT_TOOLS_CHECKED_BRANCH:-}" ]]; then
+    if [[ "$SF_INIT_TOOLS_CHECKED_BRANCH" != "$SF_TOOLS_BRANCH" ]]; then
+        log "WARNING" "ローカルの sf-tools は ${SF_INIT_TOOLS_CHECKED_BRANCH} ブランチですが、選択した環境は ${SF_TOOLS_BRANCH} です。"
+        ask_yn "▶ このまま続行しますか？" || die "セットアップを中断しました。"
+    fi
+else
+    ensure_sf_tools_branch "$SF_TOOLS_BRANCH"
+    [[ $? -eq 2 ]] && exit 75
+fi
 
 # .sf-init.env に変数を書き出す（後続フェーズで source して使用）
 {
@@ -121,5 +132,5 @@ ensure_sf_tools_branch "$SF_TOOLS_BRANCH"
 } > "$SF_INIT_ENV_FILE"
 chmod 600 "$SF_INIT_ENV_FILE" 2>/dev/null || true  # run 不使用: ファイル権限保護（Windows は効果なし・意図的エラー無視）
 
-log "SUCCESS" "Phase 2 完了: プロジェクト情報の確認 OK。"
+log "SUCCESS" "完了: プロジェクト情報の確認 OK。"
 exit $RET_OK

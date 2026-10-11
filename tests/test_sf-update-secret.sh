@@ -45,8 +45,8 @@ test_update_all_success() {
     _create_mocks_update_secret "$mb" "$td"
     _prepare_update_all_env "$td" "$td"
 
-    # 入力: Y=管理者警告確認 4=全更新 Y=SF_PRIVATE_KEY更新 consumer_key username（PROD のみ）
-    printf 'Y4Yfake_consumer_key\nfake@example.com\n' \
+    # 入力: Y=管理者警告確認 4=全更新 Y=SF_PRIVATE_KEY更新 consumer_key username ログイン先（Enter = Sandbox。PROD のみ）
+    printf 'Y4Yfake_consumer_key\nfake@example.com\n\n' \
         | ( cd "$td" && HOME="$td" PATH="$mb:$PATH" \
               bash "$SF_TOOLS_DIR/bin/sf-update-secret.sh" ) > /tmp/update-secret-test.log 2>&1
     local ec=$?
@@ -78,7 +78,7 @@ test_update_sf_cli_abort() {
     _create_mocks_update_secret "$mb" "$td"
     _prepare_update_all_env "$td" "$td"
 
-    printf 'Y4Yfake_consumer_key\nfake@example.com\n' \
+    printf 'Y4Yfake_consumer_key\nfake@example.com\n\n' \
         | ( cd "$td" && HOME="$td" PATH="$mb:$PATH" MOCK_SF_VERSION_EXIT=1 \
               bash "$SF_TOOLS_DIR/bin/sf-update-secret.sh" ) > /tmp/update-secret-test2.log 2>&1
     local ec=$?
@@ -103,7 +103,7 @@ test_update_jwt_login_fail() {
 
     export MOCK_SF_LOGIN_EXIT=1
 
-    printf 'Y4Yfake_consumer_key\nfake@example.com\n' \
+    printf 'Y4Yfake_consumer_key\nfake@example.com\n\n' \
         | ( cd "$td" && HOME="$td" PATH="$mb:$PATH" \
               bash "$SF_TOOLS_DIR/bin/sf-update-secret.sh" ) > /dev/null 2>&1
     local ec=$?
@@ -126,7 +126,7 @@ test_update_gh_fail() {
 
     export MOCK_GH_SECRET_SET_EXIT=1
 
-    printf 'Y4Yfake_consumer_key\nfake@example.com\n' \
+    printf 'Y4Yfake_consumer_key\nfake@example.com\n\n' \
         | ( cd "$td" && HOME="$td" PATH="$mb:$PATH" \
               bash "$SF_TOOLS_DIR/bin/sf-update-secret.sh" ) > /dev/null 2>&1
     local ec=$?

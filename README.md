@@ -126,7 +126,7 @@ sf-init.sh
 3. GitHub リポジトリ作成・clone
 4. ワークフロー・設定ファイル生成
 5. ブランチ構成
-6. PAT_TOKEN の設定
+6. PAT_TOKEN の設定（force-* のリポジトリの**オーナー（組織なら管理者）のアカウント**で発行した Classic PAT を貼り付けます。発行済みの Token があれば、ブラウザは開かず、そのまま貼り付けられます。貼り付けた Token は、画面に表示されず、スコープ（`repo`・`workflow`）とリポジトリの管理者であることを、GitHub に問い合わせて確認します。違えば、貼り直せます）
 7. Slack 連携の設定（通知先は、全員が参加する共有チャンネルを Slack で事前に作成しておく。DM は使えません）
 8. 初回コミット＆プッシュ
 9. GitHub リポジトリ設定・Ruleset 適用
@@ -341,10 +341,38 @@ sf-init.sh --add-tier develop    # 既存プロジェクトに develop を追加
 
 | オプション | 内容 |
 |---|---|
-| `--resume N` | Phase N から再開（エラー後の再試行） |
-| `--only N` | Phase N のみ実行（デバッグ用） |
+| `--resume N` | Phase N から、質問なしで再開（通常は、指定不要です。下記「途中で止まったとき」） |
+| `--only N` | Phase N のみ実行（デバッグ用。進捗は記録しない） |
 | `--add-tier staging` | 既存プロジェクトに staging 階層を追加 |
-| `--add-tier develop` | 既存プロジェクトに develop 階層を追加 |
+| `--add-tier develop` | 既存プロジェクトに develop 階層を追加（`main` へは直接 push せず、PR を作成します） |
+| `--reconnect <段階>` | 1 つの段階（main / staging / develop）の、接続先の Salesforce 組織を付け替える（`force-*` 内で実行） |
+| `--status` | 段階ごとの、接続先（ログイン先・組織の種類・ユーザー・組織 ID・最終確認日時）を一覧にする（読み取りのみ。`force-*` 内で実行） |
+| `--legacy-connected-app` | 従来の接続アプリケーション（今後廃止予定。手動の入力）を使う。既定は、外部クライアントアプリ（自動で作成） |
+
+**Salesforce 組織の接続（段階と組織の種類は、結びつけません）:** main / staging / develop のどの段階にも、本番・Sandbox・Developer Edition などを、自由につなげます（main に Sandbox や Developer Edition でも構いません）。ただし、**Salesforce の本番組織は、main にしかつなげません**（staging・develop に本番をつなごうとすると、ログイン後に、組織の種類を読み取って、中断します）。
+- 段階ごとに、**ログイン先**を、次の 3 つから選びます（Enter は 2）。種類ではなく、URL で選びます。
+  1. `https://login.salesforce.com` — 本番・Developer Edition・Trial など
+  2. `https://test.salesforce.com` — Sandbox（**安全なおすすめ**。本番に影響しません）
+  3. 組織の URL を入力（My Domain。例: `https://会社名.my.salesforce.com`）
+- ログイン後に、組織の ID・名前・種類（本番 / Sandbox / Developer Edition / Trial）を、**組織から読み取って**、表示・保存します。
+- あとから付け替えるときは `sf-init.sh --reconnect <段階>`、いまの接続を見るときは `sf-init.sh --status` です（`force-*` フォルダの中で実行します）。
+
+**画面の流れ（ウィザード形式）:** 実行すると、はじめに、作るもの・かかる時間の目安・**先に用意するもの**（GitHub の管理者のブラウザ、Slack の共有チャンネル、Salesforce の管理者アカウント）・全 8 ステップの一覧が表示されます。用意ができたら Enter を押します（q で中断）。各ステップの先頭には、「ステップ n / 8」と、完了したステップ・そのステップの目的が表示されます。終わると、**できたことと、次にやること**（`sf-job.sh` の実行など）が表示されます。`~/sf-tools` が古いときは、確認のうえ更新し、**自動で、はじめから実行しなおします**（もう一度の実行は、不要です）。
+
+**途中で止まったとき（続きから）:** どの Phase まで進んだかを、利用者が覚えておく必要はありません。止まったら、**同じフォルダで、もう一度 `sf-init.sh` を実行**してください。前回の状態が残っていれば、次の選択肢が表示されます。
+
+```
+前回のセットアップは、「ブランチの構成」まで完了しています（2026-10-11 14:32）。（owner/force-xxx）
+
+    [1] 「GitHub の Token」から、続きをやる   ← おすすめ
+    [2] 最初からやり直す（作成済みのリポジトリ・init フォルダは、そのまま使います）
+    [q] 中断
+```
+
+- **[1]** 保存済みの入力内容（環境種別・ブランチ構成など）を使い、失敗した所から再開します（最初の環境チェックは、毎回行います）。
+- **[2]** 保存した状態を消して、Phase 1 から始めます。作成済みのリポジトリと `init` フォルダは、削除せず、そのまま使います。
+- 前回が最後まで完了している場合や、別のリポジトリの状態の場合は、選択肢は出ず、最初から始まります。
+- 管理者向けの警告と確認は、どちらの場合も、毎回表示されます。
 
 補足:
 - 通常の初期セットアップは `force-*` ディレクトリの外で実行します
@@ -359,7 +387,7 @@ sf-init.sh が登録する認証情報は、機密性に応じて **Secret（暗
 |---|---|---|
 | `SF_PRIVATE_KEY` | Secret | JWT 署名用 RSA 秘密鍵 |
 | `SF_CONSUMER_KEY_*` | Secret | Connected App のコンシューマキー |
-| `PAT_TOKEN` | Secret | GitHub Personal Access Token |
+| `PAT_TOKEN` | Secret | GitHub Personal Access Token（Classic。`repo`・`workflow`。force-* のリポジトリのオーナー・組織の管理者のもの。sf-tools（公開リポジトリ）とは関係ありません） |
 | `SLACK_BOT_TOKEN` | Secret | Slack Bot のアクセストークン |
 | `SF_USERNAME_*` | Variable | Salesforce ユーザー名（平文で問題なし） |
 | `SF_INSTANCE_URL_*` | Variable | Salesforce インスタンス URL（平文で問題なし） |
@@ -803,7 +831,8 @@ sf-tools/
 │   ├── sf-precommit.sh
 │   └── sf-metasync.sh
 ├── lib/
-│   └── common.sh               ← 全スクリプト共通ライブラリ
+│   ├── common.sh               ← 全スクリプト共通ライブラリ
+│   └── wizard.sh               ← ウィザード形式の画面の共通部品（sf-init で使用）
 ├── phases/
 │   └── init/                   ← sf-init.sh のフェーズスクリプト
 │       ├── init-common.sh

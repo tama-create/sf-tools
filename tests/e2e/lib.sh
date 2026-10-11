@@ -588,14 +588,16 @@ e2e_cleanup_all() {
 # sf-init に流す標準入力（質問の順番に依存する。質問を変えたら、ここも直すこと）
 # ------------------------------------------------------------------------------
 #   Phase 1 続行 Y → Phase 2 確認 Y → 環境種別 2（検証）→ 検証環境で続行 Y → Phase 5 ブランチ 3（main のみ）
-#   → Phase 6 PAT（先頭の改行は、直前の入力の残りを press_enter が消費）→ 空行（Phase 7 の press_enter）
-#   → Slack Token → チャンネル ID → 空行（招待の press_enter）→ Phase 10 アプリ種別 2 → Sandbox? N
+#   → Phase 6 PAT（先頭の改行は、直前の入力の残りを read_secret が空行として無視する。Token は、GitHub に問い合わせて
+#     検証される。値は、画面に出ない）→ 空行（Phase 7 の press_enter）
+#   → Slack Token → チャンネル ID → 空行（招待の press_enter）→ Phase 10 ログイン先 1（login.salesforce.com。
+#     アプリの種類は聞かない: 既定は外部クライアントアプリ。ログイン先は、段階ごとに 3 択: main の 1 つだけ）
 #   → init フォルダ削除 N（Phase 10 が最後。SF_TOOLS_TOKEN は不要になった: sf-tools は公開リポジトリ）
 e2e_make_input() {
     printf '%s\n' "Y" "Y" "2" "Y" "3" \
         "$E2E_PAT_TOKEN" "" \
         "$E2E_SLACK_BOT_TOKEN" "$E2E_SLACK_CHANNEL_ID" "" \
-        "2" "N" \
+        "1" \
         "N"
 }
 

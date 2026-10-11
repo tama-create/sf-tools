@@ -3,7 +3,7 @@
 # ==============================================================================
 #
 # 【概要】
-#   PR 作成・更新時に sf-release.sh を「検証のみ（本番反映なし）」で実行する。
+#   PR 作成・更新時に sf-release.sh を「検証のみ（反映なし）」で実行する。
 #   検証結果は PR にコメントとして投稿され、失敗時はマージがブロックされる。
 #
 # 【処理フロー】
@@ -19,17 +19,17 @@
 #
 # 【必要な GitHub Secrets（このリポジトリに設定すること）】
 #   SF_PRIVATE_KEY       : 秘密鍵（PEM 形式・全組織共通）
-#   SF_CONSUMER_KEY_PROD : 本番組織の Connected App コンシューマーキー
-#   SF_CONSUMER_KEY_STG  : ステージング組織の Connected App コンシューマーキー
-#   SF_CONSUMER_KEY_DEV  : 開発組織の Connected App コンシューマーキー
+#   SF_CONSUMER_KEY_PROD : main の組織の Connected App コンシューマーキー
+#   SF_CONSUMER_KEY_STG  : staging の組織の Connected App コンシューマーキー
+#   SF_CONSUMER_KEY_DEV  : develop の組織の Connected App コンシューマーキー
 #
 # 【必要な GitHub Variables（このリポジトリに設定すること）】
-#   SF_USERNAME_PROD     : 本番組織の接続ユーザー名
-#   SF_USERNAME_STG      : ステージング組織の接続ユーザー名
-#   SF_USERNAME_DEV      : 開発組織の接続ユーザー名
-#   SF_INSTANCE_URL_PROD : 本番組織の接続 URL（https://login.salesforce.com 等）
-#   SF_INSTANCE_URL_STG  : ステージング組織の接続 URL
-#   SF_INSTANCE_URL_DEV  : 開発組織の接続 URL
+#   SF_USERNAME_PROD     : main の組織の接続ユーザー名
+#   SF_USERNAME_STG      : staging の組織の接続ユーザー名
+#   SF_USERNAME_DEV      : develop の組織の接続ユーザー名
+#   SF_INSTANCE_URL_PROD : main の組織の接続 URL（https://login.salesforce.com 等）
+#   SF_INSTANCE_URL_STG  : staging の組織の接続 URL
+#   SF_INSTANCE_URL_DEV  : develop の組織の接続 URL
 #   SF_TOOLS_BRANCH      : clone する sf-tools のブランチ（任意。未設定なら main）
 #
 # ==============================================================================
@@ -119,17 +119,17 @@ jobs:
             echo "SF_CONSUMER_KEY=${{ secrets.SF_CONSUMER_KEY_PROD }}" >> "$GITHUB_ENV"
             echo "SF_USERNAME=${{ vars.SF_USERNAME_PROD }}"            >> "$GITHUB_ENV"
             echo "SF_INSTANCE_URL=${{ vars.SF_INSTANCE_URL_PROD }}"    >> "$GITHUB_ENV"
-            echo "接続先: 本番組織"
+            echo "接続先: main の組織"
           elif [[ "$BASE" == "staging" ]]; then
             echo "SF_CONSUMER_KEY=${{ secrets.SF_CONSUMER_KEY_STG }}"  >> "$GITHUB_ENV"
             echo "SF_USERNAME=${{ vars.SF_USERNAME_STG }}"             >> "$GITHUB_ENV"
             echo "SF_INSTANCE_URL=${{ vars.SF_INSTANCE_URL_STG }}"     >> "$GITHUB_ENV"
-            echo "接続先: ステージング組織"
+            echo "接続先: staging の組織"
           else
             echo "SF_CONSUMER_KEY=${{ secrets.SF_CONSUMER_KEY_DEV }}"  >> "$GITHUB_ENV"
             echo "SF_USERNAME=${{ vars.SF_USERNAME_DEV }}"             >> "$GITHUB_ENV"
             echo "SF_INSTANCE_URL=${{ vars.SF_INSTANCE_URL_DEV }}"     >> "$GITHUB_ENV"
-            echo "接続先: 開発組織"
+            echo "接続先: develop の組織"
           fi
 
       # --------------------------------------------------------------------------
@@ -162,9 +162,9 @@ jobs:
           echo "対象ブランチ: ${SOURCE_BRANCH}"
 
       # --------------------------------------------------------------------------
-      # Step 8: Salesforce へのデプロイ検証（本番反映なし）
+      # Step 8: Salesforce へのデプロイ検証（反映なし）
       # --------------------------------------------------------------------------
-      - name: Salesforce にデプロイ検証を実行（本番反映なし）
+      - name: Salesforce にデプロイ検証を実行（反映なし）
         id: sf_validate
         env:
           SF_TARGET_ORG: ci-org
@@ -210,7 +210,7 @@ jobs:
               `| --- | --- |`,
               `| ブランチ | \`${ヘッドブランチ}\` → \`${ベースブランチ}\` |`,
               `| コミット | \`${{ github.event.pull_request.head.sha || '' }}\` |`,
-              `| 実行モード | 検証のみ（本番反映なし） |`,
+              `| 実行モード | 検証のみ（反映なし） |`,
               '',
               '<details>',
               '<summary>実行ログ（クリックで展開）</summary>',

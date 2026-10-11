@@ -7,11 +7,15 @@
 #
 # 【処理フロー】
 #   1.   openssl で秘密鍵・証明書を生成（~/.sf-jwt/<REPO_NAME>/）
-#   1.5. アプリ種別を選択（接続アプリケーション / 外部クライアントアプリケーション）
+#   1.5. アプリ種別を決める（質問しない。既定は外部クライアントアプリケーション（2）。
+#        接続アプリケーション（1）は、--legacy-connected-app / SF_INIT_LEGACY_CONNECTED_APP=1 のときだけ。
+#        保存済みの APP_TYPE があれば、それを使う。指定と食い違うときは中断する）
 #   2.   接続アプリケーション（1）: Salesforce 設定手順を案内（証明書アップロードまで待機・手動）
 #        外部クライアントアプリケーション（2）: 自動作成のため案内のみ（手動の設定は不要）
 #   3.   秘密鍵を SF_PRIVATE_KEY として GitHub Secrets に登録
-#   4.   組織ごとに登録する（本番 or Sandbox を選択）
+#   4.   段階（main / staging / develop）ごとに登録する。ログイン先は、種類ではなく URL で選ぶ（3 択。Enter = Sandbox）。
+#        段階と組織の種類は結びつけない（どの段階にも、本番・Sandbox・Developer Edition をつなげる）。
+#        ただし Salesforce の本番組織は main にしか、つなげない（ログイン後に種類を読み取り、deploy の前に確認する）
 #        ・接続アプリケーション（1）: コンシューマーキー・ユーザー名を入力して JWT 接続テスト
 #        ・外部クライアントアプリケーション（2）: register_jwt_secret_eca（init-common.sh）が
 #            sf org login web（ブラウザでログイン）→ ユーザー名とプロファイル名を取得 →
@@ -26,6 +30,7 @@
 # 【登録する GitHub Variables（平文）】
 #   SF_USERNAME_PROD     / _STG / _DEV
 #   SF_INSTANCE_URL_PROD / _STG / _DEV
+#   SF_ORG_ID_* / SF_ORG_NAME_* / SF_ORG_KIND_* / SF_ORG_CHECKED_*（組織の ID・名前・種類・確認日時。--status の表示用）
 #
 # 【備考】
 #   秘密鍵は ~/.sf-jwt/<REPO_NAME>/server.key に保存される。
@@ -70,7 +75,7 @@ JWT_DIR="$HOME/.sf-jwt/${REPO_NAME}"
 # Step 2 案内文: 接続アプリケーション（Connected App）
 # ------------------------------------------------------------------------------
 _show_connected_app_guide() {
-    log "HEADER" "Phase 10-2: Salesforce 接続アプリケーション を設定してください。"
+    log "HEADER" "Salesforce 接続アプリケーション を設定してください。"
     log "INFO" ""
     log "INFO" "  ▼ アップロードする証明書ファイル（server.crt）のパス:"
     log "INFO" "    ${JWT_DIR}/server.crt"
@@ -103,12 +108,12 @@ _show_connected_app_guide() {
 # ------------------------------------------------------------------------------
 # メイン処理
 # ------------------------------------------------------------------------------
-log "HEADER" "Phase 10: JWT 認証情報の設定"
+log "HEADER" "JWT 認証情報の設定"
 
 # --------------------------------------------------------------------------
 # Step 1: 証明書の生成
 # --------------------------------------------------------------------------
-log "HEADER" "Phase 10-1: JWT 用証明書を生成します。"
+log "HEADER" "JWT 用証明書を生成します。"
 
 if [[ -f "${JWT_DIR}/server.key" && -f "${JWT_DIR}/server.crt" ]]; then
     log "INFO" "既存の証明書が見つかりました: ${JWT_DIR}/"
@@ -127,21 +132,22 @@ fi
 # --------------------------------------------------------------------------
 # Step 1.5: アプリ種別の選択
 # --------------------------------------------------------------------------
-log "HEADER" "Phase 10-1.5: Salesforce アプリ種別を選択してください。"
-log "INFO" ""
-log "INFO" "  [1] 接続アプリケーション（Connected App）"
-log "INFO" "      ※ 今後廃止予定。既存プロジェクトとの互換維持に使用"
-log "INFO" "  [2] 外部クライアントアプリケーション（External Client App）"
-log "INFO" "      ※ Salesforce 推奨の新方式"
-log "INFO" ""
+log "HEADER" "Salesforce アプリの種類"
 
-# --resume 時は .sf-init.env に保存済みの種別を再利用
+# アプリ種別は、利用者に聞かない（利用者は判断できないため）。
+#   既定: 外部クライアントアプリケーション（[2] Salesforce 推奨の新方式。自動で作成する）
+#   従来の接続アプリケーション（[1] 今後廃止予定）は、`sf-init.sh --legacy-connected-app`（環境変数
+#   SF_INIT_LEGACY_CONNECTED_APP=1）を指定したときだけ
+#   --resume 時は、.sf-init.env に保存済みの種別を再利用する。保存済みの種別と、指定が食い違うときは、中断する
+want_type="2"
+[[ "${SF_INIT_LEGACY_CONNECTED_APP:-}" == "1" ]] && want_type="1"
 if [[ -n "${APP_TYPE:-}" ]]; then
+    if [[ "${SF_INIT_LEGACY_CONNECTED_APP:-}" == "1" && "$APP_TYPE" != "1" ]]; then
+        die "--legacy-connected-app が指定されましたが、このプロジェクトは、外部クライアントアプリ（APP_TYPE=${APP_TYPE}）で、設定を始めています。"
+    fi
     log "INFO" "  前回選択済みの種別を使用します: [${APP_TYPE}]"
 else
-    APP_TYPE=""
-    read_key APP_TYPE "  選択してください [1-2/q]: " "[12Qq]"
-    [[ "$APP_TYPE" =~ [Qq] ]] && die "中断しました。"
+    APP_TYPE="$want_type"
     # .sf-init.env に書き出して --resume 時に再利用
     echo "APP_TYPE=${APP_TYPE}" >> "$SF_INIT_ENV_FILE"
 fi
@@ -159,7 +165,7 @@ if [[ "$APP_TYPE" == "1" ]]; then
     _show_connected_app_guide
 else
     # 外部クライアントアプリは、組織ごとに自動で作成する（Step 4: register_jwt_secret_eca）
-    log "HEADER" "Phase 10-2: 外部クライアントアプリケーションは自動で作成します。"
+    log "HEADER" "外部クライアントアプリケーションは自動で作成します。"
     log "INFO" "  各組織で、ブラウザでのログインが必要です（接続ユーザー＝管理者権限のユーザー）。"
     log "INFO" "  アプリの作成・証明書の登録・ポリシーとプロファイルの設定・コンシューマー鍵の取得は、sf-init が自動で行います。"
 fi
@@ -167,7 +173,7 @@ fi
 # --------------------------------------------------------------------------
 # Step 3: SF_PRIVATE_KEY を GitHub Secrets に登録
 # --------------------------------------------------------------------------
-log "HEADER" "Phase 10-3: SF_PRIVATE_KEY を GitHub Secrets に登録します。"
+log "HEADER" "SF_PRIVATE_KEY を GitHub Secrets に登録します。"
 # run 不使用: 秘密鍵の内容をログに記録しないため直接実行（base64 エンコードして改行コード問題を回避）
 # tr -d '\r': Windows(Git Bash)環境で生成された PEM に含まれる CR(0x0D) を除去してから base64 エンコード
 tr -d '\r' < "${JWT_DIR}/server.key" | base64 -w 0 | gh secret set "SF_PRIVATE_KEY" -R "$REPO_FULL_NAME" \
@@ -177,7 +183,7 @@ log "SUCCESS" "SF_PRIVATE_KEY を登録しました。"
 # --------------------------------------------------------------------------
 # Step 4: 組織ごとの JWT 設定
 # --------------------------------------------------------------------------
-log "HEADER" "Phase 10-4: 各組織の JWT 認証情報を設定します。"
+log "HEADER" "各組織の JWT 認証情報を設定します。"
 
 # アプリ種別に応じた組織ごとの登録
 #   接続アプリ（1）      : コンシューマーキー・ユーザー名を入力 → JWT 接続テスト → 登録
@@ -203,5 +209,5 @@ if [[ $BRANCH_COUNT -ge 3 ]]; then
     _register_org "develop" "DEV" "開発組織"
 fi
 
-log "SUCCESS" "Phase 10 完了: JWT 認証情報の設定 OK。"
+log "SUCCESS" "完了: JWT 認証情報の設定 OK。"
 exit $RET_OK

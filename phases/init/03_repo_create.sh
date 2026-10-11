@@ -38,7 +38,7 @@ SF_INIT_ENV_FILE="${SF_INIT_ENV_FILE:-${PWD}/.sf-init.env}"
 # ------------------------------------------------------------------------------
 # メイン処理
 # ------------------------------------------------------------------------------
-log "HEADER" "Phase 3: リポジトリ作成"
+log "HEADER" "リポジトリ作成"
 
 # --- リポジトリ作成（冪等: すでに存在する場合はスキップ） ---
 if run gh repo view "$REPO_FULL_NAME" --json name 2>/dev/null; then
@@ -91,5 +91,5 @@ if [[ -f "$sfdx_json" ]]; then
     log "SUCCESS" "sfdx-project.json のプロジェクト名を設定しました: ${REPO_NAME}"
 fi
 
-log "SUCCESS" "Phase 3 完了: リポジトリ作成 OK。"
+log "SUCCESS" "完了: リポジトリ作成 OK。"
 exit $RET_OK

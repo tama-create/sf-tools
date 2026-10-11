@@ -95,6 +95,15 @@ case "$1 $2" in
         _vn="MOCK_GH_VAR_$3"
         [[ -n "${!_vn:-}" ]] && { echo "${!_vn}"; exit 0; }
         exit 1 ;;
+    "secret list")
+        # --status の診断用: MOCK_GH_SECRETS（改行区切りの名前）。実際の gh と同じく、名前の後ろに TAB と日時が付く
+        while IFS= read -r _n; do [[ -n "$_n" ]] && printf '%s\t2026-10-11T08:00:00Z\n' "$_n"; done <<< "${MOCK_GH_SECRETS:-}"
+        exit 0 ;;
+    "variable list")
+        while IFS= read -r _n; do [[ -n "$_n" ]] && printf '%s\tx\t2026-10-11T08:00:00Z\n' "$_n"; done <<< "${MOCK_GH_VARIABLES:-}"
+        exit 0 ;;
+    "run list")
+        printf '%s\n' "${MOCK_GH_RUN_OUT:-none}"; exit 0 ;;
     "variable set")
         # --body で値が渡される場合は何もしない（標準入力を読むと、テストの入力列を消費してしまう）
         case " $* " in *" --body "*) exit 0 ;; esac
@@ -106,6 +115,11 @@ case "$1 $2" in
             *" .permissions.admin "*|*" '.permissions.admin' "*)
                 if [[ -n "${MOCK_GH_BAD_TOKEN:-}" && "${GH_TOKEN:-}" == "$MOCK_GH_BAD_TOKEN" ]]; then exit 1; fi
                 echo "${MOCK_GH_PERM_ADMIN:-true}"; exit 0 ;;
+        esac
+        # --status の診断用: ブランチの一覧（MOCK_GH_BRANCHES）・ワークフローの一覧（MOCK_GH_WORKFLOWS）
+        case "$2" in
+            */branches) printf '%s\n' "${MOCK_GH_BRANCHES:-}"; exit 0 ;;
+            */contents/.github/workflows) printf '%s\n' "${MOCK_GH_WORKFLOWS:-}"; exit 0 ;;
         esac
         # Ruleset 一覧: MOCK_GH_RULESETS=error → エラー本文を標準出力に出して exit 1（無料プランの 403 を再現）、
         #               MOCK_GH_RULESETS=id    → 既存の Ruleset の ID（12345）を返す
@@ -177,11 +191,10 @@ _stub_subscripts() {
 #  19. Y                  (develop Sandbox? - ask_yn read_key)
 #  20. fake_dev_key       (develop コンシューマーキー - read_or_quit)
 #  21. dev@example.com    (develop ユーザー名 - read_or_quit)
-# 入力順（後処理）:
-#  22. N                  (init フォルダ削除をスキップ。Phase 10 が最後。SF_TOOLS_TOKEN は不要になった)
+# 入力順（後処理）: なし（init フォルダの削除の質問は、廃止した。init フォルダは、管理者用として残す。Phase 10 が最後）
 # ==============================================================================
 _make_input_3branches() {
-    printf 'Y\nY\n1\n1\nghp_faketoken\n\nxoxb-faketoken\nC01ABCDEFGH\n\n\n1\nfake_prod_key\nprod@example.com\n\nY\nfake_stg_key\nstg@example.com\n\nY\nfake_dev_key\ndev@example.com\nN\n'
+    printf 'Y\nY\n1\n1\nghp_faketoken\n\nxoxb-faketoken\nC01ABCDEFGH\n\n\n1\nfake_prod_key\nprod@example.com\n\nY\nfake_stg_key\nstg@example.com\n\nY\nfake_dev_key\ndev@example.com\n'
 }
 
 # ==============================================================================
@@ -1208,7 +1221,8 @@ test_e2e_input_sequence() {
     assert_file_contains      "$MOCK_CALL_LOG" "gh secret set SF_CONSUMER_KEY_PROD"                   "SF_CONSUMER_KEY_PROD が登録される"
     assert_file_not_contains  "$MOCK_CALL_LOG" "SF_CONSUMER_KEY_STG"                                  "main のみの構成なので、ステージング組織は設定しない"
     assert_file_not_contains  "$MOCK_CALL_LOG" "SF_TOOLS_TOKEN"                                       "SF_TOOLS_TOKEN は登録しない（sf-tools は公開リポジトリのため不要）"
-    assert_dir_exists         "$init_dir/init"                                                        "最後の質問に N と答えて、init フォルダが残る（台本の最後までずれていない）"
+    assert_dir_exists         "$init_dir/init"                                                        "init フォルダが残る（削除の質問は、廃止した）"
+    assert_file_not_contains  "$mb/out.log" "削除してよいですか"                                       "init フォルダの削除の質問は、出さない"
     assert_file_not_contains  "$mb/out.log" "ghp_fakepat"                                            "PAT_TOKEN の値が出力に出ない"
 
     unset MOCK_SF_ORG_JSON SF_INIT_JWT_INTERVAL MOCK_CALL_LOG SF_INIT_LOGIN_URL_PROD
@@ -1279,7 +1293,7 @@ test_phase6_pat_token() {
     mkdir -p "$init_dir/init"
 
     # 引数: 標準入力（printf の書式）。先頭の Y は、管理者向けの確認。環境変数（MOCK_GH_*）は、呼ぶ前に export する
-    #   REPO_DIR は入れない（--only 6 の終了時に、init フォルダ削除の質問を出さないため）
+    #   REPO_DIR は入れない
     _p6_run() {
         : > "$MOCK_CALL_LOG"
         cat > "$init_dir/init/.sf-init.env" << 'ENVEOF'
@@ -1299,7 +1313,7 @@ ENVEOF
     assert_exit_ok            "$exit_code"                                                  "正常終了する"
     assert_file_not_contains  "$mb/out.log" "発行済み"                                       "「発行済みか」は、聞かない"
     assert_file_contains      "$mb/out.log" "【作るアカウント】 tamashimon"                   "Token を作るアカウント（オーナー）が表示される"
-    assert_file_contains      "$mb/out.log" "画面には何も表示されません"                       "貼り付けても表示されないことを、先に伝える"
+    assert_file_contains      "$mb/out.log" "文字の数だけ * が並びます"                         "貼り付けると * が並ぶことを、先に伝える"
     assert_file_contains      "$mb/out.log" "Generate token"                                "手順（やること）が表示される"
     assert_file_contains      "$MOCK_CALL_LOG" "tokens/new?description=sf-metasync-testproject&scopes=repo,workflow" "Token の作成ページ（Note・Scopes 入力済み）を、ブラウザで開く"
     assert_file_contains      "$mb/out.log" "Token を確認できました（tamashimon さんの Token"   "検証の結果が、人の言葉で表示される"
@@ -1372,7 +1386,7 @@ test_resume_choice() {
     export SF_INIT_JWT_INTERVAL=0
 export SF_INIT_LOGIN_URL_PROD=login   # ログイン先を、質問せずに指定する
 
-    # 引数: 前回の完了 Phase / リポジトリ / sf-init.sh の引数 / 標準入力（printf %b）
+    # 引数: 前回の完了 Phase / リポジトリ / sf-init.sh の引数 / 標準入力（printf %b） / 追加の .sf-init.env の行（省略可）
     #   前回の状態（.sf-init.env）を作ってから、sf-init.sh を実行する
     _rc_run() {
         local done_phase="$1" repo="$2" args="$3" input="$4"
@@ -1382,8 +1396,10 @@ export SF_INIT_LOGIN_URL_PROD=login   # ログイン先を、質問せずに指�
         mkdir -p "$init_dir/init"
         {
             printf 'GITHUB_OWNER="tamashimon"\nPROJECT_NAME="testproject"\nREPO_NAME="force-testproject"\n'
-            printf 'REPO_FULL_NAME="%s"\nBRANCH_COUNT="1"\n' "$repo"   # REPO_DIR は入れない（終了時の init フォルダ削除の質問を出さないため）
+            printf 'REPO_FULL_NAME="%s"\nBRANCH_COUNT="1"\n' "$repo"   # REPO_DIR は、5 番目の引数で渡す（既定は入れない）
+            [[ -n "${5:-}" ]] && printf '%s\n' "${5//@INIT@/$init_dir/init}"   # 追加の行（@INIT@ は、init フォルダのパスに置き換える）
         } > "$envf"
+        [[ "${5:-}" == *REPO_DIR* ]] && mkdir -p "$init_dir/init/force-testproject"
         printf 'SF_INIT_DONE_PHASE=%s\nSF_INIT_DONE_AT="2026-10-11 14:32"\n' "$done_phase" > "$progf"
         rm -rf "$mb/deployed_src" "$mb/jwt.cnt" "$mock_home/.sf-jwt" "$mb/.repo_view_called"
         : > "$MOCK_CALL_LOG"
@@ -1431,9 +1447,32 @@ export SF_INIT_LOGIN_URL_PROD=login   # ログイン先を、質問せずに指�
     [[ ! -e "$envf" ]] && pass "別のリポジトリの状態 → 残骸として消す" || fail "別のリポジトリの状態 → 残骸として消す"
     rm -rf "$init_base"
 
-    # 質問が出ない: 前回は最後まで完了している
-    _rc_run 10 "tamashimon/force-testproject" "" 'Y\n'
-    assert_file_not_contains  "$out" "前回のセットアップは"                                   "完了済み（Phase 10）→ 質問しない（最初から）"
+    # 完了済み（Phase 10）: 「続きをやる」ではなく、完了済みの案内を出す。[q] 終了: 何も実行しない・状態を消さない
+    _rc_run 10 "tamashimon/force-testproject" "" 'Y\nq\n'
+    assert_exit_ok            "$exit_code"                                                  "完了済み・q: 正常終了する"
+    assert_file_contains      "$out" "セットアップが、すでに完了しています"                       "完了済み: 完了済みであることが表示される"
+    assert_file_not_contains  "$out" "から、続きをやる"                                        "完了済み: 「続きをやる」は出さない"
+    assert_file_not_contains  "$MOCK_CALL_LOG" "gh repo create"                              "完了済み・q: 何も実行しない"
+    assert_file_contains      "$progf" "SF_INIT_DONE_PHASE=10"                                "完了済み・q: 保存した状態は、消さない"
+    rm -rf "$init_base"
+
+    # 完了済み・[1] 接続を見る: 管理者用のフォルダで status.sh が実行される（何も変更しない）
+    printf '#!/bin/bash\necho "STATUS-STUB cwd=$PWD"\nexit 0\n' > "$mock_home/sf-tools/phases/init/status.sh"
+    _rc_run 10 "tamashimon/force-testproject" "" 'Y\n1\n' 'REPO_DIR="@INIT@/force-testproject"'
+    assert_exit_ok            "$exit_code"                                                  "完了済み・1: 正常終了する"
+    assert_file_contains      "$out" "STATUS-STUB cwd="                                       "完了済み・1: 接続の確認（status.sh）が実行される"
+    assert_file_contains      "$out" "init/force-testproject"                                  "完了済み・1: 管理者用のフォルダで実行される"
+    assert_file_not_contains  "$MOCK_CALL_LOG" "gh repo create"                              "完了済み・1: 何も変更しない"
+    rm -rf "$init_base"
+
+    # 完了時の後始末: 残った Token の値の行を、.sf-init.env から消す（init フォルダは、残すため）
+    _rc_run 9 "tamashimon/force-testproject" "" 'Y\n1\n' 'PAT_TOKEN_VALUE="ghp_leftover"'
+    assert_exit_ok            "$exit_code"                                                  "完了時の掃除: 正常終了する"
+    assert_file_not_contains  "$envf" "PAT_TOKEN_VALUE"                                       "完了時の掃除: Token の値の行が、.sf-init.env から消える"
+    assert_file_contains      "$envf" "REPO_FULL_NAME"                                        "完了時の掃除: ほかの行は、残る"
+    assert_file_not_contains  "$out" "ghp_leftover"                                           "完了時の掃除: Token の値が、画面に出ない"
+    assert_file_contains      "$out" "管理者用フォルダ"                                         "完了画面: 管理者用のフォルダを案内する"
+    assert_file_not_contains  "$out" "削除してよいですか"                                      "init フォルダの削除の質問は、出さない"
     rm -rf "$init_base"
 
     # 質問が出ない: --resume N を明示
@@ -1749,7 +1788,12 @@ GITEOF
 
     # --- H. --status: 本番が main にだけあれば、正常終了する ---
     : > "$MOCK_CALL_LOG"
+    local diag_secrets diag_vars diag_wf
+    diag_secrets=$'PAT_TOKEN\nSLACK_BOT_TOKEN\nSF_PRIVATE_KEY\nSF_CONSUMER_KEY_PROD\nSF_CONSUMER_KEY_STG'
+    diag_vars=$'SLACK_CHANNEL_ID\nSF_TOOLS_BRANCH\nSF_USERNAME_PROD\nSF_INSTANCE_URL_PROD\nSF_ORG_ID_PROD\nSF_USERNAME_STG\nSF_INSTANCE_URL_STG\nSF_ORG_ID_STG'
+    diag_wf=$'wf-metasync.yml\nwf-propagate.yml\nwf-release.yml\nwf-sequence.yml\nwf-validate.yml'
     ( cd "$force_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
+        MOCK_GH_SECRETS="$diag_secrets" MOCK_GH_VARIABLES="$diag_vars" MOCK_GH_BRANCHES=$'main\nstaging' MOCK_GH_WORKFLOWS="$diag_wf" \
         MOCK_GH_VAR_SF_INSTANCE_URL_PROD=https://login.salesforce.com MOCK_GH_VAR_SF_USERNAME_PROD=admin@example.com \
         MOCK_GH_VAR_SF_ORG_KIND_PROD=production MOCK_GH_VAR_SF_ORG_ID_PROD=00D0000000PROD01 MOCK_GH_VAR_SF_ORG_NAME_PROD="Acme Production" \
         MOCK_GH_VAR_SF_INSTANCE_URL_STG=https://test.salesforce.com MOCK_GH_VAR_SF_USERNAME_STG=admin@example.com.test \
@@ -1759,6 +1803,25 @@ GITEOF
     assert_exit_ok            "$exit_code"                                                    "--status: main = 本番・staging = Sandbox → 正常終了する"
     assert_file_contains      "$out" "種類: 本番"                                               "--status: main の種類（本番）が表示される"
     assert_file_not_contains  "$out" "同じ組織につながっています"                               "--status: 別の組織なら、重複の警告は出ない"
+    assert_file_contains      "$out" "セットアップに、不足はありません"                           "--status: 診断（セットアップの状態）で、不足なしと表示される"
+
+    # --- H2. --status の診断: 不足があれば、直し方つきで表示し、非ゼロで終了する（何も変更しない）---
+    : > "$MOCK_CALL_LOG"
+    ( cd "$force_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
+        MOCK_GH_SECRETS=$'SLACK_BOT_TOKEN\nSF_PRIVATE_KEY\nSF_CONSUMER_KEY_PROD' MOCK_GH_VARIABLES="$diag_vars" \
+        MOCK_GH_BRANCHES="main" MOCK_GH_WORKFLOWS="$diag_wf" \
+        MOCK_GH_VAR_SF_INSTANCE_URL_PROD=https://login.salesforce.com MOCK_GH_VAR_SF_USERNAME_PROD=admin@example.com \
+        MOCK_GH_VAR_SF_ORG_KIND_PROD=developer MOCK_GH_VAR_SF_ORG_ID_PROD=00D0000000DE0001 \
+        bash "$mock_home/sf-tools/bin/sf-init.sh" --status ) > "$out" 2>&1
+    exit_code=$?
+    assert_exit_fail          "$exit_code"                                                    "--status: 診断で不足があれば、非ゼロで終了する"
+    assert_file_contains      "$out" "PAT_TOKEN がありません"                                    "--status: 不足している Secret が表示される"
+    assert_file_contains      "$out" "sf-init.sh --only 6"                                      "--status: 直し方が表示される"
+    assert_file_contains      "$out" "SF_CONSUMER_KEY_STG がありません"                           "--status: 段階（staging）の不足が表示される"
+    assert_file_contains      "$out" "sf-init.sh --add-tier staging"                            "--status: ブランチがないときの直し方が表示される"
+    assert_file_not_contains  "$out" "--status が失敗しました"                                    "--status: 診断の結果を、エラー終了のメッセージにしない"
+    assert_file_not_contains  "$MOCK_CALL_LOG" "gh secret set"                                  "--status: 何も変更しない（Secrets）"
+    assert_file_not_contains  "$MOCK_CALL_LOG" "gh variable set"                                "--status: 何も変更しない（Variables）"
 
     # --- E. 段階の指定が正しくない / branches.txt にない ---
     printf 'Y\n' | ( cd "$force_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
@@ -1796,6 +1859,49 @@ echo -e "${CLR_HEAD}========================================"
 echo "  sf-init.sh テスト"
 echo -e "========================================${CLR_RST}"
 
+# ==============================================================================
+# テスト: e2e の入力の台本（2 層・3 層）で、sf-init が最後まで進む
+#   e2e_make_input の層数ごとの台本（Phase 5 の番号・ログイン先の答えの数）が、質問の順番と合っているかを、モックで確認する
+# ==============================================================================
+test_e2e_input_sequence_layouts() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] e2e の入力の台本（2 層・3 層）で、sf-init が最後まで進む${CLR_RST}"
+
+    local layout mb mock_home init_base init_dir exit_code input
+    for layout in 2 3; do
+        mb=$(setup_mock_bin)
+        export MOCK_CALL_LOG="$mb/calls.log"
+        mock_home=$(setup_mock_home)
+        init_base=$(_setup_init_dir "tamashimon" "e2e-20260101-000000")
+        init_dir="$init_base/home/tamashimon/e2e-20260101-000000"
+        create_all_mocks "$mb"
+        create_mock_gh_for_init "$mb"
+        _stub_subscripts "$mock_home"
+        export MOCK_SF_ORG_JSON='{"result":{"username":"admin@example.com","alias":"x"}}'
+        export SF_INIT_JWT_INTERVAL=0
+
+        input=$(E2E_PAT_TOKEN=ghp_fakepat E2E_SLACK_BOT_TOKEN=xoxb-fakeslack E2E_SLACK_CHANNEL_ID=C01ABCDEFGH \
+                bash -c "source '$SF_TOOLS_DIR/tests/e2e/lib.sh'; e2e_make_input $layout")
+        printf '%s\n' "$input" \
+            | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
+                  bash "$mock_home/sf-tools/bin/sf-init.sh" ) > "$mb/out.log" 2>&1
+        exit_code=$?
+
+        assert_exit_ok            "$exit_code"                                                   "${layout} 層の台本で、最後まで正常終了する"
+        assert_file_contains      "$MOCK_CALL_LOG" "gh secret set SF_CONSUMER_KEY_PROD"            "${layout} 層: main の接続情報が登録される"
+        assert_file_contains      "$MOCK_CALL_LOG" "gh secret set SF_CONSUMER_KEY_STG"             "${layout} 層: staging の接続情報が登録される"
+        if [[ "$layout" -eq 3 ]]; then
+            assert_file_contains  "$MOCK_CALL_LOG" "gh secret set SF_CONSUMER_KEY_DEV"             "3 層: develop の接続情報が登録される"
+        else
+            assert_file_not_contains "$MOCK_CALL_LOG" "SF_CONSUMER_KEY_DEV"                        "2 層: develop の接続情報は、登録しない"
+        fi
+        assert_file_not_contains  "$mb/out.log" "ghp_fakepat"                                     "${layout} 層: PAT_TOKEN の値が出力に出ない"
+
+        unset MOCK_SF_ORG_JSON SF_INIT_JWT_INTERVAL MOCK_CALL_LOG
+        teardown "$mb" "$mock_home" "$init_base"
+    done
+}
+
 test_happy_path_3branches
 test_missing_tool_gh
 test_repo_create_failure
@@ -1816,6 +1922,7 @@ test_phase9_ruleset_id
 test_phase7_channel_id
 test_phase10_eca_auto
 test_e2e_input_sequence
+test_e2e_input_sequence_layouts
 test_sf_cli_check
 test_wf_propagate_skip_missing_branch
 test_wf_no_script_injection

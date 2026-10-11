@@ -7,8 +7,13 @@
 # それ以外のコマンドは、本物の sf にそのまま渡す。
 #
 # 環境変数（run.sh が設定する）:
-#   E2E_SHIM_DIR       この差し替えを置いたフォルダ（本物の sf を探すときに PATH から除く）
-#   E2E_SFDX_URL_FILE  認証 URL を書いたファイル（値は環境変数に載せない）
+#   E2E_SHIM_DIR           この差し替えを置いたフォルダ（本物の sf を探すときに PATH から除く）
+#   E2E_SFDX_URL_FILE      main の組織の認証 URL を書いたファイル（値は環境変数に載せない）
+#   E2E_SFDX_URL_FILE_STG  staging の組織の認証 URL を書いたファイル（2 層・3 層のとき）
+#   E2E_SFDX_URL_FILE_DEV  develop の組織の認証 URL を書いたファイル（3 層のとき）
+#
+# どの組織にログインするかは、--alias の末尾で決める（sf-init が、段階ごとに sf-tools-PROD / sf-tools-STG / sf-tools-DEV を付ける）:
+#   末尾が STG → staging の組織 / 末尾が DEV → develop の組織 / それ以外 → main の組織
 # ==============================================================================
 _real_sf=$(PATH="${PATH//${E2E_SHIM_DIR}:/}" command -v sf)
 [[ -n "$_real_sf" ]] || { echo "sf shim: 本物の sf が見つかりません" >&2; exit 127; }
@@ -20,8 +25,13 @@ if [[ "$1" == "org" && "$2" == "login" && "$3" == "web" ]]; then
         [[ "$_prev" == "--alias" || "$_prev" == "-a" ]] && _alias="$_a"
         _prev="$_a"
     done
-    [[ -f "${E2E_SFDX_URL_FILE:-}" ]] || { echo "sf shim: E2E_SFDX_URL_FILE がありません" >&2; exit 1; }
-    "$_real_sf" org login sfdx-url --sfdx-url-file "$E2E_SFDX_URL_FILE" ${_alias:+--alias "$_alias"}
+    _urlfile="${E2E_SFDX_URL_FILE:-}"
+    case "$_alias" in
+        *STG) _urlfile="${E2E_SFDX_URL_FILE_STG:-}" ;;
+        *DEV) _urlfile="${E2E_SFDX_URL_FILE_DEV:-}" ;;
+    esac
+    [[ -f "$_urlfile" ]] || { echo "sf shim: 認証 URL のファイルがありません（alias=${_alias:-なし}）" >&2; exit 1; }
+    "$_real_sf" org login sfdx-url --sfdx-url-file "$_urlfile" ${_alias:+--alias "$_alias"}
     exit $?
 fi
 

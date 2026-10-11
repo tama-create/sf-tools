@@ -31,6 +31,8 @@
 
 ### 1.3 mm / rr 実行手順
 
+> **gh のアカウント**: push・PR・マージは、sf-tools のオーナーの認証で、**自動で**行う（利用者に、切り替えを頼まない）。gh のアクティブなアカウントは、書き換えず、コマンドごとに、トークンを指定する（`GH_TOKEN="$(gh auth token --user <オーナー>)"`、push は `http.extraheader`）。
+
 #### 1.3.1 mm（開発反映）
 
 「mm」と明示された場合のみ、以下の手順を一括実行すること。**`main` には触れない。**
@@ -146,6 +148,7 @@ git pull origin main                     # main の最新を取り込む
 | `sf-metasync.sh` | ✅ 実装済み |
 | `sf-update-secret.sh` | ✅ 実装済み |
 | `sf-sync-wf.sh` | ✅ 実装済み |
+| `sf-verify.sh` | ✅ 実装済み（警告ボックス + 実行内容の表示 + `wizard_confirm`（Enter。入力を最小に）。本番を含むときは、文面で明示） |
 | `sf-release.sh`（`--release` 時） | ✅ 実装済み |
 
 > 警告ボックスの実装例は `doc/dev-reference.md` セクション 3.4 参照

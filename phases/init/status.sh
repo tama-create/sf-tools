@@ -1,12 +1,18 @@
 #!/bin/bash
 # ==============================================================================
-# status.sh - 段階ごとの Salesforce 接続先の一覧（sf-init.sh --status）
+# status.sh - セットアップの診断と、段階ごとの Salesforce 接続先の一覧（sf-init.sh --status）
 # ==============================================================================
-# force-* ディレクトリの中で、各段階（main / staging / develop）が、どの Salesforce 組織につながっているかを表示する。
-# 何も変更しない（読み取りのみ）。GitHub の Variables（SF_USERNAME_* / SF_INSTANCE_URL_* / SF_ORG_*）を読む。
+# force-* ディレクトリの中で、次の 2 つを表示する。何も変更しない（読み取りのみ）。
+#   1. セットアップの診断（lib/sf-diag.sh）: リポジトリ・ブランチ・ワークフロー・Secrets・Variables が、そろっているか。
+#      不足している項目には、直し方を表示する。直近のワークフローの実行結果も表示する（参考）
+#   2. 段階（main / staging / develop）ごとの、Salesforce 組織の接続先
+#      GitHub の Variables（SF_USERNAME_* / SF_INSTANCE_URL_* / SF_ORG_*）を読む。
 #
-# 【表示する項目】
+# 【表示する項目（接続先）】
 #   段階 → ログイン先（URL）/ 組織の種類 / 接続ユーザー / 組織 ID / 組織名 / 最終確認日時
+#
+# 【終了コード】
+#   0: 不足なし・違反なし / 1: 診断で不足がある、または、本番組織が main 以外につながっている
 #
 # 【備考】
 #   組織の種類・ID・名前・確認日時は、sf-init.sh（または --reconnect / --add-tier）が、ログイン後に、
@@ -25,8 +31,9 @@ export SF_INIT_MODE=1
 
 source "${SF_TOOLS_DIR}/lib/common.sh"
 source "${SF_TOOLS_DIR}/phases/init/init-common.sh"
+source "${SF_TOOLS_DIR}/lib/sf-diag.sh"
 
-log "HEADER" "いまの Salesforce 接続（段階ごと）"
+log "HEADER" "セットアップの診断と、Salesforce 接続（段階ごと）"
 
 check_force_dir || die "force-* ディレクトリ内で実行してください。"
 
@@ -43,6 +50,17 @@ echo "  リポジトリ: ${REPO_FULL_NAME}" >&2
 echo "" >&2
 
 BRANCHES_FILE="${PWD}/sf-tools/config/branches.txt"
+
+# セットアップの診断（リポジトリ・ブランチ・ワークフロー・Secrets・Variables・直近の実行）
+diag_tiers=("main")
+for _t in staging develop; do
+    grep -qx "$_t" "$BRANCHES_FILE" 2>/dev/null && diag_tiers+=("$_t")
+done
+sf_diag_run "$REPO_FULL_NAME" "${diag_tiers[@]}"
+
+echo "" >&2
+echo -e "  ${CLR_WARNING}【Salesforce の接続（段階ごと）】${CLR_RESET}" >&2
+echo "" >&2
 found=0
 violation=0   # 本番が main 以外にある場合は、1（終了コードを、非ゼロにする）
 declare -A SEEN_ORG
@@ -88,5 +106,5 @@ echo "" >&2
 [[ $found -eq 1 ]] || log "WARNING" "接続情報が、見つかりませんでした（sf-init.sh が、完了していない可能性があります）。"
 log "INFO" "接続先を変えるとき: sf-init.sh --reconnect <main|staging|develop>"
 # 本番が main 以外にあれば、非ゼロで終了する（管理者のスクリプトから、検知できるように）
-[[ $violation -eq 0 ]] || exit $RET_NG
+[[ $violation -eq 0 && "$DIAG_NG" -eq 0 ]] || exit $RET_NG
 exit $RET_OK

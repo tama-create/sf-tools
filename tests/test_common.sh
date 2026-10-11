@@ -187,7 +187,7 @@ SEOF
 
 test_read_secret() {
     echo ""
-    echo -e "${CLR_HEAD}[TEST] read_secret: 入力を受け取り、画面に値を出さない${CLR_RST}"
+    echo -e "${CLR_HEAD}[TEST] read_secret: 入力を受け取り、* で表示する（値は画面に出ない）${CLR_RST}"
     local script out
     script=$(_make_read_secret_script)
 
@@ -207,6 +207,29 @@ test_read_secret() {
 
     printf '' | bash "$script" > /dev/null 2>&1
     assert_exit_fail $? "EOF → 中断（die）"
+
+    # 入力した文字は、1 文字ごとに * で表示される（貼り付けられたかどうかが、見て分かる）
+    out=$(printf 'ghp_abcdefghij\n' | bash "$script" 2>&1)
+    [[ "$out" == *"PROMPT: **************"* ]] && pass "入力した文字数（14 文字）だけ * が表示される" || fail "入力した文字数だけ * が表示される" "$out"
+    [[ "$out" == *"14 文字を受け取りました"* ]] && pass "受け取った文字数が表示される" || fail "受け取った文字数が表示される" "$out"
+    [[ "$out" == *"先頭: ghp_…"* ]] && pass "先頭の「英字_」だけが表示される" || fail "先頭の「英字_」だけが表示される" "$out"
+    [[ "$(echo "$out" | grep -v '^GOT=')" != *"abcdefghij"* ]] && pass "値の残りの部分は、画面に出ない" || fail "値の残りの部分は、画面に出ない" "$out"
+
+    # BackSpace（DEL）で 1 文字消せる
+    out=$(printf 'ghp_abX\x7fc\n' | bash "$script" 2>&1)
+    [[ "$out" == *"GOT=[ghp_abc]"* ]] && pass "BackSpace で 1 文字消せる" || fail "BackSpace で 1 文字消せる" "$out"
+
+    # 改行なしで終わった入力（EOF）は、確定として扱う
+    out=$(printf 'ghp_noeol' | bash "$script" 2>&1)
+    [[ "$out" == *"GOT=[ghp_noeol]"* ]] && pass "改行なしの入力（EOF）は、確定として扱う" || fail "改行なしの入力（EOF）は、確定として扱う" "$out"
+
+    # 制御文字（ESC）は無視される
+    out=$(printf 'ghp_a\x1bb\n' | bash "$script" 2>&1)
+    [[ "$out" == *"GOT=[ghp_ab]"* ]] && pass "制御文字（ESC）は無視される" || fail "制御文字（ESC）は無視される" "$out"
+
+    # 先頭が「英字_」ではない値は、先頭の表示を出さない（文字数だけ）
+    out=$(printf 'abcdef\n' | bash "$script" 2>&1)
+    [[ "$out" == *"6 文字を受け取りました"* && "$out" != *"先頭:"* ]] && pass "「英字_」で始まらない値は、文字数だけを表示する" || fail "「英字_」で始まらない値は、文字数だけを表示する" "$out"
 
     rm -f "$script"
 }

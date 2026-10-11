@@ -58,7 +58,13 @@ e2e_guard_env
 check_sf_cli  # sf が終了コードを正しく返すか確認（npm 版が前提。異常なら中断）
 
 # 管理用ログインで付けた一時エイリアスは、終了時に外す（認証そのものは残る）
-trap 'sf alias unset "$E2E_ADMIN_ALIAS" >/dev/null 2>&1 || true' EXIT  # 後始末のため run 不使用・エラー無視
+_unset_admin_aliases() {
+    local t
+    for t in main staging develop; do
+        sf alias unset "$(e2e_tier_alias "$t")" >/dev/null 2>&1 || true  # 後始末のため run 不使用・エラー無視
+    done
+}
+trap _unset_admin_aliases EXIT
 
 log "HEADER" "e2e のテスト用リソースの削除 (${SCRIPT_NAME}.sh)"
 

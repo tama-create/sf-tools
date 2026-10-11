@@ -467,6 +467,25 @@ test_e2e_sf_shim() {
     assert_exit_fail $? "認証 URL のファイルが無いと、失敗する"
     assert_file_not_contains "$MOCK_CALL_LOG" "org login" "認証 URL のファイルが無いと、ログインを呼ばない"
 
+    # 段階ごとの組織: エイリアスの末尾（STG / DEV）で、認証 URL のファイルを選ぶ
+    printf 'force://PlatformCLI::stgurl@stg.my.salesforce.com' > "$b/url-stg.txt"
+    printf 'force://PlatformCLI::devurl@dev.my.salesforce.com' > "$b/url-dev.txt"
+    : > "$MOCK_CALL_LOG"
+    ( export E2E_SHIM_DIR="$sd" E2E_SFDX_URL_FILE="$b/url.txt" E2E_SFDX_URL_FILE_STG="$b/url-stg.txt" E2E_SFDX_URL_FILE_DEV="$b/url-dev.txt" PATH="$sd:$mb:$PATH"
+      sf org login web --instance-url https://login.salesforce.com --alias sf-tools-STG
+      sf org login web --instance-url https://login.salesforce.com --alias sf-tools-DEV
+      sf org login web --instance-url https://login.salesforce.com --alias sf-tools-PROD ) > /dev/null 2>&1
+    assert_file_contains "$MOCK_CALL_LOG" "--sfdx-url-file $b/url-stg.txt --alias sf-tools-STG" "末尾が STG のエイリアスは、staging の認証 URL を使う"
+    assert_file_contains "$MOCK_CALL_LOG" "--sfdx-url-file $b/url-dev.txt --alias sf-tools-DEV" "末尾が DEV のエイリアスは、develop の認証 URL を使う"
+    assert_file_contains "$MOCK_CALL_LOG" "--sfdx-url-file $b/url.txt --alias sf-tools-PROD"    "それ以外は、main の認証 URL を使う"
+
+    # staging の認証 URL のファイルがないとき: main の組織に、ログインしない（別の組織に、つながらない）
+    : > "$MOCK_CALL_LOG"
+    ( export E2E_SHIM_DIR="$sd" E2E_SFDX_URL_FILE="$b/url.txt" PATH="$sd:$mb:$PATH"
+      sf org login web --instance-url https://login.salesforce.com --alias sf-tools-STG ) > /dev/null 2>&1
+    assert_exit_fail $? "STG の認証 URL のファイルが無いと、失敗する"
+    assert_file_not_contains "$MOCK_CALL_LOG" "org login" "STG のファイルが無いとき、main の組織にログインしない"
+
     unset MOCK_CALL_LOG
     teardown "$b"
 }
@@ -511,8 +530,8 @@ test_e2e_input() {
     _e2e_call 'e2e_load_fixture; e2e_make_input'
     out=$(cat "$mb/out.log")
     local expected
-    expected=$'Y\nY\n2\nY\n3\nghp_fakepat\n\nxoxb-fakeslack\nC01ABCDEFGH\n\n1\nN'
-    assert_equals "$out" "$expected" "台本が、質問の順番どおりである（Y→Y→2→Y→3→PAT→空→Slack→ID→空→ログイン先 1→N）"
+    expected=$'Y\nY\n2\nY\n3\nghp_fakepat\n\nxoxb-fakeslack\nC01ABCDEFGH\n\n1'
+    assert_equals "$out" "$expected" "台本が、質問の順番どおりである（Y→Y→2→Y→3→PAT→空→Slack→ID→空→ログイン先 1）"
     unset MOCK_CALL_LOG
     teardown "$mb"
 }
@@ -545,6 +564,27 @@ test_e2e_run_guard() {
         bash "$E2E_DIR/$f" --help 2>&1 | grep -q "オプション\|処理の流れ" \
             && pass "${f} --help が表示できる" || fail "${f} --help が表示できる"
     done
+
+    # --layout の指定の検証（何も実行せずに、中止する）
+    : > "$MOCK_CALL_LOG"
+    ( cd "$HM" && export HOME="$HM" PATH="$MB:$PATH" E2E_FIXTURE="$FX"
+      printf 'Y' | bash "$E2E_DIR/run.sh" --layout 4 ) > "$MB/out.log" 2>&1; rc=$?
+    assert_exit_fail "$rc" "--layout 4（範囲外）→ 中止する"
+    assert_file_contains "$MB/out.log" "--layout は、1・2・3 のいずれかです" "--layout: 理由が表示される"
+    ( cd "$HM" && export HOME="$HM" PATH="$MB:$PATH" E2E_FIXTURE="$FX"
+      printf 'Y' | bash "$E2E_DIR/run.sh" --layout 2 --resume ) > "$MB/out.log" 2>&1; rc=$?
+    assert_exit_fail "$rc" "--layout と --resume の同時指定 → 中止する"
+    assert_file_contains "$MB/out.log" "新しくリポジトリを作るときだけ" "--layout + --resume: 理由が表示される"
+    ( cd "$HM" && export HOME="$HM" PATH="$MB:$PATH" E2E_FIXTURE="$FX"
+      printf 'Y' | bash "$E2E_DIR/run.sh" --layout ) > "$MB/out.log" 2>&1; rc=$?
+    assert_exit_fail "$rc" "--layout に値がない → 中止する"
+    # 2 層・3 層に必要な組織が、鍵一式にない（main だけ）→ 何もせずに、中止する
+    ( cd "$HM" && export HOME="$HM" PATH="$MB:$PATH" E2E_FIXTURE="$FX"
+      printf 'Y' | bash "$E2E_DIR/run.sh" --layout 3 ) > "$MB/out.log" 2>&1; rc=$?
+    assert_exit_fail "$rc" "--layout 3 で、鍵一式に develop の組織がない → 中止する"
+    assert_file_contains "$MB/out.log" "bootstrap.sh --add-orgs" "鍵一式にない組織: 追加の方法が表示される"
+    assert_file_not_contains "$MOCK_CALL_LOG" "gh repo delete" "オプションの検証で中止したとき: 何も削除しない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "gh repo create" "オプションの検証で中止したとき: 何も作らない"
     unset MOCK_CALL_LOG MOCK_GH_REPOS MOCK_SF_ECAS
     teardown "$CB"
 }
@@ -1033,12 +1073,10 @@ assert_file_contains "$E2E_DIR/run.sh" "削除後: Salesforce への管理用ロ
     assert_file_contains "$E2E_DIR/run.sh" "sf-next.sh" "run.sh: sf-next.sh で、マージ済みの表示を確認する"
     assert_file_contains "$E2E_DIR/run.sh" "sf-deploy.sh" "run.sh: sf-deploy.sh が、共有環境（予約名）への強制リリースを拒否することを確認する"
 
-    # fixtures: Apex のソースが、揃っている
-    local f
-    for f in SfToolsE2eHello.cls SfToolsE2eHello.cls-meta.xml SfToolsE2eHelloTest.cls SfToolsE2eHelloTest.cls-meta.xml; do
-        assert_file_exists "$E2E_DIR/fixtures/$f" "fixtures: $f がある"
-    done
-    assert_file_contains "$E2E_DIR/fixtures/SfToolsE2eHelloTest.cls" "@isTest" "fixtures: テストクラスに @isTest がある（RunSpecifiedTests の自動検出に必要）"
+    # Hello World の Apex のソース: 共有の部品（lib/sf-verify.sh）から、そろっている
+    _e2e_call 'echo "N=$(sfv_hello_paths | wc -l)"; sfv_hello_content_for force-app/main/default/classes/SfToolsE2eHelloTest.cls | grep -q @isTest && echo ISTEST'
+    assert_file_contains "$MB/out.log" "N=4" "Hello World: クラスのファイルが 4 つある"
+    assert_file_contains "$MB/out.log" "ISTEST" "Hello World: テストクラスに @isTest がある（RunSpecifiedTests の自動検出に必要）"
     unset MOCK_CALL_LOG MOCK_GH_REPOS MOCK_SF_ECAS
     teardown "$CB"
 }
@@ -1244,6 +1282,218 @@ test_e2e_review_fixes() {
     teardown "$CB"
 }
 
+# ------------------------------------------------------------------------------
+# 段階ごとのテスト用組織（staging・develop は任意）・層数ごとの段階の一覧
+# ------------------------------------------------------------------------------
+test_e2e_tiers() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] 段階ごとのテスト用組織・層数ごとの段階の一覧${CLR_RST}"
+    local mb out; mb=$(setup_mock_bin); MB="$mb"; FX="$mb/fx.env"; HM="$mb"
+    export MOCK_CALL_LOG="$mb/calls.log"; _mk_mocks "$mb"
+
+    # main だけの鍵一式: staging・develop は、使えない
+    _mk_fixture "$FX"
+    _e2e_call 'e2e_load_fixture; e2e_tier_available main && echo MAIN_OK; e2e_tier_available staging && echo STG_OK; e2e_tier_available develop && echo DEV_OK; echo LOADED'
+    assert_file_contains     "$mb/out.log" "LOADED"   "main だけの鍵一式を、読み込める（staging・develop は任意）"
+    assert_file_contains     "$mb/out.log" "MAIN_OK"  "main の組織は、使える"
+    assert_file_not_contains "$mb/out.log" "STG_OK"   "staging の組織がなければ、使えない"
+    assert_file_not_contains "$mb/out.log" "DEV_OK"   "develop の組織がなければ、使えない"
+
+    # staging・develop も入った鍵一式
+    _mk_fixture "$FX"
+    echo "E2E_SFDX_AUTH_URL_STG=force://PlatformCLI::stgurl@stg.my.salesforce.com" >> "$FX"
+    echo "E2E_SFDX_AUTH_URL_DEV=force://PlatformCLI::devurl@dev.my.salesforce.com" >> "$FX"
+    _e2e_call 'e2e_load_fixture; e2e_tier_available staging && echo STG_OK; e2e_tier_available develop && echo DEV_OK
+               echo "URL_STG=$(e2e_tier_url staging)"; echo "ALIAS_MAIN=$(e2e_tier_alias main)"; echo "ALIAS_STG=$(e2e_tier_alias staging)"; echo "ALIAS_DEV=$(e2e_tier_alias develop)"'
+    assert_file_contains     "$mb/out.log" "STG_OK"   "staging の組織が、使える"
+    assert_file_contains     "$mb/out.log" "DEV_OK"   "develop の組織が、使える"
+    assert_file_contains     "$mb/out.log" "URL_STG=force://PlatformCLI::stgurl@stg.my.salesforce.com" "段階の認証 URL を取得できる"
+    assert_file_contains     "$mb/out.log" "ALIAS_MAIN=sf-tools-e2e-admin"      "main の管理用エイリアスは、従来どおり"
+    assert_file_contains     "$mb/out.log" "ALIAS_STG=sf-tools-e2e-admin-stg"   "staging の管理用エイリアス"
+    assert_file_contains     "$mb/out.log" "ALIAS_DEV=sf-tools-e2e-admin-dev"   "develop の管理用エイリアス"
+
+    # 認証 URL の値は、表示・ログに出ない（伏せ字になる）
+    _e2e_call 'e2e_load_fixture; _e2e_mask_line "x force://PlatformCLI::stgurl@stg.my.salesforce.com y"'
+    assert_file_not_contains "$mb/out.log" "stgurl"   "staging の認証 URL は、伏せ字になる"
+
+    # 形式が違う staging の認証 URL → 読み込みに失敗する
+    _mk_fixture "$FX"; echo "E2E_SFDX_AUTH_URL_STG='[REDACTED] not-a-url'" >> "$FX"
+    _e2e_call 'e2e_load_fixture; echo LOADED'
+    assert_file_not_contains "$mb/out.log" "LOADED"                         "staging の認証 URL の形式が違うと、読み込みに失敗する"
+    assert_file_contains     "$mb/out.log" "E2E_SFDX_AUTH_URL_STG が認証 URL の形式ではありません" "理由が表示される"
+
+    # 層数 → 段階の一覧（develop → staging → main の順）
+    _mk_fixture "$FX"
+    _e2e_call 'echo "L1=$(e2e_layout_tiers 1 | tr "\n" ",")"; echo "L2=$(e2e_layout_tiers 2 | tr "\n" ",")"; echo "L3=$(e2e_layout_tiers 3 | tr "\n" ",")"; e2e_layout_tiers 4 || echo "L4=NG"'
+    assert_file_contains     "$mb/out.log" "L1=main,"                     "1 層: main"
+    assert_file_contains     "$mb/out.log" "L2=staging,main,"             "2 層: staging → main"
+    assert_file_contains     "$mb/out.log" "L3=develop,staging,main,"     "3 層: develop → staging → main"
+    assert_file_contains     "$mb/out.log" "L4=NG"                        "範囲外の層数は、エラー"
+
+    # 組織 ID の取得（sf org display の JSON から、00D で始まる ID を取り出す）
+    cat > "$mb/sf" << 'EOF'
+#!/bin/bash
+echo "sf $*" >> "${MOCK_CALL_LOG:-/dev/null}"
+case "$1 $2" in
+    "org display") echo "${MOCK_SF_DISPLAY_JSON:-}"; exit "${MOCK_SF_DISPLAY_EXIT:-0}" ;;
+esac
+exit 0
+EOF
+    chmod +x "$mb/sf"
+    export MOCK_SF_DISPLAY_JSON='{"status":0,"result":{"id":"00D5g00000FDr1YEAT","username":"a@example.com","instanceUrl":"https://x.my.salesforce.com"}}'
+    _e2e_call 'echo "ID=$(e2e_org_id some-alias)"'
+    assert_file_contains     "$mb/out.log" "ID=00D5g00000FDr1YEAT"        "組織 ID を取得できる"
+    export MOCK_SF_DISPLAY_JSON='{"status":0,"result":{"username":"a@example.com"}}'
+    _e2e_call 'e2e_org_id some-alias && echo "GOT" || echo "NONE"'
+    assert_file_contains     "$mb/out.log" "NONE"                         "組織 ID が JSON にないときは、取得失敗"
+    unset MOCK_SF_DISPLAY_JSON MOCK_CALL_LOG
+    teardown "$mb"
+}
+
+# ------------------------------------------------------------------------------
+# 層数対応（段階ごとの PR・実行の取り違えの防止・段階ごとの掃除・sf-init の入力）
+# ------------------------------------------------------------------------------
+test_e2e_layout() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] 層数対応（段階ごとの PR・実行の基準・段階ごとの掃除・入力の台本）${CLR_RST}"
+    _mk_cleanup_env
+    local pre='e2e_load_fixture; e2e_guard_env;'
+    local repo="tamashimon-org/force-e2e-20260101-000000"
+
+    # PR の作成: base（段階）を指定できる。省略は main
+    : > "$MOCK_CALL_LOG"
+    _e2e_call "$pre"" n=\$(e2e_gh_pr_create $repo e2e-hello 'e2e: Hello' staging); echo \"PR=[\$n]\""
+    assert_file_contains "$MOCK_CALL_LOG" "pr create -R ${repo} --base staging --head e2e-hello" "PR 作成: 指定した段階（staging）への PR を作る"
+
+    # 実行の基準: 最新の実行 ID（なければ 0）
+    _e2e_call "$pre"" id=\$(e2e_latest_run_id $repo wf-validate.yml e2e-hello); echo \"ID=[\$id]\""
+    assert_file_contains "$MB/out.log" "ID=[555]" "最新の実行 ID を返す"
+    MOCK_GH_RUN_NONE=1 _e2e_call "$pre"" id=\$(e2e_latest_run_id $repo wf-validate.yml e2e-hello); echo \"ID=[\$id]\""
+    assert_file_contains "$MB/out.log" "ID=[0]" "実行がなければ 0"
+
+    # 実行の待ち: 「この ID より新しい実行」だけを対象にする（前の PR の実行を、取り違えない）
+    MOCK_GH_RUN_ID=555 E2E_RUN_FIND_TRIES=2 E2E_POLL_SEC=0 _e2e_call "$pre"" id=\$(e2e_wait_pr_run $repo wf-release.yml e2e-hello 555); echo \"RC=\$? ID=[\$id]\""
+    assert_file_contains "$MB/out.log" "RC=1 ID=[]" "実行の待ち: 基準と同じ ID（前の PR の実行）は、対象にしない"
+    MOCK_GH_RUN_ID=556 E2E_RUN_FIND_TRIES=2 E2E_POLL_SEC=0 _e2e_call "$pre"" id=\$(e2e_wait_pr_run $repo wf-release.yml e2e-hello 555); echo \"RC=\$? ID=[\$id]\""
+    assert_file_contains "$MB/out.log" "RC=0 ID=[556]" "実行の待ち: 基準より新しい実行を、対象にする"
+
+    # 段階ごとの掃除: 鍵一式にある staging・develop の組織にも、ログインして掃除する
+    echo "E2E_SFDX_AUTH_URL_STG=force://PlatformCLI::stgurl@stg.my.salesforce.com" >> "$FX"
+    echo "E2E_SFDX_AUTH_URL_DEV=force://PlatformCLI::devurl@dev.my.salesforce.com" >> "$FX"
+    : > "$MOCK_CALL_LOG"
+    _e2e_call "$pre"" e2e_cleanup_all list; echo RC=\$?"
+    assert_file_contains "$MOCK_CALL_LOG" "--alias sf-tools-e2e-admin-stg" "掃除: staging の組織にログインする（段階のエイリアス）"
+    assert_file_contains "$MOCK_CALL_LOG" "--alias sf-tools-e2e-admin-dev" "掃除: develop の組織にログインする（段階のエイリアス）"
+    assert_file_contains "$MOCK_CALL_LOG" "--alias sf-tools-e2e-admin" "掃除: main の組織にも、ログインする"
+
+    # 段階を指定した管理用ログイン: 鍵一式にない段階は、中断する
+    _mk_fixture "$FX"
+    _e2e_call "$pre"" ( E2E_TIER=develop; e2e_sf_admin_login; echo LOGGED_IN ); echo RC=\$?"
+    assert_file_not_contains "$MB/out.log" "LOGGED_IN" "鍵一式にない段階の組織へは、ログインしない（中断する）"
+    assert_file_contains     "$MB/out.log" "RC=1" "中断する（終了コード 1）"
+    assert_file_contains     "$MB/out.log" "bootstrap.sh --add-orgs" "追加の方法が表示される"
+
+    # sf-init に流す入力の台本（層数ごと）: Phase 5 の番号と、ログイン先の答えの数
+    _e2e_call 'e2e_load_fixture; e2e_make_input 2 | tr "\n" ","'
+    assert_file_contains "$MB/out.log" "Y,Y,2,Y,2,ghp_fakepat,,xoxb-fakeslack,C01ABCDEFGH,,1,1," "台本（2 層）: Phase 5 は 2・ログイン先は 2 つ"
+    _e2e_call 'e2e_load_fixture; e2e_make_input 3 | tr "\n" ","'
+    assert_file_contains "$MB/out.log" "Y,Y,2,Y,1,ghp_fakepat,,xoxb-fakeslack,C01ABCDEFGH,,1,1,1," "台本（3 層）: Phase 5 は 1・ログイン先は 3 つ"
+    _e2e_call 'e2e_load_fixture; e2e_make_input | tr "\n" ","'
+    assert_file_contains "$MB/out.log" "Y,Y,2,Y,3,ghp_fakepat,,xoxb-fakeslack,C01ABCDEFGH,,1," "台本（既定 = 1 層）: Phase 5 は 3・ログイン先は 1 つ"
+    _e2e_call 'e2e_load_fixture; e2e_make_input 4; echo "RC=$?"'
+    assert_file_contains "$MB/out.log" "RC=1" "範囲外の層数は、エラー"
+
+    unset MOCK_CALL_LOG MOCK_GH_REPOS MOCK_SF_ECAS
+    teardown "$CB"
+}
+
+# ------------------------------------------------------------------------------
+# bootstrap.sh --add-orgs: staging・develop の組織の追加（別々の組織であることの確認）
+#   sf のモック: 組織の ID は、認証 URL から決まる（同じ URL = 同じ組織）。login web は、MOCK_SF_WEB_URLS（改行区切り）を、順に使う
+# ------------------------------------------------------------------------------
+test_e2e_bootstrap_add_orgs() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] bootstrap.sh --add-orgs（別々の組織であることの確認）${CLR_RST}"
+    local mb d fx rc
+    mb=$(setup_mock_bin); MB="$mb"; HM="$mb"; d="$mb"
+    export MOCK_CALL_LOG="$mb/calls.log"; : > "$MOCK_CALL_LOG"
+    _mk_mocks "$mb"
+    cat > "$mb/sf" << 'EOF'
+#!/bin/bash
+echo "sf $*" >> "${MOCK_CALL_LOG:-/dev/null}"
+_d="${MOCK_CALL_LOG%/*}"
+_id_of() { printf '00D%012d' "$(printf '%s' "$1" | cksum | awk '{print $1}')"; }
+_arg() { local k="$1"; shift; while [[ $# -gt 0 ]]; do [[ "$1" == "$k" ]] && { echo "$2"; return; }; shift; done; }
+case "$1 $2 $3" in
+    "org login sfdx-url")
+        f=$(_arg --sfdx-url-file "$@"); a=$(_arg --alias "$@")
+        cat "$f" > "$_d/alias_$a.url"; exit 0 ;;
+    "org login web")
+        a=$(_arg --alias "$@")
+        u=$(head -1 "$_d/web_urls"); sed -i 1d "$_d/web_urls"
+        printf '%s' "$u" > "$_d/alias_$a.url"; exit 0 ;;
+    "org display "*)
+        a=$(_arg --target-org "$@"); u=$(cat "$_d/alias_$a.url" 2>/dev/null)
+        [[ -n "$u" ]] || exit 1
+        printf '{"status":0,"result":{"id":"%s"}}\n' "$(_id_of "$u")"; exit 0 ;;
+    "org auth show-sfdx-auth-url")
+        a=$(_arg --target-org "$@"); u=$(cat "$_d/alias_$a.url" 2>/dev/null)
+        printf '{"status":0,"result":{"sfdxAuthUrl":"%s"}}\n' "$u"; exit 0 ;;
+esac
+exit 0
+EOF
+    chmod +x "$mb/sf"
+    fx="$mb/fx.env"
+    local U_MAIN="force://PlatformCLI::fakeurl@example.my.salesforce.com"
+    local U_STG="force://PlatformCLI::stgurl@stg.my.salesforce.com"
+    local U_DEV="force://PlatformCLI::devurl@dev.my.salesforce.com"
+    _run_boot() {   # 引数: 標準入力 / web ログインの URL（改行区切り）
+        printf '%s' "$2" > "$mb/web_urls"
+        printf '%b' "$1" | ( cd "$mb" && HOME="$mb" PATH="$mb:$PATH" SF_INIT_MODE=1 E2E_FIXTURE="$fx" \
+            bash "$E2E_DIR/bootstrap.sh" --add-orgs ) > "$mb/out.log" 2>&1
+        rc=$?
+    }
+
+    # 1. 正常: staging・develop が、別々の組織 → 両方、保存される
+    _mk_fixture "$fx"
+    _run_boot 'Y\nY\n' "${U_STG}"$'\n'"${U_DEV}"$'\n'
+    assert_exit_ok "$rc" "別々の組織なら、追加できる"
+    assert_file_contains "$fx" "E2E_SFDX_AUTH_URL_STG=" "staging の認証 URL が、保存される"
+    assert_file_contains "$fx" "E2E_SFDX_AUTH_URL_DEV=" "develop の認証 URL が、保存される"
+
+    # 2. staging が、main と同じ組織 → 中断（保存しない）
+    _mk_fixture "$fx"
+    _run_boot 'Y\nN\n' "${U_MAIN}"$'\n'
+    assert_exit_fail "$rc" "staging が main と同じ組織なら、中断する"
+    assert_file_contains "$mb/out.log" "ほかの段階（main・develop）と同じ組織です" "理由が表示される"
+    assert_file_not_contains "$fx" "E2E_SFDX_AUTH_URL_STG" "中断したときは、鍵一式に、保存しない"
+
+    # 3. すでに登録済みの staging と、同じ組織を、develop に登録しようとする（2 回目の実行）→ 中断
+    _mk_fixture "$fx"
+    echo "E2E_SFDX_AUTH_URL_STG=${U_STG}" >> "$fx"
+    _run_boot 'N\nY\n' "${U_STG}"$'\n'
+    assert_exit_fail "$rc" "登録済みの staging と同じ組織を、develop に登録しようとすると、中断する"
+    assert_file_contains "$mb/out.log" "ほかの段階（main・staging）と同じ組織です" "理由が表示される"
+    assert_file_not_contains "$fx" "E2E_SFDX_AUTH_URL_DEV" "中断したときは、develop を、保存しない"
+
+    # 4. 同じ実行の中で、staging と develop が、同じ組織 → develop で中断（先に確認した staging も、保存しない）
+    _mk_fixture "$fx"
+    cp "$fx" "$mb/before4.env"
+    _run_boot 'Y\nY\n' "${U_STG}"$'\n'"${U_STG}"$'\n'
+    assert_exit_fail "$rc" "staging と develop が同じ組織なら、中断する"
+    assert_file_not_contains "$fx" "E2E_SFDX_AUTH_URL_DEV" "develop は、保存しない"
+    assert_file_not_contains "$fx" "E2E_SFDX_AUTH_URL_STG" "先に確認した staging も、保存しない（一部だけの保存にしない）"
+    assert_equals "$(cat "$fx")" "$(cat "$mb/before4.env")" "中断したときは、鍵一式が、実行の前と同じ"
+
+    # 5. 登録済みの staging と develop が、すでに同じ組織（鍵一式が、壊れている）→ 中断
+    _mk_fixture "$fx"
+    echo "E2E_SFDX_AUTH_URL_STG=${U_STG}" >> "$fx"
+    echo "E2E_SFDX_AUTH_URL_DEV=${U_STG}" >> "$fx"
+    _run_boot 'N\nN\n' ""
+    assert_exit_fail "$rc" "登録済みの staging と develop が同じ組織なら、中断する"
+    assert_file_contains "$mb/out.log" "登録済みの develop が、ほかの段階と同じ組織です" "理由が表示される"
+
+    unset MOCK_CALL_LOG
+    teardown "$mb"
+}
+
 test_e2e_names
 test_e2e_guard
 test_e2e_delete_guards
@@ -1264,5 +1514,8 @@ test_e2e_apex
 test_e2e_gh_flow
 test_e2e_sf_cmd
 test_e2e_review_fixes
+test_e2e_tiers
+test_e2e_layout
+test_e2e_bootstrap_add_orgs
 
 print_summary

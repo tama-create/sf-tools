@@ -37,9 +37,9 @@
 # ==============================================================================
 
 E2E_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# Hello World の本文・PR とワークフローの実行の部品は、実際のリポジトリの検証（bin/sf-verify.sh）と共有する
+# Hello World の本文・PR とワークフローの実行の部品は、実際のリポジトリの検証（phases/init/verify.sh）と共有する
 # shellcheck disable=SC1091
-source "${E2E_LIB_DIR}/../../lib/sf-verify.sh"
+source "${E2E_LIB_DIR}/../../lib/verify-common.sh"
 E2E_ADMIN_ALIAS="sf-tools-e2e-admin"     # 削除・一覧用にログインするときの一時エイリアス
 
 # ------------------------------------------------------------------------------
@@ -350,8 +350,8 @@ e2e_delete_eca() {
 #   e2e は、Hello World のクラス（SfToolsE2eHello・そのテスト）を、PR 経由でリリースし、続けて削除する。
 #   途中で止まって残った場合に備え、後掃除でも、名前が完全に一致するものだけを削除する。
 # ------------------------------------------------------------------------------
-E2E_APEX_HELLO="$SFV_APEX_HELLO"
-E2E_APEX_HELLO_TEST="$SFV_APEX_HELLO_TEST"
+E2E_APEX_HELLO="$VERIFY_APEX_HELLO"
+E2E_APEX_HELLO_TEST="$VERIFY_APEX_HELLO_TEST"
 E2E_JOB_ALIAS="sf-tools-e2e-job"          # sf-start.sh で、接続する組織に付けるエイリアス（予約名ではない。終了時に、実行前の状態へ戻る）
 e2e_is_target_apex() { [[ "$1" =~ ^SfToolsE2eHello(Test)?$ ]]; }
 
@@ -446,13 +446,13 @@ _e2e_check_repo() {
 # main への PR を作り、PR 番号を標準出力に返す。引数: リポジトリ ブランチ名 タイトル
 e2e_gh_pr_create() {
     _e2e_check_repo "$1"
-    sfv_pr_create "$1" "$2" "$3" "e2e の通し検証（自動作成）。マージ後に、リポジトリごと削除されます。" "${4:-main}"
+    verify_pr_create "$1" "$2" "$3" "e2e の通し検証（自動作成）。マージ後に、リポジトリごと削除されます。" "${4:-main}"
 }
 
 # PR をマージする（マージコミット）。引数: リポジトリ PR 番号
 e2e_gh_pr_merge() {
     _e2e_check_repo "$1"
-    sfv_pr_merge "$1" "$2"
+    verify_pr_merge "$1" "$2"
 }
 
 # PR のイベントで起動した、ワークフローの最新の実行の ID を、標準出力に返す（なければ 0）。
@@ -460,7 +460,7 @@ e2e_gh_pr_merge() {
 #   引数: リポジトリ ワークフロー名 ブランチ名（PR の head ブランチ）
 e2e_latest_run_id() {
     _e2e_check_repo "$1"
-    sfv_latest_run_id "$1" "$2" "$3"
+    verify_latest_run_id "$1" "$2" "$3"
 }
 
 # PR のイベントで起動したワークフローの実行が、完了するまで待ち、実行 ID を標準出力に返す。
@@ -468,12 +468,12 @@ e2e_latest_run_id() {
 #   E2E_WF_TIMEOUT（既定 1200 秒）以内に完了しなければ、戻り値 1。E2E_POLL_SEC（既定 5 秒）おきに確認する
 e2e_wait_pr_run() {
     _e2e_check_repo "$1"
-    sfv_wait_pr_run "$1" "$2" "$3" "${4:-0}"
+    verify_wait_pr_run "$1" "$2" "$3" "${4:-0}"
 }
 
 # deploy-target.txt / remove-target.txt の本文（Hello World）
-e2e_hello_deploy_target_text() { sfv_hello_deploy_target_text; }
-e2e_hello_remove_target_text() { sfv_hello_remove_target_text; }
+e2e_hello_deploy_target_text() { verify_hello_deploy_target_text; }
+e2e_hello_remove_target_text() { verify_hello_remove_target_text; }
 
 # ローカルのテスト用フォルダ（作業フォルダと JWT 用の証明書フォルダ）の一覧（フルパス）
 e2e_list_target_local() {
@@ -790,11 +790,11 @@ e2e_wait_sf_install() {
 #   実行が完了した直後は、API の反映の遅れや、gh の一時的な失敗で、空になることがある（実機で、成功した実行が、
 #   空と読まれて FAIL になった）。空のときだけ、E2E_POLL_SEC 秒（既定 5）おきに、最大 E2E_CONCLUSION_TRIES 回（既定 6）やり直す。
 #   success / failure などの値が返ったら、やり直さない
-e2e_run_conclusion() { sfv_run_conclusion "$1" "$2"; }
+e2e_run_conclusion() { verify_run_conclusion "$1" "$2"; }
 
 # ワークフローの実行の、特定のステップの結果を、標準出力に返す（空のときは、e2e_run_conclusion と同じ扱い）
 #   引数: リポジトリ 実行ID ステップ名
-e2e_step_conclusion() { sfv_step_conclusion "$1" "$2" "$3"; }
+e2e_step_conclusion() { verify_step_conclusion "$1" "$2" "$3"; }
 
 # 失敗したワークフローの実行を、1 回だけ再実行し（gh run rerun --failed）、完了するまで待つ。
 #   Salesforce や通信側の一時的なエラー（MetadataTransferError など）で、失敗することがある。開発者が GitHub の画面で
@@ -803,5 +803,5 @@ e2e_step_conclusion() { sfv_step_conclusion "$1" "$2" "$3"; }
 #   E2E_WF_TIMEOUT 秒（既定 1200）以内に完了しなければ、戻り値 1
 e2e_rerun_and_wait() {
     _e2e_check_repo "$1"
-    sfv_rerun_and_wait "$1" "$2"
+    verify_rerun_and_wait "$1" "$2"
 }

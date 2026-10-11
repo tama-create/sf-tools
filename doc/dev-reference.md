@@ -49,9 +49,9 @@
 |---|---|
 | `test_common.sh` | lib/common.sh |
 | `test_init-common.sh` | phases/init/init-common.sh（`ensure_sf_tools_branch`。実際の Git と一時 bare リポジトリを使用） |
-| `test_sf-org.sh` | lib/sf-org.sh（ログイン先の 3 択・環境変数の指定・組織の種類の判定・本番は main のみのガード・保存） |
-| `test_sf-verify.sh` | bin/sf-verify.sh と lib/sf-verify.sh（実行できない場所・--plan・診断の不足・確認（N / q / EOF・本番の明示）・1 層・3 層（develop → staging → main の順）・失敗（マージしない・案内）・取り違えの検出・--cleanup・部品） |
-| `test_sf-diag.sh` | lib/sf-diag.sh（セットアップの診断: すべてそろっている・不足と直し方・一覧を取得できない（？。不足に数えない）・段階の数に応じた確認・組織の種類の記録がない（！）・直近の実行・読み取りのみ） |
+| `test_org.sh` | lib/org.sh（ログイン先の 3 択・環境変数の指定・組織の種類の判定・本番は main のみのガード・保存） |
+| `test_verify.sh` | phases/init/verify.sh と lib/verify-common.sh（実行できない場所・--plan・診断の不足・確認（N / q / EOF・本番の明示）・1 層・3 層（develop → staging → main の順）・失敗（マージしない・案内）・取り違えの検出・--cleanup・部品） |
+| `test_diag.sh` | lib/diag.sh（セットアップの診断: すべてそろっている・不足と直し方・一覧を取得できない（？。不足に数えない）・段階の数に応じた確認・組織の種類の記録がない（！）・直近の実行・読み取りのみ） |
 | `test_wizard.sh` | lib/wizard.sh（ウィザード形式の画面の部品: 現在地・チェックリスト・確認・失敗・完了） |
 | `test_sf-unhook.sh` | sf-unhook.sh |
 | `test_sf-hook.sh` | sf-hook.sh |
@@ -123,9 +123,9 @@
 | `check_force_dir` | `check_force_dir` | `force-*` ディレクトリか検証 |
 | `check_home_dir` | `check_home_dir` | `~/home/{owner}/{company}/` の階層を検証し `GITHUB_OWNER` / `COMPANY_NAME` をセット |
 | `check_gh_owner` | `check_gh_owner OWNER` | gh 認証ユーザーがリポジトリオーナーと一致するか確認（不一致は die。オーナーが組織で、ユーザーがその有効な admin なら通過。gh が空を返す場合はスキップ） |
-| （`lib/sf-org.sh`） | `sf_org_choose_login_url VAR LABEL TIER [SUFFIX]` / `sf_org_read_info ALIAS` / `sf_org_parse_info JSON` / `sf_org_kind` / `sf_org_guard TIER LABEL` / `sf_org_jwt_test ALIAS KEY KEYFILE USER URL` / `sf_org_save SUFFIX` | Salesforce 組織の接続情報の共通部品（`doc/wizard-ux-design.md` 4.7）。ログイン先は URL の 3 択（Enter = Sandbox。環境変数 `SF_INIT_LOGIN_URL_<PROD\|STG\|DEV\|START>` で、質問なしで指定できる）。ログイン後に `Organization`（`Id`・`Name`・`IsSandbox`・`OrganizationType`・`TrialExpirationDate`）を読み取り、種類（production / sandbox / developer / trial / unknown）を判定する（読み取れない・矛盾するときは unknown。推測しない）。`sf_org_guard`: **Salesforce の本番組織は main のみ**（staging・develop に本番は、戻り値 2。**判定不能（unknown）も、main 以外は戻り値 2**。確認では通さない。main は、unknown でも続行）。`sf_org_jwt_test`: 従来の接続アプリ用。JWT 接続テストと組織情報の読み取りを、同じ一時的なホームの中で行う（Secrets を登録する前にガードできるように）。`sf_org_save`: 組織の ID・名前・種類・確認日時を GitHub Variables（`SF_ORG_*_<接尾辞>`）に保存 |
-| （`lib/sf-diag.sh`） | `sf_diag_run REPO 段階...`（結果の不足の数は `DIAG_NG`） | セットアップの診断（`sf-init.sh --status` が使う）。リポジトリ・ブランチ・ワークフロー・Secrets・Variables・直近の実行を、GitHub から読み取って、✓ / ✗（直し方つき）/ ！ / ？ で表示する。読み取りのみ。一覧を取得できないものは「？」とし、不足に数えない |
-| （`lib/sf-verify.sh`） | `sfv_pr_create` / `sfv_pr_merge` / `sfv_latest_run_id` / `sfv_wait_pr_run`（基準の ID より新しい実行だけを対象にする）/ `sfv_run_conclusion` / `sfv_step_conclusion` / `sfv_rerun_and_wait` / `sfv_run_log_has` / `sfv_branch_create` / `sfv_file_put` / `sfv_file_delete` / `sfv_hello_*` | 実際のリポジトリの検証（`bin/sf-verify.sh`）と、e2e が共有する部品。GitHub の API（ブランチ・ファイルの追加・削除）と PR・ワークフローの実行の待ち、Hello World の本文。リポジトリは引数で受け取り、操作してよいリポジトリの安全ガードは、呼び出し側が行う（e2e: `_e2e_check_repo`）。環境変数 `SFV_*`（`E2E_*` も使える） |
+| （`lib/org.sh`） | `org_choose_login_url VAR LABEL TIER [SUFFIX]` / `org_read_info ALIAS` / `org_parse_info JSON` / `org_kind` / `org_guard TIER LABEL` / `org_jwt_test ALIAS KEY KEYFILE USER URL` / `org_save SUFFIX` | Salesforce 組織の接続情報の共通部品（`doc/wizard-ux-design.md` 4.7）。ログイン先は URL の 3 択（Enter = Sandbox。環境変数 `SF_INIT_LOGIN_URL_<PROD\|STG\|DEV\|START>` で、質問なしで指定できる）。ログイン後に `Organization`（`Id`・`Name`・`IsSandbox`・`OrganizationType`・`TrialExpirationDate`）を読み取り、種類（production / sandbox / developer / trial / unknown）を判定する（読み取れない・矛盾するときは unknown。推測しない）。`org_guard`: **Salesforce の本番組織は main のみ**（staging・develop に本番は、戻り値 2。**判定不能（unknown）も、main 以外は戻り値 2**。確認では通さない。main は、unknown でも続行）。`org_jwt_test`: 従来の接続アプリ用。JWT 接続テストと組織情報の読み取りを、同じ一時的なホームの中で行う（Secrets を登録する前にガードできるように）。`org_save`: 組織の ID・名前・種類・確認日時を GitHub Variables（`SF_ORG_*_<接尾辞>`）に保存 |
+| （`lib/diag.sh`） | `diag_run REPO 段階...`（結果の不足の数は `DIAG_NG`） | セットアップの診断（`sf-init.sh --status` が使う）。リポジトリ・ブランチ・ワークフロー・Secrets・Variables・直近の実行を、GitHub から読み取って、✓ / ✗（直し方つき）/ ！ / ？ で表示する。読み取りのみ。一覧を取得できないものは「？」とし、不足に数えない |
+| （`lib/verify-common.sh`） | `verify_pr_create` / `verify_pr_merge` / `verify_latest_run_id` / `verify_wait_pr_run`（基準の ID より新しい実行だけを対象にする）/ `verify_run_conclusion` / `verify_step_conclusion` / `verify_rerun_and_wait` / `verify_dispatch_workflow` / `verify_wait_run` / `verify_run_log_has` / `verify_branch_create` / `verify_file_put` / `verify_file_delete` / `verify_hello_*` | 実際のリポジトリの検証（`phases/init/verify.sh`）と、e2e が共有する部品。GitHub の API（ブランチ・ファイルの追加・削除）と PR・ワークフローの実行の待ち、Hello World の本文。リポジトリは引数で受け取り、操作してよいリポジトリの安全ガードは、呼び出し側が行う（e2e: `_e2e_check_repo`）。環境変数 `VERIFY_*`（`E2E_*` も使える） |
 | `ensure_sf_tools_latest` | `ensure_sf_tools_latest [--no-update] DIR` | sf-tools（DIR）が origin の最新か確認し、遅れていれば確認のうえ `git pull --ff-only` で更新する。戻り値: 0=最新（または判定できない）／2=更新した（呼び出し側は、更新した sf-tools で、再実行すること）。die: fetch 失敗・遅れていて未コミットの変更または未プッシュのコミットがある・更新を断った・pull 失敗・`--no-update` で遅れている |
 | `is_gitbash` | `if is_gitbash; then ...` | Windows の Git Bash か判定（`$OSTYPE` が `msys*` / `mingw*` / `cygwin*`） |
 | `check_sf_cli` | `check_sf_cli [--warn-only] [--cache]` | `sf --version` の終了コードが 0 か確認する（sf は npm 版が前提）。0 以外なら、sf の場所と対処を ERROR で表示して `die`（`--warn-only` は表示のみで戻り値 1）。`--cache`（日常のコマンド用）は、成功を `~/.sf-tools-sf-check`（`SF_TOOLS_SF_CHECK_STAMP` で変更可）に sf の場所つきで記録し、24 時間は確認を省略する（失敗は記録せず、毎回確認する）。sf 未インストール・GitHub Actions 上（`GITHUB_ACTIONS=true`）では何もしない |
@@ -409,7 +409,7 @@ tr -d '\r' < "$key_file" | base64 -w 0 | gh secret set "SF_PRIVATE_KEY" -R "$REP
 
 起動時（フェーズの実行・`--resume` / `--only` / `--add-tier` の前）に `check_sf_cli` で、`sf --version` の終了コードを確認し、0 以外なら案内（npm 版への入れ替え）を表示して中断する（3.3 参照）。
 **ウィザード形式の画面（`lib/wizard.sh`・設計: `doc/wizard-ux-design.md`）:**
-- 利用者に見せるのは、Phase の番号ではなく、**全 8 ステップ**（`WIZ_STEP_TITLES`）。Phase とステップの対応は `WIZ_PHASE_STEP`（1→1, 2→2, 3・4→3, 5→4, 6→5, 7→6, 8・9→7, 10→8）。フェーズループが、新しいステップに入るときに `wizard_step`（現在地・完了済み・目的の 1 文）を出す。各 Phase スクリプトの見出しからは、「Phase N」を外した。
+- 利用者に見せるのは、Phase の番号ではなく、**全 9 ステップ**（`WIZ_STEP_TITLES`。ステップ 9 は「動作の確認」で、Phase ではなく、`phases/init/verify.sh` を呼ぶ最後のステップ）。Phase とステップの対応は `WIZ_PHASE_STEP`（1→1, 2→2, 3・4→3, 5→4, 6→5, 7→6, 8・9→7, 10→8）。フェーズループが、新しいステップに入るときに `wizard_step`（現在地・完了済み・目的の 1 文）を出す。各 Phase スクリプトの見出しからは、「Phase N」を外した。
 - 開始画面（通常の新規実行のみ。`--only` / `--resume N` は従来の簡易表示）: `wizard_banner` → 作るもの・所要時間の目安 → 管理者向けの警告ボックス（従来どおり）→ `wizard_checklist`（先に用意するもの）→ 全ステップの一覧 → `wizard_confirm`（Enter / Y で進む。N / q は die。CLAUDE.md 2.4 の `ask_yn || die` と同じく、「N / q で必ず中断」）。`check_home_dir` は、開始画面の前に実行する（作るリポジトリ名を表示するため）。
 - sf-tools の最新化（P14）: 開始画面の、**管理者向けの警告のあと・確認の前**に、**現在のブランチを対象に** `ensure_sf_tools_branch` を呼ぶ（本番 / 検証の選択には依存しない。Git リポジトリのときだけ）。遅れていれば、確認のうえ `git pull --ff-only` し、戻り値 2 を返す。`sf-init.sh` は、`SF_INIT_RESTARTED=1` を付けて、同じ引数で `exec` する（実行しなおしたあとも、開始画面・管理者向けの警告・確認は、毎回出す。確認を飛ばさない）。確認済みのブランチは `SF_INIT_TOOLS_CHECKED_BRANCH` で Phase 2 に渡し、Phase 2 は、最新化を二重に確認せず、選んだ環境とのブランチ違いだけを確認する。Phase 2 が戻り値 2 を受けたとき（起動時に確認できなかった場合）は、終了コード 75 で終了し、`sf-init.sh` が実行しなおす。**実行しなおしは 1 回だけ**（`SF_INIT_RESTARTED` が立っているのに、再び 75 なら、die。無限に繰り返さない）。
 - 完了画面: `wizard_done`（できたこと・次にやること: `sf-job.sh` と、リポジトリの URL）。`init` フォルダは、**削除せず、管理者用として残す**（削除の質問は廃止）。完了画面に、管理者用フォルダ（`REPO_DIR`）のパスと用途（メンテナンス用・日常の開発には使わない）を表示する。完了時（`END_PHASE` が 10 のときだけ）、`.sf-init.env` から `*TOKEN_VALUE=` の行を念のため消す（通常は Phase 8 の push 後に消えている）。
@@ -429,12 +429,15 @@ tr -d '\r' < "$key_file" | base64 -w 0 | gh secret set "SF_PRIVATE_KEY" -R "$REP
 10. JWT 認証情報の設定（SF_PRIVATE_KEY / SF_CONSUMER_KEY_* を Secret / SF_USERNAME_* / SF_INSTANCE_URL_* を Variable に登録）。アプリ種別が外部クライアントアプリ（2）のときは、組織ごとに `register_jwt_secret_eca`（`init-common.sh`）が自動作成する（`sf org login web` → ユーザー名・プロファイル名（表示名）を取得 → `generate_eca_metadata` で 5 ファイルを生成して `sf project deploy` → `sf project retrieve` でコンシューマー鍵を取得 → JWT 接続テスト（反映待ちのためリトライ。`SF_INIT_JWT_RETRIES` / `SF_INIT_JWT_INTERVAL`）→ 登録）。ログイン用の一時エイリアス（`sf-tools-PROD` / `sf-tools-STG` / `sf-tools-DEV`。ユーザーが運用中のエイリアスと重ならないよう `sf-tools-` を付ける）は、ログイン前に `sf alias unset` で外し（前回の古い認証による誤判定の防止）、終了後にも `sf alias unset` で消す（`sf org logout` は同じユーザー名の全エイリアスの認証を消すため使わない）。`sf` は npm 版が前提（Windows の Git Bash で公式インストーラー版を使うと、成功しても終了コード 1 になるため）。ログイン（`sf org login web`）、接続情報の取得（`sf org display --json`。ユーザー名はその出力から取り出す）、プロファイル名の取得（`sf data query`）、JWT 接続テストの成否は、すべて終了コードで判定し、0 以外なら中断する（JWT 接続テストはリトライ後、スキップの確認）。接続アプリ（1）は従来の手動案内
 
 **進捗の記録と「続きから」の選択（`bin/sf-init.sh`）:**
-- フェーズループで、Phase 2 以降が成功するたびに、`init/.sf-init.env` の `SF_INIT_DONE_PHASE=N` と `SF_INIT_DONE_AT="日時"` を更新する（`sed -i` で古い行を消してから追記。Phase 1 は状態を持たないため記録しない。`--only` は記録しない）。失敗した Phase は記録されない。
-- 引数なしで起動し、`.sf-init.env` があり、`SF_INIT_DONE_PHASE` が 2〜9 で、`REPO_FULL_NAME` が `${GITHUB_OWNER}/force-${COMPANY_NAME}`（作業フォルダのもの）と一致するとき、管理者警告・`check_gh_owner`・init フォルダへの移動のあとに、`read_key` で `[1] 続き / [2] 最初から / [q] 中断` を選ばせる（既定値なし）。
+- フェーズループで、Phase 2 以降が成功するたびに、**`init/.sf-init.progress`**（入力内容を保存する `.sf-init.env` とは別のファイル）を、`SF_INIT_DONE_PHASE=N` と `SF_INIT_DONE_AT="日時"` の 2 行で書き直す（外部コマンドを使わない）。Phase 1 は状態を持たないため記録しない。`--only` は記録しない。失敗した Phase は記録されない。Phase 10 の実行中は、段階ごとの完了（`SF_INIT_DONE_TIER_*`）が、追記される。
+- 引数なしで起動し、`.sf-init.env` と `.sf-init.progress` があり、`SF_INIT_DONE_PHASE` が 2〜9 で、`REPO_FULL_NAME` が `${GITHUB_OWNER}/force-${COMPANY_NAME}`（作業フォルダのもの）と一致するとき、管理者警告・`check_gh_owner`・init フォルダへの移動のあとに、`read_key` で `[1] 続き / [2] 最初から / [q] 中断` を選ばせる（既定値なし）。
   - `1`: `START_PHASE=N+1`、`RESUMED=1`。`.sf-init.env` は消さない。Phase 1（環境チェック）を、先頭に付け足して、毎回実行する。
   - `2`: 従来どおり `.sf-init.env` を削除して Phase 1 から。リポジトリ・init フォルダは削除しない（Phase 3 が冪等のため）。
   - `q`: `die`。
-- `SF_INIT_DONE_PHASE` が `10`（完了済み）で、リポジトリが一致するとき: 続きの選択肢の代わりに「セットアップが、すでに完了しています」を表示し、`[1]` 管理者用フォルダ（`REPO_DIR`）で `phases/init/status.sh` を実行して終了（何も変更しない）／`[2]` 最初からやり直す（上の `2` と同じ）／`[q]` 終了、を選ばせる。
+- `SF_INIT_DONE_PHASE` が `10`（完了済み）で、リポジトリが一致するとき: 続きの選択肢の代わりに「セットアップが、すでに完了しています」を表示し、`[1]` 管理者用フォルダ（`REPO_DIR`）で `phases/init/status.sh` を実行して終了（何も変更しない）／`[2]` 管理者用フォルダで `phases/init/verify.sh` を実行し、その終了コードで終了（確認は phases/init/verify.sh の中で聞く）／`[3]` 最初からやり直す（上の `2` と同じ）／`[q]` 終了、を選ばせる。
+- **ステップ 9（動作の確認）**: **通しの実行（`FULL_START`）と、中断後の「続きをやる」のときだけ**、最後（`END_PHASE` が 10）まで実行し、`GITHUB_ACTIONS` でなく、端末（`-t 0`。テストは `SF_INIT_VERIFY_ASK=1`）のとき、完了処理（Token の値の行の掃除）のあと、完了画面の前に、`read_input` で「Enter = 確認する / s = あとで」を聞く（EOF は「あとで」）。`--resume N` / `--only N` の明示では、聞かない。Enter なら、`(cd "$REPO_DIR" && SF_VERIFY_CONFIRMED=1 bash phases/init/verify.sh)`。結果（`VERIFY_RESULT`: done / failed / skipped）は、完了画面の 4 番目の項目に表示する。確認の失敗は、sf-init の終了コードに影響しない。進捗（`.sf-init.progress`）には、記録しない（Phase ではないため）。
+- **完了済みで `--resume N`**: `SF_INIT_DONE_PHASE` が `10` で、リポジトリが一致するとき、`--resume N`（N > 1）は、`die`（接続処理などを、確認なしで、やり直さないため）。案内: `--reconnect` / 引数なしの実行（[1] 接続を見る・[2] 動作を確認・[3] 最初から）。`--only N` は、拒否しない（デバッグ用）が、開始時に「進捗は、更新しない」を表示する。
+- **Phase 10 の段階ごとの再開**（`10_sf_auth.sh` の `_register_org` / `_tier_done`）: 段階（PROD / STG / DEV）が完了するたびに、`.sf-init.progress` に `SF_INIT_DONE_TIER_<接尾辞>=1` を追記する（`SF_INIT_TIER_RESUME=1` のとき。`--only` では、設定されず、記録も、スキップも、しない）。再実行では、その記録があり、かつ、`gh secret list` に `SF_CONSUMER_KEY_<接尾辞>` が、いまもあるときだけ、その段階をスキップする（記録だけを信じない）。Phase 10 が成功したとき、`sf-init.sh` が進捗ファイルを書き直すため、段階の記録は、消える。「最初から」では、進捗ファイルごと消えるため、すべての段階を、実行する。外部クライアントアプリは、名前が決まっている（`SF_TOOLS_<リポジトリ名>`）ため、やり直しても、重複しない。
 - 質問しない場合: 状態なし・Phase 10 完了済み・別のリポジトリの状態（従来どおり `.sf-init.env` を削除して最初から）、`--resume N` / `--only N` の指定あり。
 - Phase 3 以降が失敗したときは、`die`（事実のみ）の前に、「もう一度 sf-init.sh を実行し、『続きをやる』を選ぶと、Phase N から再開できます」を INFO で表示する。
 - 値の取り出しは `source` せず、`_env_value KEY`（grep + sed）で行う。
@@ -443,10 +446,11 @@ tr -d '\r' < "$key_file" | base64 -w 0 | gh secret set "SF_PRIVATE_KEY" -R "$REP
 オプション:
 - `--resume N`: Phase N から、質問なしで再開
 - `--only N`: Phase N のみ実行（デバッグ用。進捗は記録しない）
-- `--add-tier staging|develop`: 既存プロジェクトへの tier 追加（後述）
+- `--add-tier staging|develop`: 既存プロジェクトへの tier 追加（後述）。初回のセットアップ（GitHub 側 → Salesforce の接続）とは、順序が逆: 先に Salesforce に接続し、成功してから、ブランチ・PR を作る（接続に失敗したときに、GitHub 側を、変更しないため）
 - `--reconnect main|staging|develop`: 1 つの段階の接続先（Salesforce 組織）の付け替え（`phases/init/reconnect.sh`。force-* 内で実行。現在の接続を表示 → 確認 → ログイン先の選択 → ログイン → 種類の読み取り → 本番は main のみのガード → 外部クライアントアプリの自動作成 → JWT 接続テスト → Secrets / Variables の一括更新。古い組織が別の組織なら、残る外部クライアントアプリと片付け方を表示する（自動では削除しない））
 - `--status`: セットアップの診断と、段階ごとの接続の一覧（`phases/init/status.sh`。読み取りのみ。終了コード: 診断で不足がある、または、本番が main 以外にあれば 1）。
-  - 診断（`lib/sf-diag.sh` の `sf_diag_run REPO 段階...`）: リポジトリ・branches.txt の各ブランチ・ワークフロー 5 本（`gh api` / `gh repo view`）、Secrets（`gh secret list`）、Variables（`gh variable list`）、直近の実行（`gh run list --workflow`）を、✓ / ✗ / ！ / ？ で表示する。不足（✗）には、直し方（`--only N` / `--reconnect` / `--add-tier` / `sf-sync-wf.sh`）を表示し、件数を `DIAG_NG` に入れる。一覧を取得できなかったものは「？」とし、不足に数えない（通信エラー・権限不足を、不足と誤認しない）。組織の種類の記録（`SF_ORG_ID_*`）がないものは「！」（不足に数えない。古いバージョンで作ったプロジェクトのため）。直近の実行の失敗も「！」（セットアップの不足ではないため）。
+- `--verify`: 動作の確認（`phases/init/verify.sh`。`--plan` / `--cleanup` / `--no-metasync` は、そのまま渡す。`--verify` なしの指定は `die`）。詳細は 4.15.1
+  - 診断（`lib/diag.sh` の `diag_run REPO 段階...`）: リポジトリ・branches.txt の各ブランチ・ワークフロー 5 本（`gh api` / `gh repo view`）、Secrets（`gh secret list`）、Variables（`gh variable list`）、直近の実行（`gh run list --workflow`）を、✓ / ✗ / ！ / ？ で表示する。不足（✗）には、直し方（`--only N` / `--reconnect` / `--add-tier` / `sf-sync-wf.sh`）を表示し、件数を `DIAG_NG` に入れる。一覧を取得できなかったものは「？」とし、不足に数えない（通信エラー・権限不足を、不足と誤認しない）。組織の種類の記録（`SF_ORG_ID_*`）がないものは「！」（不足に数えない。古いバージョンで作ったプロジェクトのため）。直近の実行の失敗も「！」（セットアップの不足ではないため）。
   - Salesforce 側（外部クライアントアプリ・JWT 接続）は、ログインが必要なため確認しない。直近の wf-metasync / wf-release の成功で、接続できていることが分かる。
   - 接続の一覧: GitHub Variables を読むだけ。同じ組織が複数の段階にあれば警告、本番が main 以外にあればエラー表示。
 - `--legacy-connected-app`（環境変数 `SF_INIT_LEGACY_CONNECTED_APP=1`）: 従来の接続アプリケーション（手動の入力）を使う。既定は外部クライアントアプリ。保存済みの `APP_TYPE=2` と食い違うときは中断する
@@ -514,19 +518,19 @@ sf-init.sh --add-tier develop    # main+staging → main+staging+develop
 テスト: `tests/test_sf-sync-wf.sh`（モックの HOME に雛形を置き、ガード・差分・N/q/Y・CRLF・`--check`・`--remove` を確認。実際の雛形のコピーが `--check` で差分なしであることも確認）、`tests/test_common.sh` の `test_ensure_sf_tools_latest`（本物の git で、最新・遅れ・未コミット・未プッシュ・更新を断る・`--no-update` などを確認。bare の origin は `--initial-branch=main` で作る。環境によって既定のブランチ名が違うため）
 ---
 
-### 4.15.1 sf-verify.sh
+### 4.15.1 verify.sh（sf-init.sh --verify）
 
-管理者が、実際のリポジトリ・実際の組織で、リリースと削除が動くことを確認する（`bin/sf-verify.sh`。部品は `lib/sf-verify.sh`）。
+管理者が、実際のリポジトリ・実際の組織で、リリースと削除が動くことを確認する（`phases/init/verify.sh`。部品は `lib/verify-common.sh`）。
 
-**フロー:** (1) `GITHUB_ACTIONS` なら中断。force-* の中で実行。`check_gh_owner` (2) 段階の判定: リモートのブランチから（develop + staging があれば 3 層・staging があれば 2 層・それ以外は main のみ）。リリースの順は develop → staging → main (3) 診断（`sf_diag_run`）。不足があれば、確認の前に中断 (3b) 検証用と同名のクラスのファイルが、いずれかの段階のブランチに、すでにあれば、中断（`--cleanup` は、対象外）(4) 実行内容の表示（段階ごとの `SF_ORG_NAME_*`・`SF_ORG_KIND_*`・`SF_USERNAME_*`。種類が developer / sandbox / trial 以外は、本番扱いで赤く表示）。`--plan` はここで終了 (5) 確認: 警告ボックスと `wizard_confirm`（Enter / Y で進む。N / q / EOF は中断。入力を最小にするため）。本番扱いの組織があれば、質問の文面で、本番を含むことを明示する（リポジトリ名・`production` の入力は、求めない） (6) リリース: main の先頭から `verify-hello-時刻` を API で作り（クラスのファイル 4 つ + `deploy-target.txt` + 空の `remove-target.txt`）、段階ごとに PR → wf-validate → マージ → wf-release（→ main のとき wf-propagate）。各 PR の前に、実行 ID の基準を覚え、より新しい実行だけを、その PR の実行とする。失敗した実行は、1 回だけ再実行する (7) 削除: main の先頭から `verify-hello-delete-時刻`（クラスのファイルを API で削除 + `remove-target.txt`）を作り、同じ順に各段階へ (8) 結果。
+**フロー:** (1) `GITHUB_ACTIONS` なら中断。force-* の中で実行。`check_gh_owner` (2) 段階の判定: リモートのブランチから（develop + staging があれば 3 層・staging があれば 2 層・それ以外は main のみ）。リリースの順は develop → staging → main (3) 診断（`diag_run`）。不足があれば、確認の前に中断 (3b) 検証用と同名のクラスのファイルが、いずれかの段階のブランチに、すでにあれば、中断（`--cleanup` は、対象外）(4) 実行内容の表示（段階ごとの `SF_ORG_NAME_*`・`SF_ORG_KIND_*`・`SF_USERNAME_*`。種類が developer / sandbox / trial 以外は、本番扱いで赤く表示）。`--plan` はここで終了 (5) 確認（`SF_VERIFY_CONFIRMED=1` のときは、聞かない）: 警告ボックスと `wizard_confirm`（Enter / Y で進む。N / q / EOF は中断。入力を最小にするため）。本番扱いの組織があれば、質問の文面で、本番を含むことを明示する（リポジトリ名・`production` の入力は、求めない） (5b) 環境の確認（`--cleanup` では行わない。NG があれば、そこで止める。`wf-metasync` は、手前の 2 つの確認が OK のときだけ起動する）: `SF_TOOLS_BRANCH` が main / development／`~/sf-tools/logs/*.log` に Token・認証 URL（`ghp_` / `github_pat_` / `xoxb-` / `force://…`）が残っていない（`_logs_clean`）／`wf-metasync` を `verify_dispatch_workflow` で手動起動 → `verify_wait_run` → `_run_ok`（失敗は 1 回だけ再実行）→ ステップ `Salesforce 組織にログイン`・`自動化ツール（sf-tools）を取得` が success（`--no-metasync` で省略）(6) リリース: main の先頭から `verify-hello-時刻` を API で作り（クラスのファイル 4 つ + `deploy-target.txt` + 空の `remove-target.txt`）、段階ごとに PR → wf-validate → マージ → wf-release（→ main のとき wf-propagate）。各 PR の前に、実行 ID の基準を覚え、より新しい実行だけを、その PR の実行とする。失敗した実行は、1 回だけ再実行する (7) 削除: main の先頭から `verify-hello-delete-時刻`（クラスのファイルを API で削除 + `remove-target.txt`）を作り、同じ順に各段階へ (8) 結果。
 
 **確認（段階ごと・リリースと削除）:** `<段階> の組織にログイン（JWT）` ステップが success（文言の中立化より前の古い名前 `本番組織` / `ステージング組織` / `開発組織` も候補。`_login_step_names`）／ほかの段階のログインのステップが `skipped`（見つからなければ、注意の表示のみ）／`SF_USERNAME_*` が登録されていて、その値がログに出ている（空は NG）／ログに Hello World のクラス名が出ている。Slack の `ok:true` は、注意の表示のみ（成否に含めない）。確認が NG でも、削除まで進める（組織を元に戻すため）。
 
-**失敗時:** リリースの PR をマージした段階を `LEFT` に記録し、削除が成功するまで残す。中断したときは、`LEFT` の段階と `sf-verify.sh --cleanup`（削除のみ。全段階を対象にする）を案内する。マージの拒否（ブランチ保護）・wf-validate の失敗では、PR を残して止まる。
+**失敗時:** リリースの PR をマージした段階を `LEFT` に記録し、削除が成功するまで残す。中断したときは、`LEFT` の段階と `sf-init.sh --verify --cleanup`（削除のみ。全段階を対象にする）を案内する。マージの拒否（ブランチ保護）・wf-validate の失敗では、PR を残して止まる。
 
 **ローカルの clone・git の操作は、行わない**（ブランチ・ファイルは GitHub の API で作る。フック・認証ヘルパーの影響を受けない）。組織への直接のログインも、行わない（ワークフローの結果で確認する）。
 
-テスト: `tests/test_sf-verify.sh`（状態つきの gh のモック）。e2e（`tests/e2e/lib.sh`）は、PR・実行の待ち・結果の読み取り・Hello World の本文を、`lib/sf-verify.sh` に委譲する。
+テスト: `tests/test_verify.sh`（状態つきの gh のモック）。e2e（`tests/e2e/lib.sh`）は、PR・実行の待ち・結果の読み取り・Hello World の本文を、`lib/verify-common.sh` に委譲する。
 
 ---
 

@@ -1,8 +1,10 @@
 #!/bin/bash
 # ==============================================================================
-# sf-verify.sh - 実際のリポジトリと組織で、リリース・削除が動くことを検証する（管理者向け）
+# verify.sh - 実際のリポジトリと組織で、リリース・削除が動くことを検証する（sf-init.sh --verify。管理者向け）
 # ==============================================================================
 # sf-init で作った、実際のリポジトリ（force-*）が、実際の Salesforce 組織に対して、正しく動くことを確認する。
+# 入口は sf-init.sh --verify（オプション --plan / --cleanup / --no-metasync は、そのまま、この処理に渡る）。
+# sf-init.sh の最後のステップ（動作の確認）と、完了済みのときのメニューからも、呼ばれる。
 # 誰も使わない、単純な Apex（Hello World: SfToolsE2eHello / SfToolsE2eHelloTest）を、各段階にリリースして、削除する。
 # 何をするかを、先に表示し、Enter を 1 回押して確認してから、実行する（sf-init と同じ Git Bash で、続けて実行する想定。入力は、最小）。
 # force-* ディレクトリの中で、リポジトリのオーナー（組織の管理者）の gh アカウントで、実行する。
@@ -12,6 +14,12 @@
 #   2. 実行内容の表示 : リポジトリ・段階ごとの組織の名前と種類・実行する内容・目安の時間。本番は、赤く表示する
 #   3. 確認          : 警告と、Enter の確認（Enter / Y で進む。N / q は、何も変更せずに中断）。本番（または種類を判定できない）
 #                      組織があるときは、質問の文面で、本番を含むことを明示する
+#   3b. 環境の確認   : 環境全体を、最初に確認する（e2e の確認と同じ観点）。NG があれば、そこで止める（組織に、何も変更しない。
+#                      wf-metasync は、手前の 2 つの確認が OK のときだけ、実行する）
+#                        ・SF_TOOLS_BRANCH が、main または development である
+#                        ・ローカルのログ（~/sf-tools/logs）に、Token・認証 URL が残っていない
+#                        ・wf-metasync（Salesforce → Git の同期）を、手動で 1 回実行し、成功する
+#                          （JWT ログイン・sf-tools の取得を含む。main の組織の変更が、main にコミットされることがある）
 #   4. リリース      : 同じブランチから、develop → staging → main の順（ない段階は、とばす）に、段階ごとの PR を出して、
 #                      wf-validate（検証）→ マージ → wf-release（リリース）。段階ごとに、次を確認する:
 #                        ・その段階の組織への JWT ログインが成功した
@@ -34,35 +42,41 @@
 #
 # 【オプション】
 #   --plan      : 診断と、実行内容の表示だけを行う（何も変更しない。確認も出さない）
+#   --no-metasync : 環境の確認のうち、wf-metasync の実行を、省略する（組織からの同期を、いま行いたくないとき）
 #   --cleanup   : 削除のみを行う（リリースの途中で止まって、組織に Hello World が残ったときの後始末）。
 #                 対象は、固定名のクラス（SfToolsE2eHello / SfToolsE2eHelloTest）だけ。ほかのクラスには、触れない
 #   -h, --help  : このヘルプを表示する
 # ==============================================================================
 
-readonly SCRIPT_NAME="sf-verify"
-mkdir -p "$HOME/sf-tools/logs" 2>/dev/null || true  # run 不使用: ログフォルダの準備（log が使える前の処理）
-readonly LOG_FILE="$HOME/sf-tools/logs/${SCRIPT_NAME}.log"
-readonly LOG_MODE="NEW"
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PHASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SF_TOOLS_DIR="${SF_TOOLS_DIR:-$(dirname "$(dirname "$PHASE_DIR")")}"
 
 if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
     awk '/^# ==/{f++; next} f==2{sub(/^# ?/,""); print} f==3{exit}' "${BASH_SOURCE[0]}"
     exit 0
 fi
 
-source "${SCRIPT_DIR}/../lib/common.sh"
-source "${SCRIPT_DIR}/../lib/wizard.sh"
-source "${SCRIPT_DIR}/../lib/sf-org.sh"
-source "${SCRIPT_DIR}/../lib/sf-diag.sh"
-source "${SCRIPT_DIR}/../lib/sf-verify.sh"
+# ログは、sf-init.log とは別のファイルに書く（sf-init.sh のステップ 9 から呼ばれたとき、sf-init のログを、上書きしないため）
+readonly SCRIPT_NAME="verify"
+mkdir -p "$HOME/sf-tools/logs" 2>/dev/null || true  # run 不使用: ログフォルダの準備（log が使える前の処理）
+readonly LOG_FILE="$HOME/sf-tools/logs/${SCRIPT_NAME}.log"
+readonly LOG_MODE="NEW"
+export SF_INIT_MODE=1   # sf-init.sh の一部として動く（force-* のチェックは、下で行う）
+
+source "${SF_TOOLS_DIR}/lib/common.sh"
+source "${SF_TOOLS_DIR}/lib/wizard.sh"
+source "${SF_TOOLS_DIR}/lib/org.sh"
+source "${SF_TOOLS_DIR}/lib/diag.sh"
+source "${SF_TOOLS_DIR}/lib/verify-common.sh"
 
 PLAN_ONLY=0
 CLEANUP_ONLY=0
+NO_METASYNC=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --plan)    PLAN_ONLY=1 ;;
         --cleanup) CLEANUP_ONLY=1 ;;
+        --no-metasync) NO_METASYNC=1 ;;
         *) die "不明なオプションです: $1" ;;
     esac
     shift
@@ -72,7 +86,7 @@ done
 # 0. 前提の確認
 # ------------------------------------------------------------------------------
 [[ "${GITHUB_ACTIONS:-}" == "true" ]] && die "GitHub Actions 上では、実行できません。"
-check_force_dir || die "force-* ディレクトリ内で実行してください。"
+check_force_dir || die "このスクリプトは 'force-*' ディレクトリ内で実行してください。"
 
 remote_url=$(git remote get-url origin 2>/dev/null) || die "git remote を取得できません。"  # VAR=$(cmd) のため run 不使用
 REPO=$(echo "$remote_url" | sed 's|.*github\.com[:/]\(.*\)\.git|\1|; s|.*github\.com[:/]\(.*\)|\1|')  # VAR=$(cmd) のため run 不使用
@@ -83,7 +97,7 @@ log "HEADER" "リポジトリの検証（${REPO}）"
 check_gh_owner "$OWNER"
 
 # 段階: リモートのブランチから判定する（develop → staging → main の順に、リリースする）
-branches=$(sfv_gh api "repos/${REPO}/branches" --paginate --jq '.[].name' 2>/dev/null | tr -d '\r') \
+branches=$(verify_gh api "repos/${REPO}/branches" --paginate --jq '.[].name' 2>/dev/null | tr -d '\r') \
     || die "ブランチの一覧を取得できません。"  # VAR=$(cmd) のため run 不使用
 grep -qx "main" <<< "$branches" || die "ブランチ main が見つかりません。"
 TIERS=()
@@ -92,12 +106,12 @@ grep -qx "staging" <<< "$branches" && TIERS+=("staging")
 TIERS+=("main")
 
 _suffix_of() { case "$1" in main) echo "PROD" ;; staging) echo "STG" ;; develop) echo "DEV" ;; esac; }
-_var() { sfv_gh variable get "$1" -R "$REPO" 2>/dev/null | tr -d '\r' || true; }  # 取得専用のため run 不使用
+_var() { verify_gh variable get "$1" -R "$REPO" 2>/dev/null | tr -d '\r' || true; }  # 取得専用のため run 不使用
 
 # ------------------------------------------------------------------------------
 # 1. 診断（不足があれば、ここで中断する）
 # ------------------------------------------------------------------------------
-sf_diag_run "$REPO" "${TIERS[@]}"
+diag_run "$REPO" "${TIERS[@]}"
 [[ "$DIAG_NG" -eq 0 ]] || die "セットアップに不足があるため、検証を始められません（上の「直し方」を実行してください）。"
 
 # 同名のクラスのファイルが、すでにリポジトリにないこと。あれば、検証のクラスが、それを上書きして、削除してしまう。
@@ -105,12 +119,12 @@ sf_diag_run "$REPO" "${TIERS[@]}"
 if [[ $CLEANUP_ONLY -eq 0 ]]; then
     for t in "${TIERS[@]}"; do
         while IFS= read -r p; do
-            if sfv_file_sha "$REPO" "$t" "$p" > /dev/null; then  # 条件チェック
+            if verify_file_sha "$REPO" "$t" "$p" > /dev/null; then  # 条件チェック
                 log "ERROR" "  ${t} ブランチに、検証用と同じ名前のファイルが、すでにあります: ${p}"
-                log "WARNING" "  このまま実行すると、そのクラスを、上書きして、削除します。前回の検証の残りであれば、sf-verify.sh --cleanup を実行してください。"
+                log "WARNING" "  このまま実行すると、そのクラスを、上書きして、削除します。前回の検証の残りであれば、sf-init.sh --verify --cleanup を実行してください。"
                 die "検証用と同名のクラスのファイルが、すでにあります（${t}: ${p}）。"
             fi
-        done < <(sfv_hello_paths)
+        done < <(verify_hello_paths)
     done
 fi
 
@@ -127,7 +141,7 @@ for t in "${TIERS[@]}"; do
     kind=$(_var "SF_ORG_KIND_${sfx}")
     oname=$(_var "SF_ORG_NAME_${sfx}")
     user=$(_var "SF_USERNAME_${sfx}")
-    label=$(sf_org_kind_label "${kind:-unknown}")
+    label=$(org_kind_label "${kind:-unknown}")
     case "$kind" in
         developer|sandbox|trial) mark="" ;;
         *) mark="  ← 本番（または、種類を判定できない）組織"; NEED_PROD_CONFIRM=1 ;;
@@ -142,10 +156,21 @@ n_tiers=${#TIERS[@]}
 if [[ $CLEANUP_ONLY -eq 1 ]]; then
     echo "    内容       : 削除のみ（Hello World のクラスを、各段階の組織から消す。${n_tiers} 本の PR）" >&2
 else
-    echo "    内容       : Hello World（${SFV_APEX_HELLO} / ${SFV_APEX_HELLO_TEST}）を、各段階にリリースして、削除する" >&2
+    echo "    内容       : Hello World（${VERIFY_APEX_HELLO} / ${VERIFY_APEX_HELLO_TEST}）を、各段階にリリースして、削除する" >&2
     echo "                 PR を $((n_tiers * 2)) 本（リリース ${n_tiers}・削除 ${n_tiers}）作成してマージする。組織のクラスと、リポジトリのファイルは、最後に消える" >&2
 fi
-echo "    目安の時間 : 約 $((n_tiers * (CLEANUP_ONLY == 1 ? 1 : 2) * 8)) 分" >&2
+if [[ $CLEANUP_ONLY -eq 0 ]]; then
+    _env_items="SF_TOOLS_BRANCH・ログに Token が残っていないこと"
+    [[ $NO_METASYNC -eq 1 ]] || _env_items+="・wf-metasync の実行"
+    echo "    最初の確認 : 環境全体（${_env_items}）。NG があれば、リリースへ進みません" >&2
+    if [[ $NO_METASYNC -eq 0 ]]; then
+        echo "                 ※ wf-metasync は、Salesforce（main の組織）の変更を、main に同期します。変更があれば、main にコミットされます" >&2
+    fi
+fi
+# 目安: PR 1 本（検証 → マージ → リリース）が、約 3 分。wf-metasync が、約 3 分（実測: 3 層・PR 6 本・metasync で、約 20 分）
+_est=$((n_tiers * (CLEANUP_ONLY == 1 ? 1 : 2) * 3))
+[[ $CLEANUP_ONLY -eq 0 && $NO_METASYNC -eq 0 ]] && _est=$((_est + 3))
+echo "    目安の時間 : 約 ${_est} 分（Actions の混み具合で、前後します）" >&2
 echo "    残るもの   : リポジトリに、PR・コミットの履歴。Slack に、通知（段階ごとに数通）" >&2
 
 if [[ $PLAN_ONLY -eq 1 ]]; then
@@ -155,20 +180,23 @@ fi
 
 # ------------------------------------------------------------------------------
 # 3. 確認（管理者向けの警告・Enter の確認。本番を含むときは、文面で明示する）
+#    sf-init.sh から呼ばれたとき（SF_VERIFY_CONFIRMED=1）は、sf-init が、確認済みのため、二重には聞かない
 # ------------------------------------------------------------------------------
-echo "" >&2
-echo -e "${CLR_ERR}╔══════════════════════════════════════════════════════╗${CLR_RESET}" >&2
-echo -e "${CLR_ERR}║  !!  実際のリポジトリと組織に、リリースします        ║${CLR_RESET}" >&2
-echo -e "${CLR_ERR}║      Hello World を、リリースして、削除します        ║${CLR_RESET}" >&2
-echo -e "${CLR_ERR}║      管理者以外は、実行しないでください              ║${CLR_RESET}" >&2
-echo -e "${CLR_ERR}╚══════════════════════════════════════════════════════╝${CLR_RESET}" >&2
-echo "" >&2
-# 確認は、Enter を 1 回押すだけ（q で中断）。入力を、最小にするため。本番を含むときは、文面で、明示する
-if [[ $NEED_PROD_CONFIRM -eq 1 ]]; then
-    echo -e "  ${CLR_ERR}本番（または、種類を判定できない）組織に、Hello World を、リリースして、削除します。${CLR_RESET}" >&2
-    wizard_confirm "本番の組織を含みます。Enter で、${REPO} の検証を始めます（q で中断）"
-else
-    wizard_confirm "Enter で、${REPO} の検証を始めます（q で中断）"
+if [[ "${SF_VERIFY_CONFIRMED:-}" != "1" ]]; then
+    echo "" >&2
+    echo -e "${CLR_ERR}╔══════════════════════════════════════════════════════╗${CLR_RESET}" >&2
+    echo -e "${CLR_ERR}║  !!  実際のリポジトリと組織に、リリースします        ║${CLR_RESET}" >&2
+    echo -e "${CLR_ERR}║      Hello World を、リリースして、削除します        ║${CLR_RESET}" >&2
+    echo -e "${CLR_ERR}║      管理者以外は、実行しないでください              ║${CLR_RESET}" >&2
+    echo -e "${CLR_ERR}╚══════════════════════════════════════════════════════╝${CLR_RESET}" >&2
+    echo "" >&2
+    # 確認は、Enter を 1 回押すだけ（q で中断）。入力を、最小にするため。本番を含むときは、文面で、明示する
+    if [[ $NEED_PROD_CONFIRM -eq 1 ]]; then
+        echo -e "  ${CLR_ERR}本番（または、種類を判定できない）組織に、Hello World を、リリースして、削除します。${CLR_RESET}" >&2
+        wizard_confirm "本番の組織を含みます。Enter で、${REPO} の検証を始めます（q で中断）"
+    else
+        wizard_confirm "Enter で、${REPO} の検証を始めます（q で中断）"
+    fi
 fi
 
 # ------------------------------------------------------------------------------
@@ -193,18 +221,18 @@ _vchk() {
     return 1
 }
 
-_slack_ok() { sfv_gh run view "$1" -R "$REPO" --log 2>/dev/null | grep -F "Slack response" | grep -q '"ok":true'; }
+_slack_ok() { verify_gh run view "$1" -R "$REPO" --log 2>/dev/null | grep -F "Slack response" | grep -q '"ok":true'; }
 
 # 実行が成功したか。失敗したら、ログを表示し、1 回だけ再実行する（一時的な失敗への対策）。引数: 実行 ID ラベル
 _run_ok() {
     local id="$1" label="$2" out line
-    [[ "$(sfv_run_conclusion "$REPO" "$id")" == "success" ]] && return 0
+    [[ "$(verify_run_conclusion "$REPO" "$id")" == "success" ]] && return 0
     log "WARNING" "${label}: 失敗しました。失敗したステップのログ（末尾 30 行）:"
-    out=$(sfv_gh run view "$id" -R "$REPO" --log-failed 2>/dev/null | sed -E 's/\x1b\[[0-9;]*m//g' | tail -n 30) || true  # VAR=$(cmd) のため run 不使用
+    out=$(verify_gh run view "$id" -R "$REPO" --log-failed 2>/dev/null | sed -E 's/\x1b\[[0-9;]*m//g' | tail -n 30) || true  # VAR=$(cmd) のため run 不使用
     while IFS= read -r line; do printf '    %s\n' "$(_mask_secrets "$line")" >&2; done <<< "$out"
     log "WARNING" "${label}: 一時的な失敗の可能性があるため、1 回だけ再実行します。"
-    sfv_rerun_and_wait "$REPO" "$id" || return 1
-    if [[ "$(sfv_run_conclusion "$REPO" "$id")" == "success" ]]; then
+    verify_rerun_and_wait "$REPO" "$id" || return 1
+    if [[ "$(verify_run_conclusion "$REPO" "$id")" == "success" ]]; then
         FLAKY=$((FLAKY + 1))
         log "WARNING" "${label}: 再実行で成功しました（一時的な失敗だった可能性があります）。"
         return 0
@@ -225,11 +253,11 @@ _login_step_names() {
 _login_conclusion() {
     local id="$1" t="$2" name c
     while IFS= read -r name; do
-        c=$(SFV_CONCLUSION_TRIES=1 sfv_step_conclusion "$REPO" "$id" "$name")  # VAR=$(cmd) のため run 不使用
+        c=$(VERIFY_CONCLUSION_TRIES=1 verify_step_conclusion "$REPO" "$id" "$name")  # VAR=$(cmd) のため run 不使用
         if [[ -n "$c" ]]; then printf '%s' "$c"; return 0; fi
     done < <(_login_step_names "$t")
     name=$(_login_step_names "$t" | head -1)  # VAR=$(cmd) のため run 不使用
-    sfv_step_conclusion "$REPO" "$id" "$name"
+    verify_step_conclusion "$REPO" "$id" "$name"
 }
 
 # 段階ごとの確認: その段階の組織に、入ったか（別の組織に、入っていないか）。引数: 段階 実行 ID 種類（リリース / 削除）
@@ -252,9 +280,9 @@ _evidence() {
     done
     _vchk "${kind}（${t}）: ${t} の接続ユーザー（SF_USERNAME_$(_suffix_of "$t")）が、登録されている" test -n "$user"
     if [[ -n "$user" ]]; then
-        _vchk "${kind}（${t}）: ログインしたユーザーが、${t} の接続ユーザー（${user}）と一致する" sfv_run_log_has "$REPO" "$id" "$user"
+        _vchk "${kind}（${t}）: ログインしたユーザーが、${t} の接続ユーザー（${user}）と一致する" verify_run_log_has "$REPO" "$id" "$user"
     fi
-    _vchk "${kind}（${t}）: ログに、${SFV_APEX_HELLO} が出ている" sfv_run_log_has "$REPO" "$id" "$SFV_APEX_HELLO"
+    _vchk "${kind}（${t}）: ログに、${VERIFY_APEX_HELLO} が出ている" verify_run_log_has "$REPO" "$id" "$VERIFY_APEX_HELLO"
     if ! _slack_ok "$id"; then
         log "WARNING" "  [注意] ${kind}（${t}）: Slack への通知の成功（ok:true）を、確認できませんでした（検証の成否には、含めません）。"
     fi
@@ -266,7 +294,7 @@ _guidance() {
     log "ERROR" "検証を、途中で止めました。"
     if (( ${#LEFT[@]} > 0 )); then
         log "WARNING" "  Hello World が、次の段階の組織に、残っている可能性があります: ${!LEFT[*]}"
-        log "WARNING" "  削除のみを、やり直すには、次を実行してください: sf-verify.sh --cleanup"
+        log "WARNING" "  削除のみを、やり直すには、次を実行してください: sf-init.sh --verify --cleanup"
     fi
     log "WARNING" "  PR が残っているときは、GitHub の画面で、確認してください（https://github.com/${REPO}/pulls）。"
 }
@@ -277,22 +305,22 @@ _guidance() {
 FLOW_RUN=""
 _pr_flow() {
     local label="$1" br="$2" title="$3" base="$4" mode="$5" prn runid b_val b_rel b_pro pid
-    b_val=$(sfv_latest_run_id "$REPO" wf-validate.yml "$br")    # VAR=$(cmd) のため run 不使用
-    b_rel=$(sfv_latest_run_id "$REPO" wf-release.yml "$br")     # VAR=$(cmd) のため run 不使用
-    b_pro=$(sfv_latest_run_id "$REPO" wf-propagate.yml "$br")   # VAR=$(cmd) のため run 不使用
-    prn=$(sfv_pr_create "$REPO" "$br" "$title" "sf-verify.sh による検証（Hello World）。" "$base") || prn=""  # VAR=$(cmd) のため run 不使用
+    b_val=$(verify_latest_run_id "$REPO" wf-validate.yml "$br")    # VAR=$(cmd) のため run 不使用
+    b_rel=$(verify_latest_run_id "$REPO" wf-release.yml "$br")     # VAR=$(cmd) のため run 不使用
+    b_pro=$(verify_latest_run_id "$REPO" wf-propagate.yml "$br")   # VAR=$(cmd) のため run 不使用
+    prn=$(verify_pr_create "$REPO" "$br" "$title" "sf-init.sh --verify による検証（Hello World）。" "$base") || prn=""  # VAR=$(cmd) のため run 不使用
     _vchk "${label}: PR を作成した（${base} 向け）" test -n "$prn" || return 1
-    runid=$(sfv_wait_pr_run "$REPO" wf-validate.yml "$br" "$b_val") || runid=""   # VAR=$(cmd) のため run 不使用
+    runid=$(verify_wait_pr_run "$REPO" wf-validate.yml "$br" "$b_val") || runid=""   # VAR=$(cmd) のため run 不使用
     _vchk "${label}: wf-validate（検証）が実行され、完了した" test -n "$runid" || return 1
     _vchk "${label}: wf-validate が成功した" _run_ok "$runid" "${label}: wf-validate" || return 1
-    _vchk "${label}: PR をマージした" sfv_pr_merge "$REPO" "$prn" || return 1
+    _vchk "${label}: PR をマージした" verify_pr_merge "$REPO" "$prn" || return 1
     [[ "$mode" == "release" ]] && LEFT["$base"]=1   # マージした時点から、組織に、クラスが入った可能性がある
-    runid=$(sfv_wait_pr_run "$REPO" wf-release.yml "$br" "$b_rel") || runid=""    # VAR=$(cmd) のため run 不使用
+    runid=$(verify_wait_pr_run "$REPO" wf-release.yml "$br" "$b_rel") || runid=""    # VAR=$(cmd) のため run 不使用
     _vchk "${label}: wf-release が実行され、完了した" test -n "$runid" || return 1
     FLOW_RUN="$runid"
     _vchk "${label}: wf-release が成功した" _run_ok "$runid" "${label}: wf-release" || return 1
     if [[ "$base" == "main" ]]; then
-        pid=$(sfv_wait_pr_run "$REPO" wf-propagate.yml "$br" "$b_pro") || pid=""   # VAR=$(cmd) のため run 不使用
+        pid=$(verify_wait_pr_run "$REPO" wf-propagate.yml "$br" "$b_pro") || pid=""   # VAR=$(cmd) のため run 不使用
         if _vchk "${label}: wf-propagate が実行され、完了した" test -n "$pid"; then
             _vchk "${label}: wf-propagate が成功した" _run_ok "$pid" "${label}: wf-propagate" || true  # 失敗しても、続きの確認は進める
         fi
@@ -303,26 +331,58 @@ _pr_flow() {
 # リリース用のブランチを作る（main の先頭から。クラスのファイルと、リリース対象）。引数: ブランチ
 _make_release_branch() {
     local br="$1" sha p
-    sha=$(sfv_branch_sha "$REPO" main)  # VAR=$(cmd) のため run 不使用
+    sha=$(verify_branch_sha "$REPO" main)  # VAR=$(cmd) のため run 不使用
     [[ -n "$sha" ]] || return 1
-    sfv_branch_create "$REPO" "$br" "$sha" || return 1
+    verify_branch_create "$REPO" "$br" "$sha" || return 1
     while IFS= read -r p; do
-        sfv_hello_content_for "$p" | sfv_file_put "$REPO" "$br" "$p" "verify: Hello World を追加" || return 1
-    done < <(sfv_hello_paths)
-    sfv_hello_deploy_target_text | sfv_file_put "$REPO" "$br" "sf-tools/release/${br}/deploy-target.txt" "verify: リリース対象" || return 1
-    sfv_empty_target_text        | sfv_file_put "$REPO" "$br" "sf-tools/release/${br}/remove-target.txt" "verify: 削除対象（なし）" || return 1
+        verify_hello_content_for "$p" | verify_file_put "$REPO" "$br" "$p" "verify: Hello World を追加" || return 1
+    done < <(verify_hello_paths)
+    verify_hello_deploy_target_text | verify_file_put "$REPO" "$br" "sf-tools/release/${br}/deploy-target.txt" "verify: リリース対象" || return 1
+    verify_empty_target_text        | verify_file_put "$REPO" "$br" "sf-tools/release/${br}/remove-target.txt" "verify: 削除対象（なし）" || return 1
 }
 # 削除用のブランチを作る（main の先頭から。クラスのファイルの削除と、削除対象）。引数: ブランチ
 _make_delete_branch() {
     local br="$1" sha p
-    sha=$(sfv_branch_sha "$REPO" main)  # VAR=$(cmd) のため run 不使用
+    sha=$(verify_branch_sha "$REPO" main)  # VAR=$(cmd) のため run 不使用
     [[ -n "$sha" ]] || return 1
-    sfv_branch_create "$REPO" "$br" "$sha" || return 1
+    verify_branch_create "$REPO" "$br" "$sha" || return 1
     while IFS= read -r p; do
-        sfv_file_delete "$REPO" "$br" "$p" "verify: Hello World を削除" || return 1
-    done < <(sfv_hello_paths)
-    sfv_empty_target_text         | sfv_file_put "$REPO" "$br" "sf-tools/release/${br}/deploy-target.txt" "verify: リリース対象（なし）" || return 1
-    sfv_hello_remove_target_text  | sfv_file_put "$REPO" "$br" "sf-tools/release/${br}/remove-target.txt" "verify: 削除対象" || return 1
+        verify_file_delete "$REPO" "$br" "$p" "verify: Hello World を削除" || return 1
+    done < <(verify_hello_paths)
+    verify_empty_target_text         | verify_file_put "$REPO" "$br" "sf-tools/release/${br}/deploy-target.txt" "verify: リリース対象（なし）" || return 1
+    verify_hello_remove_target_text  | verify_file_put "$REPO" "$br" "sf-tools/release/${br}/remove-target.txt" "verify: 削除対象" || return 1
+}
+
+# 環境全体の確認（リリースの前に行う。NG があれば、リリースへ進まない: 組織に、何も変更していない状態で止まる）
+# ローカルのログに、Token・認証 URL が、残っていないこと（sf-init・verify などのログ）
+_logs_clean() {
+    local f found=0
+    for f in "$HOME"/sf-tools/logs/*.log; do
+        [[ -f "$f" ]] || continue
+        if grep -qE 'ghp_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|xox[bp]-[0-9A-Za-z-]{20,}|force://[^[:space:]]*:[^[:space:]]*:[^@[:space:]]{20,}@' "$f" 2>/dev/null; then
+            log "ERROR" "    Token（または認証 URL）らしい文字列が、ログに残っています: ${f}"
+            found=1
+        fi
+    done
+    [[ $found -eq 0 ]]
+}
+_tools_branch_ok() {
+    local v
+    v=$(_var SF_TOOLS_BRANCH)  # VAR=$(cmd) のため run 不使用
+    log "INFO" "    SF_TOOLS_BRANCH = ${v:-（未設定）}"
+    [[ "$v" == "main" || "$v" == "development" ]]
+}
+# wf-metasync を、手動で 1 回実行して、成功を確認する（JWT ログイン・sf-tools の取得を含む）
+_metasync_check() {
+    local id
+    id=$(verify_dispatch_workflow "$REPO" wf-metasync.yml main) || id=""  # VAR=$(cmd) のため run 不使用
+    _vchk "環境（wf-metasync）: 起動した" test -n "$id" || return 1
+    _vchk "環境（wf-metasync）: 完了した" verify_wait_run "$REPO" "$id" || return 1
+    _vchk "環境（wf-metasync）: 成功した（Salesforce → Git の同期）" _run_ok "$id" "wf-metasync" || return 1
+    _vchk "環境（wf-metasync）: Salesforce 組織への JWT ログインが成功した" \
+        test "$(verify_step_conclusion "$REPO" "$id" "Salesforce 組織にログイン")" == "success"
+    _vchk "環境（wf-metasync）: sf-tools の取得が成功した（公開リポジトリを、Token なしで clone）" \
+        test "$(verify_step_conclusion "$REPO" "$id" "自動化ツール（sf-tools）を取得")" == "success"
 }
 
 STAMP=$(date +%H%M%S)  # VAR=$(cmd) のため run 不使用
@@ -330,6 +390,25 @@ JOB_RELEASE="verify-hello-${STAMP}"
 JOB_DELETE="verify-hello-delete-${STAMP}"
 
 if [[ $CLEANUP_ONLY -eq 0 ]]; then
+    log "HEADER" "環境の確認"
+    # 環境の確認で、NG があれば、そこで止める。組織・リポジトリに、何も変更しない状態で終わる
+    #   （wf-metasync は、組織の変更を main にコミットすることがあるため、手前の確認が、すべて OK のときだけ実行する）
+    _env_stop_if_ng() {
+        [[ $NG_COUNT -eq 0 ]] && return 0
+        echo "" >&2
+        log "ERROR" "環境の確認で、NG があります。これ以上は、進みません（リリースも、wf-metasync も、行っていません）。"
+        log "WARNING" "  上の [NG] を直してから、もう一度、実行してください。"
+        exit $RET_NG
+    }
+    _vchk "環境: SF_TOOLS_BRANCH が、main または development である" _tools_branch_ok || true
+    _vchk "環境: ローカルのログに、Token・認証 URL が残っていない" _logs_clean || true
+    _env_stop_if_ng
+    if [[ $NO_METASYNC -eq 0 ]]; then
+        _metasync_check || true
+    else
+        log "INFO" "  wf-metasync の実行は、省略しました（--no-metasync）。"
+    fi
+    _env_stop_if_ng
     log "HEADER" "リリース（${TIERS[*]}）"
     if _vchk "リリース用のブランチ ${JOB_RELEASE} を作成した（クラスのファイルとリリース対象）" _make_release_branch "$JOB_RELEASE"; then
         for t in "${TIERS[@]}"; do

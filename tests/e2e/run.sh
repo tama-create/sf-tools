@@ -35,7 +35,7 @@
 #   ・~/sf-tools が development ブランチで、origin/development と一致していること
 #     （GitHub Actions は sf-tools の origin/development を使うため）
 #
-# 【関連】 管理者の実際のリポジトリ・実際の組織での検証は、bin/sf-verify.sh（この e2e は、sf-tools の開発者の回帰テスト）
+# 【関連】 管理者の実際のリポジトリ・実際の組織での検証は、phases/init/verify.sh（この e2e は、sf-tools の開発者の回帰テスト）
 #
 # 【オプション】
 #   --cleanup     : 終了時に、テスト用のものを削除する（既定は削除しない。次回の前掃除、または cleanup.sh で削除される）
@@ -252,33 +252,10 @@ _not_in_file()  { [[ ! -f "$2" ]] || ! grep -qF -- "$1" "$2"; }
 # Actions: ワークフローを手動で起動し、起動した実行の ID を標準出力に返す（完了は待たない）
 #   起動の前の、最新の実行 ID を覚え、それより新しい実行だけを、起動した実行とみなす（古い実行を、取り違えないため）。
 #   起動の呼び出しが、すべて失敗したら、戻り値 1
-_dispatch_workflow() {
-    local wf="$1" i id before dispatched=0
-    before=$(_e2e_gh run list -R "$REPO_FULL" --workflow "$wf" --event workflow_dispatch --limit 1 --json databaseId --jq '.[0].databaseId // 0' 2>/dev/null)  # VAR=$(cmd) のため run 不使用
-    [[ "$before" =~ ^[0-9]+$ ]] || before=0
-    for ((i = 1; i <= 12; i++)); do   # 登録直後はワークフローが認識されるまで少しかかる
-        if _e2e_gh workflow run "$wf" -R "$REPO_FULL" --ref main >/dev/null 2>&1; then dispatched=1; break; fi  # 条件チェック
-        sleep 5  # run 不使用: 待機
-    done
-    [[ $dispatched -eq 1 ]] || return 1
-    for ((i = 1; i <= 12; i++)); do
-        id=$(_e2e_gh run list -R "$REPO_FULL" --workflow "$wf" --event workflow_dispatch --limit 1 --json databaseId --jq '.[0].databaseId // empty' 2>/dev/null)  # VAR=$(cmd) のため run 不使用
-        [[ "$id" =~ ^[0-9]+$ ]] && (( id > before )) && { printf '%s' "$id"; return 0; }
-        sleep 5  # run 不使用: 待機
-    done
-    return 1
-}
+_dispatch_workflow() { verify_dispatch_workflow "$REPO_FULL" "$1" main; }
 
 # Actions: 実行 ID の実行が、完了するまで待つ（E2E_WF_TIMEOUT 秒（既定 1200）以内。E2E_POLL_SEC 秒（既定 5）おきに確認）
-_wait_run() {
-    local id="$1" timeout="${E2E_WF_TIMEOUT:-1200}" poll="${E2E_POLL_SEC:-5}" waited=0 status
-    while (( waited < timeout )); do
-        status=$(_e2e_gh run view "$id" -R "$REPO_FULL" --json status --jq .status 2>/dev/null)  # VAR=$(cmd) のため run 不使用
-        [[ "$status" == "completed" ]] && return 0
-        sleep "$poll"; waited=$((waited + poll))  # run 不使用: 待機
-    done
-    return 1
-}
+_wait_run() { verify_wait_run "$REPO_FULL" "$1"; }
 _run_conclusion() { e2e_run_conclusion "$REPO_FULL" "$1"; }   # 空のときは、やり直す（lib.sh）
 _step_conclusion() { e2e_step_conclusion "$REPO_FULL" "$1" "$2"; }
 
@@ -298,8 +275,8 @@ _hello_write_release() {   # 引数: クローンのフォルダ ブランチ名
     local repo="$1" job="$2" p
     mkdir -p "${repo}/force-app/main/default/classes" || return 1  # run 不使用: テスト用の作業フォルダへの書き込み
     while IFS= read -r p; do
-        sfv_hello_content_for "$p" > "${repo}/${p}" || return 1  # run 不使用: 同上（本文は、lib/sf-verify.sh と共有）
-    done < <(sfv_hello_paths)
+        verify_hello_content_for "$p" > "${repo}/${p}" || return 1  # run 不使用: 同上（本文は、lib/verify-common.sh と共有）
+    done < <(verify_hello_paths)
     e2e_hello_deploy_target_text > "${repo}/sf-tools/release/${job}/deploy-target.txt"
 }
 _hello_write_remove() {   # 引数: クローンのフォルダ ブランチ名（削除: remove-target.txt。deploy-target.txt は雛形のまま）

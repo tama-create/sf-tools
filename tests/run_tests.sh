@@ -42,9 +42,9 @@ CLR_RST='\033[0m'
 TEST_FILES=(
     test_common.sh
     test_wizard.sh
-    test_sf-org.sh
-    test_sf-diag.sh
-    test_sf-verify.sh
+    test_org.sh
+    test_diag.sh
+    test_verify.sh
     test_init-common.sh
     test_sf-unhook.sh
     test_sf-hook.sh
@@ -115,14 +115,17 @@ if [[ "${1:-}" == "--changed" ]]; then
             lib/wizard.sh)
                 _changed_tests+=("test_wizard.sh")
                 ;;
-            lib/sf-org.sh)
-                _changed_tests+=("test_sf-org.sh")
+            lib/org.sh)
+                _changed_tests+=("test_org.sh")
                 ;;
-            lib/sf-diag.sh)
-                _changed_tests+=("test_sf-diag.sh")
+            lib/diag.sh)
+                _changed_tests+=("test_diag.sh")
                 ;;
-            lib/sf-verify.sh)
-                _changed_tests+=("test_sf-verify.sh")
+            lib/verify-common.sh)
+                _changed_tests+=("test_verify.sh")
+                ;;
+            phases/init/verify.sh)
+                _changed_tests+=("test_verify.sh")
                 ;;
             phases/init/*)
                 _changed_tests+=("test_sf-init.sh")

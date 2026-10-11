@@ -1,6 +1,6 @@
 #!/bin/bash
 # ==============================================================================
-# sf-org.sh - Salesforce 組織の接続情報の共通部品（ログイン先の選択・組織の種類の読み取り・本番のガード）
+# org.sh - Salesforce 組織の接続情報の共通部品（ログイン先の選択・組織の種類の読み取り・本番のガード）
 # ==============================================================================
 # 段階（main / staging / develop）と、Salesforce 組織の種類（本番・Sandbox・Developer Edition など）は、
 # 基本的に独立している。ただし、**本番組織は、main にしか、つなげない**（F8。doc/wizard-ux-design.md 4.7）。
@@ -10,19 +10,19 @@
 #   lib/common.sh を source 済みであること（log / read_input / read_or_quit / ask_yn / run / die）。
 #
 # 【提供する関数】
-#   sf_org_tier_of_suffix SUFFIX             ... PROD→main / STG→staging / DEV→develop を出力する
-#   sf_org_validate_url URL                  ... Salesforce のログイン先として正しい URL か（https かつ salesforce.com / force.com）
-#   sf_org_choose_login_url VAR LABEL TIER [SUFFIX]
+#   org_tier_of_suffix SUFFIX             ... PROD→main / STG→staging / DEV→develop を出力する
+#   org_validate_url URL                  ... Salesforce のログイン先として正しい URL か（https かつ salesforce.com / force.com）
+#   org_choose_login_url VAR LABEL TIER [SUFFIX]
 #                                            ... ログイン先（URL）を、3 択で選ぶ。種類ではなく、URL で決める（F2）
-#   sf_org_read_info ALIAS                   ... ログイン済みの組織から、ID・名前・種類を読み取る（ORG_* 変数にセット）
-#   sf_org_kind                              ... production / sandbox / developer / trial / unknown を出力する
-#   sf_org_kind_label KIND                   ... 種類の表示名
-#   sf_org_guard TIER LABEL                  ... 本番は main のみ（F8）。違反・判定不能（main 以外）は戻り値 2
-#   sf_org_parse_info JSON                   ... sf data query の JSON から、ORG_* を取り出す
-#   sf_org_jwt_test ALIAS KEY KEYFILE USER URL ... JWT 接続テストと、組織情報の読み取り（一時的なホームの中。従来の接続アプリ用）
-#   sf_org_save SUFFIX                       ... 組織 ID・名前・種類・確認日時を、GitHub の Variables に保存する
+#   org_read_info ALIAS                   ... ログイン済みの組織から、ID・名前・種類を読み取る（ORG_* 変数にセット）
+#   org_kind                              ... production / sandbox / developer / trial / unknown を出力する
+#   org_kind_label KIND                   ... 種類の表示名
+#   org_guard TIER LABEL                  ... 本番は main のみ（F8）。違反・判定不能（main 以外）は戻り値 2
+#   org_parse_info JSON                   ... sf data query の JSON から、ORG_* を取り出す
+#   org_jwt_test ALIAS KEY KEYFILE USER URL ... JWT 接続テストと、組織情報の読み取り（一時的なホームの中。従来の接続アプリ用）
+#   org_save SUFFIX                       ... 組織 ID・名前・種類・確認日時を、GitHub の Variables に保存する
 #
-# 【ORG_* 変数】（sf_org_read_info がセットする）
+# 【ORG_* 変数】（org_read_info がセットする）
 #   ORG_ID / ORG_NAME / ORG_IS_SANDBOX(true|false|"") / ORG_EDITION / ORG_TRIAL_EXPIRES
 # ==============================================================================
 
@@ -30,7 +30,7 @@ SF_ORG_URL_LOGIN="https://login.salesforce.com"
 SF_ORG_URL_TEST="https://test.salesforce.com"
 
 # 段階の識別子（Secrets / Variables の接尾辞）から、段階の名前を出す
-sf_org_tier_of_suffix() {
+org_tier_of_suffix() {
     case "$1" in
         PROD) echo "main" ;;
         STG)  echo "staging" ;;
@@ -40,7 +40,7 @@ sf_org_tier_of_suffix() {
 }
 
 # Salesforce のログイン先として正しい URL か。https で、ホストが salesforce.com または force.com 配下
-sf_org_validate_url() {
+org_validate_url() {
     [[ "$1" =~ ^https://[A-Za-z0-9.-]+\.(salesforce\.com|force\.com)(/[^[:space:]]*)?$ ]]
 }
 
@@ -48,7 +48,7 @@ sf_org_validate_url() {
 #   ・選択肢は、種類ではなく、ログイン先の URL（F2）。3 択: login.salesforce.com / test.salesforce.com / 組織の URL
 #   ・Enter は、[2] test.salesforce.com（Sandbox。安全な既定。段階に依存しない: F7）
 #   ・環境変数 SF_INIT_LOGIN_URL_<接尾辞>（login / test / URL）が指定されていれば、質問しない（自動実行用）
-sf_org_choose_login_url() {
+org_choose_login_url() {
     local -n _sfo_out="$1"
     local label="$2" tier="${3:-main}" suffix="${4:-}"
     local envname preset="" hint1 ans url
@@ -62,7 +62,7 @@ sf_org_choose_login_url() {
             login) _sfo_out="$SF_ORG_URL_LOGIN" ;;
             test)  _sfo_out="$SF_ORG_URL_TEST" ;;
             *)
-                sf_org_validate_url "$preset" || die "${envname} の値が、Salesforce のログイン先として正しくありません: ${preset}"
+                org_validate_url "$preset" || die "${envname} の値が、Salesforce のログイン先として正しくありません: ${preset}"
                 _sfo_out="${preset%/}" ;;
         esac
         log "INFO" "  ${label}のログイン先: ${_sfo_out}（環境変数 ${envname} の指定）"
@@ -86,7 +86,7 @@ sf_org_choose_login_url() {
                 while true; do
                     read_or_quit url "  組織の URL（q で中断）: "
                     url="${url%/}"
-                    sf_org_validate_url "$url" && break
+                    org_validate_url "$url" && break
                     log "WARNING" "「${url}」は、Salesforce のログイン先の形式ではありません（https:// で始まり、salesforce.com または force.com のドメインです）。"
                 done
                 _sfo_out="$url"; break ;;
@@ -100,7 +100,7 @@ sf_org_choose_login_url() {
 # sf data query の JSON（文字列）から、組織の ID・名前・種類を読み取る。引数: JSON
 #   戻り値: 0=読み取れた / 1=読み取れなかった（status が 0 ではない・ID や IsSandbox がない。推測しない）
 #   jq は使わない（CLAUDE.md: 追加の依存を増やさない）。grep / sed で、必要な項目だけを取り出す
-sf_org_parse_info() {
+org_parse_info() {
     local out="$1"
     ORG_ID=""; ORG_NAME=""; ORG_IS_SANDBOX=""; ORG_EDITION=""; ORG_TRIAL_EXPIRES=""
     # status が、あって、0 以外なら、失敗として扱う
@@ -115,13 +115,13 @@ sf_org_parse_info() {
 
 # ログイン済みの組織から、ID・名前・種類を読み取る。引数: エイリアス（またはユーザー名）
 #   戻り値: 0=読み取れた / 1=読み取れなかった（権限不足・通信の失敗など。推測しない）
-sf_org_read_info() {
+org_read_info() {
     local out
     ORG_ID=""; ORG_NAME=""; ORG_IS_SANDBOX=""; ORG_EDITION=""; ORG_TRIAL_EXPIRES=""
     out=$(sf data query \
         --query "SELECT Id, Name, IsSandbox, OrganizationType, TrialExpirationDate FROM Organization LIMIT 1" \
         --target-org "$1" --json 2>/dev/null) || return 1  # VAR=$(cmd) のため run 不使用（出力の取得。成否は終了コードで判定）
-    sf_org_parse_info "$out"
+    org_parse_info "$out"
 }
 
 # JWT 接続テストと、組織情報の読み取りを、同じ一時的なホームフォルダの中で行う（従来の接続アプリ用）
@@ -129,8 +129,8 @@ sf_org_read_info() {
 #   認証は、一時的なホームと一緒に消えるため、組織情報の読み取りも、その中で行う。
 #   引数: エイリアス コンシューマー鍵 秘密鍵ファイル ユーザー名 ログイン入口
 #   戻り値: sf org login jwt の終了コード。出力（コンシューマー鍵を含みうる）は SF_ORG_JWT_OUT。
-#           成功したときは、ORG_*（sf_org_parse_info）も、セットする（読み取れなければ、空のまま）
-sf_org_jwt_test() {
+#           成功したときは、ORG_*（org_parse_info）も、セットする（読み取れなければ、空のまま）
+org_jwt_test() {
     local out rc marker="---SF_ORG_INFO---"
     SF_ORG_JWT_OUT=""
     ORG_ID=""; ORG_NAME=""; ORG_IS_SANDBOX=""; ORG_EDITION=""; ORG_TRIAL_EXPIRES=""
@@ -143,15 +143,15 @@ sf_org_jwt_test() {
     rc=$?
     SF_ORG_JWT_OUT="${out%%"$marker"*}"
     if [[ $rc -eq 0 && "$out" == *"$marker"* ]]; then
-        sf_org_parse_info "${out#*"$marker"}" || true
+        org_parse_info "${out#*"$marker"}" || true
     fi
     return $rc
 }
 
-# 組織の種類。IsSandbox / OrganizationType / TrialExpirationDate から判定する（sf_org_read_info のあとに呼ぶ）
+# 組織の種類。IsSandbox / OrganizationType / TrialExpirationDate から判定する（org_read_info のあとに呼ぶ）
 #   production : Sandbox ではなく、Developer Edition でも Trial でもない
 #   unknown    : 読み取れていない・矛盾している（推測しない）
-sf_org_kind() {
+org_kind() {
     if [[ -z "${ORG_ID:-}" || -z "${ORG_IS_SANDBOX:-}" ]]; then echo "unknown"; return 0; fi
     if [[ "$ORG_IS_SANDBOX" == "true" ]]; then echo "sandbox"; return 0; fi
     if [[ "${ORG_EDITION:-}" == *"Developer"* ]]; then echo "developer"; return 0; fi
@@ -161,7 +161,7 @@ sf_org_kind() {
 }
 
 # 種類の表示名
-sf_org_kind_label() {
+org_kind_label() {
     case "$1" in
         production) echo "本番" ;;
         sandbox)    echo "Sandbox" ;;
@@ -173,10 +173,10 @@ sf_org_kind_label() {
 
 # 本番は main のみ（F8）。引数: 段階（main|staging|develop）/ 表示名
 #   戻り値: 0=接続してよい / 2=接続できない（本番を、main 以外に接続しようとした。または、判定不能で、確認に N と答えた）
-sf_org_guard() {
+org_guard() {
     local tier="$1" label="$2" kind
-    kind=$(sf_org_kind)
-    log "INFO" "  ログインした組織: ${ORG_NAME:-（名前を取得できません）}（$(sf_org_kind_label "$kind")${ORG_ID:+ / 組織 ID ${ORG_ID}}）"
+    kind=$(org_kind)
+    log "INFO" "  ログインした組織: ${ORG_NAME:-（名前を取得できません）}（$(org_kind_label "$kind")${ORG_ID:+ / 組織 ID ${ORG_ID}}）"
     case "$kind" in
         production)
             if [[ "$tier" != "main" ]]; then
@@ -197,11 +197,11 @@ sf_org_guard() {
 }
 
 # 組織の情報を、GitHub の Variables に保存する（--status の表示用）。引数: 接尾辞（PROD|STG|DEV）
-#   REPO_FULL_NAME と、sf_org_read_info の結果が要る。読み取れていなければ、保存しない
-sf_org_save() {
+#   REPO_FULL_NAME と、org_read_info の結果が要る。読み取れていなければ、保存しない
+org_save() {
     local suffix="$1" kind now
     [[ -n "${REPO_FULL_NAME:-}" && -n "${ORG_ID:-}" ]] || return 0
-    kind=$(sf_org_kind)
+    kind=$(org_kind)
     now=$(date '+%Y-%m-%d %H:%M')  # VAR=$(cmd) のため run 不使用
     run gh variable set "SF_ORG_ID_${suffix}"      --body "$ORG_ID"        -R "$REPO_FULL_NAME" || log "WARNING" "  SF_ORG_ID_${suffix} を保存できませんでした。"
     run gh variable set "SF_ORG_NAME_${suffix}"    --body "${ORG_NAME:-}"  -R "$REPO_FULL_NAME" || log "WARNING" "  SF_ORG_NAME_${suffix} を保存できませんでした。"

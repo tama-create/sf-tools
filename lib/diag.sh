@@ -1,6 +1,6 @@
 #!/bin/bash
 # ==============================================================================
-# sf-diag.sh - セットアップの状態の診断（sf-init.sh --status が使う）
+# diag.sh - セットアップの状態の診断（sf-init.sh --status が使う）
 # ==============================================================================
 # リポジトリのセットアップが、どこまで正しくできているかを、GitHub から読み取って、項目ごとに表示する。
 # 何も変更しない（読み取りのみ）。「どこで間違えたか分からない」を、なくすための部品。
@@ -21,8 +21,8 @@
 #   直近の wf-metasync / wf-release が成功していれば、JWT 接続は、できている。
 #
 # 【使い方】（呼び出し側が、lib/common.sh を source 済みであること）
-#   source lib/sf-diag.sh
-#   sf_diag_run "owner/force-xxx" main staging develop   # 段階（ブランチ名）を、並べて渡す
+#   source lib/diag.sh
+#   diag_run "owner/force-xxx" main staging develop   # 段階（ブランチ名）を、並べて渡す
 #   # 不足の数は、DIAG_NG に入る（0 なら、不足なし）
 # ==============================================================================
 
@@ -104,7 +104,7 @@ _diag_last_run() {
 }
 
 # 診断を実行して、結果を表示する。引数: リポジトリ（owner/name）段階（ブランチ名）...
-sf_diag_run() {
+diag_run() {
     local repo="$1"; shift
     local -a tiers=("$@")
     local tier suffix names wf

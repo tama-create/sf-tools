@@ -3,7 +3,7 @@
 # status.sh - セットアップの診断と、段階ごとの Salesforce 接続先の一覧（sf-init.sh --status）
 # ==============================================================================
 # force-* ディレクトリの中で、次の 2 つを表示する。何も変更しない（読み取りのみ）。
-#   1. セットアップの診断（lib/sf-diag.sh）: リポジトリ・ブランチ・ワークフロー・Secrets・Variables が、そろっているか。
+#   1. セットアップの診断（lib/diag.sh）: リポジトリ・ブランチ・ワークフロー・Secrets・Variables が、そろっているか。
 #      不足している項目には、直し方を表示する。直近のワークフローの実行結果も表示する（参考）
 #   2. 段階（main / staging / develop）ごとの、Salesforce 組織の接続先
 #      GitHub の Variables（SF_USERNAME_* / SF_INSTANCE_URL_* / SF_ORG_*）を読む。
@@ -31,7 +31,7 @@ export SF_INIT_MODE=1
 
 source "${SF_TOOLS_DIR}/lib/common.sh"
 source "${SF_TOOLS_DIR}/phases/init/init-common.sh"
-source "${SF_TOOLS_DIR}/lib/sf-diag.sh"
+source "${SF_TOOLS_DIR}/lib/diag.sh"
 
 log "HEADER" "セットアップの診断と、Salesforce 接続（段階ごと）"
 
@@ -56,7 +56,7 @@ diag_tiers=("main")
 for _t in staging develop; do
     grep -qx "$_t" "$BRANCHES_FILE" 2>/dev/null && diag_tiers+=("$_t")
 done
-sf_diag_run "$REPO_FULL_NAME" "${diag_tiers[@]}"
+diag_run "$REPO_FULL_NAME" "${diag_tiers[@]}"
 
 echo "" >&2
 echo -e "  ${CLR_WARNING}【Salesforce の接続（段階ごと）】${CLR_RESET}" >&2
@@ -86,7 +86,7 @@ for tier in main staging develop; do
     fi
     found=1
     printf '  %-8s → %s\n' "$tier" "${url:-（ログイン先が未設定）}" >&2
-    printf '             種類: %s / ユーザー: %s\n' "$(sf_org_kind_label "${kind:-unknown}")" "${user:-（未設定）}" >&2
+    printf '             種類: %s / ユーザー: %s\n' "$(org_kind_label "${kind:-unknown}")" "${user:-（未設定）}" >&2
     if [[ -n "$oid" ]]; then
         printf '             組織: %s（ID %s）/ 最終確認: %s\n' "${oname:-（名前なし）}" "$oid" "${chk:-不明}" >&2
         if [[ -n "${SEEN_ORG[$oid]:-}" ]]; then

@@ -48,7 +48,7 @@ if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
     exit 0
 fi
 source "$COMMON_LIB"
-source "${SCRIPT_DIR}/../lib/sf-org.sh"   # ログイン先の選択（種類ではなく URL）・本番は main のみの確認
+source "${SCRIPT_DIR}/../lib/org.sh"   # ログイン先の選択（種類ではなく URL）・本番は main のみの確認
 
 # ------------------------------------------------------------------------------
 # 3. 必須コマンドのチェック
@@ -110,9 +110,9 @@ _test_jwt_login() {
 
     # 出力（stderr 含む）をキャプチャしてログに残し、成否は sf の終了コードで判定する（sf は npm 版が前提）
     # 一時的なホームフォルダの中で実行する: エイリアスが増えず、同じユーザーの既存の sf の認証も置き換わらない。
-    # 組織の種類の読み取りも、同じ一時的なホームの中で行う（sf_org_jwt_test）
+    # 組織の種類の読み取りも、同じ一時的なホームの中で行う（org_jwt_test）
     local jwt_out
-    if ! sf_org_jwt_test "$org_alias" "$consumer_key" "$key_file" "$username" "$instance_url"; then  # 条件チェック
+    if ! org_jwt_test "$org_alias" "$consumer_key" "$key_file" "$username" "$instance_url"; then  # 条件チェック
         jwt_out="$SF_ORG_JWT_OUT"
         log "ERROR" "  ${jwt_out//$consumer_key/***masked***}"
         die "JWT 接続テストに失敗しました（${label}）。"
@@ -124,11 +124,11 @@ _test_jwt_login() {
 
     # 本番組織は main にしか、つなげない（F8）。Secrets を更新する前に確認する（判定できない組織も、main 以外には、つなげない）
     local _t
-    _t=$(sf_org_tier_of_suffix "$suffix")  # VAR=$(cmd) のため run 不使用
-    sf_org_guard "${_t:-main}" "$label" \
+    _t=$(org_tier_of_suffix "$suffix")  # VAR=$(cmd) のため run 不使用
+    org_guard "${_t:-main}" "$label" \
         || die "${label}（${_t:-main}）に、Salesforce の本番組織、または、種類を判定できない組織は、つなげません（本番組織は main のみです）。"
     # 組織の情報（ID・名前・種類・確認日時）を保存する（--status の表示用。読み取れていなければ、保存しない）
-    sf_org_save "$suffix"
+    org_save "$suffix"
 }
 
 # ------------------------------------------------------------------------------
@@ -226,8 +226,8 @@ _update_consumer_key() {
 
     # 接続 URL（ログイン先）: 種類ではなく、URL で選ぶ。段階と組織の種類は、結びつけない（PROD も、選択する）
     local _tier
-    _tier=$(sf_org_tier_of_suffix "$suffix")  # VAR=$(cmd) のため run 不使用
-    sf_org_choose_login_url instance_url "$label" "${_tier:-main}" "$suffix"
+    _tier=$(org_tier_of_suffix "$suffix")  # VAR=$(cmd) のため run 不使用
+    org_choose_login_url instance_url "$label" "${_tier:-main}" "$suffix"
 
     _test_jwt_login "$org_alias" "$suffix" "$label" "$consumer_key" "$username" "$instance_url" "$key_file"
 
@@ -264,8 +264,8 @@ _update_username() {
 
     # 接続 URL（ログイン先）: 種類ではなく、URL で選ぶ。段階と組織の種類は、結びつけない（PROD も、選択する）
     local _tier
-    _tier=$(sf_org_tier_of_suffix "$suffix")  # VAR=$(cmd) のため run 不使用
-    sf_org_choose_login_url instance_url "$label" "${_tier:-main}" "$suffix"
+    _tier=$(org_tier_of_suffix "$suffix")  # VAR=$(cmd) のため run 不使用
+    org_choose_login_url instance_url "$label" "${_tier:-main}" "$suffix"
 
     _test_jwt_login "$org_alias" "$suffix" "$label" "$consumer_key" "$username" "$instance_url" "$key_file"
 
@@ -318,8 +318,8 @@ _update_all() {
 
         # 接続 URL（ログイン先）: 種類ではなく、URL で選ぶ（段階と組織の種類は、結びつけない）
         local _tier
-        _tier=$(sf_org_tier_of_suffix "$suffix")  # VAR=$(cmd) のため run 不使用
-        sf_org_choose_login_url instance_url "$label" "${_tier:-main}" "$suffix"
+        _tier=$(org_tier_of_suffix "$suffix")  # VAR=$(cmd) のため run 不使用
+        org_choose_login_url instance_url "$label" "${_tier:-main}" "$suffix"
 
         _test_jwt_login "$org_alias" "$suffix" "$label" "$consumer_key" "$username" "$instance_url" "$key_file"
 

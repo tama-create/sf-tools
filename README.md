@@ -346,7 +346,7 @@ sf-init.sh --add-tier develop    # 既存プロジェクトに develop を追加
 | `--add-tier staging` | 既存プロジェクトに staging 階層を追加 |
 | `--add-tier develop` | 既存プロジェクトに develop 階層を追加（`main` へは直接 push せず、PR を作成します） |
 | `--reconnect <段階>` | 1 つの段階（main / staging / develop）の、接続先の Salesforce 組織を付け替える（`force-*` 内で実行） |
-| `--status` | 段階ごとの、接続先（ログイン先・組織の種類・ユーザー・組織 ID・最終確認日時）を一覧にする（読み取りのみ。`force-*` 内で実行） |
+| `--status` | **セットアップの診断**（リポジトリ・ブランチ・ワークフロー・Secrets・Variables が、そろっているか。不足は、直し方つきで表示）と、段階ごとの接続先（ログイン先・組織の種類・ユーザー・組織 ID・最終確認日時）の一覧（読み取りのみ。`force-*` 内で実行。不足があれば、終了コード 1） |
 | `--legacy-connected-app` | 従来の接続アプリケーション（今後廃止予定。手動の入力）を使う。既定は、外部クライアントアプリ（自動で作成） |
 
 **Salesforce 組織の接続（段階と組織の種類は、結びつけません）:** main / staging / develop のどの段階にも、本番・Sandbox・Developer Edition などを、自由につなげます（main に Sandbox や Developer Edition でも構いません）。ただし、**Salesforce の本番組織は、main にしかつなげません**（staging・develop に本番をつなごうとすると、ログイン後に、組織の種類を読み取って、中断します）。
@@ -355,7 +355,7 @@ sf-init.sh --add-tier develop    # 既存プロジェクトに develop を追加
   2. `https://test.salesforce.com` — Sandbox（**安全なおすすめ**。本番に影響しません）
   3. 組織の URL を入力（My Domain。例: `https://会社名.my.salesforce.com`）
 - ログイン後に、組織の ID・名前・種類（本番 / Sandbox / Developer Edition / Trial）を、**組織から読み取って**、表示・保存します。
-- あとから付け替えるときは `sf-init.sh --reconnect <段階>`、いまの接続を見るときは `sf-init.sh --status` です（`force-*` フォルダの中で実行します）。
+- あとから付け替えるときは `sf-init.sh --reconnect <段階>`、いまの状態を見るときは `sf-init.sh --status` です（`force-*` フォルダの中で実行します）。`--status` は、「どこで間違えたか分からない」ときの最初の手がかりです。✓（できている）・✗（不足。直し方を表示）・！（注意）・？（確認できず）で、項目ごとに表示します。Salesforce 側（外部クライアントアプリ・JWT 接続）は、ログインが必要なため確認しません。直近の wf-metasync / wf-release が成功していれば、接続はできています。
 
 **画面の流れ（ウィザード形式）:** 実行すると、はじめに、作るもの・かかる時間の目安・**先に用意するもの**（GitHub の管理者のブラウザ、Slack の共有チャンネル、Salesforce の管理者アカウント）・全 8 ステップの一覧が表示されます。用意ができたら Enter を押します（q で中断）。各ステップの先頭には、「ステップ n / 8」と、完了したステップ・そのステップの目的が表示されます。終わると、**できたことと、次にやること**（`sf-job.sh` の実行など）と、**管理者用フォルダ**（`init` フォルダ。削除せず、残します）の場所が表示されます。`~/sf-tools` が古いときは、確認のうえ更新し、**自動で、はじめから実行しなおします**（もう一度の実行は、不要です）。
 
@@ -834,7 +834,9 @@ sf-tools/
 │   └── sf-metasync.sh
 ├── lib/
 │   ├── common.sh               ← 全スクリプト共通ライブラリ
-│   └── wizard.sh               ← ウィザード形式の画面の共通部品（sf-init で使用）
+│   ├── wizard.sh               ← ウィザード形式の画面の共通部品（sf-init で使用）
+│   ├── sf-org.sh               ← Salesforce 組織の接続情報の共通部品（ログイン先の選択・種類の判定・本番は main のみのガード）
+│   └── sf-diag.sh              ← セットアップの診断（sf-init.sh --status で使用。読み取りのみ）
 ├── phases/
 │   └── init/                   ← sf-init.sh のフェーズスクリプト
 │       ├── init-common.sh

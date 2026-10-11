@@ -95,6 +95,15 @@ case "$1 $2" in
         _vn="MOCK_GH_VAR_$3"
         [[ -n "${!_vn:-}" ]] && { echo "${!_vn}"; exit 0; }
         exit 1 ;;
+    "secret list")
+        # --status の診断用: MOCK_GH_SECRETS（改行区切りの名前）。実際の gh と同じく、名前の後ろに TAB と日時が付く
+        while IFS= read -r _n; do [[ -n "$_n" ]] && printf '%s\t2026-10-11T08:00:00Z\n' "$_n"; done <<< "${MOCK_GH_SECRETS:-}"
+        exit 0 ;;
+    "variable list")
+        while IFS= read -r _n; do [[ -n "$_n" ]] && printf '%s\tx\t2026-10-11T08:00:00Z\n' "$_n"; done <<< "${MOCK_GH_VARIABLES:-}"
+        exit 0 ;;
+    "run list")
+        printf '%s\n' "${MOCK_GH_RUN_OUT:-none}"; exit 0 ;;
     "variable set")
         # --body で値が渡される場合は何もしない（標準入力を読むと、テストの入力列を消費してしまう）
         case " $* " in *" --body "*) exit 0 ;; esac
@@ -106,6 +115,11 @@ case "$1 $2" in
             *" .permissions.admin "*|*" '.permissions.admin' "*)
                 if [[ -n "${MOCK_GH_BAD_TOKEN:-}" && "${GH_TOKEN:-}" == "$MOCK_GH_BAD_TOKEN" ]]; then exit 1; fi
                 echo "${MOCK_GH_PERM_ADMIN:-true}"; exit 0 ;;
+        esac
+        # --status の診断用: ブランチの一覧（MOCK_GH_BRANCHES）・ワークフローの一覧（MOCK_GH_WORKFLOWS）
+        case "$2" in
+            */branches) printf '%s\n' "${MOCK_GH_BRANCHES:-}"; exit 0 ;;
+            */contents/.github/workflows) printf '%s\n' "${MOCK_GH_WORKFLOWS:-}"; exit 0 ;;
         esac
         # Ruleset 一覧: MOCK_GH_RULESETS=error → エラー本文を標準出力に出して exit 1（無料プランの 403 を再現）、
         #               MOCK_GH_RULESETS=id    → 既存の Ruleset の ID（12345）を返す
@@ -1774,7 +1788,12 @@ GITEOF
 
     # --- H. --status: 本番が main にだけあれば、正常終了する ---
     : > "$MOCK_CALL_LOG"
+    local diag_secrets diag_vars diag_wf
+    diag_secrets=$'PAT_TOKEN\nSLACK_BOT_TOKEN\nSF_PRIVATE_KEY\nSF_CONSUMER_KEY_PROD\nSF_CONSUMER_KEY_STG'
+    diag_vars=$'SLACK_CHANNEL_ID\nSF_TOOLS_BRANCH\nSF_USERNAME_PROD\nSF_INSTANCE_URL_PROD\nSF_ORG_ID_PROD\nSF_USERNAME_STG\nSF_INSTANCE_URL_STG\nSF_ORG_ID_STG'
+    diag_wf=$'wf-metasync.yml\nwf-propagate.yml\nwf-release.yml\nwf-sequence.yml\nwf-validate.yml'
     ( cd "$force_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
+        MOCK_GH_SECRETS="$diag_secrets" MOCK_GH_VARIABLES="$diag_vars" MOCK_GH_BRANCHES=$'main\nstaging' MOCK_GH_WORKFLOWS="$diag_wf" \
         MOCK_GH_VAR_SF_INSTANCE_URL_PROD=https://login.salesforce.com MOCK_GH_VAR_SF_USERNAME_PROD=admin@example.com \
         MOCK_GH_VAR_SF_ORG_KIND_PROD=production MOCK_GH_VAR_SF_ORG_ID_PROD=00D0000000PROD01 MOCK_GH_VAR_SF_ORG_NAME_PROD="Acme Production" \
         MOCK_GH_VAR_SF_INSTANCE_URL_STG=https://test.salesforce.com MOCK_GH_VAR_SF_USERNAME_STG=admin@example.com.test \
@@ -1784,6 +1803,25 @@ GITEOF
     assert_exit_ok            "$exit_code"                                                    "--status: main = 本番・staging = Sandbox → 正常終了する"
     assert_file_contains      "$out" "種類: 本番"                                               "--status: main の種類（本番）が表示される"
     assert_file_not_contains  "$out" "同じ組織につながっています"                               "--status: 別の組織なら、重複の警告は出ない"
+    assert_file_contains      "$out" "セットアップに、不足はありません"                           "--status: 診断（セットアップの状態）で、不足なしと表示される"
+
+    # --- H2. --status の診断: 不足があれば、直し方つきで表示し、非ゼロで終了する（何も変更しない）---
+    : > "$MOCK_CALL_LOG"
+    ( cd "$force_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
+        MOCK_GH_SECRETS=$'SLACK_BOT_TOKEN\nSF_PRIVATE_KEY\nSF_CONSUMER_KEY_PROD' MOCK_GH_VARIABLES="$diag_vars" \
+        MOCK_GH_BRANCHES="main" MOCK_GH_WORKFLOWS="$diag_wf" \
+        MOCK_GH_VAR_SF_INSTANCE_URL_PROD=https://login.salesforce.com MOCK_GH_VAR_SF_USERNAME_PROD=admin@example.com \
+        MOCK_GH_VAR_SF_ORG_KIND_PROD=developer MOCK_GH_VAR_SF_ORG_ID_PROD=00D0000000DE0001 \
+        bash "$mock_home/sf-tools/bin/sf-init.sh" --status ) > "$out" 2>&1
+    exit_code=$?
+    assert_exit_fail          "$exit_code"                                                    "--status: 診断で不足があれば、非ゼロで終了する"
+    assert_file_contains      "$out" "PAT_TOKEN がありません"                                    "--status: 不足している Secret が表示される"
+    assert_file_contains      "$out" "sf-init.sh --only 6"                                      "--status: 直し方が表示される"
+    assert_file_contains      "$out" "SF_CONSUMER_KEY_STG がありません"                           "--status: 段階（staging）の不足が表示される"
+    assert_file_contains      "$out" "sf-init.sh --add-tier staging"                            "--status: ブランチがないときの直し方が表示される"
+    assert_file_not_contains  "$out" "--status が失敗しました"                                    "--status: 診断の結果を、エラー終了のメッセージにしない"
+    assert_file_not_contains  "$MOCK_CALL_LOG" "gh secret set"                                  "--status: 何も変更しない（Secrets）"
+    assert_file_not_contains  "$MOCK_CALL_LOG" "gh variable set"                                "--status: 何も変更しない（Variables）"
 
     # --- E. 段階の指定が正しくない / branches.txt にない ---
     printf 'Y\n' | ( cd "$force_dir" && HOME="$mock_home" PATH="$mb:$PATH" \

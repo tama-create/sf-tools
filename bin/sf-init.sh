@@ -66,7 +66,7 @@
 #   --add-tier staging    : 既存プロジェクトに staging tier を追加
 #   --add-tier develop    : 既存プロジェクトに develop tier を追加
 #   --reconnect <段階>    : 1 つの段階（main / staging / develop）の、接続先の Salesforce 組織を付け替える（force-* 内で実行）
-#   --status              : 段階ごとの、接続先（ログイン先・組織の種類・ユーザー・組織 ID）を一覧にする（読み取りのみ。force-* 内で実行）
+#   --status              : セットアップの診断（リポジトリ・ブランチ・ワークフロー・Secrets・Variables が、そろっているか。不足は、直し方つき）と、段階ごとの、接続先（ログイン先・組織の種類・ユーザー・組織 ID）を一覧にする（読み取りのみ。force-* 内で実行）
 #   --legacy-connected-app: 従来の接続アプリケーション（手動の入力。今後廃止予定）を使う。既定は、外部クライアントアプリ（自動で作成）
 # ==============================================================================
 
@@ -151,7 +151,7 @@ while [[ $# -gt 0 ]]; do
   ~/sf-tools/bin/sf-init.sh --add-tier staging     # staging tier を追加
   ~/sf-tools/bin/sf-init.sh --add-tier develop     # develop tier を追加
   ~/sf-tools/bin/sf-init.sh --reconnect main       # main の接続先（Salesforce 組織）を付け替える
-  ~/sf-tools/bin/sf-init.sh --status               # 段階ごとの接続先を一覧にする
+  ~/sf-tools/bin/sf-init.sh --status               # セットアップの診断と、段階ごとの接続先を一覧にする
   ~/sf-tools/bin/sf-init.sh --legacy-connected-app # 従来の接続アプリケーションを使う（今後廃止予定）"
             ;;
     esac
@@ -174,8 +174,9 @@ fi
 # --status モード（読み取りのみ。force-* ディレクトリの中で実行する）
 if [[ "$STATUS_MODE" -eq 1 ]]; then
     export SF_TOOLS_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-    bash "${SCRIPT_DIR}/../phases/init/status.sh" || die "--status が失敗しました。"
-    exit $RET_OK
+    # 診断で不足があるとき（終了コード 1）は、表示のとおり。エラー終了のメッセージは、出さない
+    bash "${SCRIPT_DIR}/../phases/init/status.sh"
+    exit $?
 fi
 
 # --reconnect モード（1 つの段階の接続先を付け替える。force-* ディレクトリの中で実行する）
@@ -349,7 +350,8 @@ if [[ "$RESUME_PHASE" -eq 1 && -z "$ONLY_PHASE" && -f "$SF_INIT_ENV_FILE" && -f 
         read_key done_choice "  ▶ 番号を入力してください [1-2/q]: " "[12Qq]"
         case "$done_choice" in
             1) [[ -d "$prev_dir" ]] || die "管理者用のフォルダが見つかりません: ${prev_dir}"
-               ( cd "$prev_dir" && run bash "${SF_TOOLS_DIR}/phases/init/status.sh" ) || die "接続の確認に失敗しました。"
+               # 診断で不足があっても（終了コード 1）、表示のとおり。ここでは、エラー終了にしない
+               ( cd "$prev_dir" && bash "${SF_TOOLS_DIR}/phases/init/status.sh" ) || true  # 不足の表示は、status.sh が行う
                exit $RET_OK
                ;;
             2) ;;  # 最初から（下で .sf-init.env を削除する）

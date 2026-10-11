@@ -43,6 +43,7 @@ TEST_FILES=(
     test_common.sh
     test_wizard.sh
     test_sf-org.sh
+    test_sf-diag.sh
     test_init-common.sh
     test_sf-unhook.sh
     test_sf-hook.sh
@@ -109,6 +110,15 @@ if [[ "${1:-}" == "--changed" ]]; then
                 ;;
             lib/common.sh)
                 _changed_tests+=("test_common.sh")
+                ;;
+            lib/wizard.sh)
+                _changed_tests+=("test_wizard.sh")
+                ;;
+            lib/sf-org.sh)
+                _changed_tests+=("test_sf-org.sh")
+                ;;
+            lib/sf-diag.sh)
+                _changed_tests+=("test_sf-diag.sh")
                 ;;
             phases/init/*)
                 _changed_tests+=("test_sf-init.sh")

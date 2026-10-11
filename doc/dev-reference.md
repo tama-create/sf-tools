@@ -50,6 +50,7 @@
 | `test_common.sh` | lib/common.sh |
 | `test_init-common.sh` | phases/init/init-common.sh（`ensure_sf_tools_branch`。実際の Git と一時 bare リポジトリを使用） |
 | `test_sf-org.sh` | lib/sf-org.sh（ログイン先の 3 択・環境変数の指定・組織の種類の判定・本番は main のみのガード・保存） |
+| `test_sf-diag.sh` | lib/sf-diag.sh（セットアップの診断: すべてそろっている・不足と直し方・一覧を取得できない（？。不足に数えない）・段階の数に応じた確認・組織の種類の記録がない（！）・直近の実行・読み取りのみ） |
 | `test_wizard.sh` | lib/wizard.sh（ウィザード形式の画面の部品: 現在地・チェックリスト・確認・失敗・完了） |
 | `test_sf-unhook.sh` | sf-unhook.sh |
 | `test_sf-hook.sh` | sf-hook.sh |
@@ -122,6 +123,7 @@
 | `check_home_dir` | `check_home_dir` | `~/home/{owner}/{company}/` の階層を検証し `GITHUB_OWNER` / `COMPANY_NAME` をセット |
 | `check_gh_owner` | `check_gh_owner OWNER` | gh 認証ユーザーがリポジトリオーナーと一致するか確認（不一致は die。オーナーが組織で、ユーザーがその有効な admin なら通過。gh が空を返す場合はスキップ） |
 | （`lib/sf-org.sh`） | `sf_org_choose_login_url VAR LABEL TIER [SUFFIX]` / `sf_org_read_info ALIAS` / `sf_org_parse_info JSON` / `sf_org_kind` / `sf_org_guard TIER LABEL` / `sf_org_jwt_test ALIAS KEY KEYFILE USER URL` / `sf_org_save SUFFIX` | Salesforce 組織の接続情報の共通部品（`doc/wizard-ux-design.md` 4.7）。ログイン先は URL の 3 択（Enter = Sandbox。環境変数 `SF_INIT_LOGIN_URL_<PROD\|STG\|DEV\|START>` で、質問なしで指定できる）。ログイン後に `Organization`（`Id`・`Name`・`IsSandbox`・`OrganizationType`・`TrialExpirationDate`）を読み取り、種類（production / sandbox / developer / trial / unknown）を判定する（読み取れない・矛盾するときは unknown。推測しない）。`sf_org_guard`: **Salesforce の本番組織は main のみ**（staging・develop に本番は、戻り値 2。**判定不能（unknown）も、main 以外は戻り値 2**。確認では通さない。main は、unknown でも続行）。`sf_org_jwt_test`: 従来の接続アプリ用。JWT 接続テストと組織情報の読み取りを、同じ一時的なホームの中で行う（Secrets を登録する前にガードできるように）。`sf_org_save`: 組織の ID・名前・種類・確認日時を GitHub Variables（`SF_ORG_*_<接尾辞>`）に保存 |
+| （`lib/sf-diag.sh`） | `sf_diag_run REPO 段階...`（結果の不足の数は `DIAG_NG`） | セットアップの診断（`sf-init.sh --status` が使う）。リポジトリ・ブランチ・ワークフロー・Secrets・Variables・直近の実行を、GitHub から読み取って、✓ / ✗（直し方つき）/ ！ / ？ で表示する。読み取りのみ。一覧を取得できないものは「？」とし、不足に数えない |
 | `ensure_sf_tools_latest` | `ensure_sf_tools_latest [--no-update] DIR` | sf-tools（DIR）が origin の最新か確認し、遅れていれば確認のうえ `git pull --ff-only` で更新する。戻り値: 0=最新（または判定できない）／2=更新した（呼び出し側は、更新した sf-tools で、再実行すること）。die: fetch 失敗・遅れていて未コミットの変更または未プッシュのコミットがある・更新を断った・pull 失敗・`--no-update` で遅れている |
 | `is_gitbash` | `if is_gitbash; then ...` | Windows の Git Bash か判定（`$OSTYPE` が `msys*` / `mingw*` / `cygwin*`） |
 | `check_sf_cli` | `check_sf_cli [--warn-only] [--cache]` | `sf --version` の終了コードが 0 か確認する（sf は npm 版が前提）。0 以外なら、sf の場所と対処を ERROR で表示して `die`（`--warn-only` は表示のみで戻り値 1）。`--cache`（日常のコマンド用）は、成功を `~/.sf-tools-sf-check`（`SF_TOOLS_SF_CHECK_STAMP` で変更可）に sf の場所つきで記録し、24 時間は確認を省略する（失敗は記録せず、毎回確認する）。sf 未インストール・GitHub Actions 上（`GITHUB_ACTIONS=true`）では何もしない |
@@ -441,7 +443,10 @@ tr -d '\r' < "$key_file" | base64 -w 0 | gh secret set "SF_PRIVATE_KEY" -R "$REP
 - `--only N`: Phase N のみ実行（デバッグ用。進捗は記録しない）
 - `--add-tier staging|develop`: 既存プロジェクトへの tier 追加（後述）
 - `--reconnect main|staging|develop`: 1 つの段階の接続先（Salesforce 組織）の付け替え（`phases/init/reconnect.sh`。force-* 内で実行。現在の接続を表示 → 確認 → ログイン先の選択 → ログイン → 種類の読み取り → 本番は main のみのガード → 外部クライアントアプリの自動作成 → JWT 接続テスト → Secrets / Variables の一括更新。古い組織が別の組織なら、残る外部クライアントアプリと片付け方を表示する（自動では削除しない））
-- `--status`: 段階ごとの接続を一覧にする（`phases/init/status.sh`。GitHub Variables を読むだけ。同じ組織が複数の段階にあれば警告、本番が main 以外にあればエラー表示）
+- `--status`: セットアップの診断と、段階ごとの接続の一覧（`phases/init/status.sh`。読み取りのみ。終了コード: 診断で不足がある、または、本番が main 以外にあれば 1）。
+  - 診断（`lib/sf-diag.sh` の `sf_diag_run REPO 段階...`）: リポジトリ・branches.txt の各ブランチ・ワークフロー 5 本（`gh api` / `gh repo view`）、Secrets（`gh secret list`）、Variables（`gh variable list`）、直近の実行（`gh run list --workflow`）を、✓ / ✗ / ！ / ？ で表示する。不足（✗）には、直し方（`--only N` / `--reconnect` / `--add-tier` / `sf-sync-wf.sh`）を表示し、件数を `DIAG_NG` に入れる。一覧を取得できなかったものは「？」とし、不足に数えない（通信エラー・権限不足を、不足と誤認しない）。組織の種類の記録（`SF_ORG_ID_*`）がないものは「！」（不足に数えない。古いバージョンで作ったプロジェクトのため）。直近の実行の失敗も「！」（セットアップの不足ではないため）。
+  - Salesforce 側（外部クライアントアプリ・JWT 接続）は、ログインが必要なため確認しない。直近の wf-metasync / wf-release の成功で、接続できていることが分かる。
+  - 接続の一覧: GitHub Variables を読むだけ。同じ組織が複数の段階にあれば警告、本番が main 以外にあればエラー表示。
 - `--legacy-connected-app`（環境変数 `SF_INIT_LEGACY_CONNECTED_APP=1`）: 従来の接続アプリケーション（手動の入力）を使う。既定は外部クライアントアプリ。保存済みの `APP_TYPE=2` と食い違うときは中断する
 
 #### 4.13.1 `--add-tier` による tier 追加

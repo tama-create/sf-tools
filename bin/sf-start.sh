@@ -42,7 +42,7 @@ if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
     exit 0
 fi
 source "$COMMON_LIB"
-source "${SCRIPT_DIR}/../lib/sf-org.sh"   # ログイン先の選択（エイリアスの名前では、決めない）
+source "${SCRIPT_DIR}/../lib/org.sh"   # ログイン先の選択（エイリアスの名前では、決めない）
 
 # ------------------------------------------------------------------------------
 # 3. 初期チェック
@@ -92,7 +92,7 @@ if [ "$SKIP_LOGIN" -eq 0 ]; then
 
     # ログイン先は、エイリアスの名前では、決めない（Developer Edition や、別名の本番も、あるため）。
     #   種類ではなく、ログイン先の URL を選ぶ（Enter = Sandbox）。環境変数 SF_INIT_LOGIN_URL_START（login / test / URL）で、指定もできる
-    sf_org_choose_login_url LOGIN_URL "組織 ${ORG_ALIAS}" "main" "START"
+    org_choose_login_url LOGIN_URL "組織 ${ORG_ALIAS}" "main" "START"
 
     log "INFO" "ブラウザでログインして接続を許可してください..."
     run sf org logout --target-org "$ORG_ALIAS" --no-prompt 2>/dev/null || true

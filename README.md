@@ -279,7 +279,7 @@ sfl
 | 管理者 | `sf-hook.sh` / `sf-unhook.sh` | フックの有効化 / 削除 | ランチャー外 |
 | 管理者 | `sf-update-secret.sh` | ⚠️ GitHub Secrets の再登録（管理者のみ） | ランチャー外 |
 | 管理者 | `sf-sync-wf.sh` | ⚠️ 作成済みのワークフローを、雛形に合わせて更新 | ランチャー外 |
-| 管理者 | `sf-verify.sh` | ⚠️ 実際のリポジトリ・組織で、リリースと削除が動くことを検証（Hello World） | ランチャー外 |
+| 管理者 | `sf-init.sh --verify` | ⚠️ 実際のリポジトリ・組織で、リリースと削除が動くことを検証（Hello World） | ランチャー外 |
 | — | `sf-install.sh` | sf-start から自動実行 | 自動実行 |
 | — | `sf-upgrade.sh` | sf-install から自動実行 | 自動実行 |
 | — | `sf-prepush.sh` | git pre-push フックから自動実行 | 自動実行 |
@@ -348,6 +348,7 @@ sf-init.sh --add-tier develop    # 既存プロジェクトに develop を追加
 | `--add-tier develop` | 既存プロジェクトに develop 階層を追加（`main` へは直接 push せず、PR を作成します） |
 | `--reconnect <段階>` | 1 つの段階（main / staging / develop）の、接続先の Salesforce 組織を付け替える（`force-*` 内で実行） |
 | `--status` | **セットアップの診断**（リポジトリ・ブランチ・ワークフロー・Secrets・Variables が、そろっているか。不足は、直し方つきで表示）と、段階ごとの接続先（ログイン先・組織の種類・ユーザー・組織 ID・最終確認日時）の一覧（読み取りのみ。`force-*` 内で実行。不足があれば、終了コード 1） |
+| `--verify` | **動作の確認**（実際のリポジトリ・組織に、Hello World を、リリースして、削除します。環境全体の確認も、最初に行います）。`force-*` フォルダの中で実行します。`--plan`（実行内容の表示だけ）・`--cleanup`（削除のみ）・`--no-metasync` と一緒に指定できます。詳しくは 4.21 |
 | `--legacy-connected-app` | 従来の接続アプリケーション（今後廃止予定。手動の入力）を使う。既定は、外部クライアントアプリ（自動で作成） |
 
 **Salesforce 組織の接続（段階と組織の種類は、結びつけません）:** main / staging / develop のどの段階にも、本番・Sandbox・Developer Edition などを、自由につなげます（main に Sandbox や Developer Edition でも構いません）。ただし、**Salesforce の本番組織は、main にしかつなげません**（staging・develop に本番をつなごうとすると、ログイン後に、組織の種類を読み取って、中断します）。
@@ -372,9 +373,9 @@ sf-init.sh --add-tier develop    # 既存プロジェクトに develop を追加
 
 - **[1]** 保存済みの入力内容（環境種別・ブランチ構成など）を使い、失敗した所から再開します（最初の環境チェックは、毎回行います）。
 - **[2]** 保存した状態を消して、Phase 1 から始めます。作成済みのリポジトリと `init` フォルダは、削除せず、そのまま使います。
-- **最後のステップ（ステップ 9: 動作の確認・任意）**: Phase 10 のあとに、「動作を確認しますか？ [Enter = 確認する / s = あとで]」と聞きます。Enter なら、`sf-verify.sh`（環境全体の確認 → Hello World のリリースと削除。約 50 分）を、続けて実行します（確認は、ここの 1 回だけです）。確認で失敗があっても、セットアップは完了扱いです（結果と、直し方が表示されます）。**聞くのは、通しの実行と、中断後に「続きをやる」を選んだときだけ**です（`--resume N` / `--only N` では、聞きません）。端末でない実行（テスト・e2e）でも、聞きません。
+- **最後のステップ（ステップ 9: 動作の確認・任意）**: Phase 10 のあとに、「動作を確認しますか？ [Enter = 確認する / s = あとで]」と聞きます。Enter なら、`sf-init.sh --verify`（環境全体の確認 → Hello World のリリースと削除。約 20 分（3 層の場合））を、続けて実行します（確認は、ここの 1 回だけです）。確認で失敗があっても、セットアップは完了扱いです（結果と、直し方が表示されます）。**聞くのは、通しの実行と、中断後に「続きをやる」を選んだときだけ**です（`--resume N` / `--only N` では、聞きません）。端末でない実行（テスト・e2e）でも、聞きません。
 - **Phase 10（Salesforce の接続）は、段階ごとに、完了を記録します。** 途中（例: staging）で失敗しても、「続きをやる」では、完了した段階（main など）は、スキップし、残りの段階だけを実行します（ブラウザのログインを、やり直さなくて済みます。登録した Secret が、いまもあるときだけ、スキップします）。
-- 前回が最後まで完了している場合は、「セットアップが、すでに完了しています」と表示され、**[1] いまの Salesforce の接続を見る（何も変更しません）／[2] 動作を確認する（`sf-verify.sh`）／[3] 最初からやり直す／[q] 終了** を選べます。別のリポジトリの状態の場合は、選択肢は出ず、最初から始まります。
+- 前回が最後まで完了している場合は、「セットアップが、すでに完了しています」と表示され、**[1] いまの Salesforce の接続を見る（何も変更しません）／[2] 動作を確認する（`sf-init.sh --verify`）／[3] 最初からやり直す／[q] 終了** を選べます。別のリポジトリの状態の場合は、選択肢は出ず、最初から始まります。
 - **`init` フォルダは、管理者用のフォルダとして残します**（以前あった、削除の質問は、廃止しました）。ワークフローの更新（`sf-sync-wf.sh`）・接続の確認（`--status`）・接続先の付け替え（`--reconnect`）など、管理者のメンテナンスに使います。日常の開発には使いません（開発は、`sf-job.sh` の作業フォルダで行います）。
 - Token の入力欄は、貼り付けた文字の数だけ `*` を表示します（Token の中身は、画面に出ません）。Git Bash は、**右クリック**（または Shift+Insert）で貼り付けます。Enter のあと、「N 文字を受け取りました（先頭: ghp_…）」と表示されるので、コピーできたかを確認できます。
 - 管理者向けの警告と確認は、どちらの場合も、毎回表示されます。
@@ -729,13 +730,13 @@ sf-sync-wf.sh --remove wf-old.yml   # 雛形から廃止されたワークフロ
 
 ---
 
-### 4.21 `sf-verify.sh`
+### 4.21 `sf-init.sh --verify`（動作の確認）
 
 ```bash
-sf-verify.sh            # 診断 → 実行内容の表示 → 確認 → リリース → 削除 → 結果（force-* の中で実行する）
-sf-verify.sh --plan     # 診断と、実行内容の表示だけ（何も変更しない）
-sf-verify.sh --no-metasync  # wf-metasync（Salesforce → Git の同期）の実行を、省略する
-sf-verify.sh --cleanup  # 削除のみ（リリースの途中で止まって、組織に Hello World が残ったとき）
+sf-init.sh --verify               # 診断 → 実行内容の表示 → 確認 → リリース → 削除 → 結果（force-* の中で実行する）
+sf-init.sh --verify --plan        # 診断と、実行内容の表示だけ（何も変更しない）
+sf-init.sh --verify --no-metasync # wf-metasync（Salesforce → Git の同期）の実行を、省略する
+sf-init.sh --verify --cleanup     # 削除のみ（リリースの途中で止まって、組織に Hello World が残ったとき）
 ```
 
 `sf-init.sh` で作った、**実際のリポジトリと、実際の Salesforce 組織**で、リリースと削除が正しく動くことを確認します。誰も使わない、単純な Apex（Hello World: `SfToolsE2eHello` / `SfToolsE2eHelloTest`）を、各段階にリリースして、削除します。本番の組織（main）にも、リリースして、削除します。
@@ -758,10 +759,10 @@ sf-verify.sh --cleanup  # 削除のみ（リリースの途中で止まって、
 - リリースの間、組織が、短時間、占有されます。作業の少ない時間帯に、実行してください
 - ブランチ保護で、PR のマージが拒否されると、その段階で止まり、PR が残ります
 - 検証用と同じ名前のクラス（`SfToolsE2eHello` / `SfToolsE2eHelloTest`）のファイルが、すでにリポジトリにあると、上書きして削除してしまうため、**実行しません**（前回の検証の残りなら、`--cleanup`）。組織だけにある同名のクラスは、検出できません。`--cleanup` は、この固定名のクラスだけを削除します
-- **失敗したとき**: リリースのあとで止まった場合は、組織に Hello World が残ることがあります。残った段階と、`sf-verify.sh --cleanup`（削除のみ）を、表示します
+- **失敗したとき**: リリースのあとで止まった場合は、組織に Hello World が残ることがあります。残った段階と、`sf-init.sh --verify --cleanup`（削除のみ）を、表示します
 - gh のアカウントは、リポジトリのオーナー（組織の管理者）にしてください
 
-e2e（`tests/e2e/run.sh`）との違い: e2e は、sf-tools の開発者が、新しく作ったテスト用のリポジトリ・組織で、sf-tools 自体を確認する回帰テストです。`sf-verify.sh` は、管理者が、実際のリポジトリ・組織を確認するためのものです。PR と実行の待ちの部品は、共通（`lib/sf-verify.sh`）です。
+e2e（`tests/e2e/run.sh`）との違い: e2e は、sf-tools の開発者が、新しく作ったテスト用のリポジトリ・組織で、sf-tools 自体を確認する回帰テストです。`sf-init.sh --verify` は、管理者が、実際のリポジトリ・組織を確認するためのものです。PR と実行の待ちの部品は、共通（`lib/verify-common.sh`）です。
 
 
 ## 5. ターゲットファイルの書き方
@@ -864,7 +865,6 @@ sf-tools/
 │   ├── sf-hook.sh
 │   ├── sf-unhook.sh
 │   ├── sf-sync-wf.sh
-│   ├── sf-verify.sh
 │   ├── sf-update-secret.sh
 │   ├── sf-install.sh
 │   ├── sf-upgrade.sh
@@ -874,13 +874,14 @@ sf-tools/
 ├── lib/
 │   ├── common.sh               ← 全スクリプト共通ライブラリ
 │   ├── wizard.sh               ← ウィザード形式の画面の共通部品（sf-init で使用）
-│   ├── sf-org.sh               ← Salesforce 組織の接続情報の共通部品（ログイン先の選択・種類の判定・本番は main のみのガード）
-│   ├── sf-diag.sh              ← セットアップの診断（sf-init.sh --status で使用。読み取りのみ）
-│   └── sf-verify.sh            ← Hello World の本文・PR とワークフローの実行の部品（sf-verify.sh と e2e で共有）
+│   ├── org.sh                  ← Salesforce 組織の接続情報の共通部品（ログイン先の選択・種類の判定・本番は main のみのガード）
+│   ├── diag.sh                 ← セットアップの診断（sf-init.sh --status で使用。読み取りのみ）
+│   └── verify-common.sh        ← Hello World の本文・PR とワークフローの実行の部品（phases/init/verify.sh と e2e で共有）
 ├── phases/
 │   └── init/                   ← sf-init.sh のフェーズスクリプト
 │       ├── init-common.sh
 │       ├── add_tier.sh          ← --add-tier オプションで呼ばれる tier 追加スクリプト
+│       ├── verify.sh            ← --verify オプションで呼ばれる動作の確認（Hello World のリリースと削除）
 │       ├── 01_check_env.sh
 │       ├── 02_project_info.sh
 │       ├── 03_repo_create.sh
@@ -1011,7 +1012,7 @@ bash tests/e2e/run.sh --layout 3            # 3 層で、通しで確認する
 
 確認する内容（3 層の例）: 同じブランチから、develop → staging → main の順に、段階ごとの PR を出し、PR をマージするたびに、**その段階の組織にだけ**クラスができること（まだ先の段階の組織には入っていないこと）、main へのマージのあと、`wf-propagate` が成功し、staging・develop のブランチに main の最新が入ること、削除（main への PR）が、ほかの段階の組織には及ばないこと。3 つの組織（main・staging・develop）は、別々の組織にしてください。`--resume` では、リポジトリの構成（層数）を、ブランチから自動で判定します。
 
-**実際のリポジトリの検証は、`sf-verify.sh` です。** この e2e は、sf-tools の開発者が、sf-tools 自体の変更を確認するための回帰テストです。管理者が、自分の実際のリポジトリ・実際の組織で、リリースと削除が動くことを確認するときは、`sf-verify.sh`（4.21）を使います。
+**実際のリポジトリの検証は、`sf-init.sh --verify` です。** この e2e は、sf-tools の開発者が、sf-tools 自体の変更を確認するための回帰テストです。管理者が、自分の実際のリポジトリ・実際の組織で、リリースと削除が動くことを確認するときは、`sf-init.sh --verify`（4.21）を使います。
 
 **途中から再実行する（`--resume`）:** `e2e` は、`sf-init` と `wf-metasync` の確認に、15 分ほどかかります。Hello World の部分だけを直して確認したいときは、前回残したテスト用リポジトリ（最新の 1 つ）を使って、その部分だけを、約 15 分で再実行できます。
 

@@ -1,6 +1,6 @@
 #!/bin/bash
 # ==============================================================================
-# test_sf-diag.sh - lib/sf-diag.sh（セットアップの診断）のテスト
+# test_diag.sh - lib/diag.sh（セットアップの診断）のテスト
 # ==============================================================================
 #
 # 【テストケース】
@@ -13,7 +13,7 @@
 #   7. 読み取りのみ               : 変更系のコマンド（set / create / delete）を呼ばない
 # ==============================================================================
 source "$(dirname "${BASH_SOURCE[0]}")/test_helper.sh"
-echo -e "${CLR_HEAD}=== lib/sf-diag.sh ===${CLR_RST}"
+echo -e "${CLR_HEAD}=== lib/diag.sh ===${CLR_RST}"
 
 MB=$(setup_mock_bin)
 export MOCK_CALL_LOG="$MB/calls.log"
@@ -59,8 +59,8 @@ _d() {
         readonly LOG_FILE=/dev/null
         readonly LOG_MODE=NEW
         source "${SF_TOOLS_DIR}/lib/common.sh"
-        source "${SF_TOOLS_DIR}/lib/sf-diag.sh"
-        sf_diag_run "owner/force-x" "$@" 2> "$OUT"
+        source "${SF_TOOLS_DIR}/lib/diag.sh"
+        diag_run "owner/force-x" "$@" 2> "$OUT"
         echo "$DIAG_NG"
     )
 }

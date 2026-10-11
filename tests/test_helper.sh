@@ -242,7 +242,7 @@ case "$1 $2" in
         [[ "${MOCK_SF_LOGIN_EXIT:-0}" -eq 0 ]] && echo "Successfully authorized fake@example.com with org ID 00D000000000001AAA"
         exit "${MOCK_SF_LOGIN_EXIT:-0}" ;;
     "data query")
-        # 組織の種類の取得（sf_org_read_info: SELECT ... FROM Organization）。
+        # 組織の種類の取得（org_read_info: SELECT ... FROM Organization）。
         #   MOCK_SF_ORG_INFO=<JSON> で応答を差し替える。既定は Sandbox（Enterprise Edition）
         #   MOCK_SF_ORG_QUERY_EXIT=1 で、取得の失敗を再現する
         if [[ "$*" == *"FROM Organization"* ]]; then

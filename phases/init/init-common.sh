@@ -20,7 +20,7 @@
 
 # Salesforce 組織の接続情報の共通部品（ログイン先の選択・組織の種類の読み取り・本番は main のみ）
 _INIT_COMMON_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "${_INIT_COMMON_DIR}/../../lib/sf-org.sh"
+source "${_INIT_COMMON_DIR}/../../lib/org.sh"
 
 # ------------------------------------------------------------------------------
 # ブラウザを開く（OS 判定）- lib/common.sh で定義済みなら再定義しない
@@ -115,12 +115,12 @@ register_jwt_secret() {
     # 接続 URL（ログイン先）を決定する。種類ではなく、URL で選ぶ（段階と組織の種類は、結びつけない）
     local instance_url="https://login.salesforce.com"
     local tier
-    tier=$(sf_org_tier_of_suffix "$suffix")  # VAR=$(cmd) のため run 不使用
+    tier=$(org_tier_of_suffix "$suffix")  # VAR=$(cmd) のため run 不使用
     if [[ -n "$is_sandbox_override" ]]; then
         # 自動実行・テスト用: "Y" = test.salesforce.com / "N" = login.salesforce.com
         [[ "$is_sandbox_override" =~ ^[Yy] ]] && instance_url="https://test.salesforce.com"
     else
-        sf_org_choose_login_url instance_url "$label" "${tier:-main}" "$suffix"
+        org_choose_login_url instance_url "$label" "${tier:-main}" "$suffix"
     fi
     log "INFO" "  接続 URL: ${instance_url}"
 
@@ -136,9 +136,9 @@ register_jwt_secret() {
     log "INFO" "  JWT 接続テストを実行中..."
     log "INFO" "  [jwt cmd] sf org login jwt --client-id ***masked*** --jwt-key-file ${key_file} --username ${username} --instance-url ${instance_url} --alias ${org_alias}"
     # 成否は sf の終了コードで判定する（sf は npm 版が前提）。一時的なホームフォルダの中で実行する（エイリアスが増えず、
-    # 同じユーザーの既存の sf の認証も置き換わらない）。組織の種類の読み取りも、同じ一時的なホームの中で行う（sf_org_jwt_test）
+    # 同じユーザーの既存の sf の認証も置き換わらない）。組織の種類の読み取りも、同じ一時的なホームの中で行う（org_jwt_test）
     local jwt_err
-    if ! sf_org_jwt_test "$org_alias" "$consumer_key" "$key_file" "$username" "$instance_url"; then  # 条件チェック
+    if ! org_jwt_test "$org_alias" "$consumer_key" "$key_file" "$username" "$instance_url"; then  # 条件チェック
         jwt_err="$SF_ORG_JWT_OUT"
         log "ERROR" "  [jwt error] ${jwt_err}"
         log "WARNING" "  JWT 接続テストに失敗しました。以下を確認してください:"
@@ -162,7 +162,7 @@ register_jwt_secret() {
 
     # 本番組織は main にしか、つなげない（F8）。Secrets を登録する前に確認する。
     #   組織の種類を読み取れなかった場合（接続テストのスキップなど）は、main 以外では、つなげない（確認で、通さない）
-    if ! sf_org_guard "${tier:-main}" "$label"; then
+    if ! org_guard "${tier:-main}" "$label"; then
         die "${label}（${tier:-main}）に、Salesforce の本番組織、または、種類を判定できない組織は、つなげません（本番組織は main のみです）。"
     fi
 
@@ -177,7 +177,7 @@ register_jwt_secret() {
 
     log "SUCCESS" "  SF_CONSUMER_KEY_${suffix}（Secret）/ SF_USERNAME_${suffix}（Variable）/ SF_INSTANCE_URL_${suffix}（Variable）を登録しました。"
     # 組織の情報（ID・名前・種類・確認日時）を保存する（--status の表示用。読み取れていなければ、保存しない）
-    sf_org_save "$suffix"
+    org_save "$suffix"
 }
 
 # ------------------------------------------------------------------------------
@@ -423,8 +423,8 @@ register_jwt_secret_eca() {
 
     # 1. ログイン先（種類ではなく、URL で選ぶ。段階と組織の種類は、結びつけない: doc/wizard-ux-design.md 4.7）
     local tier
-    tier=$(sf_org_tier_of_suffix "$suffix")  # VAR=$(cmd) のため run 不使用
-    sf_org_choose_login_url instance_url "$label" "${tier:-main}" "$suffix"
+    tier=$(org_tier_of_suffix "$suffix")  # VAR=$(cmd) のため run 不使用
+    org_choose_login_url instance_url "$label" "${tier:-main}" "$suffix"
     log "INFO" "  接続 URL: ${instance_url}"
 
     # 2. ブラウザでログイン
@@ -448,10 +448,10 @@ register_jwt_secret_eca() {
 
     # 組織の種類を、組織から読み取る（F3）。Salesforce の本番組織は、main にしか、つなげない（F8）。
     #   外部クライアントアプリを作る（deploy）前に確認する（誤って、本番に作らないため）
-    if ! sf_org_read_info "$tmp_alias"; then
+    if ! org_read_info "$tmp_alias"; then
         log "WARNING" "  組織の種類を、組織から読み取れませんでした（権限・通信など）。"
     fi
-    if ! sf_org_guard "${tier:-main}" "$label"; then
+    if ! org_guard "${tier:-main}" "$label"; then
         run sf alias unset "$tmp_alias" || true  # 失敗しても続行（意図的エラー無視）
         die "${label}（${tier:-main}）に、Salesforce の本番組織は、つなげません（本番組織は main のみです）。"
     fi
@@ -517,5 +517,5 @@ register_jwt_secret_eca() {
         || die "SF_INSTANCE_URL_${suffix} の登録に失敗しました。"
     log "SUCCESS" "  SF_CONSUMER_KEY_${suffix}（Secret）/ SF_USERNAME_${suffix}（Variable）/ SF_INSTANCE_URL_${suffix}（Variable）を登録しました。"
     # 組織の情報（ID・名前・種類・確認日時）を保存する（sf-init.sh --status の表示用。読み取れていなければ、保存しない）
-    sf_org_save "$suffix"
+    org_save "$suffix"
 }

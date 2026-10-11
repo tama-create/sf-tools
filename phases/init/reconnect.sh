@@ -77,7 +77,7 @@ echo "  段階       : ${TIER}" >&2
 echo "  いまの接続 :" >&2
 if [[ -n "$old_url" || -n "$old_user" ]]; then
     echo "      ログイン先 : ${old_url:-（未設定）}" >&2
-    echo "      種類       : $(sf_org_kind_label "${old_kind:-unknown}")" >&2
+    echo "      種類       : $(org_kind_label "${old_kind:-unknown}")" >&2
     echo "      ユーザー   : ${old_user:-（未設定）}" >&2
     echo "      組織       : ${old_name:-（未確認）}${old_id:+（ID ${old_id}）}" >&2
 else

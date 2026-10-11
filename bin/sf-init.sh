@@ -55,13 +55,13 @@
 #   Phase 10（Salesforce の接続）は、段階（main / staging / develop）ごとに、完了を進捗に記録し、再実行では、完了した段階を、
 #   スキップする（登録した Secret が、いまもあるときだけ。--only 10 では、記録も、スキップも、しない）。
 #   セットアップが完了済み（SF_INIT_DONE_PHASE=10）のプロジェクトで起動したときは、「続きをやる」ではなく、
-#   [1] いまの Salesforce の接続を見る（status.sh。何も変更しない） / [2] 動作を確認する（sf-verify.sh） /
+#   [1] いまの Salesforce の接続を見る（status.sh。何も変更しない） / [2] 動作を確認する（verify.sh = --verify） /
 #   [3] 最初からやり直す / [q] 終了 を選ばせる。
 #
 # 【動作の確認（最後のステップ）】
 #   最後（Phase 10）まで実行したあと、対話できる端末のときは、「動作を確認しますか？ [Enter = 確認する / s = あとで]」を聞く
 #   （通しの実行と、中断後の「続きをやる」のときだけ。--resume N / --only N では、聞かない）。
-#   Enter なら、管理者用フォルダで、sf-verify.sh（環境全体の確認 → Hello World のリリースと削除）を、確認なしで実行する
+#   Enter なら、管理者用フォルダで、verify.sh（環境全体の確認 → Hello World のリリースと削除）を、確認なしで実行する
 #   （確認は、ここの 1 回だけ。SF_VERIFY_CONFIRMED=1）。確認の失敗は、セットアップの失敗にはしない（結果と、直し方を表示する）。
 #   完了済みのプロジェクトで再実行したときは、[2] 動作を、確認する、でも実行できる。
 #
@@ -78,6 +78,11 @@
 #   --add-tier develop    : 既存プロジェクトに develop tier を追加
 #   --reconnect <段階>    : 1 つの段階（main / staging / develop）の、接続先の Salesforce 組織を付け替える（force-* 内で実行）
 #   --status              : セットアップの診断（リポジトリ・ブランチ・ワークフロー・Secrets・Variables が、そろっているか。不足は、直し方つき）と、段階ごとの、接続先（ログイン先・組織の種類・ユーザー・組織 ID）を一覧にする（読み取りのみ。force-* 内で実行）
+#   --verify              : 動作の確認（実際のリポジトリ・組織に、Hello World を、リリースして、削除する。管理者向け。force-* 内で実行）。
+#                           環境全体の確認（SF_TOOLS_BRANCH・ログに Token が残っていない・wf-metasync）も、最初に行う。詳細は phases/init/verify.sh
+#     --plan              : （--verify と一緒に）診断と、実行内容の表示だけ（何も変更しない）
+#     --cleanup           : （--verify と一緒に）削除のみ（検証が途中で止まって、組織に Hello World が残ったときの後始末）
+#     --no-metasync       : （--verify と一緒に）環境の確認のうち、wf-metasync の実行を、省略する
 #   --legacy-connected-app: 従来の接続アプリケーション（手動の入力。今後廃止予定）を使う。既定は、外部クライアントアプリ（自動で作成）
 # ==============================================================================
 
@@ -123,6 +128,8 @@ RESUME_PHASE=1
 ADD_TIER_MODE=""
 RECONNECT_MODE=""
 STATUS_MODE=0
+VERIFY_MODE=0
+VERIFY_ARGS=()   # --verify のオプション（--plan / --cleanup / --no-metasync）。verify.sh に、そのまま渡す
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -148,6 +155,14 @@ while [[ $# -gt 0 ]]; do
             STATUS_MODE=1
             shift
             ;;
+        --verify)
+            VERIFY_MODE=1
+            shift
+            ;;
+        --plan|--cleanup|--no-metasync)
+            VERIFY_ARGS+=("$1")   # --verify と一緒に指定するもの（下で、--verify なしの指定を拒否する）
+            shift
+            ;;
         --legacy-connected-app)
             # 従来の接続アプリケーション（今後廃止予定）を使う。既定は、外部クライアントアプリ（自動で作成）
             export SF_INIT_LEGACY_CONNECTED_APP=1
@@ -163,6 +178,7 @@ while [[ $# -gt 0 ]]; do
   ~/sf-tools/bin/sf-init.sh --add-tier develop     # develop tier を追加
   ~/sf-tools/bin/sf-init.sh --reconnect main       # main の接続先（Salesforce 組織）を付け替える
   ~/sf-tools/bin/sf-init.sh --status               # セットアップの診断と、段階ごとの接続先を一覧にする
+  ~/sf-tools/bin/sf-init.sh --verify               # 動作の確認（Hello World を、各段階にリリースして、削除する。--plan / --cleanup / --no-metasync）
   ~/sf-tools/bin/sf-init.sh --legacy-connected-app # 従来の接続アプリケーションを使う（今後廃止予定）"
             ;;
     esac
@@ -180,6 +196,19 @@ if [[ -n "$ADD_TIER_MODE" ]]; then
     bash "${SCRIPT_DIR}/../phases/init/add_tier.sh" \
         || die "--add-tier ${ADD_TIER_MODE} が失敗しました。"
     exit $RET_OK
+fi
+
+# --plan / --cleanup / --no-metasync は、--verify と一緒にだけ指定できる
+if [[ "$VERIFY_MODE" -eq 0 && ${#VERIFY_ARGS[@]} -gt 0 ]]; then
+    die "${VERIFY_ARGS[*]} は、--verify と一緒に指定してください。"
+fi
+
+# --verify モード（動作の確認。force-* ディレクトリの中で実行する。管理者向けの警告・確認は、verify.sh が行う）
+if [[ "$VERIFY_MODE" -eq 1 ]]; then
+    export SF_TOOLS_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+    # 検証の失敗（終了コード 1）は、表示のとおり。エラー終了のメッセージは、出さない
+    bash "${SCRIPT_DIR}/../phases/init/verify.sh" ${VERIFY_ARGS[@]+"${VERIFY_ARGS[@]}"}
+    exit $?
 fi
 
 # --status モード（読み取りのみ。force-* ディレクトリの中で実行する）
@@ -210,7 +239,7 @@ fi
 # ------------------------------------------------------------------------------
 # 4. 開始画面・実行ディレクトリの検証（~/home/{owner}/{company}/ であること）
 # ------------------------------------------------------------------------------
-# 利用者に見せるステップ（全 9 つ）と、内部の Phase の対応。ステップ 9（動作の確認）は、Phase ではなく、sf-verify.sh を呼ぶ最後のステップ。表示と実行順は一致させる（doc/wizard-ux-design.md 4.1）
+# 利用者に見せるステップ（全 9 つ）と、内部の Phase の対応。ステップ 9（動作の確認）は、Phase ではなく、verify.sh を呼ぶ最後のステップ。表示と実行順は一致させる（doc/wizard-ux-design.md 4.1）
 WIZ_TOTAL=9
 WIZ_STEP_TITLES=("" "準備の確認" "プロジェクトの確認" "リポジトリの作成" "ブランチの構成" "GitHub の Token" "Slack の通知" "リポジトリの設定" "Salesforce の接続" "動作の確認")
 WIZ_STEP_PURPOSES=("" \
@@ -358,7 +387,7 @@ if [[ "$RESUME_PHASE" -eq 1 && -z "$ONLY_PHASE" && -f "$SF_INIT_ENV_FILE" && -f 
         log "INFO" "このプロジェクトは、セットアップが、すでに完了しています${prev_at:+（${prev_at}）}。（${prev_repo}）"
         echo "" >&2
         echo "    [1] いまの Salesforce の接続を、見る（何も変更しません）   ← おすすめ" >&2
-        echo "    [2] 動作を、確認する（Hello World を、各段階にリリースして、削除します。約 50 分）" >&2
+        echo "    [2] 動作を、確認する（Hello World を、各段階にリリースして、削除します。約 20 分）" >&2
         echo "    [3] 最初から、やり直す（作成済みのリポジトリは、そのまま使い、設定を、上書きします）" >&2
         echo "    [q] 終了" >&2
         echo "" >&2
@@ -370,8 +399,8 @@ if [[ "$RESUME_PHASE" -eq 1 && -z "$ONLY_PHASE" && -f "$SF_INIT_ENV_FILE" && -f 
                exit $RET_OK
                ;;
             2) [[ -d "$prev_dir" ]] || die "管理者用のフォルダが見つかりません: ${prev_dir}"
-               # 動作の確認（sf-verify.sh）。結果は、sf-verify.sh が、表示する。確認は、sf-verify.sh の中で、聞く
-               ( cd "$prev_dir" && bash "${SF_TOOLS_DIR}/bin/sf-verify.sh" )
+               # 動作の確認（verify.sh）。結果は、verify.sh が、表示する。確認は、verify.sh の中で、聞く
+               ( cd "$prev_dir" && bash "${SF_TOOLS_DIR}/phases/init/verify.sh" )
                exit $?
                ;;
             3) ;;  # 最初から（下で .sf-init.env を削除する）
@@ -473,8 +502,8 @@ if [[ "$END_PHASE" -eq 10 && -f "$SF_INIT_ENV_FILE" ]]; then
     run sed -i '/^[A-Z_]*TOKEN_VALUE=/d' "$SF_INIT_ENV_FILE"
 fi
 
-# ステップ 9: 動作の確認（sf-verify.sh）。聞くのは、「通しの実行」と、中断後の「続きをやる」だけ（FULL_START。
-#   --resume N / --only N を明示した実行では、聞かない: Phase 単位のやり直しに、50 分の検証を、混ぜないため）。
+# ステップ 9: 動作の確認（verify.sh）。聞くのは、「通しの実行」と、中断後の「続きをやる」だけ（FULL_START。
+#   --resume N / --only N を明示した実行では、聞かない: Phase 単位のやり直しに、20 分ほどの検証を、混ぜないため）。
 #   対話できる端末のときだけ聞く（SF_INIT_VERIFY_ASK=1 で、端末でなくても聞く: テスト用。GITHUB_ACTIONS 上では、聞かない）
 #   Enter = 確認する / s = あとで。標準入力が閉じている（EOF）ときは、あとで、とする。確認の失敗は、セットアップの失敗にはしない
 VERIFY_RESULT=""   # "" = 聞かなかった / done = 成功 / failed = 失敗あり / skipped = あとで
@@ -485,7 +514,7 @@ if [[ "$END_PHASE" -eq 10 && "$FULL_START" -eq 1 && "${GITHUB_ACTIONS:-}" != "tr
     wizard_step "$WIZ_TOTAL" "$WIZ_TOTAL" "${WIZ_STEP_TITLES[$WIZ_TOTAL]}" "${WIZ_STEP_PURPOSES[$WIZ_TOTAL]}" "${_done_titles[@]}"
     echo "" >&2
     echo "  環境全体の確認と、Hello World（誰も使わない、単純な Apex）の、リリースと削除を、各段階の組織で行います。" >&2
-    echo "  所要時間の目安: 約 $((${BRANCH_COUNT:-1} * 16 + 5)) 分。実際の組織にデプロイします（Hello World は、最後に削除します）。" >&2
+    echo "  所要時間の目安: 約 $((${BRANCH_COUNT:-1} * 6 + 3)) 分（Actions の混み具合で、前後します）。実際の組織にデプロイします（Hello World は、最後に削除します）。" >&2
     echo "" >&2
     while true; do
         read_input _vans "  ▶ 動作を確認しますか？ [Enter = 確認する / s = あとで]: " || _vans="s"  # EOF → あとで
@@ -496,7 +525,7 @@ if [[ "$END_PHASE" -eq 10 && "$FULL_START" -eq 1 && "${GITHUB_ACTIONS:-}" != "tr
         esac
     done
     if [[ "$_vrun" -eq 1 ]]; then
-        if ( cd "$REPO_DIR" && SF_VERIFY_CONFIRMED=1 bash "${SF_TOOLS_DIR}/bin/sf-verify.sh" ); then  # 条件チェック
+        if ( cd "$REPO_DIR" && SF_VERIFY_CONFIRMED=1 bash "${SF_TOOLS_DIR}/phases/init/verify.sh" ); then  # 条件チェック
             VERIFY_RESULT="done"
         else
             VERIFY_RESULT="failed"
@@ -523,9 +552,9 @@ wizard_done "できました: ${REPO_FULL_NAME:-${GITHUB_OWNER}/force-${COMPANY_
     "     ・日常の開発には使わないでください（開発は、上の sf-job.sh の作業フォルダで行います）" \
     "$(case "$VERIFY_RESULT" in
         done)    echo "4. 動作の確認: 成功しました（リリースと削除を、各段階の組織で確認済みです）" ;;
-        failed)  echo "4. 動作の確認: 失敗した項目があります。上の [NG] を確認してください（削除のみのやり直し: sf-verify.sh --cleanup）" ;;
-        skipped) echo "4. 動作の確認は、あとで行えます: 管理者用フォルダで、bash ~/sf-tools/bin/sf-verify.sh（または、sf-init.sh を再実行して、2 を選ぶ）" ;;
-        *)       echo "4. 動作の確認は、あとで行えます: 管理者用フォルダで、bash ~/sf-tools/bin/sf-verify.sh" ;;
+        failed)  echo "4. 動作の確認: 失敗した項目があります。上の [NG] を確認してください（削除のみのやり直し: sf-init.sh --verify --cleanup）" ;;
+        skipped) echo "4. 動作の確認は、あとで行えます: 管理者用フォルダで、~/sf-tools/bin/sf-init.sh --verify（または、sf-init.sh を再実行して、2 を選ぶ）" ;;
+        *)       echo "4. 動作の確認は、あとで行えます: 管理者用フォルダで、~/sf-tools/bin/sf-init.sh --verify" ;;
     esac)"
 
 exit $RET_OK

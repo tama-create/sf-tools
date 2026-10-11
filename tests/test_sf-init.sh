@@ -1082,7 +1082,7 @@ test_phase10_eca_auto() {
     export MOCK_SF_ORG_JSON='{"result":{"username":"admin@example.com","alias":"x"}}'
     export SF_INIT_JWT_INTERVAL=0
     # ログイン先は、環境変数で指定する（login = login.salesforce.com）。直前の質問（read_key）の改行が、
-    # 次の質問に、空 Enter（= 既定の Sandbox）として読まれるのを、避けるため。ログイン先の質問そのものは、tests/test_sf-org.sh で確認する
+    # 次の質問に、空 Enter（= 既定の Sandbox）として読まれるのを、避けるため。ログイン先の質問そのものは、tests/test_org.sh で確認する
     export SF_INIT_LOGIN_URL_PROD=login
 
     _p10_run() {
@@ -1468,18 +1468,18 @@ export SF_INIT_LOGIN_URL_PROD=login   # ログイン先を、質問せずに指�
     assert_file_not_contains  "$MOCK_CALL_LOG" "gh repo create"                              "完了済み・1: 何も変更しない"
     rm -rf "$init_base"
 
-    # 完了済み・[2] 動作を確認する: 管理者用のフォルダで sf-verify.sh を実行し、その終了コードで終わる（何も作り直さない）
-    printf '#!/bin/bash\necho "VERIFY-FROM-MENU cwd=$(basename "$PWD")"\nexit 0\n' > "$mock_home/sf-tools/bin/sf-verify.sh"
-    chmod +x "$mock_home/sf-tools/bin/sf-verify.sh"
+    # 完了済み・[2] 動作を確認する: 管理者用のフォルダで verify.sh を実行し、その終了コードで終わる（何も作り直さない）
+    printf '#!/bin/bash\necho "VERIFY-FROM-MENU cwd=$(basename "$PWD")"\nexit 0\n' > "$mock_home/sf-tools/phases/init/verify.sh"
+    chmod +x "$mock_home/sf-tools/phases/init/verify.sh"
     _rc_run 10 "tamashimon/force-testproject" "" 'Y\n2\n' 'REPO_DIR="@INIT@/force-testproject"'
     assert_exit_ok            "$exit_code"                                                  "完了済み・2: 正常終了する"
-    assert_file_contains      "$out" "VERIFY-FROM-MENU cwd=force-testproject"                  "完了済み・2: 管理者用のフォルダで、sf-verify.sh が実行される"
+    assert_file_contains      "$out" "VERIFY-FROM-MENU cwd=force-testproject"                  "完了済み・2: 管理者用のフォルダで、verify.sh が実行される"
     assert_file_contains      "$out" "動作を、確認する"                                        "完了済み: 選択肢に、動作の確認が、表示される"
     assert_file_not_contains  "$MOCK_CALL_LOG" "gh repo create"                              "完了済み・2: 何も作り直さない"
     rm -rf "$init_base"
-    printf '#!/bin/bash\nexit 1\n' > "$mock_home/sf-tools/bin/sf-verify.sh"
+    printf '#!/bin/bash\nexit 1\n' > "$mock_home/sf-tools/phases/init/verify.sh"
     _rc_run 10 "tamashimon/force-testproject" "" 'Y\n2\n' 'REPO_DIR="@INIT@/force-testproject"'
-    assert_exit_fail          "$exit_code"                                                  "完了済み・2: sf-verify.sh が失敗すれば、非ゼロで終了する"
+    assert_exit_fail          "$exit_code"                                                  "完了済み・2: verify.sh が失敗すれば、非ゼロで終了する"
     rm -rf "$init_base"
 
     # 完了済みのプロジェクトで、--resume N を明示 → 拒否する（接続処理を、確認なしで、やり直さない）
@@ -1544,18 +1544,18 @@ export SF_INIT_LOGIN_URL_PROD=login   # ログイン先を、質問せずに指�
     unset MOCK_GH_SECRETS SF_INIT_LOGIN_URL_STG
 
     # 動作の確認の質問: --resume N では、聞かない（通しの実行と、中断後の「続きをやる」だけ）
-    printf '#!/bin/bash\necho VERIFY-CALLED >> "%s/verify.log"\n' "$mb" > "$mock_home/sf-tools/bin/sf-verify.sh"
-    chmod +x "$mock_home/sf-tools/bin/sf-verify.sh"
+    printf '#!/bin/bash\necho VERIFY-CALLED >> "%s/verify.log"\n' "$mb" > "$mock_home/sf-tools/phases/init/verify.sh"
+    chmod +x "$mock_home/sf-tools/phases/init/verify.sh"
     export SF_INIT_VERIFY_ASK=1
     rm -f "$mb/verify.log"
     _rc_run 9 "tamashimon/force-testproject" "--resume 10" 'Y\n\n'
     assert_file_not_contains  "$out" "ステップ 9 / 9: 動作の確認"                              "--resume 10: 動作の確認を、聞かない"
-    assert_file_not_exists    "$mb/verify.log"                                                "--resume 10: sf-verify.sh を呼ばない"
+    assert_file_not_exists    "$mb/verify.log"                                                "--resume 10: verify.sh を呼ばない"
     rm -rf "$init_base"
     # 中断後の「続きをやる」では、聞く（Enter = 確認する）
     _rc_run 9 "tamashimon/force-testproject" "" 'Y\n1\n\n'
     assert_file_contains      "$out" "ステップ 9 / 9: 動作の確認"                              "続きをやる: 動作の確認を、聞く"
-    assert_file_contains      "$mb/verify.log" "VERIFY-CALLED"                                 "続きをやる: Enter で、sf-verify.sh を呼ぶ"
+    assert_file_contains      "$mb/verify.log" "VERIFY-CALLED"                                 "続きをやる: Enter で、verify.sh を呼ぶ"
     rm -rf "$init_base"
     unset SF_INIT_VERIFY_ASK
 
@@ -1997,8 +1997,8 @@ test_e2e_input_sequence_layouts() {
 }
 
 # ==============================================================================
-# テスト: ステップ 9「動作の確認」（sf-verify.sh を呼ぶ最後のステップ）
-#   sf-verify.sh は、スタブ（呼ばれたことと、環境変数・実行したフォルダを記録）に置き換える
+# テスト: ステップ 9「動作の確認」（verify.sh を呼ぶ最後のステップ）
+#   verify.sh は、スタブ（呼ばれたことと、環境変数・実行したフォルダを記録）に置き換える
 # ==============================================================================
 test_verify_step() {
     echo ""
@@ -2014,11 +2014,11 @@ test_verify_step() {
         create_all_mocks "$mb"
         create_mock_gh_for_init "$mb"
         _stub_subscripts "$mock_home"
-        # sf-verify.sh のスタブ（呼ばれたこと・SF_VERIFY_CONFIRMED・実行したフォルダを記録して、指定の終了コードで終わる）
+        # verify.sh のスタブ（呼ばれたこと・SF_VERIFY_CONFIRMED・実行したフォルダを記録して、指定の終了コードで終わる）
         stub_rc=0; [[ "$case_name" == "fail" ]] && stub_rc=1
         printf '#!/bin/bash\necho "VERIFY-CALLED confirmed=${SF_VERIFY_CONFIRMED:-} cwd=$(basename "$PWD")" >> "%s/verify.log"\nexit %s\n' "$mb" "$stub_rc" \
-            > "$mock_home/sf-tools/bin/sf-verify.sh"
-        chmod +x "$mock_home/sf-tools/bin/sf-verify.sh"
+            > "$mock_home/sf-tools/phases/init/verify.sh"
+        chmod +x "$mock_home/sf-tools/phases/init/verify.sh"
         export MOCK_SF_ORG_JSON='{"result":{"username":"admin@example.com","alias":"x"}}'
         export SF_INIT_JWT_INTERVAL=0 SF_INIT_VERIFY_ASK=1
 
@@ -2038,13 +2038,13 @@ test_verify_step() {
         assert_file_contains "$mb/out.log" "ステップ 9 / 9: 動作の確認" "${case_name}: ステップ 9 の見出しが、表示される"
         case "$case_name" in
             enter)
-                assert_file_contains "$mb/verify.log" "VERIFY-CALLED" "enter: sf-verify.sh が呼ばれる"
+                assert_file_contains "$mb/verify.log" "VERIFY-CALLED" "enter: verify.sh が呼ばれる"
                 assert_file_contains "$mb/verify.log" "confirmed=1" "enter: 確認は、二重に聞かない（SF_VERIFY_CONFIRMED=1）"
                 assert_file_contains "$mb/verify.log" "cwd=force-testproject" "enter: 管理者用のフォルダ（force-*）で実行される"
                 assert_file_contains "$mb/out.log" "動作の確認: 成功しました" "enter: 完了画面に、成功が表示される"
                 ;;
             skip)
-                assert_file_not_exists "$mb/verify.log" "skip: sf-verify.sh は、呼ばれない"
+                assert_file_not_exists "$mb/verify.log" "skip: verify.sh は、呼ばれない"
                 assert_file_contains "$mb/out.log" "動作の確認は、あとで行えます" "skip: あとで実行するコマンドが、表示される"
                 ;;
             eof)
@@ -2052,9 +2052,9 @@ test_verify_step() {
                 assert_file_contains "$mb/out.log" "動作の確認は、あとで行えます" "eof: あとで実行するコマンドが、表示される"
                 ;;
             fail)
-                assert_file_contains "$mb/verify.log" "VERIFY-CALLED" "fail: sf-verify.sh が呼ばれる"
+                assert_file_contains "$mb/verify.log" "VERIFY-CALLED" "fail: verify.sh が呼ばれる"
                 assert_file_contains "$mb/out.log" "失敗した項目があります" "fail: 完了画面に、失敗と案内が、表示される"
-                assert_file_contains "$mb/out.log" "sf-verify.sh --cleanup" "fail: 削除のみのやり直しが、案内される"
+                assert_file_contains "$mb/out.log" "sf-init.sh --verify --cleanup" "fail: 削除のみのやり直しが、案内される"
                 ;;
         esac
         unset MOCK_SF_ORG_JSON SF_INIT_JWT_INTERVAL SF_INIT_VERIFY_ASK MOCK_CALL_LOG
@@ -2068,8 +2068,8 @@ test_verify_step() {
     init_base=$(_setup_init_dir "tamashimon" "testproject")
     init_dir="$init_base/home/tamashimon/testproject"
     create_all_mocks "$mb"; create_mock_gh_for_init "$mb"; _stub_subscripts "$mock_home"
-    printf '#!/bin/bash\necho CALLED >> "%s/verify.log"\n' "$mb" > "$mock_home/sf-tools/bin/sf-verify.sh"
-    chmod +x "$mock_home/sf-tools/bin/sf-verify.sh"
+    printf '#!/bin/bash\necho CALLED >> "%s/verify.log"\n' "$mb" > "$mock_home/sf-tools/phases/init/verify.sh"
+    chmod +x "$mock_home/sf-tools/phases/init/verify.sh"
     export MOCK_SF_ORG_JSON='{"result":{"username":"admin@example.com","alias":"x"}}' SF_INIT_JWT_INTERVAL=0
     input=$(E2E_PAT_TOKEN=ghp_fakepat E2E_SLACK_BOT_TOKEN=xoxb-fakeslack E2E_SLACK_CHANNEL_ID=C01ABCDEFGH \
             bash -c "source '$SF_TOOLS_DIR/tests/e2e/lib.sh'; e2e_make_input")
@@ -2079,7 +2079,7 @@ test_verify_step() {
     exit_code=$?
     assert_exit_ok "$exit_code" "非対話: 正常終了する"
     assert_file_not_contains "$mb/out.log" "動作を確認しますか" "非対話（端末ではない）: 質問を出さない"
-    assert_file_not_exists "$mb/verify.log" "非対話: sf-verify.sh を呼ばない"
+    assert_file_not_exists "$mb/verify.log" "非対話: verify.sh を呼ばない"
     assert_file_contains "$mb/out.log" "動作の確認は、あとで行えます" "非対話: あとで実行するコマンドを、案内する"
     unset MOCK_SF_ORG_JSON SF_INIT_JWT_INTERVAL MOCK_CALL_LOG
     teardown "$mb" "$mock_home" "$init_base"

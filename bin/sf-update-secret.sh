@@ -48,6 +48,7 @@ if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
     exit 0
 fi
 source "$COMMON_LIB"
+source "${SCRIPT_DIR}/../lib/sf-org.sh"   # ログイン先の選択（種類ではなく URL）・本番は main のみの確認
 
 # ------------------------------------------------------------------------------
 # 3. 必須コマンドのチェック
@@ -108,20 +109,26 @@ _test_jwt_login() {
     log "INFO" "  sf org login jwt --client-id *** --jwt-key-file ${key_file} --username ${username} --instance-url ${instance_url} --alias ${org_alias}"
 
     # 出力（stderr 含む）をキャプチャしてログに残し、成否は sf の終了コードで判定する（sf は npm 版が前提）
-    # 一時的なホームフォルダの中で実行する: エイリアスが増えず、同じユーザーの既存の sf の認証も置き換わらない
+    # 一時的なホームフォルダの中で実行する: エイリアスが増えず、同じユーザーの既存の sf の認証も置き換わらない。
+    # 組織の種類の読み取りも、同じ一時的なホームの中で行う（sf_org_jwt_test）
     local jwt_out
-    if ! jwt_out=$(run_isolated_home sf org login jwt \
-        --client-id    "$consumer_key" \
-        --jwt-key-file "$key_file" \
-        --username     "$username" \
-        --instance-url "$instance_url" \
-        --alias        "$org_alias"); then  # 条件チェック
+    if ! sf_org_jwt_test "$org_alias" "$consumer_key" "$key_file" "$username" "$instance_url"; then  # 条件チェック
+        jwt_out="$SF_ORG_JWT_OUT"
         log "ERROR" "  ${jwt_out//$consumer_key/***masked***}"
         die "JWT 接続テストに失敗しました（${label}）。"
     fi
+    jwt_out="$SF_ORG_JWT_OUT"
 
     log "INFO" "  ${jwt_out}"
     log "SUCCESS" "JWT 接続テスト成功: ${label}"
+
+    # 本番組織は main にしか、つなげない（F8）。Secrets を更新する前に確認する（判定できない組織も、main 以外には、つなげない）
+    local _t
+    _t=$(sf_org_tier_of_suffix "$suffix")  # VAR=$(cmd) のため run 不使用
+    sf_org_guard "${_t:-main}" "$label" \
+        || die "${label}（${_t:-main}）に、Salesforce の本番組織、または、種類を判定できない組織は、つなげません（本番組織は main のみです）。"
+    # 組織の情報（ID・名前・種類・確認日時）を保存する（--status の表示用。読み取れていなければ、保存しない）
+    sf_org_save "$suffix"
 }
 
 # ------------------------------------------------------------------------------
@@ -143,7 +150,7 @@ _select_org() {
 
     # ブランチ数に応じたメニュー表示
     log "INFO" "対象組織を選択してください:"
-    log "INFO" "  1) 本番組織（PROD）"
+    log "INFO" "  1) main の組織（PROD）"
     [[ $branch_count -ge 2 ]] && log "INFO" "  2) ステージング組織（STG）"
     [[ $branch_count -ge 3 ]] && log "INFO" "  3) 開発組織（DEV）"
 
@@ -157,7 +164,7 @@ _select_org() {
     local key
     read_key key "$prompt" "[${valid}Qq]"
     case "$key" in
-        1) _suffix_ref="PROD"; _label_ref="本番組織";         _alias_ref="prod"    ;;
+        1) _suffix_ref="PROD"; _label_ref="main の組織";     _alias_ref="prod"    ;;
         2) _suffix_ref="STG";  _label_ref="ステージング組織"; _alias_ref="staging" ;;
         3) _suffix_ref="DEV";  _label_ref="開発組織";         _alias_ref="develop" ;;
         q|Q) die "中断しました。" ;;
@@ -217,13 +224,10 @@ _update_consumer_key() {
         read_or_quit username "  ${label}の接続ユーザー名を入力してください（接続テスト用）："
     fi
 
-    # 接続 URL: PROD は本番固定、STG/DEV は Sandbox か否かを選択
-    instance_url="https://login.salesforce.com"
-    if [[ "$suffix" != "PROD" ]]; then
-        ask_yn "  Sandbox ですか？" \
-            && instance_url="https://test.salesforce.com" \
-            || instance_url="https://login.salesforce.com"
-    fi
+    # 接続 URL（ログイン先）: 種類ではなく、URL で選ぶ。段階と組織の種類は、結びつけない（PROD も、選択する）
+    local _tier
+    _tier=$(sf_org_tier_of_suffix "$suffix")  # VAR=$(cmd) のため run 不使用
+    sf_org_choose_login_url instance_url "$label" "${_tier:-main}" "$suffix"
 
     _test_jwt_login "$org_alias" "$suffix" "$label" "$consumer_key" "$username" "$instance_url" "$key_file"
 
@@ -258,13 +262,10 @@ _update_username() {
     read_or_quit consumer_key  "  ${label}のコンシューマーキーを入力してください（接続テスト用）："
     read_or_quit username      "  ${label}の新しい接続ユーザー名を入力してください："
 
-    # 接続 URL: PROD は本番固定、STG/DEV は Sandbox か否かを選択
-    instance_url="https://login.salesforce.com"
-    if [[ "$suffix" != "PROD" ]]; then
-        ask_yn "  Sandbox ですか？" \
-            && instance_url="https://test.salesforce.com" \
-            || instance_url="https://login.salesforce.com"
-    fi
+    # 接続 URL（ログイン先）: 種類ではなく、URL で選ぶ。段階と組織の種類は、結びつけない（PROD も、選択する）
+    local _tier
+    _tier=$(sf_org_tier_of_suffix "$suffix")  # VAR=$(cmd) のため run 不使用
+    sf_org_choose_login_url instance_url "$label" "${_tier:-main}" "$suffix"
 
     _test_jwt_login "$org_alias" "$suffix" "$label" "$consumer_key" "$username" "$instance_url" "$key_file"
 
@@ -297,7 +298,7 @@ _update_all() {
     }
 
     # 組織ごとに更新
-    local suffixes=("PROD") aliases=("prod") labels=("本番組織")
+    local suffixes=("PROD") aliases=("prod") labels=("main の組織")
     local branch_count_file="./sf-tools/config/branches.txt"
     if [[ -f "$branch_count_file" ]]; then
         # コメント行・空行を除いた有効行数でブランチ数を判定する
@@ -315,12 +316,10 @@ _update_all() {
         read_or_quit consumer_key  "    コンシューマーキーを入力してください："
         read_or_quit username      "    接続ユーザー名を入力してください："
 
-        instance_url="https://login.salesforce.com"
-        if [[ "$suffix" != "PROD" ]]; then
-            ask_yn "    Sandbox ですか？" \
-                && instance_url="https://test.salesforce.com" \
-                || instance_url="https://login.salesforce.com"
-        fi
+        # 接続 URL（ログイン先）: 種類ではなく、URL で選ぶ（段階と組織の種類は、結びつけない）
+        local _tier
+        _tier=$(sf_org_tier_of_suffix "$suffix")  # VAR=$(cmd) のため run 不使用
+        sf_org_choose_login_url instance_url "$label" "${_tier:-main}" "$suffix"
 
         _test_jwt_login "$org_alias" "$suffix" "$label" "$consumer_key" "$username" "$instance_url" "$key_file"
 

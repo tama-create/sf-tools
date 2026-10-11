@@ -49,6 +49,7 @@
 |---|---|
 | `test_common.sh` | lib/common.sh |
 | `test_init-common.sh` | phases/init/init-common.sh（`ensure_sf_tools_branch`。実際の Git と一時 bare リポジトリを使用） |
+| `test_sf-org.sh` | lib/sf-org.sh（ログイン先の 3 択・環境変数の指定・組織の種類の判定・本番は main のみのガード・保存） |
 | `test_wizard.sh` | lib/wizard.sh（ウィザード形式の画面の部品: 現在地・チェックリスト・確認・失敗・完了） |
 | `test_sf-unhook.sh` | sf-unhook.sh |
 | `test_sf-hook.sh` | sf-hook.sh |
@@ -120,6 +121,7 @@
 | `check_force_dir` | `check_force_dir` | `force-*` ディレクトリか検証 |
 | `check_home_dir` | `check_home_dir` | `~/home/{owner}/{company}/` の階層を検証し `GITHUB_OWNER` / `COMPANY_NAME` をセット |
 | `check_gh_owner` | `check_gh_owner OWNER` | gh 認証ユーザーがリポジトリオーナーと一致するか確認（不一致は die。オーナーが組織で、ユーザーがその有効な admin なら通過。gh が空を返す場合はスキップ） |
+| （`lib/sf-org.sh`） | `sf_org_choose_login_url VAR LABEL TIER [SUFFIX]` / `sf_org_read_info ALIAS` / `sf_org_parse_info JSON` / `sf_org_kind` / `sf_org_guard TIER LABEL` / `sf_org_jwt_test ALIAS KEY KEYFILE USER URL` / `sf_org_save SUFFIX` | Salesforce 組織の接続情報の共通部品（`doc/wizard-ux-design.md` 4.7）。ログイン先は URL の 3 択（Enter = Sandbox。環境変数 `SF_INIT_LOGIN_URL_<PROD\|STG\|DEV\|START>` で、質問なしで指定できる）。ログイン後に `Organization`（`Id`・`Name`・`IsSandbox`・`OrganizationType`・`TrialExpirationDate`）を読み取り、種類（production / sandbox / developer / trial / unknown）を判定する（読み取れない・矛盾するときは unknown。推測しない）。`sf_org_guard`: **Salesforce の本番組織は main のみ**（staging・develop に本番は、戻り値 2。**判定不能（unknown）も、main 以外は戻り値 2**。確認では通さない。main は、unknown でも続行）。`sf_org_jwt_test`: 従来の接続アプリ用。JWT 接続テストと組織情報の読み取りを、同じ一時的なホームの中で行う（Secrets を登録する前にガードできるように）。`sf_org_save`: 組織の ID・名前・種類・確認日時を GitHub Variables（`SF_ORG_*_<接尾辞>`）に保存 |
 | `ensure_sf_tools_latest` | `ensure_sf_tools_latest [--no-update] DIR` | sf-tools（DIR）が origin の最新か確認し、遅れていれば確認のうえ `git pull --ff-only` で更新する。戻り値: 0=最新（または判定できない）／2=更新した（呼び出し側は、更新した sf-tools で、再実行すること）。die: fetch 失敗・遅れていて未コミットの変更または未プッシュのコミットがある・更新を断った・pull 失敗・`--no-update` で遅れている |
 | `is_gitbash` | `if is_gitbash; then ...` | Windows の Git Bash か判定（`$OSTYPE` が `msys*` / `mingw*` / `cygwin*`） |
 | `check_sf_cli` | `check_sf_cli [--warn-only] [--cache]` | `sf --version` の終了コードが 0 か確認する（sf は npm 版が前提）。0 以外なら、sf の場所と対処を ERROR で表示して `die`（`--warn-only` は表示のみで戻り値 1）。`--cache`（日常のコマンド用）は、成功を `~/.sf-tools-sf-check`（`SF_TOOLS_SF_CHECK_STAMP` で変更可）に sf の場所つきで記録し、24 時間は確認を省略する（失敗は記録せず、毎回確認する）。sf 未インストール・GitHub Actions 上（`GITHUB_ACTIONS=true`）では何もしない |
@@ -437,6 +439,9 @@ tr -d '\r' < "$key_file" | base64 -w 0 | gh secret set "SF_PRIVATE_KEY" -R "$REP
 - `--resume N`: Phase N から、質問なしで再開
 - `--only N`: Phase N のみ実行（デバッグ用。進捗は記録しない）
 - `--add-tier staging|develop`: 既存プロジェクトへの tier 追加（後述）
+- `--reconnect main|staging|develop`: 1 つの段階の接続先（Salesforce 組織）の付け替え（`phases/init/reconnect.sh`。force-* 内で実行。現在の接続を表示 → 確認 → ログイン先の選択 → ログイン → 種類の読み取り → 本番は main のみのガード → 外部クライアントアプリの自動作成 → JWT 接続テスト → Secrets / Variables の一括更新。古い組織が別の組織なら、残る外部クライアントアプリと片付け方を表示する（自動では削除しない））
+- `--status`: 段階ごとの接続を一覧にする（`phases/init/status.sh`。GitHub Variables を読むだけ。同じ組織が複数の段階にあれば警告、本番が main 以外にあればエラー表示）
+- `--legacy-connected-app`（環境変数 `SF_INIT_LEGACY_CONNECTED_APP=1`）: 従来の接続アプリケーション（手動の入力）を使う。既定は外部クライアントアプリ。保存済みの `APP_TYPE=2` と食い違うときは中断する
 
 #### 4.13.1 `--add-tier` による tier 追加
 
@@ -456,10 +461,9 @@ sf-init.sh --add-tier develop    # main+staging → main+staging+develop
 3. バリデーション:
    - 対象 tier がすでに `branches.txt` に存在する場合はエラー
    - `develop` を追加しようとしたとき `staging` が未登録の場合はエラー（`main → develop` のスキップは禁止）
-4. `branches.txt` に tier を追記
+4. **Salesforce 組織に接続する（先に行う）**: ログイン先の選択 → ログイン → 種類の読み取り → 本番は main のみのガード → 外部クライアントアプリの自動作成（`--legacy-connected-app` のときは手動の入力）→ JWT 認証情報（`SF_CONSUMER_KEY_*` を Secret / `SF_USERNAME_*` / `SF_INSTANCE_URL_*` / `SF_ORG_*` を Variable）を登録。接続できなければ、何も変更しない
 5. `git push` でリモートにブランチを作成（既存ならスキップ）
-6. JWT 認証情報（`SF_CONSUMER_KEY_*` を Secret / `SF_USERNAME_*` / `SF_INSTANCE_URL_*` を Variable）を登録
-7. `branches.txt` をコミット＆プッシュ（main ブランチに）
+6. 作業用ブランチ（`system-add-tier-<tier>-日時`）で `branches.txt` に tier を追記・コミット・push し、**PR を作成する**（`main` への直接 push はしない。PR のマージで、`branches.txt` が main に反映される）
 
 スケールアップのみ対応・スケールダウンは対象外:
 - tier の削除（スケールダウン）は自動化していない

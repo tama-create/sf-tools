@@ -82,7 +82,7 @@ echo -e "${CLR_ERR}╔═══════════════════�
 echo -e "${CLR_ERR}║  !!  実際の GitHub / Salesforce を操作します         ║${CLR_RESET}" >&2
 echo -e "${CLR_ERR}║                                                      ║${CLR_RESET}" >&2
 echo -e "${CLR_ERR}║  ・テスト用のリポジトリ・外部クライアントアプリ・    ║${CLR_RESET}" >&2
-echo -e "${CLR_ERR}║    Hello World の Apex を作成します（Apex は削除）    ║${CLR_RESET}" >&2
+echo -e "${CLR_ERR}║    Hello World の Apex を作成します（Apex は削除）   ║${CLR_RESET}" >&2
 echo -e "${CLR_ERR}║  ・終了後も、リポジトリなどは残します（見返す用）    ║${CLR_RESET}" >&2
 echo -e "${CLR_ERR}║    前回の残りは、最初に削除します                    ║${CLR_RESET}" >&2
 echo -e "${CLR_ERR}║  ・sf の認証が、テスト用組織の認証 URL で置き換わり  ║${CLR_RESET}" >&2

@@ -242,6 +242,16 @@ case "$1 $2" in
         [[ "${MOCK_SF_LOGIN_EXIT:-0}" -eq 0 ]] && echo "Successfully authorized fake@example.com with org ID 00D000000000001AAA"
         exit "${MOCK_SF_LOGIN_EXIT:-0}" ;;
     "data query")
+        # 組織の種類の取得（sf_org_read_info: SELECT ... FROM Organization）。
+        #   MOCK_SF_ORG_INFO=<JSON> で応答を差し替える。既定は Sandbox（Enterprise Edition）
+        #   MOCK_SF_ORG_QUERY_EXIT=1 で、取得の失敗を再現する
+        if [[ "$*" == *"FROM Organization"* ]]; then
+            [[ "${MOCK_SF_ORG_QUERY_EXIT:-0}" -ne 0 ]] && { echo "Error: query failed" >&2; exit "${MOCK_SF_ORG_QUERY_EXIT}"; }
+            # 注意: ${VAR:-{...}} は、既定値の中の } で展開が終わり、末尾が付け足されるため、別の変数に入れる
+            _org_default='{"status":0,"result":{"records":[{"attributes":{"type":"Organization"},"Id":"00D000000000001AAA","Name":"Mock Sandbox","IsSandbox":true,"OrganizationType":"Enterprise Edition","TrialExpirationDate":null}]}}'
+            echo "${MOCK_SF_ORG_INFO:-$_org_default}"
+            exit 0
+        fi
         # 接続ユーザーのプロファイル名の取得（sf-init の外部クライアントアプリ作成）
         echo "{\"status\":0,\"result\":{\"records\":[{\"Profile\":{\"Name\":\"${MOCK_SF_PROFILE_NAME:-System Administrator}\"}}]}}"
         exit 0 ;;

@@ -14,8 +14,8 @@
 #   REPO_DIR      = {PWD}/force-{company}
 #
 # 【環境種別】
-#   本番環境 (production) : SF_TOOLS_BRANCH=main       → GitHub Actions は sf-tools main を使用（通常はこちら）
-#   検証環境 (staging)    : SF_TOOLS_BRANCH=development → GitHub Actions は sf-tools development を使用
+#   配布版 (production)    : SF_TOOLS_BRANCH=main       → GitHub Actions は sf-tools main を使用（通常はこちら）
+#   開発版 (staging)       : SF_TOOLS_BRANCH=development → GitHub Actions は sf-tools development を使用
 #                           sf-tools の開発者専用（未リリースのコードが使われる）。
 #                           誤選択を防ぐため、選択時に WARNING と Y/N/q 確認を行う（N なら選択に戻る）
 #
@@ -80,27 +80,27 @@ ask_yn "▶ よろしいですか？" || die "セットアップを中断しま�
 
 # 環境種別の選択
 echo ""
-log "INFO" "環境種別を選択してください："
-log "INFO" "  1. 本番環境  - 通常はこちらを選択してください。"
-log "INFO" "                 GitHub Actions は sf-tools main ブランチ（リリース済みの配布版）を使用"
-log "INFO" "  2. 検証環境  - sf-tools の開発者専用です（リリース前の動作確認用）。"
-log "INFO" "                 GitHub Actions は sf-tools development ブランチ（未リリース版）を使用"
+log "INFO" "sf-tools の版を選択してください（Salesforce の本番・Sandbox とは、関係ありません）："
+log "INFO" "  1. 配布版（main）        - 通常は、こちらを選択してください。"
+log "INFO" "                             GitHub Actions は、リリース済みの sf-tools（main ブランチ）を使用"
+log "INFO" "  2. 開発版（development） - sf-tools の開発者専用です（リリース前の動作確認用）。"
+log "INFO" "                             GitHub Actions は、未リリースの sf-tools（development ブランチ）を使用"
 echo ""
 while true; do
-    read_key ENV_TYPE_KEY "▶ 環境種別を選択してください [1/2/q]：" "[12qQ]"
+    read_key ENV_TYPE_KEY "▶ sf-tools の版を選択してください [1/2/q]：" "[12qQ]"
     [[ "$ENV_TYPE_KEY" =~ ^[qQ]$ ]] && die "セットアップを中断しました。"
     if [[ "$ENV_TYPE_KEY" == "1" ]]; then
         ENV_TYPE="production"
         SF_TOOLS_BRANCH="main"
-        log "INFO" "  → 本番環境（sf-tools: main）"
+        log "INFO" "  → 配布版（sf-tools: main）"
         break
     fi
     # 検証環境は未リリースのコードを使うため、誤選択を防ぐ確認を挟む（N なら選択に戻る）
-    log "WARNING" "検証環境は sf-tools の開発者専用です。リリース前の未検証コード（sf-tools development）が使われます。"
-    if ask_yn "▶ 検証環境で続行しますか？"; then
+    log "WARNING" "開発版は、sf-tools の開発者専用です。リリース前の未検証コード（sf-tools development）が使われます。"
+    if ask_yn "▶ 開発版（development）で続行しますか？"; then
         ENV_TYPE="staging"
         SF_TOOLS_BRANCH="development"
-        log "INFO" "  → 検証環境（sf-tools: development）"
+        log "INFO" "  → 開発版（sf-tools: development）"
         break
     fi
     echo ""

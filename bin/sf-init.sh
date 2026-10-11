@@ -57,6 +57,9 @@
 #   --only N              : Phase N のみ実行（デバッグ・単体テストに使用。進捗は記録しない）
 #   --add-tier staging    : 既存プロジェクトに staging tier を追加
 #   --add-tier develop    : 既存プロジェクトに develop tier を追加
+#   --reconnect <段階>    : 1 つの段階（main / staging / develop）の、接続先の Salesforce 組織を付け替える（force-* 内で実行）
+#   --status              : 段階ごとの、接続先（ログイン先・組織の種類・ユーザー・組織 ID）を一覧にする（読み取りのみ。force-* 内で実行）
+#   --legacy-connected-app: 従来の接続アプリケーション（手動の入力。今後廃止予定）を使う。既定は、外部クライアントアプリ（自動で作成）
 # ==============================================================================
 
 # ------------------------------------------------------------------------------
@@ -99,6 +102,8 @@ ORIG_ARGS=("$@")   # sf-tools を更新したあと、同じ引数で、実行�
 ONLY_PHASE=""
 RESUME_PHASE=1
 ADD_TIER_MODE=""
+RECONNECT_MODE=""
+STATUS_MODE=0
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -115,6 +120,20 @@ while [[ $# -gt 0 ]]; do
             ADD_TIER_MODE="$2"
             shift 2
             ;;
+        --reconnect)
+            RECONNECT_MODE="$2"
+            [[ -n "$RECONNECT_MODE" ]] || die "--reconnect には、main・staging・develop のいずれかを指定してください。"
+            shift 2
+            ;;
+        --status)
+            STATUS_MODE=1
+            shift
+            ;;
+        --legacy-connected-app)
+            # 従来の接続アプリケーション（今後廃止予定）を使う。既定は、外部クライアントアプリ（自動で作成）
+            export SF_INIT_LEGACY_CONNECTED_APP=1
+            shift
+            ;;
         *)
             die "不明なオプションです: $1
 使い方:
@@ -122,7 +141,10 @@ while [[ $# -gt 0 ]]; do
   ~/sf-tools/bin/sf-init.sh --resume N             # Phase N から最後まで順次実行（質問なし）
   ~/sf-tools/bin/sf-init.sh --only N               # Phase N のみ実行
   ~/sf-tools/bin/sf-init.sh --add-tier staging     # staging tier を追加
-  ~/sf-tools/bin/sf-init.sh --add-tier develop     # develop tier を追加"
+  ~/sf-tools/bin/sf-init.sh --add-tier develop     # develop tier を追加
+  ~/sf-tools/bin/sf-init.sh --reconnect main       # main の接続先（Salesforce 組織）を付け替える
+  ~/sf-tools/bin/sf-init.sh --status               # 段階ごとの接続先を一覧にする
+  ~/sf-tools/bin/sf-init.sh --legacy-connected-app # 従来の接続アプリケーションを使う（今後廃止予定）"
             ;;
     esac
 done
@@ -138,6 +160,21 @@ if [[ -n "$ADD_TIER_MODE" ]]; then
     export ADD_TIER="$ADD_TIER_MODE"
     bash "${SCRIPT_DIR}/../phases/init/add_tier.sh" \
         || die "--add-tier ${ADD_TIER_MODE} が失敗しました。"
+    exit $RET_OK
+fi
+
+# --status モード（読み取りのみ。force-* ディレクトリの中で実行する）
+if [[ "$STATUS_MODE" -eq 1 ]]; then
+    export SF_TOOLS_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+    bash "${SCRIPT_DIR}/../phases/init/status.sh" || die "--status が失敗しました。"
+    exit $RET_OK
+fi
+
+# --reconnect モード（1 つの段階の接続先を付け替える。force-* ディレクトリの中で実行する）
+if [[ -n "$RECONNECT_MODE" ]]; then
+    export SF_TOOLS_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+    export RECONNECT_TIER="$RECONNECT_MODE"
+    bash "${SCRIPT_DIR}/../phases/init/reconnect.sh" || die "--reconnect ${RECONNECT_MODE} が失敗しました。"
     exit $RET_OK
 fi
 

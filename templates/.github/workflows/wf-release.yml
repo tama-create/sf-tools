@@ -1,5 +1,5 @@
 # ==============================================================================
-# wf-release.yml - Salesforce 本番リリース
+# wf-release.yml - Salesforce リリース
 # ==============================================================================
 #
 # 【概要】
@@ -7,18 +7,18 @@
 #
 # 【必要な GitHub Secrets（このリポジトリに設定すること）】
 #   SF_PRIVATE_KEY       : 秘密鍵（PEM 形式・全組織共通）
-#   SF_CONSUMER_KEY_PROD : 本番組織の Connected App コンシューマーキー
-#   SF_CONSUMER_KEY_STG  : ステージング組織の Connected App コンシューマーキー
-#   SF_CONSUMER_KEY_DEV  : 開発組織の Connected App コンシューマーキー
+#   SF_CONSUMER_KEY_PROD : main の組織の Connected App コンシューマーキー
+#   SF_CONSUMER_KEY_STG  : staging の組織の Connected App コンシューマーキー
+#   SF_CONSUMER_KEY_DEV  : develop の組織の Connected App コンシューマーキー
 #   SLACK_BOT_TOKEN      : Slack API の Bot Token
 #
 # 【必要な GitHub Variables（このリポジトリに設定すること）】
-#   SF_USERNAME_PROD     : 本番組織の接続ユーザー名
-#   SF_USERNAME_STG      : ステージング組織の接続ユーザー名
-#   SF_USERNAME_DEV      : 開発組織の接続ユーザー名
-#   SF_INSTANCE_URL_PROD : 本番組織の接続 URL（https://login.salesforce.com 等）
-#   SF_INSTANCE_URL_STG  : ステージング組織の接続 URL
-#   SF_INSTANCE_URL_DEV  : 開発組織の接続 URL
+#   SF_USERNAME_PROD     : main の組織の接続ユーザー名
+#   SF_USERNAME_STG      : staging の組織の接続ユーザー名
+#   SF_USERNAME_DEV      : develop の組織の接続ユーザー名
+#   SF_INSTANCE_URL_PROD : main の組織の接続 URL（https://login.salesforce.com 等）
+#   SF_INSTANCE_URL_STG  : staging の組織の接続 URL
+#   SF_INSTANCE_URL_DEV  : develop の組織の接続 URL
 #   SLACK_CHANNEL_ID     : 通知先 Slack チャンネル ID
 #   SF_TOOLS_BRANCH      : clone する sf-tools のブランチ（任意。未設定なら main）
 #
@@ -85,11 +85,11 @@ jobs:
         run: |
           BRANCH="$BASE_REF"
           if [ "$BRANCH" = "main" ]; then
-            ENV_LABEL="🚀 本番組織 (prod)"
+            ENV_LABEL="🚀 main の組織 (prod)"
           elif [ "$BRANCH" = "staging" ]; then
-            ENV_LABEL="🧪 ステージング Sandbox (staging)"
+            ENV_LABEL="🧪 staging の組織 (staging)"
           else
-            ENV_LABEL="🔧 結合 Sandbox (develop)"
+            ENV_LABEL="🔧 develop の組織 (develop)"
           fi
           PR_TITLE="$PR_TITLE_RAW"
           PR_NUMBER="$PR_NUMBER_RAW"
@@ -133,7 +133,7 @@ jobs:
       # --------------------------------------------------------------------------
       # Step 5: マージ先ブランチに対応する Salesforce 組織への認証
       # --------------------------------------------------------------------------
-      - name: 本番組織にログイン（JWT）
+      - name: main の組織にログイン（JWT）
         if: ${{ (github.event.pull_request.base.ref || github.ref_name) == 'main' }}
         run: |
           # 秘密鍵は、本人だけが読める権限で作り、ログインの成否にかかわらず（失敗しても）、必ず消す
@@ -148,7 +148,7 @@ jobs:
             --set-default --alias prod
           rm -f /tmp/server.key
 
-      - name: ステージング組織にログイン（JWT）
+      - name: staging の組織にログイン（JWT）
         if: ${{ (github.event.pull_request.base.ref || github.ref_name) == 'staging' }}
         run: |
           # 秘密鍵は、本人だけが読める権限で作り、ログインの成否にかかわらず（失敗しても）、必ず消す
@@ -163,7 +163,7 @@ jobs:
             --set-default --alias staging
           rm -f /tmp/server.key
 
-      - name: 開発組織にログイン（JWT）
+      - name: develop の組織にログイン（JWT）
         if: ${{ (github.event.pull_request.base.ref || github.ref_name) == 'develop' }}
         run: |
           # 秘密鍵は、本人だけが読める権限で作り、ログインの成否にかかわらず（失敗しても）、必ず消す
@@ -226,11 +226,11 @@ jobs:
           json_escape() { printf '%s' "$1" | tr -d '\000-\037' | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'; }
           BRANCH="$BASE_REF"
           if [ "$BRANCH" = "main" ]; then
-            ENV_LABEL="🚀 本番組織 (prod)"
+            ENV_LABEL="🚀 main の組織 (prod)"
           elif [ "$BRANCH" = "staging" ]; then
-            ENV_LABEL="🧪 ステージング Sandbox (staging)"
+            ENV_LABEL="🧪 staging の組織 (staging)"
           else
-            ENV_LABEL="🔧 統合検証 Sandbox (develop)"
+            ENV_LABEL="🔧 develop の組織 (develop)"
           fi
           BRANCH=$(json_escape "$BRANCH")
 

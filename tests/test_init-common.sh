@@ -6,7 +6,7 @@
 #
 # 【テストケース】
 #   1. 最新・同じブランチ                → 通過
-#   2. 遅れ + Y                          → pull して中断（異常終了）
+#   2. 遅れ + Y                          → pull して、戻り値 2（呼び出し側が、実行しなおす）
 #   3. 遅れ + N                          → 更新せず続行
 #   4. ブランチ違い + N                  → 中断
 #   5. ブランチ違い + Y                  → 続行
@@ -77,10 +77,10 @@ test_esb_behind_yes() {
     b=$(_mk_repos); _advance_origin "$b"
     before=$(git -C "$b/sf-tools" rev-list --count HEAD)
     _run_esb "$b" development 'Y\n'
-    assert_exit_fail $? "遅れ + Y → 中断（異常終了）"
+    assert_equals "$?" "2" "遅れ + Y → 戻り値 2（更新した。呼び出し側が、実行しなおす）"
     after=$(git -C "$b/sf-tools" rev-list --count HEAD)
     [[ "$after" -eq $((before + 1)) ]] && pass "pull で 1 コミット進んだ" || fail "pull で 1 コミット進んだ" "前=${before} 後=${after}"
-    assert_file_contains "$b/out.log" "更新したため" "中断の理由が表示される"
+    assert_file_contains "$b/out.log" "更新しました" "更新した旨が表示される"
     teardown "$b"
 }
 

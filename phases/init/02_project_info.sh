@@ -22,7 +22,7 @@
 # 【sf-tools の最新化確認】
 #   環境種別の選択直後に ensure_sf_tools_branch（init-common.sh）を呼び、~/sf-tools が
 #   選択した環境のブランチ（本番=main / 検証=development）かどうか、origin より遅れていないかを確認する。
-#   ・遅れていれば確認のうえ git pull --ff-only を実行し、実行中のスクリプトが書き換わるため die で中断する
+#   ・遅れていれば確認のうえ git pull --ff-only を実行し、終了コード 75 で終了する（sf-init.sh が、自動で、実行しなおす）する
 #   ・ブランチ違いは確認（Y/N/q）。ローカルに未コミット・未 push の変更があれば更新せず警告のみ
 # ==============================================================================
 
@@ -46,7 +46,7 @@ SF_INIT_ENV_FILE="${SF_INIT_ENV_FILE:-${PWD}/.sf-init.env}"
 # ------------------------------------------------------------------------------
 # メイン処理
 # ------------------------------------------------------------------------------
-log "HEADER" "Phase 2: プロジェクト情報の確認"
+log "HEADER" "プロジェクト情報の確認"
 
 log "INFO" "プロジェクト情報を確認中..."
 
@@ -106,8 +106,19 @@ while true; do
     echo ""
 done
 
-# 選択した環境に合わせて ~/sf-tools の最新化を確認する（更新した場合は die で中断）
-ensure_sf_tools_branch "$SF_TOOLS_BRANCH"
+# 選択した環境に合わせて ~/sf-tools の最新化を確認する。更新した場合（戻り値 2）は、終了コード 75 で終了する
+#   （司令塔の sf-init.sh が、更新した sf-tools で、自動的に、最初から実行しなおす）
+#   起動時（sf-init.sh）に、現在のブランチの最新化を、確認済みなら（SF_INIT_TOOLS_CHECKED_BRANCH）、
+#   二重に確認せず、選んだ環境とのブランチ違いだけを確認する
+if [[ -n "${SF_INIT_TOOLS_CHECKED_BRANCH:-}" ]]; then
+    if [[ "$SF_INIT_TOOLS_CHECKED_BRANCH" != "$SF_TOOLS_BRANCH" ]]; then
+        log "WARNING" "ローカルの sf-tools は ${SF_INIT_TOOLS_CHECKED_BRANCH} ブランチですが、選択した環境は ${SF_TOOLS_BRANCH} です。"
+        ask_yn "▶ このまま続行しますか？" || die "セットアップを中断しました。"
+    fi
+else
+    ensure_sf_tools_branch "$SF_TOOLS_BRANCH"
+    [[ $? -eq 2 ]] && exit 75
+fi
 
 # .sf-init.env に変数を書き出す（後続フェーズで source して使用）
 {
@@ -121,5 +132,5 @@ ensure_sf_tools_branch "$SF_TOOLS_BRANCH"
 } > "$SF_INIT_ENV_FILE"
 chmod 600 "$SF_INIT_ENV_FILE" 2>/dev/null || true  # run 不使用: ファイル権限保護（Windows は効果なし・意図的エラー無視）
 
-log "SUCCESS" "Phase 2 完了: プロジェクト情報の確認 OK。"
+log "SUCCESS" "完了: プロジェクト情報の確認 OK。"
 exit $RET_OK

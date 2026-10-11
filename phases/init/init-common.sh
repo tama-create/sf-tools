@@ -185,7 +185,7 @@ register_jwt_secret() {
 #   - 現在のブランチが目標ブランチと違う → WARNING + ask_yn（N/q は die。ブランチの自動切り替えはしない）
 #   - 未コミットの変更または未 push のコミットがある → 更新せず WARNING のみで続行（開発者の作業を守る）
 #   - origin より遅れている → 遅れたコミットを表示し ask_yn。Y なら git pull --ff-only を実行し、
-#     実行中のスクリプトが書き換わるため die で中断する。N なら WARNING で続行
+#     実行中のスクリプトが書き換わるため、戻り値 2 を返す（呼び出し側は、更新した sf-tools で、実行しなおすこと）。N なら WARNING で続行
 #   - 最新ならそのまま続行
 # ------------------------------------------------------------------------------
 ensure_sf_tools_branch() {
@@ -231,7 +231,8 @@ ensure_sf_tools_branch() {
     done < <(git -C "$dir" log --oneline -10 "HEAD..origin/${cur}" 2>/dev/null)  # プロセス置換のため run 不使用
     if ask_yn "▶ sf-tools を更新しますか？"; then
         run git -C "$dir" pull --ff-only origin "$cur" || die "sf-tools の更新に失敗しました。"
-        die "sf-tools を更新したため、この実行を中断しました。"
+        log "SUCCESS" "sf-tools を更新しました。"
+        return 2
     fi
     log "WARNING" "sf-tools を更新せずに続行します。"
     return $RET_OK

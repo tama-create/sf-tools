@@ -40,7 +40,7 @@ SF_INIT_ENV_FILE="${SF_INIT_ENV_FILE:-${PWD}/.sf-init.env}"
 # ------------------------------------------------------------------------------
 # メイン処理
 # ------------------------------------------------------------------------------
-log "HEADER" "Phase 8: 初回コミット＆プッシュ"
+log "HEADER" "初回コミット＆プッシュ"
 
 log "INFO" "初回コミット＆プッシュを実行中..."
 
@@ -120,5 +120,5 @@ log "INFO" "pre-push フックをインストール中..."
 run bash "${SF_TOOLS_DIR}/bin/sf-hook.sh" \
     || die "sf-hook.sh の実行に失敗しました。"
 
-log "SUCCESS" "Phase 8 完了: 初回コミット＆プッシュ OK。"
+log "SUCCESS" "完了: 初回コミット＆プッシュ OK。"
 exit $RET_OK

@@ -26,7 +26,7 @@ SF_INIT_ENV_FILE="${SF_INIT_ENV_FILE:-${PWD}/.sf-init.env}"
 # ------------------------------------------------------------------------------
 # メイン処理
 # ------------------------------------------------------------------------------
-log "HEADER" "Phase 1: 環境チェック"
+log "HEADER" "環境チェック"
 
 # init フォルダからのみ実行を許可
 local_dir=$(basename "$PWD")
@@ -59,5 +59,5 @@ if ! run gh auth status; then
     run gh auth login || die "GitHub 認証に失敗しました。"
 fi
 
-log "SUCCESS" "Phase 1 完了: 環境チェック OK。"
+log "SUCCESS" "完了: 環境チェック OK。"
 exit $RET_OK

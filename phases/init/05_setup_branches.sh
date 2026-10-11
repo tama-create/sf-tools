@@ -37,7 +37,7 @@ trap '[[ -n "$TMP_BRANCH_FILE" ]] && rm -f "$TMP_BRANCH_FILE"' EXIT
 # ------------------------------------------------------------------------------
 # メイン処理
 # ------------------------------------------------------------------------------
-log "HEADER" "Phase 5: ブランチ構成"
+log "HEADER" "ブランチ構成"
 
 cd "$REPO_DIR" || die "ディレクトリに移動できません: $REPO_DIR"
 
@@ -90,5 +90,5 @@ log "SUCCESS" "branches.txt を更新しました: ${BRANCHES[*]}"
 BRANCH_COUNT="${#BRANCHES[@]}"
 printf 'BRANCH_COUNT="%s"\n' "$BRANCH_COUNT" >> "$SF_INIT_ENV_FILE"
 
-log "SUCCESS" "Phase 5 完了: ブランチ構成 OK（${BRANCH_COUNT} 階層）。"
+log "SUCCESS" "完了: ブランチ構成 OK（${BRANCH_COUNT} 階層）。"
 exit $RET_OK

@@ -38,7 +38,7 @@ SF_INIT_ENV_FILE="${SF_INIT_ENV_FILE:-${PWD}/.sf-init.env}"
 # ------------------------------------------------------------------------------
 # メイン処理
 # ------------------------------------------------------------------------------
-log "HEADER" "Phase 9: GitHub リポジトリ設定・Ruleset の適用"
+log "HEADER" "GitHub リポジトリ設定・Ruleset の適用"
 
 # --- 1. リポジトリ基本設定 ---
 log "INFO" "[1/3] リポジトリ基本設定を適用中..."
@@ -169,6 +169,6 @@ if [[ "${SF_TOOLS_BRANCH:-main}" == "development" ]]; then
     fi
 fi
 
-log "SUCCESS" "Phase 9 完了: GitHub リポジトリ設定・Ruleset の適用 OK。"
+log "SUCCESS" "完了: GitHub リポジトリ設定・Ruleset の適用 OK。"
 
 exit $RET_OK

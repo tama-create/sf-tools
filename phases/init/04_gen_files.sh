@@ -28,7 +28,7 @@ SF_INIT_ENV_FILE="${SF_INIT_ENV_FILE:-${PWD}/.sf-init.env}"
 # ------------------------------------------------------------------------------
 # メイン処理
 # ------------------------------------------------------------------------------
-log "HEADER" "Phase 4: ファイル生成"
+log "HEADER" "ファイル生成"
 
 log "INFO" "sf-tools の初期設定ファイルを生成中..."
 
@@ -40,5 +40,5 @@ cd "$REPO_DIR" || die "ディレクトリに移動できません: $REPO_DIR"
 run bash "${SF_TOOLS_DIR}/bin/sf-install.sh" \
     || die "sf-install.sh の実行に失敗しました。"
 
-log "SUCCESS" "Phase 4 完了: 設定ファイルの生成 OK。"
+log "SUCCESS" "完了: 設定ファイルの生成 OK。"
 exit $RET_OK

@@ -33,7 +33,7 @@ SF_INIT_ENV_FILE="${SF_INIT_ENV_FILE:-${PWD}/.sf-init.env}"
 # ------------------------------------------------------------------------------
 # メイン処理
 # ------------------------------------------------------------------------------
-log "HEADER" "Phase 7: Slack 連携の設定"
+log "HEADER" "Slack 連携の設定"
 
 # 8-1. Bot Token 取得
 echo ""
@@ -100,5 +100,5 @@ echo "  また、通知を見る人は、このチャンネルに参加してく
 echo ""
 press_enter "Bot の招待が完了したら Enter を押してください..."
 
-log "SUCCESS" "Phase 7 完了: Slack 連携の設定 OK。"
+log "SUCCESS" "完了: Slack 連携の設定 OK。"
 exit $RET_OK

@@ -49,6 +49,7 @@
 |---|---|
 | `test_common.sh` | lib/common.sh |
 | `test_init-common.sh` | phases/init/init-common.sh（`ensure_sf_tools_branch`。実際の Git と一時 bare リポジトリを使用） |
+| `test_wizard.sh` | lib/wizard.sh（ウィザード形式の画面の部品: 現在地・チェックリスト・確認・失敗・完了） |
 | `test_sf-unhook.sh` | sf-unhook.sh |
 | `test_sf-hook.sh` | sf-hook.sh |
 | `test_sf-init.sh` | sf-init.sh |
@@ -401,6 +402,13 @@ tr -d '\r' < "$key_file" | base64 -w 0 | gh secret set "SF_PRIVATE_KEY" -R "$REP
 新規 Salesforce プロジェクトの初期セットアップ。`phases/init/` 配下のフェーズスクリプトを順次実行する。
 
 起動時（フェーズの実行・`--resume` / `--only` / `--add-tier` の前）に `check_sf_cli` で、`sf --version` の終了コードを確認し、0 以外なら案内（npm 版への入れ替え）を表示して中断する（3.3 参照）。
+**ウィザード形式の画面（`lib/wizard.sh`・設計: `doc/wizard-ux-design.md`）:**
+- 利用者に見せるのは、Phase の番号ではなく、**全 8 ステップ**（`WIZ_STEP_TITLES`）。Phase とステップの対応は `WIZ_PHASE_STEP`（1→1, 2→2, 3・4→3, 5→4, 6→5, 7→6, 8・9→7, 10→8）。フェーズループが、新しいステップに入るときに `wizard_step`（現在地・完了済み・目的の 1 文）を出す。各 Phase スクリプトの見出しからは、「Phase N」を外した。
+- 開始画面（通常の新規実行のみ。`--only` / `--resume N` は従来の簡易表示）: `wizard_banner` → 作るもの・所要時間の目安 → 管理者向けの警告ボックス（従来どおり）→ `wizard_checklist`（先に用意するもの）→ 全ステップの一覧 → `wizard_confirm`（Enter / Y で進む。N / q は die。CLAUDE.md 2.4 の `ask_yn || die` と同じく、「N / q で必ず中断」）。`check_home_dir` は、開始画面の前に実行する（作るリポジトリ名を表示するため）。
+- sf-tools の最新化（P14）: 開始画面の、**管理者向けの警告のあと・確認の前**に、**現在のブランチを対象に** `ensure_sf_tools_branch` を呼ぶ（本番 / 検証の選択には依存しない。Git リポジトリのときだけ）。遅れていれば、確認のうえ `git pull --ff-only` し、戻り値 2 を返す。`sf-init.sh` は、`SF_INIT_RESTARTED=1` を付けて、同じ引数で `exec` する（実行しなおしたあとも、開始画面・管理者向けの警告・確認は、毎回出す。確認を飛ばさない）。確認済みのブランチは `SF_INIT_TOOLS_CHECKED_BRANCH` で Phase 2 に渡し、Phase 2 は、最新化を二重に確認せず、選んだ環境とのブランチ違いだけを確認する。Phase 2 が戻り値 2 を受けたとき（起動時に確認できなかった場合）は、終了コード 75 で終了し、`sf-init.sh` が実行しなおす。**実行しなおしは 1 回だけ**（`SF_INIT_RESTARTED` が立っているのに、再び 75 なら、die。無限に繰り返さない）。
+- 完了画面: `wizard_done`（できたこと・次にやること: `sf-job.sh` と、リポジトリの URL）。`init` フォルダの片付けの質問は、何のフォルダか・なぜ消してよいかを書いたうえで、聞く。
+- 失敗時: `wizard_fail` で、「どこから再開されるか」を、利用者向けの名前で出す（再開の単位は、Phase の先頭）。`die` は、事実のみ（従来の規約）。
+- テスト: `tests/test_wizard.sh`（部品）、`tests/test_sf-init.sh` の happy path（開始画面・見出し・完了画面）と `test_sf_tools_autoupdate`（本物の git で、更新 → 自動で実行しなおし）。
 
 実行フロー:
 1. 環境チェック（ツール確認・GitHub CLI 認証確認）
@@ -408,15 +416,26 @@ tr -d '\r' < "$key_file" | base64 -w 0 | gh secret set "SF_PRIVATE_KEY" -R "$REP
 3. リポジトリ作成（gh repo create + git clone）
 4. ファイル生成（sf-install.sh / sf-hook.sh）
 5. ブランチ構成（対話選択 → branches.txt 更新）
-6. PAT_TOKEN の設定
+6. PAT_TOKEN の設定（`phases/init/06_pat_token.sh`。force-* のリポジトリ用の Token であり、sf-tools（公開リポジトリ）とは無関係）。流れ: Token を作るべきアカウント（`REPO_FULL_NAME` のオーナー。組織なら管理者）を表示 → `ask_yn`「発行済みの Token がありますか？」（Y: ブラウザを開かず、使い回しの注意を表示 / N: 手順を表示し `open_browser` + `press_enter`）→ `read_secret`（画面に表示しない）→ `verify_pat_token`（Token は環境変数 `GH_TOKEN` で `gh` に渡し、コマンドの引数に出さない。①`gh api user --jq .login` で認証できるか ②`gh api user --include` の `X-OAuth-Scopes` に `repo`・`workflow` があるか〔ヘッダーがない Fine-grained は不可〕 ③`gh api repos/<REPO_FULL_NAME> --jq .permissions.admin` が `true` か〔個人ならオーナー、組織なら組織の管理者〕。NG なら理由を表示し、3 回まで貼り直し。超えたら die）→ `gh secret set PAT_TOKEN` → `.sf-init.env` に `PAT_TOKEN_VALUE` を書き出し（Phase 8 の push で使用）
 7. Slack 連携の設定（SLACK_BOT_TOKEN を Secret / SLACK_CHANNEL_ID を Variable に登録。チャンネル ID は C または G で始まる形式かを検証し、それ以外（D=DM、U=ユーザーなど）は警告して拒否し、入力し直させる。通知先は全員が参加する共有チャンネルのため）
 8. 初回コミット＆プッシュ（PAT は GIT_ASKPASS で渡しコマンドのログに残さない。push 後に .sf-init.env から PAT を削除する）
 9. GitHub リポジトリ設定・Ruleset の適用（既存 Ruleset の ID は数字のときだけ削除対象にする）
 10. JWT 認証情報の設定（SF_PRIVATE_KEY / SF_CONSUMER_KEY_* を Secret / SF_USERNAME_* / SF_INSTANCE_URL_* を Variable に登録）。アプリ種別が外部クライアントアプリ（2）のときは、組織ごとに `register_jwt_secret_eca`（`init-common.sh`）が自動作成する（`sf org login web` → ユーザー名・プロファイル名（表示名）を取得 → `generate_eca_metadata` で 5 ファイルを生成して `sf project deploy` → `sf project retrieve` でコンシューマー鍵を取得 → JWT 接続テスト（反映待ちのためリトライ。`SF_INIT_JWT_RETRIES` / `SF_INIT_JWT_INTERVAL`）→ 登録）。ログイン用の一時エイリアス（`sf-tools-PROD` / `sf-tools-STG` / `sf-tools-DEV`。ユーザーが運用中のエイリアスと重ならないよう `sf-tools-` を付ける）は、ログイン前に `sf alias unset` で外し（前回の古い認証による誤判定の防止）、終了後にも `sf alias unset` で消す（`sf org logout` は同じユーザー名の全エイリアスの認証を消すため使わない）。`sf` は npm 版が前提（Windows の Git Bash で公式インストーラー版を使うと、成功しても終了コード 1 になるため）。ログイン（`sf org login web`）、接続情報の取得（`sf org display --json`。ユーザー名はその出力から取り出す）、プロファイル名の取得（`sf data query`）、JWT 接続テストの成否は、すべて終了コードで判定し、0 以外なら中断する（JWT 接続テストはリトライ後、スキップの確認）。接続アプリ（1）は従来の手動案内
 
+**進捗の記録と「続きから」の選択（`bin/sf-init.sh`）:**
+- フェーズループで、Phase 2 以降が成功するたびに、`init/.sf-init.env` の `SF_INIT_DONE_PHASE=N` と `SF_INIT_DONE_AT="日時"` を更新する（`sed -i` で古い行を消してから追記。Phase 1 は状態を持たないため記録しない。`--only` は記録しない）。失敗した Phase は記録されない。
+- 引数なしで起動し、`.sf-init.env` があり、`SF_INIT_DONE_PHASE` が 2〜9 で、`REPO_FULL_NAME` が `${GITHUB_OWNER}/force-${COMPANY_NAME}`（作業フォルダのもの）と一致するとき、管理者警告・`check_gh_owner`・init フォルダへの移動のあとに、`read_key` で `[1] 続き / [2] 最初から / [q] 中断` を選ばせる（既定値なし）。
+  - `1`: `START_PHASE=N+1`、`RESUMED=1`。`.sf-init.env` は消さない。Phase 1（環境チェック）を、先頭に付け足して、毎回実行する。
+  - `2`: 従来どおり `.sf-init.env` を削除して Phase 1 から。リポジトリ・init フォルダは削除しない（Phase 3 が冪等のため）。
+  - `q`: `die`。
+- 質問しない場合: 状態なし・Phase 10 完了済み・別のリポジトリの状態（従来どおり `.sf-init.env` を削除して最初から）、`--resume N` / `--only N` の指定あり。
+- Phase 3 以降が失敗したときは、`die`（事実のみ）の前に、「もう一度 sf-init.sh を実行し、『続きをやる』を選ぶと、Phase N から再開できます」を INFO で表示する。
+- 値の取り出しは `source` せず、`_env_value KEY`（grep + sed）で行う。
+- テスト: `tests/test_sf-init.sh` の `test_resume_choice`（[1]・[2]・q・質問が出ない条件・`--resume`・`--only`）。happy path と Phase 10 失敗のテストにも、記録の確認がある。
+
 オプション:
-- `--resume N`: Phase N から再開（エラー後の再試行）
-- `--only N`: Phase N のみ実行（デバッグ用）
+- `--resume N`: Phase N から、質問なしで再開
+- `--only N`: Phase N のみ実行（デバッグ用。進捗は記録しない）
 - `--add-tier staging|develop`: 既存プロジェクトへの tier 追加（後述）
 
 #### 4.13.1 `--add-tier` による tier 追加

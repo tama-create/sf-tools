@@ -372,6 +372,7 @@ if [[ "$RESUME_PHASE" -eq 1 && -z "$ONLY_PHASE" && -f "$SF_INIT_ENV_FILE" && -f 
         echo "    [q] 中断" >&2
         echo "" >&2
         read_key resume_choice "  ▶ 番号を入力してください [1-2/q]: " "[12Qq]"
+        # shellcheck disable=SC2154  # resume_choice は、read_key（lib/input.sh）が、名前で受け取って代入する
         case "$resume_choice" in
             1) RESUMED=1
                START_PHASE=$next_phase
@@ -392,6 +393,7 @@ if [[ "$RESUME_PHASE" -eq 1 && -z "$ONLY_PHASE" && -f "$SF_INIT_ENV_FILE" && -f 
         echo "    [q] 終了" >&2
         echo "" >&2
         read_key done_choice "  ▶ 番号を入力してください [1-3/q]: " "[123Qq]"
+        # shellcheck disable=SC2154  # done_choice も同様（read_key が代入する）
         case "$done_choice" in
             1) [[ -d "$prev_dir" ]] || die "管理者用のフォルダが見つかりません: ${prev_dir}"
                # 診断で不足があっても（終了コード 1）、表示のとおり。ここでは、エラー終了にしない

@@ -34,6 +34,7 @@ E2E_DIR="$SF_TOOLS_DIR/tests/e2e"
 # ------------------------------------------------------------------------------
 _mk_mocks() {
     local mb="$1"
+    create_mock_node "$mb"   # json_get が使う node（-e だけ本物へ渡す。WSL には node がなく node.exe だけがある）
     cat > "$mb/gh" << 'EOF'
 #!/bin/bash
 echo "gh $*" >> "${MOCK_CALL_LOG:-/dev/null}"

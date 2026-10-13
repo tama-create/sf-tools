@@ -5,6 +5,8 @@
 # 使い方: bash tests/run_tests.sh [テストファイル名]
 #   引数なし → 全テストを順番に実行
 #   引数あり → 指定したテストのみ実行（例: bash run_tests.sh test_sf-hook.sh）
+#   --jobs N / --serial : 同時に動かすテストファイルの数（既定: CPU の数。環境変数 SF_TEST_JOBS でも指定できる。
+#                         --serial は 1 = 1 つずつ）。時間のかかるファイルから先に起動する（全体の時間を短くするため）
 # ==============================================================================
 
 # Windows Git Bash の場合は WSL で自動リダイレクト（高速化）
@@ -37,6 +39,23 @@ CLR_PASS='\033[32m'
 CLR_FAIL='\033[31m'
 CLR_HEAD='\033[36m'
 CLR_RST='\033[0m'
+
+# 同時に動かすテストファイルの数（先頭の --jobs N / --jobs=N / --serial を、読み取る）
+JOBS="${SF_TEST_JOBS:-$(nproc 2>/dev/null || echo 4)}"
+while [[ "${1:-}" == "--jobs" || "${1:-}" == --jobs=* || "${1:-}" == "--serial" ]]; do
+    case "$1" in
+        --serial)  JOBS=1; shift ;;
+        --jobs)    JOBS="${2:-}"; shift 2 || shift ;;
+        --jobs=*)  JOBS="${1#--jobs=}"; shift ;;
+    esac
+done
+if ! [[ "$JOBS" =~ ^[1-9][0-9]*$ ]]; then
+    echo "--jobs には、1 以上の整数を指定してください: ${JOBS}" >&2
+    exit 2
+fi
+
+# 時間のかかるファイル（先に起動する。最後に長いものが残って、全体が伸びるのを避ける）
+HEAVY_FIRST=(test_sf-init.sh test_e2e.sh test_verify.sh test_sf-release.sh test_sf-install.sh)
 
 # 実行するテストファイルを順番に定義
 TEST_FILES=(
@@ -109,7 +128,8 @@ if [[ "${1:-}" == "--changed" ]]; then
                 _t="test_$(basename "$_file")"
                 _changed_tests+=("$_t")
                 ;;
-            lib/common.sh)
+            lib/common.sh|lib/input.sh|lib/platform.sh|lib/project.sh)
+                # common.sh は、input.sh / platform.sh / project.sh を source する（どれを変えても、test_common.sh）
                 _changed_tests+=("test_common.sh")
                 ;;
             lib/wizard.sh)
@@ -190,21 +210,34 @@ if [[ ${#TEST_FILES[@]} -eq 1 ]]; then
         _run_single "$test_path"
     fi
 else
-    # 複数ファイル: 並列実行（各ファイルをバックグラウンドで起動し tmp に出力を保存）
+    # 複数ファイル: 並列実行（各ファイルをバックグラウンドで起動し tmp に出力を保存）。
+    #   同時に動かす数は JOBS まで（全ファイルを一斉に動かすと、CPU を取り合って、かえって遅くなる）。
+    #   起動の順は、時間のかかるファイルが先。表示と集計は、TEST_FILES の順
     declare -a _pids=()
     declare -a _tmps=()
+    declare -a _order=()
+    for i in "${!TEST_FILES[@]}"; do _pids[$i]=-1; _tmps[$i]=""; done
+    for _h in "${HEAVY_FIRST[@]}"; do
+        for i in "${!TEST_FILES[@]}"; do
+            [[ "${TEST_FILES[$i]}" == "$_h" ]] && _order+=("$i")
+        done
+    done
+    for i in "${!TEST_FILES[@]}"; do
+        _in=0
+        for _j in "${_order[@]}"; do [[ "$_j" == "$i" ]] && { _in=1; break; }; done
+        [[ $_in -eq 0 ]] && _order+=("$i")
+    done
 
-    for test_file in "${TEST_FILES[@]}"; do
-        test_path="$TESTS_DIR/$test_file"
-        if [[ ! -f "$test_path" ]]; then
-            _pids+=(-1)
-            _tmps+=("")
-            continue
-        fi
+    for i in "${_order[@]}"; do
+        test_path="$TESTS_DIR/${TEST_FILES[$i]}"
+        [[ -f "$test_path" ]] || continue   # 見つからないファイルは、pid が -1 のまま（表示のときに SKIP）
+        while (( $(jobs -rp | wc -l) >= JOBS )); do
+            wait -n 2>/dev/null || true
+        done
         tmp=$(mktemp /tmp/sftest-XXXX)
-        bash "$test_path" > "$tmp" 2>&1 &
-        _pids+=($!)
-        _tmps+=("$tmp")
+        bash "$test_path" > "$tmp" 2>&1 < /dev/null &   # 標準入力は閉じる（入力待ちで、止まらないため）
+        _pids[$i]=$!
+        _tmps[$i]="$tmp"
     done
 
     # 起動順に wait → 出力を順番に表示・集計

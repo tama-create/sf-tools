@@ -39,20 +39,26 @@ EOF
     cat > "$bin_dir/gh" << 'EOF'
 #!/bin/bash
 echo "gh $*" >> "${MOCK_CALL_LOG:-/dev/null}"
-_build_json() {
-    local result="[" sep=""
+# --jq 付きのときは、gh が適用した後の出力（「ヘッド<TAB>ベース」の行。@tsv）を返す。なければ JSON
+_build_out() {
+    local result="[" sep="" pr head base
     for pr in $1; do
         head="${pr%%->*}"; base="${pr##*->}"
-        result="${result}${sep}{\"headRefName\":\"${head}\",\"baseRefName\":\"${base}\"}"
-        sep=","
+        if [[ "$_args" == *"--jq"* ]]; then
+            printf '%s	%s
+' "$head" "$base"
+        else
+            result="${result}${sep}{\"headRefName\":\"${head}\",\"baseRefName\":\"${base}\"}"
+            sep=","
+        fi
     done
-    echo "${result}]"
+    [[ "$_args" == *"--jq"* ]] || echo "${result}]"
 }
 _args="$*"
 if echo "$_args" | grep -q -- "--state merged" && echo "$_args" | grep -q -- "--json"; then
-    _build_json "${MOCK_GH_MERGED_PRS:-}"
+    _build_out "${MOCK_GH_MERGED_PRS:-}"
 elif echo "$_args" | grep -q -- "--state open" && echo "$_args" | grep -q -- "--json"; then
-    _build_json "${MOCK_GH_OPEN_PRS:-}"
+    _build_out "${MOCK_GH_OPEN_PRS:-}"
 else
     exit 0
 fi

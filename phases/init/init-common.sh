@@ -441,7 +441,7 @@ register_jwt_secret_eca() {
     local org_info
     org_info=$(sf org display --target-org "$tmp_alias" --json 2>/dev/null) \
         || die "${label}の接続情報を取得できませんでした。"  # VAR=$(cmd) のため run 不使用（出力の取得。成否は終了コードで判定）
-    username=$(printf '%s\n' "$org_info" | grep -o '"username": *"[^"]*"' | head -1 | sed 's/.*: *"\(.*\)"/\1/')  # VAR=$(cmd) のため run 不使用（値の抽出のみ）
+    username=$(json_get "$org_info" result.username)  # VAR=$(cmd) のため run 不使用（値の抽出のみ）
     [[ -n "$username" ]] || die "${label}の接続ユーザー名を取得できませんでした。"
     log "INFO" "  ログインに成功しました。"
     log "INFO" "  接続ユーザー: ${username}"
@@ -459,7 +459,7 @@ register_jwt_secret_eca() {
     prof_info=$(sf data query --query "SELECT Profile.Name FROM User WHERE Username='${username}'" \
         --target-org "$tmp_alias" --json 2>/dev/null) \
         || die "接続ユーザーのプロファイル名を取得できませんでした。"  # VAR=$(cmd) のため run 不使用（出力の取得。成否は終了コードで判定）
-    profile=$(printf '%s\n' "$prof_info" | grep -o '"Name": *"[^"]*"' | head -1 | sed 's/.*: *"\(.*\)"/\1/')  # VAR=$(cmd) のため run 不使用（値の抽出のみ）
+    profile=$(json_get "$prof_info" result.records.0.Profile.Name)  # VAR=$(cmd) のため run 不使用（値の抽出のみ）
     [[ -n "$profile" ]] || die "接続ユーザーのプロファイル名を取得できませんでした。"
     log "INFO" "  プロファイル: ${profile}"
 

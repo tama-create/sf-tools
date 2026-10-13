@@ -29,10 +29,13 @@
 #                      main へのマージのあとは、wf-propagate も確認する
 #   5. 削除          : 削除用のブランチ（remove-target.txt と、リポジトリのクラスのファイルの削除）から、同じ順に、各段階へ PR →
 #                      マージ → wf-release。組織のクラスと、リポジトリのファイルの両方が、消える
+#   5b. 後始末       : 今回作った作業用ブランチ（verify-hello-HHMMSS / verify-hello-delete-HHMMSS）を、削除する
+#                      （PR の履歴は、PR の番号で残る）。途中で止めたときは、調査のために、残す。削除の失敗は、検証の成否に含めない
 #   6. 結果の表示    : 段階ごとの成功・失敗
 #
 # 【注意】
-#   ・リポジトリに、PR・コミット（追加と削除）が、残る。Slack に、通知が届く。リリースの間、組織が、短時間、占有される
+#   ・リポジトリに、PR・コミット（追加と削除）が、残る（作業用ブランチは、最後に削除する）。Slack に、通知が届く。
+#     リリースの間、組織が、短時間、占有される
 #   ・作業の少ない時間帯に、実行すること
 #   ・失敗したとき: リリースのあとで止まった場合、組織に Hello World が残ることがある。
 #     残った組織と、削除のみをやり直す方法（--cleanup）を、表示する
@@ -171,7 +174,7 @@ fi
 _est=$((n_tiers * (CLEANUP_ONLY == 1 ? 1 : 2) * 3))
 [[ $CLEANUP_ONLY -eq 0 && $NO_METASYNC -eq 0 ]] && _est=$((_est + 3))
 echo "    目安の時間 : 約 ${_est} 分（Actions の混み具合で、前後します）" >&2
-echo "    残るもの   : リポジトリに、PR・コミットの履歴。Slack に、通知（段階ごとに数通）" >&2
+echo "    残るもの   : リポジトリに、PR・コミットの履歴（作業用ブランチは、最後に削除します）。Slack に、通知（段階ごとに数通）" >&2
 
 if [[ $PLAN_ONLY -eq 1 ]]; then
     log "INFO" "--plan のため、ここで終了します（何も変更していません）。"
@@ -448,6 +451,38 @@ if [[ $STOPPED -eq 1 ]]; then
     _guidance
     exit $RET_NG
 fi
+
+# ------------------------------------------------------------------------------
+# 5b. 後始末: 今回作った作業用ブランチを削除する
+#   リリースと削除の PR は、すべてマージ済み（ここに来るのは、途中で止まらなかったときだけ。止めたときは、調査のために、
+#   ブランチを残す）。PR の履歴は、PR の番号で残る。次の場合は、削除しない（警告のみ。検証の成否には、含めない）:
+#     ・名前が、想定の形式（verify-hello-HHMMSS / verify-hello-delete-HHMMSS）でない
+#     ・そのブランチを head とする、開いている PR がある（確認できなかったときも、同じ）
+# ------------------------------------------------------------------------------
+_delete_job_branches() {
+    local b deleted=0
+    log "HEADER" "後始末（作業用ブランチの削除）"
+    for b in "$JOB_RELEASE" "$JOB_DELETE"; do
+        # --cleanup は、リリース用のブランチを、作っていない
+        [[ $CLEANUP_ONLY -eq 1 && "$b" == "$JOB_RELEASE" ]] && continue
+        if ! [[ "$b" =~ ^verify-hello(-delete)?-[0-9]{6}$ ]]; then
+            log "WARNING" "  ${b}: 想定の形式の名前ではないため、削除しません。"
+            continue
+        fi
+        if verify_branch_has_open_pr "$REPO" "$b"; then  # 条件チェック
+            log "WARNING" "  ${b}: 開いている PR がある（または、確認できない）ため、削除しません。"
+            continue
+        fi
+        if verify_branch_delete "$REPO" "$b"; then  # 条件チェック
+            log "INFO" "  作業用ブランチを削除しました: ${b}"
+            deleted=$((deleted + 1))
+        else
+            log "WARNING" "  ${b}: 削除できませんでした（GitHub の画面か、gh api -X DELETE repos/${REPO}/git/refs/heads/${b} で、削除できます）。"
+        fi
+    done
+    [[ $deleted -eq 0 ]] || log "INFO" "  PR の履歴は、PR の番号で残っています（${REPO} の Pull requests）。"
+}
+_delete_job_branches
 
 # ------------------------------------------------------------------------------
 # 6. 結果

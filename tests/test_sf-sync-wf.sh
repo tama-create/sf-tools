@@ -218,6 +218,31 @@ test_real_templates_are_synced() {
     teardown "$td" "$mb" "$mh"
 }
 
+# 雛形 wf-validate.yml: PR コメントに載せるログから、ANSI エスケープコード（色の指定）を除いていること
+#   残すと、PR のコメント・通知メールで「[34m」のように化ける。雛形の置換式を取り出して、実際に動かして確認する
+test_validate_strips_ansi() {
+    local tmpl="$SF_TOOLS_DIR/templates/.github/workflows/wf-validate.yml" line expr out
+    line=$(grep -F 'ログ = ログ.replace(' "$tmpl" | head -1)
+    assert_equals "$([[ -n "$line" ]] && echo yes || echo no)" "yes" "wf-validate.yml: ログから ANSI エスケープコードを除く処理がある"
+    # コメントの作成（createComment）より前にあること
+    local n_strip n_comment
+    n_strip=$(grep -nF 'ログ = ログ.replace(' "$tmpl" | head -1 | cut -d: -f1)
+    n_comment=$(grep -nF 'createComment' "$tmpl" | head -1 | cut -d: -f1)
+    assert_equals "$([[ -n "$n_strip" && -n "$n_comment" && "$n_strip" -lt "$n_comment" ]] && echo yes || echo no)" "yes" "wf-validate.yml: 除く処理は、コメントの投稿より前にある"
+    if [[ -z "${REAL_NODE_PATH:-}" ]]; then
+        pass "（node がないため、置換式の実行は省略）"
+        return 0
+    fi
+    expr=$(printf '%s' "$line" | sed -E 's/^[[:space:]]*//')   # 例: ログ = ログ.replace(/.../g, '');
+    out=$("$REAL_NODE_PATH" -e '
+        let ログ = "\x1b[34m\x1b[1mValidated Source\x1b[22m\x1b[39m\n\x1b[1m\x1b[32mDry-run complete.\x1b[39m\x1b[22m\n\x1b[?25l▶ Waiting\x1b[?25h\n✔ Done (0ms)";
+        '"$expr"'
+        console.log(JSON.stringify(ログ), ログ.includes("\x1b") ? "ESC-REMAINS" : "ESC-CLEAN");
+    ' 2>&1)
+    assert_output_contains "$out" "ESC-CLEAN" "wf-validate.yml: 置換式を実行すると、ESC が残らない"
+    assert_output_contains "$out" 'Validated Source\\nDry-run complete.\\n▶ Waiting\\n✔ Done (0ms)' "wf-validate.yml: 文字と記号（▶ ✔）は、そのまま残る"
+}
+
 test_help
 test_guards
 test_up_to_date
@@ -226,5 +251,6 @@ test_no_workflows_dir
 test_check
 test_remove
 test_real_templates_are_synced
+test_validate_strips_ansi
 
 print_summary

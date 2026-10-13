@@ -47,6 +47,7 @@ case "$*" in
     "api repos/"*"/git/ref/heads/main"*)        echo "abc123def456"; exit 0 ;;
     "api -X POST repos/"*)   exit "${MOCK_GH_API_WRITE_EXIT:-0}" ;;
     "api -X PUT repos/"*)    exit "${MOCK_GH_API_WRITE_EXIT:-0}" ;;
+    "api -X DELETE repos/"*"/git/refs/heads/"*) exit "${MOCK_GH_BRANCH_DELETE_EXIT:-0}" ;;
     "api -X DELETE repos/"*) exit 0 ;;
     "api repos/"*"/contents/"*"?ref="*)
         # MOCK_GH_HELLO_ON=<段階>: その段階のブランチに、検証用と同名のクラスのファイルが、すでにある
@@ -61,6 +62,7 @@ case "$*" in
         # 先の段階（--base の値）を覚える（ログインのステップの結果を、対象の段階だけ success にするため）
         _pa=("$@"); for ((_i = 0; _i < ${#_pa[@]}; _i++)); do [[ "${_pa[_i]}" == "--base" ]] && echo "${_pa[_i+1]}" > "$_d/last_base"; done
         echo "https://github.com/tamashimon/force-testproject/pull/${_n}"; exit 0 ;;
+    "pr list"*"--state open"*) echo "${MOCK_GH_OPEN_PR_COUNT:-0}"; exit 0 ;;
     "pr merge"*)             exit "${MOCK_GH_MERGE_EXIT:-0}" ;;
     "pr close"*)             exit 0 ;;
     "workflow run"*)         exit "${MOCK_GH_WORKFLOW_EXIT:-0}" ;;
@@ -146,7 +148,7 @@ _env() {
     export MOCK_GH_VAR_SF_TOOLS_BRANCH=development
     rm -f "$MB/disp.cnt" "$HM"/sf-tools/logs/*.log
     export VERIFY_POLL_SEC=0 VERIFY_RUN_FIND_TRIES=3 VERIFY_CONCLUSION_TRIES=1 VERIFY_WF_TIMEOUT=5
-    unset MOCK_GH_CONCL MOCK_GH_MERGE_EXIT MOCK_GH_API_WRITE_EXIT MOCK_GH_RELEASE_FAIL MOCK_GH_METASYNC_FAIL MOCK_GH_WORKFLOW_EXIT SF_VERIFY_CONFIRMED MOCK_GH_OTHER_LOGIN MOCK_GH_OLD_STEPS MOCK_GH_HELLO_ON GITHUB_ACTIONS
+    unset MOCK_GH_OPEN_PR_COUNT MOCK_GH_BRANCH_DELETE_EXIT MOCK_GH_CONCL MOCK_GH_MERGE_EXIT MOCK_GH_API_WRITE_EXIT MOCK_GH_RELEASE_FAIL MOCK_GH_METASYNC_FAIL MOCK_GH_WORKFLOW_EXIT SF_VERIFY_CONFIRMED MOCK_GH_OTHER_LOGIN MOCK_GH_OLD_STEPS MOCK_GH_HELLO_ON GITHUB_ACTIONS
     rm -f "$MB/pr.cnt"; : > "$MOCK_CALL_LOG"
 }
 
@@ -442,6 +444,59 @@ test_cleanup() {
     assert_file_contains "$MOCK_CALL_LOG" "api -X DELETE repos/tamashimon/force-testproject/contents/force-app/main/default/classes/SfToolsE2eHello.cls" "--cleanup: リポジトリのクラスのファイルを消す"
 }
 
+test_branch_cleanup() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] 後始末: 今回作った作業用ブランチを削除する${CLR_RST}"
+    local del='api -X DELETE repos/tamashimon/force-testproject/git/refs/heads/verify-hello'
+
+    # 正常: リリース用・削除用の 2 本のブランチを、削除する（PR の履歴は、PR の番号で残る）
+    _env
+    _run "Y\n"
+    assert_exit_ok "$RC" "正常: 正常終了する"
+    assert_equals "$(grep -c "${del}-[0-9]" "$MOCK_CALL_LOG")" "1" "正常: リリース用ブランチ（verify-hello-HHMMSS）を削除する"
+    assert_equals "$(grep -c "${del}-delete-[0-9]" "$MOCK_CALL_LOG")" "1" "正常: 削除用ブランチ（verify-hello-delete-HHMMSS）を削除する"
+    assert_file_contains "$OUT" "作業用ブランチを削除しました" "正常: 削除した旨が表示される"
+    assert_file_contains "$OUT" "PR の履歴は、PR の番号で残っています" "正常: PR の履歴が残る旨が表示される"
+    # 削除は、すべての PR の処理が終わったあと（最後の PR の作成より後）
+    local last_pr first_del
+    last_pr=$(grep -n 'gh pr create' "$MOCK_CALL_LOG" | tail -1 | cut -d: -f1)
+    first_del=$(grep -n "${del}" "$MOCK_CALL_LOG" | head -1 | cut -d: -f1)
+    assert_equals "$([[ -n "$last_pr" && -n "$first_del" && "$first_del" -gt "$last_pr" ]] && echo yes || echo no)" "yes" "正常: 削除は、すべての PR の後"
+
+    # 開いている PR があるブランチは、削除しない（警告のみ。検証の成否には、含めない）
+    _env
+    export MOCK_GH_OPEN_PR_COUNT=1
+    _run "Y\n"
+    assert_exit_ok "$RC" "開いている PR あり: 検証は、成功のまま"
+    assert_file_not_contains "$MOCK_CALL_LOG" "${del}" "開いている PR あり: ブランチを削除しない"
+    assert_file_contains "$OUT" "開いている PR がある" "開いている PR あり: 理由が表示される"
+
+    # 削除に失敗しても、検証は、成功のまま（警告のみ。手動の削除方法を案内する）
+    _env
+    export MOCK_GH_BRANCH_DELETE_EXIT=1
+    _run "Y\n"
+    assert_exit_ok "$RC" "削除に失敗: 検証は、成功のまま"
+    assert_file_contains "$OUT" "削除できませんでした" "削除に失敗: 警告が表示される"
+    assert_file_contains "$OUT" "gh api -X DELETE repos/tamashimon/force-testproject/git/refs/heads/verify-hello-" "削除に失敗: 手動の削除方法が案内される"
+
+    # 途中で止めたときは、調査のために、ブランチを残す
+    _env
+    export MOCK_GH_MERGE_EXIT=1
+    _run "Y\n"
+    assert_exit_fail "$RC" "途中で止まった: 非ゼロで終了する"
+    assert_file_not_contains "$MOCK_CALL_LOG" "${del}" "途中で止まった: ブランチを削除しない（調査のために残す）"
+
+    # --cleanup: 削除用ブランチだけ（リリース用は、作っていない）
+    _env
+    _run "Y\n" --cleanup
+    assert_exit_ok "$RC" "--cleanup: 正常終了する"
+    assert_equals "$(grep -c "${del}-delete-[0-9]" "$MOCK_CALL_LOG")" "1" "--cleanup: 削除用ブランチを削除する"
+    assert_equals "$(grep -c "${del}-[0-9]" "$MOCK_CALL_LOG")" "0" "--cleanup: リリース用ブランチは、対象にしない（作っていない）"
+
+    # 部品: 名前の形式の確認は、verify.sh 側（想定外の名前は、削除しない）
+    _env
+    unset MOCK_GH_OPEN_PR_COUNT MOCK_GH_BRANCH_DELETE_EXIT
+}
+
 test_lib() {
     echo ""; echo -e "${CLR_HEAD}[TEST] lib/verify-common.sh の部品${CLR_RST}"
     _env
@@ -484,6 +539,7 @@ test_identity_mismatch
 test_review_fixes
 test_environment
 test_cleanup
+test_branch_cleanup
 test_lib
 
 teardown "$MB" "$FORCE" "$HM"

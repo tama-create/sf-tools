@@ -218,6 +218,15 @@ verify_run_log_has() { verify_gh run view "$2" -R "$1" --log 2>/dev/null | grep 
 verify_branch_sha() { verify_gh api "repos/${1}/git/ref/heads/${2}" --jq .object.sha 2>/dev/null; }
 # ブランチを作る。引数: リポジトリ 新しいブランチ 元の SHA
 verify_branch_create() { verify_gh api -X POST "repos/${1}/git/refs" -f "ref=refs/heads/${2}" -f "sha=${3}" >/dev/null 2>&1; }
+# ブランチ（リモート）を削除する。引数: リポジトリ ブランチ
+verify_branch_delete() { verify_gh api -X DELETE "repos/${1}/git/refs/heads/${2}" >/dev/null 2>&1; }
+# そのブランチを head とする、開いている PR があるか（あれば戻り値 0）。引数: リポジトリ ブランチ
+#   取得できなかったときは、「ある」として扱う（安全側。PR が開いているブランチを、消さないため）
+verify_branch_has_open_pr() {
+    local n
+    n=$(verify_gh pr list -R "$1" --head "$2" --state open --json number --jq 'length' 2>/dev/null) || return 0  # VAR=$(cmd) のため run 不使用
+    [[ "${n:-1}" != "0" ]]
+}
 # ファイルの SHA（ブランチ上）を、標準出力に返す。なければ、戻り値 1。引数: リポジトリ ブランチ パス
 verify_file_sha() {
     local s

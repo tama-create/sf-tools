@@ -99,17 +99,22 @@ org_choose_login_url() {
 
 # sf data query の JSON（文字列）から、組織の ID・名前・種類を読み取る。引数: JSON
 #   戻り値: 0=読み取れた / 1=読み取れなかった（status が 0 ではない・ID や IsSandbox がない。推測しない）
-#   jq は使わない（CLAUDE.md: 追加の依存を増やさない）。grep / sed で、必要な項目だけを取り出す
+#   JSON は json_get（lib/common.sh。Node の標準機能のみ）で読む。パスで項目を指定する（result.records.0.Id など）
 org_parse_info() {
-    local out="$1"
+    local out="$1" vals
+    local -a v=()
     ORG_ID=""; ORG_NAME=""; ORG_IS_SANDBOX=""; ORG_EDITION=""; ORG_TRIAL_EXPIRES=""
-    # status が、あって、0 以外なら、失敗として扱う
-    if printf '%s\n' "$out" | grep -q '"status": *[1-9]'; then return 1; fi
-    ORG_ID=$(printf '%s\n' "$out" | grep -o '"Id": *"[^"]*"' | head -1 | sed 's/.*: *"\(.*\)"/\1/')                          # VAR=$(cmd) のため run 不使用
-    ORG_NAME=$(printf '%s\n' "$out" | grep -o '"Name": *"[^"]*"' | head -1 | sed 's/.*: *"\(.*\)"/\1/')                      # VAR=$(cmd) のため run 不使用
-    ORG_IS_SANDBOX=$(printf '%s\n' "$out" | grep -o '"IsSandbox": *\(true\|false\)' | head -1 | sed 's/.*: *//')             # VAR=$(cmd) のため run 不使用
-    ORG_EDITION=$(printf '%s\n' "$out" | grep -o '"OrganizationType": *"[^"]*"' | head -1 | sed 's/.*: *"\(.*\)"/\1/')      # VAR=$(cmd) のため run 不使用
-    ORG_TRIAL_EXPIRES=$(printf '%s\n' "$out" | grep -o '"TrialExpirationDate": *"[^"]*"' | head -1 | sed 's/.*: *"\(.*\)"/\1/')  # VAR=$(cmd) のため run 不使用
+    # JSON として読み取れなければ、失敗（6 項目を、1 回で取る。終了コードを確認してから、代入する）
+    vals=$(json_get "$out" status result.records.0.Id result.records.0.Name result.records.0.IsSandbox \
+                           result.records.0.OrganizationType result.records.0.TrialExpirationDate) || return 1  # VAR=$(cmd) のため run 不使用
+    mapfile -t v <<< "$vals"
+    # status が、あって、0 以外なら、失敗として扱う（項目は、空のまま）
+    if [[ -n "${v[0]:-}" && "${v[0]}" != "0" ]]; then return 1; fi
+    ORG_ID="${v[1]:-}"
+    ORG_NAME="${v[2]:-}"
+    ORG_IS_SANDBOX="${v[3]:-}"
+    ORG_EDITION="${v[4]:-}"
+    ORG_TRIAL_EXPIRES="${v[5]:-}"
     [[ -n "$ORG_ID" && -n "$ORG_IS_SANDBOX" ]]
 }
 

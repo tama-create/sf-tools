@@ -25,6 +25,10 @@
 # 【オプション】
 #   --add-orgs : 既にある鍵一式に、staging・develop 用のテスト用組織（認証 URL）だけを追加する
 #                （2 層・3 層の通し検証に必要。Token などは、入力し直さない。ブラウザでのログインが、組織の数だけ必要）
+#   --refresh-orgs : 登録済みの組織（main・staging・develop）の認証 URL が、いまも有効かを確認し、**無効なものだけ**を、
+#                ブラウザでのログインで取り直す（Token などの、ほかの値は、そのまま）。
+#                リフレッシュトークンは、同じユーザーでログインを繰り返すと、古いものから無効になる
+#                （e2e が RefreshTokenAuthError で失敗したときに使う）。有効なものには、何もしない
 #   -h, --help : このヘルプを表示する
 #
 # 【保存先】 ~/.sf-tools-e2e/fixture.env（権限は本人のみ。E2E_FIXTURE 環境変数で変更できる）
@@ -48,12 +52,15 @@ source "${SF_TOOLS_ROOT}/lib/common.sh"
 source "${E2E_SCRIPT_DIR}/lib.sh"
 
 ADD_ORGS=0
+REFRESH_ORGS=0
 for _a in "$@"; do
     case "$_a" in
         --add-orgs) ADD_ORGS=1 ;;
+        --refresh-orgs) REFRESH_ORGS=1 ;;
         *) die "不明なオプションです: ${_a}" ;;
     esac
 done
+[[ $ADD_ORGS -eq 0 || $REFRESH_ORGS -eq 0 ]] || die "--add-orgs と --refresh-orgs は、同時に指定できません。"
 
 # ブラウザでログインして、認証 URL を取得する。引数: 仮のエイリアス 表示名
 #   成功: 認証 URL を B_URL に、組織 ID を B_ORG_ID に入れる。失敗: die
@@ -95,7 +102,8 @@ _bootstrap_id_of_url() {
     f=$(mktemp "${TMPDIR:-/tmp}/e2e-sfdx-url.XXXXXX") || die "一時ファイルを作成できません。"  # VAR=$(cmd) のため run 不使用
     chmod 600 "$f" 2>/dev/null || true  # run 不使用: 権限保護（Windows は効果なし・意図的エラー無視）
     printf '%s' "$url" > "$f"
-    if ! run sf org login sfdx-url --sfdx-url-file "$f" --alias "$alias"; then  # 条件チェック
+    # run の標準出力（sf の警告・"Successfully authorized ..." など）は、組織 ID に混ぜない（捨てる。画面には、標準エラーが出る）
+    if ! run sf org login sfdx-url --sfdx-url-file "$f" --alias "$alias" > /dev/null; then  # 条件チェック
         rm -f "$f"  # run 不使用: 認証 URL の一時ファイルの削除（秘密情報を残さない）
         return 1
     fi
@@ -150,6 +158,92 @@ _bootstrap_add_orgs() {
     [[ -z "$new_dev_url" ]] || _bootstrap_put E2E_SFDX_AUTH_URL_DEV "$new_dev_url"
     [[ -n "$new_stg_url$new_dev_url" ]] || log "WARNING" "何も追加しませんでした。"
 }
+
+# 登録済みの組織（main・staging・develop）の認証 URL が、いまも有効かを確認し、無効なものだけを、取り直す。
+#   有効かどうかは、保存してある認証 URL で、実際にログインして確認する（sf org login sfdx-url）。
+#   無効なものは、確認のうえ、ブラウザでログインし直して、認証 URL を取り直す。取り直した組織が、ほかの段階と
+#   同じ組織なら、中断する（鍵一式を更新しない）。保存は、すべての確認が済んでから、まとめて行う。
+#   戻り値: 0 = すべて有効（または、取り直した） / 1 = 取り直さなかった（無効なまま）組織がある
+_bootstrap_refresh_orgs() {
+    local -A ids=() new_urls=()
+    local -a invalid=()
+    local tier var url id other skipped=0
+    log "INFO" "登録済みのテスト用組織の認証 URL が、いまも有効かを確認します。"
+    for tier in main staging develop; do
+        case "$tier" in
+            main)    var="E2E_SFDX_AUTH_URL" ;;
+            staging) var="E2E_SFDX_AUTH_URL_STG" ;;
+            develop) var="E2E_SFDX_AUTH_URL_DEV" ;;
+        esac
+        url="${!var:-}"
+        if [[ -z "$url" ]]; then
+            log "INFO" "  ${tier}: 未登録です（追加するときは、bootstrap.sh --add-orgs）。"
+            continue
+        fi
+        if id=$(_bootstrap_id_of_url "$url" "sf-tools-e2e-bootstrap-chk-${tier}"); then  # 条件チェック
+            # 有効な組織が、ほかの段階と同じ組織なら、鍵一式が壊れている
+            for other in "${!ids[@]}"; do
+                [[ "${ids[$other]}" != "$id" ]] || die "登録済みの ${tier} が、${other} と同じ組織です。鍵一式を、確認してください。"
+            done
+            ids[$tier]="$id"
+            log "SUCCESS" "  ${tier}: 有効です（組織 ID: ${id}）。"
+        else
+            invalid+=("$tier")
+            log "WARNING" "  ${tier}: 無効です（リフレッシュトークンが、失効した可能性があります。ログインし直しが必要です）。"
+        fi
+    done
+
+    if [[ ${#invalid[@]} -eq 0 ]]; then
+        log "SUCCESS" "登録済みの認証 URL は、すべて有効です。変更はありません。"
+        return 0
+    fi
+
+    for tier in "${invalid[@]}"; do
+        if ! ask_yn "${tier} の組織に、ブラウザでログインし直して、認証 URL を取り直しますか？（元と同じテスト用組織・同じユーザーでログインしてください）"; then  # 条件チェック
+            log "WARNING" "  ${tier}: 取り直しませんでした（無効なままです）。"
+            skipped=1
+            continue
+        fi
+        _bootstrap_login "sf-tools-e2e-bootstrap-${tier}" "${tier} 用の"
+        for other in "${!ids[@]}"; do
+            [[ "${ids[$other]}" != "$B_ORG_ID" ]] \
+                || die "ログインした組織が、${other} と同じ組織です。別の組織でログインしてください（鍵一式は、更新していません）。"
+        done
+        ids[$tier]="$B_ORG_ID"
+        new_urls[$tier]="$B_URL"
+    done
+
+    # 保存は、すべての確認が済んでから、まとめて行う（途中で中断したときに、一部だけが保存されないように）
+    for tier in "${!new_urls[@]}"; do
+        case "$tier" in
+            main)    var="E2E_SFDX_AUTH_URL" ;;
+            staging) var="E2E_SFDX_AUTH_URL_STG" ;;
+            develop) var="E2E_SFDX_AUTH_URL_DEV" ;;
+        esac
+        _bootstrap_put "$var" "${new_urls[$tier]}"
+        log "SUCCESS" "  ${tier}: 認証 URL を、取り直して、保存しました。"
+    done
+    [[ $skipped -eq 0 ]]
+}
+
+# ------------------------------------------------------------------------------
+# --refresh-orgs: 登録済みの組織の認証 URL を、確認して、無効なものだけを取り直す
+# ------------------------------------------------------------------------------
+if [[ $REFRESH_ORGS -eq 1 ]]; then
+    FIXTURE=$(e2e_fixture_path)
+    [[ -f "$FIXTURE" ]] || die "鍵一式のファイルが見つかりません（先に、bootstrap.sh を実行してください）: ${FIXTURE}"
+    check_sf_cli
+    e2e_load_fixture
+    _refresh_rc=0
+    _bootstrap_refresh_orgs || _refresh_rc=$?
+    e2e_load_fixture   # 保存した内容の形式を、確認する
+    if [[ $_refresh_rc -ne 0 ]]; then
+        log "WARNING" "無効なまま残っている組織があります。e2e を実行する前に、もう一度、bootstrap.sh --refresh-orgs を実行してください。"
+        exit $RET_NG
+    fi
+    log "SUCCESS" "鍵一式を確認しました: ${FIXTURE}"
+    exit $RET_OK
+fi
 
 # ------------------------------------------------------------------------------
 # --add-orgs: 既存の鍵一式に、staging・develop の組織だけを追加する

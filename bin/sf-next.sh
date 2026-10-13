@@ -90,10 +90,12 @@ run git fetch origin "${REVERSED[@]}" 2>/dev/null \
 
 # gh pr list はブランチごとに呼ぶと遅いため、マージ済み・オープン を各1回で取得
 # --head フィルタが merged/open で正常動作しないバージョンがあるため全件取得して絞る
-_merged_prs=$(gh pr list --state merged \
-    --json headRefName,baseRefName --limit 50 2>/dev/null || echo "[]")
-_open_prs=$(gh pr list --state open \
-    --json headRefName,baseRefName --limit 50 2>/dev/null || echo "[]")
+# 出力は「ヘッド<TAB>ベース」の行（gh の --jq で作る。JSON を、シェルでは、読まない）。
+# 取得に失敗したときは、空（= PR なし）として扱う
+_merged_prs=$(gh pr list --state merged --limit 50 \
+    --json headRefName,baseRefName --jq '.[] | [.headRefName, .baseRefName] | @tsv' 2>/dev/null || echo "")
+_open_prs=$(gh pr list --state open --limit 50 \
+    --json headRefName,baseRefName --jq '.[] | [.headRefName, .baseRefName] | @tsv' 2>/dev/null || echo "")
 
 # ------------------------------------------------------------------------------
 # 5. 各ブランチへのマージ状況を確認
@@ -101,16 +103,12 @@ _open_prs=$(gh pr list --state open \
 NEXT_TARGET=""
 STATUSES=()
 
-# _pr_exists PRSJON HEAD BASE
-# JSON 配列内に headRefName=HEAD かつ baseRefName=BASE のオブジェクトが存在するか確認。
-# gh pr list の --json 出力はフィールド順が保証されないため、
-# awk で } を区切りとして各オブジェクトを分割し両フィールドを個別に検索する。
+# _pr_exists PRS HEAD BASE
+# PRS（「ヘッド<TAB>ベース」の行）に、HEAD → BASE の PR があるか確認する。
+# 固定文字列として、行全体で比較する（ブランチ名の . や [ を、正規表現として解釈しない）。
 _pr_exists() {
     local prs="$1" head="$2" base="$3"
-    echo "$prs" | awk \
-        -v hf="\"headRefName\":\"${head}\"" \
-        -v bf="\"baseRefName\":\"${base}\"" \
-        'BEGIN{RS="}"} index($0,hf) && index($0,bf) {found=1} END{exit !found}'
+    printf '%s\n' "$prs" | grep -qxF -- "${head}"$'\t'"${base}"
 }
 
 for target in "${REVERSED[@]}"; do

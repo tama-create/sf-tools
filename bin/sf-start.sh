@@ -66,8 +66,11 @@ SKIP_LOGIN=0
 #   .sf/config.json が存在しない場合はプロジェクト初回起動とみなし、強制的にエイリアス入力へ
 if [ "$FORCE_RELOGIN" != "1" ] && [ -f ".sf/config.json" ]; then
     DISPLAY_JSON=$(run sf org display --json || echo "")
-    CURRENT_ALIAS=$(echo "$DISPLAY_JSON" | grep '"alias"' | head -n 1 | cut -d '"' -f 4 | tr -d '\r')
-    CURRENT_ID=$(echo "$DISPLAY_JSON"    | grep '"id"'    | head -n 1 | cut -d '"' -f 4 | tr -d '\r')
+    # エイリアスと組織 ID を、1 回で取る（JSON として読み取れなければ、どちらも空 = 未接続として扱う）
+    _disp_vals=$(json_get "$DISPLAY_JSON" result.alias result.id) || _disp_vals=""  # VAR=$(cmd) のため run 不使用
+    mapfile -t _disp_v <<< "$_disp_vals"
+    CURRENT_ALIAS="${_disp_v[0]:-}"
+    CURRENT_ID="${_disp_v[1]:-}"
 
     # エイリアスと本番/Sandbox 組織ID（00D始まり）が取得できた場合は接続済みと判断
     if [ -n "$CURRENT_ALIAS" ] && [ "$CURRENT_ALIAS" != "null" ] && [[ "$CURRENT_ID" == 00D* ]]; then

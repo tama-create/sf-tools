@@ -1494,6 +1494,134 @@ EOF
     teardown "$mb"
 }
 
+# ------------------------------------------------------------------------------
+# bootstrap.sh --refresh-orgs: 登録済みの認証 URL の有効性を確認し、無効なものだけを取り直す
+#   sf のモック: URL に EXPIRED を含む認証 URL は、sfdx-url でのログインに失敗する（リフレッシュトークンの失効の再現）。
+#   組織の ID は、認証 URL から決まる。login web は、web_urls（改行区切り）を、順に使う
+# ------------------------------------------------------------------------------
+test_e2e_bootstrap_refresh_orgs() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] bootstrap.sh --refresh-orgs（無効な認証 URL だけを、取り直す）${CLR_RST}"
+    local mb fx rc
+    mb=$(setup_mock_bin)
+    export MOCK_CALL_LOG="$mb/calls.log"; : > "$MOCK_CALL_LOG"
+    _mk_mocks "$mb"
+    cat > "$mb/sf" << 'EOF'
+#!/bin/bash
+echo "sf $*" >> "${MOCK_CALL_LOG:-/dev/null}"
+_d="${MOCK_CALL_LOG%/*}"
+_id_of() { printf '00D%012d' "$(printf '%s' "$1" | sed 's/EXPIRED//g' | cksum | awk '{print $1}')"; }
+_arg() { local k="$1"; shift; while [[ $# -gt 0 ]]; do [[ "$1" == "$k" ]] && { echo "$2"; return; }; shift; done; }
+case "$1 $2 $3" in
+    "org login sfdx-url")
+        f=$(_arg --sfdx-url-file "$@"); a=$(_arg --alias "$@")
+        if grep -q EXPIRED "$f"; then
+            echo "Error (RefreshTokenAuthError): Error authenticating with the refresh token" >&2
+            exit 1
+        fi
+        echo " »   Warning: @salesforce/cli update available from 2.1 to 2.2."
+        echo "Successfully authorized user@example.com with org ID 00D000000000099"
+        cat "$f" > "$_d/alias_$a.url"; exit 0 ;;
+    "org login web")
+        a=$(_arg --alias "$@")
+        u=$(head -1 "$_d/web_urls"); sed -i 1d "$_d/web_urls"
+        printf '%s' "$u" > "$_d/alias_$a.url"; exit 0 ;;
+    "org display "*)
+        a=$(_arg --target-org "$@"); u=$(cat "$_d/alias_$a.url" 2>/dev/null)
+        [[ -n "$u" ]] || exit 1
+        printf '{"status":0,"result":{"id":"%s"}}\n' "$(_id_of "$u")"; exit 0 ;;
+    "org auth show-sfdx-auth-url")
+        a=$(_arg --target-org "$@"); u=$(cat "$_d/alias_$a.url" 2>/dev/null)
+        printf '{"status":0,"result":{"sfdxAuthUrl":"%s"}}\n' "$u"; exit 0 ;;
+esac
+exit 0
+EOF
+    chmod +x "$mb/sf"
+    fx="$mb/fx.env"
+    local U_MAIN="force://PlatformCLI::fakeurl@example.my.salesforce.com"
+    local U_STG="force://PlatformCLI::stgurl@stg.my.salesforce.com"
+    local U_DEV="force://PlatformCLI::devurl@dev.my.salesforce.com"
+    local U_MAIN_X="force://PlatformCLI::EXPIREDfakeurl@example.my.salesforce.com"
+    local U_STG_X="force://PlatformCLI::EXPIREDstgurl@stg.my.salesforce.com"
+    _run_ref() {   # 引数: 標準入力 / web ログインの URL（改行区切り）
+        printf '%s' "$2" > "$mb/web_urls"
+        printf '%b' "$1" | ( cd "$mb" && HOME="$mb" PATH="$mb:$PATH" SF_INIT_MODE=1 E2E_FIXTURE="$fx" \
+            bash "$E2E_DIR/bootstrap.sh" --refresh-orgs ) > "$mb/out.log" 2>&1
+        rc=$?
+    }
+
+    # 1. すべて有効 → 何も聞かず、何も変更しない（ブラウザでのログインもしない）
+    _mk_fixture "$fx"
+    echo "E2E_SFDX_AUTH_URL_STG=${U_STG}" >> "$fx"
+    cp "$fx" "$mb/before1.env"
+    _run_ref "" ""
+    assert_exit_ok "$rc" "すべて有効なら、正常終了する"
+    assert_file_contains "$mb/out.log" "すべて有効です" "有効である旨が表示される"
+    assert_equals "$(grep -cE '有効です（組織 ID: 00D[0-9]+）' "$mb/out.log")" "2" "組織 ID は、ID だけが表示される（sf の警告・出力を、混ぜない）"
+    assert_equals "$(cat "$fx")" "$(cat "$mb/before1.env")" "鍵一式は、変更されない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "org login web" "有効なときは、ブラウザでログインしない"
+
+    # 2. main だけが無効 → 確認のうえ、ブラウザで取り直す。staging（有効）は、そのまま
+    : > "$MOCK_CALL_LOG"
+    _mk_fixture "$fx"
+    sed -i "s|^E2E_SFDX_AUTH_URL=.*|E2E_SFDX_AUTH_URL=${U_MAIN_X}|" "$fx"
+    echo "E2E_SFDX_AUTH_URL_STG=${U_STG}" >> "$fx"
+    _run_ref 'Y\n' "${U_MAIN}"$'\n'
+    assert_exit_ok "$rc" "main だけが無効: 取り直して、正常終了する"
+    assert_file_contains "$mb/out.log" "main: 無効です" "無効な段階が表示される"
+    assert_file_contains "$mb/out.log" "staging: 有効です" "有効な段階も表示される"
+    assert_file_contains "$fx" "fakeurl@example.my.salesforce.com" "main の認証 URL が、新しいものに置き換わる"
+    assert_file_not_contains "$fx" "EXPIRED" "古い（無効な）認証 URL は、残らない"
+    assert_file_contains "$fx" "E2E_SFDX_AUTH_URL_STG=" "staging は、そのまま残る"
+    assert_file_contains "$fx" "E2E_PAT_TOKEN=" "Token などの、ほかの値は、そのまま残る"
+    assert_equals "$(grep -c '^E2E_SFDX_AUTH_URL=' "$fx")" "1" "main の行は、1 つだけ"
+    assert_equals "$(grep -c 'org login web' "$MOCK_CALL_LOG")" "1" "ブラウザでのログインは、無効な段階の分だけ（1 回）"
+
+    # 3. 無効なものを、取り直さない（N）→ 変更せず、非ゼロで終了（無効なまま残る旨を、表示する）
+    _mk_fixture "$fx"
+    sed -i "s|^E2E_SFDX_AUTH_URL=.*|E2E_SFDX_AUTH_URL=${U_MAIN_X}|" "$fx"
+    cp "$fx" "$mb/before3.env"
+    _run_ref 'N\n' ""
+    assert_exit_fail "$rc" "取り直さなければ、非ゼロで終了する"
+    assert_file_contains "$mb/out.log" "無効なまま残っている組織があります" "無効なまま残る旨が表示される"
+    assert_equals "$(cat "$fx")" "$(cat "$mb/before3.env")" "取り直さなかったときは、鍵一式は、変更されない"
+
+    # 4. 取り直した組織が、有効な staging と同じ組織 → 中断（鍵一式を更新しない）
+    _mk_fixture "$fx"
+    sed -i "s|^E2E_SFDX_AUTH_URL=.*|E2E_SFDX_AUTH_URL=${U_MAIN_X}|" "$fx"
+    echo "E2E_SFDX_AUTH_URL_STG=${U_STG}" >> "$fx"
+    cp "$fx" "$mb/before4.env"
+    _run_ref 'Y\n' "${U_STG}"$'\n'
+    assert_exit_fail "$rc" "ほかの段階と同じ組織でログインしたら、中断する"
+    assert_file_contains "$mb/out.log" "同じ組織です" "理由が表示される"
+    assert_equals "$(cat "$fx")" "$(cat "$mb/before4.env")" "中断したときは、鍵一式は、変更されない"
+
+    # 5. main と staging の両方が無効 → 両方を取り直す。どちらも、保存される（まとめて保存）
+    : > "$MOCK_CALL_LOG"
+    _mk_fixture "$fx"
+    sed -i "s|^E2E_SFDX_AUTH_URL=.*|E2E_SFDX_AUTH_URL=${U_MAIN_X}|" "$fx"
+    echo "E2E_SFDX_AUTH_URL_STG=${U_STG_X}" >> "$fx"
+    _run_ref 'Y\nY\n' "${U_MAIN}"$'\n'"${U_STG}"$'\n'
+    assert_exit_ok "$rc" "両方が無効: 両方を取り直して、正常終了する"
+    assert_file_not_contains "$fx" "EXPIRED" "無効な認証 URL は、残らない"
+    assert_equals "$(grep -c 'org login web' "$MOCK_CALL_LOG")" "2" "ブラウザでのログインは、2 回"
+
+    # 6. 未登録の段階（staging・develop なし）は、無視する
+    _mk_fixture "$fx"
+    _run_ref "" ""
+    assert_exit_ok "$rc" "main だけの登録: 正常終了する"
+    assert_file_contains "$mb/out.log" "staging: 未登録です" "未登録の段階は、その旨が表示される"
+
+    # 7. --add-orgs と同時には、指定できない
+    _mk_fixture "$fx"
+    ( cd "$mb" && HOME="$mb" PATH="$mb:$PATH" SF_INIT_MODE=1 E2E_FIXTURE="$fx" \
+        bash "$E2E_DIR/bootstrap.sh" --add-orgs --refresh-orgs ) > "$mb/out.log" 2>&1 < /dev/null
+    assert_exit_fail "$?" "--add-orgs と --refresh-orgs の同時指定は、拒否される"
+    assert_file_contains "$mb/out.log" "同時に指定できません" "理由が表示される"
+
+    unset MOCK_CALL_LOG
+    teardown "$mb"
+}
+
 test_e2e_names
 test_e2e_guard
 test_e2e_delete_guards
@@ -1517,5 +1645,6 @@ test_e2e_review_fixes
 test_e2e_tiers
 test_e2e_layout
 test_e2e_bootstrap_add_orgs
+test_e2e_bootstrap_refresh_orgs
 
 print_summary

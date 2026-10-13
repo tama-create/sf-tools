@@ -343,6 +343,47 @@ die() {
 # 9. ユーティリティ関数
 # ------------------------------------------------------------------------------
 
+# json_get - JSON 文字列から値を取り出す（Node の標準機能のみ。jq は使わない）
+# ------------------------------------------------------------------------------
+# 【使い方】
+#   VALS=$(json_get "$JSON" パス...) || 失敗時の処理
+#   mapfile -t V <<< "$VALS"          # 複数のパスは 1 回で取り、行ごとに配列へ（Node の起動を 1 回にするため）
+#
+# 【パス】 「.」区切り（配列の要素は数字）。例: result.records.0.Id / result.alias。先頭の「.」は、あってもよい
+# 【出力】 パス 1 つにつき 1 行。値がなければ空行。オブジェクト・配列は JSON 文字列。値の中の改行は、空白 1 つにする
+# 【戻り値】 0 = 読み取れた / 1 = JSON として読み取れなかった・node がない
+# 【備考】
+#   ・GitHub の情報は、gh の --jq で読む（これは使わない）。これは、sf CLI の出力（sf ... --json）など、gh が読めない JSON 用
+#   ・JSON は、まず全体を厳密に読む。失敗したときだけ、最初の { から最後の } までを読む
+#     （run は標準エラーも標準出力に混ぜるため、sf の警告が、JSON の前後に付くことがある）
+#   ・node は、sf CLI（npm 版）の前提のため、すでにある。追加のパッケージは使わない
+# ------------------------------------------------------------------------------
+json_get() {
+    local json="$1"
+    shift
+    if ! command -v node > /dev/null 2>&1; then  # 存在確認のため run 不使用
+        log "ERROR" "node が見つかりません（JSON の読み取りに必要です。sf CLI は npm 版が前提のため、Node は、通常あります）。"
+        return 1
+    fi
+    printf '%s' "$json" | node -e '
+        let s = "";
+        process.stdin.setEncoding("utf8");
+        process.stdin.on("data", d => s += d).on("end", () => {
+            let o;
+            try { o = JSON.parse(s); }
+            catch (e) {
+                try { o = JSON.parse(s.slice(s.indexOf("{"), s.lastIndexOf("}") + 1)); }
+                catch (e2) { process.exit(1); }
+            }
+            for (const p of process.argv.slice(1)) {
+                let v = o;
+                for (const k of p.replace(/^\./, "").split(".")) { if (v == null) break; v = v[k]; }
+                const t = v == null ? "" : (typeof v === "object" ? JSON.stringify(v) : String(v));
+                console.log(t.replace(/\r?\n/g, " "));
+            }
+        });' -- "$@"
+}
+
 # get_target_org - 接続先組織エイリアスを解決して echo する
 # ------------------------------------------------------------------------------
 # 【使い方】
@@ -365,8 +406,9 @@ get_target_org() {
     local target="$1"
     [[ -z "$target" ]] && target="$SF_TARGET_ORG"
     if [[ -z "$target" ]]; then
-        local current_alias
-        current_alias=$(run sf org display --json | grep '"alias"' | head -n 1 | cut -d '"' -f 4 | tr -d '\r')
+        local current_alias disp_json
+        disp_json=$(run sf org display --json || echo "")  # VAR=$(cmd) のため run 不使用（出力の取得）
+        current_alias=$(json_get "$disp_json" result.alias)  # VAR=$(cmd) のため run 不使用（値の抽出のみ）
         [[ -n "$current_alias" && "$current_alias" != "null" ]] && target="$current_alias"
     fi
     [[ -z "$target" ]] && return $RET_NG

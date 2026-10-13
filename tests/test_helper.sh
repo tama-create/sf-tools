@@ -212,10 +212,10 @@ case "$1 $2" in
             echo "Error: No authorization information found" >&2
             exit 1
         fi
-        # sf-start.sh の grep/cut パース（各キーが1行前提）に対応するため
-        # コンパクト JSON を , と { で改行展開して出力する
-        echo "${MOCK_SF_ORG_JSON:-{\"result\":{\"alias\":\"testorg\",\"id\":\"00D000000000001AAA\"}}}" \
-            | sed 's/[,{]/&\n/g'
+        # sf org display --json の出力（JSON）。MOCK_SF_ORG_JSON=<JSON> で差し替える
+        # 注意: ${VAR:-{...}} は、既定値の中の } で展開が終わり、末尾が付け足されるため、別の変数に入れる
+        _org_display_default='{"result":{"alias":"testorg","id":"00D000000000001AAA"}}'
+        echo "${MOCK_SF_ORG_JSON:-$_org_display_default}"
         exit "${MOCK_SF_ORG_DISPLAY_EXIT:-0}" ;;
     "org login")
         # sf org login jwt が、どのホームフォルダで実行されたかを記録する（JWT 接続テストの隔離の確認用）
@@ -352,14 +352,25 @@ EOF
 }
 
 # node モック
+#   node -e '...'（lib/common.sh の json_get が JSON を読むために使う）は、本物の node に渡す
+#   （JSON の読み取りを、モックで偽装しない。呼び出しの記録にも、残さない）。それ以外は、バージョンを返すだけ
+#   本物の node の場所は、モックを PATH に置く前（このファイルの読み込み時）に控える。
+#   WSL（run_tests.sh は Git Bash から WSL に移って実行する）には node がなく、Windows 側の node.exe だけがある場合がある
+REAL_NODE_PATH="${REAL_NODE_PATH:-$(command -v node 2>/dev/null || command -v node.exe 2>/dev/null || true)}"  # 存在確認・値の取得のため run 不使用
 create_mock_node() {
     local bin_dir="$1"
-    cat > "$bin_dir/node" << 'EOF'
-#!/bin/bash
+    {
+        echo '#!/bin/bash'
+        echo "REAL_NODE='${REAL_NODE_PATH}'"
+        cat << 'EOF'
+if [[ "$1" == "-e" && -n "$REAL_NODE" && -x "$REAL_NODE" ]]; then
+    exec "$REAL_NODE" "$@"
+fi
 echo "node $*" >> "${MOCK_CALL_LOG:-/dev/null}"
 echo "v20.0.0"
 exit 0
 EOF
+    } > "$bin_dir/node"
     chmod +x "$bin_dir/node"
 }
 

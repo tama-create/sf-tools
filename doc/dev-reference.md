@@ -47,7 +47,7 @@
 
 | ファイル | 対象スクリプト |
 |---|---|
-| `test_common.sh` | lib/common.sh |
+| `test_common.sh` | lib/common.sh（`json_get`: 基本・先頭のドット・配列・日本語や引用符・警告つき・不正な JSON・`node` がない・`set -e` を含む。`node -e` だけは、モックではなく本物の node に渡す: `test_helper.sh`） |
 | `test_init-common.sh` | phases/init/init-common.sh（`ensure_sf_tools_branch`。実際の Git と一時 bare リポジトリを使用） |
 | `test_org.sh` | lib/org.sh（ログイン先の 3 択・環境変数の指定・組織の種類の判定・本番は main のみのガード・保存） |
 | `test_verify.sh` | phases/init/verify.sh と lib/verify-common.sh（実行できない場所・--plan・診断の不足・確認（N / q / EOF・本番の明示）・1 層・3 層（develop → staging → main の順）・失敗（マージしない・案内）・取り違えの検出・--cleanup・部品） |
@@ -119,6 +119,7 @@
 | `log` | `log LEVEL MESSAGE [DEST]` | 画面・ログファイルに出力 |
 | `run` | `run CMD [ARGS...]` | コマンド実行、ログ出力、戻り値判定 |
 | `die` | `die MESSAGE [EXIT_CODE]` | エラーログを出力して終了 |
+| `json_get` | `VALS=$(json_get "$JSON" パス...) \|\| ...`（複数のパスは `mapfile -t V <<< "$VALS"`） | JSON から値を取り出す（sf CLI の出力など。GitHub の情報は `gh --jq`）。Node の標準機能のみ。パスは `.` 区切り（`result.records.0.Id`。先頭の `.` は許容）。パス 1 つにつき 1 行（値なし・null は空行。値の中の改行は空白 1 つ）。まず全体を厳密に読み、失敗したときだけ最初の `{` から最後の `}` までを読む（`run` は標準エラーも標準出力に混ぜるため、sf の警告が前後に付く）。読み取れない・node がないときは終了コード 1 |
 | `get_target_org` | `get_target_org [ALIAS]` | 対象組織エイリアスを解決して出力 |
 | `check_force_dir` | `check_force_dir` | `force-*` ディレクトリか検証 |
 | `check_home_dir` | `check_home_dir` | `~/home/{owner}/{company}/` の階層を検証し `GITHUB_OWNER` / `COMPANY_NAME` をセット |
@@ -589,6 +590,7 @@ cat logs/error.log                                # run 失敗コマンドのロ
 ```bash
 bash tests/e2e/bootstrap.sh                       # 鍵一式の作成（最初の 1 回だけ）
 bash tests/e2e/bootstrap.sh --add-orgs            # staging・develop のテスト用組織を、鍵一式に追加（2 層・3 層の確認に必要）
+bash tests/e2e/bootstrap.sh --refresh-orgs        # 登録済みの認証 URL の有効性を確認し、無効なものだけを、ブラウザでのログインで取り直す
 bash tests/e2e/run.sh --layout 3                  # 3 層で、段階ごとに、ワークフローを動かして確認（既定は 1 層）
 bash tests/e2e/run.sh                             # 前掃除 → sf-init の通し実行 → 確認 → 終了（既定では、テスト用のものを残す。--cleanup で削除）
 bash tests/e2e/cleanup.sh                         # 削除対象の一覧（何も消さない）。--yes で削除
@@ -695,7 +697,7 @@ sf-tools の `main` への反映は、全ユーザーへの配布と同義であ
 | `tests/e2e/lib.sh` | 共通関数。名前の判定、ガード、鍵一式の読み込み、削除、エイリアスの保存・復元、`e2e_make_input`（標準入力の台本） |
 | `tests/e2e/run.sh` | 前掃除 → `sf-init.sh` の実行 → 確認 → 終了。既定では、終了時にテスト用のリポジトリなどを削除せず残す（あとから見返せる。次回の前掃除で削除）。`--cleanup`（終了時に削除）、`--resume`（前回残したリポジトリで、Hello World の部分だけを再実行。前掃除・sf-init・wf-metasync は行わない。ジョブ名は時刻付き。前回の残りの Hello World の Apex は、最初に削除する）、`--no-actions`（Actions の確認を省略）。`--keep` は、以前の名残り（何もしない） |
 | `tests/e2e/cleanup.sh` | 削除。既定は一覧のみ、`--yes` で削除（確認で `delete` の入力が必要。`--no-confirm` で省略） |
-| `tests/e2e/bootstrap.sh` | 鍵一式（`~/.sf-tools-e2e/fixture.env`）の作成。最初の 1 回だけ。雛形は `fixture.example.env`。`--add-orgs`: 既存の鍵一式に、staging・develop の組織の認証 URL（`E2E_SFDX_AUTH_URL_STG` / `_DEV`）だけを追加する（ほかの段階と同じ組織は拒否） |
+| `tests/e2e/bootstrap.sh` | 鍵一式（`~/.sf-tools-e2e/fixture.env`）の作成。最初の 1 回だけ。雛形は `fixture.example.env`。`--add-orgs`: 既存の鍵一式に、staging・develop の組織の認証 URL（`E2E_SFDX_AUTH_URL_STG` / `_DEV`）だけを追加する（ほかの段階と同じ組織は拒否）。`--refresh-orgs`: 登録済みの認証 URL（main・staging・develop）で、実際にログイン（`sf org login sfdx-url`）して有効性を確認し、**無効なものだけ**を、確認のうえ、ブラウザでログインし直して取り直す（Token などは変えない。取り直した組織が、ほかの段階と同じなら中断し、保存は、すべての確認の後にまとめて行う。無効なまま残したときは、非ゼロで終了）。リフレッシュトークンは、同じユーザーで、ログインを繰り返すと、古いものから失効する（e2e が `RefreshTokenAuthError` で失敗する） |
 | （層数対応: `run.sh` / `lib.sh`） | `--layout 1\|2\|3`: `e2e_make_input N`（Phase 5 の番号は、3 層 = 1・2 層 = 2・1 層 = 3。ログイン先の答えは段階の数だけ）。リポジトリの構成は、ブランチから判定（`TIERS`: develop → staging → main）し、`_hello_flow` が、段階の数だけ、`_hello_pr_flow`（同じブランチから、段階ごとの PR）を繰り返す。実行の取り違え防止: PR を作る前の最新の実行 ID（`e2e_latest_run_id`）を覚え、それより新しい実行だけを、その PR の実行とする（`e2e_wait_pr_run` の 4 番目の引数）。段階の指定: 環境変数 `E2E_TIER`（`e2e_sf_admin_login` / `e2e_apex_count` / `e2e_list_target_apex` / `e2e_delete_apex` などが、その段階の組織・エイリアス（`sf-tools-e2e-admin[-stg\|-dev]`）を使う）。`sf` の差し替えは、`--alias` の末尾（STG / DEV）で、段階の認証 URL を選ぶ。確認: 各段階のリリースで、その段階の組織にだけクラスができる（先の段階にはない）・`wf-propagate` で staging / develop に main が入る（`compare` の `ahead_by` = 0）・main の削除は、ほかの段階に及ばない。 |
 | `tests/e2e/shims/sf` | `sf org login web` だけを `sf org login sfdx-url`（認証 URL）に差し替える。他のコマンドは本物の `sf` に渡す |
 | `tests/e2e/shims/browser` | `start` / `xdg-open` / `open` の名前でコピーされ、ブラウザを開かない |

@@ -970,6 +970,7 @@ sf-tools の `main` ブランチは、**そのまま全ユーザーに配布さ�
 gh auth refresh -h github.com -s delete_repo   # テスト用リポジトリを削除するための権限
 bash tests/e2e/bootstrap.sh                    # 鍵一式（Token など）を、リポジトリの外に保存する
 bash tests/e2e/bootstrap.sh --add-orgs         # （2 層・3 層で確認するときだけ）staging・develop のテスト用組織を追加する
+bash tests/e2e/bootstrap.sh --refresh-orgs     # （e2e が RefreshTokenAuthError で失敗したとき）無効になった認証 URL だけを、ログインし直して取り直す
 ```
 
 `bootstrap.sh` では、Classic PAT、Slack の Bot Token と通知先の共有チャンネルの ID を入力し、ブラウザでテスト用の Salesforce 組織にログインします（認証 URL を取得して保存するため）。これらは `~/.sf-tools-e2e/fixture.env` に、本人だけが読める権限で保存され、リポジトリには入りません。テスト用の組織は、本番または Developer Edition（Sandbox ではない）にしてください。
@@ -1007,6 +1008,7 @@ bash tests/e2e/run.sh
 
 ```bash
 bash tests/e2e/bootstrap.sh --add-orgs      # 2 層・3 層に必要な、staging・develop のテスト用組織を、鍵一式に追加する（1 回だけ）
+bash tests/e2e/bootstrap.sh --refresh-orgs  # 認証 URL（リフレッシュトークン）が失効したとき（RefreshTokenAuthError）に、無効なものだけを取り直す
 bash tests/e2e/run.sh --layout 3            # 3 層で、通しで確認する
 ```
 

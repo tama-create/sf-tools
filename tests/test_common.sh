@@ -573,6 +573,86 @@ test_ensure_sf_tools_latest() {
     teardown "$b"
 }
 
+# ------------------------------------------------------------------------------
+# json_get のテスト（本物の node で JSON を読む。モックの node は、-e だけ本物に渡す: test_helper.sh）
+# ------------------------------------------------------------------------------
+# 実行する。引数: JSON パス...。標準出力: json_get の出力。戻り値: json_get の終了コード
+_jg() {
+    (
+        export SF_INIT_MODE=1 PATH="$JG_MB:$PATH"
+        readonly SCRIPT_NAME=test; readonly LOG_FILE=/dev/null; readonly LOG_MODE=NEW
+        source "$SF_TOOLS_DIR/lib/common.sh"
+        json_get "$@"
+    ) 2> /dev/null
+}
+
+test_json_get() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] json_get${CLR_RST}"
+    JG_MB=$(setup_mock_bin)
+    create_mock_node "$JG_MB"
+    local q='"' out rc
+
+    # 基本: sf data query の形（result.records.0.…）・先頭のドット・存在しないパス・null・真偽値
+    local j='{"status":0,"result":{"records":[{"Id":"00D1","Name":"Acme","IsSandbox":false,"TrialExpirationDate":null}],"alias":"prod"}}'
+    out=$(_jg "$j" status result.records.0.Id result.records.0.Name result.records.0.IsSandbox result.records.0.TrialExpirationDate .result.alias result.none)
+    assert_equals "$out" $'0\n00D1\nAcme\nfalse\n\nprod' "基本: 値を、パスごとに 1 行で返す（null は空行。先頭のドットは許容。末尾の空行は、コマンド置換で落ちる）"
+    _jg "$j" result.alias > /dev/null; rc=$?
+    assert_equals "$rc" "0" "基本: 読み取れたときは 0"
+
+    # ルートが配列
+    out=$(_jg '[{"a":"x"},{"a":"y"}]' 1.a)
+    assert_equals "$out" "y" "ルートが配列: 添字で取れる"
+
+    # 値が日本語・引用符・波かっこ・改行を含む
+    out=$(_jg '{"result":{"v":"会社 \"A\" {x}\n次の行"}}' result.v)
+    assert_equals "$out" "会社 ${q}A${q} {x} 次の行" "日本語・引用符・波かっこを含む値。値の中の改行は、空白 1 つになる（1 パス = 1 行）"
+
+    # オブジェクトは JSON 文字列で返る
+    out=$(_jg '{"result":{"o":{"k":1}}}' result.o)
+    assert_equals "$out" '{"k":1}' "オブジェクトは、JSON 文字列で返る"
+
+    # records が空・結果なし
+    out=$(_jg '{"status":0,"result":{"records":[]}}' result.records.0.Id)
+    assert_equals "$out" "" "records が空: 空行（値なし）"
+
+    # sf の警告が、JSON の前後に付いている（run は標準エラーも標準出力に混ぜる）
+    out=$(_jg $'»   Warning: update available\n{"result":{"alias":"prod"}}\n' result.alias)
+    assert_equals "$out" "prod" "警告が JSON の前後に付いていても、読める"
+
+    # 読み取れない: 不正な JSON・空・JSON ではない文字列 → 終了コード 1
+    _jg 'not json' result.alias > /dev/null; rc=$?
+    assert_equals "$rc" "1" "JSON ではない文字列: 終了コード 1"
+    _jg '' result.alias > /dev/null; rc=$?
+    assert_equals "$rc" "1" "空: 終了コード 1"
+    _jg '{"a":' a > /dev/null; rc=$?
+    assert_equals "$rc" "1" "途中で切れた JSON: 終了コード 1"
+
+    # 終了コードを確認してから、代入する使い方（コマンド置換の失敗を、検出できる）
+    local vals
+    vals=$(_jg 'not json' a) && rc=0 || rc=1
+    assert_equals "$rc" "1" "コマンド置換: 失敗が、|| で検出できる"
+    # set -e でも、呼び出し側が || で受ければ、中断しない
+    out=$( set -e; ( export SF_INIT_MODE=1 PATH="$JG_MB:$PATH"; readonly SCRIPT_NAME=test LOG_FILE=/dev/null LOG_MODE=NEW
+                     source "$SF_TOOLS_DIR/lib/common.sh"
+                     v=$(json_get 'not json' a 2>/dev/null) || v="fallback"; echo "$v" ) )
+    assert_equals "$out" "fallback" "set -e でも、|| で受ければ、中断しない"
+
+    # node がない環境: 明確なメッセージで、終了コード 1
+    local nonode; nonode=$(mktemp -d "${TMPDIR:-/tmp}/test-nonode-XXXX")
+    out=$( ( export SF_INIT_MODE=1 PATH="$nonode:/usr/bin:/bin"; readonly SCRIPT_NAME=test LOG_FILE=/dev/null LOG_MODE=NEW
+             source "$SF_TOOLS_DIR/lib/common.sh"
+             if command -v node > /dev/null 2>&1; then echo "SKIP-node-in-usr-bin"; exit 0; fi
+             json_get '{"a":1}' a; echo "rc=$?" ) 2>&1 )
+    if echo "$out" | grep -q "SKIP-node-in-usr-bin"; then
+        pass "node がない環境（このテスト環境の /usr/bin に node があるためスキップ）"
+    else
+        assert_output_contains "$out" "node が見つかりません" "node がない: メッセージが表示される"
+        assert_output_contains "$out" "rc=1" "node がない: 終了コード 1"
+    fi
+    rm -rf "$nonode"
+    teardown "$JG_MB"
+}
+
 test_check_gh_owner_match
 test_check_gh_owner_mismatch
 test_check_gh_owner_skip_on_empty
@@ -589,5 +669,6 @@ test_check_sf_cli
 test_check_sf_cli_cache
 test_run_isolated_home
 test_ensure_sf_tools_latest
+test_json_get
 
 print_summary

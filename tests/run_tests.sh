@@ -40,6 +40,11 @@ CLR_FAIL='\033[31m'
 CLR_HEAD='\033[36m'
 CLR_RST='\033[0m'
 
+# テストは、実行する環境に左右されないこと。GitHub Actions 上では GITHUB_ACTIONS=true が設定されており、
+# sf-tools のスクリプトは、これを見て動作を変える（確認・警告を飛ばす・e2e を拒否するなど）。
+# そのため、ここで外す（GITHUB_ACTIONS=true の動作を確認するテストは、そのテストの中で、明示的に設定する）
+unset GITHUB_ACTIONS CI
+
 # 同時に動かすテストファイルの数（先頭の --jobs N / --jobs=N / --serial を、読み取る）
 JOBS="${SF_TEST_JOBS:-$(nproc 2>/dev/null || echo 4)}"
 while [[ "${1:-}" == "--jobs" || "${1:-}" == --jobs=* || "${1:-}" == "--serial" ]]; do

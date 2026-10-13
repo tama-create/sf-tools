@@ -670,11 +670,13 @@ e2e_make_input() {
 #   鍵一式の値（Token・認証 URL）は、念のため、*** に置き換える。表示だけで、戻り値は常に 0
 e2e_show_run_failure() {
     local repo="$1" id="$2" label="$3" out line v
+    # BSD の sed（macOS）は、\x や \t を解釈しないため、Bash が、実際の文字に展開して渡す
+    local _e2e_esc=$'\033' _e2e_tab=$'\t'
     _e2e_check_repo "$repo"
     log "WARNING" "${label}: 失敗したステップのログ（末尾 ${E2E_FAIL_LOG_LINES:-40} 行）:"
     # 形式: ジョブ名 TAB ステップ名 TAB 時刻 本文 → [ステップ名] 本文。色の指定は除く
     out=$(_e2e_gh run view "$id" -R "$repo" --log-failed 2>/dev/null \
-        | sed -E 's/\x1b\[[0-9;]*m//g; s/^([^\t]*)\t([^\t]*)\t[^ ]+Z /[\2] /' \
+        | sed -E "s/${_e2e_esc}\[[0-9;]*m//g; s/^([^${_e2e_tab}]*)${_e2e_tab}([^${_e2e_tab}]*)${_e2e_tab}[^ ]+Z /[\2] /" \
         | tail -n "${E2E_FAIL_LOG_LINES:-40}") || true  # VAR=$(cmd) のため run 不使用
     if [[ -z "$out" ]]; then
         log "WARNING" "  （ログを取得できませんでした。実行 ID: ${id}）"
@@ -702,7 +704,7 @@ e2e_show_file_tail() {
     fi
     while IFS= read -r line; do
         printf '    %s\n' "$(_e2e_mask_line "$line")"
-    done < <(sed -E 's/\x1b\[[0-9;]*[A-Za-z]//g' "$f" | tail -n "$n")
+    done < <(_strip_ansi < "$f" | tail -n "$n")
     return 0
 }
 

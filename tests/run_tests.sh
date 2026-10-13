@@ -10,7 +10,8 @@
 # ==============================================================================
 
 # Windows Git Bash の場合は WSL で自動リダイレクト（高速化）
-if [[ "$(uname -s)" =~ MINGW|MSYS ]] && command -v wsl >/dev/null 2>&1; then
+#   SF_TEST_NO_WSL=1 で、移らない（GitHub Actions の Windows ランナーなど、WSL を使えない環境で、Git Bash のまま実行する）
+if [[ "$(uname -s)" =~ MINGW|MSYS ]] && [[ "${SF_TEST_NO_WSL:-}" != "1" ]] && command -v wsl >/dev/null 2>&1; then
     WSL_SCRIPT=$(echo "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")" \
         | sed 's|^/\([a-z]\)/|/mnt/\1/|')
     MSYS_NO_PATHCONV=1 exec wsl bash "$WSL_SCRIPT" "$@"

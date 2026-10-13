@@ -661,6 +661,45 @@ test_json_get() {
     teardown "$JG_MB"
 }
 
+# ------------------------------------------------------------------------------
+# sed_inplace / _strip_ansi / _strip_term_codes のテスト（GNU / BSD の sed の、どちらでも動くこと）
+#   BSD の sed（macOS）は、`sed -i SCRIPT FILE` と、\x1b などの 16 進の表記を、解釈しない。
+# ------------------------------------------------------------------------------
+test_portable_sed() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] sed_inplace / _strip_ansi / _strip_term_codes${CLR_RST}"
+    local td out rc esc
+    td=$(mktemp -d "${TMPDIR:-/tmp}/test-psed-XXXX")
+    esc=$'\033'
+    _ps() {   # 引数: 実行する式（common.sh を読み込んだ子プロセスで評価する）
+        ( export SF_INIT_MODE=1; readonly SCRIPT_NAME=test LOG_FILE=/dev/null LOG_MODE=NEW
+          source "$SF_TOOLS_DIR/lib/common.sh"
+          eval "$1" ) 2>&1
+    }
+
+    # sed_inplace: 削除・置換・戻り値・バックアップを残さない・存在しないファイル
+    printf 'A=1\nPAT_TOKEN_VALUE="x"\nB=2\n' > "$td/env"
+    _ps "sed_inplace '/^PAT_TOKEN_VALUE=/d' '$td/env'" > /dev/null; rc=$?
+    assert_equals "$rc" "0" "sed_inplace: 行を削除できる（戻り値 0）"
+    assert_equals "$(tr '\n' ',' < "$td/env")" "A=1,B=2," "sed_inplace: 該当の行だけが、消える"
+    assert_equals "$([[ -e "$td/env.bak" ]] && echo yes || echo no)" "no" "sed_inplace: バックアップを残さない"
+    printf 'name=__REPO_NAME__\n' > "$td/j"
+    _ps "sed_inplace 's/__REPO_NAME__/force-x/g' '$td/j'" > /dev/null
+    assert_equals "$(cat "$td/j")" "name=force-x" "sed_inplace: 置換できる"
+    _ps "sed_inplace 's/a/b/' '$td/none'" > /dev/null; rc=$?
+    assert_equals "$([[ $rc -ne 0 ]] && echo ng || echo ok)" "ng" "sed_inplace: ファイルがなければ、非ゼロ"
+    assert_equals "$([[ -e "$td/none.bak" ]] && echo yes || echo no)" "no" "sed_inplace: 失敗しても、バックアップを残さない"
+
+    # _strip_ansi: 色の指定・カーソル操作を除く。日本語・記号は、そのまま
+    out=$(printf '%s[34m%s[1mValidated%s[22m %s[?25lWaiting%s[?25h 日本語 ▶\n' "$esc" "$esc" "$esc" "$esc" "$esc" | _ps '_strip_ansi')
+    assert_equals "$out" "Validated Waiting 日本語 ▶" "_strip_ansi: ANSI を除き、日本語・記号は残す"
+
+    # _strip_term_codes: ANSI に加えて、絵文字（3 バイト・4 バイト・U+FE0F）を除く。日本語は残す
+    out=$(printf '%s[32mOK%s[0m ✅ 完了 🔥 ⚠️ done\n' "$esc" "$esc" | _ps '_strip_term_codes')
+    assert_equals "$out" "OK  完了   done" "_strip_term_codes: ANSI と絵文字を除き、日本語は残す"
+
+    rm -rf "$td"
+}
+
 test_check_gh_owner_match
 test_check_gh_owner_mismatch
 test_check_gh_owner_skip_on_empty
@@ -678,5 +717,6 @@ test_check_sf_cli_cache
 test_run_isolated_home
 test_ensure_sf_tools_latest
 test_json_get
+test_portable_sed
 
 print_summary

@@ -7,6 +7,7 @@
 #
 # 【提供する関数】
 #   is_gitbash                     ... Windows の Git Bash か判定（$OSTYPE が msys / mingw / cygwin）
+#   sed_inplace SCRIPT FILE        ... ファイルを、その場で置換する（GNU / BSD の sed 共通）
 #   run_isolated_home CMD [ARGS]   ... 一時的なホームフォルダの中でコマンドを実行（sf の認証・エイリアスを隔離）
 #   check_sf_cli [--warn-only] [--cache] ... sf が終了コードを正しく返すか確認（npm 版が前提。NG なら案内して die）
 #   open_browser URL               ... OS を判定してブラウザを開く（Git Bash/WSL/macOS/Linux 対応）
@@ -19,6 +20,21 @@
 # 【使い方】  if is_gitbash; then ...
 # ------------------------------------------------------------------------------
 is_gitbash() { [[ "$OSTYPE" == "msys"* || "$OSTYPE" == "mingw"* || "$OSTYPE" == "cygwin"* ]]; }
+
+# sed_inplace - ファイルを、その場で置換する（GNU の sed と BSD の sed（macOS）の、両方で動く）
+# ------------------------------------------------------------------------------
+# 【使い方】 sed_inplace SCRIPT FILE      例: sed_inplace '/^PAT_TOKEN_VALUE=/d' "$ENV_FILE"
+# 【理由】   `sed -i SCRIPT FILE` は、BSD の sed では、-i の直後に、バックアップの拡張子が必要（GNU では、不要）。
+#           拡張子を、-i に続けて書く形（-i.bak）は、どちらでも動く。バックアップは、成功のあとで、消す。
+# 【戻り値】 sed の戻り値（失敗しても、バックアップは、残さない）
+# ------------------------------------------------------------------------------
+sed_inplace() {
+    local script="$1" file="$2" rc
+    sed -i.bak "$script" "$file"
+    rc=$?
+    rm -f "${file}.bak"  # run 不使用: バックアップの削除（なくても続行）
+    return $rc
+}
 
 # run_isolated_home - コマンドを、一時的なホームフォルダの中で実行する（sf の認証・エイリアスを隔離する）
 # ------------------------------------------------------------------------------

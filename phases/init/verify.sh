@@ -231,7 +231,7 @@ _run_ok() {
     local id="$1" label="$2" out line
     [[ "$(verify_run_conclusion "$REPO" "$id")" == "success" ]] && return 0
     log "WARNING" "${label}: 失敗しました。失敗したステップのログ（末尾 30 行）:"
-    out=$(verify_gh run view "$id" -R "$REPO" --log-failed 2>/dev/null | sed -E 's/\x1b\[[0-9;]*m//g' | tail -n 30) || true  # VAR=$(cmd) のため run 不使用
+    out=$(verify_gh run view "$id" -R "$REPO" --log-failed 2>/dev/null | _strip_ansi | tail -n 30) || true  # VAR=$(cmd) のため run 不使用
     while IFS= read -r line; do printf '    %s\n' "$(_mask_secrets "$line")" >&2; done <<< "$out"
     log "WARNING" "${label}: 一時的な失敗の可能性があるため、1 回だけ再実行します。"
     verify_rerun_and_wait "$REPO" "$id" || return 1

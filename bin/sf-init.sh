@@ -501,7 +501,7 @@ done
 #   念のため、Token の値の行を .sf-init.env から消す（通常は、Phase 8 の push 後に、消えている）。
 #   最後（Phase 10）まで実行したときだけ行う（--only 6 などの途中までの実行では、Phase 8 が、あとで使うため、消さない）
 if [[ "$END_PHASE" -eq 10 && -f "$SF_INIT_ENV_FILE" ]]; then
-    run sed -i '/^[A-Z_]*TOKEN_VALUE=/d' "$SF_INIT_ENV_FILE"
+    run sed_inplace '/^[A-Z_]*TOKEN_VALUE=/d' "$SF_INIT_ENV_FILE"
 fi
 
 # ステップ 9: 動作の確認（verify.sh）。聞くのは、「通しの実行」と、中断後の「続きをやる」だけ（FULL_START。

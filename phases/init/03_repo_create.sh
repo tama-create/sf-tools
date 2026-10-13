@@ -85,8 +85,8 @@ log "SUCCESS" "テンプレートファイルをコピーしました"
 # --- sfdx-project.json のプレースホルダー置換 ---
 sfdx_json="${REPO_DIR}/sfdx-project.json"
 if [[ -f "$sfdx_json" ]]; then
-    # sed の -i はGitBash/macOS/Linuxで動作（インプレース置換）
-    sed -i "s/__REPO_NAME__/${REPO_NAME}/g" "$sfdx_json" \
+    # sed_inplace（lib/platform.sh）: GNU / BSD（macOS）の sed の、どちらでも動く、その場の置換
+    sed_inplace "s/__REPO_NAME__/${REPO_NAME}/g" "$sfdx_json" \
         || die "sfdx-project.json のプレースホルダー置換に失敗しました。"
     log "SUCCESS" "sfdx-project.json のプロジェクト名を設定しました: ${REPO_NAME}"
 fi

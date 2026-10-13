@@ -76,7 +76,7 @@ test_up_to_date() {
     assert_exit_ok "$ec" "--check → 確認なしで、終了コード 0（何も変更しないため）"
     echo "$out" | grep -q "管理者以外は、実行しないでください" && fail "--check → 警告ボックスを表示しない" || pass "--check → 警告ボックスを表示しない"
 
-    sed -i 's/$/\r/' "$td/.github/workflows/wf-a.yml"   # CRLF にする（Windows の改行）
+    sedi $'s/$/\r/' "$td/.github/workflows/wf-a.yml"   # CRLF にする（Windows の改行）
     out=$(_wf_run "$td" "$mb" "$mh" "Y"); ec=$?
     assert_exit_ok "$ec" "CRLF だけの違い → 終了コード 0"
     assert_output_contains "$out" "最新です" "CRLF だけの違い → 差分とみなさない"

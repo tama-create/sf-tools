@@ -351,6 +351,12 @@ EOF
     chmod +x "$bin_dir/gh"
 }
 
+# sedi - ファイルを、その場で置換する（GNU / BSD の sed 共通。テストの中で、-i を直接使わない）
+#   使い方: sedi SCRIPT FILE
+sedi() {
+    sed -i.bak "$1" "$2" && rm -f "$2.bak"
+}
+
 # node モック
 #   node -e '...'（lib/common.sh の json_get が JSON を読むために使う）は、本物の node に渡す
 #   （JSON の読み取りを、モックで偽装しない。呼び出しの記録にも、残さない）。それ以外は、バージョンを返すだけ

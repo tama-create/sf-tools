@@ -1,0 +1,16 @@
+# shellcheck の設定（リポジトリ全体。CI と手元で、同じ設定になる）
+# 実行: shellcheck -x -S warning bin/*.sh lib/*.sh phases/init/*.sh hooks/* templates/*.sh
+
+# source するファイルも、たどる
+external-sources=true
+source-path=SCRIPTDIR
+
+# SC1090 / SC1091: source "${SCRIPT_DIR}/../lib/common.sh" のように、変数を使った source は、たどれない（呼び出し先は、別に検査する）
+disable=SC1090
+disable=SC1091
+
+# SC2034: readonly SCRIPT_NAME / LOG_FILE / LOG_MODE などは、source する lib/common.sh が使う（shellcheck からは、未使用に見える）
+disable=SC2034
+
+# SC2155: readonly SCRIPT_NAME=$(basename "$0" .sh) のように、宣言と代入を 1 行で書く（失敗しても問題のない値の取得のみ）
+disable=SC2155

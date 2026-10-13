@@ -72,6 +72,12 @@
 | `test_sf-update-secret.sh` | sf-update-secret.sh |
 | `test_sf-sync-wf.sh` | sf-sync-wf.sh |
 
+### 2.1.1 テストの実行方式と CI
+
+- **並列実行**: `run_tests.sh` は、複数ファイルを、同時に（既定は CPU の数まで）動かす。時間のかかるファイル（`HEAVY_FIRST`: `test_sf-init.sh` など）を先に起動し、標準入力は閉じる（入力待ちで止まらないため）。出力は、ファイルごとに溜めて、`TEST_FILES` の順に表示・集計する。実測（8 コア・WSL）: 直列 約 400 秒 → 並列 約 170〜230 秒。並列数を 4〜100 で変えても、大きな差は、出なかった。
+- **WSL**: Git Bash から実行すると、自動で WSL に移り、ext4 にコピーして実行する（`/mnt/c` の 9P は、遅いため）。WSL には `node` がなく `node.exe` だけがある場合があり、`test_helper.sh` の node のモックは、`node -e` を、本物（`node` または `node.exe`）に渡す（`json_get` のテストのため）。
+- **CI**: `.github/workflows/test.yml`（Ubuntu のランナー）。PR（main・development 向け）と development への push で、全件テスト（`bash tests/run_tests.sh`）と shellcheck（`-S warning`。バージョン固定 `shellcheck-py==0.11.0.1`）を実行し、どちらも失敗扱いになる。Secrets は使わない。shellcheck の設定は、リポジトリ直下の `.shellcheckrc`（`SC1090` / `SC1091`・`SC2034`・`SC2155` を、理由つきで無効化）。個別の誤検知は、該当行の直前に `# shellcheck disable=SCxxxx  # 理由` で除外する。手元での実行: `shellcheck -S warning $(git ls-files 'bin/*.sh' 'lib/*.sh' 'phases/*.sh' 'hooks/*' 'templates/*.sh')`（`pip install shellcheck-py` など）。
+
 ### 2.2 `test_helper.sh` の前提
 
 セットアップ関数:
@@ -102,6 +108,9 @@
 ---
 
 ## 3. 共通ライブラリ (`lib/common.sh`) 詳細
+
+> **構成**: `lib/common.sh` が窓口で、ログ（`log`）・実行（`run`）・終了（`die`）・`json_get` と定数を持つ。残りの関数は、責務ごとのファイルに分けてあり、`common.sh` が `source` する（呼び出し側は、これまでどおり、`common.sh` だけを `source` すればよい）。
+> `lib/input.sh`（対話入力: `read_input` / `read_key` / `press_enter` / `read_or_quit` / `read_secret` / `ask_yn`）・`lib/platform.sh`（OS・外部コマンド: `is_gitbash` / `run_isolated_home` / `check_sf_cli` / `open_browser`）・`lib/project.sh`（プロジェクト: `get_target_org` / `check_force_dir` / `check_home_dir` / `check_gh_owner` / `get_branch_list` / `is_reserved_org_alias` / `is_protected_branch` / `ensure_sf_tools_latest`）。テストは、すべて `tests/test_common.sh`。
 
 全スクリプトは `source "$SCRIPT_DIR/lib/common.sh"` の前に以下を `readonly` で定義すること。
 
@@ -483,6 +492,59 @@ sf-init.sh --add-tier develop    # main+staging → main+staging+develop
 - スケールダウンは影響範囲が大きく（ブランチ削除・WF 停止・Secrets 削除・Ruleset 更新）、誤操作リスクが高いため**手動運用とする**
 - 必要な場合は GitHub リポジトリ設定・`branches.txt` 編集・ローカルブランチ削除を手動で実施すること
 
+### 4.13.1 sf-init の状態（保存ファイルと環境変数）
+
+`sf-init.sh` の Phase 間の受け渡しと、再開（続きをやる）は、init フォルダ（`{root}/{owner}/{company}/init/`）の 2 つのファイルと、環境変数で行う。
+変更するときは、この表と、書く側・読む側の両方を、確認する。
+
+#### 保存ファイル
+
+| ファイル | 内容 | 形式 | 備考 |
+|---|---|---|---|
+| `.sf-init.env` | 入力内容（Phase 2 以降が読む） | `KEY="値"`（`source` で読み込む。権限 600） | 完了時に `*TOKEN_VALUE=` の行を消す。別のリポジトリの状態なら、残骸として扱い、最初から |
+| `.sf-init.progress` | 進捗（どこまで成功したか） | `KEY=値`（書き換えに外部コマンドを使わない） | `--only` では書かない。Phase 1 は、状態を持たないため、記録しない |
+
+`phases/init/add_tier.sh` だけは、`force-*/sf-tools/config/.sf-init.env` を読む（別の場所。init フォルダのものではない）。
+
+#### `.sf-init.env` のキー
+
+| キー | 意味 | 書く | 読む |
+|---|---|---|---|
+| `GITHUB_OWNER` | リポジトリのオーナー（gh のログインユーザー・組織） | Phase 2（ファイルを作り直す） | Phase 3 以降・完了画面 |
+| `PROJECT_NAME` | 会社・プロジェクト名（init の 1 つ上のフォルダ名） | Phase 2 | Phase 3・完了画面 |
+| `REPO_NAME` / `REPO_FULL_NAME` | `force-{PROJECT_NAME}` / `{owner}/force-{PROJECT_NAME}` | Phase 2 | Phase 3 以降。`sf-init.sh` が、前回の状態が、同じリポジトリのものかの判定にも使う |
+| `REPO_DIR` | init フォルダ内の clone 先（`init/force-{PROJECT_NAME}`） | Phase 2 | Phase 4 以降・管理者用フォルダの案内・`verify.sh`（ステップ 9） |
+| `ENV_TYPE` | sf-tools の版（`production` / `staging`）。`SF_TOOLS_BRANCH` の決定に使う | Phase 2 | Phase 2（同じ Phase の中） |
+| `SF_TOOLS_BRANCH` | Actions が使う sf-tools のブランチ（`main` / `development`） | Phase 2 | Phase 9（`development` のときだけ、GitHub の Variable に登録） |
+| `BRANCH_COUNT` | 段階の数（1〜3） | Phase 5（追記） | Phase 8（ブランチ作成）・Phase 10（段階）・ステップ 9（目安の時間） |
+| `PAT_TOKEN_VALUE` | PAT（**秘密情報。一時的**） | Phase 6（追記） | Phase 8（push に使い、直後に、この行を消す） |
+| `APP_TYPE` | Salesforce の接続の種別（`1` = 接続アプリ（従来）/ `2` = 外部クライアントアプリ） | Phase 10（追記） | Phase 10（再開時に再利用。指定と食い違うと中断） |
+
+#### `.sf-init.progress` のキー
+
+| キー | 意味 | 書く | 読む |
+|---|---|---|---|
+| `SF_INIT_DONE_PHASE` | 最後に成功した Phase の番号（`2`〜`10`。`10` = 完了済み） | `sf-init.sh`（Phase が成功するたび。ファイルを書き直す） | `sf-init.sh`（続きの選択肢・完了済みの判定・`--resume N` の拒否） |
+| `SF_INIT_DONE_AT` | 上の日時（表示用） | 同上 | 続きの選択肢の表示 |
+| `SF_INIT_DONE_TIER_PROD` / `_STG` / `_DEV` | Phase 10 で、その段階の接続まで完了した（`1`） | Phase 10（`_register_org` が、追記） | Phase 10（再実行でスキップ。Secret が、いまもあるときだけ）。Phase 10 が成功すると、`sf-init.sh` がファイルを書き直すため、消える |
+
+#### 環境変数（保存しない）
+
+| 変数 | 意味 | 設定する | 使う |
+|---|---|---|---|
+| `SF_INIT_MODE=1` | init の一部として動く（`common.sh` の force-* のチェックを、飛ばす） | `sf-init.sh` と各 Phase | `lib/common.sh`・各 Phase |
+| `SF_INIT_ENV_FILE` / `SF_INIT_PROGRESS_FILE` | 上の 2 つのファイルの絶対パス | `sf-init.sh` | 各 Phase・`10_sf_auth.sh` |
+| `SF_INIT_TIER_RESUME=1` | Phase 10 の段階ごとの再開を有効にする（`--only` では、設定しない） | `sf-init.sh` | `10_sf_auth.sh` |
+| `SF_INIT_LEGACY_CONNECTED_APP=1` | `--legacy-connected-app`（従来の接続アプリを使う） | `sf-init.sh` | `10_sf_auth.sh`・`add_tier.sh`・`reconnect.sh` |
+| `SF_INIT_RESTARTED` | sf-tools を更新して、同じ引数で、実行しなおした（無限に、実行しなおさないため） | `sf-init.sh` | `sf-init.sh` |
+| `SF_INIT_TOOLS_CHECKED_BRANCH` | sf-tools の最新確認を済ませたブランチ（Phase 2 で、二重に確認しない） | `sf-init.sh` | `02_project_info.sh` |
+| `SF_INIT_RUNNING=1` | Phase 4 → `sf-install.sh` の初期化モード（フック・`npm install` などを、飛ばす） | `04_gen_files.sh` | `sf-install.sh` |
+| `SF_INIT_PUSH_TOKEN` | Phase 8 の push の PAT（`GIT_ASKPASS` で、git に渡す。URL・引数には、出さない） | `08_initial_commit.sh` | 一時スクリプト（終了時に削除） |
+| `SF_INIT_LOGIN_URL_{PROD,STG,DEV,START}` | ログイン先の指定（`login` / `test` / URL）。対話の質問を、省略する（e2e・テスト用） | 利用者・e2e | `lib/org.sh`・`reconnect.sh`・`sf-start.sh` |
+| `SF_INIT_JWT_RETRIES` / `SF_INIT_JWT_INTERVAL` | JWT 接続テストの再試行の回数・間隔（テストで短くする） | テスト | `init-common.sh` |
+| `SF_INIT_VERIFY_ASK=1` | 端末でなくても、ステップ 9 の質問を出す（テスト用） | テスト | `sf-init.sh` |
+| `SF_VERIFY_CONFIRMED=1` | `sf-init.sh` が確認済みのため、`verify.sh` の確認を省略する | `sf-init.sh` | `verify.sh` |
+
 ### 4.14 sf-check.sh
 
 ターゲットファイルの構文チェックと、テストクラス不足検出を行う。`sf-release.sh` / `sf-prepush.sh` / `sf-push.sh` から自動呼び出しされる。
@@ -580,6 +642,8 @@ sf-init.sh --add-tier develop    # main+staging → main+staging+develop
 ```bash
 bash tests/run_tests.sh                           # 全テスト実行（mm 前に必ず実行）
 bash tests/run_tests.sh --changed                 # 変更ファイルに対応するテストのみ（開発中）
+bash tests/run_tests.sh --jobs 4                  # 同時に動かすテストファイルの数を指定（既定: CPU の数。環境変数 SF_TEST_JOBS でも指定できる）
+bash tests/run_tests.sh --serial                  # 1 つずつ実行（並列で、原因を切り分けにくいときの確認用）
 bash tests/run_tests.sh test_sf-start.sh          # 単体実行
 cat logs/run_tests.log | grep '\[FAIL\]'          # 失敗行のみ抽出
 cat logs/error.log                                # run 失敗コマンドのログ

@@ -205,6 +205,7 @@ phase_setup_gitmessage() {
 }
 
 # 【UPGRADE】開発ツールのアップデート（バックグラウンド実行）
+# shellcheck disable=SC2120  # 引数は、呼び出し側が渡すことがある（"$@" を、そのまま sf-upgrade.sh に渡す）
 phase_upgrade_tools_bg() {
     if _is_tool_update_needed; then
         log "INFO" "開発ツールのアップデートをバックグラウンドで開始します（sf-upgrade.sh）..."

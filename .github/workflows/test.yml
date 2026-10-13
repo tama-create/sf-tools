@@ -1,0 +1,53 @@
+name: テスト
+
+# sf-tools 自体のテスト（モックベースの単体テスト 約 1,600 件）と、シェルの静的解析（shellcheck）。
+# 実際の GitHub / Salesforce には触れない（Secrets は使わない）。実環境の確認は tests/e2e（開発者が手動で実行する）。
+# shellcheck の設定（無効にしている項目と、その理由）は、リポジトリの .shellcheckrc。
+on:
+  pull_request:
+    branches: [main, development]
+  push:
+    branches: [development]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: 全件テスト
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: ソースコードを取得
+        uses: actions/checkout@v4
+
+      - name: テストを実行
+        run: bash tests/run_tests.sh
+
+  shellcheck:
+    name: shellcheck（警告以上）
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: ソースコードを取得
+        uses: actions/checkout@v4
+
+      - name: Python を用意
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # バージョンを固定する（手元と同じ結果にするため）。設定は、リポジトリの .shellcheckrc
+      - name: shellcheck を導入
+        run: pip install shellcheck-py==0.11.0.1
+
+      - name: shellcheck を実行（警告以上）
+        run: |
+          shellcheck --version
+          files=$(git ls-files 'bin/*.sh' 'lib/*.sh' 'phases/*.sh' 'hooks/*' 'templates/*.sh')
+          shellcheck -S warning $files

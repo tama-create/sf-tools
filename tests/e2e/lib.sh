@@ -87,10 +87,10 @@ e2e_valid_sfdx_url() { [[ "$1" =~ ^force://[^:@[:space:]]+:[^:@[:space:]]*:[^@[:
 e2e_get_sfdx_auth_url() {
     local alias="$1" out url
     out=$(sf org auth show-sfdx-auth-url --target-org "$alias" --no-prompt --json 2>/dev/null)  # VAR=$(cmd) のため run 不使用（値をログに出さない）
-    url=$(printf '%s' "$out" | grep -oE 'force://[^"]*' | head -1)
+    url=$(json_get "$out" result.sfdxAuthUrl) || url=""  # VAR=$(cmd) のため run 不使用（読み取れなければ、空）
     if ! e2e_valid_sfdx_url "$url"; then
         out=$(sf org display --target-org "$alias" --verbose --json 2>/dev/null)  # VAR=$(cmd) のため run 不使用（値をログに出さない）
-        url=$(printf '%s' "$out" | grep -oE '"sfdxAuthUrl": *"force://[^"]*"' | head -1 | sed -E 's/.*: *"(.*)"/\1/')
+        url=$(json_get "$out" result.sfdxAuthUrl) || url=""  # VAR=$(cmd) のため run 不使用（読み取れなければ、空）
     fi
     e2e_valid_sfdx_url "$url" || return 1
     printf '%s' "$url"
@@ -168,8 +168,9 @@ e2e_layout_tiers() {
 e2e_org_id() {
     local out id
     out=$(sf org display --target-org "$1" --json 2>/dev/null)  # VAR=$(cmd) のため run 不使用
-    id=$(printf '%s' "$out" | grep -oE '"id": *"00D[A-Za-z0-9]{12,15}"' | head -1 | sed -E 's/.*"(00D[A-Za-z0-9]+)"/\1/')
-    [[ -n "$id" ]] || return 1
+    id=$(json_get "$out" result.id) || id=""  # VAR=$(cmd) のため run 不使用（読み取れなければ、空）
+    # 組織 ID の形式（00D + 12〜15 文字）でなければ、取得できなかったものとして扱う
+    [[ "$id" =~ ^00D[A-Za-z0-9]{12,15}$ ]] || return 1
     printf '%s' "$id"
 }
 
@@ -198,11 +199,13 @@ e2e_require_guard() {
 # sf alias list の失敗（戻り値 1）を、空の一覧と取り違えない。取り違えると、保存した一覧が空になり、
 # 復元のときに、開発者の本物のエイリアス（prod / staging / develop など）を、すべて外してしまう
 e2e_alias_dump() {
-    local out
+    local out names values
     out=$(sf alias list --json 2>/dev/null) || return 1  # VAR=$(cmd) のため run 不使用
-    printf '%s' "$out" | tr -d '\n\r' \
-        | grep -oE '"alias": *"[^"]*", *"value": *"[^"]*"' \
-        | sed -E 's/"alias": *"([^"]*)", *"value": *"([^"]*)"/\1=\2/' || true  # パイプのみのため run 不使用。エイリアスが 0 件なら、grep が 1 を返す（正常）
+    # JSON として読み取れないときは、失敗（空の一覧と取り違えない。エイリアスが 0 件のときは、空で、成功）
+    names=$(json_get "$out" 'result.*.alias') || return 1   # VAR=$(cmd) のため run 不使用
+    values=$(json_get "$out" 'result.*.value') || return 1  # VAR=$(cmd) のため run 不使用
+    [[ -n "$names" ]] || return 0
+    paste -d= <(printf '%s\n' "$names") <(printf '%s\n' "$values")  # 要素ごとに 1 行ずつ（行の数は、そろう）
 }
 
 # 戻り値 1: sf alias list に失敗した（保存できていない。呼び出し側は、中断すること）

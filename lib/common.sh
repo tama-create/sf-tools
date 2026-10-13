@@ -14,20 +14,13 @@
 #   log LEVEL MESSAGE [DEST]  ... 画面とログファイルへ出力
 #   run CMD [ARGS...]         ... コマンドを実行してログに記録
 #   die MESSAGE [EXIT_CODE]   ... エラーログを出力して終了
-#   get_target_org [ALIAS]    ... 接続先組織エイリアスを解決
-#   check_force_dir           ... force-* ディレクトリ内か確認
-#   check_home_dir            ... ~/home/{owner}/{company}/ の正しい階層か確認し GITHUB_OWNER/COMPANY_NAME をセット
-#   check_gh_owner OWNER      ... gh 認証ユーザーが期待するオーナーと一致するか確認（組織の有効な admin も許可）
-#   is_gitbash                     ... Windows の Git Bash か判定（$OSTYPE が msys / mingw / cygwin）
-#   run_isolated_home CMD [ARGS]   ... 一時的なホームフォルダの中でコマンドを実行（sf の認証・エイリアスを隔離）
-#   check_sf_cli [--warn-only] [--cache] ... sf が終了コードを正しく返すか確認（npm 版が前提。NG なら案内して die）
-#   open_browser URL               ... OS を判定してブラウザを開く（Git Bash/WSL/macOS/Linux 対応）
-#   read_input VARNAME [PROMPT]    ... readline 対応インタラクティブ入力
-#   read_key VARNAME [PROMPT] [V]  ... 1文字即時入力（Enter 不要・空 Enter 無視）
-#   press_enter [MSG]              ... Enter 待ち（q で中断）
-#   read_or_quit VARNAME PROMPT    ... テキスト入力（空 Enter 無視・q で中断）
-#   read_secret VARNAME PROMPT     ... 秘密情報の入力（* で表示・空 Enter は案内して再入力・q で中断）
-#   ask_yn QUESTION                ... Y/N/q 確認（1文字即時入力）
+#   json_get JSON パス...     ... JSON から値を取り出す（Node の標準機能のみ。sf CLI の出力など）
+#
+#   以下は、責務ごとのファイルに分けてあり、この common.sh が source する（呼び出し側は、common.sh だけでよい）:
+#   project.sh   ... get_target_org / check_force_dir / check_home_dir / check_gh_owner / get_branch_list /
+#                    is_reserved_org_alias / is_protected_branch / ensure_sf_tools_latest
+#   platform.sh  ... is_gitbash / run_isolated_home / check_sf_cli / open_browser
+#   input.sh     ... read_input / read_key / press_enter / read_or_quit / read_secret / ask_yn
 #
 # 【戻り値定数】
 #   RET_OK=0        正常終了
@@ -340,7 +333,7 @@ die() {
 }
 
 # ------------------------------------------------------------------------------
-# 9. ユーティリティ関数
+# 9. ユーティリティ関数（JSON の読み取り）と、責務ごとのファイルの読み込み
 # ------------------------------------------------------------------------------
 
 # json_get - JSON 文字列から値を取り出す（Node の標準機能のみ。jq は使わない）
@@ -350,7 +343,10 @@ die() {
 #   mapfile -t V <<< "$VALS"          # 複数のパスは 1 回で取り、行ごとに配列へ（Node の起動を 1 回にするため）
 #
 # 【パス】 「.」区切り（配列の要素は数字）。例: result.records.0.Id / result.alias。先頭の「.」は、あってもよい
-# 【出力】 パス 1 つにつき 1 行。値がなければ空行。オブジェクト・配列は JSON 文字列。値の中の改行は、空白 1 つにする
+#          「*」は、配列（またはオブジェクト）の全要素に展開する。例: result.*.alias → 要素ごとに 1 行
+#          （要素に、そのキーがなければ、その要素の行は空行。要素の数と、行の数が、そろう）
+# 【出力】 パス 1 つにつき 1 行（「*」があれば、要素の数だけ）。値がなければ空行。オブジェクト・配列は JSON 文字列。
+#          値の中の改行は、空白 1 つにする
 # 【戻り値】 0 = 読み取れた / 1 = JSON として読み取れなかった・node がない
 # 【備考】
 #   ・GitHub の情報は、gh の --jq で読む（これは使わない）。これは、sf CLI の出力（sf ... --json）など、gh が読めない JSON 用
@@ -375,118 +371,22 @@ json_get() {
                 try { o = JSON.parse(s.slice(s.indexOf("{"), s.lastIndexOf("}") + 1)); }
                 catch (e2) { process.exit(1); }
             }
+            const walk = (v, ks) => {
+                if (ks.length === 0) return [v];
+                const k = ks[0], rest = ks.slice(1);
+                if (k === "*") {
+                    const arr = Array.isArray(v) ? v : (v !== null && typeof v === "object" ? Object.values(v) : []);
+                    return arr.flatMap(x => walk(x, rest));
+                }
+                return v == null ? [undefined] : walk(v[k], rest);
+            };
             for (const p of process.argv.slice(1)) {
-                let v = o;
-                for (const k of p.replace(/^\./, "").split(".")) { if (v == null) break; v = v[k]; }
-                const t = v == null ? "" : (typeof v === "object" ? JSON.stringify(v) : String(v));
-                console.log(t.replace(/\r?\n/g, " "));
+                for (const v of walk(o, p.replace(/^\./, "").split("."))) {
+                    const t = v == null ? "" : (typeof v === "object" ? JSON.stringify(v) : String(v));
+                    console.log(t.replace(/\r?\n/g, " "));
+                }
             }
         });' -- "$@"
-}
-
-# get_target_org - 接続先組織エイリアスを解決して echo する
-# ------------------------------------------------------------------------------
-# 【使い方】
-#   TARGET=$(get_target_org [ALIAS]) || die "組織を特定できません。"
-#
-# 【解決の優先順位】
-#   1. 引数 ALIAS（明示指定）
-#   2. 環境変数 SF_TARGET_ORG（GitHub Actions の secrets 等）
-#   3. ローカル接続情報（sf org display の出力）
-#
-# 【戻り値】
-#   RET_OK (0) : エイリアスを echo して正常終了
-#   RET_NG (1) : どこからも特定できなかった場合
-#
-# 【使用例】
-#   TARGET_ORG=$(get_target_org "$OPT_TARGET") || die "接続先を特定できません。"
-#   TARGET_ORG=$(get_target_org)               || die "接続先を特定できません。"
-# ------------------------------------------------------------------------------
-get_target_org() {
-    local target="$1"
-    [[ -z "$target" ]] && target="$SF_TARGET_ORG"
-    if [[ -z "$target" ]]; then
-        local current_alias disp_json
-        disp_json=$(run sf org display --json || echo "")  # VAR=$(cmd) のため run 不使用（出力の取得）
-        current_alias=$(json_get "$disp_json" result.alias)  # VAR=$(cmd) のため run 不使用（値の抽出のみ）
-        [[ -n "$current_alias" && "$current_alias" != "null" ]] && target="$current_alias"
-    fi
-    [[ -z "$target" ]] && return $RET_NG
-    echo "$target"
-    return $RET_OK
-}
-
-# check_force_dir - カレントディレクトリが force-* であるか確認する
-# ------------------------------------------------------------------------------
-# 【使い方】
-#   check_force_dir || die "force-* ディレクトリ内で実行してください。"
-#
-# 【戻り値】
-#   RET_OK (0) : カレントディレクトリ名が force- で始まる
-#   RET_NG (1) : それ以外
-# ------------------------------------------------------------------------------
-check_force_dir() {
-    [[ "$(basename "$PWD")" =~ ^force- ]] && return $RET_OK
-    return $RET_NG
-}
-
-# check_gh_owner - gh 認証ユーザーがリポジトリオーナーと一致するか確認する
-# ------------------------------------------------------------------------------
-# 【使い方】
-#   check_gh_owner "$GITHUB_OWNER"          # 失敗時は die で終了
-#   check_gh_owner "${REPO_FULL_NAME%%/*}"  # OWNER/REPO 形式からオーナーを抽出して渡す
-#
-# 【検証内容】
-#   - gh api user でログイン中のユーザー名を取得
-#   - 期待するオーナーと一致すれば通過
-#   - 一致しない場合、オーナーが組織で認証ユーザーがその組織の有効な管理者（admin かつ active）なら通過
-#   - 上記以外は die（組織 API が失敗した場合も通過させない）
-#   - gh コマンドが使えない場合（ユーザー名が空）はチェックをスキップ（ネットワーク障害等への配慮）
-# ------------------------------------------------------------------------------
-check_gh_owner() {
-    local expected_owner="$1"
-    local gh_user org_status
-    gh_user=$(gh api user --jq '.login' 2>/dev/null || true)  # VAR=$(cmd) のため run 不使用
-    [[ -z "$gh_user" || "$gh_user" == "$expected_owner" ]] && return $RET_OK
-    # 不一致: オーナーが組織なら、認証ユーザーがその組織の有効な管理者かを確認する
-    org_status=$(gh api "user/memberships/orgs/${expected_owner}" --jq '.role + " " + .state' 2>/dev/null || true)  # VAR=$(cmd) のため run 不使用
-    if [[ "$org_status" == "admin active" ]]; then
-        log "INFO" "gh の認証ユーザー（${gh_user}）は組織 ${expected_owner} の管理者です。続行します。"
-        return $RET_OK
-    fi
-    die "gh の認証ユーザー（${gh_user}）がリポジトリオーナー（${expected_owner}）と一致せず、組織の管理者（admin）でもありません。"
-}
-
-# check_home_dir - ~/home/{owner}/{company}/ の正しい階層か確認し変数をセットする
-# ------------------------------------------------------------------------------
-# 【使い方】
-#   check_home_dir   # 失敗時は die で終了
-#   # 成功時: GITHUB_OWNER / COMPANY_NAME がセットされる
-#
-# 【検証内容】
-#   - PWD が */home/ 配下にある
-#   - home/ からの深さがちょうど 2（{owner}/{company}）
-#
-# 【セット先変数】
-#   GITHUB_OWNER  : 1つ上のフォルダ名（例: tamashimon-org）
-#   COMPANY_NAME  : カレントフォルダ名（例: yamada）
-# ------------------------------------------------------------------------------
-check_home_dir() {
-    local rest depth
-    rest="${PWD#*/home/}"
-    if [[ "$rest" == "$PWD" ]]; then
-        die "~/home/ 配下で実行してください。
-  正しい場所: ~/home/{github-owner}/{company}/
-  現在の場所: ${PWD}"
-    fi
-    depth=$(printf '%s' "$rest" | tr -cd '/' | wc -c)
-    if [[ $depth -ne 1 ]]; then
-        die "実行フォルダの階層が正しくありません。
-  正しい場所: ~/home/{github-owner}/{company}/
-  現在の場所: ${PWD}"
-    fi
-    GITHUB_OWNER=$(basename "$(dirname "$PWD")")
-    COMPANY_NAME=$(basename "$PWD")
 }
 
 # get_branch_list - branches.txt からブランチ一覧を取得して echo する
@@ -502,28 +402,6 @@ check_home_dir() {
 #   RET_NG (1) : ファイルが存在しない場合
 # ------------------------------------------------------------------------------
 readonly BRANCH_LIST_FILE="sf-tools/config/branches.txt"
-
-get_branch_list() {
-    if [[ ! -f "$BRANCH_LIST_FILE" ]]; then
-        log "WARNING" "ブランチ構成ファイルが見つかりません: ${BRANCH_LIST_FILE}（デフォルト: main のみ）"
-        echo "main"
-        return $RET_OK
-    fi
-    local branches="" line
-    while IFS= read -r line || [[ -n "$line" ]]; do
-        line="${line%$'\r'}"                          # CR 除去（Windows 対応）
-        [[ "$line" =~ ^[[:space:]]*# ]] && continue  # コメント行スキップ
-        [[ -z "${line//[[:space:]]/}" ]] && continue  # 空行スキップ
-        branches="${branches}${branches:+$'\n'}${line}"
-    done < "$BRANCH_LIST_FILE"
-    if [[ -z "$branches" ]]; then
-        log "WARNING" "${BRANCH_LIST_FILE} にブランチが定義されていません。デフォルト: main のみ"
-        echo "main"
-        return $RET_OK
-    fi
-    echo "$branches"
-    return $RET_OK
-}
 
 # is_reserved_org_alias - 共有環境の組織エイリアス（sf-tools の予約名）かを返す
 # ------------------------------------------------------------------------------
@@ -544,384 +422,14 @@ get_branch_list() {
 # ------------------------------------------------------------------------------
 readonly SF_RESERVED_ORG_ALIASES="prod staging develop main"
 
-is_reserved_org_alias() {
-    local alias_name="$1" reserved
-    for reserved in $SF_RESERVED_ORG_ALIASES; do
-        [[ "$alias_name" == "$reserved" ]] && return $RET_OK
-    done
-    return $RET_NG
-}
-
-# is_protected_branch - 指定ブランチが branches.txt の保護対象かを返す
 # ------------------------------------------------------------------------------
-# 【使い方】
-#   is_protected_branch "staging" && die "直接プッシュ禁止"
-#
-# 【戻り値】
-#   RET_OK (0) : 保護対象ブランチである
-#   RET_NG (1) : 保護対象外
+# 10. 責務ごとのファイル（ここから読み込む。呼び出し側は、common.sh だけを source すればよい）
+#   input.sh     ... 対話入力（read_input / read_key / press_enter / read_or_quit / read_secret / ask_yn）
+#   platform.sh  ... OS・外部コマンド（is_gitbash / run_isolated_home / check_sf_cli / open_browser）
+#   project.sh   ... プロジェクト（get_target_org / check_force_dir / check_home_dir / check_gh_owner /
+#                    get_branch_list / is_reserved_org_alias / is_protected_branch / ensure_sf_tools_latest）
 # ------------------------------------------------------------------------------
-is_protected_branch() {
-    local branch="$1"
-    local branches
-    branches=$(get_branch_list)
-    echo "$branches" | grep -qx "$branch" && return $RET_OK
-    return $RET_NG
-}
-
-# ensure_sf_tools_latest - sf-tools（Git リポジトリ）が、origin の最新であることを確認する（必須の確認）
-# ------------------------------------------------------------------------------
-# 【使い方】
-#   ensure_sf_tools_latest [--no-update] [DIR]    # DIR は、省略時 $SF_TOOLS_DIR
-#
-# 【戻り値】
-#   RET_OK (0) : 最新である（または、Git リポジトリでない・HEAD が分離状態・origin にブランチがない等で、
-#                確認できないため、WARNING を出して続行する）
-#   2          : 遅れていたため、git pull --ff-only で更新した。実行中のスクリプトが書き換わった可能性があるため、
-#                呼び出し元は、再実行（exec）すること
-#   （die）    : origin に接続できない・遅れているのに、ローカルに未コミットの変更または未 push のコミットがある・
-#                更新を断った（N / q）・更新に失敗した・--no-update で遅れている
-#
-# 【動作】
-#   - 古い sf-tools で、作成済みのプロジェクトのワークフローなどを書き換える事故を防ぐ。
-#     「最新でなければ続行しない」ことが目的のため、origin に接続できないときは、続行せず、中断する
-#   - --no-update: 確認の質問と更新をしない（読み取り専用の実行用）。遅れていれば、die
-# ------------------------------------------------------------------------------
-ensure_sf_tools_latest() {
-    local no_update=0
-    if [[ "${1:-}" == "--no-update" ]]; then no_update=1; shift; fi
-    local dir="${1:-${SF_TOOLS_DIR:-}}"
-    local cur dirty ahead behind line
-
-    if [[ -z "$dir" ]] || ! git -C "$dir" rev-parse --is-inside-work-tree >/dev/null 2>&1; then  # if cmd のため run 不使用
-        log "WARNING" "sf-tools が Git リポジトリではないため、最新かどうかを確認できません。"
-        return $RET_OK
-    fi
-    cur=$(git -C "$dir" symbolic-ref --short HEAD 2>/dev/null || true)  # VAR=$(cmd) のため run 不使用
-    if [[ -z "$cur" ]]; then
-        log "WARNING" "sf-tools の HEAD がブランチを指していないため、最新かどうかを確認できません。"
-        return $RET_OK
-    fi
-    run git -C "$dir" fetch origin "$cur" \
-        || die "origin に接続できないため、sf-tools が最新かどうかを確認できません。"
-    if ! git -C "$dir" rev-parse --verify --quiet "origin/${cur}" >/dev/null 2>&1; then  # if cmd のため run 不使用
-        log "WARNING" "origin に ${cur} ブランチが存在しないため、最新かどうかを確認できません。"
-        return $RET_OK
-    fi
-    behind=$(git -C "$dir" rev-list --count "HEAD..origin/${cur}" 2>/dev/null || echo 0)  # VAR=$(cmd) のため run 不使用
-    if [[ "$behind" -eq 0 ]]; then
-        log "INFO" "sf-tools（${cur}）は最新です。"
-        return $RET_OK
-    fi
-    log "WARNING" "sf-tools（${cur}）は origin より ${behind} コミット遅れています。"
-    while IFS= read -r line; do
-        log "INFO" "  ${line}"
-    done < <(git -C "$dir" log --oneline -10 "HEAD..origin/${cur}" 2>/dev/null)  # プロセス置換のため run 不使用
-    [[ $no_update -eq 0 ]] || die "sf-tools が最新ではありません。"
-    dirty=$(git -C "$dir" status --porcelain 2>/dev/null || true)  # VAR=$(cmd) のため run 不使用
-    ahead=$(git -C "$dir" rev-list --count "origin/${cur}..HEAD" 2>/dev/null || echo 0)  # VAR=$(cmd) のため run 不使用
-    if [[ -n "$dirty" || "$ahead" -gt 0 ]]; then
-        die "sf-tools に未コミットの変更または未 push のコミットがあるため、自動では更新できません。"
-    fi
-    ask_yn "▶ sf-tools を更新しますか？" || die "sf-tools が最新ではないため、続行できません。"
-    run git -C "$dir" pull --ff-only origin "$cur" || die "sf-tools の更新に失敗しました。"
-    log "SUCCESS" "sf-tools を更新しました。"
-    return 2
-}
-
-
-# read_input - readline 対応インタラクティブ入力（矢印キー・BS 等が正常に動作する）
-# ------------------------------------------------------------------------------
-# 【使い方】
-#   read_input VARNAME [PROMPT]
-#
-# 【引数】
-#   VARNAME : 入力値を格納する変数名
-#   PROMPT  : 省略可。プロンプト文字列（stderr に出力）
-#
-# 【使用例】
-#   read_input ORG_ALIAS "組織エイリアスを入力: "
-#   read_input answer
-# ------------------------------------------------------------------------------
-read_input() {
-    local _varname="$1" _prompt="${2:-}"
-    if [[ -n "$_prompt" ]]; then
-        # readline にプロンプトを渡し、ANSI カラーコードを \001..\002 で囲む
-        # （カーソル位置計算を正しくし、行折り返し時のプロンプト上書きを防止）
-        local _rl_prompt
-        _rl_prompt=$(printf '%b' "$_prompt" | sed $'s/\033\\[[0-9;]*m/\001&\002/g')
-        read -rep "$_rl_prompt" "$_varname"
-    else
-        read -re "$_varname"
-    fi
-}
-
-# read_key - 1文字即時入力（Enter不要・空 Enter 無視）
-# ------------------------------------------------------------------------------
-# 【使い方】
-#   read_key VARNAME [PROMPT]
-#
-# 【引数】
-#   VARNAME : 入力値を格納する変数名
-#   PROMPT  : 省略可。プロンプト文字列（stderr に出力）
-#
-# 【使用例】
-#   read_key choice "  番号を入力 [1-3/q]: "
-#   read_key answer "  削除してよいですか？ [Y/N/q]: "
-# ------------------------------------------------------------------------------
-read_key() {
-    local _varname="$1" _prompt="${2:-}" _valid="${3:-}"
-    while true; do
-        [[ -n "$_prompt" ]] && printf "%s" "$_prompt" >&2
-        read -rsn1 "$_varname" || { printf "\n" >&2; die "入力が中断されました。"; }
-        # 空 Enter または無効文字 → 行クリアして再プロンプト（同じ行に留まる）
-        if [[ -z "${!_varname}" ]] || { [[ -n "$_valid" ]] && ! [[ "${!_varname}" =~ $_valid ]]; }; then
-            printf "\r\033[K" >&2
-            continue
-        fi
-        printf "%s\n" "${!_varname}" >&2  # 有効文字のみエコー
-        break
-    done
-}
-
-# is_gitbash - Windows の Git Bash（MSYS2 / Cygwin 系の Bash）かどうか
-# ------------------------------------------------------------------------------
-# $OSTYPE は、Git Bash でも環境により msys / mingw / cygwin のいずれにもなる
-# （cygwin になる環境があり、msys / mingw だけを見ていると判定を外す）。
-# 【使い方】  if is_gitbash; then ...
-# ------------------------------------------------------------------------------
-is_gitbash() { [[ "$OSTYPE" == "msys"* || "$OSTYPE" == "mingw"* || "$OSTYPE" == "cygwin"* ]]; }
-
-# run_isolated_home - コマンドを、一時的なホームフォルダの中で実行する（sf の認証・エイリアスを隔離する）
-# ------------------------------------------------------------------------------
-# 【背景】
-#   sf の認証は「ユーザー名単位」で ~/.sfdx に保存される。JWT の接続テスト（sf org login jwt）を、そのまま
-#   実行すると、エイリアスが増える上に、同じユーザーの既存の認証が、JWT の認証に置き換わってしまう
-#   （その JWT の鍵・アプリを後で消すと、そのユーザーの sf が使えなくなる）。
-#   HOME と USERPROFILE（Windows は USERPROFILE を見る）を一時フォルダにすると、認証・エイリアス・暗号鍵が、
-#   すべて一時フォルダの中に作られ、本物の ~/.sfdx は変わらない（実機で確認）。
-#
-# 【使い方】
-#   out=$(run_isolated_home sf org login jwt --client-id ... --alias prod)   # 標準出力・標準エラーを受け取る
-#   rc=$?                                                                    # コマンドの終了コード
-#
-# 【動作】
-#   ・mktemp -d で一時フォルダを作り、HOME / USERPROFILE をそれにしてコマンドを実行する
-#   ・終了後に、一時フォルダを削除する（アクセストークンなどが入るため、必ず消す）
-#   ・出力（標準出力と標準エラー）を、標準出力に返す。戻り値は、コマンドの終了コード
-# ------------------------------------------------------------------------------
-run_isolated_home() {
-    local tmp_home out rc
-    tmp_home=$(mktemp -d "${TMPDIR:-/tmp}/sf-tools-home.XXXXXX") || return $RET_NG  # VAR=$(cmd) のため run 不使用
-    out=$(HOME="$tmp_home" USERPROFILE="$tmp_home" "$@" 2>&1)  # VAR=$(cmd) のため run 不使用（認証情報をログに出さない）
-    rc=$?
-    rm -rf "${tmp_home:?}"  # run 不使用: 認証情報を含む一時フォルダの確実な削除
-    printf '%s' "$out"
-    return $rc
-}
-
-# check_sf_cli - sf（Salesforce CLI）が、終了コードを正しく返すか確認する
-# ------------------------------------------------------------------------------
-# 【背景】
-#   Windows の Git Bash で、Salesforce CLI の公式インストーラー版（自動更新後）を使うと、sf が成功しても
-#   常に終了コード 1 を返す（npm 版では正しく返る。Salesforce 側の起動用ファイルの問題）。
-#   run() は終了コードで成否を判定するため、この環境では、成功した処理も失敗扱いになる。
-#   そのため sf-tools は、Salesforce CLI の npm 版（npm install -g @salesforce/cli）を前提とする。
-#
-# 【使い方】
-#   check_sf_cli                       # 終了コードが 0 以外なら、案内を表示して die する
-#   check_sf_cli --warn-only           # 案内を表示するだけで、続行する（戻り値 1）。die したくない呼び出し元用（sf-install.sh）
-#   check_sf_cli --cache               # 日常のコマンド用。成功したら 24 時間は、確認を省略する（下記）。NG なら die する
-#
-# 【動作】
-#   ・GitHub Actions 上（GITHUB_ACTIONS=true）では、何もしない（Linux の npm 版のため）
-#   ・sf が未インストールなら、何もしない（各スクリプトの環境チェックが扱う）
-#   ・--cache のとき、成功を ~/.sf-tools-sf-check（環境変数 SF_TOOLS_SF_CHECK_STAMP で変更可）に、sf の場所を
-#     記録し、同じ場所の sf なら、24 時間は sf --version（1〜2 秒）の実行を省略する。失敗は、記録せず、毎回確認する
-#   ・sf --version の終了コードが 0 なら、何も表示しない
-#   ・0 以外なら、sf の場所と対処（npm 版への入れ替え）を ERROR で表示する
-# ------------------------------------------------------------------------------
-check_sf_cli() {
-    local warn_only=0 use_cache=0 out rc sf_path stamp arg
-    for arg in "$@"; do
-        case "$arg" in
-            --warn-only) warn_only=1 ;;
-            --cache)     use_cache=1 ;;
-        esac
-    done
-
-    [[ "${GITHUB_ACTIONS:-}" == "true" ]] && return 0
-    command -v sf >/dev/null 2>&1 || return 0  # 存在確認のため run 不使用
-
-    sf_path=$(command -v sf)  # VAR=$(cmd) のため run 不使用
-    stamp="${SF_TOOLS_SF_CHECK_STAMP:-$HOME/.sf-tools-sf-check}"
-    if [[ $use_cache -eq 1 && -f "$stamp" && "$(cat "$stamp" 2>/dev/null)" == "$sf_path" \
-          && -n "$(find "$stamp" -mmin -1440 2>/dev/null)" ]]; then
-        return 0   # 24 時間以内に、同じ場所の sf で成功を確認済み
-    fi
-
-    out=$(sf --version 2>&1)  # VAR=$(cmd) のため run 不使用（終了コードを自分で判定する）
-    rc=$?
-    if [[ $rc -eq 0 ]]; then
-        [[ $use_cache -eq 1 ]] && { printf '%s' "$sf_path" > "$stamp" 2>/dev/null || true; }  # 記録に失敗しても続行（意図的エラー無視）
-        return 0
-    fi
-
-    log "ERROR" "sf（Salesforce CLI）の終了コードが 0 ではありません（sf --version: 終了コード ${rc}）。"
-    log "ERROR" "  sf の場所: ${sf_path}"
-    [[ -n "$out" ]] && log "ERROR" "  出力: $(printf '%s' "$out" | head -1)"
-    log "ERROR" "  Windows の Git Bash で、Salesforce CLI の公式インストーラー版を使うと、成功しても終了コード 1 になり、"
-    log "ERROR" "  sf-tools の処理が、成功しても失敗扱いになります。sf-tools は、npm 版の Salesforce CLI を前提としています。"
-    log "ERROR" "  対処: インストーラー版をアンインストールし、npm 版をインストールしてください（詳細は README の前提条件）。"
-    log "ERROR" "    npm install -g @salesforce/cli"
-    if [[ $warn_only -eq 1 ]]; then
-        return 1
-    fi
-    die "sf の終了コードが 0 ではないため、処理を中断しました。"
-}
-
-# open_browser - OS を判定してブラウザを開く
-# ------------------------------------------------------------------------------
-# 【使い方】
-#   open_browser URL
-#
-# 【対応環境】
-#   Git Bash : start ""
-#   WSL      : powershell.exe Start-Process
-#   macOS    : open
-#   Linux    : xdg-open
-# ------------------------------------------------------------------------------
-open_browser() {
-    local url="$1"
-    # stdin を /dev/null にリダイレクトし、パイプ入力の消費を防止する
-    # （Git Bash の判定を先にする。WSL の判定は /proc/version を読むため、$OSTYPE の判定のほうが確実）
-    if is_gitbash; then
-        # Git Bash / MSYS2 / Cygwin
-        start "" "$url" < /dev/null 2>/dev/null || true
-    elif grep -qi microsoft /proc/version 2>/dev/null; then
-        # WSL 環境
-        powershell.exe -c "Start-Process '$url'" < /dev/null 2>/dev/null || true
-    elif [[ "$OSTYPE" == "darwin"* ]]; then
-        # macOS
-        open "$url" < /dev/null 2>/dev/null || true  # open は macOS 標準のため直接実行
-    elif command -v xdg-open &>/dev/null; then
-        # Linux
-        xdg-open "$url" < /dev/null 2>/dev/null || true  # xdg-open は存在確認のため直接実行
-    fi
-}
-
-# press_enter - Enter キー待ち（q で中断）
-# ------------------------------------------------------------------------------
-# 【使い方】
-#   press_enter [MSG]
-#
-# 【引数】
-#   MSG : 省略時は「続行するには Enter キーを押してください（q で中断）...」
-#
-# 【使用例】
-#   press_enter "ブラウザでログインしたら Enter を押してください..."
-# ------------------------------------------------------------------------------
-press_enter() {
-    local msg="${1:-続行するには Enter キーを押してください（q で中断）...}"
-    echo ""
-    local _input
-    read_input _input "  ▶ $msg" || die "中断しました。"  # EOF → 中断
-    [[ "$_input" == "q" || "$_input" == "Q" ]] && die "中断しました。"
-}
-
-# read_or_quit - テキスト入力（空 Enter 無視・q で中断）
-# ------------------------------------------------------------------------------
-# 【使い方】
-#   read_or_quit VARNAME PROMPT
-#
-# 【引数】
-#   VARNAME : 入力値を格納する変数名（nameref: Bash 4.3 以降必須）
-#   PROMPT  : プロンプト文字列
-#
-# 【使用例】
-#   read_or_quit JOB_NAME "  ジョブ名: "
-#   read_or_quit PAT_TOKEN "  トークンを貼り付けてください（q で中断）: "
-# ------------------------------------------------------------------------------
-read_or_quit() {
-    local -n _rq_var=$1
-    local prompt="$2"
-    while true; do
-        read_input _rq_var "$prompt" || die "中断しました。"  # EOF → 中断
-        [[ "$_rq_var" == "q" || "$_rq_var" == "Q" ]] && die "中断しました。"
-        [[ -n "$_rq_var" ]] && break  # 空 Enter → 再入力
-    done
-}
-
-# read_secret - 秘密情報の入力（入力した文字は * で表示する・空 Enter は案内して再入力・q で中断）
-# ------------------------------------------------------------------------------
-# 【使い方】
-#   read_secret VARNAME PROMPT
-#
-# 【動作】
-#   - 入力（貼り付け）した文字は、1 文字ごとに * で表示する。値そのものは、画面・スクロールバックに残らない
-#     （貼り付けられたかどうかが、見て分かるようにするため。Git Bash は、右クリックで貼り付けるため、何も出ないと分からない）
-#   - BackSpace で 1 文字消せる。ESC などの制御文字は無視する。末尾の CR（Windows の貼り付け）は除去する
-#   - Enter で確定すると、「N 文字を受け取りました（先頭: ghp_…）」を表示する（値の先頭の「英字_」だけ。残りは出さない）
-#   - 空 Enter は無視して再入力（端末のときは、貼り付け方を案内する）。q / Q だけの入力は die。EOF も die
-#   - 標準入力が端末でない場合（テスト・e2e）も、同じように動く（* の表示だけ。案内は出さない）
-#
-# 【使用例】
-#   read_secret PAT_TOKEN_VALUE "  Token を貼り付けてください（* で表示されます・q で中断）："
-# ------------------------------------------------------------------------------
-read_secret() {
-    local -n _rs_var=$1
-    local prompt="$2" _rs_ch _rs_buf _rs_prefix
-    while true; do
-        printf "%s" "$prompt" >&2
-        _rs_buf=""
-        while true; do
-            if ! IFS= read -rsn1 _rs_ch; then
-                # EOF: 改行なしで終わった入力は、確定として扱う。何も入力がなければ中断
-                [[ -n "$_rs_buf" ]] && break
-                printf "\n" >&2
-                die "入力が中断されました。"
-            fi
-            # Enter（read は、区切りの改行を、空文字として返す）/ CR
-            [[ -z "$_rs_ch" || "$_rs_ch" == $'\r' ]] && break
-            # BackSpace / DEL: 1 文字消す
-            if [[ "$_rs_ch" == $'\x7f' || "$_rs_ch" == $'\b' ]]; then
-                if [[ -n "$_rs_buf" ]]; then
-                    _rs_buf="${_rs_buf%?}"
-                    printf '\b \b' >&2
-                fi
-                continue
-            fi
-            # そのほかの制御文字（ESC など）は無視する
-            [[ "$_rs_ch" == [[:cntrl:]] ]] && continue
-            _rs_buf+="$_rs_ch"
-            printf '*' >&2
-        done
-        printf "\n" >&2
-        _rs_buf="${_rs_buf%$'\r'}"
-        [[ "$_rs_buf" == "q" || "$_rs_buf" == "Q" ]] && die "中断しました。"
-        if [[ -n "$_rs_buf" ]]; then
-            # 受け取った内容の確認用の表示（文字数と、先頭の「英字_」だけ。残りは出さない）
-            _rs_prefix=""
-            [[ "$_rs_buf" =~ ^[A-Za-z]{2,12}_ ]] && _rs_prefix="${BASH_REMATCH[0]}"
-            printf "  → %d 文字を受け取りました%s\n" "${#_rs_buf}" "${_rs_prefix:+（先頭: ${_rs_prefix}…）}" >&2
-            _rs_var="$_rs_buf"
-            break
-        fi
-        # 空 Enter → 再入力（端末のときは、貼り付け方を案内する）
-        if [[ -t 0 ]]; then
-            echo "  何も入力されていません。コピーした内容を、貼り付けてください（Git Bash は、右クリック、または Shift+Insert）。" >&2
-        fi
-    done
-}
-
-# Y / N / q を明示的に入力させる（1文字即時入力・q で即中断）
-# 使い方: ask_yn "質問文" && echo "Yes" || echo "No"
-ask_yn() {
-    local prompt="$1" answer
-    read_key answer "  ${prompt} [Y/N/q]: " "[YyNnQq]"
-    case "$answer" in
-        [Yy]) return 0 ;;
-        [Nn]) return 1 ;;
-        [Qq]) die "中断しました。" ;;
-    esac
-}
+_COMMON_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${_COMMON_LIB_DIR}/input.sh"
+source "${_COMMON_LIB_DIR}/platform.sh"
+source "${_COMMON_LIB_DIR}/project.sh"

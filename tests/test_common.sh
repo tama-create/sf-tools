@@ -607,6 +607,14 @@ test_json_get() {
     out=$(_jg '{"result":{"v":"会社 \"A\" {x}\n次の行"}}' result.v)
     assert_equals "$out" "会社 ${q}A${q} {x} 次の行" "日本語・引用符・波かっこを含む値。値の中の改行は、空白 1 つになる（1 パス = 1 行）"
 
+    # 「*」: 配列の全要素に展開する（要素ごとに 1 行。キーがない要素は空行で、行の数がそろう）
+    out=$(_jg '{"result":[{"alias":"prod","value":"a@x.com"},{"alias":"stg"},{"alias":"dev","value":"c=d@x.com"}]}' 'result.*.alias' 'result.*.value')
+    assert_equals "$out" $'prod\nstg\ndev\na@x.com\n\nc=d@x.com' "「*」: 配列の要素ごとに 1 行（キーのない要素は空行）"
+    out=$(_jg '{"result":[]}' 'result.*.alias')
+    assert_equals "$out" "" "「*」: 空の配列は、何も出さない"
+    out=$(_jg '{"a":{"x":{"n":1},"y":{"n":2}}}' 'a.*.n')
+    assert_equals "$out" $'1\n2' "「*」: オブジェクトの値にも展開できる"
+
     # オブジェクトは JSON 文字列で返る
     out=$(_jg '{"result":{"o":{"k":1}}}' result.o)
     assert_equals "$out" '{"k":1}' "オブジェクトは、JSON 文字列で返る"

@@ -872,7 +872,10 @@ sf-tools/
 │   ├── sf-precommit.sh
 │   └── sf-metasync.sh
 ├── lib/
-│   ├── common.sh               ← 全スクリプト共通ライブラリ
+│   ├── common.sh               ← 全スクリプト共通ライブラリの窓口（ログ・実行・終了・JSON の読み取り。下の 3 つを source する）
+│   ├── input.sh                ← 対話入力（read_input / read_key / press_enter / read_or_quit / read_secret / ask_yn）
+│   ├── platform.sh             ← OS・外部コマンド（is_gitbash / run_isolated_home / check_sf_cli / open_browser）
+│   ├── project.sh              ← プロジェクト（force-* の確認・gh のオーナー確認・ブランチ一覧・組織エイリアス）
 │   ├── wizard.sh               ← ウィザード形式の画面の共通部品（sf-init で使用）
 │   ├── org.sh                  ← Salesforce 組織の接続情報の共通部品（ログイン先の選択・種類の判定・本番は main のみのガード）
 │   ├── diag.sh                 ← セットアップの診断（sf-init.sh --status で使用。読み取りのみ）

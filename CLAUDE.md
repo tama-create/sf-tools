@@ -185,10 +185,11 @@ git pull origin main                     # main の最新を取り込む
 bash tests/run_tests.sh                        # 全テスト実行（mm 前に必ず実行）
 bash tests/run_tests.sh test_sf-metasync.sh   # 単体実行
 bash tests/run_tests.sh --changed             # 変更ファイルに対応するテストのみ実行
+bash tests/run_tests.sh --jobs 4 / --serial   # 同時に動かすファイル数（既定: CPU の数。--serial は 1 つずつ）
 bash tests/e2e/run.sh                          # 実環境の通し検証（開発者が手動実行。通常のテストには含まれない）
 ```
 
-> **開発中は `--changed`、mm 前は全件** が基本ワークフロー。
+> **開発中は `--changed`、mm 前は全件** が基本ワークフロー。PR（main・development 向け）と development への push では、GitHub Actions（`.github/workflows/test.yml`）も、全件テストと shellcheck を実行する。
 > `tests/e2e/` は実際の GitHub / Salesforce にテスト用のものを作って削除する。**削除の安全ガード（名前の形式・オーナーの一致）を緩めないこと**。詳細は `doc/dev-reference.md` 9.6。
 
 ### 3.2 デグレ防止チェックリスト

@@ -58,6 +58,7 @@ echo -e "  ${CLR_INFO}───────────────────�
 echo "" >&2
 
 read_key choice "  番号を入力 [1-3/q]: " "[1-3Qq]"
+# shellcheck disable=SC2154  # choice は、read_key（lib/input.sh）が、名前で受け取って代入する
 case "$choice" in
     1) BRANCHES=("main" "staging" "develop") ;;
     2) BRANCHES=("main" "staging") ;;

@@ -240,13 +240,12 @@ else
         test_path="$TESTS_DIR/${TEST_FILES[$i]}"
         [[ -f "$test_path" ]] || continue   # 見つからないファイルは、pid が -1 のまま（表示のときに SKIP）
         while (( $(jobs -rp | wc -l) >= JOBS )); do
-            # wait -n は Bash 4.3 以降。それより古い Bash（macOS 標準の 3.2）では、少し待って、数え直す
-            if (( BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 3) )); then
-                wait -n 2>/dev/null || true
-            else
-                sleep 0.2
-            fi
+            # wait -n は使わない（Bash 4.3 以降の機能。macOS 標準の 3.2 で動かすため。CLAUDE.md 2.2）。少し待って、数え直す
+            sleep 0.2
         done
+        # SF_TEST_PROGRESS=1: 起動するテストファイルを、順に表示する（結果は、全部の起動後にまとめて出るため、
+        #   途中で異常終了したときに、どのファイルで止まったかを、分かるようにする。GitHub Actions の Windows 用）
+        [[ "${SF_TEST_PROGRESS:-}" == "1" ]] && echo "  [START] ${TEST_FILES[$i]} ($(date '+%H:%M:%S'))" >&2
         tmp=$(mktemp /tmp/sftest-XXXX)
         bash "$test_path" > "$tmp" 2>&1 < /dev/null &   # 標準入力は閉じる（入力待ちで、止まらないため）
         _pids[$i]=$!

@@ -77,7 +77,7 @@ jobs:
   test-windows:
     name: 全件テスト（Windows・Git Bash）
     runs-on: windows-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     continue-on-error: true
     defaults:
       run:
@@ -85,6 +85,8 @@ jobs:
     env:
       # Git Bash のまま実行する（run_tests.sh は、WSL を使えるとき、WSL に移るが、ランナーには WSL のディストリビューションがない）
       SF_TEST_NO_WSL: "1"
+      # 起動するテストファイルを順に表示する（異常終了したとき、どのファイルで止まったかを分かるようにする）
+      SF_TEST_PROGRESS: "1"
     steps:
       # Windows では、チェックアウト時に、改行が CRLF に変換されることがある。シェルスクリプトは LF のままにする
       - name: 改行の自動変換を止める
@@ -93,7 +95,9 @@ jobs:
       - name: ソースコードを取得
         uses: actions/checkout@v4
 
+      # 1 つずつ実行する（--serial）。Git Bash は fork が遅く脆いため、並列（既定は CPU の数）で動かすと、
+      # 結果を 1 件も出さずに、終了コード 2304 で異常終了していた（test-windows を追加した最初の実行から）
       - name: テストを実行
         run: |
           bash --version | head -1
-          bash tests/run_tests.sh
+          bash tests/run_tests.sh --serial

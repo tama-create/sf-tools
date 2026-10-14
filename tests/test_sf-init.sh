@@ -1555,6 +1555,14 @@ export SF_INIT_LOGIN_URL_PROD=login   # ログイン先を、質問せずに指�
     # 中断後の「続きをやる」では、聞く（Enter = 確認する）
     _rc_run 9 "tamashimon/force-testproject" "" 'Y\n1\n\n'
     assert_file_contains      "$out" "ステップ 9 / 9: 動作の確認"                              "続きをやる: 動作の確認を、聞く"
+    # 診断: 失敗したときだけ、そのときの画面出力と標準入力の読まれ方を、ログに出す（Windows の Git Bash で、パイプの
+    #   Enter が、確認の質問に届かなかった原因を、Actions のログから特定するため。通常は、何も出ない）
+    if ! grep -q "VERIFY-CALLED" "$mb/verify.log" 2>/dev/null; then
+        echo "    [診断] exit_code=${exit_code} / bash=${BASH_VERSION} / OSTYPE=${OSTYPE}"
+        echo "    [診断] verify.log: $(head -c 300 "$mb/verify.log" 2>&1 | tr '\n' '|')"
+        echo "    [診断] out.log の「動作の確認」付近（末尾 30 行。行頭の ' | ' は、診断の目印）:"
+        tail -30 "$out" 2>&1 | sed 's/^/      | /' | cat -v | cut -c1-200
+    fi
     assert_file_contains      "$mb/verify.log" "VERIFY-CALLED"                                 "続きをやる: Enter で、verify.sh を呼ぶ"
     rm -rf "$init_base"
     unset SF_INIT_VERIFY_ASK

@@ -774,6 +774,15 @@ test_bash32_compat() {
     [[ $elapsed -lt 10 ]] && pass "timeout なし: 上限の秒数で打ち切る（待ち続けない）" \
         || fail "timeout なし: 上限の秒数で打ち切る（待ち続けない）" "所要: ${elapsed} 秒"
 
+    # TERM を無視するコマンドも、上限で打ち切る（TERM のあと、約 2 秒待って KILL する。2026-10-14 のレビューで発見:
+    #   以前は、wait が戻らず、待ち続けた）。PATH は、timeout がない状態のまま
+    start=$SECONDS
+    _b32 "PATH='$td/bin'; run_with_timeout 1 /bin/bash -c 'trap \"\" TERM; while :; do :; done'" > /dev/null 2>&1; rc=$?
+    elapsed=$(( SECONDS - start ))
+    assert_equals "$rc" "124" "timeout なし: TERM を無視するコマンドも、時間切れは 124"
+    [[ $elapsed -lt 12 ]] && pass "timeout なし: TERM を無視するコマンドも、上限＋数秒で打ち切る（KILL）" \
+        || fail "timeout なし: TERM を無視するコマンドも、上限＋数秒で打ち切る（KILL）" "所要: ${elapsed} 秒"
+
     # Bash 4 以降の機能を、使っていないこと（コメントの行は除く。このファイル自身は、下の検索の文字列を含むため除く）
     #   nameref / 連想配列 / mapfile / 大文字・小文字の変換 / |& / &>> / $( ) の中の case（3.2 は「)」を取り違える）
     _b32_grep() {   # 引数: 説明 / 正規表現
@@ -786,6 +795,7 @@ test_bash32_compat() {
     _b32_grep "連想配列（declare -A / local -A）"  '(local|declare|typeset)[[:space:]]+-[a-zA-Z]*A[a-zA-Z]*[[:space:]]'
     _b32_grep "mapfile / readarray"                '(^|[;&|({[:space:]])(mapfile|readarray)[[:space:]]+-'
     _b32_grep "大文字・小文字の変換（\${x^} / \${x,,}）" '\$\{[A-Za-z_0-9]+(\[[^]]*\])?(\^\^?|,,?)\}'
+    _b32_grep "wait -n（Bash 4.3 以降）"           '(^|[;&|({[:space:]])wait[[:space:]]+-[a-zA-Z]*n'
     _b32_grep "|& と &>>"                          '(\|&[[:space:]]|&>>)'
     _b32_grep "\$( ) の中の case"                  '\$\([[:space:]]*case[[:space:]]'
 

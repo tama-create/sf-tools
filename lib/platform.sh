@@ -56,12 +56,13 @@ sed_inplace() {
 # 【使い方】 run_with_timeout 秒 CMD [ARGS...]      例: run_with_timeout 120 gh pr view 1 </dev/null
 # 【理由】   timeout（GNU coreutils）は、Linux と Git Bash にはあるが、macOS の標準にはない。
 #           ない環境で、上限なしで実行すると、応答しないコマンドで、止まり続ける。
-# 【動作】   timeout があれば、それを使う。なければ、背景で実行して、0.1 秒ごとに終了を確認し、上限を超えたら終了させる。
+# 【動作】   timeout があれば、それを使う。なければ、背景で実行して、0.1 秒ごとに終了を確認し、上限を超えたら終了させる
+#           （TERM を送り、約 2 秒待っても動いていれば KILL する。TERM を無視するコマンドでも、上限を守る）。
 #           標準入力は、呼び出し元のものを、そのまま渡す（背景のコマンドは、既定では /dev/null になるため、<&0 で明示する）
 # 【戻り値】 コマンドの終了コード。時間切れは 124（timeout コマンドと同じ）
 # ------------------------------------------------------------------------------
 run_with_timeout() {
-    local _rt_secs="$1" _rt_pid _rt_ticks=0 _rt_limit
+    local _rt_secs="$1" _rt_pid _rt_ticks=0 _rt_limit _rt_grace
     shift
     if command -v timeout >/dev/null 2>&1; then  # 存在確認のため run 不使用
         timeout "$_rt_secs" "$@"
@@ -74,6 +75,17 @@ run_with_timeout() {
         if (( _rt_ticks >= _rt_limit )); then
             pkill -TERM -P "$_rt_pid" 2>/dev/null || true  # 子プロセスも止める（なくても続行）
             kill -TERM "$_rt_pid" 2>/dev/null || true      # すでに終了していても続行
+            # TERM を無視するコマンドのために、約 2 秒待って、まだ動いていれば KILL する
+            #   （待たずに wait すると、TERM を無視する相手では、永久に戻らない。上限を守れない）
+            _rt_grace=0
+            while kill -0 "$_rt_pid" 2>/dev/null && (( _rt_grace < 20 )); do  # 存在確認のため run 不使用
+                sleep 0.1  # run 不使用: 待機
+                _rt_grace=$(( _rt_grace + 1 ))
+            done
+            if kill -0 "$_rt_pid" 2>/dev/null; then  # 存在確認のため run 不使用
+                pkill -KILL -P "$_rt_pid" 2>/dev/null || true  # 子プロセスも止める（なくても続行）
+                kill -KILL "$_rt_pid" 2>/dev/null || true      # すでに終了していても続行
+            fi
             wait "$_rt_pid" 2>/dev/null
             return 124
         fi

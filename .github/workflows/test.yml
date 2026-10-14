@@ -54,14 +54,13 @@ jobs:
 
   # --------------------------------------------------------------------------
   # クロスプラットフォーム（macOS・Windows）。sf-tools は、Windows（Git Bash）・macOS・Linux で、同じように動くことが前提。
-  # 導入の初期は、結果の表示のみ（continue-on-error: true）。失敗の一覧が、そのまま、対応の作業リストになる。
-  # 指摘をなくしたあと、この行を消して、失敗扱いにする。
+  # 2026-10-14: macOS・Windows とも、全件が成功するようになったため、失敗扱いにした（continue-on-error を外した）。
+  # 以前は、導入の初期として、結果の表示のみ（continue-on-error: true）にしていた。
   # --------------------------------------------------------------------------
   test-macos:
     name: 全件テスト（macOS）
     runs-on: macos-latest
     timeout-minutes: 45
-    continue-on-error: true
     steps:
       - name: ソースコードを取得
         uses: actions/checkout@v4
@@ -78,7 +77,6 @@ jobs:
     name: 全件テスト（Windows・Git Bash）
     runs-on: windows-latest
     timeout-minutes: 60
-    continue-on-error: true
     defaults:
       run:
         shell: bash

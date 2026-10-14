@@ -77,7 +77,7 @@ jobs:
   test-windows:
     name: 全件テスト（Windows・Git Bash）
     runs-on: windows-latest
-    timeout-minutes: 90
+    timeout-minutes: 60
     continue-on-error: true
     defaults:
       run:
@@ -95,9 +95,11 @@ jobs:
       - name: ソースコードを取得
         uses: actions/checkout@v4
 
-      # 1 つずつ実行する（--serial）。Git Bash は fork が遅く脆いため、並列（既定は CPU の数）で動かすと、
-      # 結果を 1 件も出さずに、終了コード 2304 で異常終了していた（test-windows を追加した最初の実行から）
+      # 並列（既定は CPU の数）で実行する。以前は、終了コード 2304 で異常終了していたが、原因は、並列ではなく、
+      # テストが本物の `git update-git-for-windows`（Git の更新）を実行し、Git Bash 自体を壊していたことだった
+      # （tests/run_tests.sh の保護用の代理コマンドで解消）。1 ファイルずつ（--serial）だと、約 30 分かかる。
+      # 再び異常終了するときは、--serial に戻す（SF_TEST_PROGRESS の [START] 行で、止まったファイルが分かる）
       - name: テストを実行
         run: |
           bash --version | head -1
-          bash tests/run_tests.sh --serial
+          bash tests/run_tests.sh

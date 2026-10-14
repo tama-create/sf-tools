@@ -309,10 +309,33 @@ test_staging_synced() {
 
 test_next_is_staging
 test_next_is_main
+# --- PR 作成画面を開く: open_browser で、OS に合ったコマンド（Git Bash: start / WSL: powershell / macOS: open / Linux: xdg-open）を使う ---
+test_pr_open_browser() {
+    local td mb mh
+    setup_std_env td mb mh
+    create_mock_git_with_remote "$mb"
+    create_mock_browser "$mb"
+
+    export MOCK_GIT_BRANCH="feature/my-feature"
+    export MOCK_GH_MERGED_PRS="feature/my-feature->develop"
+    export MOCK_GH_OPEN_PRS=""
+
+    local out; out=$(cd "$td" && echo "y" | PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-next.sh" 2>&1)
+    local ec=$?
+
+    assert_exit_ok $ec "PR を出す → 終了コード 0"
+    assert_file_contains "$MOCK_CALL_LOG" "compare/staging...feature/my-feature" "ブラウザで、PR 作成画面（次の PR 先 staging）を開く"
+    assert_output_contains "$out" "compare/staging...feature/my-feature" "開けなかった場合に備えて、URL も表示する"
+
+    unset MOCK_GIT_BRANCH MOCK_GH_MERGED_PRS MOCK_GH_OPEN_PRS
+    teardown "$td" "$mb"
+}
+
 test_all_merged
 test_none_merged
 test_two_branches_none_merged
 test_pr_open_shown
+test_pr_open_browser
 test_out_of_order_merge
 test_staging_synced
 test_protected_branch_blocked

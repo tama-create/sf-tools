@@ -119,6 +119,8 @@ if [[ -f "${JWT_DIR}/server.key" && -f "${JWT_DIR}/server.crt" ]]; then
     log "INFO" "既存の証明書が見つかりました: ${JWT_DIR}/"
     if ask_yn "  既存の証明書を再利用しますか？（N を選ぶと再生成します）"; then
         log "INFO" "  既存の証明書を使用します。"
+        # 以前の sf-tools は、Mac・Linux で、発行先が空の証明書を作っていた。空なら、秘密鍵はそのままで、証明書だけを作り直す
+        ensure_jwt_cert_subject "$JWT_DIR" "$REPO_NAME"
     else
         # N を選んだ場合は既存ファイルを削除してから再生成
         # （削除しないと generate_jwt_cert 内のスキップ判定に引っかかるため）

@@ -7,7 +7,8 @@
 #
 # 【提供する関数】
 #   open_browser URL          ... OS を判定してブラウザを開く（lib/common.sh に同名関数あり）
-#   generate_jwt_cert         ... JWT 用秘密鍵・証明書を openssl で生成する
+#   generate_jwt_cert         ... JWT 用秘密鍵・証明書を openssl で生成する（生成後に、発行先が空でないことを確認する）
+#   ensure_jwt_cert_subject   ... 既存の証明書の発行先が空なら、秘密鍵はそのままで、証明書だけを作り直す
 #   register_jwt_secret       ... JWT 認証情報を取得・テストして GitHub Secret に登録する
 #                                 テスト失敗時はスキップして続行するか確認する（DE 組織対応）
 #   ensure_sf_tools_branch BR ... 選択した環境（main / development）に合わせて ~/sf-tools の最新化を確認する
@@ -39,6 +40,62 @@ if ! declare -f open_browser &>/dev/null; then
 fi
 
 # ------------------------------------------------------------------------------
+# 証明書の発行先（subject）の部品
+# ------------------------------------------------------------------------------
+# _jwt_cert_subject_arg REPO_NAME - openssl req の -subj に渡す値を返す
+#   Git Bash は、-subj の先頭の / を Windows のパスと取り違えるため、// で書く（Git Bash が / に直して渡す）。
+#   Git Bash 以外（macOS・Linux・WSL）で // のまま渡すと、openssl は「/CN は未知の属性」と読み飛ばし、
+#   発行先が空の証明書を、終了コード 0 で作る。Salesforce は「アップロードされたファイルは証明書ではありません」と拒否する。
+_jwt_cert_subject_arg() {
+    if is_gitbash; then
+        printf '%s' "//CN=sf-jwt-$1"
+    else
+        printf '%s' "/CN=sf-jwt-$1"
+    fi
+}
+
+# _jwt_cert_subject_state CRT_FILE - 証明書に、発行先（subject）が入っているか
+#   戻り値: 0=入っている / 1=空 / 2=読み取れない（証明書ではない・ファイルがない）
+_jwt_cert_subject_state() {
+    local subj
+    subj=$(openssl x509 -in "$1" -noout -subject 2>/dev/null) || return 2  # VAR=$(cmd) のため run 不使用
+    subj="${subj#subject=}"
+    subj="${subj//[[:space:]]/}"
+    [[ -n "$subj" ]]
+}
+
+# _issue_jwt_cert KEY_FILE CRT_FILE REPO_NAME - 秘密鍵から、発行先つきの自己署名証明書（10 年）を作る。鍵は変えない
+_issue_jwt_cert() {
+    # run 不使用: 呼び出し元が、終了コードを直接確認する
+    openssl req -new -x509 -days 3650 -key "$1" -out "$2" -subj "$(_jwt_cert_subject_arg "$3")"
+}
+
+# ensure_jwt_cert_subject JWT_DIR REPO_NAME
+#   既存の証明書の発行先が空なら、秘密鍵はそのままで、証明書だけを作り直す。
+#   以前の sf-tools は、Mac・Linux で、発行先が空の証明書を作っていた（上の _jwt_cert_subject_arg）。
+#   空の証明書は、Salesforce が拒否するため、どの組織にもアップロードされていない。
+#   秘密鍵は変えないので、GitHub に登録済みの SF_PRIVATE_KEY は、そのまま有効（ずれない）。
+#   発行先が入っているもの・読み取れないものは、触らない。
+ensure_jwt_cert_subject() {
+    local jwt_dir="$1" repo_name="$2" crt state
+    crt="${jwt_dir}/server.crt"
+    _jwt_cert_subject_state "$crt"; state=$?
+    [[ $state -eq 1 ]] || return 0
+    log "WARNING" "既存の証明書の発行先（subject）が空です。このままでは、Salesforce が「証明書ではありません」と拒否します。"
+    log "WARNING" "  秘密鍵はそのままで、証明書だけを作り直します: ${crt}"
+    if ! _issue_jwt_cert "${jwt_dir}/server.key" "${crt}.tmp" "$repo_name"; then
+        rm -f "${crt}.tmp"  # run 不使用: 失敗時の後始末（なくても続行）
+        die "証明書の再発行に失敗しました。"
+    fi
+    if ! _jwt_cert_subject_state "${crt}.tmp"; then
+        rm -f "${crt}.tmp"  # run 不使用: 失敗時の後始末（なくても続行）
+        die "再発行した証明書の発行先（subject）が空、または読み取れません。"
+    fi
+    mv -f "${crt}.tmp" "$crt" || die "証明書の置き換えに失敗しました: ${crt}"  # run 不使用: 終了コードを直接確認
+    log "SUCCESS" "証明書を作り直しました（秘密鍵は、そのままです）。"
+}
+
+# ------------------------------------------------------------------------------
 # JWT 用秘密鍵・証明書を openssl で生成する
 # 引数:
 #   $1 - jwt_dir  : 保存先ディレクトリ（例: ~/.sf-jwt/force-test）
@@ -59,6 +116,7 @@ generate_jwt_cert() {
         log "INFO" "既存の証明書を使用します（スキップ）: ${jwt_dir}/"
         log "INFO" "  秘密鍵: ${jwt_dir}/server.key"
         log "INFO" "  証明書: ${jwt_dir}/server.crt"
+        ensure_jwt_cert_subject "$jwt_dir" "$repo_name"   # 発行先が空の証明書（以前の不具合）なら、直す
         return 0
     fi
 
@@ -76,12 +134,12 @@ generate_jwt_cert() {
         # OpenSSL 1.x は genrsa が元から PKCS#1 を出力するため tmp をそのまま使用
         mv "${jwt_dir}/server.key.tmp" "${jwt_dir}/server.key"
     fi
-    # // プレフィックス: Git Bash が -subj の /CN= を Windows パスに変換するのを防ぐ定番の回避策
-    openssl req -new -x509 -days 3650 \
-        -key "${jwt_dir}/server.key" \
-        -out "${jwt_dir}/server.crt" \
-        -subj "//CN=sf-jwt-${repo_name}" \
+    # -subj の書き方は OS で違う（_jwt_cert_subject_arg）。// を Git Bash 以外に渡すと、発行先が空の証明書ができる
+    _issue_jwt_cert "${jwt_dir}/server.key" "${jwt_dir}/server.crt" "$repo_name" \
         || die "証明書の生成に失敗しました。"
+    # openssl は、発行先が空でも成功（終了コード 0）を返す。Salesforce が拒否するため、ここで確認する
+    _jwt_cert_subject_state "${jwt_dir}/server.crt" \
+        || die "生成した証明書の発行先（subject）が空、または読み取れません: ${jwt_dir}/server.crt"
 
     chmod 600 "${jwt_dir}/server.key" 2>/dev/null || true  # run 不使用: 秘密鍵の権限保護
 

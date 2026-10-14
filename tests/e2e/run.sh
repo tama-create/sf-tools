@@ -388,7 +388,8 @@ _resume_clean_apex() {
     local -a names=()
     list=$(e2e_list_target_apex) || return 1  # VAR=$(cmd) のため run 不使用
     [[ -z "$list" ]] && return 0
-    mapfile -t names <<< "$list"
+    local _line
+    while IFS= read -r _line; do names+=("$_line"); done <<< "$list"   # mapfile は Bash 4 以降のため使わない
     log "WARNING" "  前回の残りの Apex クラスがあります。削除します: ${names[*]}"
     e2e_delete_apex "${names[@]}"
 }
@@ -498,7 +499,8 @@ if [[ "$INIT_RC" -eq 0 ]]; then
     if _has_branch develop && _has_branch staging; then LAYOUT_DETECTED=3
     elif _has_branch staging; then LAYOUT_DETECTED=2
     fi
-    mapfile -t TIERS < <(e2e_layout_tiers "$LAYOUT_DETECTED")
+    TIERS=()   # mapfile は Bash 4 以降のため使わない
+    while IFS= read -r _tier_line; do TIERS+=("$_tier_line"); done < <(e2e_layout_tiers "$LAYOUT_DETECTED")
     log "INFO" "  リポジトリの構成: ${LAYOUT_DETECTED} 層（${TIERS[*]}）"
     # 新しく作ったときは、指定した層数のとおりにできていること
     [[ $RESUME -eq 1 ]] || chk "指定した層数（${LAYOUT} 層）のとおりに、ブランチができた" test "$LAYOUT_DETECTED" -eq "$LAYOUT"

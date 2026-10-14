@@ -17,10 +17,11 @@ test_normal_run() {
     assert_exit_ok $ec "正常実行 → 終了コード 0"
     assert_file_contains "$MOCK_CALL_LOG" "npm install" "npm が呼び出された"
     assert_file_contains "$MOCK_CALL_LOG" "sf update" "sf update が呼び出された"
-    if [[ "$(uname -s)" != "Linux" ]]; then
+    # Windows の Git Bash だけで実行される（sf-upgrade.sh の is_gitbash と同じ判定。Linux・WSL・macOS では、実行されない）
+    if [[ "$OSTYPE" == "msys"* || "$OSTYPE" == "mingw"* || "$OSTYPE" == "cygwin"* ]]; then
         assert_file_contains "$MOCK_CALL_LOG" "git update-git-for-windows" "git update が呼び出された"
     else
-        skip "git update が呼び出された（WSL: Windows 専用コマンドのためスキップ）"
+        skip "git update が呼び出された（Windows の Git Bash 専用コマンドのためスキップ）"
     fi
     teardown "$td" "$mb"
 }
@@ -74,8 +75,8 @@ test_git_update_is_last() {
     sf_line=$(grep -n "sf update" "$MOCK_CALL_LOG" | head -1 | cut -d: -f1)
     git_line=$(grep -n "git update-git-for-windows" "$MOCK_CALL_LOG" | head -1 | cut -d: -f1)
 
-    if [[ "$(uname -s)" == "Linux" ]]; then
-        skip "git update は npm・sf の後に実行された（WSL: Windows 専用コマンドのためスキップ）"
+    if [[ "$OSTYPE" != "msys"* && "$OSTYPE" != "mingw"* && "$OSTYPE" != "cygwin"* ]]; then
+        skip "git update は npm・sf の後に実行された（Windows の Git Bash 専用コマンドのためスキップ）"
     elif [[ -n "$npm_line" && -n "$sf_line" && -n "$git_line" ]] \
         && [[ $npm_line -lt $git_line && $sf_line -lt $git_line ]]; then
         pass "git update は npm・sf の後に実行された"

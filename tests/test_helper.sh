@@ -69,14 +69,18 @@ setup_mock_bin() {
     echo "$dir"
 }
 
-# td / mb / mh を一括セット（nameref 使用）。MOCK_CALL_LOG も自動エクスポート。
+# td / mb / mh を一括セット（指定した名前の変数に代入する）。MOCK_CALL_LOG も自動エクスポート。
+#   nameref（local -n）は Bash 4.3 以降のため使わない（macOS 標準の Bash 3.2 で動かす）。printf -v で代入する
 # 使い方: local td mb mh; setup_std_env td mb mh
 setup_std_env() {
-    local -n _td=$1 _mb=$2 _mh=$3
-    _td=$(setup_force_dir)
-    _mb=$(setup_mock_bin)
-    _mh=$(setup_mock_home)
-    export MOCK_CALL_LOG="$_mb/calls.log"
+    local _sse_td _sse_mb _sse_mh
+    _sse_td=$(setup_force_dir)
+    _sse_mb=$(setup_mock_bin)
+    _sse_mh=$(setup_mock_home)
+    printf -v "$1" '%s' "$_sse_td"
+    printf -v "$2" '%s' "$_sse_mb"
+    printf -v "$3" '%s' "$_sse_mh"
+    export MOCK_CALL_LOG="$_sse_mb/calls.log"
 }
 
 # HOME 用の仮ディレクトリを作成し、sf-tools 一式をコピー
@@ -357,6 +361,15 @@ sedi() {
     sed -i.bak "$1" "$2" && rm -f "$2.bak"
 }
 
+# touch_ago - ファイルの更新日時を、N 分前にする（GNU / BSD 共通。テストの中で、touch -d "2 hours ago" を直接使わない）
+#   使い方: touch_ago 分 FILE...     例: touch_ago 120 "$file"
+#   date の「N 分前」の書き方は、GNU（-d）と BSD（-v）で違うため、両方を試す
+touch_ago() {
+    local min="$1" ts; shift
+    ts=$(date -d "${min} minutes ago" +'%Y%m%d%H%M.%S' 2>/dev/null || date -v "-${min}M" +'%Y%m%d%H%M.%S')
+    touch -t "$ts" "$@"
+}
+
 # node モック
 #   node -e '...'（lib/common.sh の json_get が JSON を読むために使う）は、本物の node に渡す
 #   （JSON の読み取りを、モックで偽装しない。呼び出しの記録にも、残さない）。それ以外は、バージョンを返すだけ
@@ -401,6 +414,13 @@ create_mock_openssl() {
     cat > "$bin_dir/openssl" << 'EOF'
 #!/bin/bash
 echo "openssl $*" >> "${MOCK_CALL_LOG:-/dev/null}"
+# x509 -subject（証明書の発行先の確認。generate_jwt_cert が、生成後に空でないことを確認する）: 発行先を返す
+#   MOCK_OPENSSL_SUBJECT が設定されていれば、その値（空文字なら、発行先が空の証明書の再現）
+if [[ "$1" == "x509" ]]; then
+    case " $* " in
+        *" -subject "*) echo "subject=${MOCK_OPENSSL_SUBJECT-/CN=sf-jwt-mock}"; exit "${MOCK_OPENSSL_EXIT:-0}" ;;
+    esac
+fi
 # -out <file> を探してダミーファイルを生成する
 # rsa -traditional でも同様に -out ファイルを生成（PKCS#1 変換ステップのモック）
 _prev=""

@@ -540,6 +540,13 @@ fi
 # 完了画面（できたこと / 次にやること / 管理者用のフォルダ）
 _org_count=$(( ${BRANCH_COUNT:-1} ))
 _admin_dir="${REPO_DIR:-${PWD}/init/force-${COMPANY_NAME}}"
+# 動作の確認の結果の行。$( ) の中に case を書かない（Bash 3.2 は、case の「)」を、$( ) の終わりと取り違える）
+case "$VERIFY_RESULT" in
+    done)    _verify_line="4. 動作の確認: 成功しました（リリースと削除を、各段階の組織で確認済みです）" ;;
+    failed)  _verify_line="4. 動作の確認: 失敗した項目があります。上の [NG] を確認してください（削除のみのやり直し: sf-init.sh --verify --cleanup）" ;;
+    skipped) _verify_line="4. 動作の確認は、あとで行えます: 管理者用フォルダで、~/sf-tools/bin/sf-init.sh --verify（または、sf-init.sh を再実行して、2 を選ぶ）" ;;
+    *)       _verify_line="4. 動作の確認は、あとで行えます: 管理者用フォルダで、~/sf-tools/bin/sf-init.sh --verify" ;;
+esac
 wizard_done "できました: ${REPO_FULL_NAME:-${GITHUB_OWNER}/force-${COMPANY_NAME}}" \
     "GitHub リポジトリ / Token / Slack 通知 / Salesforce の接続（${_org_count} 組織）" \
     -- \
@@ -552,11 +559,6 @@ wizard_done "できました: ${REPO_FULL_NAME:-${GITHUB_OWNER}/force-${COMPANY_
     "     ${_admin_dir}" \
     "     ・ワークフローの更新・接続の確認・接続先の付け替えなど、管理者のメンテナンスに使います" \
     "     ・日常の開発には使わないでください（開発は、上の sf-job.sh の作業フォルダで行います）" \
-    "$(case "$VERIFY_RESULT" in
-        done)    echo "4. 動作の確認: 成功しました（リリースと削除を、各段階の組織で確認済みです）" ;;
-        failed)  echo "4. 動作の確認: 失敗した項目があります。上の [NG] を確認してください（削除のみのやり直し: sf-init.sh --verify --cleanup）" ;;
-        skipped) echo "4. 動作の確認は、あとで行えます: 管理者用フォルダで、~/sf-tools/bin/sf-init.sh --verify（または、sf-init.sh を再実行して、2 を選ぶ）" ;;
-        *)       echo "4. 動作の確認は、あとで行えます: 管理者用フォルダで、~/sf-tools/bin/sf-init.sh --verify" ;;
-    esac)"
+    "$_verify_line"
 
 exit $RET_OK

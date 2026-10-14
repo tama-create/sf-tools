@@ -10,7 +10,8 @@ echo -e "${CLR_HEAD}=== sf-sync-wf.sh ===${CLR_RST}"
 #   プロジェクト（td の .github/workflows/）には、雛形と同じものをコピーしておく
 #   使い方: _wf_env td mb mh
 _wf_env() {
-    local -n _t=$1 _m=$2 _h=$3
+    # 結果は、最後に printf -v で、呼び出し元の変数に代入する（nameref は Bash 4.3 以降のため使わない）
+    local _t _m _h
     setup_std_env _t _m _h
     create_all_mocks "$_m"
     local src="$_h/sf-tools/templates/.github/workflows"
@@ -19,6 +20,9 @@ _wf_env() {
     printf 'name: B\njobs:\n  b:\n    steps:\n      - run: echo new-b\n' > "$src/wf-b.yml"
     cp "$src/wf-a.yml" "$src/wf-b.yml" "$_t/.github/workflows/"
     export MOCK_GIT_BRANCH="system-20261006"
+    printf -v "$1" '%s' "$_t"
+    printf -v "$2" '%s' "$_m"
+    printf -v "$3" '%s' "$_h"
 }
 
 # sf-sync-wf.sh を実行する。使い方: _wf_run td mb mh 標準入力 [引数...]

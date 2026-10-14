@@ -1635,7 +1635,9 @@ test_sf_tools_autoupdate() {
     export GIT_AUTHOR_NAME=test GIT_AUTHOR_EMAIL=test@example.com GIT_COMMITTER_NAME=test GIT_COMMITTER_EMAIL=test@example.com
     (
         cd "$mock_home/sf-tools" || exit 1
-        git init -q -b main && printf 'logs/\n' >> .git/info/exclude
+        # core.precomposeunicode: macOS の tar は、日本語のファイル名を NFD に変えて展開する。HOME を差し替えて実行すると、
+        #   ~/.gitconfig の設定が効かず、同じファイルが「未追跡」に見える（未コミットの変更ありと判定される）ため、リポジトリに設定する
+        git init -q -b main && git config core.precomposeunicode true && printf 'logs/\n' >> .git/info/exclude
         git add -A && git commit -qm base
         git init -q --bare -b main "$base/origin.git"
         git remote add origin "$base/origin.git" && git push -q origin main
@@ -1687,7 +1689,9 @@ test_sf_tools_branch_mismatch() {
     export GIT_AUTHOR_NAME=test GIT_AUTHOR_EMAIL=test@example.com GIT_COMMITTER_NAME=test GIT_COMMITTER_EMAIL=test@example.com
     (
         cd "$mock_home/sf-tools" || exit 1
-        git init -q -b main && printf 'logs/\n' >> .git/info/exclude
+        # core.precomposeunicode: macOS の tar は、日本語のファイル名を NFD に変えて展開する。HOME を差し替えて実行すると、
+        #   ~/.gitconfig の設定が効かず、同じファイルが「未追跡」に見える（未コミットの変更ありと判定される）ため、リポジトリに設定する
+        git init -q -b main && git config core.precomposeunicode true && printf 'logs/\n' >> .git/info/exclude
         git add -A && git commit -qm base
         git init -q --bare -b main "$base/origin.git"
         git remote add origin "$base/origin.git" && git push -q origin main

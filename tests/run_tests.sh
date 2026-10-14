@@ -47,7 +47,7 @@ CLR_RST='\033[0m'
 unset GITHUB_ACTIONS CI
 
 # 同時に動かすテストファイルの数（先頭の --jobs N / --jobs=N / --serial を、読み取る）
-JOBS="${SF_TEST_JOBS:-$(nproc 2>/dev/null || echo 4)}"
+JOBS="${SF_TEST_JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)}"   # macOS には nproc がない
 while [[ "${1:-}" == "--jobs" || "${1:-}" == --jobs=* || "${1:-}" == "--serial" ]]; do
     case "$1" in
         --serial)  JOBS=1; shift ;;
@@ -172,7 +172,9 @@ if [[ "${1:-}" == "--changed" ]]; then
 
     if [[ $_run_all -eq 0 && ${#_changed_tests[@]} -gt 0 ]]; then
         # 重複排除
-        mapfile -t TEST_FILES < <(printf '%s\n' "${_changed_tests[@]}" | sort -u)
+        # mapfile は Bash 4 以降のため使わない（macOS 標準の Bash 3.2 で動かす）
+        TEST_FILES=()
+        while IFS= read -r _tf; do TEST_FILES+=("$_tf"); done < <(printf '%s\n' "${_changed_tests[@]}" | sort -u)
         echo "  [--changed] 対象テスト: ${TEST_FILES[*]}"
     elif [[ $_run_all -eq 0 && ${#_changed_tests[@]} -eq 0 ]]; then
         echo "  [--changed] 変更ファイルに対応するテストなし → 全テスト実行"
@@ -238,7 +240,12 @@ else
         test_path="$TESTS_DIR/${TEST_FILES[$i]}"
         [[ -f "$test_path" ]] || continue   # 見つからないファイルは、pid が -1 のまま（表示のときに SKIP）
         while (( $(jobs -rp | wc -l) >= JOBS )); do
-            wait -n 2>/dev/null || true
+            # wait -n は Bash 4.3 以降。それより古い Bash（macOS 標準の 3.2）では、少し待って、数え直す
+            if (( BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 3) )); then
+                wait -n 2>/dev/null || true
+            else
+                sleep 0.2
+            fi
         done
         tmp=$(mktemp /tmp/sftest-XXXX)
         bash "$test_path" > "$tmp" 2>&1 < /dev/null &   # 標準入力は閉じる（入力待ちで、止まらないため）

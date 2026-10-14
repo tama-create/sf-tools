@@ -132,12 +132,10 @@ _test_jwt_login() {
 }
 
 # ------------------------------------------------------------------------------
-# 共通: 組織選択プロンプト → suffix と label を返す（nameref）
+# 共通: 組織選択プロンプト → suffix・label・エイリアスを、指定した名前の変数に返す（set_var）
 # ------------------------------------------------------------------------------
 _select_org() {
-    local -n _suffix_ref=$1  # Bash 4.3+ nameref
-    local -n _label_ref=$2
-    local -n _alias_ref=$3
+    local _so_suffix="$1" _so_label="$2" _so_alias="$3"
 
     # branches.txt からブランチ数を取得（なければ 1 固定）
     local branch_count=1
@@ -164,9 +162,9 @@ _select_org() {
     local key
     read_key key "$prompt" "[${valid}Qq]"
     case "$key" in
-        1) _suffix_ref="PROD"; _label_ref="main の組織";     _alias_ref="prod"    ;;
-        2) _suffix_ref="STG";  _label_ref="ステージング組織"; _alias_ref="staging" ;;
-        3) _suffix_ref="DEV";  _label_ref="開発組織";         _alias_ref="develop" ;;
+        1) set_var "$_so_suffix" "PROD"; set_var "$_so_label" "main の組織";     set_var "$_so_alias" "prod"    ;;
+        2) set_var "$_so_suffix" "STG";  set_var "$_so_label" "ステージング組織"; set_var "$_so_alias" "staging" ;;
+        3) set_var "$_so_suffix" "DEV";  set_var "$_so_label" "開発組織";         set_var "$_so_alias" "develop" ;;
         q|Q) die "中断しました。" ;;
     esac
 }

@@ -68,7 +68,9 @@ if [ "$FORCE_RELOGIN" != "1" ] && [ -f ".sf/config.json" ]; then
     DISPLAY_JSON=$(run sf org display --json || echo "")
     # エイリアスと組織 ID を、1 回で取る（JSON として読み取れなければ、どちらも空 = 未接続として扱う）
     _disp_vals=$(json_get "$DISPLAY_JSON" result.alias result.id) || _disp_vals=""  # VAR=$(cmd) のため run 不使用
-    mapfile -t _disp_v <<< "$_disp_vals"
+    # 1 行を 1 要素にする（mapfile は Bash 4 以降のため使わない）
+    _disp_v=()
+    while IFS= read -r _disp_line; do _disp_v+=("$_disp_line"); done <<< "$_disp_vals"
     CURRENT_ALIAS="${_disp_v[0]:-}"
     CURRENT_ID="${_disp_v[1]:-}"
 

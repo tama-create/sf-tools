@@ -66,18 +66,13 @@ jobs:
       - name: ソースコードを取得
         uses: actions/checkout@v4
 
-      # macOS 標準の Bash は 3.2。sf-tools は Bash 4.3 以上が前提のため、brew で入れて、PATH の先頭に置く。
-      # sed などの標準コマンドは、BSD 版のまま使う（GNU 版は、入れない: BSD で動かない書き方を、見逃さないため）
-      - name: Bash 4.3 以上を用意
+      # macOS 標準の Bash（/bin/bash = 3.2）のまま実行する。sf-tools は、追加のインストールなしで、macOS で動くことが前提
+      # （Bash 4 以降の機能を使うと、ここで失敗する）。sed などの標準コマンドも、BSD 版のまま使う（GNU 版は、入れない）
+      - name: テストを実行（macOS 標準の Bash 3.2）
         run: |
-          brew install bash
-          echo "$(brew --prefix)/bin" >> "$GITHUB_PATH"
-
-      - name: テストを実行
-        run: |
-          bash --version | head -1
+          /bin/bash --version | head -1
           sed --version 2>&1 | head -1 || true
-          bash tests/run_tests.sh
+          /bin/bash tests/run_tests.sh
 
   test-windows:
     name: 全件テスト（Windows・Git Bash）

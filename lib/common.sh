@@ -31,12 +31,10 @@
 # ------------------------------------------------------------------------------
 # 1. Bash バージョンチェック
 # ------------------------------------------------------------------------------
-# nameref (local -n) は Bash 4.3 以降の機能。
-# 未満の場合は環境アップグレードを促して即終了する。
-if (( BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 3) )); then
-    echo "[ERROR] Bash 4.3 以上が必要です（現在: ${BASH_VERSION}）" >&2
-    echo "  macOS の場合: brew install bash" >&2
-    echo "  その後 /etc/shells に追加して chsh で既定シェルを変更してください。" >&2
+# macOS 標準の Bash（/bin/bash）は 3.2。追加のインストールなしで動くように、3.2 を下限にする。
+# Bash 4 以降の機能（local -n / declare -A / mapfile / ${x^} / ${x,,} / wait -n など）は、使わない。
+if (( BASH_VERSINFO[0] < 3 || (BASH_VERSINFO[0] == 3 && BASH_VERSINFO[1] < 2) )); then
+    echo "[ERROR] Bash 3.2 以上が必要です（現在: ${BASH_VERSION}）" >&2
     exit 1
 fi
 

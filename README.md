@@ -13,7 +13,9 @@ Salesforce 開発で毎回発生する環境構築、デプロイ、事前チェ
 > - **ローカル:** Windows + Git Bash
 > - **サーバー:** Linux（GitHub Actions / Ubuntu ランナー）
 >
-> macOS / WSL でも動作するようクロスプラットフォームを意識して実装していますが、動作検証は行っていません。
+> **macOS:** 標準のターミナル（zsh）と、標準の Bash（`/bin/bash` 3.2）のままで動くように実装しています（Homebrew などで、Bash を入れ直す必要はありません）。モックを使った全件テストは、macOS 標準の Bash 3.2 で通ることを確認しています。実際の GitHub / Salesforce を使った通しの動作（`sf-init.sh` など）は、macOS では、まだ検証していません。
+>
+> WSL でも動作するよう意識して実装していますが、動作検証は行っていません。
 
 以下のコマンドが使えること。
 
@@ -25,10 +27,10 @@ Salesforce 開発で毎回発生する環境構築、デプロイ、事前チェ
 | Visual Studio Code | `code --version` | エディタ起動 | https://code.visualstudio.com/ | `winget install --id Microsoft.VisualStudioCode` |
 | Slack | — | デプロイ通知の受信 | https://slack.com/downloads/windows | インストーラ実行 |
 
-> Bash 4.3 以上が必須です（Git for Windows 2.x 以降の Git Bash に含まれています）。`bash --version` で確認してください。
+> Bash 3.2 以上で動きます（Windows は、Git for Windows の Git Bash。macOS は、標準の `/bin/bash` のままで動きます）。
 
 補足:
-- Git Bash で実行してください（PowerShell / コマンドプロンプトは非対応）
+- Windows は、Git Bash で実行してください（PowerShell / コマンドプロンプトは非対応）。macOS は、標準のターミナル（zsh）から、そのまま実行できます
 - `sf-init.sh` を除くすべてのスクリプトは `force-*` ディレクトリ内から実行してください
 - `sf-init.sh` のみ `force-*` の**外**（親ディレクトリ）から実行します
 
@@ -74,14 +76,19 @@ git clone https://github.com/tama-create/sf-tools.git ~/sf-tools
 
 ### 2.2 PATH の設定（推奨）
 
-`~/.bashrc` に以下を追加すると、どこからでもスクリプト名だけで呼び出せます。
+シェルの設定ファイルに以下を追加すると、どこからでもスクリプト名だけで呼び出せます。
+
+| 環境 | 設定ファイル |
+|---|---|
+| Windows（Git Bash）・Linux | `~/.bashrc` |
+| macOS（標準のターミナル = zsh） | `~/.zshrc` |
 
 ```bash
 # sf-tools
 export PATH="$HOME/sf-tools/bin:$PATH"
 ```
 
-追加後に `source ~/.bashrc` で反映します。
+追加後に `source ~/.bashrc`（macOS は `source ~/.zshrc`）で反映します。
 
 ---
 
@@ -931,9 +938,9 @@ sf-tools/
 
 - シンプルなコマンドで毎日の作業を自動化する
 - 失敗時はログで原因を追いやすくする
-- 追加依存を減らし、Git Bash（Windows）と GitHub Actions（Ubuntu）を検証対象に、macOS / WSL でも動くクロスプラットフォーム構成を維持する
+- 追加依存を減らし、Git Bash（Windows）・macOS（標準の Bash 3.2）・Linux（GitHub Actions の Ubuntu）で、同じように動くクロスプラットフォーム構成を維持する
 - まず dry-run を基本にし、必要時のみ本番実行する
-- Bash 4.3 以上を必須とし、互換ハックより環境アップグレードを優先する（コード品質・メンテナンス性を守るため）
+- Bash 3.2 以上で動かす（macOS 標準の `/bin/bash` のまま、追加のインストールなしで使えるようにするため。Bash 4 以降の機能は、使わない）
 
 ---
 

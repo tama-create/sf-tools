@@ -49,7 +49,8 @@ org_validate_url() {
 #   ・Enter は、[2] test.salesforce.com（Sandbox。安全な既定。段階に依存しない: F7）
 #   ・環境変数 SF_INIT_LOGIN_URL_<接尾辞>（login / test / URL）が指定されていれば、質問しない（自動実行用）
 org_choose_login_url() {
-    local -n _sfo_out="$1"
+    # 結果は、最後に set_var で、$1 の名前の変数に代入する（nameref は Bash 4.3 以降のため使わない）
+    local _sfo_name="$1" _sfo_out=""
     local label="$2" tier="${3:-main}" suffix="${4:-}"
     local envname preset="" hint1 ans url
 
@@ -66,6 +67,7 @@ org_choose_login_url() {
                 _sfo_out="${preset%/}" ;;
         esac
         log "INFO" "  ${label}のログイン先: ${_sfo_out}（環境変数 ${envname} の指定）"
+        set_var "$_sfo_name" "$_sfo_out"
         return 0
     fi
 
@@ -95,6 +97,7 @@ org_choose_login_url() {
         esac
     done
     log "INFO" "  ${label}のログイン先: ${_sfo_out}"
+    set_var "$_sfo_name" "$_sfo_out"
 }
 
 # sf data query の JSON（文字列）から、組織の ID・名前・種類を読み取る。引数: JSON
@@ -107,7 +110,9 @@ org_parse_info() {
     # JSON として読み取れなければ、失敗（6 項目を、1 回で取る。終了コードを確認してから、代入する）
     vals=$(json_get "$out" status result.records.0.Id result.records.0.Name result.records.0.IsSandbox \
                            result.records.0.OrganizationType result.records.0.TrialExpirationDate) || return 1  # VAR=$(cmd) のため run 不使用
-    mapfile -t v <<< "$vals"
+    # 1 行を 1 要素にする（mapfile は Bash 4 以降のため使わない。空行も、1 要素として残す）
+    local _line
+    while IFS= read -r _line; do v+=("$_line"); done <<< "$vals"
     # status が、あって、0 以外なら、失敗として扱う（項目は、空のまま）
     if [[ -n "${v[0]:-}" && "${v[0]}" != "0" ]]; then return 1; fi
     ORG_ID="${v[1]:-}"

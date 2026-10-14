@@ -165,9 +165,10 @@ _bootstrap_add_orgs() {
 #   同じ組織なら、中断する（鍵一式を更新しない）。保存は、すべての確認が済んでから、まとめて行う。
 #   戻り値: 0 = すべて有効（または、取り直した） / 1 = 取り直さなかった（無効なまま）組織がある
 _bootstrap_refresh_orgs() {
-    local -A ids=() new_urls=()
+    # 段階と値を、同じ添字の 2 つの配列で持つ（連想配列は Bash 4 以降のため使わない。macOS 標準の Bash 3.2 で動かす）
+    local -a id_tiers=() id_vals=() new_tiers=() new_vals=()
     local -a invalid=()
-    local tier var url id other skipped=0
+    local tier var url id i skipped=0
     log "INFO" "登録済みのテスト用組織の認証 URL が、いまも有効かを確認します。"
     for tier in main staging develop; do
         case "$tier" in
@@ -182,10 +183,10 @@ _bootstrap_refresh_orgs() {
         fi
         if id=$(_bootstrap_id_of_url "$url" "sf-tools-e2e-bootstrap-chk-${tier}"); then  # 条件チェック
             # 有効な組織が、ほかの段階と同じ組織なら、鍵一式が壊れている
-            for other in "${!ids[@]}"; do
-                [[ "${ids[$other]}" != "$id" ]] || die "登録済みの ${tier} が、${other} と同じ組織です。鍵一式を、確認してください。"
+            for (( i = 0; i < ${#id_tiers[@]}; i++ )); do
+                [[ "${id_vals[$i]}" != "$id" ]] || die "登録済みの ${tier} が、${id_tiers[$i]} と同じ組織です。鍵一式を、確認してください。"
             done
-            ids[$tier]="$id"
+            id_tiers+=("$tier"); id_vals+=("$id")
             log "SUCCESS" "  ${tier}: 有効です（組織 ID: ${id}）。"
         else
             invalid+=("$tier")
@@ -205,22 +206,23 @@ _bootstrap_refresh_orgs() {
             continue
         fi
         _bootstrap_login "sf-tools-e2e-bootstrap-${tier}" "${tier} 用の"
-        for other in "${!ids[@]}"; do
-            [[ "${ids[$other]}" != "$B_ORG_ID" ]] \
-                || die "ログインした組織が、${other} と同じ組織です。別の組織でログインしてください（鍵一式は、更新していません）。"
+        for (( i = 0; i < ${#id_tiers[@]}; i++ )); do
+            [[ "${id_vals[$i]}" != "$B_ORG_ID" ]] \
+                || die "ログインした組織が、${id_tiers[$i]} と同じ組織です。別の組織でログインしてください（鍵一式は、更新していません）。"
         done
-        ids[$tier]="$B_ORG_ID"
-        new_urls[$tier]="$B_URL"
+        id_tiers+=("$tier"); id_vals+=("$B_ORG_ID")
+        new_tiers+=("$tier"); new_vals+=("$B_URL")
     done
 
     # 保存は、すべての確認が済んでから、まとめて行う（途中で中断したときに、一部だけが保存されないように）
-    for tier in "${!new_urls[@]}"; do
+    for (( i = 0; i < ${#new_tiers[@]}; i++ )); do
+        tier="${new_tiers[$i]}"
         case "$tier" in
             main)    var="E2E_SFDX_AUTH_URL" ;;
             staging) var="E2E_SFDX_AUTH_URL_STG" ;;
             develop) var="E2E_SFDX_AUTH_URL_DEV" ;;
         esac
-        _bootstrap_put "$var" "${new_urls[$tier]}"
+        _bootstrap_put "$var" "${new_vals[$i]}"
         log "SUCCESS" "  ${tier}: 認証 URL を、取り直して、保存しました。"
     done
     [[ $skipped -eq 0 ]]

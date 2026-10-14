@@ -407,7 +407,7 @@ test_check_sf_cli_cache() {
         && pass "2 回目: 24 時間以内なので、sf --version を実行せずに省略する" || fail "2 回目: sf --version を実行せずに省略する" "呼び出し $(_sf_version_calls)"
 
     # 記録が古い（2 日前）→ 省略しない
-    touch -d "2 days ago" "$stamp"
+    touch_ago 2880 "$stamp"
     SF_TOOLS_SF_CHECK_STAMP="$stamp" _csc_run "$P" "--warn-only --cache" > /dev/null
     [[ "$(_sf_version_calls)" == "2" ]] \
         && pass "記録が 24 時間より古い → 省略せず、確認する" || fail "記録が 24 時間より古い → 省略せず、確認する" "呼び出し $(_sf_version_calls)"
@@ -465,6 +465,29 @@ test_run_isolated_home() {
     [[ "$home_line" == *"U=$tmp_home"* ]] && pass "USERPROFILE も、同じ一時フォルダになる（Windows は USERPROFILE を見る）" || fail "USERPROFILE も同じ一時フォルダになる" "$home_line"
     [[ ! -e "$tmp_home" ]] && pass "実行後に、一時フォルダは削除されている" || fail "実行後に、一時フォルダは削除されている" "$tmp_home"
     [[ "$out" == *"REALHOME=$HOME"* ]] && pass "呼び出し元の HOME は変わらない" || fail "呼び出し元の HOME は変わらない" "$out"
+
+    # SF_USE_GENERIC_UNIX_KEYCHAIN: Windows（Git Bash）以外では true（mac のキーチェーンの警告を避ける）。Git Bash では設定しない
+    #   呼び出し元の環境には、残さない（サブシェルの中だけ）。関数も、呼び出せる（従来の HOME=… "$@" と同じ）
+    local kc
+    kc=$(bash -c "
+        readonly SCRIPT_NAME=test; readonly LOG_FILE=/dev/null; readonly LOG_MODE=NEW; export SF_INIT_MODE=1
+        source '${SF_TOOLS_DIR}/lib/common.sh'
+        OSTYPE=darwin25
+        echo \"MAC=\$(run_isolated_home bash -c 'echo \${SF_USE_GENERIC_UNIX_KEYCHAIN:-unset}')\"
+        OSTYPE=linux-gnu
+        echo \"LINUX=\$(run_isolated_home bash -c 'echo \${SF_USE_GENERIC_UNIX_KEYCHAIN:-unset}')\"
+        OSTYPE=msys
+        echo \"GITBASH=\$(run_isolated_home bash -c 'echo \${SF_USE_GENERIC_UNIX_KEYCHAIN:-unset}')\"
+        echo \"CALLER=\${SF_USE_GENERIC_UNIX_KEYCHAIN:-unset}\"
+        f() { echo \"FUNC H=\$HOME K=\${SF_USE_GENERIC_UNIX_KEYCHAIN:-unset}\"; }
+        OSTYPE=darwin25
+        run_isolated_home f" 2>&1)
+    assert_output_contains "$kc" "MAC=true" "macOS: SF_USE_GENERIC_UNIX_KEYCHAIN=true（キーチェーンを使わない）"
+    assert_output_contains "$kc" "LINUX=true" "Linux: SF_USE_GENERIC_UNIX_KEYCHAIN=true"
+    assert_output_contains "$kc" "GITBASH=unset" "Git Bash: 設定しない（従来のまま）"
+    assert_output_contains "$kc" "CALLER=unset" "呼び出し元の環境には、残らない"
+    assert_output_contains "$kc" "FUNC H=" "シェル関数も、一時ホームの中で実行できる"
+    assert_output_contains "$kc" "K=true" "シェル関数にも、環境変数が渡る"
 }
 
 # ------------------------------------------------------------------------------
@@ -700,6 +723,91 @@ test_portable_sed() {
     rm -rf "$td"
 }
 
+# ------------------------------------------------------------------------------
+# Bash 3.2（macOS 標準の /bin/bash）で動くこと: set_var / run_with_timeout と、Bash 4 以降の機能を使っていないことの確認
+# ------------------------------------------------------------------------------
+test_bash32_compat() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] Bash 3.2 対応: set_var / run_with_timeout / Bash 4 以降の機能を使わない${CLR_RST}"
+    local td out rc start elapsed c
+    td=$(mktemp -d "${TMPDIR:-/tmp}/test-b32-XXXX")
+    _b32() {   # 引数: 実行する式（common.sh を読み込んだ子プロセスで評価する）
+        ( export SF_INIT_MODE=1; readonly SCRIPT_NAME=test LOG_FILE=/dev/null LOG_MODE=NEW
+          source "$SF_TOOLS_DIR/lib/common.sh"
+          eval "$1" ) 2>&1
+    }
+
+    # set_var: 指定した名前の変数に代入する。値は、評価しない（$ や ` を、そのまま入れる）
+    out=$(_b32 'f() { set_var "$1" "値 A"; }; f X; echo "X=$X"')
+    assert_equals "$out" "X=値 A" "set_var: 呼び出し元の変数に代入できる"
+    out=$(_b32 'set_var X '\''$(echo NG) `echo NG` "q" %s'\''; echo "X=$X"')
+    assert_equals "$out" 'X=$(echo NG) `echo NG` "q" %s' "set_var: 値は評価しない（\$( ) や \` を、そのまま入れる）"
+    out=$(_b32 'set_var "X; echo INJECTED" v; echo "rc=$?"'); rc=$?
+    assert_equals "$([[ $rc -ne 0 ]] && echo ng || echo ok)" "ng" "set_var: 変数名が正しくなければ、die する"
+    assert_output_contains "$out" "変数名が正しくありません" "set_var: 理由が表示される"
+    assert_equals "$([[ "$out" == *$'\n'INJECTED* || "$out" == INJECTED* ]] && echo yes || echo no)" "no" "set_var: 変数名に混ぜたコマンドは、実行されない"
+
+    # run_with_timeout: 終了コードと標準入力を、そのまま渡す。時間切れは 124
+    _b32 'run_with_timeout 5 bash -c "exit 3"' > /dev/null; rc=$?
+    assert_equals "$rc" "3" "run_with_timeout: コマンドの終了コードを返す"
+    out=$(printf 'in-data\n' | _b32 'run_with_timeout 5 cat')
+    assert_equals "$out" "in-data" "run_with_timeout: 標準入力を、そのまま渡す"
+    start=$SECONDS
+    _b32 'run_with_timeout 1 sleep 20' > /dev/null; rc=$?
+    elapsed=$(( SECONDS - start ))
+    assert_equals "$rc" "124" "run_with_timeout: 時間切れは 124"
+    [[ $elapsed -lt 10 ]] && pass "run_with_timeout: 上限の秒数で打ち切る（待ち続けない）" \
+        || fail "run_with_timeout: 上限の秒数で打ち切る（待ち続けない）" "所要: ${elapsed} 秒"
+
+    # timeout コマンドがない環境（macOS の標準）でも、同じように動く。PATH を、必要なコマンドだけにして確認する
+    mkdir -p "$td/bin"
+    for c in sleep cat; do
+        printf '#!/bin/bash\nexec "%s" "$@"\n' "$(command -v "$c")" > "$td/bin/$c"; chmod +x "$td/bin/$c"
+    done
+    _b32 "PATH='$td/bin'; command -v timeout >/dev/null && exit 99; run_with_timeout 5 /bin/bash -c 'exit 3'" > /dev/null; rc=$?
+    assert_equals "$rc" "3" "timeout なし: コマンドの終了コードを返す"
+    out=$(printf 'in-data\n' | _b32 "PATH='$td/bin'; run_with_timeout 5 cat")
+    assert_equals "$out" "in-data" "timeout なし: 標準入力を、そのまま渡す"
+    start=$SECONDS
+    _b32 "PATH='$td/bin'; run_with_timeout 1 sleep 20" > /dev/null; rc=$?
+    elapsed=$(( SECONDS - start ))
+    assert_equals "$rc" "124" "timeout なし: 時間切れは 124"
+    [[ $elapsed -lt 10 ]] && pass "timeout なし: 上限の秒数で打ち切る（待ち続けない）" \
+        || fail "timeout なし: 上限の秒数で打ち切る（待ち続けない）" "所要: ${elapsed} 秒"
+
+    # Bash 4 以降の機能を、使っていないこと（コメントの行は除く。このファイル自身は、下の検索の文字列を含むため除く）
+    #   nameref / 連想配列 / mapfile / 大文字・小文字の変換 / |& / &>> / $( ) の中の case（3.2 は「)」を取り違える）
+    _b32_grep() {   # 引数: 説明 / 正規表現
+        local hits
+        hits=$( cd "$SF_TOOLS_DIR" && grep -rnIE -- "$2" bin lib phases hooks templates tests 2>/dev/null \
+                  | grep -v '^tests/test_common\.sh:' | grep -vE '^[^:]+:[0-9]+:[[:space:]]*#' | head -5 )
+        [[ -z "$hits" ]] && pass "使っていない: $1" || fail "使っていない: $1" "$hits"
+    }
+    _b32_grep "nameref（local -n / declare -n）"  '(local|declare|typeset)[[:space:]]+-[a-zA-Z]*n[a-zA-Z]*[[:space:]]'
+    _b32_grep "連想配列（declare -A / local -A）"  '(local|declare|typeset)[[:space:]]+-[a-zA-Z]*A[a-zA-Z]*[[:space:]]'
+    _b32_grep "mapfile / readarray"                '(^|[;&|({[:space:]])(mapfile|readarray)[[:space:]]+-'
+    _b32_grep "大文字・小文字の変換（\${x^} / \${x,,}）" '\$\{[A-Za-z_0-9]+(\[[^]]*\])?(\^\^?|,,?)\}'
+    _b32_grep "|& と &>>"                          '(\|&[[:space:]]|&>>)'
+    _b32_grep "\$( ) の中の case"                  '\$\([[:space:]]*case[[:space:]]'
+
+    # bin のスクリプトは、実行権限つき（100755）で git に記録されていること。
+    #   macOS・Linux では、実行権限がないと、PATH を通しても、`sf-start.sh` と名前だけで呼べない（Windows の Git Bash は、権限を見ない）。
+    #   git の記録（インデックス）で見る: ファイルシステムの権限は、環境（core.fileMode=false など）で変わるため
+    if git -C "$SF_TOOLS_DIR" rev-parse --git-dir > /dev/null 2>&1; then
+        local noexec
+        noexec=$(git -C "$SF_TOOLS_DIR" ls-files -s 'bin/*.sh' | awk '$1 != "100755" {print $4}' | head -5 | tr '\n' ' ')
+        [[ -z "$noexec" ]] && pass "bin/*.sh は、実行権限つきで git に記録されている" \
+            || fail "bin/*.sh は、実行権限つきで git に記録されている" "実行権限なし: ${noexec}（git update-index --chmod=+x で直す）"
+    else
+        skip "bin/*.sh の実行権限（git のリポジトリではないためスキップ）"
+    fi
+
+    # 共通ライブラリが、3.2 を拒否しないこと（バージョンの下限が、3.2 であること）
+    grep -q 'BASH_VERSINFO\[0\] == 3 && BASH_VERSINFO\[1\] < 2' "$SF_TOOLS_DIR/lib/common.sh" \
+        && pass "common.sh: Bash の下限は 3.2" || fail "common.sh: Bash の下限は 3.2" "バージョンの確認が、3.2 を下限にしていない"
+
+    rm -rf "$td"
+}
+
 test_check_gh_owner_match
 test_check_gh_owner_mismatch
 test_check_gh_owner_skip_on_empty
@@ -718,5 +826,6 @@ test_run_isolated_home
 test_ensure_sf_tools_latest
 test_json_get
 test_portable_sed
+test_bash32_compat
 
 print_summary

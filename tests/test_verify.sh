@@ -506,7 +506,7 @@ test_lib() {
         readonly SCRIPT_NAME=test LOG_FILE=/dev/null LOG_MODE=NEW
         source "$SF_TOOLS_DIR/lib/common.sh"
         source "$SF_TOOLS_DIR/lib/verify-common.sh"
-        echo "PATHS=$(verify_hello_paths | wc -l)"
+        echo "PATHS=$(verify_hello_paths | wc -l | tr -d " ")"
         echo "DEPLOY=$(verify_hello_deploy_target_text | grep -c SfToolsE2eHello)"
         echo "REMOVE=$(verify_hello_remove_target_text | grep -c '^ApexClass:')"
         verify_hello_content_for "force-app/main/default/classes/SfToolsE2eHelloTest.cls" | grep -q "@isTest" && echo "TESTCLS=ok"

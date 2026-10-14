@@ -68,7 +68,8 @@ print_menu() {
         local desc="${item#*|}"
         local label="${cmd// /}"
         label="${label#sf-}"
-        label="${label^}"  # 先頭を大文字に
+        # 先頭を大文字に（${label^} は Bash 4 以降のため使わない。macOS 標準の Bash 3.2 で動かす）
+        label="$(printf '%s' "${label:0:1}" | tr '[:lower:]' '[:upper:]')${label:1}"
         printf "  ${CYAN}[%d]${RESET} ${BOLD}%-10s${RESET}${DIM}%s${RESET}\n" "$num" "$label" "$desc"
         (( num++ ))
     done

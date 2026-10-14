@@ -96,7 +96,7 @@ press_enter() {
 #   read_or_quit VARNAME PROMPT
 #
 # 【引数】
-#   VARNAME : 入力値を格納する変数名（nameref: Bash 4.3 以降必須）
+#   VARNAME : 入力値を格納する変数名（set_var で代入する）
 #   PROMPT  : プロンプト文字列
 #
 # 【使用例】
@@ -104,13 +104,13 @@ press_enter() {
 #   read_or_quit PAT_TOKEN "  トークンを貼り付けてください（q で中断）: "
 # ------------------------------------------------------------------------------
 read_or_quit() {
-    local -n _rq_var=$1
-    local prompt="$2"
+    local _rq_name="$1" _rq_prompt="$2" _rq_val=""
     while true; do
-        read_input _rq_var "$prompt" || die "中断しました。"  # EOF → 中断
-        [[ "$_rq_var" == "q" || "$_rq_var" == "Q" ]] && die "中断しました。"
-        [[ -n "$_rq_var" ]] && break  # 空 Enter → 再入力
+        read_input _rq_val "$_rq_prompt" || die "中断しました。"  # EOF → 中断
+        [[ "$_rq_val" == "q" || "$_rq_val" == "Q" ]] && die "中断しました。"
+        [[ -n "$_rq_val" ]] && break  # 空 Enter → 再入力
     done
+    set_var "$_rq_name" "$_rq_val"
 }
 
 # read_secret - 秘密情報の入力（入力した文字は * で表示する・空 Enter は案内して再入力・q で中断）
@@ -130,10 +130,9 @@ read_or_quit() {
 #   read_secret PAT_TOKEN_VALUE "  Token を貼り付けてください（* で表示されます・q で中断）："
 # ------------------------------------------------------------------------------
 read_secret() {
-    local -n _rs_var=$1
-    local prompt="$2" _rs_ch _rs_buf _rs_prefix
+    local _rs_name="$1" _rs_prompt="$2" _rs_ch _rs_buf _rs_prefix
     while true; do
-        printf "%s" "$prompt" >&2
+        printf "%s" "$_rs_prompt" >&2
         _rs_buf=""
         while true; do
             if ! IFS= read -rsn1 _rs_ch; then
@@ -165,7 +164,7 @@ read_secret() {
             _rs_prefix=""
             [[ "$_rs_buf" =~ ^[A-Za-z]{2,12}_ ]] && _rs_prefix="${BASH_REMATCH[0]}"
             printf "  → %d 文字を受け取りました%s\n" "${#_rs_buf}" "${_rs_prefix:+（先頭: ${_rs_prefix}…）}" >&2
-            _rs_var="$_rs_buf"
+            set_var "$_rs_name" "$_rs_buf"
             break
         fi
         # 空 Enter → 再入力（端末のときは、貼り付け方を案内する）

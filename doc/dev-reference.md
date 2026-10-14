@@ -9,10 +9,22 @@
 
 ### 1.1 Bash バージョン要件
 
-- **Bash 4.3 以上を必須とする**（`local -n` nameref 等を使用するため）
-- `lib/common.sh` 冒頭で `BASH_VERSINFO` をチェックし、4.3 未満は起動不可としてアップグレードを促す
-- 互換ハックで古い環境に対応するよりも、**環境アップグレードを促すことを優先する**（コードの質・メンテナンス性を守るため）
-- macOS デフォルト Bash は 3.2 のため、`brew install bash` を案内すること
+- **Bash 3.2 以上で動くこと**。macOS 標準の `/bin/bash` は 3.2 で、今後も更新されない。スクリプトの先頭行は `#!/bin/bash` のため、Homebrew で新しい Bash を入れても、使われない。**追加のインストールなしで、macOS の標準のターミナル（zsh）から動かす**ために、3.2 を下限にする（Windows の Git Bash・Linux は 5 系で、同じコードが動く）
+- `lib/common.sh` 冒頭で `BASH_VERSINFO` をチェックし、3.2 未満は起動不可とする
+- **Bash 4 以降の機能は、使わない**。代わりの書き方:
+
+| 使わない（Bash 4 以降） | 代わり |
+|---|---|
+| `local -n`（nameref） | `set_var VARNAME VALUE`（`lib/platform.sh`。`printf -v`。変数名を検査する。`eval` は使わない）。配列を返すときは、決まった名前の配列に入れて、呼び出し元でコピーする（`sf-release.sh` の `_pl_out`） |
+| `declare -A`（連想配列） | 通常の配列（キーと値を、同じ添字の 2 つの配列で持つ。`phases/init/status.sh`）、または、名前の配列（`phases/init/verify.sh` の `LEFT`） |
+| `mapfile` / `readarray` | `while IFS= read -r line; do arr+=("$line"); done <<< "$text"` |
+| `${x^}` / `${x^^}` / `${x,,}` | `tr '[:lower:]' '[:upper:]'` |
+| `wait -n` | バージョンで分岐し、3.2 では `sleep 0.2` で数え直す（`tests/run_tests.sh`） |
+| `$( case ... esac )` | `$( )` の外で `case` を書き、変数に入れる（3.2 は、`case` の `)` を、`$( )` の終わりと取り違え、**構文チェック（`bash -n`）は通るのに、実行時に、コードの一部が文字として出力される**） |
+| `\|&`・`&>>`・`${x@Q}`・`[[ -v x ]]`・`printf '%(...)T'`・負の添字 `${a[-1]}` | 使わない |
+
+- 関数の中で `set_var "$1" ...` を使うときは、その関数の `local` 変数に、接頭辞（`_xx_`）を付ける（呼び出し元の変数名と同じ名前の `local` があると、そちらに代入されるため）
+- `tests/test_common.sh` の `test_bash32_compat` が、上の機能を使っていないことを、検索で確認する。CI の `test-macos` は、`/bin/bash`（3.2）で全件を実行する
 
 ### 1.2 OS 検出の統一ルール
 
@@ -76,7 +88,7 @@
 
 - **並列実行**: `run_tests.sh` は、複数ファイルを、同時に（既定は CPU の数まで）動かす。時間のかかるファイル（`HEAVY_FIRST`: `test_sf-init.sh` など）を先に起動し、標準入力は閉じる（入力待ちで止まらないため）。出力は、ファイルごとに溜めて、`TEST_FILES` の順に表示・集計する。実測（8 コア・WSL）: 直列 約 400 秒 → 並列 約 170〜230 秒。並列数を 4〜100 で変えても、大きな差は、出なかった。
 - **WSL**: Git Bash から実行すると、自動で WSL に移り、ext4 にコピーして実行する（`/mnt/c` の 9P は、遅いため）。WSL には `node` がなく `node.exe` だけがある場合があり、`test_helper.sh` の node のモックは、`node -e` を、本物（`node` または `node.exe`）に渡す（`json_get` のテストのため）。
-- **クロスプラットフォームの CI**: 同じワークフローに、`test-macos`（`macos-latest`。`brew install bash` で Bash 4.3 以上を用意し、BSD の `sed` などは、そのまま使う）と `test-windows`（`windows-latest` の Git Bash。`SF_TEST_NO_WSL=1`・`core.autocrlf=false`）がある。導入の初期は `continue-on-error: true`（結果の表示のみ）。**BSD / GNU の差**として、`sed -i`（BSD は、`-i` の直後に拡張子が必要 → `sed_inplace`）・sed の `\x` / `\t`（BSD は解釈しない → Bash の `$'..'` で展開）・`date -d`・`stat -c`・`nproc`・`timeout`（macOS にない）に注意する。
+- **クロスプラットフォームの CI**: 同じワークフローに、`test-macos`（`macos-latest`。macOS 標準の `/bin/bash`（3.2）と、BSD の `sed` などを、そのまま使う。何も追加で入れない）と `test-windows`（`windows-latest` の Git Bash。`SF_TEST_NO_WSL=1`・`core.autocrlf=false`）がある。導入の初期は `continue-on-error: true`（結果の表示のみ）。**BSD / GNU の差**として、`sed -i`（BSD は、`-i` の直後に拡張子が必要 → `sed_inplace`）・sed の `\x` / `\t`（BSD は解釈しない → Bash の `$'..'` で展開）・`date -d`・`touch -d`・`stat -c`・`nproc`・`timeout`（macOS にない → `run_with_timeout`）・`wc -l`（BSD は、数字の前に空白が付く → 文字列として使うときは `tr -d ' '`）に注意する。`openssl req -subj`（先頭の `//` は Git Bash 専用。macOS・Linux に渡すと、発行先が空の証明書ができ、Salesforce が「証明書ではありません」と拒否する → `_jwt_cert_subject_arg` が OS で切り替え、`generate_jwt_cert` が生成後に空でないことを確認する。既存の空の証明書は、`ensure_jwt_cert_subject` が、秘密鍵そのままで作り直す）。macOS の `tar` は、日本語のファイル名を NFD に変えて展開するため、テストで、HOME を差し替えて git を使うときは、`core.precomposeunicode` をリポジトリに設定する。
 - **CI**: `.github/workflows/test.yml`（Ubuntu のランナー）。PR（main・development 向け）と development への push で、全件テスト（`bash tests/run_tests.sh`）と shellcheck（`-S warning`。バージョン固定 `shellcheck-py==0.11.0.1`）を実行し、どちらも失敗扱いになる。Secrets は使わない。shellcheck の設定は、リポジトリ直下の `.shellcheckrc`（`SC1090` / `SC1091`・`SC2034`・`SC2155` を、理由つきで無効化）。個別の誤検知は、該当行の直前に `# shellcheck disable=SCxxxx  # 理由` で除外する。手元での実行: `shellcheck -S warning $(git ls-files 'bin/*.sh' 'lib/*.sh' 'phases/*.sh' 'hooks/*' 'templates/*.sh')`（`pip install shellcheck-py` など）。
 
 ### 2.2 `test_helper.sh` の前提
@@ -130,6 +142,8 @@
 | `run` | `run CMD [ARGS...]` | コマンド実行、ログ出力、戻り値判定 |
 | `die` | `die MESSAGE [EXIT_CODE]` | エラーログを出力して終了 |
 | `sed_inplace` | `sed_inplace SCRIPT FILE`（`lib/platform.sh`） | ファイルを、その場で置換する（GNU / BSD の sed 共通。`sed -i.bak` ＋ バックアップの削除）。`sed -i` の代わりに使う |
+| `set_var` | `set_var VARNAME VALUE`（`lib/platform.sh`） | 指定した名前の変数に、値を代入する（nameref の代わり。Bash 3.2 で動く）。変数名が、英数字と `_` でなければ `die`。値は、評価しない |
+| `run_with_timeout` | `run_with_timeout 秒 CMD [ARGS...]`（`lib/platform.sh`） | 時間の上限つきで実行する。`timeout` があれば使い、なければ（macOS）、背景で実行して監視する。時間切れは 124。標準入力は、そのまま渡す |
 | `json_get` | `VALS=$(json_get "$JSON" パス...) \|\| ...`（複数のパスは `mapfile -t V <<< "$VALS"`） | JSON から値を取り出す（sf CLI の出力など。GitHub の情報は `gh --jq`）。Node の標準機能のみ。パスは `.` 区切り（`result.records.0.Id`。先頭の `.` は許容）。パス 1 つにつき 1 行（値なし・null は空行。値の中の改行は空白 1 つ）。まず全体を厳密に読み、失敗したときだけ最初の `{` から最後の `}` までを読む（`run` は標準エラーも標準出力に混ぜるため、sf の警告が前後に付く）。読み取れない・node がないときは終了コード 1 |
 | `get_target_org` | `get_target_org [ALIAS]` | 対象組織エイリアスを解決して出力 |
 | `check_force_dir` | `check_force_dir` | `force-*` ディレクトリか検証 |
@@ -141,7 +155,7 @@
 | `ensure_sf_tools_latest` | `ensure_sf_tools_latest [--no-update] DIR` | sf-tools（DIR）が origin の最新か確認し、遅れていれば確認のうえ `git pull --ff-only` で更新する。戻り値: 0=最新（または判定できない）／2=更新した（呼び出し側は、更新した sf-tools で、再実行すること）。die: fetch 失敗・遅れていて未コミットの変更または未プッシュのコミットがある・更新を断った・pull 失敗・`--no-update` で遅れている |
 | `is_gitbash` | `if is_gitbash; then ...` | Windows の Git Bash か判定（`$OSTYPE` が `msys*` / `mingw*` / `cygwin*`） |
 | `check_sf_cli` | `check_sf_cli [--warn-only] [--cache]` | `sf --version` の終了コードが 0 か確認する（sf は npm 版が前提）。0 以外なら、sf の場所と対処を ERROR で表示して `die`（`--warn-only` は表示のみで戻り値 1）。`--cache`（日常のコマンド用）は、成功を `~/.sf-tools-sf-check`（`SF_TOOLS_SF_CHECK_STAMP` で変更可）に sf の場所つきで記録し、24 時間は確認を省略する（失敗は記録せず、毎回確認する）。sf 未インストール・GitHub Actions 上（`GITHUB_ACTIONS=true`）では何もしない |
-| `run_isolated_home` | `out=$(run_isolated_home CMD [ARGS])` | 一時的なホームフォルダ（`HOME` と `USERPROFILE` を `mktemp -d` のフォルダに）の中でコマンドを実行し、出力と終了コードを返す。終了後に一時フォルダを削除する。sf の認証・エイリアスを隔離するために使う（JWT 接続テスト） |
+| `run_isolated_home` | `out=$(run_isolated_home CMD [ARGS])` | 一時的なホームフォルダ（`HOME` と `USERPROFILE` を `mktemp -d` のフォルダに）の中でコマンドを実行し、出力と終了コードを返す。終了後に一時フォルダを削除する。sf の認証・エイリアスを隔離するために使う（JWT 接続テスト） **Windows（Git Bash）以外では、`SF_USE_GENERIC_UNIX_KEYCHAIN=true` も設定する**（mac は、sf の暗号鍵を OS のキーチェーン（サービス `sfdx`・アカウント `local`）に保存する。一時ホームには `Library/Keychains` がなく、「キーチェーンが見つかりません」のダイアログが出るため。設定すると、鍵は一時ホームの `.sfdx/key.json` に保存され、一時フォルダごと消える。本物のキーチェーンには触れない） |
 | `open_browser` | `open_browser URL` | OS 判定してブラウザを開く（GitBash/WSL/macOS/Linux 対応。GitBash の判定を先に行う） |
 | `read_input` | `read_input VAR [PROMPT]` | readline 対応テキスト入力（矢印キー・BS 有効） |
 | `read_key` | `read_key VAR [PROMPT] [VALID]` | 1文字即時入力（Enter 不要・空 Enter 無視・EOF 対応） |

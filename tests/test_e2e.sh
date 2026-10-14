@@ -688,7 +688,7 @@ test_e2e_tmp_cleanup() {
     echo secret > "$t/e2e-sfdx-url.QwErTy"
     # 対象外: 新しいもの（別の実行の途中かもしれない）、実行中の run.sh のもの、名前が違うもの
     mkdir -p "$t/e2e-run.NewOne" "$t/e2e-run.Curren" "$t/e2e-run.toolong1" "$t/other.AbCdEf" "$t/e2e-run.AbC"
-    touch -d "2 hours ago" "$t/e2e-run.AbCdEf" "$t/e2e-run.AbCdEf/sfdx-url.txt" "$t/e2e-eca-del.123456" "$t/e2e-sfdx-url.QwErTy" \
+    touch_ago 120 "$t/e2e-run.AbCdEf" "$t/e2e-run.AbCdEf/sfdx-url.txt" "$t/e2e-eca-del.123456" "$t/e2e-sfdx-url.QwErTy" \
         "$t/e2e-run.Curren" "$t/e2e-run.toolong1" "$t/other.AbCdEf" "$t/e2e-run.AbC"
 
     # 一覧（実行中の run.sh の一時フォルダは、E2E_TMP で除外される）
@@ -1075,7 +1075,7 @@ assert_file_contains "$E2E_DIR/run.sh" "削除後: Salesforce への管理用ロ
     assert_file_contains "$E2E_DIR/run.sh" "sf-deploy.sh" "run.sh: sf-deploy.sh が、共有環境（予約名）への強制リリースを拒否することを確認する"
 
     # Hello World の Apex のソース: 共有の部品（lib/verify-common.sh）から、そろっている
-    _e2e_call 'echo "N=$(verify_hello_paths | wc -l)"; verify_hello_content_for force-app/main/default/classes/SfToolsE2eHelloTest.cls | grep -q @isTest && echo ISTEST'
+    _e2e_call 'echo "N=$(verify_hello_paths | wc -l | tr -d " ")"; verify_hello_content_for force-app/main/default/classes/SfToolsE2eHelloTest.cls | grep -q @isTest && echo ISTEST'
     assert_file_contains "$MB/out.log" "N=4" "Hello World: クラスのファイルが 4 つある"
     assert_file_contains "$MB/out.log" "ISTEST" "Hello World: テストクラスに @isTest がある（RunSpecifiedTests の自動検出に必要）"
     unset MOCK_CALL_LOG MOCK_GH_REPOS MOCK_SF_ECAS

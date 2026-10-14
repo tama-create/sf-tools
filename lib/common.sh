@@ -31,12 +31,10 @@
 # ------------------------------------------------------------------------------
 # 1. Bash バージョンチェック
 # ------------------------------------------------------------------------------
-# nameref (local -n) は Bash 4.3 以降の機能。
-# 未満の場合は環境アップグレードを促して即終了する。
-if (( BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 3) )); then
-    echo "[ERROR] Bash 4.3 以上が必要です（現在: ${BASH_VERSION}）" >&2
-    echo "  macOS の場合: brew install bash" >&2
-    echo "  その後 /etc/shells に追加して chsh で既定シェルを変更してください。" >&2
+# macOS 標準の Bash（/bin/bash）は 3.2。追加のインストールなしで動くように、3.2 を下限にする。
+# Bash 4 以降の機能（local -n / declare -A / mapfile / ${x^} / ${x,,} / wait -n など）は、使わない。
+if (( BASH_VERSINFO[0] < 3 || (BASH_VERSINFO[0] == 3 && BASH_VERSINFO[1] < 2) )); then
+    echo "[ERROR] Bash 3.2 以上が必要です（現在: ${BASH_VERSION}）" >&2
     exit 1
 fi
 
@@ -196,6 +194,23 @@ _mask_secrets() {
 }
 
 # ------------------------------------------------------------------------------
+# 端末の制御コードの除去（標準入力 → 標準出力。GNU / BSD の sed の、どちらでも動く）
+#   BSD の sed（macOS）は、\x1b のような 16 進の表記を解釈しない。そのため、Bash が、実際の文字に展開してから、sed に渡す。
+#   LC_ALL=C により、. が任意の 1 バイトにマッチする（日本語は 0xe3〜0xe9 始まりのため、除去の対象外）。
+#   _strip_ansi        : ANSI エスケープコード（色・カーソル操作）だけを除く
+#   _strip_term_codes  : 上に加えて、絵文字を除く（0xf0 + 3 バイト = U+10000 以降 / 0xe2 + 2 バイト = U+2000〜U+2FFF /
+#                        異体字セレクタ U+FE0F = 0xef 0xb8 0x8f）
+# ------------------------------------------------------------------------------
+_strip_ansi() {
+    local esc=$'\033'
+    LC_ALL=C sed "s/${esc}\[[0-9;?]*[a-zA-Z]//g"
+}
+_strip_term_codes() {
+    local esc=$'\033' b_f0=$'\xf0' b_e2=$'\xe2' b_ef=$'\xef' b_b8=$'\xb8' b_8f=$'\x8f'
+    LC_ALL=C sed "s/${esc}\[[0-9;?]*[a-zA-Z]//g; s/${b_f0}...//g; s/${b_e2}..//g; s/${b_ef}${b_b8}${b_8f}//g"
+}
+
+# ------------------------------------------------------------------------------
 # 6. run - コマンド実行ラッパー（通常呼び出し・命令置換の両対応）
 # ------------------------------------------------------------------------------
 # 【使い方】
@@ -283,13 +298,8 @@ run() {
     local log_ts
     log_ts=$(date +'%Y-%m-%d %H:%M:%S')
     # ANSI エスケープコード・絵文字を除去してから記録
-    # LC_ALL=C により . が任意の1バイトにマッチする（日本語は \xe3〜\xe9 始まりのため除去対象外）
-    #   \x1b\[...[a-zA-Z] : ANSI エスケープコード
-    #   \xf0...            : 4バイトUTF-8絵文字 (U+10000 以降: 🔥✨ 等)
-    #   \xe2..             : 3バイトUTF-8絵文字 (U+2000-U+2FFF: ✅❌⚠️ 等)
-    #   \xef\xb8\x8f       : 異体字セレクタ U+FE0F
-    LC_ALL=C sed 's/\x1b\[[0-9;]*[a-zA-Z]//g; s/\xf0...//g; s/\xe2..//g; s/\xef\xb8\x8f//g' "$tmp_out" | \
-        sed "/./s/^/[${log_ts}] [OUT] /" >> "$LOG_FILE"
+    # _strip_term_codes（上）が、ANSI エスケープコード・絵文字を除く
+    _strip_term_codes < "$tmp_out" | sed "/./s/^/[${log_ts}] [OUT] /" >> "$LOG_FILE"
 
     # 失敗時は error.log にも記録（前回エラーとの区切りが明確になるよう都度追記）
     if [[ $is_success -eq $RET_NG ]] && [[ -n "${LOG_FILE:-}" ]]; then
@@ -297,8 +307,7 @@ run() {
         err_log="$(dirname "$LOG_FILE")/error.log"
         {
             echo "====== [${log_ts}] ERROR: [${SCRIPT_NAME}] ${cmd[*]} ======"
-            LC_ALL=C sed 's/\x1b\[[0-9;]*[a-zA-Z]//g; s/\xf0...//g; s/\xe2..//g; s/\xef\xb8\x8f//g' "$tmp_out" | \
-                sed "/./s/^/  /"
+            _strip_term_codes < "$tmp_out" | sed "/./s/^/  /"
         } >> "$err_log"
     fi
 

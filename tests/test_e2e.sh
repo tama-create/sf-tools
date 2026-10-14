@@ -326,7 +326,7 @@ test_e2e_fixture() {
     FX="$mb/none.env" _e2e_call 'e2e_load_fixture; echo LOADED'
     assert_file_not_contains "$mb/out.log" "LOADED" "ファイルが無いと、読み込みに失敗する"
 
-    _mk_fixture "$FX"; sed -i '/E2E_PAT_TOKEN/d' "$FX"
+    _mk_fixture "$FX"; sedi '/E2E_PAT_TOKEN/d' "$FX"
     _e2e_call 'e2e_load_fixture; echo LOADED'
     assert_file_not_contains "$mb/out.log" "LOADED" "必須の項目が未設定だと、読み込みに失敗する"
     assert_file_contains     "$mb/out.log" "E2E_PAT_TOKEN が未設定" "未設定の項目名が表示される"
@@ -612,7 +612,7 @@ test_e2e_sfdx_url() {
     assert_file_not_contains "$mb/out.log" "BAD"  "認証 URL の形式は通り、隠された文章・不正な形式は通らない"
 
     # 鍵一式の読み込みで、形式の違う認証 URL を拒否する
-    _mk_fixture "$FX"; sed -i "s|^E2E_SFDX_AUTH_URL=.*|E2E_SFDX_AUTH_URL='[REDACTED] Use sf org auth show-sfdx-auth-url to view'|" "$FX"
+    _mk_fixture "$FX"; sedi "s|^E2E_SFDX_AUTH_URL=.*|E2E_SFDX_AUTH_URL='[REDACTED] Use sf org auth show-sfdx-auth-url to view'|" "$FX"
     _e2e_call 'e2e_load_fixture; echo LOADED'
     assert_file_not_contains "$mb/out.log" "LOADED" "鍵一式の認証 URL が隠された文章だと、読み込みに失敗する"
     assert_file_contains     "$mb/out.log" "認証 URL の形式ではありません" "その旨が表示される"
@@ -688,7 +688,7 @@ test_e2e_tmp_cleanup() {
     echo secret > "$t/e2e-sfdx-url.QwErTy"
     # 対象外: 新しいもの（別の実行の途中かもしれない）、実行中の run.sh のもの、名前が違うもの
     mkdir -p "$t/e2e-run.NewOne" "$t/e2e-run.Curren" "$t/e2e-run.toolong1" "$t/other.AbCdEf" "$t/e2e-run.AbC"
-    touch -d "2 hours ago" "$t/e2e-run.AbCdEf" "$t/e2e-run.AbCdEf/sfdx-url.txt" "$t/e2e-eca-del.123456" "$t/e2e-sfdx-url.QwErTy" \
+    touch_ago 120 "$t/e2e-run.AbCdEf" "$t/e2e-run.AbCdEf/sfdx-url.txt" "$t/e2e-eca-del.123456" "$t/e2e-sfdx-url.QwErTy" \
         "$t/e2e-run.Curren" "$t/e2e-run.toolong1" "$t/other.AbCdEf" "$t/e2e-run.AbC"
 
     # 一覧（実行中の run.sh の一時フォルダは、E2E_TMP で除外される）
@@ -1075,7 +1075,7 @@ assert_file_contains "$E2E_DIR/run.sh" "削除後: Salesforce への管理用ロ
     assert_file_contains "$E2E_DIR/run.sh" "sf-deploy.sh" "run.sh: sf-deploy.sh が、共有環境（予約名）への強制リリースを拒否することを確認する"
 
     # Hello World の Apex のソース: 共有の部品（lib/verify-common.sh）から、そろっている
-    _e2e_call 'echo "N=$(verify_hello_paths | wc -l)"; verify_hello_content_for force-app/main/default/classes/SfToolsE2eHelloTest.cls | grep -q @isTest && echo ISTEST'
+    _e2e_call 'echo "N=$(verify_hello_paths | wc -l | tr -d " ")"; verify_hello_content_for force-app/main/default/classes/SfToolsE2eHelloTest.cls | grep -q @isTest && echo ISTEST'
     assert_file_contains "$MB/out.log" "N=4" "Hello World: クラスのファイルが 4 つある"
     assert_file_contains "$MB/out.log" "ISTEST" "Hello World: テストクラスに @isTest がある（RunSpecifiedTests の自動検出に必要）"
     unset MOCK_CALL_LOG MOCK_GH_REPOS MOCK_SF_ECAS
@@ -1428,7 +1428,7 @@ case "$1 $2 $3" in
         cat "$f" > "$_d/alias_$a.url"; exit 0 ;;
     "org login web")
         a=$(_arg --alias "$@")
-        u=$(head -1 "$_d/web_urls"); sed -i 1d "$_d/web_urls"
+        u=$(head -1 "$_d/web_urls"); tail -n +2 "$_d/web_urls" > "$_d/web_urls.t"; mv "$_d/web_urls.t" "$_d/web_urls"
         printf '%s' "$u" > "$_d/alias_$a.url"; exit 0 ;;
     "org display "*)
         a=$(_arg --target-org "$@"); u=$(cat "$_d/alias_$a.url" 2>/dev/null)
@@ -1524,7 +1524,7 @@ case "$1 $2 $3" in
         cat "$f" > "$_d/alias_$a.url"; exit 0 ;;
     "org login web")
         a=$(_arg --alias "$@")
-        u=$(head -1 "$_d/web_urls"); sed -i 1d "$_d/web_urls"
+        u=$(head -1 "$_d/web_urls"); tail -n +2 "$_d/web_urls" > "$_d/web_urls.t"; mv "$_d/web_urls.t" "$_d/web_urls"
         printf '%s' "$u" > "$_d/alias_$a.url"; exit 0 ;;
     "org display "*)
         a=$(_arg --target-org "$@"); u=$(cat "$_d/alias_$a.url" 2>/dev/null)
@@ -1564,7 +1564,7 @@ EOF
     # 2. main だけが無効 → 確認のうえ、ブラウザで取り直す。staging（有効）は、そのまま
     : > "$MOCK_CALL_LOG"
     _mk_fixture "$fx"
-    sed -i "s|^E2E_SFDX_AUTH_URL=.*|E2E_SFDX_AUTH_URL=${U_MAIN_X}|" "$fx"
+    sedi "s|^E2E_SFDX_AUTH_URL=.*|E2E_SFDX_AUTH_URL=${U_MAIN_X}|" "$fx"
     echo "E2E_SFDX_AUTH_URL_STG=${U_STG}" >> "$fx"
     _run_ref 'Y\n' "${U_MAIN}"$'\n'
     assert_exit_ok "$rc" "main だけが無効: 取り直して、正常終了する"
@@ -1579,7 +1579,7 @@ EOF
 
     # 3. 無効なものを、取り直さない（N）→ 変更せず、非ゼロで終了（無効なまま残る旨を、表示する）
     _mk_fixture "$fx"
-    sed -i "s|^E2E_SFDX_AUTH_URL=.*|E2E_SFDX_AUTH_URL=${U_MAIN_X}|" "$fx"
+    sedi "s|^E2E_SFDX_AUTH_URL=.*|E2E_SFDX_AUTH_URL=${U_MAIN_X}|" "$fx"
     cp "$fx" "$mb/before3.env"
     _run_ref 'N\n' ""
     assert_exit_fail "$rc" "取り直さなければ、非ゼロで終了する"
@@ -1588,7 +1588,7 @@ EOF
 
     # 4. 取り直した組織が、有効な staging と同じ組織 → 中断（鍵一式を更新しない）
     _mk_fixture "$fx"
-    sed -i "s|^E2E_SFDX_AUTH_URL=.*|E2E_SFDX_AUTH_URL=${U_MAIN_X}|" "$fx"
+    sedi "s|^E2E_SFDX_AUTH_URL=.*|E2E_SFDX_AUTH_URL=${U_MAIN_X}|" "$fx"
     echo "E2E_SFDX_AUTH_URL_STG=${U_STG}" >> "$fx"
     cp "$fx" "$mb/before4.env"
     _run_ref 'Y\n' "${U_STG}"$'\n'
@@ -1599,7 +1599,7 @@ EOF
     # 5. main と staging の両方が無効 → 両方を取り直す。どちらも、保存される（まとめて保存）
     : > "$MOCK_CALL_LOG"
     _mk_fixture "$fx"
-    sed -i "s|^E2E_SFDX_AUTH_URL=.*|E2E_SFDX_AUTH_URL=${U_MAIN_X}|" "$fx"
+    sedi "s|^E2E_SFDX_AUTH_URL=.*|E2E_SFDX_AUTH_URL=${U_MAIN_X}|" "$fx"
     echo "E2E_SFDX_AUTH_URL_STG=${U_STG_X}" >> "$fx"
     _run_ref 'Y\nY\n' "${U_MAIN}"$'\n'"${U_STG}"$'\n'
     assert_exit_ok "$rc" "両方が無効: 両方を取り直して、正常終了する"

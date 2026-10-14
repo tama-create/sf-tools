@@ -63,7 +63,9 @@ echo -e "  ${CLR_WARNING}【Salesforce の接続（段階ごと）】${CLR_RESET
 echo "" >&2
 found=0
 violation=0   # 本番が main 以外にある場合は、1（終了コードを、非ゼロにする）
-declare -A SEEN_ORG
+# 表示済みの組織 ID と、その段階（同じ添字で対応する。連想配列は Bash 4 以降のため使わない）
+SEEN_ORG_IDS=()
+SEEN_ORG_TIERS=()
 for tier in main staging develop; do
     case "$tier" in
         main)    suffix="PROD" ;;
@@ -89,10 +91,16 @@ for tier in main staging develop; do
     printf '             種類: %s / ユーザー: %s\n' "$(org_kind_label "${kind:-unknown}")" "${user:-（未設定）}" >&2
     if [[ -n "$oid" ]]; then
         printf '             組織: %s（ID %s）/ 最終確認: %s\n' "${oname:-（名前なし）}" "$oid" "${chk:-不明}" >&2
-        if [[ -n "${SEEN_ORG[$oid]:-}" ]]; then
-            log "WARNING" "  ${tier} は、${SEEN_ORG[$oid]} と、同じ組織につながっています（デプロイが、同じ組織の中で、循環します）。"
+        # 同じ組織 ID が、すでにあれば警告する（複数あるときは、あとの段階を表示する。上書きしていた従来と同じ）
+        seen_tier=""
+        for (( _i = 0; _i < ${#SEEN_ORG_IDS[@]}; _i++ )); do
+            [[ "${SEEN_ORG_IDS[$_i]}" == "$oid" ]] && seen_tier="${SEEN_ORG_TIERS[$_i]}"
+        done
+        if [[ -n "$seen_tier" ]]; then
+            log "WARNING" "  ${tier} は、${seen_tier} と、同じ組織につながっています（デプロイが、同じ組織の中で、循環します）。"
         fi
-        SEEN_ORG[$oid]="$tier"
+        SEEN_ORG_IDS+=("$oid")
+        SEEN_ORG_TIERS+=("$tier")
     else
         printf '             組織: 未確認（組織の情報が、保存されていません）\n' >&2
     fi

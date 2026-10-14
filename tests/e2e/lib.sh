@@ -431,13 +431,10 @@ e2e_apex_count() {
 #   操作できるのは、テスト用のリポジトリ（{E2E_OWNER}/force-e2e-日時）だけ。
 # ------------------------------------------------------------------------------
 # gh を、時間の上限（E2E_GH_TIMEOUT 秒。既定 120）付きで実行する。応答がないまま、e2e が止まり続けないようにする。
-# 標準入力は閉じる（対話の待ちを避ける。引数は、すべてフラグで渡す）。timeout がない環境では、そのまま実行する
+# 標準入力は閉じる（対話の待ちを避ける。引数は、すべてフラグで渡す）。
+# run_with_timeout（lib/platform.sh）: timeout コマンドがない macOS でも、上限で打ち切る
 _e2e_gh() {
-    if command -v timeout >/dev/null 2>&1; then  # 存在確認のため run 不使用
-        timeout "${E2E_GH_TIMEOUT:-120}" gh "$@" </dev/null
-    else
-        gh "$@" </dev/null
-    fi
+    run_with_timeout "${E2E_GH_TIMEOUT:-120}" gh "$@" </dev/null
 }
 
 _e2e_check_repo() {
@@ -571,7 +568,8 @@ _e2e_cleanup_salesforce() {
         log "INFO" "  Salesforce: 対象の Apex クラスはありません。"
     else
         local -a apex_names=()
-        mapfile -t apex_names <<< "$list"
+        local _line
+        while IFS= read -r _line; do apex_names+=("$_line"); done <<< "$list"   # mapfile は Bash 4 以降のため使わない
         for name in "${apex_names[@]}"; do log "INFO" "  Salesforce: Apex クラス ${name}"; done
         if [[ "$mode" == "delete" ]]; then
             if ! e2e_delete_apex "${apex_names[@]}"; then  # 条件チェック
@@ -670,11 +668,13 @@ e2e_make_input() {
 #   鍵一式の値（Token・認証 URL）は、念のため、*** に置き換える。表示だけで、戻り値は常に 0
 e2e_show_run_failure() {
     local repo="$1" id="$2" label="$3" out line v
+    # BSD の sed（macOS）は、\x や \t を解釈しないため、Bash が、実際の文字に展開して渡す
+    local _e2e_esc=$'\033' _e2e_tab=$'\t'
     _e2e_check_repo "$repo"
     log "WARNING" "${label}: 失敗したステップのログ（末尾 ${E2E_FAIL_LOG_LINES:-40} 行）:"
     # 形式: ジョブ名 TAB ステップ名 TAB 時刻 本文 → [ステップ名] 本文。色の指定は除く
     out=$(_e2e_gh run view "$id" -R "$repo" --log-failed 2>/dev/null \
-        | sed -E 's/\x1b\[[0-9;]*m//g; s/^([^\t]*)\t([^\t]*)\t[^ ]+Z /[\2] /' \
+        | sed -E "s/${_e2e_esc}\[[0-9;]*m//g; s/^([^${_e2e_tab}]*)${_e2e_tab}([^${_e2e_tab}]*)${_e2e_tab}[^ ]+Z /[\2] /" \
         | tail -n "${E2E_FAIL_LOG_LINES:-40}") || true  # VAR=$(cmd) のため run 不使用
     if [[ -z "$out" ]]; then
         log "WARNING" "  （ログを取得できませんでした。実行 ID: ${id}）"
@@ -702,7 +702,7 @@ e2e_show_file_tail() {
     fi
     while IFS= read -r line; do
         printf '    %s\n' "$(_e2e_mask_line "$line")"
-    done < <(sed -E 's/\x1b\[[0-9;]*[A-Za-z]//g' "$f" | tail -n "$n")
+    done < <(_strip_ansi < "$f" | tail -n "$n")
     return 0
 }
 
@@ -729,11 +729,9 @@ _e2e_exec_sf_cmd() {
     log "INFO" "  実行: bash $(basename "$1") ${*:2}（出力: ${outf}。上限 ${to} 秒）"
     (
         cd "$dir" || exit 125
-        if command -v timeout >/dev/null 2>&1; then  # 存在確認のため run 不使用
-            printf '%b' "$input" | PATH="${E2E_SHIM_DIR:-}:${PATH}" SF_LAUNCHER_ACTIVE=1 timeout "$to" bash "$@"
-        else
-            printf '%b' "$input" | PATH="${E2E_SHIM_DIR:-}:${PATH}" SF_LAUNCHER_ACTIVE=1 bash "$@"
-        fi
+        # run_with_timeout（lib/platform.sh）: timeout コマンドがない macOS でも、上限で打ち切る
+        export PATH="${E2E_SHIM_DIR:-}:${PATH}" SF_LAUNCHER_ACTIVE=1  # このサブシェルの中だけ
+        printf '%b' "$input" | run_with_timeout "$to" bash "$@"
     ) > "$outf" 2>&1 &  # 背景で動かし、経過を表示しながら待つ
     pid=$!
     next=$hb

@@ -208,7 +208,19 @@ fi
 OK_COUNT=0
 NG_COUNT=0
 FLAKY=0
-declare -A LEFT=()   # 組織に、Hello World が残っている可能性のある段階（リリースの PR をマージしてから、削除が成功するまで）
+LEFT=()   # 組織に、Hello World が残っている可能性のある段階（リリースの PR をマージしてから、削除が成功するまで）
+# LEFT に、段階を入れる / 消す（連想配列は Bash 4 以降のため使わない。段階の名前の配列で持つ）
+_left_add() {
+    local t
+    for t in "${LEFT[@]}"; do [[ "$t" == "$1" ]] && return 0; done
+    LEFT+=("$1")
+}
+_left_del() {
+    local t
+    local -a rest=()
+    for t in "${LEFT[@]}"; do [[ "$t" == "$1" ]] || rest+=("$t"); done
+    LEFT=("${rest[@]}")
+}
 STOPPED=0
 
 # 1 件の確認: 説明 コマンド...
@@ -231,7 +243,7 @@ _run_ok() {
     local id="$1" label="$2" out line
     [[ "$(verify_run_conclusion "$REPO" "$id")" == "success" ]] && return 0
     log "WARNING" "${label}: 失敗しました。失敗したステップのログ（末尾 30 行）:"
-    out=$(verify_gh run view "$id" -R "$REPO" --log-failed 2>/dev/null | sed -E 's/\x1b\[[0-9;]*m//g' | tail -n 30) || true  # VAR=$(cmd) のため run 不使用
+    out=$(verify_gh run view "$id" -R "$REPO" --log-failed 2>/dev/null | _strip_ansi | tail -n 30) || true  # VAR=$(cmd) のため run 不使用
     while IFS= read -r line; do printf '    %s\n' "$(_mask_secrets "$line")" >&2; done <<< "$out"
     log "WARNING" "${label}: 一時的な失敗の可能性があるため、1 回だけ再実行します。"
     verify_rerun_and_wait "$REPO" "$id" || return 1
@@ -296,7 +308,7 @@ _guidance() {
     echo "" >&2
     log "ERROR" "検証を、途中で止めました。"
     if (( ${#LEFT[@]} > 0 )); then
-        log "WARNING" "  Hello World が、次の段階の組織に、残っている可能性があります: ${!LEFT[*]}"
+        log "WARNING" "  Hello World が、次の段階の組織に、残っている可能性があります: ${LEFT[*]}"
         log "WARNING" "  削除のみを、やり直すには、次を実行してください: sf-init.sh --verify --cleanup"
     fi
     log "WARNING" "  PR が残っているときは、GitHub の画面で、確認してください（https://github.com/${REPO}/pulls）。"
@@ -317,7 +329,7 @@ _pr_flow() {
     _vchk "${label}: wf-validate（検証）が実行され、完了した" test -n "$runid" || return 1
     _vchk "${label}: wf-validate が成功した" _run_ok "$runid" "${label}: wf-validate" || return 1
     _vchk "${label}: PR をマージした" verify_pr_merge "$REPO" "$prn" || return 1
-    [[ "$mode" == "release" ]] && LEFT["$base"]=1   # マージした時点から、組織に、クラスが入った可能性がある
+    [[ "$mode" == "release" ]] && _left_add "$base"   # マージした時点から、組織に、クラスが入った可能性がある
     runid=$(verify_wait_pr_run "$REPO" wf-release.yml "$br" "$b_rel") || runid=""    # VAR=$(cmd) のため run 不使用
     _vchk "${label}: wf-release が実行され、完了した" test -n "$runid" || return 1
     FLOW_RUN="$runid"
@@ -433,12 +445,12 @@ fi
 
 log "HEADER" "削除（${TIERS[*]}）"
 # --cleanup のときは、どの段階に残っているか分からないため、すべての段階を、対象にする
-[[ $CLEANUP_ONLY -eq 1 ]] && for t in "${TIERS[@]}"; do LEFT["$t"]=1; done
+[[ $CLEANUP_ONLY -eq 1 ]] && for t in "${TIERS[@]}"; do _left_add "$t"; done
 if _vchk "削除用のブランチ ${JOB_DELETE} を作成した（クラスのファイルの削除と削除対象）" _make_delete_branch "$JOB_DELETE"; then
     for t in "${TIERS[@]}"; do
         if _pr_flow "削除（${t}）" "$JOB_DELETE" "verify: Hello World を削除" "$t" delete; then
             _evidence "$t" "$FLOW_RUN" "削除" || true
-            unset 'LEFT[$t]'   # この段階のクラスは、消えた
+            _left_del "$t"   # この段階のクラスは、消えた
         else
             STOPPED=1
             break

@@ -173,9 +173,12 @@ phase_generate_manifest() {
     # セクション:
     #   [files]   → --source-dir <パス>    ファイルパス指定（デフォルト）
     #   [members] → --metadata <種別:名前>  メンバー名指定
+    #   結果は、配列 _pl_out に入れる（nameref は Bash 4.3 以降のため使わない。macOS 標準の Bash 3.2 で動かす）
+    local _pl_out=()
     process_list() {
-        local list=$1; shift; local -n ref=$1
+        local list=$1
         local section="files"
+        _pl_out=()
         while IFS= read -r line || [[ -n "$line" ]]; do
             local clean_line
             # サブプロセス不使用: \r 除去 → 前後空白トリム（Windows/Git Bash 高速化）
@@ -195,9 +198,9 @@ phase_generate_manifest() {
 
             # セクションに応じた引数を追加
             if [[ "$section" == "files" ]]; then
-                ref+=("--source-dir" "$clean_line")
+                _pl_out+=("--source-dir" "$clean_line")
             else
-                ref+=("--metadata" "$clean_line")
+                _pl_out+=("--metadata" "$clean_line")
             fi
         done < "$list"
         # TortoiseGit でのサイレントエラー対策:
@@ -205,8 +208,10 @@ phase_generate_manifest() {
         return 0
     }
 
-    process_list "$DEPLOY_LIST" deploy_args || return $RET_NG
-    process_list "$REMOVE_LIST" remove_args || return $RET_NG
+    process_list "$DEPLOY_LIST" || return $RET_NG
+    deploy_args=("${_pl_out[@]}")
+    process_list "$REMOVE_LIST" || return $RET_NG
+    remove_args=("${_pl_out[@]}")
 
     # @isTest アノテーションを持つ .cls ファイルを検出して RUN_TESTS に登録
     local i=0

@@ -50,8 +50,16 @@ git clone https://github.com/tama-create/sf-tools.git ~/sf-tools
 PATH に追加して、どこからでも実行できるようにする:
 
 ```bash
+# Windows（Git Bash）・Linux
 echo 'export PATH="$HOME/sf-tools/bin:$PATH"' >> ~/.bashrc
 source ~/.bashrc
+```
+
+macOS（標準のターミナル = zsh）は、`~/.zshrc` に追加します。
+
+```bash
+echo 'export PATH="$HOME/sf-tools/bin:$PATH"' >> ~/.zshrc
+source ~/.zshrc
 ```
 
 ---

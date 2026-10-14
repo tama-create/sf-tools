@@ -82,11 +82,8 @@ verify_empty_target_text() { printf '%s\n' '[files]' '' '[members]'; }
 # ------------------------------------------------------------------------------
 verify_gh() {
     local t="${VERIFY_GH_TIMEOUT:-${E2E_GH_TIMEOUT:-120}}"
-    if command -v timeout >/dev/null 2>&1; then  # 存在確認のため run 不使用
-        timeout "$t" gh "$@" </dev/null
-    else
-        gh "$@" </dev/null
-    fi
+    # run_with_timeout（lib/platform.sh）: timeout コマンドがない macOS でも、上限で打ち切る
+    run_with_timeout "$t" gh "$@" </dev/null
 }
 _sfv_poll()  { printf '%s' "${VERIFY_POLL_SEC:-${E2E_POLL_SEC:-5}}"; }
 _sfv_tries() { printf '%s' "${VERIFY_CONCLUSION_TRIES:-${E2E_CONCLUSION_TRIES:-6}}"; }

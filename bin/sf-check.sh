@@ -71,26 +71,24 @@ fi
 # ------------------------------------------------------------------------------
 
 # \r 除去・前後空白トリムした結果を変数に格納する
-# 引数: $1 = 出力変数名(nameref), $2 = 入力行
+# 引数: $1 = 出力変数名（set_var で代入）, $2 = 入力行
 trim_line() {
-    local -n _result="$1"
-    local tmp="$2"
-    tmp="${tmp//$'\r'/}"
-    tmp="${tmp#"${tmp%%[^[:space:]]*}"}"
-    tmp="${tmp%"${tmp##*[^[:space:]]}"}"
-    _result="$tmp"
+    local _tl_tmp="$2"
+    _tl_tmp="${_tl_tmp//$'\r'/}"
+    _tl_tmp="${_tl_tmp#"${_tl_tmp%%[^[:space:]]*}"}"
+    _tl_tmp="${_tl_tmp%"${_tl_tmp##*[^[:space:]]}"}"
+    set_var "$1" "$_tl_tmp"
 }
 
 # セクションマーカーを判定し、セクション変数を更新する
-# 引数: $1 = セクション変数名(nameref), $2 = トリム済み行
+# 引数: $1 = セクション変数名（set_var で代入）, $2 = トリム済み行
 # 戻り値: 0=マーカーだった（呼び出し元で continue すべき） / 1=マーカーではない
 parse_section() {
-    local -n _section="$1"
-    local line="$2"
-    if [[ "$line" == "[files]" ]]; then
-        _section="files"; return 0
-    elif [[ "$line" == "[members]" ]]; then
-        _section="members"; return 0
+    local _ps_line="$2"
+    if [[ "$_ps_line" == "[files]" ]]; then
+        set_var "$1" "files"; return 0
+    elif [[ "$_ps_line" == "[members]" ]]; then
+        set_var "$1" "members"; return 0
     fi
     return 1
 }

@@ -110,7 +110,7 @@ fi
 
 # push が完了したら、PAT を .sf-init.env に残さない（後続フェーズでは使用しない）
 unset GIT_ASKPASS SF_INIT_PUSH_TOKEN
-run sed -i '/^PAT_TOKEN_VALUE=/d' "$SF_INIT_ENV_FILE"
+run sed_inplace '/^PAT_TOKEN_VALUE=/d' "$SF_INIT_ENV_FILE"
 
 log "SUCCESS" "初回コミット＆プッシュ完了。"
 

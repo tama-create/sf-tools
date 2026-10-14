@@ -7,6 +7,9 @@
 #
 # 【提供する関数】
 #   is_gitbash                     ... Windows の Git Bash か判定（$OSTYPE が msys / mingw / cygwin）
+#   set_var VARNAME VALUE          ... 指定した名前の変数に代入する（nameref の代わり。Bash 3.2 で動く）
+#   sed_inplace SCRIPT FILE        ... ファイルを、その場で置換する（GNU / BSD の sed 共通）
+#   run_with_timeout 秒 CMD [ARGS] ... 時間の上限つきで実行する（timeout がない macOS でも動く。時間切れは 124）
 #   run_isolated_home CMD [ARGS]   ... 一時的なホームフォルダの中でコマンドを実行（sf の認証・エイリアスを隔離）
 #   check_sf_cli [--warn-only] [--cache] ... sf が終了コードを正しく返すか確認（npm 版が前提。NG なら案内して die）
 #   open_browser URL               ... OS を判定してブラウザを開く（Git Bash/WSL/macOS/Linux 対応）
@@ -19,6 +22,66 @@
 # 【使い方】  if is_gitbash; then ...
 # ------------------------------------------------------------------------------
 is_gitbash() { [[ "$OSTYPE" == "msys"* || "$OSTYPE" == "mingw"* || "$OSTYPE" == "cygwin"* ]]; }
+
+# set_var - 呼び出し元が指定した名前の変数に、値を代入する（nameref（local -n）の代わり。Bash 3.2 で動く）
+# ------------------------------------------------------------------------------
+# 【使い方】 set_var VARNAME VALUE      例: set_var "$1" "$result"
+# 【理由】   nameref は Bash 4.3 以降の機能で、macOS 標準の Bash（3.2）にはない。printf -v は 3.1 以降で使える。
+#           eval は使わない。変数名は、英数字と _ だけを通す（それ以外は die）。
+# 【注意】   呼び出し元の関数に、VARNAME と同じ名前の local 変数があると、そちらに代入される。
+#           結果を返す関数の local 変数は、接頭辞（_xx_）を付けて、名前の衝突を避ける。
+# ------------------------------------------------------------------------------
+set_var() {
+    [[ "$1" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || die "set_var: 変数名が正しくありません: ${1}"
+    printf -v "$1" '%s' "$2"
+}
+
+# sed_inplace - ファイルを、その場で置換する（GNU の sed と BSD の sed（macOS）の、両方で動く）
+# ------------------------------------------------------------------------------
+# 【使い方】 sed_inplace SCRIPT FILE      例: sed_inplace '/^PAT_TOKEN_VALUE=/d' "$ENV_FILE"
+# 【理由】   `sed -i SCRIPT FILE` は、BSD の sed では、-i の直後に、バックアップの拡張子が必要（GNU では、不要）。
+#           拡張子を、-i に続けて書く形（-i.bak）は、どちらでも動く。バックアップは、成功のあとで、消す。
+# 【戻り値】 sed の戻り値（失敗しても、バックアップは、残さない）
+# ------------------------------------------------------------------------------
+sed_inplace() {
+    local script="$1" file="$2" rc
+    sed -i.bak "$script" "$file"
+    rc=$?
+    rm -f "${file}.bak"  # run 不使用: バックアップの削除（なくても続行）
+    return $rc
+}
+
+# run_with_timeout - コマンドを、時間の上限つきで実行する（timeout コマンドがない macOS でも動く）
+# ------------------------------------------------------------------------------
+# 【使い方】 run_with_timeout 秒 CMD [ARGS...]      例: run_with_timeout 120 gh pr view 1 </dev/null
+# 【理由】   timeout（GNU coreutils）は、Linux と Git Bash にはあるが、macOS の標準にはない。
+#           ない環境で、上限なしで実行すると、応答しないコマンドで、止まり続ける。
+# 【動作】   timeout があれば、それを使う。なければ、背景で実行して、0.1 秒ごとに終了を確認し、上限を超えたら終了させる。
+#           標準入力は、呼び出し元のものを、そのまま渡す（背景のコマンドは、既定では /dev/null になるため、<&0 で明示する）
+# 【戻り値】 コマンドの終了コード。時間切れは 124（timeout コマンドと同じ）
+# ------------------------------------------------------------------------------
+run_with_timeout() {
+    local _rt_secs="$1" _rt_pid _rt_ticks=0 _rt_limit
+    shift
+    if command -v timeout >/dev/null 2>&1; then  # 存在確認のため run 不使用
+        timeout "$_rt_secs" "$@"
+        return $?
+    fi
+    "$@" <&0 &  # 背景で起動し、下のループで時間を監視する
+    _rt_pid=$!
+    _rt_limit=$(( _rt_secs * 10 ))
+    while kill -0 "$_rt_pid" 2>/dev/null; do  # 存在確認のため run 不使用
+        if (( _rt_ticks >= _rt_limit )); then
+            pkill -TERM -P "$_rt_pid" 2>/dev/null || true  # 子プロセスも止める（なくても続行）
+            kill -TERM "$_rt_pid" 2>/dev/null || true      # すでに終了していても続行
+            wait "$_rt_pid" 2>/dev/null
+            return 124
+        fi
+        sleep 0.1  # run 不使用: 待機
+        _rt_ticks=$(( _rt_ticks + 1 ))
+    done
+    wait "$_rt_pid"
+}
 
 # run_isolated_home - コマンドを、一時的なホームフォルダの中で実行する（sf の認証・エイリアスを隔離する）
 # ------------------------------------------------------------------------------
@@ -35,13 +98,23 @@ is_gitbash() { [[ "$OSTYPE" == "msys"* || "$OSTYPE" == "mingw"* || "$OSTYPE" == 
 #
 # 【動作】
 #   ・mktemp -d で一時フォルダを作り、HOME / USERPROFILE をそれにしてコマンドを実行する
+#   ・Windows（Git Bash）以外では、SF_USE_GENERIC_UNIX_KEYCHAIN=true も設定する（mac のキーチェーンの警告を避ける。上記）
 #   ・終了後に、一時フォルダを削除する（アクセストークンなどが入るため、必ず消す）
 #   ・出力（標準出力と標準エラー）を、標準出力に返す。戻り値は、コマンドの終了コード
 # ------------------------------------------------------------------------------
 run_isolated_home() {
     local tmp_home out rc
     tmp_home=$(mktemp -d "${TMPDIR:-/tmp}/sf-tools-home.XXXXXX") || return $RET_NG  # VAR=$(cmd) のため run 不使用
-    out=$(HOME="$tmp_home" USERPROFILE="$tmp_home" "$@" 2>&1)  # VAR=$(cmd) のため run 不使用（認証情報をログに出さない）
+    # VAR=$(cmd) のため run 不使用（認証情報をログに出さない）。サブシェルの中で環境変数を設定する（関数も呼べる）
+    #   SF_USE_GENERIC_UNIX_KEYCHAIN: Windows 以外では、sf に、暗号鍵を、OS のキーチェーンではなく、一時ホームの
+    #   ファイル（.sfdx/key.json）に保存させる。mac では、一時ホームに Library/Keychains がないため、設定しないと、
+    #   「キーチェーンが見つかりません（"local" を保存する）」のダイアログが出る（sf は、暗号鍵を、サービス sfdx・
+    #   アカウント local で、キーチェーンに保存する）。本物のキーチェーンには、触れない。Windows（Git Bash）は、従来のまま
+    out=$(
+        export HOME="$tmp_home" USERPROFILE="$tmp_home"
+        is_gitbash || export SF_USE_GENERIC_UNIX_KEYCHAIN=true
+        "$@" 2>&1
+    )
     rc=$?
     rm -rf "${tmp_home:?}"  # run 不使用: 認証情報を含む一時フォルダの確実な削除
     printf '%s' "$out"

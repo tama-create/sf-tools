@@ -46,6 +46,65 @@ CLR_RST='\033[0m'
 # そのため、ここで外す（GITHUB_ACTIONS=true の動作を確認するテストは、そのテストの中で、明示的に設定する）
 unset GITHUB_ACTIONS CI
 
+# 実際の Git・npm・sf の「更新」を、テストが実行しないための保護。
+#   sf-install.sh は、sf-upgrade.sh をバックグラウンドで起動する。テストは、短い待ちのあとに、モック（偽の npm / sf / git）の
+#   フォルダを消すため、動作の遅い環境（Windows の Git Bash）では、残りの処理が、本物の
+#   `git update-git-for-windows --yes`（Git for Windows のインストーラー。実行中の Git Bash 自体が壊れ、終了コード 2304 で
+#   異常終了した）・`npm install -g`・`sf update` を実行してしまう。
+#   PATH の先頭に、これらの「更新」だけを無効にする代理のコマンドを置く（ほかの使い方は、本物にそのまま渡す。モックは、
+#   各テストが、さらにその前に置くので、変わらない）。本物がない場合は、代理も作らない（「npm がない」環境のテストを保つため）
+_make_guard_bin() {
+    local d real
+    d=$(mktemp -d "${TMPDIR:-/tmp}/sftest-guard-XXXX") || return 1
+    real=$(command -v git 2>/dev/null) || real=""
+    if [[ -n "$real" ]]; then
+        cat > "$d/git" <<EOF
+#!/bin/bash
+if [[ "\${1:-}" == "update-git-for-windows" ]]; then
+    echo "[sftest-guard] git update-git-for-windows は、テストでは実行しません" >&2; exit 0
+fi
+exec "$real" "\$@"
+EOF
+        chmod +x "$d/git"
+    fi
+    real=$(command -v npm 2>/dev/null) || real=""
+    if [[ -n "$real" ]]; then
+        cat > "$d/npm" <<EOF
+#!/bin/bash
+_g=0
+for _a in "\$@"; do [[ "\$_a" == "-g" || "\$_a" == "--global" ]] && _g=1; done
+case "\${1:-}" in
+    install|i|add|update|up|upgrade|uninstall|remove|rm)
+        if [[ \$_g -eq 1 ]]; then
+            echo "[sftest-guard] npm \$* は、テストでは実行しません" >&2; exit 0
+        fi ;;
+esac
+exec "$real" "\$@"
+EOF
+        chmod +x "$d/npm"
+    fi
+    real=$(command -v sf 2>/dev/null) || real=""
+    if [[ -n "$real" ]]; then
+        cat > "$d/sf" <<EOF
+#!/bin/bash
+if [[ "\${1:-}" == "update" ]]; then
+    echo "[sftest-guard] sf update は、テストでは実行しません" >&2; exit 0
+fi
+exec "$real" "\$@"
+EOF
+        chmod +x "$d/sf"
+    fi
+    printf '%s' "$d"
+}
+if [[ -z "${SF_TEST_GUARD_BIN:-}" || ! -d "${SF_TEST_GUARD_BIN:-}" ]]; then
+    SF_TEST_GUARD_BIN=$(_make_guard_bin) || SF_TEST_GUARD_BIN=""
+    if [[ -n "$SF_TEST_GUARD_BIN" ]]; then
+        export SF_TEST_GUARD_BIN
+        export PATH="${SF_TEST_GUARD_BIN}:${PATH}"
+        trap 'rm -rf "${SF_TEST_GUARD_BIN:?}" 2>/dev/null' EXIT   # run 不使用: 保護用の一時フォルダの後始末
+    fi
+fi
+
 # 同時に動かすテストファイルの数（先頭の --jobs N / --jobs=N / --serial を、読み取る）
 JOBS="${SF_TEST_JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)}"   # macOS には nproc がない
 while [[ "${1:-}" == "--jobs" || "${1:-}" == --jobs=* || "${1:-}" == "--serial" ]]; do
@@ -240,13 +299,12 @@ else
         test_path="$TESTS_DIR/${TEST_FILES[$i]}"
         [[ -f "$test_path" ]] || continue   # 見つからないファイルは、pid が -1 のまま（表示のときに SKIP）
         while (( $(jobs -rp | wc -l) >= JOBS )); do
-            # wait -n は Bash 4.3 以降。それより古い Bash（macOS 標準の 3.2）では、少し待って、数え直す
-            if (( BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 3) )); then
-                wait -n 2>/dev/null || true
-            else
-                sleep 0.2
-            fi
+            # wait -n は使わない（Bash 4.3 以降の機能。macOS 標準の 3.2 で動かすため。CLAUDE.md 2.2）。少し待って、数え直す
+            sleep 0.2
         done
+        # SF_TEST_PROGRESS=1: 起動するテストファイルを、順に表示する（結果は、全部の起動後にまとめて出るため、
+        #   途中で異常終了したときに、どのファイルで止まったかを、分かるようにする。GitHub Actions の Windows 用）
+        [[ "${SF_TEST_PROGRESS:-}" == "1" ]] && echo "  [START] ${TEST_FILES[$i]} ($(date '+%H:%M:%S'))" >&2
         tmp=$(mktemp /tmp/sftest-XXXX)
         bash "$test_path" > "$tmp" 2>&1 < /dev/null &   # 標準入力は閉じる（入力待ちで、止まらないため）
         _pids[$i]=$!

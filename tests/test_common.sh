@@ -808,6 +808,39 @@ test_bash32_compat() {
     rm -rf "$td"
 }
 
+# ------------------------------------------------------------------------------
+# テストの保護: 実際の Git for Windows の更新・npm のグローバル更新・sf update を、テストが実行しない
+#   （run_tests.sh が、保護用の代理コマンドを PATH の先頭に置く。2026-10-14: Windows の Actions で、モックが消えたあとの
+#    バックグラウンドの sf-upgrade.sh が、本物の git update-git-for-windows を実行し、Git Bash 自体が壊れた）
+# ------------------------------------------------------------------------------
+test_runner_guard() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] テストの保護: 実際の Git / npm / sf の更新を実行しない${CLR_RST}"
+    if [[ -z "${SF_TEST_GUARD_BIN:-}" || ! -d "${SF_TEST_GUARD_BIN:-}" ]]; then
+        skip "run_tests.sh 経由ではない（SF_TEST_GUARD_BIN がない）ためスキップ"; return
+    fi
+    local out rc
+    [[ "$PATH" == "${SF_TEST_GUARD_BIN}:"* ]] && pass "保護用のフォルダが、PATH の先頭にある" \
+        || fail "保護用のフォルダが、PATH の先頭にある" "PATH=${PATH%%:*}..."
+    if command -v git > /dev/null 2>&1; then
+        out=$(git update-git-for-windows --yes 2>&1); rc=$?
+        assert_equals "$rc" "0" "git update-git-for-windows: 実行せず、0 で終わる"
+        assert_output_contains "$out" "sftest-guard" "git update-git-for-windows: 保護の表示が出る（本物は動かない）"
+        out=$(git --version 2>&1)
+        assert_output_contains "$out" "git version" "git の通常のコマンドは、本物に渡る"
+    fi
+    if command -v npm > /dev/null 2>&1; then
+        out=$(npm install -g @salesforce/cli@latest 2>&1); rc=$?
+        assert_equals "$rc" "0" "npm install -g: 実行せず、0 で終わる"
+        assert_output_contains "$out" "sftest-guard" "npm install -g: 保護の表示が出る（本物は動かない）"
+    fi
+    if command -v sf > /dev/null 2>&1; then
+        out=$(sf update 2>&1); rc=$?
+        assert_equals "$rc" "0" "sf update: 実行せず、0 で終わる"
+        assert_output_contains "$out" "sftest-guard" "sf update: 保護の表示が出る（本物は動かない）"
+    fi
+}
+
+test_runner_guard
 test_check_gh_owner_match
 test_check_gh_owner_mismatch
 test_check_gh_owner_skip_on_empty

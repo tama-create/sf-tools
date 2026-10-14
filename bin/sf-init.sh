@@ -527,7 +527,9 @@ if [[ "$END_PHASE" -eq 10 && "$FULL_START" -eq 1 && "${GITHUB_ACTIONS:-}" != "tr
         esac
     done
     if [[ "$_vrun" -eq 1 ]]; then
-        if ( cd "$REPO_DIR" && SF_VERIFY_CONFIRMED=1 bash "${SF_TOOLS_DIR}/phases/init/verify.sh" ); then  # 条件チェック
+        # REPO_DIR が空のときは、現在のフォルダで実行する（${REPO_DIR:-.}）。Bash 5.3（Git for Windows 2.55 以降）は、
+        #   cd "" を「cd: null directory」のエラーにする（3.2・5.2 は、何もせず成功する）。通常は、Phase 2 が設定する
+        if ( cd "${REPO_DIR:-.}" && SF_VERIFY_CONFIRMED=1 bash "${SF_TOOLS_DIR}/phases/init/verify.sh" ); then  # 条件チェック
             VERIFY_RESULT="done"
         else
             VERIFY_RESULT="failed"

@@ -214,10 +214,9 @@ if ask_yn "${NEXT_TARGET} にPRを出しますか？"; then
         | sed 's|git@github\.com:|https://github.com/|; s|\.git$||')
     PR_URL="${REPO_URL}/compare/${NEXT_TARGET}...${CURRENT_BRANCH}?expand=1"
     log "INFO" "ブラウザでPR作成画面を開きます..."
-    run start "$PR_URL" 2>/dev/null \
-        || run open "$PR_URL" 2>/dev/null \
-        || run xdg-open "$PR_URL" 2>/dev/null \
-        || { log "WARNING" "ブラウザを開けません。以下のURLを手動で開いてください:"; echo "  $PR_URL" >&2; }
+    # open_browser（lib/platform.sh）が、OS に合ったコマンドで開く（Git Bash: start / WSL: powershell / macOS: open / Linux: xdg-open）
+    open_browser "$PR_URL"
+    echo "  $PR_URL" >&2   # 開けなかった場合に備えて、URL も表示する
 else
     log "INFO" "PR 作成をスキップしました。"
 fi

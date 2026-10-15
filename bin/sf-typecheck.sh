@@ -18,6 +18,7 @@
 #   sf-typecheck.sh --org ALIAS --validate-only       # 検証だけ（組織には、何も反映しない。削除は、確認できない）
 #   sf-typecheck.sh --org ALIAS --only ApexPage,Queue # 種類を絞る
 #   sf-typecheck.sh --list                            # 確認する種類の一覧だけ
+#   sf-typecheck.sh --coverage                        # 変更セット対応の種類のうち、確認済み・未確認の数と一覧（組織には、接続しない）
 #
 # 【オプション】
 #   --org ALIAS        : 接続先の組織のエイリアス（必須。予約名・本番は、拒否）
@@ -25,6 +26,9 @@
 #   --only A,B         : 指定した種類だけ確認する
 #   --out FILE         : 結果の表（TSV）の出力先（既定: ./sf-typecheck-result.txt）
 #   --list             : 確認する種類の一覧を出して終了する
+#   --coverage         : config/changeset-types.txt（変更セットで扱える種類。公式の一覧）と、
+#                        config/metadata-capability.txt（実機で確認した結果）を突き合わせて、確認済み・未確認の数と一覧を出す。
+#                        組織には、接続しない（安全の確認・警告は、不要）
 #   -y, --yes          : 確認（Enter）を省略する（自動実行用。警告は、表示する）
 #   -h, --help         : このヘルプを表示する
 # ==============================================================================
@@ -62,6 +66,7 @@ MODE="full"
 ONLY=""
 OUT_FILE="./sf-typecheck-result.txt"
 LIST_ONLY=0
+COVERAGE=0
 ASSUME_YES=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -76,11 +81,56 @@ while [[ $# -gt 0 ]]; do
             [[ $# -ge 2 && "$2" != --* ]] || die "--out にファイルを指定してください。"
             OUT_FILE="$2"; shift ;;
         --list) LIST_ONLY=1 ;;
+        --coverage) COVERAGE=1 ;;
         -y|--yes) ASSUME_YES=1 ;;
         *) die "不明なオプションです: $1" ;;
     esac
     shift
 done
+
+# 変更セット対応の種類と、実機で確認した結果の突き合わせ（組織には、接続しない。awk のみ）
+if [[ $COVERAGE -eq 1 ]]; then
+    CS_FILE="${SF_TYPECHECK_CHANGESET_FILE:-${SCRIPT_DIR}/../config/changeset-types.txt}"
+    CAP_FILE="${SF_CHECK_CAPABILITY_FILE:-${SCRIPT_DIR}/../config/metadata-capability.txt}"
+    [[ -f "$CS_FILE" ]] || die "変更セット対応の種類の一覧が見つかりません: ${CS_FILE}"
+    [[ -f "$CAP_FILE" ]] || die "可否の表が見つかりません: ${CAP_FILE}"
+    # 可否の表の種類名が、変更セット側の複数形・単数形と違うもの（CustomLabels など）は、別名で引く
+    awk -v CAP="$CAP_FILE" '
+        BEGIN {
+            FS = "\t"
+            while ((getline line < CAP) > 0) {
+                if (line ~ /^#/ || line ~ /^[ \t\r]*$/) continue
+                split(line, f, "\t"); gsub(/\r/, "", f[3]); r[f[1]] = f[2]; d[f[1]] = f[3]
+            }
+            alias["CustomLabels"] = "CustomLabel"; alias["AssignmentRules"] = "AssignmentRule"; alias["EscalationRules"] = "EscalationRule"
+        }
+        /^#/ || /^[ \t\r]*$/ { next }
+        {
+            t = $0; gsub(/\r/, "", t); total++
+            k = t
+            # 別名の表の行が、確認済みなら、そちらを使う（自分の行が、ない・判定できない場合だけ）
+            if ((t in alias) && (alias[t] in r) && (!(t in r) || (r[t] == "unknown" && d[t] == "unknown"))) k = alias[t]
+            if (!(k in r))                                                                   cls = "untested"
+            else if (r[k] == "ok" && d[k] == "ok")                                           cls = "ok"
+            else if (r[k] == "ng" || d[k] == "ng" || r[k] == "limited" || d[k] == "limited") cls = "limited"
+            else if (r[k] == "ok")                                                           cls = "relonly"
+            else                                                                             cls = "unknown"
+            n[cls]++; L[cls] = L[cls] (L[cls] == "" ? "" : ", ") t
+        }
+        END {
+            printf "変更セットで扱える種類: %d\n", total
+            printf "  リリースも削除も、実機で確認済み       : %4d（%d%%）\n", n["ok"], (total ? int(n["ok"] * 100 / total) : 0)
+            printf "  リリースのみ確認済み（削除は未確認）   : %4d\n", n["relonly"]
+            printf "  条件つき・確認済みの NG                : %4d\n", n["limited"]
+            printf "  判定できない（組織の機能がない など）  : %4d\n", n["unknown"]
+            printf "  まだ試していない                       : %4d\n", n["untested"]
+            if (n["limited"])  printf "\n【条件つき・確認済みの NG】\n%s\n", L["limited"]
+            if (n["relonly"])  printf "\n【リリースのみ確認済み】\n%s\n", L["relonly"]
+            if (n["unknown"])  printf "\n【判定できない】\n%s\n", L["unknown"]
+            if (n["untested"]) printf "\n【まだ試していない】\n%s\n", L["untested"]
+        }' "$CS_FILE" | fold -s -w 110
+    exit "${PIPESTATUS[0]}"
+fi
 
 TYPECHECK_JS="${SCRIPT_DIR}/../lib/typecheck.js"
 [[ -f "$TYPECHECK_JS" ]] || die "lib/typecheck.js が見つかりません: ${TYPECHECK_JS}"

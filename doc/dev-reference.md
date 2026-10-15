@@ -599,6 +599,7 @@ sf-init.sh --add-tier develop    # main+staging → main+staging+develop
 - テストでは `SF_TYPECHECK_CMD` で、sf をモックに差し替える
 - 終了コード: `lib/typecheck.js` は 0（すべて ok）/ 3（ng あり）/ 1（実行の失敗）。`sf-typecheck.sh` は、3 を警告にして、0 で終わる（結果の表で判断する）
 - `config/metadata-capability.txt` は、この結果を人が確認して反映する表。`ng`（必ずできない）/ `limited`（権限・使用中・標準のもの・移行済み など、条件による）/ `unknown`（サンプルを作れていない・標準の部品しかない）の区別を守る。`ng` には、備考（理由）を必ず書く（テストで検査）。個別の組織の権限で、できないだけのものは、`ng` にせず `limited` にする
+- `--coverage`: 組織に接続せず、`config/changeset-types.txt`（変更セットで扱える種類。公式の Metadata Coverage Report の ChangeSets 列。取得日・出典は、ファイルの冒頭）と `config/metadata-capability.txt` を突き合わせ、確認済み / リリースのみ / 条件つき・NG / 判定できない / 未確認の数と一覧を出す（awk のみ。`SF_TYPECHECK_CHANGESET_FILE`・`SF_CHECK_CAPABILITY_FILE` で、ファイルを差し替え可）。表の種類名と、変更セット側の複数形・単数形が違うもの（CustomLabels など）は、別名で引く
 - 確認した環境: Developer Edition（API 64.0）。新しい種類の確認を足すときは、`lib/typecheck.js` の `S`（サンプルの一覧）に追加する
 - サンプルの定義（`add(種類, files, del, extra)`）: `del` の中の `null` は、削除の段階の区切り（直前の削除が終わってから、次を実行する）。`extra.covers` は、同じサンプルで一緒に確認できた別の種類（表に同じ結果の行を足す）。共有ルールは、作成直後は、再計算が終わるまで、削除が `sharing operation already in progress` で失敗するため、30 秒おき・最大 8 回、やり直す
 - 失敗の理由が、サンプルの書き間違い・組織の機能がない（例: `Not available for deploy for this organization`）場合は、表には、`ng` ではなく `unknown` として書く（`ng` は、サンプルが正しいことを確認してから）

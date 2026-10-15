@@ -1,33 +1,169 @@
 # ==============================================================================
-# sf-tools/config/metadata-list.txt
+# sf-tools/config/metadata.txt
 # ==============================================================================
 # sf-metasync.sh が Salesforce 組織から定期取得するメタデータタイプの一覧。
 #
 # 【記述ルール】
-#   - 1行につき1つのメタデータタイプ名を記載する
+#   - 1行につき1つのメタデータタイプ名を記載する（行の途中に、コメントは書けない）
 #   - "#" で始まる行はコメントとして無視される
 #   - 空行は無視される
 #
+# 【この一覧の前提】
+#   この標準セットは、Developer Edition（Sales・Service の標準機能つき）でのみ、リリースと削除を確認しています。
+#   ほかのエディション・製品（Service Cloud・Experience Cloud・業種クラウドなど）で使う場合は、
+#   下の「機能が必要なもの」のコメントを外すか、必要な種類を、この一覧に足してください（設定ファイルだけで調整できます）。
+#   足した種類が、その組織で、リリース・削除できるかは、組織の機能・権限で決まります。
+#   確認は bin/sf-typecheck.sh で行えます（確認の状況は sf-typecheck.sh --coverage）。
+#   取得対象に、その組織に無い種類があっても、警告になるだけで、取得は続きます。
+#
+# 【区分】
+#   1. 標準セット           : 有効。Developer Edition で、リリース・削除を確認済み
+#   2. 標準だが制限あり     : 有効。更新のみ・権限による・未確認の部分がある（理由は、各行の上のコメント）
+#   3. 機能が必要なもの     : コメントアウト。Service Cloud・Experience Cloud など。使う組織だけ、外す
+#   4. 未確認               : コメントアウト。確認できていない。使う場合は、外して、リリースを確かめる
+#   5. 参考                 : コメントアウト。そのほかの種類の候補（業種クラウド・AI・分析など）
+#
 # 【参考】利用可能なメタデータタイプ一覧:
 #   https://developer.salesforce.com/docs/atlas.en-us.api_meta.meta/api_meta/meta_types_list.htm
+#   変更セットで扱える種類の一覧: config/changeset-types.txt（sf-tools 側）
 # ==============================================================================
 
 # ------------------------------------------------------------------------------
-# Apex・コード
+# 1. 標準セット（Developer Edition で、リリース・削除を確認済み）
 # ------------------------------------------------------------------------------
 ApexClass
 ApexTrigger
 ApexPage
 ApexComponent
 ApexTestSuite
-ApexEmailNotifications
-
-# ------------------------------------------------------------------------------
-# Lightning / Visualforce / UI コンポーネント
-# ------------------------------------------------------------------------------
 LightningComponentBundle
 AuraDefinitionBundle
 FlexiPage
+CustomObject
+CustomField
+CustomMetadata
+CustomTab
+CustomHelpMenuSection
+CustomPageWebLink
+Layout
+HomePageComponent
+HomePageLayout
+QuickAction
+GlobalValueSet
+CustomLabels
+CustomNotificationType
+CustomPermission
+CustomApplication
+ApprovalProcess
+Workflow
+WorkflowAlert
+WorkflowFieldUpdate
+WorkflowRule
+PermissionSet
+PermissionSetGroup
+Profile
+SharingRules
+SharingCriteriaRule
+SharingOwnerRule
+Report
+ReportFolder
+ReportType
+Dashboard
+DashboardFolder
+EmailTemplate
+EmailFolder
+EmailServicesFunction
+Letterhead
+AuthProvider
+NamedCredential
+ExternalCredential
+RemoteSiteSetting
+CorsWhitelistOrigin
+CspTrustedSite
+ExternalDataSource
+ExternalServiceRegistration
+PlatformEventChannel
+PlatformEventChannelMember
+LightningMessageChannel
+Queue
+Document
+DocumentFolder
+ContentAsset
+DuplicateRule
+
+# ------------------------------------------------------------------------------
+# 2. 標準だが制限あり（有効）
+# ------------------------------------------------------------------------------
+# StandardValueSet: 標準の選択リストの値。取得・更新はできるが、削除はできない
+StandardValueSet
+# AssignmentRules: 標準の割り当てルール。取得・更新はできるが、削除は未確認（1 つしかない種類）
+AssignmentRules
+# AutoResponseRules: 標準の自動応答ルール。削除は未確認（1 つしかない種類）
+AutoResponseRules
+# EscalationRules: 標準のエスカレーションルール。削除は未確認（1 つしかない種類）
+EscalationRules
+# MatchingRules: 標準のマッチングルール。標準のものは、削除できない
+MatchingRules
+# ApexEmailNotifications: Apex の例外メールの通知先。削除は未確認
+ApexEmailNotifications
+# CustomObjectTranslation: 翻訳（Translation Workbench）。リリースは確認済み、削除は未確認
+CustomObjectTranslation
+# Flow: フロー。リリースはできる。削除は、権限によって、API でできない組織がある（画面で削除する）
+Flow
+# FlowDefinition: フローの有効化の設定。Flow と同じ
+FlowDefinition
+# ConnectedApp: 接続アプリケーション。外部クライアントアプリへ移行済みのものは、変更できない
+ConnectedApp
+# Settings: 組織の各種設定。リリースは未確認。削除はできない（更新のみ）
+Settings
+
+# ------------------------------------------------------------------------------
+# 3. 機能が必要なもの（コメントアウト。使う組織だけ、外す）
+# ------------------------------------------------------------------------------
+# --- Service Cloud 系（Entitlement Management・Omni-Channel・Knowledge）
+# EntitlementProcess
+# EntitlementTemplate
+# MilestoneType
+# ServiceChannel
+# ServicePresenceStatus
+# PresenceUserConfig
+# QueueRoutingConfig
+# DataCategoryGroup
+# SynonymDictionary
+# --- Experience Cloud 系（Experience Cloud が有効な組織）
+# ExperienceBundle
+# Network
+# NetworkBranding
+# NavigationMenu
+# CustomSite
+# SharingSet
+# SharingGuestRule
+# KeywordList
+
+# ------------------------------------------------------------------------------
+# 4. 未確認（コメントアウト。使う場合は、外して、リリースを確かめる）
+# ------------------------------------------------------------------------------
+# Certificate
+# CustomFeedFilter
+# CustomIndex
+# FlowTest
+# FlowCategory
+# GlobalPicklist
+# GlobalValueSetTranslation
+# PathAssistant
+# Prompt
+# SamlSsoConfig
+# SearchCustomization
+# StandardValueSetTranslation
+# TopicsForObjects
+# TransactionSecurityPolicy
+# Translations
+# WorkflowOutboundMessage
+
+# ------------------------------------------------------------------------------
+# 5. 参考（そのほかの種類の候補。コメントアウト）
+# ------------------------------------------------------------------------------
+# --- Lightning / Visualforce / UI コンポーネント
 # LightningBolt
 # LightningExperienceTheme
 # LightningOnboardingConfig
@@ -37,62 +173,18 @@ FlexiPage
 # UIViewDefinition
 # VisualizationPlugin
 # AnimationRule
-
-# ------------------------------------------------------------------------------
-# オブジェクト・項目・レイアウト
-# ------------------------------------------------------------------------------
-CustomObject
-CustomField
-CustomMetadata
-CustomIndex
-CustomTab
+# --- オブジェクト・項目・レイアウト
 # CustomDataType
-CustomFeedFilter
-CustomHelpMenuSection
-CustomPageWebLink
 # CustomApplicationComponent
-Layout
 # ChannelLayout
 # CompactLayout
 # ListViews
-HomePageComponent
-HomePageLayout
-PathAssistant
-QuickAction
-GlobalPicklist
-GlobalValueSet
-GlobalValueSetTranslation
-StandardValueSet
-StandardValueSetTranslation
-TopicsForObjects
-CustomObjectTranslation
-Translations
-CustomLabels
-CustomNotificationType
-CustomPermission
-CustomApplication
 # CustomExperience
-
-# ------------------------------------------------------------------------------
-# フロー・プロセス自動化
-# ------------------------------------------------------------------------------
-Flow
-FlowCategory
-FlowDefinition
-FlowTest
+# --- フロー・プロセス自動化
 # FlowValueMap
-ApprovalProcess
-AssignmentRules
-AutoResponseRules
-EscalationRules
-Workflow
-WorkflowAlert
-WorkflowFieldUpdate
 # WorkflowFlowAction
 # WorkflowFlowAutomation
 # WorkflowKnowledgePublish
-WorkflowOutboundMessage
-WorkflowRule
 # WorkflowSend
 # WorkflowTask
 # ProcessFlowMigration
@@ -104,15 +196,9 @@ WorkflowRule
 # ActionLinkGroupTemplate
 # CommandAction
 # InvocableActionExtension
-
-# ------------------------------------------------------------------------------
-# 権限・プロファイル・共有
-# ------------------------------------------------------------------------------
-PermissionSet
-PermissionSetGroup
+# --- 権限・プロファイル・共有
 # PermissionSetLicenseDefinition
 # MutingPermissionSet
-Profile
 # ProfilePasswordPolicy
 # ProfileSessionSetting
 # UserAccessPolicy
@@ -121,84 +207,42 @@ Profile
 # UserProvisioningConfig
 # UserProfileSearchScope
 # PersonAccountOwnerPowerUser
-SharingRules
-SharingCriteriaRule
-SharingGuestRule
-SharingOwnerRule
 # SharingTerritoryRule
-SharingSet
 # DelegateGroup
 # Group
 # Role
 # AccessControlPolicy
 # FieldRestrictionRule
-
-# ------------------------------------------------------------------------------
-# レポート・ダッシュボード
-# ------------------------------------------------------------------------------
-Report
-ReportFolder
-ReportType
-Dashboard
-DashboardFolder
+# --- レポート・ダッシュボード
 # ReferencedDashboard
 # AnalyticSnapshot
 # DataCalcInsightTemplate
-
-# ------------------------------------------------------------------------------
-# メール・通知・テンプレート
-# ------------------------------------------------------------------------------
-EmailTemplate
-EmailFolder
-EmailServicesFunction
+# --- メール・通知・テンプレート
 # EmailTemplateFolder
-Letterhead
 # PostTemplate
-Prompt
 # DocumentTemplate
 # DocumentGenerationSetting
-
-# ------------------------------------------------------------------------------
-# 接続・認証・セキュリティ
-# ------------------------------------------------------------------------------
-ConnectedApp
-AuthProvider
-NamedCredential
-ExternalCredential
+# --- 接続・認証・セキュリティ
 # ExternalAuthIdentityProvider
 # ExternalClientApplication
-SamlSsoConfig
-Certificate
 # InboundCertificate
 # PublicKeyCertificate
 # PublicKeyCertificateSet
 # MyDomainDiscoverableLogin
 # OAuthCustomScope
 # OAuthTokenExchangeHandler
-RemoteSiteSetting
-CorsWhitelistOrigin
-CspTrustedSite
 # IframeWhiteListUrlSettings
 # RedirectWhitelistUrl
-TransactionSecurityPolicy
 # MobSecurityCertPinConfig
 # MobileSecurityPolicy
 # MobileSecurityPolicySet
 # MobileSecurityAssignment
 # BlacklistedConsumer
-
-# ------------------------------------------------------------------------------
-# サイト・エクスペリエンス・コミュニティ
-# ------------------------------------------------------------------------------
-ExperienceBundle
+# --- サイト・エクスペリエンス・コミュニティ
 # DigitalExperienceBundle
 # DigitalExperienceConfig
 # ExperiencePropertyTypeBundle
-CustomSite
 # SiteDotCom
-Network
-NetworkBranding
-NavigationMenu
 # Community
 # CommunityTemplateDefinition
 # CommunityThemeDefinition
@@ -206,13 +250,8 @@ NavigationMenu
 # ManagedContentType
 # ManagedTopic
 # BrandingSet
-
-# ------------------------------------------------------------------------------
-# データソース・外部システム連携
-# ------------------------------------------------------------------------------
-ExternalDataSource
+# --- データソース・外部システム連携
 # ExternalDataConnector
-ExternalServiceRegistration
 # ExternalDocStorageConfig
 # ExternalStoragePrvdConfig
 # DataSource
@@ -239,18 +278,12 @@ ExternalServiceRegistration
 # FieldSrcTrgtRelationship
 # FieldMappingConfig
 # ApiNamedQuery
-
-# ------------------------------------------------------------------------------
-# プラットフォームイベント・メッセージング
-# ------------------------------------------------------------------------------
-PlatformEventChannel
-PlatformEventChannelMember
+# --- プラットフォームイベント・メッセージング
 # PlatformEventSubscriberConfig
 # EventDelivery
 # EventRelayConfig
 # EventSubscription
 # EventType
-LightningMessageChannel
 # MessagingChannel
 # ConversationChannelDefinition
 # ConversationMessageDefinition
@@ -258,21 +291,10 @@ LightningMessageChannel
 # ConversationVendorInfo
 # StreamingAppDataConnector
 # ManagedEventSubscription
-
-# ------------------------------------------------------------------------------
-# ケース・サービス管理
-# ------------------------------------------------------------------------------
-EntitlementProcess
-EntitlementTemplate
-MilestoneType
+# --- ケース・サービス管理
 # CaseSubjectParticle
-ServiceChannel
-ServicePresenceStatus
 # ServiceProcess
 # PresenceDeclineReason
-PresenceUserConfig
-Queue
-QueueRoutingConfig
 # Skill
 # SkillType
 # WorkSkillRouting
@@ -291,10 +313,7 @@ QueueRoutingConfig
 # CallCenterRoutingMap
 # CallCoachingMediaProvider
 # CallCtrAgentFavTrfrDest
-
-# ------------------------------------------------------------------------------
-# 予測・AI・Einstein
-# ------------------------------------------------------------------------------
+# --- 予測・AI・Einstein
 # AIApplication
 # AIApplicationConfig
 # AIAssistantTemplate
@@ -336,10 +355,7 @@ QueueRoutingConfig
 # AffinityScoreDefinition
 # ScoreCategory
 # McpServerDefinition
-
-# ------------------------------------------------------------------------------
-# CRM Analytics (Wave / Tableau CRM)
-# ------------------------------------------------------------------------------
+# --- CRM Analytics (Wave / Tableau CRM)
 # WaveApplication
 # WaveComponent
 # WaveDashboard
@@ -351,10 +367,7 @@ QueueRoutingConfig
 # AnalyticsDashboard
 # AnalyticsVisualization
 # AnalyticsWorkspace
-
-# ------------------------------------------------------------------------------
-# Omni Studio
-# ------------------------------------------------------------------------------
+# --- Omni Studio
 # OmniScript
 # OmniDataTransform
 # OmniUICard
@@ -367,20 +380,14 @@ QueueRoutingConfig
 # ProcedurePlanDefinition
 # DataMapperDefinition
 # FlexcardDefinition
-
-# ------------------------------------------------------------------------------
-# Territory 管理
-# ------------------------------------------------------------------------------
+# --- Territory 管理
 # Territory
 # Territory2
 # Territory2Model
 # Territory2Rule
 # Territory2Type
 # SharingTerritoryRule
-
-# ------------------------------------------------------------------------------
-# 予測・売上
-# ------------------------------------------------------------------------------
+# --- 予測・売上
 # ForecastingFilter
 # ForecastingFilterCondition
 # ForecastingGroup
@@ -395,10 +402,7 @@ QueueRoutingConfig
 # SalesAgreementSettings
 # PipelineInspMetricConfig
 # CampaignInfluenceModel
-
-# ------------------------------------------------------------------------------
-# 商品・価格
-# ------------------------------------------------------------------------------
+# --- 商品・価格
 # ProductAttributeSet
 # ProductAttrDisplayConfig
 # ProductSpecificationType
@@ -408,10 +412,7 @@ QueueRoutingConfig
 # PricingRecipe
 # GatewayProviderPaymentMethodType
 # PaymentGatewayProvider
-
-# ------------------------------------------------------------------------------
-# スケジューリング・フィールドサービス
-# ------------------------------------------------------------------------------
+# --- スケジューリング・フィールドサービス
 # AppointmentAssignmentPolicy
 # AppointmentSchedulingPolicy
 # SchedulingObjective
@@ -419,34 +420,16 @@ QueueRoutingConfig
 # TimeSheetTemplate
 # FieldServiceMobileConfig
 # FieldServiceMobileExtension
-
-# ------------------------------------------------------------------------------
-# ドキュメント・コンテンツ
-# ------------------------------------------------------------------------------
-Document
-DocumentFolder
-ContentAsset
+# --- ドキュメント・コンテンツ
 # DocumentCategory
 # DocumentCategoryDocumentType
 # DocumentType
 # SControl
 # CanvasMetadata
-
-# ------------------------------------------------------------------------------
-# データカテゴリ・ナレッジ
-# ------------------------------------------------------------------------------
-DataCategoryGroup
+# --- データカテゴリ・ナレッジ
 # ModerationRule
-KeywordList
-SynonymDictionary
-SearchCustomization
 # SearchOrgWideObjectConfig
-
-# ------------------------------------------------------------------------------
-# ルール・重複チェック・マッチング
-# ------------------------------------------------------------------------------
-DuplicateRule
-MatchingRules
+# --- ルール・重複チェック・マッチング
 # CleanDataService
 # BusinessProcessGroup
 # BusinessProcessTypeDefinition
@@ -460,11 +443,7 @@ MatchingRules
 # ExpressionSetMessageToken
 # ExpressionSetObjectAlias
 # RuleLibraryDefinition
-
-# ------------------------------------------------------------------------------
-# 設定・システム
-# ------------------------------------------------------------------------------
-Settings
+# --- 設定・システム
 # AppMenu
 # InstalledPackage
 # LicenseDefinition
@@ -473,27 +452,18 @@ Settings
 # FeatureParameterInteger
 # XOrgHub
 # InternalOrganization
-
-# ------------------------------------------------------------------------------
-# ポータル・パートナー
-# ------------------------------------------------------------------------------
+# --- ポータル・パートナー
 # Portal
 # PortalDelegablePermissionSet
 # Audience
 # BriefcaseDefinition
-
-# ------------------------------------------------------------------------------
-# Learning・有効化
-# ------------------------------------------------------------------------------
+# --- Learning・有効化
 # EnablementMeasureDefinition
 # EnablementProgramDefinition
 # EnblProgramTaskSubCategory
 # LearningAchievementConfig
 # LearningItemType
-
-# ------------------------------------------------------------------------------
-# ヘルスクラウド・業界ソリューション
-# ------------------------------------------------------------------------------
+# --- ヘルスクラウド・業界ソリューション
 # CareBenefitVerifySettings
 # CareLimitType
 # CareProviderAfflRoleConfig
@@ -518,10 +488,7 @@ Settings
 # MfgProgramTemplate
 # ParticipantRole
 # PartyProfileDataObjectValidityDefinition
-
-# ------------------------------------------------------------------------------
-# サステナビリティ・エネルギー
-# ------------------------------------------------------------------------------
+# --- サステナビリティ・エネルギー
 # BldgEnrgyIntensityCnfg
 # FuelType
 # FuelTypeSustnUom
@@ -529,18 +496,12 @@ Settings
 # SustainabilityUom
 # SustnUomConversion
 # VehicleAssetEmSsnSourceCnfg
-
-# ------------------------------------------------------------------------------
-# ボット・チャット
-# ------------------------------------------------------------------------------
+# --- ボット・チャット
 # Bot
 # BotBlock
 # BotTemplate
 # ChatterExtension
-
-# ------------------------------------------------------------------------------
-# Slack・外部アプリ
-# ------------------------------------------------------------------------------
+# --- Slack・外部アプリ
 # SlackApp
 # ExtlClntAppConfigurablePolicies
 # ExtlClntAppGlobalOauthSettings
@@ -555,10 +516,7 @@ Settings
 # ExtlClntAppSampleConfigurablePolicies
 # ExtlClntAppSampleSettings
 # ExtlClntAppCanvasSettings
-
-# ------------------------------------------------------------------------------
-# その他
-# ------------------------------------------------------------------------------
+# --- その他
 # ActionableEventOrchDef
 # ActionableEventTypeDef
 # ActionableListDefinition

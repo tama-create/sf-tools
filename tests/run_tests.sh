@@ -219,6 +219,9 @@ if [[ "${1:-}" == "--changed" ]]; then
             lib/typecheck.js)
                 _changed_tests+=("test_sf-typecheck.sh")
                 ;;
+            config/changeset-types.txt)
+                _changed_tests+=("test_sf-typecheck.sh")
+                ;;
             config/metadata-capability.txt)
                 _changed_tests+=("test_sf-check.sh")
                 ;;

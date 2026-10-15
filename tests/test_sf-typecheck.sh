@@ -115,6 +115,37 @@ test_typecheck_delete_failure_reported() {
     teardown "$td" "$mb" "$mh"
 }
 
+test_typecheck_coverage() {
+    local td mb mh out; setup_std_env td mb mh
+    create_mock_sf "$mb"
+    printf '# コメント\nTypeA\nTypeB\nTypeC\nTypeD\nTypeE\nCustomLabels\n' > "$td/cs.txt"
+    printf '# コメント\nTypeA\tok\tok\t\nTypeB\tok\tunknown\t\nTypeC\tlimited\tok\t条件\nTypeD\tunknown\tunknown\t\nCustomLabel\tok\tok\t\nCustomLabels\tunknown\tunknown\t\nOther\tok\tok\t\n' > "$td/cap.txt"
+    out=$(SF_TYPECHECK_CHANGESET_FILE="$td/cs.txt" SF_CHECK_CAPABILITY_FILE="$td/cap.txt" _run_typecheck "$mb" "$mh" "$td" --coverage)
+    assert_exit_ok "$?" "--coverage → 正常終了（--org なしでも動く）"
+    assert_output_contains "$out" "変更セットで扱える種類: 6" "--coverage: 一覧の数（コメント・空行は除く）"
+    assert_output_contains "$out" "確認済み *: *2" "--coverage: 両方 ok は 2（TypeA と、別名で引いた CustomLabels）"
+    assert_output_contains "$out" "リリースのみ確認済み.*: *1" "--coverage: リリースのみは 1"
+    assert_output_contains "$out" "条件つき.*: *1" "--coverage: 条件つきは 1"
+    assert_output_contains "$out" "判定できない.*: *1" "--coverage: 判定できないは 1"
+    assert_output_contains "$out" "まだ試していない *: *1" "--coverage: 未確認は 1（表にない TypeE）"
+    assert_output_contains "$out" "TypeE" "--coverage: 未確認の一覧に TypeE が出る"
+    [[ ! -s "$MOCK_CALL_LOG" ]] && pass "--coverage → 組織には、接続しない（sf を呼ばない）" || fail "--coverage → sf を呼ばない" "$(cat "$MOCK_CALL_LOG")"
+    teardown "$td" "$mb" "$mh"
+}
+
+test_typecheck_shipped_changeset_list() {
+    local f="$SF_TOOLS_DIR/config/changeset-types.txt" bad
+    assert_file_exists "$f" "同梱の変更セット対応の種類の一覧がある"
+    # 種類名だけの行（英数字・アンダースコア）。重複していない
+    bad=$(awk '$0 !~ /^#/ && $0 != "" && $0 !~ /^[A-Za-z0-9_]+$/' "$f")
+    assert_equals "$bad" "" "同梱の変更セット対応の一覧: 全行が、種類名の形式"
+    bad=$(awk '$0 !~ /^#/ && $0 != "" { c[$0]++ } END { for (k in c) if (c[k] > 1) print k }' "$f")
+    assert_equals "$bad" "" "同梱の変更セット対応の一覧: 種類が重複していない"
+    # 主要な種類が含まれる（取得に失敗して、空の一覧になっていないことの確認）
+    assert_file_contains "$f" "ApexClass" "同梱の変更セット対応の一覧: ApexClass を含む"
+    assert_file_contains "$f" "CustomObject" "同梱の変更セット対応の一覧: CustomObject を含む"
+}
+
 test_typecheck_js_syntax_and_safety() {
     node --check "$SF_TOOLS_DIR/lib/typecheck.js" 2>/dev/null && pass "lib/typecheck.js: 構文が正しい" || fail "lib/typecheck.js: 構文が正しい"
     local out; out=$(node "$SF_TOOLS_DIR/lib/typecheck.js" --org prod --work "${TMPDIR:-/tmp}/tc-test-x" 2>&1)
@@ -128,6 +159,8 @@ test_typecheck_refuses_missing_org_and_actions
 test_typecheck_refuses_production_and_unknown
 test_typecheck_full_run_ok
 test_typecheck_delete_failure_reported
+test_typecheck_coverage
+test_typecheck_shipped_changeset_list
 test_typecheck_js_syntax_and_safety
 
 print_summary

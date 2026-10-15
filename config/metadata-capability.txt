@@ -37,7 +37,7 @@ CustomApplication	ok	ok
 CustomField	ok	ok	
 CustomHelpMenuSection	ok	ok	
 CustomLabel	ok	ok	
-CustomLabels	unknown	unknown	取得できなかった（部品が、ない・取得の指定が合わない）
+CustomLabels	ok	ok	CustomLabel（メンバー）で、リリースと削除を確認。取得は CustomLabels で行う
 CustomMetadata	ok	ok	
 CustomNotificationType	ok	ok	
 CustomObject	ok	ok	

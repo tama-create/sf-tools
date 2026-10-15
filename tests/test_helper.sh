@@ -290,15 +290,44 @@ case "$1 $2" in
         fi
         exit 0 ;;
     "project generate")
-        OUT_DIR=""; OUT_NAME="package.xml"; PREV=""
+        # sf project generate manifest の再現:
+        #   --source-dir <パス>  → パスから、種類とメンバー名を推定して、<types> に入れる
+        #   --metadata <種別:名前> → そのまま <types> に入れる
+        #   両方を同時に渡すと、共通部分だけ（実際の sf と同じ。モックでは、常に空）になる
+        OUT_DIR=""; OUT_NAME="package.xml"; PREV=""; _src=(); _meta=()
         for arg in "$@"; do
             [[ "$PREV" == "--output-dir" ]] && OUT_DIR="$arg"
             [[ "$PREV" == "--name" ]] && OUT_NAME="$arg"
+            [[ "$PREV" == "--source-dir" ]] && _src+=("$arg")
+            [[ "$PREV" == "--metadata" ]] && _meta+=("$arg")
             PREV="$arg"
         done
-        [[ -n "$OUT_DIR" ]] && mkdir -p "$OUT_DIR" && \
-            printf '<?xml version="1.0" encoding="UTF-8"?>\n<Package xmlns="http://soap.sforce.com/2006/04/metadata"><version>60.0</version></Package>\n' \
-            > "$OUT_DIR/$OUT_NAME"
+        if [[ -n "$OUT_DIR" ]]; then
+            mkdir -p "$OUT_DIR"
+            {
+                printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' '<Package xmlns="http://soap.sforce.com/2006/04/metadata">'
+                if [[ ${#_src[@]} -gt 0 && ${#_meta[@]} -gt 0 ]]; then
+                    :   # 共通部分だけ → 空
+                else
+                    for _p in "${_src[@]}"; do
+                        _b="${_p##*/}"; _b="${_b%%.*}"
+                        case "$_p" in
+                            */classes/*)  _t="ApexClass" ;;
+                            */triggers/*) _t="ApexTrigger" ;;
+                            */lwc/*)      _t="LightningComponentBundle"; _b="${_p#*/lwc/}"; _b="${_b%%/*}" ;;
+                            */aura/*)     _t="AuraDefinitionBundle"; _b="${_p#*/aura/}"; _b="${_b%%/*}" ;;
+                            */flows/*)    _t="Flow" ;;
+                            *)            _t="CustomObject" ;;
+                        esac
+                        printf '    <types>\n        <members>%s</members>\n        <name>%s</name>\n    </types>\n' "$_b" "$_t"
+                    done
+                    for _m in "${_meta[@]}"; do
+                        printf '    <types>\n        <members>%s</members>\n        <name>%s</name>\n    </types>\n' "${_m#*:}" "${_m%%:*}"
+                    done
+                fi
+                printf '%s\n' '    <version>60.0</version>' '</Package>'
+            } > "$OUT_DIR/$OUT_NAME"
+        fi
         exit 0 ;;
     "project deploy")
         # カレントに force-app があれば、deploy された内容をテストで検証できるよう控えを残す

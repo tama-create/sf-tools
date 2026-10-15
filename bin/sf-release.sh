@@ -9,6 +9,11 @@
 #   Salesforce CLI（sf）は npm 版であること。起動時に check_sf_cli（sf --version の終了コード）で確認し、
 #   0 以外なら、案内を表示して中断する。成功は 24 時間は確認を省略する（GitHub Actions 上では省略）。
 #
+# 【マニフェストの生成】
+#   [files]（パス指定）と [members]（種別名:メンバー名）は、別々に sf project generate manifest で生成し、1 つの
+#   package.xml に統合する（両方を同時に渡すと、sf CLI は、共通部分だけ（重なりがなければ空）を返すため）。
+#   統合後にメンバーが 1 つもなければ、エラーで中断する（「変更なし」の成功扱いで、見落とさないため）。
+#
 # 【共有環境の保護】
 #   接続先のエイリアスが予約名（prod / staging / develop / main）の組織（共有環境）には、
 #   ローカルからは実行できません（dry-run を含む）。リリースは、GitHub にコミットし、
@@ -163,6 +168,48 @@ phase_check_target() {
     return $RET_OK
 }
 
+# generate_manifest - マニフェスト（package.xml / destructiveChanges.xml）を生成する
+#   引数: 出力ファイル名 引数...（--source-dir パス / --metadata 種別:名前 の組）。出力先は ${RELEASE_DIR}
+#   sf project generate manifest は、--source-dir と --metadata を同時に渡すと、両方の共通部分だけを返す
+#   （重なりがなければ空になり、しかも、成功として終わる）。そのため、別々に生成して、merge_package_xml で統合する。
+#   統合したものに、メンバーが 1 つもなければ、エラーにする（NothingToDeploy の成功扱いで、検証・リリースを、見落とさないため）
+generate_manifest() {
+    local name="$1" base src=() meta=() parts=() i=0 args=() part
+    shift
+    args=("$@")
+    base="${name%.xml}"
+    while [[ $i -lt ${#args[@]} ]]; do
+        case "${args[$i]}" in
+            --source-dir) src+=("--source-dir" "${args[$((i+1))]}") ;;
+            --metadata)   meta+=("--metadata" "${args[$((i+1))]}") ;;
+        esac
+        i=$((i + 2))
+    done
+    if [[ ${#src[@]} -gt 0 ]]; then
+        part="${RELEASE_DIR}/${base}.files.xml"
+        run sf project generate manifest "${src[@]}" --output-dir "$RELEASE_DIR" --name "${base}.files.xml" "${JSON_FLAG[@]}" || return 1
+        parts+=("$part")
+    fi
+    if [[ ${#meta[@]} -gt 0 ]]; then
+        part="${RELEASE_DIR}/${base}.members.xml"
+        run sf project generate manifest "${meta[@]}" --output-dir "$RELEASE_DIR" --name "${base}.members.xml" "${JSON_FLAG[@]}" || return 1
+        parts+=("$part")
+    fi
+    if [[ ${#parts[@]} -eq 0 ]]; then
+        log "ERROR" "${name}: 生成する対象がありません。"
+        return 1
+    fi
+    merge_package_xml "${RELEASE_DIR}/${name}" "${parts[@]}"
+    rm -f "${parts[@]}"  # run 不使用: 統合前の一時ファイルの除去
+    if ! grep -q '<members>' "${RELEASE_DIR}/${name}" 2>/dev/null; then  # 条件チェック
+        log "ERROR" "${name} に、メンバーが 1 つも含まれていません（ターゲットファイルの記述が、マニフェストに反映されていません）。"
+        log "ERROR" "  ${DEPLOY_LIST} / ${REMOVE_LIST} の、パス・種別名:メンバー名を確認してください。"
+        return 1
+    fi
+    log "SUCCESS" "${name} を生成しました（ファイル指定 $(( ${#src[@]} / 2 )) 件 / メンバー指定 $(( ${#meta[@]} / 2 )) 件）"
+    return 0
+}
+
 # 【MANIFEST】テキストリストからマニフェストファイル(XML)を自動生成
 phase_generate_manifest() {
     run rm -f "$DEPLOY_XML" "$REMOVE_XML"
@@ -243,7 +290,7 @@ phase_generate_manifest() {
         files_count=$(printf '%s\n' "${deploy_args[@]}" | grep -c "^--source-dir$" || true)
         members_count=$(printf '%s\n' "${deploy_args[@]}" | grep -c "^--metadata$" || true)
         log "INFO" "デプロイ対象を検出 (ファイル: ${files_count}件 / メンバー: ${members_count}件)"
-        run sf project generate manifest "${deploy_args[@]}" --output-dir "$RELEASE_DIR" --name "package.xml" "${JSON_FLAG[@]}" || return $RET_NG
+        generate_manifest "package.xml" "${deploy_args[@]}" || return $RET_NG
     else
         # 対象ゼロでも CLI エラーを防ぐために最小構成の XML を作成
         printf '<?xml version="1.0" encoding="UTF-8"?><Package xmlns="http://soap.sforce.com/2006/04/metadata"><version>60.0</version></Package>\n' \
@@ -252,8 +299,7 @@ phase_generate_manifest() {
 
     # 削除用の destructiveChanges.xml 生成（対象がある場合のみ）
     if [[ ${#remove_args[@]} -gt 0 ]]; then
-        run sf project generate manifest "${remove_args[@]}" --output-dir "$RELEASE_DIR" --name "destructiveChanges.xml" "${JSON_FLAG[@]}" \
-            || return $RET_NG
+        generate_manifest "destructiveChanges.xml" "${remove_args[@]}" || return $RET_NG
     fi
 
     return $RET_OK

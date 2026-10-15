@@ -685,6 +685,45 @@ test_json_get() {
 }
 
 # ------------------------------------------------------------------------------
+# merge_package_xml のテスト（package.xml を、種類ごとに、重複なく統合する）
+# ------------------------------------------------------------------------------
+test_merge_package_xml() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] merge_package_xml: マニフェストの統合${CLR_RST}"
+    local td out
+    td=$(mktemp -d "${TMPDIR:-/tmp}/test-mpx-XXXX")
+    printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' '<Package xmlns="http://soap.sforce.com/2006/04/metadata">' \
+        '    <types>' '        <members>B</members>' '        <members>A</members>' '        <name>ApexClass</name>' '    </types>' \
+        '    <version>64.0</version>' '</Package>' > "$td/a.xml"
+    printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' '<Package xmlns="http://soap.sforce.com/2006/04/metadata">' \
+        '    <types>' '        <members>A</members>' '        <members>C</members>' '        <name>ApexClass</name>' '    </types>' \
+        '    <types>' '        <members>My__c-My Layout</members>' '        <name>Layout</name>' '    </types>' \
+        '    <version>60.0</version>' '</Package>' > "$td/b.xml"
+    printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' '<Package xmlns="http://soap.sforce.com/2006/04/metadata">' \
+        '    <version>64.0</version>' '</Package>' > "$td/empty.xml"
+    _mp() { ( export SF_INIT_MODE=1; readonly SCRIPT_NAME=test LOG_FILE=/dev/null LOG_MODE=NEW
+              source "$SF_TOOLS_DIR/lib/common.sh"; eval "$1" ) 2>&1; }
+
+    _mp "merge_package_xml '$td/out.xml' '$td/a.xml' '$td/b.xml'"
+    out=$(cat "$td/out.xml")
+    assert_output_contains "$out" "<members>A</members>"  "統合: 両方のメンバーが入る"
+    assert_output_contains "$out" "<members>C</members>"  "統合: 片方だけのメンバーも入る"
+    assert_output_contains "$out" "<members>My__c-My Layout</members>" "統合: 名前に空白を含むメンバー"
+    assert_equals "$(grep -c '<members>A</members>' "$td/out.xml")" "1" "統合: 重複するメンバーは、1 つにする"
+    assert_equals "$(grep -c '<name>ApexClass</name>' "$td/out.xml")" "1" "統合: 同じ種類は、1 つの <types> にまとめる"
+    assert_equals "$(grep -c '<types>' "$td/out.xml")" "2" "統合: 種類は 2 つ（ApexClass・Layout）"
+    assert_output_contains "$out" "<version>64.0</version>" "統合: version は、最初のものを使う"
+    assert_equals "$(head -n 1 "$td/out.xml")" '<?xml version="1.0" encoding="UTF-8"?>' "統合: XML 宣言から始まる"
+    assert_equals "$(tail -n 1 "$td/out.xml")" '</Package>' "統合: </Package> で終わる"
+    # 種類は、名前の順に並ぶ（ApexClass の後に Layout）
+    assert_equals "$(grep '<name>' "$td/out.xml" | tr -d ' \n')" "<name>ApexClass</name><name>Layout</name>" "統合: 種類は、名前の順"
+
+    _mp "merge_package_xml '$td/o2.xml' '$td/empty.xml' '$td/empty.xml'"
+    assert_equals "$(grep -c '<members>' "$td/o2.xml")" "0" "統合: 入力が空なら、メンバーのない、空のマニフェストを出力する"
+    assert_equals "$(grep -c '<version>64.0</version>' "$td/o2.xml")" "1" "統合: 空でも、version を出力する"
+    rm -rf "$td"
+}
+
+# ------------------------------------------------------------------------------
 # sed_inplace / _strip_ansi / _strip_term_codes のテスト（GNU / BSD の sed の、どちらでも動くこと）
 #   BSD の sed（macOS）は、`sed -i SCRIPT FILE` と、\x1b などの 16 進の表記を、解釈しない。
 # ------------------------------------------------------------------------------
@@ -869,6 +908,7 @@ test_run_isolated_home
 test_ensure_sf_tools_latest
 test_json_get
 test_portable_sed
+test_merge_package_xml
 test_bash32_compat
 
 print_summary

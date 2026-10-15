@@ -123,7 +123,7 @@
 ## 3. 共通ライブラリ (`lib/common.sh`) 詳細
 
 > **構成**: `lib/common.sh` が窓口で、ログ（`log`）・実行（`run`）・終了（`die`）・`json_get` と定数を持つ。残りの関数は、責務ごとのファイルに分けてあり、`common.sh` が `source` する（呼び出し側は、これまでどおり、`common.sh` だけを `source` すればよい）。
-> `lib/input.sh`（対話入力: `read_input` / `read_key` / `press_enter` / `read_or_quit` / `read_secret` / `ask_yn`）・`lib/platform.sh`（OS・外部コマンド: `is_gitbash` / `run_isolated_home` / `check_sf_cli` / `open_browser`）・`lib/project.sh`（プロジェクト: `get_target_org` / `check_force_dir` / `check_home_dir` / `check_gh_owner` / `get_branch_list` / `is_reserved_org_alias` / `is_protected_branch` / `ensure_sf_tools_latest`）。テストは、すべて `tests/test_common.sh`。
+> `lib/input.sh`（対話入力: `read_input` / `read_key` / `press_enter` / `read_or_quit` / `read_secret` / `ask_yn`）・`lib/platform.sh`（OS・外部コマンド: `is_gitbash` / `run_isolated_home` / `check_sf_cli` / `open_browser`）・`lib/project.sh`（プロジェクト: `get_target_org` / `check_force_dir` / `check_home_dir` / `check_gh_owner` / `get_branch_list` / `is_reserved_org_alias` / `is_protected_branch` / `ensure_sf_tools_latest` / `merge_package_xml`）。テストは、すべて `tests/test_common.sh`。
 
 全スクリプトは `source "$SCRIPT_DIR/lib/common.sh"` の前に以下を `readonly` で定義すること。
 
@@ -257,8 +257,16 @@ check_gh_owner "$GITHUB_OWNER"   # 認証ユーザーの一致確認
 
 ### 4.2 sf-release.sh
 
-- ターゲットファイルをもとに `package.xml` を生成
+- ターゲットファイルをもとに `package.xml`（と、削除用の `destructiveChanges.xml`）を生成
 - `sf project deploy start` で検証または本番実行
+
+**マニフェストの生成（`generate_manifest`）:** `[files]`（`--source-dir`）と `[members]`（`--metadata`）は、**別々に** `sf project generate manifest` で生成し、`merge_package_xml`（`lib/project.sh`）で 1 つに統合する。
+理由: `sf project generate manifest` は、`--source-dir` と `--metadata` を同時に渡すと、両方の**共通部分だけ**を返す（重なりがなければ `<types>` のない空のマニフェストになり、しかも成功として終わる）。
+空のマニフェストでは、`sf project deploy start` が `NothingToDeploy` を返し、sf-release.sh は「変更がないため処理をスキップしました」と成功扱いにしていたため、
+`[files]` と `[members]` を混在させたリストは、検証もリリースもされないまま、緑になっていた（`sf-init.sh --verify --components` で発見）。
+統合後に `<members>` が 1 つもなければ、エラーで中断する（`NothingToDeploy` の成功扱いにしない）。
+`merge_package_xml` は、awk と sort だけ（GNU / BSD 共通）。種類は名前の順・メンバーは重複なし・version は最初のもの。
+テスト: `tests/test_sf-release.sh`（混在・`[members]` のみ・`[files]` のみ・空のマニフェスト）、`tests/test_common.sh` の `test_merge_package_xml`。`tests/test_helper.sh` の sf のモックは、実際の sf と同じく、両方を同時に渡すと空になる。
 
 主なオプション: `--release` / `--no-open` / `--force` / `--target`
 
@@ -475,7 +483,7 @@ tr -d '\r' < "$key_file" | base64 -w 0 | gh secret set "SF_PRIVATE_KEY" -R "$REP
 - `--add-tier staging|develop`: 既存プロジェクトへの tier 追加（後述）。初回のセットアップ（GitHub 側 → Salesforce の接続）とは、順序が逆: 先に Salesforce に接続し、成功してから、ブランチ・PR を作る（接続に失敗したときに、GitHub 側を、変更しないため）
 - `--reconnect main|staging|develop`: 1 つの段階の接続先（Salesforce 組織）の付け替え（`phases/init/reconnect.sh`。force-* 内で実行。現在の接続を表示 → 確認 → ログイン先の選択 → ログイン → 種類の読み取り → 本番は main のみのガード → 外部クライアントアプリの自動作成 → JWT 接続テスト → Secrets / Variables の一括更新。古い組織が別の組織なら、残る外部クライアントアプリと片付け方を表示する（自動では削除しない））
 - `--status`: セットアップの診断と、段階ごとの接続の一覧（`phases/init/status.sh`。読み取りのみ。終了コード: 診断で不足がある、または、本番が main 以外にあれば 1）。
-- `--verify`: 動作の確認（`phases/init/verify.sh`。`--plan` / `--cleanup` / `--no-metasync` は、そのまま渡す。`--verify` なしの指定は `die`）。詳細は 4.15.1
+- `--verify`: 動作の確認（`phases/init/verify.sh`。`--plan` / `--cleanup` / `--no-metasync` / `--components` / `--validate-only` / `--with-objects` は、そのまま渡す。`--verify` なしの指定は `die`）。詳細は 4.15.1
   - 診断（`lib/diag.sh` の `diag_run REPO 段階...`）: リポジトリ・branches.txt の各ブランチ・ワークフロー 5 本（`gh api` / `gh repo view`）、Secrets（`gh secret list`）、Variables（`gh variable list`）、直近の実行（`gh run list --workflow`）を、✓ / ✗ / ！ / ？ で表示する。不足（✗）には、直し方（`--only N` / `--reconnect` / `--add-tier` / `sf-sync-wf.sh`）を表示し、件数を `DIAG_NG` に入れる。一覧を取得できなかったものは「？」とし、不足に数えない（通信エラー・権限不足を、不足と誤認しない）。組織の種類の記録（`SF_ORG_ID_*`）がないものは「！」（不足に数えない。古いバージョンで作ったプロジェクトのため）。直近の実行の失敗も「！」（セットアップの不足ではないため）。
   - Salesforce 側（外部クライアントアプリ・JWT 接続）は、ログインが必要なため確認しない。直近の wf-metasync / wf-release の成功で、接続できていることが分かる。
   - 接続の一覧: GitHub Variables を読むだけ。同じ組織が複数の段階にあれば警告、本番が main 以外にあればエラー表示。
@@ -608,6 +616,24 @@ sf-init.sh --add-tier develop    # main+staging → main+staging+develop
 **失敗時:** リリースの PR をマージした段階を `LEFT` に記録し、削除が成功するまで残す。中断したときは、`LEFT` の段階と `sf-init.sh --verify --cleanup`（削除のみ。全段階を対象にする）を案内する。マージの拒否（ブランチ保護）・wf-validate の失敗では、PR を残して止まる。
 
 **ローカルの clone・git の操作は、行わない**（ブランチ・ファイルは GitHub の API で作る。フック・認証ヘルパーの影響を受けない）。組織への直接のログインも、行わない（ワークフローの結果で確認する）。
+
+**`--components` / `--validate-only` / `--with-objects`（パターン別のサンプル。develop のみ）:**
+- 目的: 種類ごとに、ターゲットファイルの書式（`[files]` / `[members]`）・パス・名前の書き方が違っても、リリースの仕組みが動くことの確認。全種類ではなく、書き方のパターンごとに最小のものを 1 つずつ置く。
+- ローカルでの dry-run（`sf-dryrun.sh`）は使えない: `sf-release.sh` は、予約名（prod / staging / develop / main）の組織へのローカル実行を拒否する（共有環境の保護。緩めない）。そのため、既存の `--verify` と同じ経路（PR → wf-validate → マージ → wf-release）で行う。
+- サンプルの定義は `lib/verify-samples.sh`（`verify_sample_paths [stage1|stage2|all]` / `verify_sample_content_for` / `verify_sample_deploy_target_text` / `verify_sample_remove_target_text [stage1|stage2]`）。`lib/verify-common.sh` の `verify_set_*`（`VERIFY_SET=hello|components`）が、Hello World とサンプルを切り替える。
+- 段階: `TIERS=("develop")` に固定。develop がある構成（3 層）だけ。それ以外は `die`（本番・staging にサンプルを入れない）。
+- `[files]` は、**ファイルのみ**（`sf-check.sh` が `-f` で検査する）。LWC は `.js` の 1 ファイルを、Aura は `[members]` で指定する。
+- LWC と Aura は、**同じ名前空間**を共有する（同名のバンドルは作れない）。Aura は `SfToolsE2eHelloAura`、LWC は `sfToolsE2eHello`（実際の組織の dry-run で、同名の Aura が拒否された）。
+- **オブジェクト系**（ApexTrigger・そのテストクラス・Layout・CustomObject・CustomField）は、`VERIFY_SAMPLE_OBJECTS`（verify.sh が決める: 検証のみ = 1 / 通し = `--with-objects` のときだけ 1）。理由: カスタムオブジェクトは、削除すると 15 日間、削除済みで名前が予約され、再作成できない（通しを繰り返すと、2 回目から失敗する）。検証のみは、何も作らないため、常に含める。
+- 削除は、既定 1 段階（`remove-target.txt` stage1: ApexClass / LWC / Aura / PermissionSet / EmailTemplate / CustomLabel）。`--with-objects` のときは 2 段階（stage1 に ApexTrigger・トリガーのテストクラスを加え → stage2: CustomField / CustomObject）。
+  実際の組織の dry-run で判明: **Layout は、オブジェクトの最後の 1 つにできない**（`Cannot delete the only layout`）ため、削除対象にしない（オブジェクトの削除に任せる）。
+- **Flow**: API での削除は、`Flow` 型・`FlowDefinition` 型のどちらでも拒否される場合がある（`insufficient access rights on cross-reference id`。接続ユーザーに、Flow を API で削除する権限がない）。削除できないものを、リリースすると組織に残るため、**通しには含めない**（`VERIFY_SAMPLE_FLOW`: 検証のみ・`--cleanup`（リポジトリのファイルの削除）では 1、通しでは 0）。`remove-target.txt` には、Flow を含めない。組織に残った Flow は、画面（設定 → フロー）で手動で削除する。削除用のブランチは、サンプルのファイルが **develop にだけある**ため、develop の先頭から作る（`_make_delete_branch BR STAGE BASE`）。
+- `--validate-only`: `_pr_flow` の `mode=validate`。wf-validate の成功を確認し、PR をマージせずに閉じる（`verify_pr_close`）。削除は、行わない。失敗したときは、PR・ブランチを残す。
+- 既存の `force-app/main/default/labels/CustomLabels.labels-meta.xml` が develop にあるときは、`VERIFY_SAMPLE_LABELS=0`（CustomLabels を含めない。上書きして削除してしまうのを避ける）。
+- GitHub の contents API のパスは `_verify_urlpath` で URL エンコードする（`%` → `%25`、空白 → `%20`。Layout の名前に空白がある）。
+- 後始末の案内: 失敗時の `--cleanup` のコマンドは、`--components`（と `--with-objects`）を含めて案内する（`_CLEANUP_CMD`。含めないと、Hello World の削除になってしまう）。
+- 作業用ブランチ: `verify-comp-HHMMSS` / `verify-comp-delete-HHMMSS` / `verify-comp-delete2-HHMMSS`（`--with-objects` のときだけ。最後に削除。`_delete_job_branches` の形式の確認は `^verify-(hello|comp)(-delete2?)?-[0-9]{6}$`）。
+- 実際の組織での受理（Flow の最小の XML・削除の順序など）は、モックでは確認できない。最初は、develop で実行して、エラーを見ながら直す。
 
 テスト: `tests/test_verify.sh`（状態つきの gh のモック）。e2e（`tests/e2e/lib.sh`）は、PR・実行の待ち・結果の読み取り・Hello World の本文を、`lib/verify-common.sh` に委譲する。
 

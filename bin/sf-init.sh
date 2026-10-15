@@ -83,6 +83,11 @@
 #     --plan              : （--verify と一緒に）診断と、実行内容の表示だけ（何も変更しない）
 #     --cleanup           : （--verify と一緒に）削除のみ（検証が途中で止まって、組織に Hello World が残ったときの後始末）
 #     --no-metasync       : （--verify と一緒に）環境の確認のうち、wf-metasync の実行を、省略する
+#     --components        : （--verify と一緒に）Hello World の代わりに、パターン別のサンプル（Apex・トリガー・LWC・Aura・Flow・
+#                           権限セット・Layout・メール テンプレート・オブジェクト・項目など）を、develop の組織だけに、リリースして、削除する
+#     --validate-only     : （--verify --components と一緒に）検証（wf-validate = dry-run）だけ。PR は、マージせずに閉じる。組織には、何も反映しない
+#     --with-objects      : （--verify --components と一緒に）オブジェクト系（トリガー・Layout・オブジェクト・項目）も、リリースして、削除する
+#                           （削除したオブジェクトの名前は、15 日間、予約される）
 #   --legacy-connected-app: 従来の接続アプリケーション（手動の入力。今後廃止予定）を使う。既定は、外部クライアントアプリ（自動で作成）
 # ==============================================================================
 
@@ -129,7 +134,7 @@ ADD_TIER_MODE=""
 RECONNECT_MODE=""
 STATUS_MODE=0
 VERIFY_MODE=0
-VERIFY_ARGS=()   # --verify のオプション（--plan / --cleanup / --no-metasync）。verify.sh に、そのまま渡す
+VERIFY_ARGS=()   # --verify のオプション（--plan / --cleanup / --no-metasync / --components / --validate-only）。verify.sh に、そのまま渡す
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -159,7 +164,7 @@ while [[ $# -gt 0 ]]; do
             VERIFY_MODE=1
             shift
             ;;
-        --plan|--cleanup|--no-metasync)
+        --plan|--cleanup|--no-metasync|--components|--validate-only|--with-objects)
             VERIFY_ARGS+=("$1")   # --verify と一緒に指定するもの（下で、--verify なしの指定を拒否する）
             shift
             ;;
@@ -179,6 +184,7 @@ while [[ $# -gt 0 ]]; do
   ~/sf-tools/bin/sf-init.sh --reconnect main       # main の接続先（Salesforce 組織）を付け替える
   ~/sf-tools/bin/sf-init.sh --status               # セットアップの診断と、段階ごとの接続先を一覧にする
   ~/sf-tools/bin/sf-init.sh --verify               # 動作の確認（Hello World を、各段階にリリースして、削除する。--plan / --cleanup / --no-metasync）
+  ~/sf-tools/bin/sf-init.sh --verify --components  # パターン別のサンプルを、develop の組織だけに、リリースして、削除する（--validate-only: 検証のみ）
   ~/sf-tools/bin/sf-init.sh --legacy-connected-app # 従来の接続アプリケーションを使う（今後廃止予定）"
             ;;
     esac
@@ -198,7 +204,7 @@ if [[ -n "$ADD_TIER_MODE" ]]; then
     exit $RET_OK
 fi
 
-# --plan / --cleanup / --no-metasync は、--verify と一緒にだけ指定できる
+# --plan / --cleanup / --no-metasync / --components / --validate-only / --with-objects は、--verify と一緒にだけ指定できる
 if [[ "$VERIFY_MODE" -eq 0 && ${#VERIFY_ARGS[@]} -gt 0 ]]; then
     die "${VERIFY_ARGS[*]} は、--verify と一緒に指定してください。"
 fi

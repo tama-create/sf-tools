@@ -57,7 +57,21 @@ case "$*" in
         # MOCK_GH_HELLO_ON=<段階>: その段階のブランチに、検証用と同名のクラスのファイルが、すでにある
         if [[ -n "${MOCK_GH_HELLO_ON:-}" && "$*" == *"/classes/"*"?ref=${MOCK_GH_HELLO_ON}"* ]]; then echo "sha-existing"; exit 0; fi
         # MOCK_GH_LABELS_EXIST=1: develop に、すでに labels のファイルがある（--components が、上書きしないことの確認）
-        if [[ "${MOCK_GH_LABELS_EXIST:-}" == "1" && "$*" == *"/labels/CustomLabels.labels-meta.xml?ref=develop"* ]]; then echo "sha-labels"; exit 0; fi
+        #   MOCK_GH_LABELS_EXIST=ours: そのファイルは、サンプルのラベルだけ（前回の検証の残り）
+        if [[ -n "${MOCK_GH_LABELS_EXIST:-}" && "$*" == *"/labels/CustomLabels.labels-meta.xml?ref=develop"* ]]; then
+            if [[ "$*" == *"@base64d"* ]]; then
+                if [[ "$MOCK_GH_LABELS_EXIST" == "ours" ]]; then
+                    printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' '<CustomLabels xmlns="http://soap.sforce.com/2006/04/metadata">' \
+                        '    <labels>' '        <fullName>SfToolsE2eHello</fullName>' '        <value>Hello, World!</value>' '    </labels>' '</CustomLabels>'
+                else
+                    printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' '<CustomLabels xmlns="http://soap.sforce.com/2006/04/metadata">' \
+                        '    <labels>' '        <fullName>MyOwnLabel</fullName>' '        <value>x</value>' '    </labels>' \
+                        '    <labels>' '        <fullName>SfToolsE2eHello</fullName>' '        <value>y</value>' '    </labels>' '</CustomLabels>'
+                fi
+                exit 0
+            fi
+            echo "sha-labels"; exit 0
+        fi
         # 削除用のブランチ（verify-hello-delete-...）には、クラスのファイルが、ある（main から作られるため）。リリース用には、ない
         case "$*" in
             *"?ref=verify-hello-delete"*"/classes/"*|*"/classes/"*"?ref=verify-hello-delete"*) echo "sha-of-file"; exit 0 ;;
@@ -537,6 +551,11 @@ test_components() {
     assert_equals "$(grep -c "${del}-[0-9]\|${del}-delete-[0-9]" "$MOCK_CALL_LOG")" "2" "通し: 作業用ブランチ 2 本を、最後に削除する"
     assert_file_not_contains "$MOCK_CALL_LOG" "verify-comp-delete2" "通し: 段階 2 のブランチは、作らない"
     assert_file_contains "$OUT" "サンプル（パターン別のコンポーネント）の、リリースと削除が" "通し: 結果が、サンプル用の文面で表示される"
+    # 通常の削除には、@ignore-missing を入れない（存在しない削除対象は、エラーにする。綴りの誤りを、見落とさないため）
+    local _rt0 _b640
+    _rt0=$(grep -- "-X PUT repos/.*remove-target.txt" "$MOCK_CALL_LOG" | tail -1)
+    _b640="${_rt0#*content=}"; _b640="${_b640%% *}"
+    assert_equals "$(printf '%s' "$_b640" | base64 -d 2>/dev/null | grep -c '@ignore-missing')" "0" "通し: 通常の削除には、@ignore-missing を入れない"
     assert_file_contains "$OUT" "オブジェクト系" "通し: オブジェクト系を含めていない旨が表示される"
 
     # --with-objects: リリース 1 本 + 削除 2 本（段階 1 → 段階 2）。オブジェクト・項目・Layout・トリガーも入る
@@ -591,6 +610,11 @@ test_components() {
     assert_exit_ok "$RC" "--cleanup: 正常終了する"
     assert_equals "$(_count 'gh pr create')" "1" "--cleanup: PR は 1 本（削除の段階 1）"
     assert_file_not_contains "$OUT" "リリース用のブランチ" "--cleanup: リリース用のブランチは、作らない"
+    # --cleanup の remove-target.txt には、「# @ignore-missing」を入れる（どこまで消えているか分からないため。冪等にする）
+    local _rt _b64
+    _rt=$(grep -- "-X PUT repos/.*remove-target.txt" "$MOCK_CALL_LOG" | head -1)
+    _b64="${_rt#*content=}"; _b64="${_b64%% *}"
+    assert_equals "$(printf '%s' "$_b64" | base64 -d 2>/dev/null | grep -c '^# @ignore-missing')" "1" "--cleanup: remove-target.txt に、@ignore-missing を入れる"
     assert_file_contains "$MOCK_CALL_LOG" "-X DELETE repos/tamashimon/force-testproject/contents/force-app/main/default/flows/SfToolsE2eHello.flow-meta.xml" "--cleanup: リポジトリの Flow のファイルを削除する（組織の Flow は、画面で手動で削除する）"
     _env
     _run "\n" --components --with-objects --cleanup
@@ -632,11 +656,27 @@ test_components() {
 
     # 既存の labels がある: CustomLabels は、サンプルに含めない（上書きして削除してしまうのを避ける）
     _env
-    export MOCK_GH_LABELS_EXIST=1
+    export MOCK_GH_LABELS_EXIST=1   # 利用者のファイル（ほかのラベルも含む）
     _run "\n" --components
     assert_exit_ok "$RC" "既存の labels あり: 正常終了する"
     assert_file_contains "$OUT" "CustomLabels は、サンプルに含めません" "既存の labels あり: 理由が表示される"
     assert_equals "$(grep -c -- "-X [A-Z]* repos/.*labels/CustomLabels" "$MOCK_CALL_LOG")" "0" "既存の labels あり: そのファイルを、追加・削除しない（確認の読み取りのみ）"
+    _env
+
+    # 前回の検証の残り（サンプルのラベルだけのファイル）: サンプルのものとして扱う。--cleanup で、ファイルを削除する
+    _env
+    export MOCK_GH_LABELS_EXIST=ours
+    _run "\n" --components --cleanup
+    assert_exit_ok "$RC" "サンプルの labels の残り（--cleanup）: 正常終了する"
+    assert_file_contains "$OUT" "サンプルの一部として扱います" "サンプルの labels の残り: サンプルのものとして扱う旨が表示される"
+    assert_file_not_contains "$OUT" "CustomLabels は、サンプルに含めません" "サンプルの labels の残り: 含めない警告は、出さない"
+    assert_file_contains "$MOCK_CALL_LOG" "-X DELETE repos/tamashimon/force-testproject/contents/force-app/main/default/labels/CustomLabels.labels-meta.xml" "サンプルの labels の残り: --cleanup が、そのファイルを削除する"
+    # 通しの実行: 同名のファイルが、すでにある → 実行しない（--cleanup を案内する）
+    _env
+    export MOCK_GH_LABELS_EXIST=ours
+    _run "\n" --components
+    assert_exit_fail "$RC" "サンプルの labels の残り（通し）: 実行しない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "pr create" "サンプルの labels の残り（通し）: PR を作らない"
     _env
 
     # 検証用と同名のファイルが、develop に、すでにある: 実行しない
@@ -730,6 +770,11 @@ test_samples() {
         VERIFY_SET=hello; echo "SET_HELLO=$(verify_set_paths all | wc -l | tr -d ' ')"
         VERIFY_SET=components; VERIFY_SAMPLE_LABELS=1; echo "SET_COMP=$(verify_set_paths all | wc -l | tr -d ' ')"
         # URL エンコード
+        # labels のファイルの判定: サンプルのラベルだけ → サンプルのもの。ほかのラベルを含む・空 → 利用者のもの
+        printf '<CustomLabels>\n<labels>\n<fullName>SfToolsE2eHello</fullName>\n</labels>\n</CustomLabels>\n' | verify_sample_labels_file_is_ours && echo "LBL_OURS=yes" || echo "LBL_OURS=no"
+        printf '<CustomLabels>\n<labels>\n<fullName>Mine</fullName>\n</labels>\n<labels>\n<fullName>SfToolsE2eHello</fullName>\n</labels>\n</CustomLabels>\n' | verify_sample_labels_file_is_ours && echo "LBL_MIXED=ours" || echo "LBL_MIXED=theirs"
+        printf '' | verify_sample_labels_file_is_ours && echo "LBL_EMPTY=ours" || echo "LBL_EMPTY=theirs"
+        printf '<CustomLabels>\n<labels>\n<fullName>Other</fullName>\n</labels>\n</CustomLabels>\n' | verify_sample_labels_file_is_ours && echo "LBL_OTHER=ours" || echo "LBL_OTHER=theirs"
         # LWC と Aura は、同じ名前空間。大文字・小文字を無視して、同名にならないこと（実際の組織が拒否した）
         echo "AURA_LWC_DIFF=$([[ "$(printf '%s' "$VERIFY_SAMPLE_AURA" | tr 'A-Z' 'a-z')" != "$(printf '%s' "$VERIFY_SAMPLE_LWC" | tr 'A-Z' 'a-z')" ]] && echo yes || echo no)"
         echo "URLPATH=$(_verify_urlpath 'a/SfToolsE2eHello__c-SfToolsE2eHello Layout%28x%29.xml')"
@@ -765,6 +810,10 @@ test_samples() {
     assert_output_contains "$out" "NO_MIXED=11"    "オブジェクト系なし: [files] と [members] の混在は、維持する（混在の確認）"
     assert_output_contains "$out" "SET_HELLO=4"    "切替: hello は 4 ファイル（従来どおり）"
     assert_output_contains "$out" "SET_COMP=21"    "切替: components は 21 ファイル"
+    assert_output_contains "$out" "LBL_OURS=yes"     "labels の判定: サンプルのラベルだけのファイルは、サンプルのもの"
+    assert_output_contains "$out" "LBL_MIXED=theirs" "labels の判定: ほかのラベルを含むファイルは、利用者のもの（同名のラベルを含んでいても）"
+    assert_output_contains "$out" "LBL_EMPTY=theirs" "labels の判定: 空・読めないときは、利用者のもの（触らない）"
+    assert_output_contains "$out" "LBL_OTHER=theirs" "labels の判定: 別のラベルだけのファイルは、利用者のもの"
     assert_output_contains "$out" "AURA_LWC_DIFF=yes" "サンプル: Aura と LWC は、別名（同じ名前空間のため。同名だと、組織が拒否する）"
     assert_output_contains "$out" "URLPATH=a/SfToolsE2eHello__c-SfToolsE2eHello%20Layout%2528x%2529.xml" "パスの URL エンコード: 空白 → %20・% → %25"
 }

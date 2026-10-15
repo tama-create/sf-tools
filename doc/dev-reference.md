@@ -265,6 +265,7 @@ check_gh_owner "$GITHUB_OWNER"   # 認証ユーザーの一致確認
 空のマニフェストでは、`sf project deploy start` が `NothingToDeploy` を返し、sf-release.sh は「変更がないため処理をスキップしました」と成功扱いにしていたため、
 `[files]` と `[members]` を混在させたリストは、検証もリリースもされないまま、緑になっていた（`sf-init.sh --verify --components` で発見）。
 統合後に `<members>` が 1 つもなければ、エラーで中断する（`NothingToDeploy` の成功扱いにしない）。
+**`remove-target.txt` の指示行 `# @ignore-missing`**（コメント行の形）: あるときだけ、`sf project deploy start --ignore-warnings` を付け、組織に存在しない削除対象を、エラーにしない。後始末（`sf-init.sh --verify --cleanup`）用。通常のリリース・削除には、付けない。
 `merge_package_xml` は、awk と sort だけ（GNU / BSD 共通）。種類は名前の順・メンバーは重複なし・version は最初のもの。
 テスト: `tests/test_sf-release.sh`（混在・`[members]` のみ・`[files]` のみ・空のマニフェスト）、`tests/test_common.sh` の `test_merge_package_xml`。`tests/test_helper.sh` の sf のモックは、実際の sf と同じく、両方を同時に渡すと空になる。
 
@@ -630,7 +631,9 @@ sf-init.sh --add-tier develop    # main+staging → main+staging+develop
 - **Flow**: API での削除は、`Flow` 型・`FlowDefinition` 型のどちらでも拒否される場合がある（`insufficient access rights on cross-reference id`。接続ユーザーに、Flow を API で削除する権限がない）。削除できないものを、リリースすると組織に残るため、**通しには含めない**（`VERIFY_SAMPLE_FLOW`: 検証のみ・`--cleanup`（リポジトリのファイルの削除）では 1、通しでは 0）。`remove-target.txt` には、Flow を含めない。組織に残った Flow は、画面（設定 → フロー）で手動で削除する。削除用のブランチは、サンプルのファイルが **develop にだけある**ため、develop の先頭から作る（`_make_delete_branch BR STAGE BASE`）。
 - `--validate-only`: `_pr_flow` の `mode=validate`。wf-validate の成功を確認し、PR をマージせずに閉じる（`verify_pr_close`）。削除は、行わない。失敗したときは、PR・ブランチを残す。
 - 既存の `force-app/main/default/labels/CustomLabels.labels-meta.xml` が develop にあるときは、`VERIFY_SAMPLE_LABELS=0`（CustomLabels を含めない。上書きして削除してしまうのを避ける）。
+  ただし、**サンプルのラベル（fullName が `SfToolsE2eHello`）だけを含むファイル**は、サンプル自身のもの（前回の検証の残り）として扱う（`verify_sample_labels_file_is_ours`）。含めないと、ラベルとファイルが、後始末でも消えなくなる（実際に発生）。ほかのラベルを含む・読めない・空のときは、利用者のものとして、触らない。
 - GitHub の contents API のパスは `_verify_urlpath` で URL エンコードする（`%` → `%25`、空白 → `%20`。Layout の名前に空白がある）。
+- **`--cleanup` は冪等**: 削除用ブランチの `remove-target.txt` の先頭に `# @ignore-missing` を入れる（`_make_delete_branch`。`CLEANUP_ONLY` のときだけ）。`sf-release.sh` がこの指示行を見つけると `sf project deploy start --ignore-warnings` を付け、組織に存在しない削除対象（`No ApexClass named: X found`）を、エラーにしない。どこまで消えているか分からない後始末が、何度でも通る（付けないと、一部が残っているだけで、dry-run が失敗していた）。通常の削除には入れない（綴りの誤りを、見落とさないため）。
 - 後始末の案内: 失敗時の `--cleanup` のコマンドは、`--components`（と `--with-objects`）を含めて案内する（`_CLEANUP_CMD`。含めないと、Hello World の削除になってしまう）。
 - 作業用ブランチ: `verify-comp-HHMMSS` / `verify-comp-delete-HHMMSS` / `verify-comp-delete2-HHMMSS`（`--with-objects` のときだけ。最後に削除。`_delete_job_branches` の形式の確認は `^verify-(hello|comp)(-delete2?)?-[0-9]{6}$`）。
 - 実際の組織での受理（Flow の最小の XML・削除の順序など）は、モックでは確認できない。最初は、develop で実行して、エラーを見ながら直す。

@@ -520,26 +520,47 @@ test_components() {
     assert_file_not_contains "$OUT" "main → TAMA_PROD" "--plan: main（本番）は、対象にしない"
     assert_file_not_contains "$MOCK_CALL_LOG" "pr create" "--plan: PR を作らない"
 
-    # 通し: リリース 1 本 + 削除 2 本（段階 1 → 段階 2）。すべて develop 向け。develop の先頭から削除用のブランチを作る
+    # 通し（既定）: オブジェクト系を含めない。リリース 1 本 + 削除 1 本。すべて develop 向け。develop の先頭から削除用のブランチを作る
     _env
     _run "\n" --components
     [[ "$RC" -eq 0 ]] || { echo "  --- 診断: verify.sh の出力（末尾 40 行）---"; tail -n 40 "$OUT" | sed 's/^/  | /'; }
     assert_exit_ok "$RC" "通し: 正常終了する"
-    assert_equals "$(_count 'gh pr create')" "3" "通し: PR は 3 本（リリース 1・削除 2）"
-    assert_equals "$(_count 'gh pr create.*--base develop')" "3" "通し: すべて develop 向け"
-    assert_equals "$(_count 'gh pr merge')" "3" "通し: 3 本ともマージする"
+    assert_equals "$(_count 'gh pr create')" "2" "通し: PR は 2 本（リリース 1・削除 1）"
+    assert_equals "$(_count 'gh pr create.*--base develop')" "2" "通し: すべて develop 向け"
+    assert_equals "$(_count 'gh pr merge')" "2" "通し: 2 本ともマージする"
     assert_file_contains "$MOCK_CALL_LOG" "git/ref/heads/develop" "通し: 削除用のブランチは、develop の先頭から作る"
-    assert_file_contains "$MOCK_CALL_LOG" "contents/force-app/main/default/objects/SfToolsE2eHello__c/fields/Note__c.field-meta.xml" "通し: 項目のファイルを追加する"
-    assert_file_contains "$MOCK_CALL_LOG" "SfToolsE2eHello__c-SfToolsE2eHello%20Layout.layout-meta.xml" "通し: 名前に空白を含む Layout のパスは、URL エンコードして送る"
     assert_file_contains "$MOCK_CALL_LOG" 'email/unfiled$public/SfToolsE2eHello.email' "通し: 名前に \$ を含むメール テンプレートのパス"
-    assert_equals "$(grep -c "api -X DELETE repos/tamashimon/force-testproject/contents/.*objects/SfToolsE2eHello__c" "$MOCK_CALL_LOG")" "2" "通し: 段階 2 で、オブジェクト・項目のファイルを削除する"
-    assert_equals "$(grep -c "${del}-[0-9]\|${del}-delete-[0-9]\|${del}-delete2-[0-9]" "$MOCK_CALL_LOG")" "3" "通し: 作業用ブランチ 3 本を、最後に削除する"
+    assert_file_contains "$MOCK_CALL_LOG" "aura/SfToolsE2eHelloAura/SfToolsE2eHelloAura.cmp" "通し: Aura は、LWC と別名"
+    # オブジェクト系（トリガー・Layout・オブジェクト・項目）は、既定では、触れない（削除したオブジェクトの名前が、15 日間、予約されるため）
+    assert_equals "$(grep -c -- "-X PUT repos/.*\(objects/\|layouts/\|triggers/\)" "$MOCK_CALL_LOG")" "0" "通し: オブジェクト・Layout・トリガーのファイルは、追加しない"
+    assert_equals "$(grep -c "${del}-[0-9]\|${del}-delete-[0-9]" "$MOCK_CALL_LOG")" "2" "通し: 作業用ブランチ 2 本を、最後に削除する"
+    assert_file_not_contains "$MOCK_CALL_LOG" "verify-comp-delete2" "通し: 段階 2 のブランチは、作らない"
     assert_file_contains "$OUT" "サンプル（パターン別のコンポーネント）の、リリースと削除が" "通し: 結果が、サンプル用の文面で表示される"
+    assert_file_contains "$OUT" "オブジェクト系" "通し: オブジェクト系を含めていない旨が表示される"
+
+    # --with-objects: リリース 1 本 + 削除 2 本（段階 1 → 段階 2）。オブジェクト・項目・Layout・トリガーも入る
+    _env
+    _run "\n" --components --with-objects
+    [[ "$RC" -eq 0 ]] || { echo "  --- 診断: verify.sh の出力（末尾 40 行）---"; tail -n 40 "$OUT" | sed 's/^/  | /'; }
+    assert_exit_ok "$RC" "--with-objects: 正常終了する"
+    assert_equals "$(_count 'gh pr create')" "3" "--with-objects: PR は 3 本（リリース 1・削除 2）"
+    assert_equals "$(_count 'gh pr create.*--base develop')" "3" "--with-objects: すべて develop 向け"
+    assert_equals "$(_count 'gh pr merge')" "3" "--with-objects: 3 本ともマージする"
+    assert_file_contains "$MOCK_CALL_LOG" "contents/force-app/main/default/objects/SfToolsE2eHello__c/fields/Note__c.field-meta.xml" "--with-objects: 項目のファイルを追加する"
+    assert_file_contains "$MOCK_CALL_LOG" "SfToolsE2eHello__c-SfToolsE2eHello%20Layout.layout-meta.xml" "--with-objects: 名前に空白を含む Layout のパスは、URL エンコードして送る"
+    assert_equals "$(grep -c "api -X DELETE repos/tamashimon/force-testproject/contents/.*objects/SfToolsE2eHello__c" "$MOCK_CALL_LOG")" "2" "--with-objects: 段階 2 で、オブジェクト・項目のファイルを削除する"
+    assert_equals "$(grep -c "${del}-[0-9]\|${del}-delete-[0-9]\|${del}-delete2-[0-9]" "$MOCK_CALL_LOG")" "3" "--with-objects: 作業用ブランチ 3 本を、最後に削除する"
     # 段階 2 は、段階 1 のあと（段階 2 のブランチの作成は、段階 1 の PR のマージより後）
     local m1 b2
     m1=$(grep -n 'gh pr merge' "$MOCK_CALL_LOG" | sed -n 2p | cut -d: -f1)
     b2=$(grep -n 'refs.*verify-comp-delete2' "$MOCK_CALL_LOG" | head -1 | cut -d: -f1)
-    assert_equals "$([[ -n "$m1" && -n "$b2" && "$b2" -gt "$m1" ]] && echo yes || echo no)" "yes" "通し: 段階 2 のブランチは、段階 1 のマージの後に作る"
+    assert_equals "$([[ -n "$m1" && -n "$b2" && "$b2" -gt "$m1" ]] && echo yes || echo no)" "yes" "--with-objects: 段階 2 のブランチは、段階 1 のマージの後に作る"
+
+    # --with-objects だけの指定: 拒否する
+    _env
+    _run "" --with-objects
+    assert_exit_fail "$RC" "--with-objects だけ: 拒否する"
+    assert_file_contains "$OUT" "--components と一緒に" "--with-objects だけ: 理由が表示される"
 
     # --validate-only: PR は 1 本・マージしない・閉じる。リリース・削除は、行わない
     _env
@@ -551,6 +572,8 @@ test_components() {
     assert_file_not_contains "$OUT" "wf-release が実行され" "--validate-only: リリースの実行を、待たない"
     assert_equals "$(grep -c "${del}" "$MOCK_CALL_LOG")" "1" "--validate-only: 作業用ブランチ（リリース用のみ）を削除する"
     assert_file_contains "$OUT" "反映はしていません" "--validate-only: 反映していない旨が表示される"
+    assert_file_contains "$MOCK_CALL_LOG" "SfToolsE2eHello__c-SfToolsE2eHello%20Layout.layout-meta.xml" "--validate-only: オブジェクト系（Layout）も、検証の対象にする（何も作らないため）"
+    assert_file_contains "$MOCK_CALL_LOG" "objects/SfToolsE2eHello__c/SfToolsE2eHello__c.object-meta.xml" "--validate-only: オブジェクトも、検証の対象にする"
 
     # --validate-only が失敗: マージしない・PR は閉じない（調査のため）・ブランチを残す
     _env
@@ -560,12 +583,28 @@ test_components() {
     assert_file_not_contains "$MOCK_CALL_LOG" "gh pr merge" "--validate-only 失敗: マージしない"
     assert_file_not_contains "$MOCK_CALL_LOG" "${del}" "--validate-only 失敗: ブランチを残す（調査のため）"
 
-    # --cleanup: 削除のみ（PR 2 本: 段階 1・段階 2）
+    # --cleanup: 削除のみ（既定: PR 1 本 / --with-objects: PR 2 本（段階 1・段階 2））
     _env
     _run "\n" --components --cleanup
     assert_exit_ok "$RC" "--cleanup: 正常終了する"
-    assert_equals "$(_count 'gh pr create')" "2" "--cleanup: PR は 2 本（削除の段階 1・段階 2）"
+    assert_equals "$(_count 'gh pr create')" "1" "--cleanup: PR は 1 本（削除の段階 1）"
     assert_file_not_contains "$OUT" "リリース用のブランチ" "--cleanup: リリース用のブランチは、作らない"
+    _env
+    _run "\n" --components --with-objects --cleanup
+    assert_exit_ok "$RC" "--cleanup --with-objects: 正常終了する"
+    assert_equals "$(_count 'gh pr create')" "2" "--cleanup --with-objects: PR は 2 本（削除の段階 1・段階 2）"
+
+    # 失敗したときの後始末の案内: --components（と --with-objects）を含むコマンドを案内する
+    _env
+    export MOCK_GH_RELEASE_FAIL=1
+    _run "\n" --components --with-objects
+    assert_exit_fail "$RC" "リリースの失敗: 非ゼロで終了する"
+    assert_file_contains "$OUT" "sf-init.sh --verify --components --with-objects --cleanup" "リリースの失敗: 後始末の案内に、--components --with-objects が入る"
+    _env
+    export MOCK_GH_RELEASE_FAIL=1
+    _run "\n" --components
+    assert_file_contains "$OUT" "sf-init.sh --verify --components --cleanup" "リリースの失敗（既定）: 後始末の案内に、--components が入る"
+    assert_file_not_contains "$OUT" "--components --with-objects --cleanup" "リリースの失敗（既定）: --with-objects は、案内しない"
 
     # develop がない構成: 拒否する（本番・staging に、サンプルを入れない）
     _env
@@ -619,7 +658,7 @@ test_components() {
     assert_file_contains "$OUT" "サンプル（" "sf-init.sh --verify --components --plan: サンプルの実行内容が表示される"
     assert_file_not_contains "$MOCK_CALL_LOG" "pr create" "sf-init.sh --verify --components --plan: PR を作らない"
     # --verify なしの --components / --validate-only は、拒否する（sf-init の通常の実行に、混ぜない）
-    for opt in --components --validate-only; do
+    for opt in --components --validate-only --with-objects; do
         ( cd "$FDIR" && HOME="$HM" PATH="$MB:$PATH" bash "$init" "$opt" ) > "$OUT" 2>&1 < /dev/null
         assert_exit_fail $? "${opt} だけの指定は、拒否される"
         assert_file_contains "$OUT" "--verify と一緒に指定してください" "${opt} だけの指定: 理由が表示される"
@@ -658,6 +697,8 @@ test_samples() {
         echo "MEMBERS=$(verify_sample_deploy_target_text | sed -n '/^\[members\]/,$p' | grep -c ':')"
         echo "FILES_ARE_FILES=$(verify_sample_deploy_target_text | sed -n '/^\[files\]/,/^\[members\]/p' | grep -v '^\[' | grep -v '^$' | while IFS= read -r f; do verify_sample_paths all | grep -qxF "$f" || echo "$f"; done | wc -l | tr -d ' ')"
         echo "R1=$(verify_sample_remove_target_text stage1 | grep -c ':')"
+        echo "R1_LAYOUT=$(verify_sample_remove_target_text stage1 | grep -c '^Layout:')"
+        echo "R1_FLOWDEF=$(verify_sample_remove_target_text stage1 | grep -c '^FlowDefinition:')$(verify_sample_remove_target_text stage1 | grep -c '^Flow:')"
         echo "R2=$(verify_sample_remove_target_text stage2 | grep -c ':')"
         echo "R2_OBJ_LAST=$(verify_sample_remove_target_text stage2 | grep ':' | tail -n 1)"
         echo "TRIGGER_BEFORE_OBJ=$(verify_sample_remove_target_text stage1 | grep -c 'CustomObject')"
@@ -665,6 +706,16 @@ test_samples() {
         VERIFY_SAMPLE_LABELS=0
         echo "NL_ALL=$(verify_sample_paths all | wc -l | tr -d ' ')"
         echo "NL_LABELS=$(verify_sample_paths all | grep -c 'labels/')$(verify_sample_deploy_target_text | grep -c CustomLabel)$(verify_sample_remove_target_text stage1 | grep -c CustomLabel)"
+        # オブジェクト系を含めない（通しの既定）
+        VERIFY_SAMPLE_OBJECTS=0; VERIFY_SAMPLE_LABELS=1
+        echo "NO_ALL=$(verify_sample_paths all | wc -l | tr -d ' ')"
+        echo "NO_S2=$(verify_sample_paths stage2 | wc -l | tr -d ' ')"
+        echo "NO_OBJ_PATHS=$(verify_sample_paths all | grep -c 'objects/\|layouts/\|triggers/\|TriggerTest')"
+        echo "NO_OBJ_DEPLOY=$(verify_sample_deploy_target_text | grep -c 'CustomObject\|CustomField\|Layout\|Trigger')"
+        echo "NO_R1=$(verify_sample_remove_target_text stage1 | grep -c ':')"
+        echo "NO_R2=$(verify_sample_remove_target_text stage2 | grep -c ':')"
+        echo "NO_MIXED=$(verify_sample_deploy_target_text | grep -c '^\[files\]')$(verify_sample_deploy_target_text | grep -c '^\[members\]')"
+        VERIFY_SAMPLE_OBJECTS=1
         # 切替: hello（既定）と components
         VERIFY_SET=hello; echo "SET_HELLO=$(verify_set_paths all | wc -l | tr -d ' ')"
         VERIFY_SET=components; VERIFY_SAMPLE_LABELS=1; echo "SET_COMP=$(verify_set_paths all | wc -l | tr -d ' ')"
@@ -683,12 +734,21 @@ test_samples() {
     assert_output_contains "$out" "NONAME=0"       "サンプル: labels 以外は、すべて SfToolsE2eHello 系の名前（ほかのファイルを、上書きしない）"
     assert_output_contains "$out" "TESTS=3"        "リリース対象: Apex クラスが 3 つ（Hello・テスト・トリガーのテスト）"
     assert_output_contains "$out" "FILES_ARE_FILES=0" "リリース対象: [files] のパスは、すべて、サンプルのファイルを指す"
-    assert_output_contains "$out" "R1=11"          "削除対象（段階 1）: 11 件"
+    assert_output_contains "$out" "R1=10"          "削除対象（段階 1）: 10 件"
+    assert_output_contains "$out" "R1_LAYOUT=0"    "削除対象（段階 1）: Layout は、含めない（最後の 1 つは削除できない。オブジェクトの削除に任せる）"
+    assert_output_contains "$out" "R1_FLOWDEF=10"  "削除対象（段階 1）: Flow は FlowDefinition 型（Flow 型は、組織が拒否した）"
     assert_output_contains "$out" "R2=2"           "削除対象（段階 2）: 項目・オブジェクト"
     assert_output_contains "$out" "R2_OBJ_LAST=CustomObject:SfToolsE2eHello__c" "削除対象（段階 2）: オブジェクトは、項目のあと"
     assert_output_contains "$out" "TRIGGER_BEFORE_OBJ=0" "削除対象: オブジェクトは、段階 1 には入れない（トリガーなどを、先に消す）"
     assert_output_contains "$out" "NL_ALL=20"      "CustomLabels なし: パスは 20 個"
     assert_output_contains "$out" "NL_LABELS=000"  "CustomLabels なし: labels のファイル・メンバーを、含めない"
+    assert_output_contains "$out" "NO_ALL=14"      "オブジェクト系なし: パスは 14 個"
+    assert_output_contains "$out" "NO_S2=0"        "オブジェクト系なし: 段階 2 は、空"
+    assert_output_contains "$out" "NO_OBJ_PATHS=0" "オブジェクト系なし: オブジェクト・Layout・トリガーのパスを、含めない"
+    assert_output_contains "$out" "NO_OBJ_DEPLOY=0" "オブジェクト系なし: リリース対象に、オブジェクト・項目・Layout・トリガーを、含めない"
+    assert_output_contains "$out" "NO_R1=8"        "オブジェクト系なし: 削除対象（段階 1）は 8 件"
+    assert_output_contains "$out" "NO_R2=0"        "オブジェクト系なし: 削除対象（段階 2）は、空"
+    assert_output_contains "$out" "NO_MIXED=11"    "オブジェクト系なし: [files] と [members] の混在は、維持する（混在の確認）"
     assert_output_contains "$out" "SET_HELLO=4"    "切替: hello は 4 ファイル（従来どおり）"
     assert_output_contains "$out" "SET_COMP=21"    "切替: components は 21 ファイル"
     assert_output_contains "$out" "AURA_LWC_DIFF=yes" "サンプル: Aura と LWC は、別名（同じ名前空間のため。同名だと、組織が拒否する）"

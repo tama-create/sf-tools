@@ -53,6 +53,10 @@
 #                 （lib/verify-samples.sh）。ターゲットファイルの書式（[files] / [members]）・パス・名前の書き方が、種類ごとに
 #                 違っても、リリースの仕組みが動くことの確認。develop の組織がある構成（3 層）だけで、実行できる。
 #                 削除は、2 段階（段階 1: ほかから参照されないもの → 段階 2: 項目・オブジェクト）
+#   --with-objects : （--components と一緒に）オブジェクト系（ApexTrigger とそのテスト・Layout・CustomObject・CustomField）も、
+#                 リリースして、削除する（削除は 2 段階）。既定では、含めない: カスタムオブジェクトは、削除すると、15 日間、
+#                 削除済みの状態で名前が予約され、同じ API 名を再作成できない（ごみ箱から消すまで）ため。--validate-only は、
+#                 何も作らないため、常に含める（オブジェクトへの依存関係まで、実際の組織で検証する）
 #   --validate-only : （--components と一緒に）検証だけを行う。サンプルの PR を develop 向けに出し、wf-validate（dry-run）の
 #                 成功を確認して、PR は、マージせずに閉じる。組織には、何も反映しない
 #   -h, --help  : このヘルプを表示する
@@ -84,6 +88,7 @@ CLEANUP_ONLY=0
 NO_METASYNC=0
 COMPONENTS=0
 VALIDATE_ONLY=0
+WITH_OBJECTS=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --plan)    PLAN_ONLY=1 ;;
@@ -91,13 +96,29 @@ while [[ $# -gt 0 ]]; do
         --no-metasync) NO_METASYNC=1 ;;
         --components) COMPONENTS=1 ;;
         --validate-only) VALIDATE_ONLY=1 ;;
+        --with-objects) WITH_OBJECTS=1 ;;
         *) die "不明なオプションです: $1" ;;
     esac
     shift
 done
 [[ $VALIDATE_ONLY -eq 1 && $COMPONENTS -eq 0 ]] && die "--validate-only は、--components と一緒に指定してください。"
 [[ $VALIDATE_ONLY -eq 1 && $CLEANUP_ONLY -eq 1 ]] && die "--validate-only と --cleanup は、一緒に指定できません（検証だけのときは、組織に、何も残りません）。"
+[[ $WITH_OBJECTS -eq 1 && $COMPONENTS -eq 0 ]] && die "--with-objects は、--components と一緒に指定してください。"
 [[ $COMPONENTS -eq 1 ]] && VERIFY_SET="components"
+# オブジェクト系（トリガー・Layout・オブジェクト・項目）を、サンプルに含めるか: 検証のみは、常に含める（何も作らない）。
+# リリースと削除の通しは、--with-objects のときだけ（削除したオブジェクトの名前が、15 日間、予約されるため）
+VERIFY_SAMPLE_OBJECTS=0
+[[ $COMPONENTS -eq 1 && ( $VALIDATE_ONLY -eq 1 || $WITH_OBJECTS -eq 1 ) ]] && VERIFY_SAMPLE_OBJECTS=1
+# 削除の PR の本数（--components: 段階 1 のみ / オブジェクト系を含めるときは、段階 2 も）
+_DEL_PRS=1
+[[ $VERIFY_SAMPLE_OBJECTS -eq 1 ]] && _DEL_PRS=2
+# 後始末（--cleanup）の案内に使う、オプションの指定
+_CLEANUP_CMD="sf-init.sh --verify --cleanup"
+if [[ $COMPONENTS -eq 1 ]]; then
+    _CLEANUP_CMD="sf-init.sh --verify --components"
+    [[ $VERIFY_SAMPLE_OBJECTS -eq 1 ]] && _CLEANUP_CMD+=" --with-objects"
+    _CLEANUP_CMD+=" --cleanup"
+fi
 # 確認の対象の表示名（実行内容・確認の文面で使う）
 _WHAT="Hello World"
 [[ $COMPONENTS -eq 1 ]] && _WHAT="サンプル（パターン別のコンポーネント）"
@@ -189,11 +210,18 @@ if [[ $COMPONENTS -eq 1 && $VALIDATE_ONLY -eq 1 ]]; then
     echo "    内容       : サンプル（$(verify_set_paths all | wc -l | tr -d ' ') ファイル）の検証のみ（wf-validate = dry-run）。PR は、マージせずに閉じる" >&2
     echo "                 組織には、何も反映しません（develop のみ）" >&2
 elif [[ $COMPONENTS -eq 1 && $CLEANUP_ONLY -eq 1 ]]; then
-    echo "    内容       : 削除のみ（サンプルを、develop の組織から消す。2 本の PR: 段階 1・段階 2）" >&2
+    echo "    内容       : 削除のみ（サンプルを、develop の組織から消す。${_DEL_PRS} 本の PR）" >&2
 elif [[ $COMPONENTS -eq 1 ]]; then
-    echo "    内容       : サンプル（$(verify_set_paths all | wc -l | tr -d ' ') ファイル。Apex・トリガー・LWC・Aura・Flow・権限セット・Layout・メール テンプレート・" >&2
-    echo "                 オブジェクト・項目など）を、develop の組織にリリースして、削除する（develop のみ）" >&2
-    echo "                 PR を 3 本（リリース 1・削除 2: 段階 1 → 段階 2）作成してマージする。組織と、リポジトリのファイルは、最後に消える" >&2
+    if [[ $VERIFY_SAMPLE_OBJECTS -eq 1 ]]; then
+        echo "    内容       : サンプル（$(verify_set_paths all | wc -l | tr -d ' ') ファイル。Apex・トリガー・LWC・Aura・Flow・権限セット・Layout・メール テンプレート・" >&2
+        echo "                 オブジェクト・項目など）を、develop の組織にリリースして、削除する（develop のみ）" >&2
+        echo "                 PR を 3 本（リリース 1・削除 2: 段階 1 → 段階 2）作成してマージする。組織と、リポジトリのファイルは、最後に消える" >&2
+        echo -e "                 ${CLR_WARNING}※ 削除したカスタムオブジェクトの名前は、15 日間、予約されます（再作成には、ごみ箱から消す必要があります）${CLR_RESET}" >&2
+    else
+        echo "    内容       : サンプル（$(verify_set_paths all | wc -l | tr -d ' ') ファイル。Apex・LWC・Aura・Flow・権限セット・メール テンプレート・表示ラベル）を、" >&2
+        echo "                 develop の組織にリリースして、削除する（develop のみ。オブジェクト系は、含めません: --with-objects で含めます）" >&2
+        echo "                 PR を 2 本（リリース 1・削除 1）作成してマージする。組織と、リポジトリのファイルは、最後に消える" >&2
+    fi
 elif [[ $CLEANUP_ONLY -eq 1 ]]; then
     echo "    内容       : 削除のみ（Hello World のクラスを、各段階の組織から消す。${n_tiers} 本の PR）" >&2
 else
@@ -211,7 +239,7 @@ fi
 # 目安: PR 1 本（検証 → マージ → リリース）が、約 3 分。wf-metasync が、約 3 分（実測: 3 層・PR 6 本・metasync で、約 20 分）
 _est=$((n_tiers * (CLEANUP_ONLY == 1 ? 1 : 2) * 3))
 if [[ $COMPONENTS -eq 1 ]]; then
-    if [[ $VALIDATE_ONLY -eq 1 ]]; then _est=4; elif [[ $CLEANUP_ONLY -eq 1 ]]; then _est=6; else _est=10; fi   # PR 1 本 = 約 3 分（検証のみは、マージ・リリースがない）
+    if [[ $VALIDATE_ONLY -eq 1 ]]; then _est=4; elif [[ $CLEANUP_ONLY -eq 1 ]]; then _est=$((_DEL_PRS * 3)); else _est=$(((1 + _DEL_PRS) * 3 + 1)); fi   # PR 1 本 = 約 3 分（検証のみは、マージ・リリースがない）
 fi
 [[ $CLEANUP_ONLY -eq 0 && $NO_METASYNC -eq 0 ]] && _est=$((_est + 3))
 echo "    目安の時間 : 約 ${_est} 分（Actions の混み具合で、前後します）" >&2
@@ -355,8 +383,8 @@ _guidance() {
     echo "" >&2
     log "ERROR" "検証を、途中で止めました。"
     if (( ${#LEFT[@]} > 0 )); then
-        log "WARNING" "  Hello World が、次の段階の組織に、残っている可能性があります: ${LEFT[*]}"
-        log "WARNING" "  削除のみを、やり直すには、次を実行してください: sf-init.sh --verify --cleanup"
+        log "WARNING" "  ${_WHAT} が、次の段階の組織に、残っている可能性があります: ${LEFT[*]}"
+        log "WARNING" "  削除のみを、やり直すには、次を実行してください: ${_CLEANUP_CMD}"
     fi
     log "WARNING" "  PR が残っているときは、GitHub の画面で、確認してください（https://github.com/${REPO}/pulls）。"
 }
@@ -523,7 +551,7 @@ if _vchk "削除用のブランチ ${JOB_DELETE} を作成した（${_WHAT}の�
     for t in "${TIERS[@]}"; do
         if _pr_flow "削除（${t}）" "$JOB_DELETE" "verify: ${_WHAT} を削除" "$t" delete; then
             _evidence "$t" "$FLOW_RUN" "削除" || true
-            [[ $COMPONENTS -eq 1 ]] || _left_del "$t"   # この段階のクラスは、消えた（--components は、段階 2 のあと）
+            [[ $VERIFY_SAMPLE_OBJECTS -eq 1 ]] || _left_del "$t"   # この段階のクラスは、消えた（オブジェクト系を含めるときは、段階 2 のあと）
         else
             STOPPED=1
             break
@@ -536,8 +564,8 @@ if [[ $STOPPED -eq 1 ]]; then
     _guidance
     exit $RET_NG
 fi
-# --components: 段階 2（項目・オブジェクト）。段階 1 で、参照するもの（トリガー・テストクラス・Layout など）を消したあとに、消す
-if [[ $COMPONENTS -eq 1 ]]; then
+# --components --with-objects: 段階 2（項目・オブジェクト）。段階 1 で、参照するもの（トリガー・テストクラスなど）を消したあとに、消す
+if [[ $COMPONENTS -eq 1 && $VERIFY_SAMPLE_OBJECTS -eq 1 ]]; then
     log "HEADER" "削除（項目・オブジェクト。${TIERS[*]}）"
     MADE_DELETE2=1
     if _vchk "削除用のブランチ ${JOB_DELETE2} を作成した（項目・オブジェクトの削除と削除対象）" _make_delete_branch "$JOB_DELETE2" stage2 "$DEL_BASE"; then
@@ -607,6 +635,7 @@ if [[ $NG_COUNT -eq 0 ]]; then
         log "SUCCESS" "検証: すべて成功しました。サンプル（パターン別のコンポーネント）の検証（dry-run）が、develop の組織に対して通りました（反映はしていません）。"
     elif [[ $COMPONENTS -eq 1 ]]; then
         log "SUCCESS" "検証: すべて成功しました。サンプル（パターン別のコンポーネント）の、リリースと削除が、develop の組織に対して動いています。"
+        [[ $VERIFY_SAMPLE_OBJECTS -eq 1 ]] || log "INFO" "  オブジェクト系（トリガー・Layout・オブジェクト・項目）は、通しには含めていません（--validate-only で検証できます）。"
     else
         log "SUCCESS" "検証: すべて成功しました。${REPO} は、段階ごとの組織に対して、リリースと削除が動いています。"
     fi

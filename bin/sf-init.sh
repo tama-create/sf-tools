@@ -86,6 +86,8 @@
 #     --components        : （--verify と一緒に）Hello World の代わりに、パターン別のサンプル（Apex・トリガー・LWC・Aura・Flow・
 #                           権限セット・Layout・メール テンプレート・オブジェクト・項目など）を、develop の組織だけに、リリースして、削除する
 #     --validate-only     : （--verify --components と一緒に）検証（wf-validate = dry-run）だけ。PR は、マージせずに閉じる。組織には、何も反映しない
+#     --with-objects      : （--verify --components と一緒に）オブジェクト系（トリガー・Layout・オブジェクト・項目）も、リリースして、削除する
+#                           （削除したオブジェクトの名前は、15 日間、予約される）
 #   --legacy-connected-app: 従来の接続アプリケーション（手動の入力。今後廃止予定）を使う。既定は、外部クライアントアプリ（自動で作成）
 # ==============================================================================
 
@@ -162,7 +164,7 @@ while [[ $# -gt 0 ]]; do
             VERIFY_MODE=1
             shift
             ;;
-        --plan|--cleanup|--no-metasync|--components|--validate-only)
+        --plan|--cleanup|--no-metasync|--components|--validate-only|--with-objects)
             VERIFY_ARGS+=("$1")   # --verify と一緒に指定するもの（下で、--verify なしの指定を拒否する）
             shift
             ;;
@@ -202,7 +204,7 @@ if [[ -n "$ADD_TIER_MODE" ]]; then
     exit $RET_OK
 fi
 
-# --plan / --cleanup / --no-metasync / --components / --validate-only は、--verify と一緒にだけ指定できる
+# --plan / --cleanup / --no-metasync / --components / --validate-only / --with-objects は、--verify と一緒にだけ指定できる
 if [[ "$VERIFY_MODE" -eq 0 && ${#VERIFY_ARGS[@]} -gt 0 ]]; then
     die "${VERIFY_ARGS[*]} は、--verify と一緒に指定してください。"
 fi

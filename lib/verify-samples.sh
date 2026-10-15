@@ -22,9 +22,17 @@
 #     CustomObject      SfToolsE2eHello__c                                                     ... 親
 #     CustomField       SfToolsE2eHello__c.Note__c                                             ... 子（Object.Field の書式）
 #
+# 【オブジェクト系（ApexTrigger とそのテスト・Layout・CustomObject・CustomField）】
+#   カスタムオブジェクトは、削除すると、15 日間、削除済みの状態で名前が予約され、同じ API 名を再作成できない
+#   （ごみ箱から消すまで）。そのため、リリースと削除の通しでは、既定で、含めない（--with-objects で、明示したときだけ含める）。
+#   検証のみ（--validate-only）は、何も作らないため、常に含める（オブジェクトへの依存関係まで、実際の組織で検証する）。
+#   Layout は、オブジェクトの最後の 1 つにできない（"Cannot delete the only layout"）ため、削除対象にせず、オブジェクトの削除に任せる。
+#   Flow の削除は、Flow 型では拒否される（"insufficient access rights on cross-reference id"）ため、FlowDefinition 型で指定する。
+#
 # 【環境変数】
-#   VERIFY_SAMPLE_LABELS  1 = CustomLabels を含める（既定 1）。リポジトリに、すでに labels のファイルがあるときは、0 にする
-#                         （そのファイルを、上書きして、削除してしまうため）
+#   VERIFY_SAMPLE_LABELS   1 = CustomLabels を含める（既定 1）。リポジトリに、すでに labels のファイルがあるときは、0 にする
+#                          （そのファイルを、上書きして、削除してしまうため）
+#   VERIFY_SAMPLE_OBJECTS  1 = オブジェクト系を含める（既定 1。verify.sh が、通しでは 0、--with-objects・検証のみでは 1 にする）
 # ==============================================================================
 
 VERIFY_SAMPLE_NAME="SfToolsE2eHello"
@@ -49,10 +57,6 @@ verify_sample_paths() {
             "${b}/classes/${VERIFY_SAMPLE_NAME}.cls-meta.xml" \
             "${b}/classes/${VERIFY_APEX_HELLO_TEST}.cls" \
             "${b}/classes/${VERIFY_APEX_HELLO_TEST}.cls-meta.xml" \
-            "${b}/classes/${VERIFY_SAMPLE_TRIGGER_TEST}.cls" \
-            "${b}/classes/${VERIFY_SAMPLE_TRIGGER_TEST}.cls-meta.xml" \
-            "${b}/triggers/${VERIFY_SAMPLE_TRIGGER}.trigger" \
-            "${b}/triggers/${VERIFY_SAMPLE_TRIGGER}.trigger-meta.xml" \
             "${b}/lwc/${VERIFY_SAMPLE_LWC}/${VERIFY_SAMPLE_LWC}.html" \
             "${b}/lwc/${VERIFY_SAMPLE_LWC}/${VERIFY_SAMPLE_LWC}.js" \
             "${b}/lwc/${VERIFY_SAMPLE_LWC}/${VERIFY_SAMPLE_LWC}.js-meta.xml" \
@@ -60,12 +64,19 @@ verify_sample_paths() {
             "${b}/aura/${VERIFY_SAMPLE_AURA}/${VERIFY_SAMPLE_AURA}.cmp-meta.xml" \
             "${b}/flows/${VERIFY_SAMPLE_NAME}.flow-meta.xml" \
             "${b}/permissionsets/${VERIFY_SAMPLE_NAME}.permissionset-meta.xml" \
-            "${b}/layouts/${VERIFY_SAMPLE_LAYOUT}.layout-meta.xml" \
             "${b}/email/unfiled\$public/${VERIFY_SAMPLE_NAME}.email" \
             "${b}/email/unfiled\$public/${VERIFY_SAMPLE_NAME}.email-meta.xml"
+        if [[ "${VERIFY_SAMPLE_OBJECTS:-1}" == "1" ]]; then
+            printf '%s\n' \
+                "${b}/classes/${VERIFY_SAMPLE_TRIGGER_TEST}.cls" \
+                "${b}/classes/${VERIFY_SAMPLE_TRIGGER_TEST}.cls-meta.xml" \
+                "${b}/triggers/${VERIFY_SAMPLE_TRIGGER}.trigger" \
+                "${b}/triggers/${VERIFY_SAMPLE_TRIGGER}.trigger-meta.xml" \
+                "${b}/layouts/${VERIFY_SAMPLE_LAYOUT}.layout-meta.xml"
+        fi
         [[ "${VERIFY_SAMPLE_LABELS:-1}" == "1" ]] && printf '%s\n' "$VERIFY_SAMPLE_LABELS_PATH"
     fi
-    if [[ "$stage" == "stage2" || "$stage" == "all" ]]; then
+    if [[ "${VERIFY_SAMPLE_OBJECTS:-1}" == "1" && ( "$stage" == "stage2" || "$stage" == "all" ) ]]; then
         printf '%s\n' \
             "${b}/objects/${VERIFY_SAMPLE_OBJ}/${VERIFY_SAMPLE_OBJ}.object-meta.xml" \
             "${b}/objects/${VERIFY_SAMPLE_OBJ}/fields/Note__c.field-meta.xml"
@@ -218,41 +229,52 @@ verify_sample_content_for() {
 #   削除    : 段階 1（stage1）→ 段階 2（stage2）。オブジェクトは、参照するもの（トリガー・項目の参照・Layout）を消したあとで消す
 # ------------------------------------------------------------------------------
 verify_sample_deploy_target_text() {
-    local b="$VERIFY_SAMPLE_BASE"
+    local b="$VERIFY_SAMPLE_BASE" obj="${VERIFY_SAMPLE_OBJECTS:-1}"
     printf '%s\n' '[files]' \
         "${b}/classes/${VERIFY_SAMPLE_NAME}.cls" \
-        "${b}/classes/${VERIFY_APEX_HELLO_TEST}.cls" \
-        "${b}/classes/${VERIFY_SAMPLE_TRIGGER_TEST}.cls" \
-        "${b}/triggers/${VERIFY_SAMPLE_TRIGGER}.trigger" \
+        "${b}/classes/${VERIFY_APEX_HELLO_TEST}.cls"
+    if [[ "$obj" == "1" ]]; then
+        printf '%s\n' \
+            "${b}/classes/${VERIFY_SAMPLE_TRIGGER_TEST}.cls" \
+            "${b}/triggers/${VERIFY_SAMPLE_TRIGGER}.trigger"
+    fi
+    printf '%s\n' \
         "${b}/lwc/${VERIFY_SAMPLE_LWC}/${VERIFY_SAMPLE_LWC}.js" \
         "${b}/flows/${VERIFY_SAMPLE_NAME}.flow-meta.xml" \
         "${b}/permissionsets/${VERIFY_SAMPLE_NAME}.permissionset-meta.xml" \
         "${b}/email/unfiled\$public/${VERIFY_SAMPLE_NAME}.email" \
         '' '[members]' \
-        "CustomObject:${VERIFY_SAMPLE_OBJ}" \
-        "CustomField:${VERIFY_SAMPLE_OBJ}.Note__c" \
-        "Layout:${VERIFY_SAMPLE_LAYOUT}" \
         "AuraDefinitionBundle:${VERIFY_SAMPLE_AURA}"
+    if [[ "$obj" == "1" ]]; then
+        printf '%s\n' \
+            "CustomObject:${VERIFY_SAMPLE_OBJ}" \
+            "CustomField:${VERIFY_SAMPLE_OBJ}.Note__c" \
+            "Layout:${VERIFY_SAMPLE_LAYOUT}"
+    fi
     [[ "${VERIFY_SAMPLE_LABELS:-1}" == "1" ]] && printf '%s\n' "CustomLabel:${VERIFY_SAMPLE_NAME}"
     return 0
 }
 # 引数: stage1 | stage2
+#   stage1: ほかから参照されないもの。Layout は、含めない（オブジェクトの削除に任せる）。Flow は FlowDefinition 型で指定する
+#   stage2: 項目・オブジェクト（オブジェクト系を含めるときだけ）。オブジェクトは、項目のあと
 verify_sample_remove_target_text() {
     printf '%s\n' '[files]' '' '[members]'
     if [[ "${1:-stage1}" == "stage1" ]]; then
+        if [[ "${VERIFY_SAMPLE_OBJECTS:-1}" == "1" ]]; then
+            printf '%s\n' \
+                "ApexTrigger:${VERIFY_SAMPLE_TRIGGER}" \
+                "ApexClass:${VERIFY_SAMPLE_TRIGGER_TEST}"
+        fi
         printf '%s\n' \
-            "ApexTrigger:${VERIFY_SAMPLE_TRIGGER}" \
-            "ApexClass:${VERIFY_SAMPLE_TRIGGER_TEST}" \
             "ApexClass:${VERIFY_APEX_HELLO_TEST}" \
             "ApexClass:${VERIFY_SAMPLE_NAME}" \
             "LightningComponentBundle:${VERIFY_SAMPLE_LWC}" \
             "AuraDefinitionBundle:${VERIFY_SAMPLE_AURA}" \
-            "Flow:${VERIFY_SAMPLE_NAME}" \
+            "FlowDefinition:${VERIFY_SAMPLE_NAME}" \
             "PermissionSet:${VERIFY_SAMPLE_NAME}" \
-            "Layout:${VERIFY_SAMPLE_LAYOUT}" \
             "EmailTemplate:unfiled\$public/${VERIFY_SAMPLE_NAME}"
         [[ "${VERIFY_SAMPLE_LABELS:-1}" == "1" ]] && printf '%s\n' "CustomLabel:${VERIFY_SAMPLE_NAME}"
-    else
+    elif [[ "${VERIFY_SAMPLE_OBJECTS:-1}" == "1" ]]; then
         printf '%s\n' \
             "CustomField:${VERIFY_SAMPLE_OBJ}.Note__c" \
             "CustomObject:${VERIFY_SAMPLE_OBJ}"

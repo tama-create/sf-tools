@@ -745,7 +745,8 @@ sf-init.sh --verify --plan        # 診断と、実行内容の表示だけ（�
 sf-init.sh --verify --no-metasync # wf-metasync（Salesforce → Git の同期）の実行を、省略する
 sf-init.sh --verify --cleanup     # 削除のみ（リリースの途中で止まって、組織に Hello World が残ったとき）
 sf-init.sh --verify --components                  # パターン別のサンプルを、develop の組織だけに、リリースして、削除する
-sf-init.sh --verify --components --validate-only  # 上の検証（dry-run）だけ。マージせず、組織には、何も反映しない
+sf-init.sh --verify --components --validate-only  # 検証（dry-run）だけ。マージせず、組織には、何も反映しない（オブジェクト系も含む）
+sf-init.sh --verify --components --with-objects   # オブジェクト系（トリガー・Layout・オブジェクト・項目）も、リリースして、削除する
 ```
 
 `sf-init.sh` で作った、**実際のリポジトリと、実際の Salesforce 組織**で、リリースと削除が正しく動くことを確認します。誰も使わない、単純な Apex（Hello World: `SfToolsE2eHello` / `SfToolsE2eHelloTest`）を、各段階にリリースして、削除します。本番の組織（main）にも、リリースして、削除します。
@@ -784,14 +785,19 @@ Hello World（Apex のみ）の代わりに、**書き方のパターンが違�
 | 名前に空白・ハイフン | Layout（`SfToolsE2eHello__c-SfToolsE2eHello Layout`） |
 | フォルダ付き・名前に `$` | EmailTemplate（`unfiled$public/SfToolsE2eHello`） |
 | 1 ファイルに複数メンバー | CustomLabels（リポジトリに、すでに labels のファイルがあるときは、上書きを避けるため、含めません） |
-| 親子 | CustomObject（`SfToolsE2eHello__c`）／ CustomField（`Note__c`） |
+| 親子（オブジェクト系） | CustomObject（`SfToolsE2eHello__c`）／ CustomField（`Note__c`）／ ApexTrigger ／ Layout |
+
+> **オブジェクト系**（ApexTrigger とそのテスト・Layout・CustomObject・CustomField）は、`--validate-only`（何も作らない）では、常に検証します。
+> リリースと削除の通しには、**既定では含めません**（`--with-objects` で含めます）。カスタムオブジェクトは、削除すると、**15 日間、削除済みの状態で名前が予約され**、
+> 同じ API 名を、ごみ箱から消すまで再作成できないためです（通しを繰り返すと、2 回目から失敗します）。
 
 - 対象は **develop の組織だけ**です（develop・staging・main の 3 層の構成のみ。それ以外は、拒否します）。staging・本番の組織には、入れません
-- 流れ: サンプルと `deploy-target.txt` を載せた PR を develop 向けに出す → `wf-validate`（dry-run）→ マージ → `wf-release`。続けて、削除を **2 段階**で行います（段階 1: トリガー・テストクラス・LWC・Aura・Flow・権限セット・Layout・メール テンプレート・labels → 段階 2: 項目・オブジェクト。参照するものを先に消すため）
+- 流れ: サンプルと `deploy-target.txt` を載せた PR を develop 向けに出す → `wf-validate`（dry-run）→ マージ → `wf-release`。続けて、削除を行います（既定は 1 段階。`--with-objects` のときは **2 段階**: 段階 1: トリガー・テストクラス・LWC・Aura・Flow・権限セット・メール テンプレート・labels → 段階 2: 項目・オブジェクト。参照するものを先に消すため）
 - `--validate-only`: サンプルの PR を出して、`wf-validate`（dry-run）の成功を確認し、**PR はマージせずに閉じます**。組織には、何も反映しません（目安 4 分）
-- 目安の時間: リリースと削除の通しで、約 10 分
+- 目安の時間: リリースと削除の通しで、約 7 分（`--with-objects`: 約 10 分）
+- 削除の指定: Flow は `FlowDefinition` 型（`Flow` 型の削除は、組織が拒否します）。Layout は、オブジェクトの最後の 1 つにできないため、オブジェクトの削除に任せます
 - 名前は、すべて `SfToolsE2eHello` 系で、誰も使いません。ほかのファイルを、上書きしません（検証用と同名のファイルが、develop にすでにあるときは、実行しません）
-- 途中で止まって、組織に残ったときは、`sf-init.sh --verify --components --cleanup`（削除のみ。2 段階）で消します
+- 途中で止まって、組織に残ったときは、`sf-init.sh --verify --components --cleanup`（削除のみ。`--with-objects` でリリースしたときは、`--with-objects` も付けます）で消します。失敗したときの案内にも、付けるべきコマンドが表示されます
 
 e2e（`tests/e2e/run.sh`）との違い: e2e は、sf-tools の開発者が、新しく作ったテスト用のリポジトリ・組織で、sf-tools 自体を確認する回帰テストです。`sf-init.sh --verify` は、管理者が、実際のリポジトリ・組織を確認するためのものです。PR と実行の待ちの部品は、共通（`lib/verify-common.sh`）です。
 

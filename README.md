@@ -781,7 +781,7 @@ Hello World（Apex のみ）の代わりに、**書き方のパターンが違�
 |---|---|
 | 1 ファイル + `-meta.xml` | ApexClass（本体・テスト・トリガーのテスト）／ ApexTrigger |
 | バンドル（フォルダ単位） | LWC（`[files]` に `.js` を指定）／ Aura（`[members]` で指定） |
-| 単独の XML | Flow（Draft）／ PermissionSet |
+| 単独の XML | Flow（Draft。**検証のみ**）／ PermissionSet |
 | 名前に空白・ハイフン | Layout（`SfToolsE2eHello__c-SfToolsE2eHello Layout`） |
 | フォルダ付き・名前に `$` | EmailTemplate（`unfiled$public/SfToolsE2eHello`） |
 | 1 ファイルに複数メンバー | CustomLabels（リポジトリに、すでに labels のファイルがあるときは、上書きを避けるため、含めません） |
@@ -795,7 +795,8 @@ Hello World（Apex のみ）の代わりに、**書き方のパターンが違�
 - 流れ: サンプルと `deploy-target.txt` を載せた PR を develop 向けに出す → `wf-validate`（dry-run）→ マージ → `wf-release`。続けて、削除を行います（既定は 1 段階。`--with-objects` のときは **2 段階**: 段階 1: トリガー・テストクラス・LWC・Aura・Flow・権限セット・メール テンプレート・labels → 段階 2: 項目・オブジェクト。参照するものを先に消すため）
 - `--validate-only`: サンプルの PR を出して、`wf-validate`（dry-run）の成功を確認し、**PR はマージせずに閉じます**。組織には、何も反映しません（目安 4 分）
 - 目安の時間: リリースと削除の通しで、約 7 分（`--with-objects`: 約 10 分）
-- 削除の指定: Flow は `FlowDefinition` 型（`Flow` 型の削除は、組織が拒否します）。Layout は、オブジェクトの最後の 1 つにできないため、オブジェクトの削除に任せます
+- **Flow は、検証のみ（`--validate-only`）で検証し、リリースと削除の通しには含めません**: 接続ユーザーに、API で Flow を削除する権限がない組織があり（`insufficient access rights on cross-reference id`。`Flow` 型・`FlowDefinition` 型のどちらでも拒否されます）、削除できずに組織に残ってしまうためです。`--cleanup` は、リポジトリの Flow のファイルを削除します。組織に残った Flow は、画面（設定 → フロー）で、手動で削除してください
+- Layout は、オブジェクトの最後の 1 つにできないため、削除対象にせず、オブジェクトの削除に任せます
 - 名前は、すべて `SfToolsE2eHello` 系で、誰も使いません。ほかのファイルを、上書きしません（検証用と同名のファイルが、develop にすでにあるときは、実行しません）
 - 途中で止まって、組織に残ったときは、`sf-init.sh --verify --components --cleanup`（削除のみ。`--with-objects` でリリースしたときは、`--with-objects` も付けます）で消します。失敗したときの案内にも、付けるべきコマンドが表示されます
 

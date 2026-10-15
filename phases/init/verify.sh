@@ -57,6 +57,8 @@
 #                 リリースして、削除する（削除は 2 段階）。既定では、含めない: カスタムオブジェクトは、削除すると、15 日間、
 #                 削除済みの状態で名前が予約され、同じ API 名を再作成できない（ごみ箱から消すまで）ため。--validate-only は、
 #                 何も作らないため、常に含める（オブジェクトへの依存関係まで、実際の組織で検証する）
+#   （Flow は、接続ユーザーに、API で削除する権限がない場合があるため、通しには含めず、--validate-only だけで検証する。
+#     --cleanup は、リポジトリの Flow のファイルを削除する。組織に残った Flow は、画面（設定 → フロー）で、手動で削除する）
 #   --validate-only : （--components と一緒に）検証だけを行う。サンプルの PR を develop 向けに出し、wf-validate（dry-run）の
 #                 成功を確認して、PR は、マージせずに閉じる。組織には、何も反映しない
 #   -h, --help  : このヘルプを表示する
@@ -109,6 +111,10 @@ done
 # リリースと削除の通しは、--with-objects のときだけ（削除したオブジェクトの名前が、15 日間、予約されるため）
 VERIFY_SAMPLE_OBJECTS=0
 [[ $COMPONENTS -eq 1 && ( $VALIDATE_ONLY -eq 1 || $WITH_OBJECTS -eq 1 ) ]] && VERIFY_SAMPLE_OBJECTS=1
+# Flow は、API で削除できない場合がある（権限）ため、通しには含めない。検証のみ（何も作らない）と --cleanup（リポジトリの
+# ファイルの削除。組織の Flow は、画面で、手動で削除する）では、含める
+VERIFY_SAMPLE_FLOW=0
+[[ $COMPONENTS -eq 1 && ( $VALIDATE_ONLY -eq 1 || $CLEANUP_ONLY -eq 1 ) ]] && VERIFY_SAMPLE_FLOW=1
 # 削除の PR の本数（--components: 段階 1 のみ / オブジェクト系を含めるときは、段階 2 も）
 _DEL_PRS=1
 [[ $VERIFY_SAMPLE_OBJECTS -eq 1 ]] && _DEL_PRS=2
@@ -218,8 +224,8 @@ elif [[ $COMPONENTS -eq 1 ]]; then
         echo "                 PR を 3 本（リリース 1・削除 2: 段階 1 → 段階 2）作成してマージする。組織と、リポジトリのファイルは、最後に消える" >&2
         echo -e "                 ${CLR_WARNING}※ 削除したカスタムオブジェクトの名前は、15 日間、予約されます（再作成には、ごみ箱から消す必要があります）${CLR_RESET}" >&2
     else
-        echo "    内容       : サンプル（$(verify_set_paths all | wc -l | tr -d ' ') ファイル。Apex・LWC・Aura・Flow・権限セット・メール テンプレート・表示ラベル）を、" >&2
-        echo "                 develop の組織にリリースして、削除する（develop のみ。オブジェクト系は、含めません: --with-objects で含めます）" >&2
+        echo "    内容       : サンプル（$(verify_set_paths all | wc -l | tr -d ' ') ファイル。Apex・LWC・Aura・権限セット・メール テンプレート・表示ラベル）を、" >&2
+        echo "                 develop の組織にリリースして、削除する（develop のみ。オブジェクト系・Flow は、含めません: 検証のみ（--validate-only）で検証します）" >&2
         echo "                 PR を 2 本（リリース 1・削除 1）作成してマージする。組織と、リポジトリのファイルは、最後に消える" >&2
     fi
 elif [[ $CLEANUP_ONLY -eq 1 ]]; then
@@ -635,7 +641,7 @@ if [[ $NG_COUNT -eq 0 ]]; then
         log "SUCCESS" "検証: すべて成功しました。サンプル（パターン別のコンポーネント）の検証（dry-run）が、develop の組織に対して通りました（反映はしていません）。"
     elif [[ $COMPONENTS -eq 1 ]]; then
         log "SUCCESS" "検証: すべて成功しました。サンプル（パターン別のコンポーネント）の、リリースと削除が、develop の組織に対して動いています。"
-        [[ $VERIFY_SAMPLE_OBJECTS -eq 1 ]] || log "INFO" "  オブジェクト系（トリガー・Layout・オブジェクト・項目）は、通しには含めていません（--validate-only で検証できます）。"
+        [[ $VERIFY_SAMPLE_OBJECTS -eq 1 ]] || log "INFO" "  オブジェクト系（トリガー・Layout・オブジェクト・項目）と Flow は、通しには含めていません（--validate-only で検証できます）。"
     else
         log "SUCCESS" "検証: すべて成功しました。${REPO} は、段階ごとの組織に対して、リリースと削除が動いています。"
     fi

@@ -625,8 +625,9 @@ sf-init.sh --add-tier develop    # main+staging → main+staging+develop
 - `[files]` は、**ファイルのみ**（`sf-check.sh` が `-f` で検査する）。LWC は `.js` の 1 ファイルを、Aura は `[members]` で指定する。
 - LWC と Aura は、**同じ名前空間**を共有する（同名のバンドルは作れない）。Aura は `SfToolsE2eHelloAura`、LWC は `sfToolsE2eHello`（実際の組織の dry-run で、同名の Aura が拒否された）。
 - **オブジェクト系**（ApexTrigger・そのテストクラス・Layout・CustomObject・CustomField）は、`VERIFY_SAMPLE_OBJECTS`（verify.sh が決める: 検証のみ = 1 / 通し = `--with-objects` のときだけ 1）。理由: カスタムオブジェクトは、削除すると 15 日間、削除済みで名前が予約され、再作成できない（通しを繰り返すと、2 回目から失敗する）。検証のみは、何も作らないため、常に含める。
-- 削除は、既定 1 段階（`remove-target.txt` stage1: ApexClass / LWC / Aura / FlowDefinition / PermissionSet / EmailTemplate / CustomLabel）。`--with-objects` のときは 2 段階（stage1 に ApexTrigger・トリガーのテストクラスを加え → stage2: CustomField / CustomObject）。
-  実際の組織の dry-run で判明: **Layout は、オブジェクトの最後の 1 つにできない**（`Cannot delete the only layout`）ため、削除対象にしない（オブジェクトの削除に任せる）。**Flow 型の削除は拒否される**（`insufficient access rights on cross-reference id`）ため、`FlowDefinition` 型で指定する。削除用のブランチは、サンプルのファイルが **develop にだけある**ため、develop の先頭から作る（`_make_delete_branch BR STAGE BASE`）。
+- 削除は、既定 1 段階（`remove-target.txt` stage1: ApexClass / LWC / Aura / PermissionSet / EmailTemplate / CustomLabel）。`--with-objects` のときは 2 段階（stage1 に ApexTrigger・トリガーのテストクラスを加え → stage2: CustomField / CustomObject）。
+  実際の組織の dry-run で判明: **Layout は、オブジェクトの最後の 1 つにできない**（`Cannot delete the only layout`）ため、削除対象にしない（オブジェクトの削除に任せる）。
+- **Flow**: API での削除は、`Flow` 型・`FlowDefinition` 型のどちらでも拒否される場合がある（`insufficient access rights on cross-reference id`。接続ユーザーに、Flow を API で削除する権限がない）。削除できないものを、リリースすると組織に残るため、**通しには含めない**（`VERIFY_SAMPLE_FLOW`: 検証のみ・`--cleanup`（リポジトリのファイルの削除）では 1、通しでは 0）。`remove-target.txt` には、Flow を含めない。組織に残った Flow は、画面（設定 → フロー）で手動で削除する。削除用のブランチは、サンプルのファイルが **develop にだけある**ため、develop の先頭から作る（`_make_delete_branch BR STAGE BASE`）。
 - `--validate-only`: `_pr_flow` の `mode=validate`。wf-validate の成功を確認し、PR をマージせずに閉じる（`verify_pr_close`）。削除は、行わない。失敗したときは、PR・ブランチを残す。
 - 既存の `force-app/main/default/labels/CustomLabels.labels-meta.xml` が develop にあるときは、`VERIFY_SAMPLE_LABELS=0`（CustomLabels を含めない。上書きして削除してしまうのを避ける）。
 - GitHub の contents API のパスは `_verify_urlpath` で URL エンコードする（`%` → `%25`、空白 → `%20`。Layout の名前に空白がある）。

@@ -533,6 +533,7 @@ test_components() {
     assert_file_contains "$MOCK_CALL_LOG" "aura/SfToolsE2eHelloAura/SfToolsE2eHelloAura.cmp" "通し: Aura は、LWC と別名"
     # オブジェクト系（トリガー・Layout・オブジェクト・項目）は、既定では、触れない（削除したオブジェクトの名前が、15 日間、予約されるため）
     assert_equals "$(grep -c -- "-X PUT repos/.*\(objects/\|layouts/\|triggers/\)" "$MOCK_CALL_LOG")" "0" "通し: オブジェクト・Layout・トリガーのファイルは、追加しない"
+    assert_equals "$(grep -c -- "-X PUT repos/.*flows/" "$MOCK_CALL_LOG")" "0" "通し: Flow のファイルは、追加しない（API で削除できない場合があるため）"
     assert_equals "$(grep -c "${del}-[0-9]\|${del}-delete-[0-9]" "$MOCK_CALL_LOG")" "2" "通し: 作業用ブランチ 2 本を、最後に削除する"
     assert_file_not_contains "$MOCK_CALL_LOG" "verify-comp-delete2" "通し: 段階 2 のブランチは、作らない"
     assert_file_contains "$OUT" "サンプル（パターン別のコンポーネント）の、リリースと削除が" "通し: 結果が、サンプル用の文面で表示される"
@@ -574,6 +575,7 @@ test_components() {
     assert_file_contains "$OUT" "反映はしていません" "--validate-only: 反映していない旨が表示される"
     assert_file_contains "$MOCK_CALL_LOG" "SfToolsE2eHello__c-SfToolsE2eHello%20Layout.layout-meta.xml" "--validate-only: オブジェクト系（Layout）も、検証の対象にする（何も作らないため）"
     assert_file_contains "$MOCK_CALL_LOG" "objects/SfToolsE2eHello__c/SfToolsE2eHello__c.object-meta.xml" "--validate-only: オブジェクトも、検証の対象にする"
+    assert_file_contains "$MOCK_CALL_LOG" "flows/SfToolsE2eHello.flow-meta.xml" "--validate-only: Flow も、検証の対象にする（何も作らないため）"
 
     # --validate-only が失敗: マージしない・PR は閉じない（調査のため）・ブランチを残す
     _env
@@ -589,6 +591,7 @@ test_components() {
     assert_exit_ok "$RC" "--cleanup: 正常終了する"
     assert_equals "$(_count 'gh pr create')" "1" "--cleanup: PR は 1 本（削除の段階 1）"
     assert_file_not_contains "$OUT" "リリース用のブランチ" "--cleanup: リリース用のブランチは、作らない"
+    assert_file_contains "$MOCK_CALL_LOG" "-X DELETE repos/tamashimon/force-testproject/contents/force-app/main/default/flows/SfToolsE2eHello.flow-meta.xml" "--cleanup: リポジトリの Flow のファイルを削除する（組織の Flow は、画面で手動で削除する）"
     _env
     _run "\n" --components --with-objects --cleanup
     assert_exit_ok "$RC" "--cleanup --with-objects: 正常終了する"
@@ -715,6 +718,13 @@ test_samples() {
         echo "NO_R1=$(verify_sample_remove_target_text stage1 | grep -c ':')"
         echo "NO_R2=$(verify_sample_remove_target_text stage2 | grep -c ':')"
         echo "NO_MIXED=$(verify_sample_deploy_target_text | grep -c '^\[files\]')$(verify_sample_deploy_target_text | grep -c '^\[members\]')"
+        # Flow を含めない（通しの既定）
+        VERIFY_SAMPLE_FLOW=0
+        echo "NOFLOW_ALL=$(verify_sample_paths all | wc -l | tr -d ' ')"
+        echo "NOFLOW_PATH=$(verify_sample_paths all | grep -c 'flows/')"
+        echo "NOFLOW_DEPLOY=$(verify_sample_deploy_target_text | grep -c 'flows/')"
+        VERIFY_SAMPLE_FLOW=1
+        echo "FLOW_DEPLOY=$(verify_sample_deploy_target_text | grep -c 'flows/')"
         VERIFY_SAMPLE_OBJECTS=1
         # 切替: hello（既定）と components
         VERIFY_SET=hello; echo "SET_HELLO=$(verify_set_paths all | wc -l | tr -d ' ')"
@@ -734,9 +744,9 @@ test_samples() {
     assert_output_contains "$out" "NONAME=0"       "サンプル: labels 以外は、すべて SfToolsE2eHello 系の名前（ほかのファイルを、上書きしない）"
     assert_output_contains "$out" "TESTS=3"        "リリース対象: Apex クラスが 3 つ（Hello・テスト・トリガーのテスト）"
     assert_output_contains "$out" "FILES_ARE_FILES=0" "リリース対象: [files] のパスは、すべて、サンプルのファイルを指す"
-    assert_output_contains "$out" "R1=10"          "削除対象（段階 1）: 10 件"
+    assert_output_contains "$out" "R1=9"           "削除対象（段階 1）: 9 件"
     assert_output_contains "$out" "R1_LAYOUT=0"    "削除対象（段階 1）: Layout は、含めない（最後の 1 つは削除できない。オブジェクトの削除に任せる）"
-    assert_output_contains "$out" "R1_FLOWDEF=10"  "削除対象（段階 1）: Flow は FlowDefinition 型（Flow 型は、組織が拒否した）"
+    assert_output_contains "$out" "R1_FLOWDEF=00"  "削除対象: Flow は、含めない（接続ユーザーに、API で削除する権限がない場合がある。Flow 型・FlowDefinition 型とも拒否された）"
     assert_output_contains "$out" "R2=2"           "削除対象（段階 2）: 項目・オブジェクト"
     assert_output_contains "$out" "R2_OBJ_LAST=CustomObject:SfToolsE2eHello__c" "削除対象（段階 2）: オブジェクトは、項目のあと"
     assert_output_contains "$out" "TRIGGER_BEFORE_OBJ=0" "削除対象: オブジェクトは、段階 1 には入れない（トリガーなどを、先に消す）"
@@ -746,7 +756,11 @@ test_samples() {
     assert_output_contains "$out" "NO_S2=0"        "オブジェクト系なし: 段階 2 は、空"
     assert_output_contains "$out" "NO_OBJ_PATHS=0" "オブジェクト系なし: オブジェクト・Layout・トリガーのパスを、含めない"
     assert_output_contains "$out" "NO_OBJ_DEPLOY=0" "オブジェクト系なし: リリース対象に、オブジェクト・項目・Layout・トリガーを、含めない"
-    assert_output_contains "$out" "NO_R1=8"        "オブジェクト系なし: 削除対象（段階 1）は 8 件"
+    assert_output_contains "$out" "NO_R1=7"        "オブジェクト系なし: 削除対象（段階 1）は 7 件"
+    assert_output_contains "$out" "NOFLOW_ALL=13"  "Flow なし: パスは 13 個（オブジェクト系なし）"
+    assert_output_contains "$out" "NOFLOW_PATH=0"  "Flow なし: Flow のパスを、含めない"
+    assert_output_contains "$out" "NOFLOW_DEPLOY=0" "Flow なし: リリース対象に、Flow を含めない"
+    assert_output_contains "$out" "FLOW_DEPLOY=1"  "Flow あり: リリース対象に、Flow を含める（検証のみ）"
     assert_output_contains "$out" "NO_R2=0"        "オブジェクト系なし: 削除対象（段階 2）は、空"
     assert_output_contains "$out" "NO_MIXED=11"    "オブジェクト系なし: [files] と [members] の混在は、維持する（混在の確認）"
     assert_output_contains "$out" "SET_HELLO=4"    "切替: hello は 4 ファイル（従来どおり）"

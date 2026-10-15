@@ -27,12 +27,19 @@
 #   （ごみ箱から消すまで）。そのため、リリースと削除の通しでは、既定で、含めない（--with-objects で、明示したときだけ含める）。
 #   検証のみ（--validate-only）は、何も作らないため、常に含める（オブジェクトへの依存関係まで、実際の組織で検証する）。
 #   Layout は、オブジェクトの最後の 1 つにできない（"Cannot delete the only layout"）ため、削除対象にせず、オブジェクトの削除に任せる。
-#   Flow の削除は、Flow 型では拒否される（"insufficient access rights on cross-reference id"）ため、FlowDefinition 型で指定する。
+#
+# 【Flow】
+#   Flow の削除は、API 経由では、Flow 型でも FlowDefinition 型でも拒否される場合がある（"insufficient access rights on
+#   cross-reference id"。接続ユーザーに、Flow を API で削除する権限がない）。削除できないものを、リリースすると、組織に残る。
+#   そのため、Flow は、検証のみ（--validate-only。何も作らない）で検証し、リリースと削除の通しには、含めない。
+#   --cleanup は、リポジトリの Flow のファイルを削除する（組織の Flow は、API では消せないため、画面で、手動で削除する）。
+#   削除対象（remove-target.txt）には、Flow を、含めない。
 #
 # 【環境変数】
 #   VERIFY_SAMPLE_LABELS   1 = CustomLabels を含める（既定 1）。リポジトリに、すでに labels のファイルがあるときは、0 にする
 #                          （そのファイルを、上書きして、削除してしまうため）
 #   VERIFY_SAMPLE_OBJECTS  1 = オブジェクト系を含める（既定 1。verify.sh が、通しでは 0、--with-objects・検証のみでは 1 にする）
+#   VERIFY_SAMPLE_FLOW     1 = Flow を含める（既定 1。verify.sh が、通しでは 0、検証のみ・--cleanup（ファイルの削除）では 1 にする）
 # ==============================================================================
 
 VERIFY_SAMPLE_NAME="SfToolsE2eHello"
@@ -62,10 +69,10 @@ verify_sample_paths() {
             "${b}/lwc/${VERIFY_SAMPLE_LWC}/${VERIFY_SAMPLE_LWC}.js-meta.xml" \
             "${b}/aura/${VERIFY_SAMPLE_AURA}/${VERIFY_SAMPLE_AURA}.cmp" \
             "${b}/aura/${VERIFY_SAMPLE_AURA}/${VERIFY_SAMPLE_AURA}.cmp-meta.xml" \
-            "${b}/flows/${VERIFY_SAMPLE_NAME}.flow-meta.xml" \
             "${b}/permissionsets/${VERIFY_SAMPLE_NAME}.permissionset-meta.xml" \
             "${b}/email/unfiled\$public/${VERIFY_SAMPLE_NAME}.email" \
             "${b}/email/unfiled\$public/${VERIFY_SAMPLE_NAME}.email-meta.xml"
+        [[ "${VERIFY_SAMPLE_FLOW:-1}" == "1" ]] && printf '%s\n' "${b}/flows/${VERIFY_SAMPLE_NAME}.flow-meta.xml"
         if [[ "${VERIFY_SAMPLE_OBJECTS:-1}" == "1" ]]; then
             printf '%s\n' \
                 "${b}/classes/${VERIFY_SAMPLE_TRIGGER_TEST}.cls" \
@@ -238,9 +245,9 @@ verify_sample_deploy_target_text() {
             "${b}/classes/${VERIFY_SAMPLE_TRIGGER_TEST}.cls" \
             "${b}/triggers/${VERIFY_SAMPLE_TRIGGER}.trigger"
     fi
+    printf '%s\n' "${b}/lwc/${VERIFY_SAMPLE_LWC}/${VERIFY_SAMPLE_LWC}.js"
+    [[ "${VERIFY_SAMPLE_FLOW:-1}" == "1" ]] && printf '%s\n' "${b}/flows/${VERIFY_SAMPLE_NAME}.flow-meta.xml"
     printf '%s\n' \
-        "${b}/lwc/${VERIFY_SAMPLE_LWC}/${VERIFY_SAMPLE_LWC}.js" \
-        "${b}/flows/${VERIFY_SAMPLE_NAME}.flow-meta.xml" \
         "${b}/permissionsets/${VERIFY_SAMPLE_NAME}.permissionset-meta.xml" \
         "${b}/email/unfiled\$public/${VERIFY_SAMPLE_NAME}.email" \
         '' '[members]' \
@@ -255,7 +262,7 @@ verify_sample_deploy_target_text() {
     return 0
 }
 # 引数: stage1 | stage2
-#   stage1: ほかから参照されないもの。Layout は、含めない（オブジェクトの削除に任せる）。Flow は FlowDefinition 型で指定する
+#   stage1: ほかから参照されないもの。Layout は、含めない（オブジェクトの削除に任せる）。Flow も、含めない（API で削除できない場合がある）
 #   stage2: 項目・オブジェクト（オブジェクト系を含めるときだけ）。オブジェクトは、項目のあと
 verify_sample_remove_target_text() {
     printf '%s\n' '[files]' '' '[members]'
@@ -270,7 +277,6 @@ verify_sample_remove_target_text() {
             "ApexClass:${VERIFY_SAMPLE_NAME}" \
             "LightningComponentBundle:${VERIFY_SAMPLE_LWC}" \
             "AuraDefinitionBundle:${VERIFY_SAMPLE_AURA}" \
-            "FlowDefinition:${VERIFY_SAMPLE_NAME}" \
             "PermissionSet:${VERIFY_SAMPLE_NAME}" \
             "EmailTemplate:unfiled\$public/${VERIFY_SAMPLE_NAME}"
         [[ "${VERIFY_SAMPLE_LABELS:-1}" == "1" ]] && printf '%s\n' "CustomLabel:${VERIFY_SAMPLE_NAME}"

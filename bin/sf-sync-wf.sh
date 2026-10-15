@@ -117,11 +117,7 @@ fi
 # 管理者向けの警告ボックスと確認。引数: 確認の質問（省略可）
 #   GITHUB_ACTIONS=true でも、確認を省略しない（ワークフローを書き換えるコマンドで、Actions 上で実行する想定がない）
 confirm_admin() {
-    echo -e "${CLR_ERR}╔══════════════════════════════════════════════════════╗${CLR_RESET}" >&2
-    echo -e "${CLR_ERR}║  !!  GitHub Actions のワークフローを書き換えます     ║${CLR_RESET}" >&2
-    echo -e "${CLR_ERR}║      CI/CD（リリース・検証）の動作が変わります       ║${CLR_RESET}" >&2
-    echo -e "${CLR_ERR}║      管理者以外は、実行しないでください              ║${CLR_RESET}" >&2
-    echo -e "${CLR_ERR}╚══════════════════════════════════════════════════════╝${CLR_RESET}" >&2
+    print_admin_warning "!!  GitHub Actions のワークフローを書き換えます" "    CI/CD（リリース・検証）の動作が変わります" "    管理者以外は、実行しないでください"
     ask_yn "${1:-続行しますか？}" || die "中断しました。"
 }
 

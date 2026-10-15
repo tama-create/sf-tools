@@ -283,13 +283,7 @@ else
 fi
 [[ -n "${SF_INIT_RESTARTED:-}" ]] && log "INFO" "sf-tools を更新しました。更新した sf-tools で、はじめから実行しています。"
 
-echo -e "${CLR_ERR}╔══════════════════════════════════════════════════════╗${CLR_RESET}" >&2
-echo -e "${CLR_ERR}║  !!  このコマンドは管理者専用です                    ║${CLR_RESET}" >&2
-echo -e "${CLR_ERR}║      管理者以外は絶対に実行しないでください          ║${CLR_RESET}" >&2
-echo -e "${CLR_ERR}║                                                      ║${CLR_RESET}" >&2
-echo -e "${CLR_ERR}║  新規 Salesforce リポジトリを GitHub に作成し        ║${CLR_RESET}" >&2
-echo -e "${CLR_ERR}║  初期セットアップを行います。                        ║${CLR_RESET}" >&2
-echo -e "${CLR_ERR}╚══════════════════════════════════════════════════════╝${CLR_RESET}" >&2
+print_admin_warning --standard "新規 Salesforce リポジトリを GitHub に作成し" "初期セットアップを行います。"
 
 # sf-tools が古いと、古い雛形でプロジェクトを作ってしまうため、最初に最新かを確認する（P14）。
 #   管理者向けの警告の後（確認の前）に行う。更新した場合は、警告・確認から、もう一度、やりなおす（確認を、飛ばさない）。

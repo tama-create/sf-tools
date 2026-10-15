@@ -283,7 +283,7 @@ sfl
 | 開発者 | `sf-restart.sh` | 接続先 Sandbox の切り替え | ランチャー |
 | 開発者 | `sf-deploy.sh` | ⚠️ 接続中の組織への強制リリース（確認あり） | ランチャー |
 | 管理者 | `sf-init.sh` | 新規プロジェクト初期セットアップ | ランチャー外 |
-| 管理者 | `sf-hook.sh` / `sf-unhook.sh` | フックの有効化 / 削除 | ランチャー外 |
+| 開発者 | `sf-hook.sh` / `sf-unhook.sh` | 手元のクローンの、検証フックの有効化 / 削除 | ランチャー外 |
 | 管理者 | `sf-update-secret.sh` | ⚠️ GitHub Secrets の再登録（管理者のみ） | ランチャー外 |
 | 管理者 | `sf-sync-wf.sh` | ⚠️ 作成済みのワークフローを、雛形に合わせて更新 | ランチャー外 |
 | 管理者 | `sf-init.sh --verify` | ⚠️ 実際のリポジトリ・組織で、リリースと削除が動くことを検証（Hello World） | ランチャー外 |

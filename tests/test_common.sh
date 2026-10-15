@@ -443,6 +443,46 @@ test_check_sf_cli_cache() {
 }
 
 # ------------------------------------------------------------------------------
+# print_admin_warning: 管理者向けの警告ボックス（幅のそろえ・標準の見出し）
+# ------------------------------------------------------------------------------
+test_print_admin_warning() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] print_admin_warning: 管理者向けの警告ボックスを、幅をそろえて表示する${CLR_RST}"
+    local out inner bad
+    out=$(bash -c "
+        readonly SCRIPT_NAME=test; readonly LOG_FILE=/dev/null; readonly LOG_MODE=NEW; export SF_INIT_MODE=1
+        source '${SF_TOOLS_DIR}/lib/common.sh'
+        print_admin_warning --standard 'GitHub Secrets を更新します。' 'English line 1' 'ＡＢＣ全角と半角 mixed'
+        print_admin_warning '!!  見出しだけ' '    続き'
+        print_admin_warning --standard" 2>&1 | sed $'s/\033\\[[0-9;]*m//g')
+
+    assert_output_contains "$out" "このコマンドは管理者専用です" "標準の見出し（このコマンドは管理者専用です）が出る"
+    assert_output_contains "$out" "管理者以外は絶対に実行しないでください" "標準の見出し（管理者以外は絶対に…）が出る"
+    assert_output_contains "$out" "GitHub Secrets を更新します。" "指定した行が出る"
+    assert_output_contains "$out" "見出しだけ" "--standard なしでも、指定した行が出る"
+    # 内側の幅（全角 2・半角 1）が、すべての行で 54 にそろっている
+    bad=$(bash -c "
+        readonly SCRIPT_NAME=test; readonly LOG_FILE=/dev/null; readonly LOG_MODE=NEW; export SF_INIT_MODE=1
+        source '${SF_TOOLS_DIR}/lib/common.sh'
+        while IFS= read -r l; do
+            case \"\$l\" in ║*║)
+                inner=\"\${l#║}\"; inner=\"\${inner%║}\"
+                [[ \$(_display_width \"\$inner\") -eq 54 ]] || echo \"BAD: \$l\" ;;
+            esac
+        done <<< \"\$1\"" _ "$out")
+    assert_equals "$bad" "" "すべての行で、内側の表示の幅が 54 にそろっている（右の枠が、ずれない）"
+    local box_count; box_count=$(printf '%s\n' "$out" | grep -c '^╔')
+    assert_equals "$box_count" "3" "呼び出しごとに、ボックスが 1 つ出る"
+    # 標準エラーに出る（標準出力を汚さない）
+    local so
+    so=$(bash -c "
+        readonly SCRIPT_NAME=test; readonly LOG_FILE=/dev/null; readonly LOG_MODE=NEW; export SF_INIT_MODE=1
+        source '${SF_TOOLS_DIR}/lib/common.sh'
+        print_admin_warning --standard 'x'" 2>/dev/null)
+    assert_equals "$so" "" "標準出力には、何も出さない（標準エラーのみ）"
+}
+
+# ------------------------------------------------------------------------------
 # run_isolated_home: 一時的なホームフォルダの中で実行する（sf の認証・エイリアスの隔離）
 # ------------------------------------------------------------------------------
 test_run_isolated_home() {
@@ -904,6 +944,7 @@ test_is_reserved_org_alias
 test_open_browser_gitbash
 test_check_sf_cli
 test_check_sf_cli_cache
+test_print_admin_warning
 test_run_isolated_home
 test_ensure_sf_tools_latest
 test_json_get

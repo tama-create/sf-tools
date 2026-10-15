@@ -156,7 +156,9 @@ git pull origin main                     # main の最新を取り込む
 | `sf-release.sh`（`--release` 時） | ✅ 実装済み |
 | `sf-typecheck.sh` | ✅ 実装済み（警告ボックス + `ask_yn \|\| die`（`-y` で省略可）。GitHub Actions 上・予約名のエイリアス・本番は拒否。作成・削除は `SfToolsE2eMin` を含むものだけ。**この安全ガードを緩めないこと**） |
 
-> 警告ボックスの実装例は `doc/dev-reference.md` セクション 3.4 参照
+> **警告ボックスは、`print_admin_warning`（`lib/common.sh`）を使うこと。`echo` で直書きしない。** 使い方は `doc/dev-reference.md` セクション 3.4 参照
+> **警告は、必ず、確認（`ask_yn || die` / `wizard_confirm`）とセットにする。** 警告を出しただけで、先へ進まない（表示だけで流れると、意味がない）。読み取りのみのモード（`--list` など）も、同じ（`-y` で省略できるようにする）
+> `sf-hook.sh` / `sf-unhook.sh`（手元のフックの入れ替え）・`sf-release.sh`（単独では、まず打たない。確認のみ）・`sf-deploy.sh`（開発者向けのラッパー）は、管理者向けではないため、警告ボックスは不要
 
 ### 2.5 冒頭コメント（仕様の正本）
 

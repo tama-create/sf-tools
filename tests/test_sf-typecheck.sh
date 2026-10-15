@@ -40,7 +40,7 @@ test_typecheck_help_and_list() {
     local out; out=$(_run_typecheck "$mb" "$mh" "$td" --help)
     assert_exit_ok "$?" "--help → 正常終了"
     assert_output_contains "$out" "validate-only" "--help → オプションの説明が表示された"
-    out=$(_run_typecheck "$mb" "$mh" "$td" --list)
+    out=$(_run_typecheck "$mb" "$mh" "$td" --list -y)
     assert_exit_ok "$?" "--list → 正常終了"
     assert_output_contains "$out" "ApexClass" "--list → 種類の一覧が表示された"
     assert_output_contains "$out" "LightningComponentBundle" "--list → LWC も含まれる"
@@ -120,7 +120,7 @@ test_typecheck_coverage() {
     create_mock_sf "$mb"
     printf '# コメント\nTypeA\nTypeB\nTypeC\nTypeD\nTypeE\nCustomLabels\n' > "$td/cs.txt"
     printf '# コメント\nTypeA\tok\tok\t\nTypeB\tok\tunknown\t\nTypeC\tlimited\tok\t条件\nTypeD\tunknown\tunknown\t\nCustomLabel\tok\tok\t\nCustomLabels\tunknown\tunknown\t\nOther\tok\tok\t\n' > "$td/cap.txt"
-    out=$(SF_TYPECHECK_CHANGESET_FILE="$td/cs.txt" SF_CHECK_CAPABILITY_FILE="$td/cap.txt" _run_typecheck "$mb" "$mh" "$td" --coverage)
+    out=$(SF_TYPECHECK_CHANGESET_FILE="$td/cs.txt" SF_CHECK_CAPABILITY_FILE="$td/cap.txt" _run_typecheck "$mb" "$mh" "$td" --coverage -y)
     assert_exit_ok "$?" "--coverage → 正常終了（--org なしでも動く）"
     assert_output_contains "$out" "変更セットで扱える種類: 6" "--coverage: 一覧の数（コメント・空行は除く）"
     assert_output_contains "$out" "確認済み *: *2" "--coverage: 両方 ok は 2（TypeA と、別名で引いた CustomLabels）"
@@ -146,6 +146,49 @@ test_typecheck_shipped_changeset_list() {
     assert_file_contains "$f" "CustomObject" "同梱の変更セット対応の一覧: CustomObject を含む"
 }
 
+test_typecheck_warns_first() {
+    local td mb mh out; setup_std_env td mb mh
+    create_mock_sf "$mb"
+    # --list・--coverage（読み取りのみ）でも、管理者向けの警告を、最初に表示する（確認は、不要）
+    out=$(_run_typecheck "$mb" "$mh" "$td" --list -y)
+    assert_output_contains "$out" "このコマンドは管理者専用です" "--list: 管理者向けの警告が出る"
+    out=$(_run_typecheck "$mb" "$mh" "$td" --coverage -y)
+    assert_output_contains "$out" "このコマンドは管理者専用です" "--coverage: 管理者向けの警告が出る"
+    # 拒否される場合（予約名）でも、警告が、先に出る
+    out=$(_run_typecheck "$mb" "$mh" "$td" --org prod -y)
+    assert_output_contains "$out" "このコマンドは管理者専用です" "予約名で拒否される場合も、警告が、先に出る"
+    # 警告は、拒否の理由（ログ）より前にある
+    local w r
+    w=$(printf '%s\n' "$out" | grep -n "このコマンドは管理者専用です" | head -1 | cut -d: -f1)
+    r=$(printf '%s\n' "$out" | grep -n "予約名" | head -1 | cut -d: -f1)
+    [[ -n "$w" && -n "$r" && "$w" -lt "$r" ]] && pass "警告は、拒否の理由より前に表示される" || fail "警告は、拒否の理由より前に表示される" "warn=$w reason=$r"
+    # sf（組織）に、何も呼ばない
+    [[ ! -s "$MOCK_CALL_LOG" ]] && pass "警告の表示までに、sf を呼ばない" || fail "警告の表示までに、sf を呼ばない" "$(cat "$MOCK_CALL_LOG")"
+    teardown "$td" "$mb" "$mh"
+}
+
+test_typecheck_confirms_before_running() {
+    local td mb mh out; setup_std_env td mb mh
+    create_mock_sf "$mb"
+    # 警告のあと、確認する。N で、何も実行しない（--list の一覧も、--coverage の表も、出ない）
+    out=$(printf 'n\n' | _run_typecheck "$mb" "$mh" "$td" --list)
+    assert_exit_fail "$?" "--list: 確認で N → 中断（終了コードが 0 以外）"
+    assert_output_contains "$out" "続行しますか" "--list: 警告のあとに、確認が出る"
+    assert_output_not_contains "$out" "LightningComponentBundle" "--list: N なら、一覧は出ない"
+    out=$(printf 'n\n' | _run_typecheck "$mb" "$mh" "$td" --coverage)
+    assert_exit_fail "$?" "--coverage: 確認で N → 中断"
+    echo "$out" | grep -q "変更セットで扱える種類" && fail "--coverage: N なら、表は出ない" || pass "--coverage: N なら、表は出ない"
+    # Y なら、実行する
+    out=$(printf 'Y\n' | _run_typecheck "$mb" "$mh" "$td" --coverage)
+    assert_exit_ok "$?" "--coverage: 確認で Y → 実行する"
+    assert_output_contains "$out" "変更セットで扱える種類" "--coverage: Y なら、表が出る"
+    # 実行（組織への接続）の前に、確認する: 確認で N なら、sf を呼ばない
+    out=$(printf 'n\n' | _run_typecheck "$mb" "$mh" "$td" --org mydev)
+    assert_exit_fail "$?" "--org: 確認で N → 中断"
+    [[ ! -s "$MOCK_CALL_LOG" ]] && pass "--org: 確認で N なら、sf を呼ばない（組織に接続しない）" || fail "--org: 確認で N なら、sf を呼ばない" "$(cat "$MOCK_CALL_LOG")"
+    teardown "$td" "$mb" "$mh"
+}
+
 test_typecheck_js_syntax_and_safety() {
     node --check "$SF_TOOLS_DIR/lib/typecheck.js" 2>/dev/null && pass "lib/typecheck.js: 構文が正しい" || fail "lib/typecheck.js: 構文が正しい"
     local out; out=$(node "$SF_TOOLS_DIR/lib/typecheck.js" --org prod --work "${TMPDIR:-/tmp}/tc-test-x" 2>&1)
@@ -160,6 +203,8 @@ test_typecheck_refuses_production_and_unknown
 test_typecheck_full_run_ok
 test_typecheck_delete_failure_reported
 test_typecheck_coverage
+test_typecheck_warns_first
+test_typecheck_confirms_before_running
 test_typecheck_shipped_changeset_list
 test_typecheck_js_syntax_and_safety
 

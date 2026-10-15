@@ -268,17 +268,14 @@ fi
 # ------------------------------------------------------------------------------
 if [[ "${SF_VERIFY_CONFIRMED:-}" != "1" ]]; then
     echo "" >&2
-    echo -e "${CLR_ERR}╔══════════════════════════════════════════════════════╗${CLR_RESET}" >&2
-    echo -e "${CLR_ERR}║  !!  実際のリポジトリと組織に、リリースします        ║${CLR_RESET}" >&2
     if [[ $COMPONENTS -eq 1 && $VALIDATE_ONLY -eq 1 ]]; then
-        echo -e "${CLR_ERR}║      サンプルを、検証します（反映はしません）        ║${CLR_RESET}" >&2
+        _vw_what="サンプルを、検証します（反映はしません）"
     elif [[ $COMPONENTS -eq 1 ]]; then
-        echo -e "${CLR_ERR}║      サンプルを、リリースして、削除します            ║${CLR_RESET}" >&2
+        _vw_what="サンプルを、リリースして、削除します"
     else
-        echo -e "${CLR_ERR}║      Hello World を、リリースして、削除します        ║${CLR_RESET}" >&2
+        _vw_what="Hello World を、リリースして、削除します"
     fi
-    echo -e "${CLR_ERR}║      管理者以外は、実行しないでください              ║${CLR_RESET}" >&2
-    echo -e "${CLR_ERR}╚══════════════════════════════════════════════════════╝${CLR_RESET}" >&2
+    print_admin_warning "!!  実際のリポジトリと組織に、リリースします" "    ${_vw_what}" "    管理者以外は、実行しないでください"
     echo "" >&2
     # 確認は、Enter を 1 回押すだけ（q で中断）。入力を、最小にするため。本番を含むときは、文面で、明示する
     if [[ $NEED_PROD_CONFIRM -eq 1 ]]; then

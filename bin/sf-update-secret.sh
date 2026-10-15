@@ -63,13 +63,7 @@ command -v openssl >/dev/null 2>&1 || die "コマンドが見つかりません:
 # ------------------------------------------------------------------------------
 check_force_dir
 if [[ "${GITHUB_ACTIONS:-false}" != "true" ]]; then
-    echo -e "${CLR_ERR}╔══════════════════════════════════════════════════════╗${CLR_RESET}" >&2
-    echo -e "${CLR_ERR}║  !!  このコマンドは管理者専用です                    ║${CLR_RESET}" >&2
-    echo -e "${CLR_ERR}║      管理者以外は絶対に実行しないでください          ║${CLR_RESET}" >&2
-    echo -e "${CLR_ERR}║                                                      ║${CLR_RESET}" >&2
-    echo -e "${CLR_ERR}║  GitHub Secrets を更新します。                       ║${CLR_RESET}" >&2
-    echo -e "${CLR_ERR}║  誤った値を設定すると CI/CD が停止します。           ║${CLR_RESET}" >&2
-    echo -e "${CLR_ERR}╚══════════════════════════════════════════════════════╝${CLR_RESET}" >&2
+    print_admin_warning --standard "GitHub Secrets を更新します。" "誤った値を設定すると CI/CD が停止します。"
     ask_yn "続行しますか？" || die "中断しました。"
 fi
 

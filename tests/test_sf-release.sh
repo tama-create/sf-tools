@@ -374,6 +374,31 @@ EOF
     teardown "$td" "$mb"
 }
 
+# remove-target.txt の「# @ignore-missing」→ --ignore-warnings を付ける（存在しない削除対象を、エラーにしない。後始末用）
+test_ignore_missing_directive() {
+    local td mb mh
+    setup_std_env td mb mh
+    create_all_mocks "$mb"
+    setup_release_dir "$td"
+    export MOCK_SF_ORG_JSON='{"result":{"alias":"testorg","id":"00D000000000001AAA"}}'
+    local rd="$td/sf-tools/release/feature/test"
+
+    # 指示なし: --ignore-warnings を付けない（存在しない削除対象は、これまでどおり、エラー）
+    printf '[files]\n\n[members]\nApexClass:Gone\n' > "$rd/remove-target.txt"
+    (cd "$td" && PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-release.sh" --no-open >/dev/null 2>&1)
+    assert_file_not_contains "$MOCK_CALL_LOG" "--ignore-warnings" "指示なし: --ignore-warnings を付けない"
+
+    # 指示あり: --ignore-warnings を付ける
+    : > "$MOCK_CALL_LOG"
+    printf '# @ignore-missing\n[files]\n\n[members]\nApexClass:Gone\n' > "$rd/remove-target.txt"
+    local out; out=$(cd "$td" && PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-release.sh" --no-open 2>&1)
+    assert_file_contains "$MOCK_CALL_LOG" "--ignore-warnings" "指示あり: --ignore-warnings を付ける"
+    assert_output_contains "$out" "@ignore-missing があるため" "指示あり: 理由が表示される"
+    assert_file_contains "$rd/destructiveChanges.xml" "<members>Gone</members>" "指示あり: 削除対象は、通常どおり、マニフェストに入る（指示行は、コメント扱い）"
+    unset MOCK_SF_ORG_JSON
+    teardown "$td" "$mb"
+}
+
 test_unprotected_org_local_allowed
 test_protected_org_staging_blocked
 test_reserved_aliases_blocked
@@ -383,5 +408,6 @@ test_sf_cli_abort
 test_mixed_files_and_members
 test_members_only_and_files_only
 test_empty_manifest_aborts
+test_ignore_missing_directive
 
 print_summary

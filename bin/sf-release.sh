@@ -14,6 +14,13 @@
 #   package.xml に統合する（両方を同時に渡すと、sf CLI は、共通部分だけ（重なりがなければ空）を返すため）。
 #   統合後にメンバーが 1 つもなければ、エラーで中断する（「変更なし」の成功扱いで、見落とさないため）。
 #
+# 【存在しない削除対象を許す指示（# @ignore-missing）】
+#   remove-target.txt に、`# @ignore-missing` の行（コメント行の形）があるときだけ、sf project deploy start に
+#   --ignore-warnings を付ける。削除対象が組織に存在しなくても、エラーにしない（「No ApexClass named: X found」を、
+#   警告として扱う）。後始末（sf-init.sh --verify --cleanup）のように、どこまで消えているか分からない削除を、何度でも
+#   実行できるようにするための指示。指示がなければ、これまでどおり、存在しない対象は、エラーになる
+#   （綴りの誤りなどを、見落とさないため。通常のリリース・削除には、付けないこと）。
+#
 # 【共有環境の保護】
 #   接続先のエイリアスが予約名（prod / staging / develop / main）の組織（共有環境）には、
 #   ローカルからは実行できません（dry-run を含む）。リリースは、GitHub にコミットし、
@@ -310,6 +317,11 @@ phase_release() {
     local deploy_cmd=("sf" "project" "deploy" "start" "--target-org" "$TARGET_ORG" "--manifest" "$DEPLOY_XML" "${JSON_FLAG[@]}")
     [[ -f "$REMOVE_XML" ]]          && deploy_cmd+=("--pre-destructive-changes" "$REMOVE_XML")
     [[ "$IGNORE_CONFLICTS" -eq 1 ]] && deploy_cmd+=("--ignore-conflicts")
+    # remove-target.txt に「# @ignore-missing」があれば、存在しない削除対象を、エラーにしない
+    if [[ -f "$REMOVE_LIST" ]] && grep -qE '^[[:space:]]*#[[:space:]]*@ignore-missing' "$REMOVE_LIST"; then  # 条件チェック
+        deploy_cmd+=("--ignore-warnings")
+        log "INFO" "remove-target.txt に @ignore-missing があるため、存在しない削除対象は、エラーにしません（--ignore-warnings）"
+    fi
 
     # テストクラスが検出されていれば RunSpecifiedTests を指定
     if [[ ${#RUN_TESTS[@]} -gt 0 ]]; then

@@ -157,10 +157,16 @@ if [[ $COMPONENTS -eq 1 ]]; then
     printf '%s\n' "${TIERS[@]}" | grep -qx "develop" \
         || die "--components は、develop の組織がある構成（develop・staging・main の 3 層）だけで、実行できます（サンプルを、staging・本番の組織には、入れません）。"
     TIERS=("develop")
-    # 既存の labels のファイルがあると、サンプルが、それを上書きして、削除してしまう。その場合は、CustomLabels を、サンプルに含めない
+    # 既存の labels のファイルがあると、サンプルが、それを上書きして、削除してしまう。その場合は、CustomLabels を、サンプルに含めない。
+    # ただし、サンプルのラベルだけを含むファイル（前回の検証の残り）は、サンプルのものとして扱う（含めないと、後始末でも消えない）
     if verify_file_sha "$REPO" develop "$VERIFY_SAMPLE_LABELS_PATH" > /dev/null; then  # 条件チェック
-        VERIFY_SAMPLE_LABELS=0
-        log "WARNING" "  develop に、すでに labels のファイル（${VERIFY_SAMPLE_LABELS_PATH}）があるため、CustomLabels は、サンプルに含めません（上書きを避けるため）。"
+        _labels_body=$(verify_gh api "repos/${REPO}/contents/$(_verify_urlpath "$VERIFY_SAMPLE_LABELS_PATH")?ref=develop" --jq '.content | @base64d' 2>/dev/null) || _labels_body=""  # VAR=$(cmd) のため run 不使用
+        if printf '%s\n' "$_labels_body" | verify_sample_labels_file_is_ours; then  # 条件チェック
+            log "INFO" "  develop の labels のファイルは、サンプルのラベル（前回の検証の残り）だけです。サンプルの一部として扱います。"
+        else
+            VERIFY_SAMPLE_LABELS=0
+            log "WARNING" "  develop に、すでに labels のファイル（${VERIFY_SAMPLE_LABELS_PATH}）があるため、CustomLabels は、サンプルに含めません（上書きを避けるため）。"
+        fi
     fi
 fi
 
@@ -455,7 +461,9 @@ _make_delete_branch() {
         verify_file_delete "$REPO" "$br" "$p" "verify: ${_WHAT} を削除" || return 1
     done < <(verify_set_paths "$stage")
     verify_empty_target_text         | verify_file_put "$REPO" "$br" "sf-tools/release/${br}/deploy-target.txt" "verify: リリース対象（なし）" || return 1
-    verify_set_remove_target_text "$stage" | verify_file_put "$REPO" "$br" "sf-tools/release/${br}/remove-target.txt" "verify: 削除対象" || return 1
+    # --cleanup: どこまで消えているか分からないため、存在しない削除対象を、エラーにしない（# @ignore-missing。sf-release.sh が解釈する）
+    { [[ $CLEANUP_ONLY -eq 1 ]] && echo '# @ignore-missing'; verify_set_remove_target_text "$stage"; } \
+        | verify_file_put "$REPO" "$br" "sf-tools/release/${br}/remove-target.txt" "verify: 削除対象" || return 1
 }
 
 # 環境全体の確認（リリースの前に行う。NG があれば、リリースへ進まない: 組織に、何も変更していない状態で止まる）

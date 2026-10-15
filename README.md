@@ -798,7 +798,7 @@ Hello World（Apex のみ）の代わりに、**書き方のパターンが違�
 - **Flow は、検証のみ（`--validate-only`）で検証し、リリースと削除の通しには含めません**: 接続ユーザーに、API で Flow を削除する権限がない組織があり（`insufficient access rights on cross-reference id`。`Flow` 型・`FlowDefinition` 型のどちらでも拒否されます）、削除できずに組織に残ってしまうためです。`--cleanup` は、リポジトリの Flow のファイルを削除します。組織に残った Flow は、画面（設定 → フロー）で、手動で削除してください
 - Layout は、オブジェクトの最後の 1 つにできないため、削除対象にせず、オブジェクトの削除に任せます
 - 名前は、すべて `SfToolsE2eHello` 系で、誰も使いません。ほかのファイルを、上書きしません（検証用と同名のファイルが、develop にすでにあるときは、実行しません）
-- 途中で止まって、組織に残ったときは、`sf-init.sh --verify --components --cleanup`（削除のみ。`--with-objects` でリリースしたときは、`--with-objects` も付けます）で消します。失敗したときの案内にも、付けるべきコマンドが表示されます
+- 途中で止まって、組織に残ったときは、`sf-init.sh --verify --components --cleanup`（削除のみ。`--with-objects` でリリースしたときは、`--with-objects` も付けます）で消します。失敗したときの案内にも、付けるべきコマンドが表示されます。`--cleanup` は、何度実行しても通ります（組織にすでに無いものがあっても、エラーにしません）。前回の検証が残した labels のファイル（サンプルのラベルだけのもの）も、サンプルのものとして、削除します
 
 e2e（`tests/e2e/run.sh`）との違い: e2e は、sf-tools の開発者が、新しく作ったテスト用のリポジトリ・組織で、sf-tools 自体を確認する回帰テストです。`sf-init.sh --verify` は、管理者が、実際のリポジトリ・組織を確認するためのものです。PR と実行の待ちの部品は、共通（`lib/verify-common.sh`）です。
 

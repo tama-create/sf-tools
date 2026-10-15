@@ -54,6 +54,20 @@ VERIFY_SAMPLE_TRIGGER_TEST="SfToolsE2eHelloTriggerTest"
 VERIFY_SAMPLE_LAYOUT="${VERIFY_SAMPLE_OBJ}-${VERIFY_SAMPLE_NAME} Layout"
 
 # ------------------------------------------------------------------------------
+# verify_sample_labels_file_is_ours - labels のファイル（標準入力）が、サンプル自身のものか
+#   サンプルのラベル（fullName が SfToolsE2eHello）だけを含むファイルなら、サンプルのもの（前回の検証の残り）。
+#   ほかのラベルを含む（または、読めない・空）ときは、利用者のものとして、触らない。戻り値: 0 = サンプルのもの / 1 = それ以外
+#   （前回の検証が、途中で止まって、サンプルの labels のファイルが残ると、「利用者のファイル」と取り違えて、
+#     ラベルを削除対象から外してしまい、ラベルとファイルが、後始末でも消えなくなるため）
+# ------------------------------------------------------------------------------
+verify_sample_labels_file_is_ours() {
+    local body n
+    body=$(cat)  # VAR=$(cmd) のため run 不使用
+    n=$(printf '%s\n' "$body" | grep -c '<fullName>')  # VAR=$(cmd) のため run 不使用
+    [[ "$n" == "1" ]] && printf '%s\n' "$body" | grep -q "<fullName>${VERIFY_SAMPLE_NAME}</fullName>"
+}
+
+# ------------------------------------------------------------------------------
 # パスの一覧（リポジトリの中のパス）。引数: stage1 | stage2 | all（既定 all）
 # ------------------------------------------------------------------------------
 verify_sample_paths() {

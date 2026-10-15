@@ -85,11 +85,7 @@ else
 fi
 echo "" >&2
 # 管理者向けの警告と確認（CLAUDE.md 2.4）。GITHUB_ACTIONS=true のときは、省略しない（Actions 上で実行する想定がない）
-echo -e "${CLR_ERR}╔══════════════════════════════════════════════════════╗${CLR_RESET}" >&2
-echo -e "${CLR_ERR}║  !!  このコマンドは管理者専用です                    ║${CLR_RESET}" >&2
-echo -e "${CLR_ERR}║      接続先（Secrets / Variables）が書き換わります   ║${CLR_RESET}" >&2
-echo -e "${CLR_ERR}║      管理者以外は、実行しないでください              ║${CLR_RESET}" >&2
-echo -e "${CLR_ERR}╚══════════════════════════════════════════════════════╝${CLR_RESET}" >&2
+print_admin_warning "!!  このコマンドは管理者専用です" "    接続先（Secrets / Variables）が書き換わります" "    管理者以外は、実行しないでください"
 log "WARNING" "この段階（${TIER}）の接続先を、付け替えます。Secrets / Variables が、まとめて更新されます。"
 check_gh_owner "${REPO_FULL_NAME%%/*}"
 ask_yn "  付け替えますか？" || die "中断しました。"

@@ -12,6 +12,11 @@
 # 【チェック内容】
 #   - [files]   セクション: パスがリポジトリ内に存在するか
 #   - [members] セクション: 「種別名:メンバー名」形式になっているか
+#   - 種類の可否: config/metadata-capability.txt（sf-typecheck.sh が、実際の組織で確かめた表）で、リリース・削除できないと
+#     確認済み（ng）の種類を、deploy-target.txt（リリース）・remove-target.txt（削除）に書くと、エラーにする。
+#     条件によって、できない種類（limited）は、警告にする（止めない）。確認していない種類（unknown）・
+#     表にない種類は、何もしない。組織の権限で、できる場合は、
+#     環境変数 SF_CHECK_IGNORE_CAPABILITY=1 で、この確認を省略できる
 #   - テストクラス不足: Apex クラスに対応するテストクラスが含まれていない場合に警告
 #       Step A: 命名規則（MyClassTest.cls / MyClass_Test.cls）で検索
 #       Step B: A で見つからない場合 @isTest を含む .cls を内容検索
@@ -69,6 +74,57 @@ fi
 # ------------------------------------------------------------------------------
 # 4. ユーティリティ関数
 # ------------------------------------------------------------------------------
+
+# ------------------------------------------------------------------------------
+# 種類の可否（config/metadata-capability.txt）
+#   形式（タブ区切り）: 種類 / release / delete / 備考。release・delete は、ok / ng / limited / unknown
+# ------------------------------------------------------------------------------
+CAPABILITY_FILE="${SF_CHECK_CAPABILITY_FILE:-${SCRIPT_DIR}/../config/metadata-capability.txt}"
+
+# 種類の可否を返す。引数: 種類 release|delete → ok / ng / （空 = 表にない・確認していない）
+capability_status() {
+    [[ -f "$CAPABILITY_FILE" ]] || return 0
+    awk -F'\t' -v t="$1" -v c="$2" '$0 !~ /^#/ && $1 == t { v = (c == "release") ? $2 : $3; gsub(/\r/, "", v); print v; exit }' "$CAPABILITY_FILE"
+}
+capability_note() {
+    [[ -f "$CAPABILITY_FILE" ]] || return 0
+    awk -F'\t' -v t="$1" '$0 !~ /^#/ && $1 == t { v = $4; gsub(/\r/, "", v); print v; exit }' "$CAPABILITY_FILE"
+}
+
+# [files] のパスから、種類を推定する（確認済みの NG がありうる主な種類だけ）。分からなければ、空
+type_of_path() {
+    case "$1" in
+        */flows/*.flow-meta.xml)        echo "Flow" ;;
+        */classes/*.cls)                echo "ApexClass" ;;
+        */triggers/*.trigger)           echo "ApexTrigger" ;;
+        */lwc/*)                        echo "LightningComponentBundle" ;;
+        */aura/*)                       echo "AuraDefinitionBundle" ;;
+        */servicePresenceStatuses/*)    echo "ServicePresenceStatus" ;;
+        */standardValueSets/*)          echo "StandardValueSet" ;;
+        *) ;;
+    esac
+}
+
+# 種類の可否の確認（エラーなら、戻り値 1）。引数: ラベル 行番号 行の内容 種類
+#   ラベルが deploy-target.txt のときは release を、remove-target.txt のときは delete を、確認する
+check_capability() {
+    local label="$1" lineno="$2" content="$3" type="$4" which="release" what="リリース" st note
+    [[ -n "$type" ]] || return 0
+    [[ "${SF_CHECK_IGNORE_CAPABILITY:-}" == "1" ]] && return 0
+    if [[ "$label" == remove* ]]; then which="delete"; what="削除"; fi
+    st=$(capability_status "$type" "$which")  # VAR=$(cmd) のため run 不使用
+    case "$st" in
+        ng)
+            note=$(capability_note "$type")  # VAR=$(cmd) のため run 不使用
+            print_gcc_message "error" "$label" "$lineno" "$content" "「${type}」は、API で${what}できないことを確認済みです${note:+（${note}）}。組織の権限で、できる場合は、SF_CHECK_IGNORE_CAPABILITY=1 で、この確認を省略できます"
+            return 1 ;;
+        limited)
+            note=$(capability_note "$type")  # VAR=$(cmd) のため run 不使用
+            print_gcc_message "warning" "$label" "$lineno" "$content" "「${type}」は、条件によって、${what}できないことがあります${note:+（${note}）}" ;;
+        *) ;;
+    esac
+    return 0
+}
 
 # \r 除去・前後空白トリムした結果を変数に格納する
 # 引数: $1 = 出力変数名（set_var で代入）, $2 = 入力行
@@ -152,12 +208,16 @@ check_target_file() {
             if [[ ! -f "$clean" ]]; then
                 print_gcc_message "error" "$label" "$lineno" "$clean" "パスが存在しません"
                 error_count=$(( error_count + 1 ))
+            else
+                check_capability "$label" "$lineno" "$clean" "$(type_of_path "$clean")" || error_count=$(( error_count + 1 ))
             fi
         else
             # [members]: 「種別名:メンバー名」形式チェック（コロン必須・両側が非空）
             if [[ "$clean" != *:* || "$clean" == :* || "$clean" == *: ]]; then
                 print_gcc_message "error" "$label" "$lineno" "$clean" "書式エラー（種別名:メンバー名）"
                 error_count=$(( error_count + 1 ))
+            else
+                check_capability "$label" "$lineno" "$clean" "${clean%%:*}" || error_count=$(( error_count + 1 ))
             fi
         fi
     done < "$file"

@@ -154,8 +154,11 @@ git pull origin main                     # main の最新を取り込む
 | `sf-sync-wf.sh` | ✅ 実装済み |
 | `sf-init.sh --verify`（`phases/init/verify.sh`） | ✅ 実装済み（警告ボックス + 実行内容の表示 + `wizard_confirm`（Enter。入力を最小に）。本番を含むときは、文面で明示） |
 | `sf-release.sh`（`--release` 時） | ✅ 実装済み |
+| `sf-typecheck.sh` | ✅ 実装済み（警告ボックス + `ask_yn \|\| die`（`-y` で省略可）。GitHub Actions 上・予約名のエイリアス・本番は拒否。作成・削除は `SfToolsE2eMin` を含むものだけ。**この安全ガードを緩めないこと**） |
 
-> 警告ボックスの実装例は `doc/dev-reference.md` セクション 3.4 参照
+> **警告ボックスは、`print_admin_warning`（`lib/common.sh`）を使うこと。`echo` で直書きしない。** 使い方は `doc/dev-reference.md` セクション 3.4 参照
+> **警告は、必ず、確認（`ask_yn || die` / `wizard_confirm`）とセットにする。** 警告を出しただけで、先へ進まない（表示だけで流れると、意味がない）。読み取りのみのモード（`--list` など）も、同じ（`-y` で省略できるようにする）
+> `sf-hook.sh` / `sf-unhook.sh`（手元のフックの入れ替え）・`sf-release.sh`（単独では、まず打たない。確認のみ）・`sf-deploy.sh`（開発者向けのラッパー）は、管理者向けではないため、警告ボックスは不要
 
 ### 2.5 冒頭コメント（仕様の正本）
 
@@ -227,6 +230,8 @@ Salesforce 開発の環境構築と日々の作業を自動化するシェルス
 | `bin/sf-*.sh` | 各種自動化スクリプト本体 |
 | `lib/common.sh` | 全スクリプト共通ライブラリ。`log` / `run` / `die` / 入力関数群を提供 |
 | `phases/init/` | sf-init.sh のサブスクリプト（Phase 02〜10 + `add_tier.sh`） |
+| `config/changeset-types.txt` | 変更セットで扱える種類の一覧（公式の Metadata Coverage Report。「全種類を対象にする」目標の一覧。`sf-typecheck.sh --coverage` で、確認の進み具合を見る） |
+| `config/metadata-capability.txt` | メタデータの種類ごとの「リリース・削除」の可否の表（`sf-typecheck.sh` が実機で確認した結果。`sf-check.sh` が読む） |
 | `hooks/pre-push` | git push フックの実体 |
 | `templates/` | force-* へ配布する雛形。**参照は sf-init 専用**（`phase_setup_release_dir` のみ日常運用でも参照可） |
 | `tests/` | モックベースの単体テスト一式 |

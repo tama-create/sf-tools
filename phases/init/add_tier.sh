@@ -101,11 +101,7 @@ log "INFO" "  対象リポジトリ: ${REPO_FULL_NAME}"
 log "INFO" "  追加 tier     : ${ADD_TIER}（${LABEL}）"
 
 # 管理者向けの警告と確認（CLAUDE.md 2.4）。GITHUB_ACTIONS=true のときも、省略しない（Actions 上で実行する想定がない）
-echo -e "${CLR_ERR}╔══════════════════════════════════════════════════════╗${CLR_RESET}" >&2
-echo -e "${CLR_ERR}║  !!  このコマンドは管理者専用です                    ║${CLR_RESET}" >&2
-echo -e "${CLR_ERR}║      段階（ブランチ）と、Salesforce 組織への接続を   ║${CLR_RESET}" >&2
-echo -e "${CLR_ERR}║      追加します。Secrets / Variables が書き換わります║${CLR_RESET}" >&2
-echo -e "${CLR_ERR}╚══════════════════════════════════════════════════════╝${CLR_RESET}" >&2
+print_admin_warning "!!  このコマンドは管理者専用です" "    段階（ブランチ）と、Salesforce 組織への接続を" "    追加します。Secrets / Variables が書き換わります"
 log "WARNING" "途中で失敗しても、Salesforce 側に作った外部クライアントアプリと、登録した Secrets は、自動では、元に戻しません。"
 check_gh_owner "${REPO_FULL_NAME%%/*}"
 ask_yn "  続行しますか？" || die "中断しました。"

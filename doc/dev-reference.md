@@ -78,7 +78,8 @@
 | `test_sf-dryrun.sh` | sf-dryrun.sh |
 | `test_sf-job.sh` | sf-job.sh |
 | `test_sf-next.sh` | sf-next.sh |
-| `test_sf-check.sh` | sf-check.sh |
+| `test_sf-check.sh` | sf-check.sh（種類の可否の判定・同梱の表 `config/metadata-capability.txt` の形式を含む） |
+| `test_sf-typecheck.sh` | sf-typecheck.sh / lib/typecheck.js（node が無い環境では、スキップ。sf はモック） |
 | `test_sf-prepush.sh` | hooks/pre-push |
 | `test_sf-push.sh` | sf-push.sh |
 | `test_sf-update-secret.sh` | sf-update-secret.sh |
@@ -194,15 +195,17 @@
 ```bash
 # 管理者向けコマンドの冒頭パターン（sf-init / sf-metasync / sf-update-secret 等）
 if [[ "${GITHUB_ACTIONS:-false}" != "true" ]]; then
-    echo -e "${CLR_ERR}╔══════════════════════════════════════════════════════╗${CLR_RESET}" >&2
-    echo -e "${CLR_ERR}║  !!  このコマンドは管理者専用です                    ║${CLR_RESET}" >&2
-    echo -e "${CLR_ERR}║      管理者以外は絶対に実行しないでください          ║${CLR_RESET}" >&2
-    echo -e "${CLR_ERR}╚══════════════════════════════════════════════════════╝${CLR_RESET}" >&2
+    print_admin_warning --standard "GitHub Secrets を更新します。" "誤った値を設定すると CI/CD が停止します。"
     ask_yn "続行しますか？" || die "中断しました。"
 fi
 ```
 
-> `CLR_ERR` は赤色（`\033[0;31m`）。ボックス罫線は `╔ ═ ╗ ║ ╚ ╝`（U+2554 等）を使用。
+> **警告ボックスは、`print_admin_warning`（`lib/common.sh`）を使う。`echo` でボックスを直書きしない**（書き写しによる、幅のずれ・書き漏れを防ぐため）。
+> - `--standard`: 先頭に「このコマンドは管理者専用です / 管理者以外は絶対に実行しないでください」を付ける（続く行があれば、空行を 1 つ挟む）
+> - 行は 1 引数 = 1 行（空文字は空行）。左に空白 2 つの余白が付く。見出しは `"!!  …"`、続きの行は空白 4 つで、そろえる
+> - 幅は、表示の幅（全角 2・半角 1）で、54 にそろう（`_display_width`）。確認（`ask_yn` / `wizard_confirm`）は、含まない
+> - 赤色（`CLR_ERR`）で、標準エラーに出る
+> - `sf-typecheck.sh` は、起動したら最初に（`--list`・`--coverage` でも）、この警告を出し、続けて確認（Y/N。`-y` で省略）をして、はじめて実行する。**警告は、必ず、確認とセットにする（表示だけで流れると、意味がないため）**
 
 #### 3.4.2 二重確認の防止パターン
 
@@ -274,7 +277,7 @@ check_gh_owner "$GITHUB_OWNER"   # 認証ユーザーの一致確認
 **共有環境の保護（5.1）:** 接続先のエイリアスが予約名（`prod` / `staging` / `develop` / `main`。`is_reserved_org_alias`）なら、ローカル（`GITHUB_ACTIONS` が `true` 以外）からは `die` する（dry-run を含む）。共有環境へのリリースは、GitHub Actions だけ。
 
 **安全ガード（セクション 3.4）:**
-ローカル実行 + `--release` + `SF_DEPLOY_CONFIRMED!=1` の条件をすべて満たす場合のみ警告ボックス + `ask_yn` を実行する。`GITHUB_ACTIONS=true` / validate モード / `SF_DEPLOY_CONFIRMED=1`（sf-deploy.sh 経由）の場合はスキップ。
+ローカル実行 + `--release` + `SF_DEPLOY_CONFIRMED!=1` の条件をすべて満たす場合のみ、確認（`ask_yn`。赤い警告ボックスは、なし）を実行する。`GITHUB_ACTIONS=true` / validate モード / `SF_DEPLOY_CONFIRMED=1`（sf-deploy.sh 経由）の場合はスキップ。
 
 `@isTest` 自動検出フロー:
 1. `phase_generate_manifest` 内で `deploy_args` を走査し、`--source-dir` に続く `.cls` ファイルを `grep -qi "@isTest"` で検査
@@ -360,7 +363,7 @@ check_gh_owner "$GITHUB_OWNER"   # 認証ユーザーの一致確認
 - `sf-release.sh --release --force` のラッパー
 - `force-*` 以外では実行禁止
 - `main` / `staging` / `develop` ブランチでは実行禁止
-- **安全ガード:** `log "WARNING"` で `--force` の意味を表示 → `ask_yn || die` で続行確認（**赤い警告ボックスなし**。赤いボックスは sf-init / sf-metasync / sf-update-secret / sf-release 直接実行のみ）
+- **安全ガード:** `log "WARNING"` で `--force` の意味を表示 → `ask_yn || die` で続行確認（**赤い警告ボックスなし**。赤いボックスは、管理者向けの sf-init / sf-metasync / sf-update-secret / sf-sync-wf / sf-typecheck のみ（print_admin_warning））
 - `export SF_DEPLOY_CONFIRMED=1` で sf-release.sh 側の二重確認を抑制
 - **共有環境には、ローカルからリリースできない。** 用途は、個人用の Sandbox / Developer Edition / Scratch Org への強制リリース。共有環境（本番・staging・develop）は、GitHub にコミットし、レビューを通して、GitHub Actions で行う。そのため、接続先のエイリアスが予約名（`SF_RESERVED_ORG_ALIASES` = `prod` / `staging` / `develop` / `main`。`is_reserved_org_alias`、`lib/common.sh`）なら、**確認の前に** `die` する（`-t` / `--target` の指定、なければ `SF_TARGET_ORG`、接続中の組織の順で特定。`GITHUB_ACTIONS=true` ではスキップ）。`sf-release.sh` の 5.1 も、同じ関数で判定する
 - `-t` / `--target` の解析規則は、`sf-deploy.sh`（事前判定）と `sf-release.sh` で同じ: 値（エイリアス）が無い、または `-` で始まる値（次のオプションを取り込む指定）は `die`。`--target=ALIAS` 形式は、どちらも未対応（`sf-deploy.sh` は確認の前に `die`、`sf-release.sh` は「不明なオプション」）。`GITHUB_ACTIONS=true` による解除は、ローカルで設定すれば誰でも解除できるが、これは誤操作を防ぐための設計（悪意ある回避は対象外。共有環境への実際の認証情報は、GitHub Secrets にあり、手元にはない）
@@ -577,6 +580,7 @@ sf-init.sh --add-tier develop    # main+staging → main+staging+develop
 `check_target_file` の処理（`deploy-target.txt` / `remove-target.txt` 共通）:
 - `[files]` セクション: ファイルパスの存在確認（`[[ ! -e "$clean" ]]`）→ エラー時は `print_gcc_error` で GCC スタイル出力
 - `[members]` セクション: `種別名:メンバー名` 書式確認（コロンなし → `print_gcc_error`）
+- 種類の可否（`check_capability`）: `config/metadata-capability.txt`（`SF_CHECK_CAPABILITY_FILE` で差し替え可）を `awk` で引く。`[members]` は先頭の種類名、`[files]` は `type_of_path`（flows / classes / triggers / lwc / aura / servicePresenceStatuses / standardValueSets のパス）から種類を決める。`deploy-target.txt` は release 列、`remove-target.txt` は delete 列を見る。`ng` はエラー（`error_count` に加算）、`limited` は警告のみ、`ok` / `unknown` / 表にない種類は何もしない。`SF_CHECK_IGNORE_CAPABILITY=1` で省略
 - `error_count > 0` の場合のみ終了コード 1
 
 `check_missing_tests` の処理（WARNING のみ・エラーにならない）:
@@ -587,6 +591,20 @@ sf-init.sh --add-tier develop    # main+staging → main+staging+develop
 - 見つかったテストクラスが `deployed_files` に含まれていなければ `print_gcc_warning` を出力
 - 設計思想: 本番/Sandbox に既存のテストクラスは含めなくてよい → WARNING 扱い（エラーにはしない）
 
+
+### 4.14.1 sf-typecheck.sh（種類ごとの可否の確認）と config/metadata-capability.txt
+
+管理者・開発者向け。個人用の組織（Developer Edition / Sandbox / Scratch / Trial）で、メタデータの種類ごとに、最小のサンプルを実際にリリース → 削除し、結果を TSV（`種類 / release / delete / 備考`、値は `ok` / `ng` / `limited` / `unknown`）にする。本体は `lib/typecheck.js`（Node 標準ライブラリのみ。シェルから呼ぶ境界は `bin/sf-typecheck.sh` の 1 か所）。
+
+- 安全: GitHub Actions 上・予約名のエイリアス（prod / staging / develop / main）・本番・種類を判定できない組織は拒否。作成・削除するのは名前に `SfToolsE2eMin` を含むものだけ（`lib/typecheck.js` が、作成前に確認する）。許可する sf のコマンドは `project deploy start` / `project deploy validate` のみ
+- オブジェクト名・メタデータ名は、実行ごとの時刻つき（削除したカスタムオブジェクトの名前は、約 15 日間、予約されるため）
+- テストでは `SF_TYPECHECK_CMD` で、sf をモックに差し替える
+- 終了コード: `lib/typecheck.js` は 0（すべて ok）/ 3（ng あり）/ 1（実行の失敗）。`sf-typecheck.sh` は、3 を警告にして、0 で終わる（結果の表で判断する）
+- `config/metadata-capability.txt` は、この結果を人が確認して反映する表。`ng`（必ずできない）/ `limited`（権限・使用中・標準のもの・移行済み など、条件による）/ `unknown`（サンプルを作れていない・標準の部品しかない）の区別を守る。`ng` には、備考（理由）を必ず書く（テストで検査）。個別の組織の権限で、できないだけのものは、`ng` にせず `limited` にする
+- `--coverage`: 組織に接続せず、`config/changeset-types.txt`（変更セットで扱える種類。公式の Metadata Coverage Report の ChangeSets 列。取得日・出典は、ファイルの冒頭）と `config/metadata-capability.txt` を突き合わせ、確認済み / リリースのみ / 条件つき・NG / 判定できない / 未確認の数と一覧を出す（awk のみ。`SF_TYPECHECK_CHANGESET_FILE`・`SF_CHECK_CAPABILITY_FILE` で、ファイルを差し替え可）。表の種類名と、変更セット側の複数形・単数形が違うもの（CustomLabels など）は、別名で引く
+- 確認した環境: Developer Edition（API 64.0）。新しい種類の確認を足すときは、`lib/typecheck.js` の `S`（サンプルの一覧）に追加する
+- サンプルの定義（`add(種類, files, del, extra)`）: `del` の中の `null` は、削除の段階の区切り（直前の削除が終わってから、次を実行する）。`extra.covers` は、同じサンプルで一緒に確認できた別の種類（表に同じ結果の行を足す）。共有ルールは、作成直後は、再計算が終わるまで、削除が `sharing operation already in progress` で失敗するため、30 秒おき・最大 8 回、やり直す
+- 失敗の理由が、サンプルの書き間違い・組織の機能がない（例: `Not available for deploy for this organization`）場合は、表には、`ng` ではなく `unknown` として書く（`ng` は、サンプルが正しいことを確認してから）
 
 ### 4.15 sf-sync-wf.sh
 

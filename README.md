@@ -283,10 +283,11 @@ sfl
 | 開発者 | `sf-restart.sh` | 接続先 Sandbox の切り替え | ランチャー |
 | 開発者 | `sf-deploy.sh` | ⚠️ 接続中の組織への強制リリース（確認あり） | ランチャー |
 | 管理者 | `sf-init.sh` | 新規プロジェクト初期セットアップ | ランチャー外 |
-| 管理者 | `sf-hook.sh` / `sf-unhook.sh` | フックの有効化 / 削除 | ランチャー外 |
+| 開発者 | `sf-hook.sh` / `sf-unhook.sh` | 手元のクローンの、検証フックの有効化 / 削除 | ランチャー外 |
 | 管理者 | `sf-update-secret.sh` | ⚠️ GitHub Secrets の再登録（管理者のみ） | ランチャー外 |
 | 管理者 | `sf-sync-wf.sh` | ⚠️ 作成済みのワークフローを、雛形に合わせて更新 | ランチャー外 |
 | 管理者 | `sf-init.sh --verify` | ⚠️ 実際のリポジトリ・組織で、リリースと削除が動くことを検証（Hello World） | ランチャー外 |
+| 管理者 | `sf-typecheck.sh` | ⚠️ 個人用の組織で、メタデータの種類ごとに、リリースと削除ができるかを確かめ、可否の表を作る（`--coverage`: 変更セットで扱える種類のうち、確認済み・未確認の数を表示。組織には接続しない） | ランチャー外 |
 | — | `sf-install.sh` | sf-start から自動実行 | 自動実行 |
 | — | `sf-upgrade.sh` | sf-install から自動実行 | 自動実行 |
 | — | `sf-prepush.sh` | git pre-push フックから自動実行 | 自動実行 |
@@ -567,6 +568,7 @@ sf-check.sh [deploy-target.txt] [remove-target.txt]
 チェック内容:
 - `[files]` セクション: 記述したパスがリポジトリ内に存在するか
 - `[members]` セクション: `種別名:メンバー名` の書式になっているか
+- **種類の可否**: `config/metadata-capability.txt`（`sf-typecheck.sh` が実際の組織で確かめた表）で、API でリリース・削除できないと確認済み（`ng`）の種類を書くと、エラーにします。条件によって、できないことがある種類（`limited`。権限・使用中・標準のもの など）は、警告にします。組織の権限で、できる場合は、環境変数 `SF_CHECK_IGNORE_CAPABILITY=1` で、この確認を省略できます
 - **テストクラス不足検出**: Apex クラス（通常クラス）に対応するテストクラスがローカルに存在するのに `deploy-target.txt` に含まれていない場合に WARNING を表示します（エラーにはならない）
   - Step A: 命名規則（`MyClassTest.cls` / `MyClass_Test.cls`）で同一ディレクトリを検索
   - Step B: A で見つからない場合、`@isTest` を含む `.cls` ファイルをコンテンツ検索
@@ -590,6 +592,25 @@ sf-metasync.sh
 主に GitHub Actions からの定期実行を想定しています。
 
 > ⚠️ **管理者専用**: 実行前に赤い警告ボックスと確認プロンプトが表示されます。`GITHUB_ACTIONS=true` の場合はスキップして自動実行します。
+
+#### 取得するメタデータの種類（`sf-tools/config/metadata.txt`）
+
+取得する種類は、各プロジェクトの `sf-tools/config/metadata.txt` で決まります（`sf-init` が、雛形から作ります）。設定ファイルだけで調整でき、コードの変更は不要です。
+
+**前提**: 雛形の標準セットは、**Developer Edition（Sales・Service の標準機能つき）でのみ、リリースと削除を確認**しています。ほかのエディション・製品（Service Cloud・Experience Cloud・業種クラウドなど）で使う場合は、必要な種類を足してください。
+
+| 区分 | 既定 | 内容 |
+|---|---|---|
+| 1. 標準セット | 有効 | Developer Edition で、リリース・削除を確認済み（Apex・LWC・オブジェクト・項目・Layout・権限・レポート・ワークフローなど） |
+| 2. 標準だが制限あり | 有効 | 更新のみ・権限による・一部未確認（StandardValueSet・Flow・Settings など。理由は、ファイル内のコメント） |
+| 3. 機能が必要なもの | コメントアウト | Service Cloud 系（Entitlement・Omni-Channel・Knowledge）・Experience Cloud 系。使う組織だけ、コメントを外す |
+| 4. 未確認 | コメントアウト | 確認できていない種類。使う場合は、外して、リリースを確かめる |
+| 5. 参考 | コメントアウト | そのほかの種類の候補（業種クラウド・AI・分析など） |
+
+- 取得対象に、その組織に無い種類があっても、**警告になるだけ**で、取得は続きます。
+- 種類ごとの確認の状況は、`sf-typecheck.sh --coverage` で見られます（変更セットで扱える種類のうち、確認済み・未確認の数）。
+- リリース・削除できないと確認済みの種類は、ターゲットファイルに書くと、`sf-check.sh` が止めます（警告のみの種類もあります）。
+- すでに作成済みのプロジェクトの `metadata.txt` は、雛形が更新されても、**変わりません**。
 
 ### 4.12 `sf-restart.sh`
 
@@ -898,6 +919,7 @@ sf-tools/
 │   ├── sf-release.sh
 │   ├── sf-deploy.sh
 │   ├── sf-check.sh
+│   ├── sf-typecheck.sh
 │   ├── sf-restart.sh
 │   ├── sf-init.sh
 │   ├── sf-hook.sh

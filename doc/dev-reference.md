@@ -123,7 +123,7 @@
 ## 3. 共通ライブラリ (`lib/common.sh`) 詳細
 
 > **構成**: `lib/common.sh` が窓口で、ログ（`log`）・実行（`run`）・終了（`die`）・`json_get` と定数を持つ。残りの関数は、責務ごとのファイルに分けてあり、`common.sh` が `source` する（呼び出し側は、これまでどおり、`common.sh` だけを `source` すればよい）。
-> `lib/input.sh`（対話入力: `read_input` / `read_key` / `press_enter` / `read_or_quit` / `read_secret` / `ask_yn`）・`lib/platform.sh`（OS・外部コマンド: `is_gitbash` / `run_isolated_home` / `check_sf_cli` / `open_browser`）・`lib/project.sh`（プロジェクト: `get_target_org` / `check_force_dir` / `check_home_dir` / `check_gh_owner` / `get_branch_list` / `is_reserved_org_alias` / `is_protected_branch` / `ensure_sf_tools_latest`）。テストは、すべて `tests/test_common.sh`。
+> `lib/input.sh`（対話入力: `read_input` / `read_key` / `press_enter` / `read_or_quit` / `read_secret` / `ask_yn`）・`lib/platform.sh`（OS・外部コマンド: `is_gitbash` / `run_isolated_home` / `check_sf_cli` / `open_browser`）・`lib/project.sh`（プロジェクト: `get_target_org` / `check_force_dir` / `check_home_dir` / `check_gh_owner` / `get_branch_list` / `is_reserved_org_alias` / `is_protected_branch` / `ensure_sf_tools_latest` / `merge_package_xml`）。テストは、すべて `tests/test_common.sh`。
 
 全スクリプトは `source "$SCRIPT_DIR/lib/common.sh"` の前に以下を `readonly` で定義すること。
 
@@ -257,8 +257,16 @@ check_gh_owner "$GITHUB_OWNER"   # 認証ユーザーの一致確認
 
 ### 4.2 sf-release.sh
 
-- ターゲットファイルをもとに `package.xml` を生成
+- ターゲットファイルをもとに `package.xml`（と、削除用の `destructiveChanges.xml`）を生成
 - `sf project deploy start` で検証または本番実行
+
+**マニフェストの生成（`generate_manifest`）:** `[files]`（`--source-dir`）と `[members]`（`--metadata`）は、**別々に** `sf project generate manifest` で生成し、`merge_package_xml`（`lib/project.sh`）で 1 つに統合する。
+理由: `sf project generate manifest` は、`--source-dir` と `--metadata` を同時に渡すと、両方の**共通部分だけ**を返す（重なりがなければ `<types>` のない空のマニフェストになり、しかも成功として終わる）。
+空のマニフェストでは、`sf project deploy start` が `NothingToDeploy` を返し、sf-release.sh は「変更がないため処理をスキップしました」と成功扱いにしていたため、
+`[files]` と `[members]` を混在させたリストは、検証もリリースもされないまま、緑になっていた（`sf-init.sh --verify --components` で発見）。
+統合後に `<members>` が 1 つもなければ、エラーで中断する（`NothingToDeploy` の成功扱いにしない）。
+`merge_package_xml` は、awk と sort だけ（GNU / BSD 共通）。種類は名前の順・メンバーは重複なし・version は最初のもの。
+テスト: `tests/test_sf-release.sh`（混在・`[members]` のみ・`[files]` のみ・空のマニフェスト）、`tests/test_common.sh` の `test_merge_package_xml`。`tests/test_helper.sh` の sf のモックは、実際の sf と同じく、両方を同時に渡すと空になる。
 
 主なオプション: `--release` / `--no-open` / `--force` / `--target`
 

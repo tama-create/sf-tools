@@ -14,7 +14,48 @@
 #   is_reserved_org_alias     ... 共有環境の組織エイリアス（sf-tools の予約名）か判定
 #   is_protected_branch       ... 指定ブランチが branches.txt の保護対象か判定
 #   ensure_sf_tools_latest    ... sf-tools（Git リポジトリ）が origin の最新であることを確認
+#   merge_package_xml OUT IN... ... package.xml 形式のマニフェストを 1 つに統合する（種類ごとに、メンバーを重複なく並べる）
 # ==============================================================================
+
+# merge_package_xml - package.xml 形式のマニフェストを、1 つに統合する
+# ------------------------------------------------------------------------------
+# 【使い方】 merge_package_xml OUT IN1 [IN2 ...]
+# 【理由】   `sf project generate manifest` は、--source-dir と --metadata を同時に渡すと、両方の「共通部分」だけを返す
+#           （重なりがなければ、<types> が 1 つもない空のマニフェストになる。しかも、成功として終わる）。
+#           そのため、sf-release.sh は、[files] と [members] を、別々に生成して、ここで統合する。
+# 【動作】   各入力の <types> を読み、種類 → メンバーの順に、重複を除いて並べる。<version> は、最初に見つかったもの。
+#           awk と sort だけで動く（GNU / BSD 共通。追加の依存なし）
+# 【戻り値】 0 = 出力した（メンバーが 1 つもなくても、空のマニフェストを出力する。判定は、呼び出し側）
+# ------------------------------------------------------------------------------
+merge_package_xml() {
+    local out="$1" f ver
+    shift
+    ver=$(grep -h -o '<version>[^<]*</version>' "$@" 2>/dev/null | head -n 1)  # VAR=$(cmd) のため run 不使用
+    [[ -n "$ver" ]] || ver="<version>64.0</version>"
+    {
+        printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' '<Package xmlns="http://soap.sforce.com/2006/04/metadata">'
+        for f in "$@"; do
+            awk '
+                /<members>/ { s = $0; sub(/^[[:space:]]*<members>/, "", s); sub(/<\/members>[[:space:]]*$/, "", s); m[n++] = s }
+                /<name>/    { t = $0; sub(/^[[:space:]]*<name>/, "", t); sub(/<\/name>[[:space:]]*$/, "", t)
+                              for (i = 0; i < n; i++) printf "%s\t%s\n", t, m[i]
+                              n = 0 }
+            ' "$f"
+        done | sort -u | awk -F'\t' '
+            {
+                if ($1 != cur) {
+                    if (cur != "") { printf "        <name>%s</name>\n    </types>\n", cur }
+                    print "    <types>"
+                    cur = $1
+                }
+                printf "        <members>%s</members>\n", $2
+            }
+            END { if (cur != "") { printf "        <name>%s</name>\n    </types>\n", cur } }
+        '
+        printf '    %s\n' "$ver"
+        printf '%s\n' '</Package>'
+    } > "$out"
+}
 
 # get_target_org - 接続先組織エイリアスを解決して echo する
 # ------------------------------------------------------------------------------

@@ -277,11 +277,111 @@ test_sf_cli_abort() {
     teardown "$td" "$mb"
 }
 
+# [files] と [members] の混在 → package.xml に、両方が入る（sf project generate manifest は、--source-dir と --metadata を
+# 同時に渡すと、共通部分だけ（重なりがなければ空）になる。別々に生成して、統合する）
+test_mixed_files_and_members() {
+    local td mb mh
+    setup_std_env td mb mh
+    create_all_mocks "$mb"
+    setup_release_dir "$td"
+    export MOCK_SF_ORG_JSON='{"result":{"alias":"testorg","id":"00D000000000001AAA"}}'
+    local rd="$td/sf-tools/release/feature/test"
+    mkdir -p "$td/force-app/main/default/flows"
+    touch "$td/force-app/main/default/flows/MyFlow.flow-meta.xml"
+    printf '[files]\nforce-app/main/default/classes/TestClass.cls\nforce-app/main/default/flows/MyFlow.flow-meta.xml\n\n[members]\nCustomObject:My__c\nLayout:My__c-My Layout\n' \
+        > "$rd/deploy-target.txt"
+    printf '[files]\n\n[members]\nApexClass:OldClass\nFlow:OldFlow\n' > "$rd/remove-target.txt"
+
+    local out; out=$(cd "$td" && PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-release.sh" --no-open 2>&1)
+    local ec=$?
+
+    assert_exit_ok $ec "混在: 正常終了する"
+    assert_file_contains "$rd/package.xml" "<name>ApexClass</name>"  "混在: package.xml に、[files] の ApexClass が入る"
+    assert_file_contains "$rd/package.xml" "<members>TestClass</members>" "混在: [files] のメンバー名が入る"
+    assert_file_contains "$rd/package.xml" "<name>Flow</name>"       "混在: [files] の Flow が入る"
+    assert_file_contains "$rd/package.xml" "<name>CustomObject</name>" "混在: package.xml に、[members] の CustomObject が入る"
+    assert_file_contains "$rd/package.xml" "<members>My__c-My Layout</members>" "混在: 名前に空白を含むメンバーが入る"
+    assert_file_contains "$rd/destructiveChanges.xml" "<members>OldClass</members>" "混在: destructiveChanges.xml に、削除対象が入る"
+    assert_file_contains "$rd/destructiveChanges.xml" "<name>Flow</name>" "混在: destructiveChanges.xml に、種類が入る"
+    # 統合前の一時ファイルは、残さない
+    assert_file_not_exists "$rd/package.files.xml"   "混在: 統合前の一時ファイル（files）を残さない"
+    assert_file_not_exists "$rd/package.members.xml" "混在: 統合前の一時ファイル（members）を残さない"
+    # sf project generate manifest は、--source-dir と --metadata を、別々の呼び出しで渡す（同時には、渡さない）
+    local both
+    both=$(grep "project generate manifest" "$MOCK_CALL_LOG" | grep -c -- "--source-dir.*--metadata\|--metadata.*--source-dir")
+    assert_equals "$both" "0" "混在: --source-dir と --metadata を、同時に渡さない"
+    assert_file_contains "$MOCK_CALL_LOG" "--manifest" "混在: デプロイに、マニフェストを渡す"
+    unset MOCK_SF_ORG_JSON
+    teardown "$td" "$mb"
+}
+
+# [members] のみ・[files] のみ → 従来どおり、package.xml が生成される
+test_members_only_and_files_only() {
+    local td mb mh
+    setup_std_env td mb mh
+    create_all_mocks "$mb"
+    setup_release_dir "$td"
+    export MOCK_SF_ORG_JSON='{"result":{"alias":"testorg","id":"00D000000000001AAA"}}'
+    local rd="$td/sf-tools/release/feature/test"
+
+    printf '[files]\n\n[members]\nCustomObject:Only__c\n' > "$rd/deploy-target.txt"
+    (cd "$td" && PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-release.sh" --no-open >/dev/null 2>&1)
+    assert_file_contains "$rd/package.xml" "<members>Only__c</members>" "[members] のみ: package.xml が生成される"
+
+    printf '[files]\nforce-app/main/default/classes/TestClass.cls\n' > "$rd/deploy-target.txt"
+    (cd "$td" && PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-release.sh" --no-open >/dev/null 2>&1)
+    assert_file_contains "$rd/package.xml" "<members>TestClass</members>" "[files] のみ: package.xml が生成される"
+    unset MOCK_SF_ORG_JSON
+    teardown "$td" "$mb"
+}
+
+# マニフェストが空（メンバーが 1 つもない）→ エラーで中断する（NothingToDeploy の成功扱いにしない）
+test_empty_manifest_aborts() {
+    local td mb mh
+    setup_std_env td mb mh
+    create_all_mocks "$mb"
+    setup_release_dir "$td"
+    export MOCK_SF_ORG_JSON='{"result":{"alias":"testorg","id":"00D000000000001AAA"}}'
+    # 空のマニフェストを返す sf（生成は成功するが、<types> がない）
+    cat > "$mb/sf" << 'EOF'
+#!/bin/bash
+echo "sf $*" >> "${MOCK_CALL_LOG:-/dev/null}"
+case "$1 $2" in
+    "--version "*) echo "@salesforce/cli/2.0.0"; exit 0 ;;
+    "project generate")
+        OUT_DIR=""; OUT_NAME="package.xml"; PREV=""
+        for arg in "$@"; do
+            [[ "$PREV" == "--output-dir" ]] && OUT_DIR="$arg"
+            [[ "$PREV" == "--name" ]] && OUT_NAME="$arg"
+            PREV="$arg"
+        done
+        mkdir -p "$OUT_DIR"
+        printf '<?xml version="1.0" encoding="UTF-8"?>\n<Package xmlns="http://soap.sforce.com/2006/04/metadata">\n    <version>64.0</version>\n</Package>\n' > "$OUT_DIR/$OUT_NAME"
+        exit 0 ;;
+    "org display") echo '{"result":{"alias":"testorg","id":"00D000000000001AAA"}}'; exit 0 ;;
+esac
+exit 0
+EOF
+    chmod +x "$mb/sf"
+
+    local out; out=$(cd "$td" && PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-release.sh" --no-open 2>&1)
+    local ec=$?
+
+    assert_exit_fail $ec "空のマニフェスト: 非ゼロで終了する"
+    assert_output_contains "$out" "メンバーが 1 つも含まれていません" "空のマニフェスト: 理由が表示される"
+    assert_file_not_contains "$MOCK_CALL_LOG" "project deploy" "空のマニフェスト: デプロイまで、進まない"
+    unset MOCK_SF_ORG_JSON
+    teardown "$td" "$mb"
+}
+
 test_unprotected_org_local_allowed
 test_protected_org_staging_blocked
 test_reserved_aliases_blocked
 test_target_without_value_rejected
 test_personal_alias_allowed
 test_sf_cli_abort
+test_mixed_files_and_members
+test_members_only_and_files_only
+test_empty_manifest_aborts
 
 print_summary

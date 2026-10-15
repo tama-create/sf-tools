@@ -30,6 +30,7 @@ AutoResponseRules	ok	unknown
 CleanDataService	ok	unknown	
 Community	ok	limited	API で削除できない組織・権限がある（insufficient access rights on cross-reference id）。画面で削除する
 ConnectedApp	limited	unknown	移行済みの接続アプリケーション（外部クライアントアプリへ移行済み）は、変更できない
+ContentAsset	ok	ok	
 CorsWhitelistOrigin	ok	ok	
 CspTrustedSite	ok	ok	
 CustomApplication	ok	ok	
@@ -41,20 +42,28 @@ CustomMetadata	ok	ok
 CustomNotificationType	ok	ok	
 CustomObject	ok	ok	
 CustomObjectTranslation	ok	unknown	
+CustomPageWebLink	ok	ok	
 CustomPermission	ok	ok	
 CustomTab	ok	ok	
 Dashboard	ok	ok	
+DashboardFolder	ok	ok	
+DataCategoryGroup	ok	ok	
 DigitalExperience	ok	unknown	
 DigitalExperienceBundle	ok	unknown	
 Document	ok	ok	
+DocumentFolder	ok	ok	Document のサンプルと同時に確認
 DuplicateRule	ok	ok	
+EmailFolder	ok	ok	
+EmailServicesFunction	ok	ok	
 EmailTemplate	ok	ok	
 EntitlementProcess	limited	unknown	使用中のプロセスは、更新・削除できない（依存）。未使用のものは、確認していない
+EntitlementTemplate	ok	ok	
 EscalationRule	ok	ok	
 EscalationRules	ok	unknown	
 ExternalClientApplication	ok	ok	
 ExternalCredential	ok	ok	
 ExternalDataSource	ok	ok	
+ExternalServiceRegistration	ok	ok	
 ExtlClntAppConfigurablePolicies	ok	ok	
 ExtlClntAppGlobalOauthSettings	ok	ok	
 ExtlClntAppOauthConfigurablePolicies	ok	ok	
@@ -68,6 +77,7 @@ HomePageComponent	ok	ok
 HomePageLayout	ok	ok	
 IframeWhiteListUrlSettings	ok	unknown	
 InstalledPackage	unknown	unknown	インストール済みパッケージは、取得・リリースの対象外
+KeywordList	unknown	unknown	この組織では、リリースできない（Not available for deploy for this organization。モデレーション機能が、ない）
 Layout	ok	ok	
 Letterhead	ok	ok	
 LightningComponentBundle	ok	ok	
@@ -83,14 +93,26 @@ PathAssistant	unknown	unknown	レコードタイプが必要なため、サン�
 PermissionSet	ok	ok	
 PermissionSetGroup	ok	ok	
 PlatformEventChannel	ok	ok	
+PlatformEventChannelMember	ok	ok	
+PresenceUserConfig	ok	ok	
+Profile	ok	ok	
 Queue	ok	ok	
+QueueRoutingConfig	ok	ok	
 QuickAction	ok	ok	
 RecordType	unknown	unknown	取得できなかった（部品が、ない・取得の指定が合わない）
 RemoteSiteSetting	ok	ok	
 Report	ok	ok	
+ReportFolder	ok	ok	Report のサンプルと同時に確認
 ReportType	ok	ok	
+ServiceChannel	ok	ok	
 ServicePresenceStatus	ok	limited	API で削除できない組織・権限がある（insufficient access rights on cross-reference id）。画面で削除する
+SharingCriteriaRule	ok	ok	作成直後は、共有の再計算が終わるまで、削除できない（sharing operation already in progress）。待てば、削除できる
+SharingOwnerRule	ok	ok	
+SharingRules	ok	ok	共有ルール（SharingCriteriaRule）のサンプルと同時に確認
 StandardValueSet	ok	ng	標準の値セットは、削除できない（更新は、できる）
 SynonymDictionary	ok	ok	
-WebLink	ok	unknown	
+WebLink	ok	ok	
 Workflow	ok	ok	
+WorkflowAlert	ok	ok	
+WorkflowFieldUpdate	ok	ok	Workflow のサンプルと同時に確認
+WorkflowRule	ok	ok	Workflow のサンプルと同時に確認

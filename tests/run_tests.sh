@@ -28,6 +28,15 @@ if [[ "$(uname -s)" == "Linux" ]] && [[ "${BASH_SOURCE[0]}" == /mnt/* ]]; then
     exec bash "${_dst}/tests/run_tests.sh" "$@"
 fi
 
+# WSL（非対話の bash）では、nvm が読み込まれず、nvm で入れた node が見つからない（nvm は ~/.bashrc で読み込まれるため）。
+# node が見つからず、nvm の node があるときだけ、その bin を PATH に加える（lib/typecheck.js のテストが、node を使う）。
+# 通常の環境（node が PATH にある・nvm がない）には、影響しない
+if ! command -v node >/dev/null 2>&1 && [[ -d "${HOME}/.nvm/versions/node" ]]; then  # 存在確認のため run 不使用
+    _nvm_node=""
+    for _d in "${HOME}"/.nvm/versions/node/v*/bin; do [[ -x "$_d/node" ]] && _nvm_node="$_d"; done  # 最後（番号順で最も新しい）を使う
+    [[ -n "$_nvm_node" ]] && export PATH="${_nvm_node}:${PATH}"
+fi
+
 TESTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOG_DIR="$TESTS_DIR/../logs"
 mkdir -p "$LOG_DIR"
@@ -144,6 +153,7 @@ TEST_FILES=(
     test_sf-job.sh
     test_sf-next.sh
     test_sf-check.sh
+    test_sf-typecheck.sh
     test_sf-prepush.sh
     test_sf-push.sh
     test_sf-update-secret.sh
@@ -205,6 +215,12 @@ if [[ "${1:-}" == "--changed" ]]; then
                 ;;
             lib/diag.sh)
                 _changed_tests+=("test_diag.sh")
+                ;;
+            lib/typecheck.js)
+                _changed_tests+=("test_sf-typecheck.sh")
+                ;;
+            config/metadata-capability.txt)
+                _changed_tests+=("test_sf-check.sh")
                 ;;
             lib/verify-common.sh)
                 _changed_tests+=("test_verify.sh")

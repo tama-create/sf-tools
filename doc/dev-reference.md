@@ -78,7 +78,8 @@
 | `test_sf-dryrun.sh` | sf-dryrun.sh |
 | `test_sf-job.sh` | sf-job.sh |
 | `test_sf-next.sh` | sf-next.sh |
-| `test_sf-check.sh` | sf-check.sh |
+| `test_sf-check.sh` | sf-check.sh（種類の可否の判定・同梱の表 `config/metadata-capability.txt` の形式を含む） |
+| `test_sf-typecheck.sh` | sf-typecheck.sh / lib/typecheck.js（node が無い環境では、スキップ。sf はモック） |
 | `test_sf-prepush.sh` | hooks/pre-push |
 | `test_sf-push.sh` | sf-push.sh |
 | `test_sf-update-secret.sh` | sf-update-secret.sh |
@@ -577,6 +578,7 @@ sf-init.sh --add-tier develop    # main+staging → main+staging+develop
 `check_target_file` の処理（`deploy-target.txt` / `remove-target.txt` 共通）:
 - `[files]` セクション: ファイルパスの存在確認（`[[ ! -e "$clean" ]]`）→ エラー時は `print_gcc_error` で GCC スタイル出力
 - `[members]` セクション: `種別名:メンバー名` 書式確認（コロンなし → `print_gcc_error`）
+- 種類の可否（`check_capability`）: `config/metadata-capability.txt`（`SF_CHECK_CAPABILITY_FILE` で差し替え可）を `awk` で引く。`[members]` は先頭の種類名、`[files]` は `type_of_path`（flows / classes / triggers / lwc / aura / servicePresenceStatuses / standardValueSets のパス）から種類を決める。`deploy-target.txt` は release 列、`remove-target.txt` は delete 列を見る。`ng` はエラー（`error_count` に加算）、`limited` は警告のみ、`ok` / `unknown` / 表にない種類は何もしない。`SF_CHECK_IGNORE_CAPABILITY=1` で省略
 - `error_count > 0` の場合のみ終了コード 1
 
 `check_missing_tests` の処理（WARNING のみ・エラーにならない）:
@@ -587,6 +589,17 @@ sf-init.sh --add-tier develop    # main+staging → main+staging+develop
 - 見つかったテストクラスが `deployed_files` に含まれていなければ `print_gcc_warning` を出力
 - 設計思想: 本番/Sandbox に既存のテストクラスは含めなくてよい → WARNING 扱い（エラーにはしない）
 
+
+### 4.14.1 sf-typecheck.sh（種類ごとの可否の確認）と config/metadata-capability.txt
+
+管理者・開発者向け。個人用の組織（Developer Edition / Sandbox / Scratch / Trial）で、メタデータの種類ごとに、最小のサンプルを実際にリリース → 削除し、結果を TSV（`種類 / release / delete / 備考`、値は `ok` / `ng` / `limited` / `unknown`）にする。本体は `lib/typecheck.js`（Node 標準ライブラリのみ。シェルから呼ぶ境界は `bin/sf-typecheck.sh` の 1 か所）。
+
+- 安全: GitHub Actions 上・予約名のエイリアス（prod / staging / develop / main）・本番・種類を判定できない組織は拒否。作成・削除するのは名前に `SfToolsE2eMin` を含むものだけ（`lib/typecheck.js` が、作成前に確認する）。許可する sf のコマンドは `project deploy start` / `project deploy validate` のみ
+- オブジェクト名・メタデータ名は、実行ごとの時刻つき（削除したカスタムオブジェクトの名前は、約 15 日間、予約されるため）
+- テストでは `SF_TYPECHECK_CMD` で、sf をモックに差し替える
+- 終了コード: `lib/typecheck.js` は 0（すべて ok）/ 3（ng あり）/ 1（実行の失敗）。`sf-typecheck.sh` は、3 を警告にして、0 で終わる（結果の表で判断する）
+- `config/metadata-capability.txt` は、この結果を人が確認して反映する表。`ng`（必ずできない）/ `limited`（権限・使用中・標準のもの・移行済み など、条件による）/ `unknown`（サンプルを作れていない・標準の部品しかない）の区別を守る。`ng` には、備考（理由）を必ず書く（テストで検査）。個別の組織の権限で、できないだけのものは、`ng` にせず `limited` にする
+- 確認した環境: Developer Edition（API 64.0）。新しい種類の確認を足すときは、`lib/typecheck.js` の `S`（サンプルの一覧）に追加する
 
 ### 4.15 sf-sync-wf.sh
 

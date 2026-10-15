@@ -1,0 +1,133 @@
+#!/bin/bash
+# ==============================================================================
+# test_sf-typecheck.sh - sf-typecheck.sh / lib/typecheck.js のテスト
+# ==============================================================================
+# 実際の組織には、つながない。sf は、モック（SF_TYPECHECK_CMD で、差し替える）。
+# 確認すること: 安全の確認（予約名・本番・GitHub Actions）・--list・結果の表の形式・許可した sf のコマンドだけを呼ぶこと
+source "$(dirname "${BASH_SOURCE[0]}")/test_helper.sh"
+echo -e "${CLR_HEAD}=== sf-typecheck.sh ===${CLR_RST}"
+
+# node が無い環境（WSL など）では、実行できない（lib/typecheck.js は、Node で動く）。CI の各 OS には、node がある
+if ! command -v node > /dev/null 2>&1; then  # 存在確認のため run 不使用
+    echo "  [SKIP] node が見つからないため、このテストは、スキップします"
+    print_summary
+    exit 0
+fi
+
+# 結果を返すだけの sf のモック。引数を記録する。FAKE_FAIL_DELETE=1 のときは、削除（--pre-destructive-changes）を失敗させる
+_create_fake_sf() {
+    cat > "$1/fakesf" << 'FEOF'
+#!/bin/bash
+echo "$*" >> "${FAKE_SF_LOG:-/dev/null}"
+if [[ "$*" == *"--pre-destructive-changes"* && "${FAKE_FAIL_DELETE:-}" == "1" ]]; then
+    echo '{"status":1,"message":"insufficient access rights on cross-reference id"}'
+    exit 1
+fi
+echo '{"status":0,"result":{"success":true}}'
+exit 0
+FEOF
+    chmod +x "$1/fakesf"
+}
+
+_run_typecheck() {   # 引数: mb mh td [追加の引数...]  （環境変数は、呼び出し側で設定）
+    local mb="$1" mh="$2" td="$3"; shift 3
+    ( cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$mh/sf-tools/bin/sf-typecheck.sh" "$@" 2>&1 )
+}
+
+test_typecheck_help_and_list() {
+    local td mb mh; setup_std_env td mb mh
+    create_mock_sf "$mb"
+    local out; out=$(_run_typecheck "$mb" "$mh" "$td" --help)
+    assert_exit_ok "$?" "--help → 正常終了"
+    assert_output_contains "$out" "validate-only" "--help → オプションの説明が表示された"
+    out=$(_run_typecheck "$mb" "$mh" "$td" --list)
+    assert_exit_ok "$?" "--list → 正常終了"
+    assert_output_contains "$out" "ApexClass" "--list → 種類の一覧が表示された"
+    assert_output_contains "$out" "LightningComponentBundle" "--list → LWC も含まれる"
+    [[ ! -s "$MOCK_CALL_LOG" ]] && pass "--list → 組織には、接続しない（sf を呼ばない）" || fail "--list → sf を呼ばない" "$(cat "$MOCK_CALL_LOG")"
+    teardown "$td" "$mb" "$mh"
+}
+
+test_typecheck_refuses_reserved_alias() {
+    local td mb mh a out; setup_std_env td mb mh
+    create_mock_sf "$mb"
+    for a in prod staging develop main; do
+        out=$(_run_typecheck "$mb" "$mh" "$td" --org "$a" -y)
+        assert_exit_fail "$?" "予約名 ${a} → 拒否"
+    done
+    assert_output_contains "$out" "共有環境の予約名" "予約名 → 理由が表示された"
+    teardown "$td" "$mb" "$mh"
+}
+
+test_typecheck_refuses_missing_org_and_actions() {
+    local td mb mh out; setup_std_env td mb mh
+    create_mock_sf "$mb"
+    out=$(_run_typecheck "$mb" "$mh" "$td" -y)
+    assert_exit_fail "$?" "--org なし → 拒否"
+    out=$(GITHUB_ACTIONS=true _run_typecheck "$mb" "$mh" "$td" --org mydev -y)
+    assert_exit_fail "$?" "GitHub Actions 上 → 拒否"
+    assert_output_contains "$out" "GitHub Actions" "GitHub Actions 上 → 理由が表示された"
+    teardown "$td" "$mb" "$mh"
+}
+
+test_typecheck_refuses_production_and_unknown() {
+    local td mb mh out; setup_std_env td mb mh
+    create_mock_sf "$mb"
+    local prod='{"status":0,"result":{"records":[{"Id":"00D000000000001AAA","Name":"Prod","IsSandbox":false,"OrganizationType":"Enterprise Edition","TrialExpirationDate":null}]}}'
+    out=$(MOCK_SF_ORG_INFO="$prod" _run_typecheck "$mb" "$mh" "$td" --org mydev -y)
+    assert_exit_fail "$?" "本番の組織 → 拒否"
+    assert_output_contains "$out" "本番の組織" "本番の組織 → 理由が表示された"
+    out=$(MOCK_SF_ORG_QUERY_EXIT=1 _run_typecheck "$mb" "$mh" "$td" --org mydev -y)
+    assert_exit_fail "$?" "組織の種類を読み取れない → 拒否（推測しない）"
+    teardown "$td" "$mb" "$mh"
+}
+
+test_typecheck_full_run_ok() {
+    local td mb mh out; setup_std_env td mb mh
+    create_mock_sf "$mb"; _create_fake_sf "$mb"
+    local res="$td/result.txt"
+    out=$(FAKE_SF_LOG="$mb/fake.log" SF_TYPECHECK_CMD="bash $mb/fakesf" \
+        MOCK_SF_ORG_INFO='{"status":0,"result":{"records":[{"Id":"00D000000000001AAA","Name":"Dev","IsSandbox":false,"OrganizationType":"Developer Edition","TrialExpirationDate":null}]}}' \
+        _run_typecheck "$mb" "$mh" "$td" --org mydev --only ApexClass,CustomLabel --out "$res" -y)
+    assert_exit_ok "$?" "全部 ok → 正常終了"
+    assert_file_exists "$res" "結果の表が出力された"
+    assert_file_contains "$res" "$(printf 'ApexClass\tok\tok')" "結果の表: ApexClass が release ok / delete ok"
+    assert_file_contains "$res" "$(printf 'CustomLabel\tok\tok')" "結果の表: CustomLabel が release ok / delete ok"
+    # 呼んだ sf は、deploy start / deploy validate だけ（--mode full は、start のみのはず）
+    local bad
+    bad=$(awk '$0 !~ /^project deploy (start|validate) /' "$mb/fake.log")
+    assert_equals "$bad" "" "許可した sf のコマンド（project deploy start / validate）だけを呼ぶ"
+    assert_file_contains "$mb/fake.log" "--pre-destructive-changes" "削除は、destructive changes で行う"
+    assert_file_contains "$mb/fake.log" "--target-org mydev" "指定した組織だけを対象にする"
+    teardown "$td" "$mb" "$mh"
+}
+
+test_typecheck_delete_failure_reported() {
+    local td mb mh out; setup_std_env td mb mh
+    create_mock_sf "$mb"; _create_fake_sf "$mb"
+    local res="$td/result.txt"
+    out=$(FAKE_FAIL_DELETE=1 SF_TYPECHECK_CMD="bash $mb/fakesf" \
+        MOCK_SF_ORG_INFO='{"status":0,"result":{"records":[{"Id":"00D000000000001AAA","Name":"Dev","IsSandbox":false,"OrganizationType":"Developer Edition","TrialExpirationDate":null}]}}' \
+        _run_typecheck "$mb" "$mh" "$td" --org mydev --only ApexClass --out "$res" -y)
+    assert_exit_ok "$?" "削除できない種類がある → 警告を出して、正常終了（結果の表で判断する）"
+    assert_file_contains "$res" "$(printf 'ApexClass\tok\tng')" "結果の表: 削除に失敗 → delete ng"
+    assert_file_contains "$res" "insufficient access rights" "結果の表: 備考に、失敗の理由が入る"
+    teardown "$td" "$mb" "$mh"
+}
+
+test_typecheck_js_syntax_and_safety() {
+    node --check "$SF_TOOLS_DIR/lib/typecheck.js" 2>/dev/null && pass "lib/typecheck.js: 構文が正しい" || fail "lib/typecheck.js: 構文が正しい"
+    local out; out=$(node "$SF_TOOLS_DIR/lib/typecheck.js" --org prod --work "${TMPDIR:-/tmp}/tc-test-x" 2>&1)
+    assert_exit_fail "$?" "lib/typecheck.js 単体でも、予約名は拒否する"
+    assert_output_contains "$out" "予約名" "lib/typecheck.js: 予約名の拒否の理由が表示された"
+}
+
+test_typecheck_help_and_list
+test_typecheck_refuses_reserved_alias
+test_typecheck_refuses_missing_org_and_actions
+test_typecheck_refuses_production_and_unknown
+test_typecheck_full_run_ok
+test_typecheck_delete_failure_reported
+test_typecheck_js_syntax_and_safety
+
+print_summary

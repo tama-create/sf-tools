@@ -287,6 +287,7 @@ sfl
 | 管理者 | `sf-update-secret.sh` | ⚠️ GitHub Secrets の再登録（管理者のみ） | ランチャー外 |
 | 管理者 | `sf-sync-wf.sh` | ⚠️ 作成済みのワークフローを、雛形に合わせて更新 | ランチャー外 |
 | 管理者 | `sf-init.sh --verify` | ⚠️ 実際のリポジトリ・組織で、リリースと削除が動くことを検証（Hello World） | ランチャー外 |
+| 管理者 | `sf-typecheck.sh` | ⚠️ 個人用の組織で、メタデータの種類ごとに、リリースと削除ができるかを確かめ、可否の表を作る | ランチャー外 |
 | — | `sf-install.sh` | sf-start から自動実行 | 自動実行 |
 | — | `sf-upgrade.sh` | sf-install から自動実行 | 自動実行 |
 | — | `sf-prepush.sh` | git pre-push フックから自動実行 | 自動実行 |
@@ -567,6 +568,7 @@ sf-check.sh [deploy-target.txt] [remove-target.txt]
 チェック内容:
 - `[files]` セクション: 記述したパスがリポジトリ内に存在するか
 - `[members]` セクション: `種別名:メンバー名` の書式になっているか
+- **種類の可否**: `config/metadata-capability.txt`（`sf-typecheck.sh` が実際の組織で確かめた表）で、API でリリース・削除できないと確認済み（`ng`）の種類を書くと、エラーにします。条件によって、できないことがある種類（`limited`。権限・使用中・標準のもの など）は、警告にします。組織の権限で、できる場合は、環境変数 `SF_CHECK_IGNORE_CAPABILITY=1` で、この確認を省略できます
 - **テストクラス不足検出**: Apex クラス（通常クラス）に対応するテストクラスがローカルに存在するのに `deploy-target.txt` に含まれていない場合に WARNING を表示します（エラーにはならない）
   - Step A: 命名規則（`MyClassTest.cls` / `MyClass_Test.cls`）で同一ディレクトリを検索
   - Step B: A で見つからない場合、`@isTest` を含む `.cls` ファイルをコンテンツ検索
@@ -898,6 +900,7 @@ sf-tools/
 │   ├── sf-release.sh
 │   ├── sf-deploy.sh
 │   ├── sf-check.sh
+│   ├── sf-typecheck.sh
 │   ├── sf-restart.sh
 │   ├── sf-init.sh
 │   ├── sf-hook.sh

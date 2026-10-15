@@ -1,0 +1,96 @@
+# ==============================================================================
+# config/metadata-capability.txt - メタデータの種類ごとの「リリース・削除」の可否
+# ==============================================================================
+# bin/sf-typecheck.sh（lib/typecheck.js）が、実際の組織で、種類ごとに、リリース → 削除を試して作った表。
+# bin/sf-check.sh が、この表を読み、ターゲットファイルに書いた時点で、「ng」はエラー・「limited」は警告にする。
+#
+# 列（タブ区切り）: 種類 / release / delete / 備考
+#   ok      : 実際の組織で、確認できた
+#   ng      : 確認済みで、必ずできない（sf-check.sh が、エラーにする）
+#   limited : 条件（権限・使用中・標準のもの・移行済み など）によって、できないことがある（sf-check.sh が、警告にする）
+#   unknown : 確認していない・判定できない（標準の部品しかない・サンプルを作れない など。何もしない）
+#
+# 確認した環境: Developer Edition（API 64.0）。組織・権限・機能で、結果が変わることがある。
+# 更新: sf-typecheck.sh --org <個人用のエイリアス> の結果を、確認して、反映する（--out で、別のファイルに出せる）。
+# ==============================================================================
+ApexClass	ok	ok	
+ApexComponent	ok	ok	
+ApexEmailNotifications	ok	unknown	
+ApexPage	ok	ok	
+ApexTestSuite	ok	ok	
+ApexTrigger	ok	ok	
+AppMenu	ok	unknown	
+AppointmentSchedulingPolicy	ok	unknown	
+ApprovalProcess	ok	ok	
+AssignmentRule	ok	ok	
+AssignmentRules	ok	unknown	
+AuraDefinitionBundle	ok	ok	
+AuthProvider	ok	ok	
+AutoResponseRules	ok	unknown	
+CleanDataService	ok	unknown	
+Community	ok	limited	API で削除できない組織・権限がある（insufficient access rights on cross-reference id）。画面で削除する
+ConnectedApp	limited	unknown	移行済みの接続アプリケーション（外部クライアントアプリへ移行済み）は、変更できない
+CorsWhitelistOrigin	ok	ok	
+CspTrustedSite	ok	ok	
+CustomApplication	ok	ok	
+CustomField	ok	ok	
+CustomHelpMenuSection	ok	ok	
+CustomLabel	ok	ok	
+CustomLabels	unknown	unknown	取得できなかった（部品が、ない・取得の指定が合わない）
+CustomMetadata	ok	ok	
+CustomNotificationType	ok	ok	
+CustomObject	ok	ok	
+CustomObjectTranslation	ok	unknown	
+CustomPermission	ok	ok	
+CustomTab	ok	ok	
+Dashboard	ok	ok	
+DigitalExperience	ok	unknown	
+DigitalExperienceBundle	ok	unknown	
+Document	ok	ok	
+DuplicateRule	ok	ok	
+EmailTemplate	ok	ok	
+EntitlementProcess	limited	unknown	使用中のプロセスは、更新・削除できない（依存）。未使用のものは、確認していない
+EscalationRule	ok	ok	
+EscalationRules	ok	unknown	
+ExternalClientApplication	ok	ok	
+ExternalCredential	ok	ok	
+ExternalDataSource	ok	ok	
+ExtlClntAppConfigurablePolicies	ok	ok	
+ExtlClntAppGlobalOauthSettings	ok	ok	
+ExtlClntAppOauthConfigurablePolicies	ok	ok	
+ExtlClntAppOauthSettings	ok	ok	
+FlexiPage	ok	ok	
+Flow	ok	limited	API で削除できない組織・権限がある（insufficient access rights on cross-reference id）。画面で削除する
+FlowCategory	unknown	unknown	フローへの参照（flowCategoryItems）が必須のため、サンプルを作れていない
+FlowDefinition	ok	limited	API で削除できない組織・権限がある（Flow と同じ）。画面で削除する
+GlobalValueSet	ok	ok	
+HomePageComponent	ok	ok	
+HomePageLayout	ok	ok	
+IframeWhiteListUrlSettings	ok	unknown	
+InstalledPackage	unknown	unknown	インストール済みパッケージは、取得・リリースの対象外
+Layout	ok	ok	
+Letterhead	ok	ok	
+LightningComponentBundle	ok	ok	
+LightningMessageChannel	ok	ok	
+ListView	ok	ok	
+ManagedContentType	limited	limited	標準の CMS の型は、更新も削除もできない
+MatchingRule	ok	unknown	
+MatchingRules	ok	unknown	標準のものは、削除できない。個別に削除する必要がある
+MilestoneType	ok	ok	
+NamedCredential	ok	ok	
+NotificationTypeConfig	ok	unknown	
+PathAssistant	unknown	unknown	レコードタイプが必要なため、サンプルを作れていない
+PermissionSet	ok	ok	
+PermissionSetGroup	ok	ok	
+PlatformEventChannel	ok	ok	
+Queue	ok	ok	
+QuickAction	ok	ok	
+RecordType	unknown	unknown	取得できなかった（部品が、ない・取得の指定が合わない）
+RemoteSiteSetting	ok	ok	
+Report	ok	ok	
+ReportType	ok	ok	
+ServicePresenceStatus	ok	limited	API で削除できない組織・権限がある（insufficient access rights on cross-reference id）。画面で削除する
+StandardValueSet	ok	ng	標準の値セットは、削除できない（更新は、できる）
+SynonymDictionary	ok	ok	
+WebLink	ok	unknown	
+Workflow	ok	ok	

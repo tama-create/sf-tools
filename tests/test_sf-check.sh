@@ -218,6 +218,104 @@ test_no_warning_for_test_class_itself() {
     teardown "$td"
 }
 
+# ------------------------------------------------------------------------------
+# 種類の可否（config/metadata-capability.txt）: ng はエラー・limited は警告・ok / unknown / 表にない種類は何もしない
+#   SF_CHECK_CAPABILITY_FILE で、テスト用の表に差し替える
+# ------------------------------------------------------------------------------
+_cap_table() {
+    printf '# コメント\nFooNg\tng\tng\t使えない理由\nFooDelNg\tok\tng\t\nFooLimited\tlimited\tlimited\t条件つき\nFooUnknown\tunknown\tunknown\t\nFooOk\tok\tok\t\nFlow\tok\tlimited\t権限\n' > "$1"
+}
+
+test_capability_ng_release_error() {
+    local td; td=$(setup_force_dir)
+    _cap_table "$td/cap.txt"
+    printf '[members]\nFooNg:A\n' > "$td/deploy.txt"; printf '[files]\n' > "$td/remove.txt"
+    local out; out=$(cd "$td" && SF_CHECK_CAPABILITY_FILE="$td/cap.txt" bash "$SF_TOOLS_DIR/bin/sf-check.sh" "$td/deploy.txt" "$td/remove.txt" 2>&1)
+    local ret=$?
+    assert_exit_fail "$ret" "可否 ng（release）→ エラー終了"
+    assert_output_contains "$out" "FooNg" "可否 ng → 種類名が表示された"
+    assert_output_contains "$out" "リリースできない" "可否 ng（deploy-target.txt）→ リリースできないと表示された"
+    assert_output_contains "$out" "使えない理由" "可否 ng → 備考が表示された"
+    teardown "$td"
+}
+
+test_capability_ng_delete_only_in_remove() {
+    local td; td=$(setup_force_dir)
+    _cap_table "$td/cap.txt"
+    # delete だけ ng の種類: deploy-target.txt に書いても、止めない
+    printf '[members]\nFooDelNg:A\n' > "$td/deploy.txt"; printf '[files]\n' > "$td/remove.txt"
+    local out; out=$(cd "$td" && SF_CHECK_CAPABILITY_FILE="$td/cap.txt" bash "$SF_TOOLS_DIR/bin/sf-check.sh" "$td/deploy.txt" "$td/remove.txt" 2>&1)
+    assert_exit_ok "$?" "delete だけ ng の種類を deploy-target.txt に書く → 正常終了"
+    # remove-target.txt に書くと、エラー
+    printf '[files]\n' > "$td/deploy.txt"; printf '[members]\nFooDelNg:A\n' > "$td/remove.txt"
+    out=$(cd "$td" && SF_CHECK_CAPABILITY_FILE="$td/cap.txt" bash "$SF_TOOLS_DIR/bin/sf-check.sh" "$td/deploy.txt" "$td/remove.txt" 2>&1)
+    assert_exit_fail "$?" "delete が ng の種類を remove-target.txt に書く → エラー終了"
+    assert_output_contains "$out" "削除できない" "可否 ng（remove-target.txt）→ 削除できないと表示された"
+    teardown "$td"
+}
+
+test_capability_limited_warning_only() {
+    local td; td=$(setup_force_dir)
+    _cap_table "$td/cap.txt"
+    printf '[members]\nFooLimited:A\n' > "$td/deploy.txt"; printf '[files]\n' > "$td/remove.txt"
+    local out; out=$(cd "$td" && SF_CHECK_CAPABILITY_FILE="$td/cap.txt" bash "$SF_TOOLS_DIR/bin/sf-check.sh" "$td/deploy.txt" "$td/remove.txt" 2>&1)
+    assert_exit_ok "$?" "可否 limited → 警告のみ（正常終了）"
+    assert_output_contains "$out" "条件によって" "可否 limited → 警告が表示された"
+    teardown "$td"
+}
+
+test_capability_unknown_and_unlisted_pass() {
+    local td; td=$(setup_force_dir)
+    _cap_table "$td/cap.txt"
+    printf '[members]\nFooUnknown:A\nFooOk:B\nNotInTable:C\n' > "$td/deploy.txt"; printf '[members]\nFooUnknown:A\nNotInTable:C\n' > "$td/remove.txt"
+    local out; out=$(cd "$td" && SF_CHECK_CAPABILITY_FILE="$td/cap.txt" bash "$SF_TOOLS_DIR/bin/sf-check.sh" "$td/deploy.txt" "$td/remove.txt" 2>&1)
+    assert_exit_ok "$?" "可否 unknown・ok・表にない種類 → 何も言わない（正常終了）"
+    teardown "$td"
+}
+
+test_capability_override_env() {
+    local td; td=$(setup_force_dir)
+    _cap_table "$td/cap.txt"
+    printf '[members]\nFooNg:A\n' > "$td/deploy.txt"; printf '[files]\n' > "$td/remove.txt"
+    local out; out=$(cd "$td" && SF_CHECK_IGNORE_CAPABILITY=1 SF_CHECK_CAPABILITY_FILE="$td/cap.txt" bash "$SF_TOOLS_DIR/bin/sf-check.sh" "$td/deploy.txt" "$td/remove.txt" 2>&1)
+    assert_exit_ok "$?" "SF_CHECK_IGNORE_CAPABILITY=1 → ng でも、確認を省略して正常終了"
+    teardown "$td"
+}
+
+test_capability_files_path_maps_to_type() {
+    local td; td=$(setup_force_dir)
+    _cap_table "$td/cap.txt"
+    # Flow は、表では delete が limited → [files] のパスから Flow と分かり、remove-target.txt では警告になる
+    mkdir -p "$td/force-app/main/default/flows"
+    touch "$td/force-app/main/default/flows/MyFlow.flow-meta.xml"
+    printf '[files]\n' > "$td/deploy.txt"; printf '[files]\nforce-app/main/default/flows/MyFlow.flow-meta.xml\n' > "$td/remove.txt"
+    local out; out=$(cd "$td" && SF_CHECK_CAPABILITY_FILE="$td/cap.txt" bash "$SF_TOOLS_DIR/bin/sf-check.sh" "$td/deploy.txt" "$td/remove.txt" 2>&1)
+    assert_exit_ok "$?" "[files] の Flow（delete が limited）→ 正常終了"
+    assert_output_contains "$out" "条件によって" "[files] のパスから種類を推定して、警告が表示された"
+    teardown "$td"
+}
+
+test_capability_shipped_table_wellformed() {
+    local f="$SF_TOOLS_DIR/config/metadata-capability.txt" bad
+    assert_file_exists "$f" "同梱の可否の表がある"
+    # 4 列（タブ区切り）・release/delete は ok|ng|limited|unknown のどれか・種類は重複しない
+    bad=$(awk -F'\t' '$0 !~ /^#/ && $0 != "" && (NF != 4 || $2 !~ /^(ok|ng|limited|unknown)$/ || $3 !~ /^(ok|ng|limited|unknown)$/)' "$f")
+    assert_equals "$bad" "" "同梱の可否の表: 全行が、4 列・正しい値"
+    bad=$(awk -F'\t' '$0 !~ /^#/ && $0 != "" { c[$1]++ } END { for (k in c) if (c[k] > 1) print k }' "$f")
+    assert_equals "$bad" "" "同梱の可否の表: 種類が重複していない"
+    # ng の行には、備考（理由）が、ある
+    bad=$(awk -F'\t' '$0 !~ /^#/ && ($2 == "ng" || $3 == "ng") && $4 == ""' "$f")
+    assert_equals "$bad" "" "同梱の可否の表: ng の行には、備考がある"
+}
+
+test_capability_shipped_table_blocks_standard_value_set_delete() {
+    local td; td=$(setup_force_dir)
+    printf '[files]\n' > "$td/deploy.txt"; printf '[members]\nStandardValueSet:Industry\n' > "$td/remove.txt"
+    local out; out=$(cd "$td" && bash "$SF_TOOLS_DIR/bin/sf-check.sh" "$td/deploy.txt" "$td/remove.txt" 2>&1)
+    assert_exit_fail "$?" "同梱の表: StandardValueSet の削除 → エラー終了"
+    teardown "$td"
+}
+
 test_files_valid_path
 test_files_missing_path
 test_members_valid_format
@@ -228,5 +326,13 @@ test_auto_resolve_branch
 test_missing_test_class_warning
 test_no_warning_when_test_included
 test_no_warning_for_test_class_itself
+test_capability_ng_release_error
+test_capability_ng_delete_only_in_remove
+test_capability_limited_warning_only
+test_capability_unknown_and_unlisted_pass
+test_capability_override_env
+test_capability_files_path_maps_to_type
+test_capability_shipped_table_wellformed
+test_capability_shipped_table_blocks_standard_value_set_delete
 
 print_summary

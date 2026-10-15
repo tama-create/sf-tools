@@ -669,6 +669,8 @@ test_samples() {
         VERIFY_SET=hello; echo "SET_HELLO=$(verify_set_paths all | wc -l | tr -d ' ')"
         VERIFY_SET=components; VERIFY_SAMPLE_LABELS=1; echo "SET_COMP=$(verify_set_paths all | wc -l | tr -d ' ')"
         # URL エンコード
+        # LWC と Aura は、同じ名前空間。大文字・小文字を無視して、同名にならないこと（実際の組織が拒否した）
+        echo "AURA_LWC_DIFF=$([[ "$(printf '%s' "$VERIFY_SAMPLE_AURA" | tr 'A-Z' 'a-z')" != "$(printf '%s' "$VERIFY_SAMPLE_LWC" | tr 'A-Z' 'a-z')" ]] && echo yes || echo no)"
         echo "URLPATH=$(_verify_urlpath 'a/SfToolsE2eHello__c-SfToolsE2eHello Layout%28x%29.xml')"
     ) 2>&1 )
     assert_output_contains "$out" "BAD=0"          "サンプル: すべてのパスに本文がある・XML の形式が正しい"
@@ -689,6 +691,7 @@ test_samples() {
     assert_output_contains "$out" "NL_LABELS=000"  "CustomLabels なし: labels のファイル・メンバーを、含めない"
     assert_output_contains "$out" "SET_HELLO=4"    "切替: hello は 4 ファイル（従来どおり）"
     assert_output_contains "$out" "SET_COMP=21"    "切替: components は 21 ファイル"
+    assert_output_contains "$out" "AURA_LWC_DIFF=yes" "サンプル: Aura と LWC は、別名（同じ名前空間のため。同名だと、組織が拒否する）"
     assert_output_contains "$out" "URLPATH=a/SfToolsE2eHello__c-SfToolsE2eHello%20Layout%2528x%2529.xml" "パスの URL エンコード: 空白 → %20・% → %25"
 }
 

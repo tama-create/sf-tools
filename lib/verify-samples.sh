@@ -12,7 +12,7 @@
 #     ApexClass         SfToolsE2eHello / SfToolsE2eHelloTest / SfToolsE2eHelloTriggerTest   ... 1 ファイル + -meta.xml
 #     ApexTrigger       SfToolsE2eHelloTrigger（SfToolsE2eHello__c の before insert）          ... オブジェクトに依存
 #     LWC               sfToolsE2eHello（.html / .js / .js-meta.xml）                          ... バンドル（[files] に .js を指定）
-#     Aura              SfToolsE2eHello（.cmp / .cmp-meta.xml）                                ... バンドル（[members] で指定）
+#     Aura              SfToolsE2eHelloAura（.cmp / .cmp-meta.xml）                           ... バンドル（[members] で指定。LWC と名前空間が同じため、LWC とは別名）
 #     Flow              SfToolsE2eHello（Draft）                                               ... 単独の XML
 #     PermissionSet     SfToolsE2eHello                                                        ... 単独の XML
 #     Layout            SfToolsE2eHello__c-SfToolsE2eHello Layout                              ... 名前に、空白・ハイフン
@@ -30,6 +30,7 @@
 VERIFY_SAMPLE_NAME="SfToolsE2eHello"
 VERIFY_SAMPLE_OBJ="SfToolsE2eHello__c"
 VERIFY_SAMPLE_LWC="sfToolsE2eHello"
+VERIFY_SAMPLE_AURA="SfToolsE2eHelloAura"   # LWC と Aura は、同じ名前空間（同名のバンドルは、作れない）。LWC とは別名にする
 VERIFY_SAMPLE_BASE="force-app/main/default"
 VERIFY_SAMPLE_API="64.0"
 VERIFY_SAMPLE_LABELS_PATH="force-app/main/default/labels/CustomLabels.labels-meta.xml"
@@ -55,8 +56,8 @@ verify_sample_paths() {
             "${b}/lwc/${VERIFY_SAMPLE_LWC}/${VERIFY_SAMPLE_LWC}.html" \
             "${b}/lwc/${VERIFY_SAMPLE_LWC}/${VERIFY_SAMPLE_LWC}.js" \
             "${b}/lwc/${VERIFY_SAMPLE_LWC}/${VERIFY_SAMPLE_LWC}.js-meta.xml" \
-            "${b}/aura/${VERIFY_SAMPLE_NAME}/${VERIFY_SAMPLE_NAME}.cmp" \
-            "${b}/aura/${VERIFY_SAMPLE_NAME}/${VERIFY_SAMPLE_NAME}.cmp-meta.xml" \
+            "${b}/aura/${VERIFY_SAMPLE_AURA}/${VERIFY_SAMPLE_AURA}.cmp" \
+            "${b}/aura/${VERIFY_SAMPLE_AURA}/${VERIFY_SAMPLE_AURA}.cmp-meta.xml" \
             "${b}/flows/${VERIFY_SAMPLE_NAME}.flow-meta.xml" \
             "${b}/permissionsets/${VERIFY_SAMPLE_NAME}.permissionset-meta.xml" \
             "${b}/layouts/${VERIFY_SAMPLE_LAYOUT}.layout-meta.xml" \
@@ -117,9 +118,9 @@ verify_sample_content_for() {
                 "    <apiVersion>${VERIFY_SAMPLE_API}</apiVersion>" \
                 '    <isExposed>false</isExposed>' \
                 '</LightningComponentBundle>' ;;
-        *"/aura/${VERIFY_SAMPLE_NAME}/${VERIFY_SAMPLE_NAME}.cmp")
+        *"/aura/${VERIFY_SAMPLE_AURA}/${VERIFY_SAMPLE_AURA}.cmp")
             printf '%s\n' '<aura:component>' '    <p>Hello, World!</p>' '</aura:component>' ;;
-        *"/aura/${VERIFY_SAMPLE_NAME}/${VERIFY_SAMPLE_NAME}.cmp-meta.xml")
+        *"/aura/${VERIFY_SAMPLE_AURA}/${VERIFY_SAMPLE_AURA}.cmp-meta.xml")
             _vs_xml_head
             printf '%s\n' '<AuraDefinitionBundle xmlns="http://soap.sforce.com/2006/04/metadata">' \
                 "    <apiVersion>${VERIFY_SAMPLE_API}</apiVersion>" \
@@ -231,7 +232,7 @@ verify_sample_deploy_target_text() {
         "CustomObject:${VERIFY_SAMPLE_OBJ}" \
         "CustomField:${VERIFY_SAMPLE_OBJ}.Note__c" \
         "Layout:${VERIFY_SAMPLE_LAYOUT}" \
-        "AuraDefinitionBundle:${VERIFY_SAMPLE_NAME}"
+        "AuraDefinitionBundle:${VERIFY_SAMPLE_AURA}"
     [[ "${VERIFY_SAMPLE_LABELS:-1}" == "1" ]] && printf '%s\n' "CustomLabel:${VERIFY_SAMPLE_NAME}"
     return 0
 }
@@ -245,7 +246,7 @@ verify_sample_remove_target_text() {
             "ApexClass:${VERIFY_APEX_HELLO_TEST}" \
             "ApexClass:${VERIFY_SAMPLE_NAME}" \
             "LightningComponentBundle:${VERIFY_SAMPLE_LWC}" \
-            "AuraDefinitionBundle:${VERIFY_SAMPLE_NAME}" \
+            "AuraDefinitionBundle:${VERIFY_SAMPLE_AURA}" \
             "Flow:${VERIFY_SAMPLE_NAME}" \
             "PermissionSet:${VERIFY_SAMPLE_NAME}" \
             "Layout:${VERIFY_SAMPLE_LAYOUT}" \

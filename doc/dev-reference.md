@@ -623,6 +623,7 @@ sf-init.sh --add-tier develop    # main+staging → main+staging+develop
 - サンプルの定義は `lib/verify-samples.sh`（`verify_sample_paths [stage1|stage2|all]` / `verify_sample_content_for` / `verify_sample_deploy_target_text` / `verify_sample_remove_target_text [stage1|stage2]`）。`lib/verify-common.sh` の `verify_set_*`（`VERIFY_SET=hello|components`）が、Hello World とサンプルを切り替える。
 - 段階: `TIERS=("develop")` に固定。develop がある構成（3 層）だけ。それ以外は `die`（本番・staging にサンプルを入れない）。
 - `[files]` は、**ファイルのみ**（`sf-check.sh` が `-f` で検査する）。LWC は `.js` の 1 ファイルを、Aura は `[members]` で指定する。
+- LWC と Aura は、**同じ名前空間**を共有する（同名のバンドルは作れない）。Aura は `SfToolsE2eHelloAura`、LWC は `sfToolsE2eHello`（実際の組織の dry-run で、同名の Aura が拒否された）。
 - 削除は 2 段階（`remove-target.txt` stage1: ApexTrigger / ApexClass / LWC / Aura / Flow / PermissionSet / Layout / EmailTemplate / CustomLabel → stage2: CustomField / CustomObject）。削除用のブランチは、サンプルのファイルが **develop にだけある**ため、develop の先頭から作る（`_make_delete_branch BR STAGE BASE`）。
 - `--validate-only`: `_pr_flow` の `mode=validate`。wf-validate の成功を確認し、PR をマージせずに閉じる（`verify_pr_close`）。削除は、行わない。失敗したときは、PR・ブランチを残す。
 - 既存の `force-app/main/default/labels/CustomLabels.labels-meta.xml` が develop にあるときは、`VERIFY_SAMPLE_LABELS=0`（CustomLabels を含めない。上書きして削除してしまうのを避ける）。

@@ -78,6 +78,27 @@ verify_hello_remove_target_text() {
 verify_empty_target_text() { printf '%s\n' '[files]' '' '[members]'; }
 
 # ------------------------------------------------------------------------------
+# 確認に使うサンプルの切替（VERIFY_SET: hello = Hello World の Apex のみ（既定）/ components = パターン別のコンポーネント）
+#   components のサンプルは、lib/verify-samples.sh（sf-init.sh --verify --components。develop のみ）
+# ------------------------------------------------------------------------------
+source "$(dirname "${BASH_SOURCE[0]}")/verify-samples.sh"
+VERIFY_SET="${VERIFY_SET:-hello}"
+# パスの一覧。引数: stage1 | stage2 | all（既定 all。hello のときは、段階を分けない）
+verify_set_paths() {
+    if [[ "$VERIFY_SET" == "components" ]]; then verify_sample_paths "${1:-all}"; else verify_hello_paths; fi
+}
+verify_set_content_for() {
+    if [[ "$VERIFY_SET" == "components" ]]; then verify_sample_content_for "$1"; else verify_hello_content_for "$1"; fi
+}
+verify_set_deploy_target_text() {
+    if [[ "$VERIFY_SET" == "components" ]]; then verify_sample_deploy_target_text; else verify_hello_deploy_target_text; fi
+}
+# 引数: stage1 | stage2（hello のときは、段階を分けない）
+verify_set_remove_target_text() {
+    if [[ "$VERIFY_SET" == "components" ]]; then verify_sample_remove_target_text "${1:-stage1}"; else verify_hello_remove_target_text; fi
+}
+
+# ------------------------------------------------------------------------------
 # gh（時間の上限つき。標準入力は読ませない）
 # ------------------------------------------------------------------------------
 verify_gh() {
@@ -224,10 +245,12 @@ verify_branch_has_open_pr() {
     n=$(verify_gh pr list -R "$1" --head "$2" --state open --json number --jq 'length' 2>/dev/null) || return 0  # VAR=$(cmd) のため run 不使用
     [[ "${n:-1}" != "0" ]]
 }
+# contents API のパスを、URL エンコードする（% → %25 を先に、空白 → %20）。ファイル名に空白・% を含むもの（Layout など）に備える
+_verify_urlpath() { printf '%s' "$1" | sed 's/%/%25/g; s/ /%20/g'; }
 # ファイルの SHA（ブランチ上）を、標準出力に返す。なければ、戻り値 1。引数: リポジトリ ブランチ パス
 verify_file_sha() {
     local s
-    s=$(verify_gh api "repos/${1}/contents/${3}?ref=${2}" --jq .sha 2>/dev/null) || return 1  # VAR=$(cmd) のため run 不使用
+    s=$(verify_gh api "repos/${1}/contents/$(_verify_urlpath "${3}")?ref=${2}" --jq .sha 2>/dev/null) || return 1  # VAR=$(cmd) のため run 不使用
     [[ -n "$s" ]] || return 1
     printf '%s' "$s"
 }
@@ -236,14 +259,14 @@ verify_file_put() {
     local repo="$1" br="$2" path="$3" msg="$4" b64 sha
     b64=$(base64 | tr -d '\n\r')  # 標準入力の本文を、base64 にする（パイプのみ）
     if sha=$(verify_file_sha "$repo" "$br" "$path"); then  # 条件チェック
-        verify_gh api -X PUT "repos/${repo}/contents/${path}" -f "message=${msg}" -f "content=${b64}" -f "branch=${br}" -f "sha=${sha}" >/dev/null 2>&1
+        verify_gh api -X PUT "repos/${repo}/contents/$(_verify_urlpath "$path")" -f "message=${msg}" -f "content=${b64}" -f "branch=${br}" -f "sha=${sha}" >/dev/null 2>&1
     else
-        verify_gh api -X PUT "repos/${repo}/contents/${path}" -f "message=${msg}" -f "content=${b64}" -f "branch=${br}" >/dev/null 2>&1
+        verify_gh api -X PUT "repos/${repo}/contents/$(_verify_urlpath "$path")" -f "message=${msg}" -f "content=${b64}" -f "branch=${br}" >/dev/null 2>&1
     fi
 }
 # ファイルを削除する（なければ、何もせず、成功）。引数: リポジトリ ブランチ パス コミットメッセージ
 verify_file_delete() {
     local repo="$1" br="$2" path="$3" msg="$4" sha
     sha=$(verify_file_sha "$repo" "$br" "$path") || return 0  # ファイルがなければ、何もしない
-    verify_gh api -X DELETE "repos/${repo}/contents/${path}" -f "message=${msg}" -f "sha=${sha}" -f "branch=${br}" >/dev/null 2>&1
+    verify_gh api -X DELETE "repos/${repo}/contents/$(_verify_urlpath "$path")" -f "message=${msg}" -f "sha=${sha}" -f "branch=${br}" >/dev/null 2>&1
 }

@@ -48,6 +48,13 @@
 #   --no-metasync : 環境の確認のうち、wf-metasync の実行を、省略する（組織からの同期を、いま行いたくないとき）
 #   --cleanup   : 削除のみを行う（リリースの途中で止まって、組織に Hello World が残ったときの後始末）。
 #                 対象は、固定名のクラス（SfToolsE2eHello / SfToolsE2eHelloTest）だけ。ほかのクラスには、触れない
+#   --components : Hello World の代わりに、パターン別のサンプル（Apex・トリガー・LWC・Aura・Flow・権限セット・Layout・
+#                 メール テンプレート・カスタム表示ラベル・オブジェクト・項目）を、develop の組織だけに、リリースして、削除する
+#                 （lib/verify-samples.sh）。ターゲットファイルの書式（[files] / [members]）・パス・名前の書き方が、種類ごとに
+#                 違っても、リリースの仕組みが動くことの確認。develop の組織がある構成（3 層）だけで、実行できる。
+#                 削除は、2 段階（段階 1: ほかから参照されないもの → 段階 2: 項目・オブジェクト）
+#   --validate-only : （--components と一緒に）検証だけを行う。サンプルの PR を develop 向けに出し、wf-validate（dry-run）の
+#                 成功を確認して、PR は、マージせずに閉じる。組織には、何も反映しない
 #   -h, --help  : このヘルプを表示する
 # ==============================================================================
 
@@ -75,15 +82,25 @@ source "${SF_TOOLS_DIR}/lib/verify-common.sh"
 PLAN_ONLY=0
 CLEANUP_ONLY=0
 NO_METASYNC=0
+COMPONENTS=0
+VALIDATE_ONLY=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --plan)    PLAN_ONLY=1 ;;
         --cleanup) CLEANUP_ONLY=1 ;;
         --no-metasync) NO_METASYNC=1 ;;
+        --components) COMPONENTS=1 ;;
+        --validate-only) VALIDATE_ONLY=1 ;;
         *) die "不明なオプションです: $1" ;;
     esac
     shift
 done
+[[ $VALIDATE_ONLY -eq 1 && $COMPONENTS -eq 0 ]] && die "--validate-only は、--components と一緒に指定してください。"
+[[ $VALIDATE_ONLY -eq 1 && $CLEANUP_ONLY -eq 1 ]] && die "--validate-only と --cleanup は、一緒に指定できません（検証だけのときは、組織に、何も残りません）。"
+[[ $COMPONENTS -eq 1 ]] && VERIFY_SET="components"
+# 確認の対象の表示名（実行内容・確認の文面で使う）
+_WHAT="Hello World"
+[[ $COMPONENTS -eq 1 ]] && _WHAT="サンプル（パターン別のコンポーネント）"
 
 # ------------------------------------------------------------------------------
 # 0. 前提の確認
@@ -108,6 +125,18 @@ grep -qx "develop" <<< "$branches" && grep -qx "staging" <<< "$branches" && TIER
 grep -qx "staging" <<< "$branches" && TIERS+=("staging")
 TIERS+=("main")
 
+# --components: サンプルは、develop の組織だけに入れる（本番・staging には、入れない）。develop がない構成では、実行しない
+if [[ $COMPONENTS -eq 1 ]]; then
+    printf '%s\n' "${TIERS[@]}" | grep -qx "develop" \
+        || die "--components は、develop の組織がある構成（develop・staging・main の 3 層）だけで、実行できます（サンプルを、staging・本番の組織には、入れません）。"
+    TIERS=("develop")
+    # 既存の labels のファイルがあると、サンプルが、それを上書きして、削除してしまう。その場合は、CustomLabels を、サンプルに含めない
+    if verify_file_sha "$REPO" develop "$VERIFY_SAMPLE_LABELS_PATH" > /dev/null; then  # 条件チェック
+        VERIFY_SAMPLE_LABELS=0
+        log "WARNING" "  develop に、すでに labels のファイル（${VERIFY_SAMPLE_LABELS_PATH}）があるため、CustomLabels は、サンプルに含めません（上書きを避けるため）。"
+    fi
+fi
+
 _suffix_of() { case "$1" in main) echo "PROD" ;; staging) echo "STG" ;; develop) echo "DEV" ;; esac; }
 _var() { verify_gh variable get "$1" -R "$REPO" 2>/dev/null | tr -d '\r' || true; }  # 取得専用のため run 不使用
 
@@ -127,7 +156,7 @@ if [[ $CLEANUP_ONLY -eq 0 ]]; then
                 log "WARNING" "  このまま実行すると、そのクラスを、上書きして、削除します。前回の検証の残りであれば、sf-init.sh --verify --cleanup を実行してください。"
                 die "検証用と同名のクラスのファイルが、すでにあります（${t}: ${p}）。"
             fi
-        done < <(verify_hello_paths)
+        done < <(verify_set_paths all)
     done
 fi
 
@@ -156,7 +185,16 @@ for t in "${TIERS[@]}"; do
     fi
 done
 n_tiers=${#TIERS[@]}
-if [[ $CLEANUP_ONLY -eq 1 ]]; then
+if [[ $COMPONENTS -eq 1 && $VALIDATE_ONLY -eq 1 ]]; then
+    echo "    内容       : サンプル（$(verify_set_paths all | wc -l | tr -d ' ') ファイル）の検証のみ（wf-validate = dry-run）。PR は、マージせずに閉じる" >&2
+    echo "                 組織には、何も反映しません（develop のみ）" >&2
+elif [[ $COMPONENTS -eq 1 && $CLEANUP_ONLY -eq 1 ]]; then
+    echo "    内容       : 削除のみ（サンプルを、develop の組織から消す。2 本の PR: 段階 1・段階 2）" >&2
+elif [[ $COMPONENTS -eq 1 ]]; then
+    echo "    内容       : サンプル（$(verify_set_paths all | wc -l | tr -d ' ') ファイル。Apex・トリガー・LWC・Aura・Flow・権限セット・Layout・メール テンプレート・" >&2
+    echo "                 オブジェクト・項目など）を、develop の組織にリリースして、削除する（develop のみ）" >&2
+    echo "                 PR を 3 本（リリース 1・削除 2: 段階 1 → 段階 2）作成してマージする。組織と、リポジトリのファイルは、最後に消える" >&2
+elif [[ $CLEANUP_ONLY -eq 1 ]]; then
     echo "    内容       : 削除のみ（Hello World のクラスを、各段階の組織から消す。${n_tiers} 本の PR）" >&2
 else
     echo "    内容       : Hello World（${VERIFY_APEX_HELLO} / ${VERIFY_APEX_HELLO_TEST}）を、各段階にリリースして、削除する" >&2
@@ -172,6 +210,9 @@ if [[ $CLEANUP_ONLY -eq 0 ]]; then
 fi
 # 目安: PR 1 本（検証 → マージ → リリース）が、約 3 分。wf-metasync が、約 3 分（実測: 3 層・PR 6 本・metasync で、約 20 分）
 _est=$((n_tiers * (CLEANUP_ONLY == 1 ? 1 : 2) * 3))
+if [[ $COMPONENTS -eq 1 ]]; then
+    if [[ $VALIDATE_ONLY -eq 1 ]]; then _est=4; elif [[ $CLEANUP_ONLY -eq 1 ]]; then _est=6; else _est=10; fi   # PR 1 本 = 約 3 分（検証のみは、マージ・リリースがない）
+fi
 [[ $CLEANUP_ONLY -eq 0 && $NO_METASYNC -eq 0 ]] && _est=$((_est + 3))
 echo "    目安の時間 : 約 ${_est} 分（Actions の混み具合で、前後します）" >&2
 echo "    残るもの   : リポジトリに、PR・コミットの履歴（作業用ブランチは、最後に削除します）。Slack に、通知（段階ごとに数通）" >&2
@@ -189,13 +230,19 @@ if [[ "${SF_VERIFY_CONFIRMED:-}" != "1" ]]; then
     echo "" >&2
     echo -e "${CLR_ERR}╔══════════════════════════════════════════════════════╗${CLR_RESET}" >&2
     echo -e "${CLR_ERR}║  !!  実際のリポジトリと組織に、リリースします        ║${CLR_RESET}" >&2
-    echo -e "${CLR_ERR}║      Hello World を、リリースして、削除します        ║${CLR_RESET}" >&2
+    if [[ $COMPONENTS -eq 1 && $VALIDATE_ONLY -eq 1 ]]; then
+        echo -e "${CLR_ERR}║      サンプルを、検証します（反映はしません）        ║${CLR_RESET}" >&2
+    elif [[ $COMPONENTS -eq 1 ]]; then
+        echo -e "${CLR_ERR}║      サンプルを、リリースして、削除します            ║${CLR_RESET}" >&2
+    else
+        echo -e "${CLR_ERR}║      Hello World を、リリースして、削除します        ║${CLR_RESET}" >&2
+    fi
     echo -e "${CLR_ERR}║      管理者以外は、実行しないでください              ║${CLR_RESET}" >&2
     echo -e "${CLR_ERR}╚══════════════════════════════════════════════════════╝${CLR_RESET}" >&2
     echo "" >&2
     # 確認は、Enter を 1 回押すだけ（q で中断）。入力を、最小にするため。本番を含むときは、文面で、明示する
     if [[ $NEED_PROD_CONFIRM -eq 1 ]]; then
-        echo -e "  ${CLR_ERR}本番（または、種類を判定できない）組織に、Hello World を、リリースして、削除します。${CLR_RESET}" >&2
+        echo -e "  ${CLR_ERR}本番（または、種類を判定できない）組織に、${_WHAT} を、リリースして、削除します。${CLR_RESET}" >&2
         wizard_confirm "本番の組織を含みます。Enter で、${REPO} の検証を始めます（q で中断）"
     else
         wizard_confirm "Enter で、${REPO} の検証を始めます（q で中断）"
@@ -323,11 +370,18 @@ _pr_flow() {
     b_val=$(verify_latest_run_id "$REPO" wf-validate.yml "$br")    # VAR=$(cmd) のため run 不使用
     b_rel=$(verify_latest_run_id "$REPO" wf-release.yml "$br")     # VAR=$(cmd) のため run 不使用
     b_pro=$(verify_latest_run_id "$REPO" wf-propagate.yml "$br")   # VAR=$(cmd) のため run 不使用
-    prn=$(verify_pr_create "$REPO" "$br" "$title" "sf-init.sh --verify による検証（Hello World）。" "$base") || prn=""  # VAR=$(cmd) のため run 不使用
+    prn=$(verify_pr_create "$REPO" "$br" "$title" "sf-init.sh --verify による検証（${_WHAT}）。" "$base") || prn=""  # VAR=$(cmd) のため run 不使用
     _vchk "${label}: PR を作成した（${base} 向け）" test -n "$prn" || return 1
     runid=$(verify_wait_pr_run "$REPO" wf-validate.yml "$br" "$b_val") || runid=""   # VAR=$(cmd) のため run 不使用
     _vchk "${label}: wf-validate（検証）が実行され、完了した" test -n "$runid" || return 1
     _vchk "${label}: wf-validate が成功した" _run_ok "$runid" "${label}: wf-validate" || return 1
+    if [[ "$mode" == "validate" ]]; then
+        # 検証のみ: ログに、サンプルが出ていること（警告のみ）→ PR は、マージせずに閉じる（組織には、何も反映しない）
+        verify_run_log_has "$REPO" "$runid" "$VERIFY_APEX_HELLO" \
+            || log "WARNING" "  [注意] ${label}: wf-validate のログに、${VERIFY_APEX_HELLO} が出ていません（検証の成否には、含めません）。"
+        _vchk "${label}: PR を、マージせずに閉じた" verify_pr_close "$REPO" "$prn" || return 1
+        return 0
+    fi
     _vchk "${label}: PR をマージした" verify_pr_merge "$REPO" "$prn" || return 1
     [[ "$mode" == "release" ]] && _left_add "$base"   # マージした時点から、組織に、クラスが入った可能性がある
     runid=$(verify_wait_pr_run "$REPO" wf-release.yml "$br" "$b_rel") || runid=""    # VAR=$(cmd) のため run 不使用
@@ -350,22 +404,24 @@ _make_release_branch() {
     [[ -n "$sha" ]] || return 1
     verify_branch_create "$REPO" "$br" "$sha" || return 1
     while IFS= read -r p; do
-        verify_hello_content_for "$p" | verify_file_put "$REPO" "$br" "$p" "verify: Hello World を追加" || return 1
-    done < <(verify_hello_paths)
-    verify_hello_deploy_target_text | verify_file_put "$REPO" "$br" "sf-tools/release/${br}/deploy-target.txt" "verify: リリース対象" || return 1
+        verify_set_content_for "$p" | verify_file_put "$REPO" "$br" "$p" "verify: ${_WHAT} を追加" || return 1
+    done < <(verify_set_paths all)
+    verify_set_deploy_target_text | verify_file_put "$REPO" "$br" "sf-tools/release/${br}/deploy-target.txt" "verify: リリース対象" || return 1
     verify_empty_target_text        | verify_file_put "$REPO" "$br" "sf-tools/release/${br}/remove-target.txt" "verify: 削除対象（なし）" || return 1
 }
-# 削除用のブランチを作る（main の先頭から。クラスのファイルの削除と、削除対象）。引数: ブランチ
+# 削除用のブランチを作る（クラスのファイルの削除と、削除対象）。
+#   引数: ブランチ [段階: stage1 | stage2（--components のみ。hello では、無視）] [元のブランチ（既定 main。--components は develop）]
+#   --components の削除は、リリースした先（develop）の先頭から作る（main には、サンプルのファイルがないため）
 _make_delete_branch() {
-    local br="$1" sha p
-    sha=$(verify_branch_sha "$REPO" main)  # VAR=$(cmd) のため run 不使用
+    local br="$1" stage="${2:-stage1}" basebr="${3:-main}" sha p
+    sha=$(verify_branch_sha "$REPO" "$basebr")  # VAR=$(cmd) のため run 不使用
     [[ -n "$sha" ]] || return 1
     verify_branch_create "$REPO" "$br" "$sha" || return 1
     while IFS= read -r p; do
-        verify_file_delete "$REPO" "$br" "$p" "verify: Hello World を削除" || return 1
-    done < <(verify_hello_paths)
+        verify_file_delete "$REPO" "$br" "$p" "verify: ${_WHAT} を削除" || return 1
+    done < <(verify_set_paths "$stage")
     verify_empty_target_text         | verify_file_put "$REPO" "$br" "sf-tools/release/${br}/deploy-target.txt" "verify: リリース対象（なし）" || return 1
-    verify_hello_remove_target_text  | verify_file_put "$REPO" "$br" "sf-tools/release/${br}/remove-target.txt" "verify: 削除対象" || return 1
+    verify_set_remove_target_text "$stage" | verify_file_put "$REPO" "$br" "sf-tools/release/${br}/remove-target.txt" "verify: 削除対象" || return 1
 }
 
 # 環境全体の確認（リリースの前に行う。NG があれば、リリースへ進まない: 組織に、何も変更していない状態で止まる）
@@ -403,6 +459,13 @@ _metasync_check() {
 STAMP=$(date +%H%M%S)  # VAR=$(cmd) のため run 不使用
 JOB_RELEASE="verify-hello-${STAMP}"
 JOB_DELETE="verify-hello-delete-${STAMP}"
+JOB_DELETE2=""   # --components の削除の段階 2（項目・オブジェクト）
+MADE_DELETE2=0
+if [[ $COMPONENTS -eq 1 ]]; then
+    JOB_RELEASE="verify-comp-${STAMP}"
+    JOB_DELETE="verify-comp-delete-${STAMP}"
+    JOB_DELETE2="verify-comp-delete2-${STAMP}"
+fi
 
 if [[ $CLEANUP_ONLY -eq 0 ]]; then
     log "HEADER" "環境の確認"
@@ -424,10 +487,16 @@ if [[ $CLEANUP_ONLY -eq 0 ]]; then
         log "INFO" "  wf-metasync の実行は、省略しました（--no-metasync）。"
     fi
     _env_stop_if_ng
-    log "HEADER" "リリース（${TIERS[*]}）"
-    if _vchk "リリース用のブランチ ${JOB_RELEASE} を作成した（クラスのファイルとリリース対象）" _make_release_branch "$JOB_RELEASE"; then
+    if [[ $VALIDATE_ONLY -eq 1 ]]; then
+        log "HEADER" "検証のみ（${TIERS[*]}。マージしない）"
+    else
+        log "HEADER" "リリース（${TIERS[*]}）"
+    fi
+    if _vchk "リリース用のブランチ ${JOB_RELEASE} を作成した（${_WHAT}のファイルとリリース対象）" _make_release_branch "$JOB_RELEASE"; then
         for t in "${TIERS[@]}"; do
-            if _pr_flow "リリース（${t}）" "$JOB_RELEASE" "verify: Hello World をリリース" "$t" release; then
+            if [[ $VALIDATE_ONLY -eq 1 ]]; then
+                _pr_flow "検証（${t}）" "$JOB_RELEASE" "verify: ${_WHAT} を検証（マージしない）" "$t" validate || { STOPPED=1; break; }
+            elif _pr_flow "リリース（${t}）" "$JOB_RELEASE" "verify: ${_WHAT} をリリース" "$t" release; then
                 _evidence "$t" "$FLOW_RUN" "リリース" || true  # 確認の失敗は、記録して、続きを進める（削除まで行って、組織を、元に戻すため）
             else
                 STOPPED=1
@@ -443,14 +512,18 @@ if [[ $CLEANUP_ONLY -eq 0 ]]; then
     fi
 fi
 
+if [[ $VALIDATE_ONLY -eq 0 ]]; then
 log "HEADER" "削除（${TIERS[*]}）"
 # --cleanup のときは、どの段階に残っているか分からないため、すべての段階を、対象にする
 [[ $CLEANUP_ONLY -eq 1 ]] && for t in "${TIERS[@]}"; do _left_add "$t"; done
-if _vchk "削除用のブランチ ${JOB_DELETE} を作成した（クラスのファイルの削除と削除対象）" _make_delete_branch "$JOB_DELETE"; then
+# --components の削除は、develop の先頭から作る（サンプルのファイルは、develop にだけある）
+DEL_BASE="main"
+[[ $COMPONENTS -eq 1 ]] && DEL_BASE="${TIERS[0]}"
+if _vchk "削除用のブランチ ${JOB_DELETE} を作成した（${_WHAT}のファイルの削除と削除対象）" _make_delete_branch "$JOB_DELETE" stage1 "$DEL_BASE"; then
     for t in "${TIERS[@]}"; do
-        if _pr_flow "削除（${t}）" "$JOB_DELETE" "verify: Hello World を削除" "$t" delete; then
+        if _pr_flow "削除（${t}）" "$JOB_DELETE" "verify: ${_WHAT} を削除" "$t" delete; then
             _evidence "$t" "$FLOW_RUN" "削除" || true
-            _left_del "$t"   # この段階のクラスは、消えた
+            [[ $COMPONENTS -eq 1 ]] || _left_del "$t"   # この段階のクラスは、消えた（--components は、段階 2 のあと）
         else
             STOPPED=1
             break
@@ -463,6 +536,29 @@ if [[ $STOPPED -eq 1 ]]; then
     _guidance
     exit $RET_NG
 fi
+# --components: 段階 2（項目・オブジェクト）。段階 1 で、参照するもの（トリガー・テストクラス・Layout など）を消したあとに、消す
+if [[ $COMPONENTS -eq 1 ]]; then
+    log "HEADER" "削除（項目・オブジェクト。${TIERS[*]}）"
+    MADE_DELETE2=1
+    if _vchk "削除用のブランチ ${JOB_DELETE2} を作成した（項目・オブジェクトの削除と削除対象）" _make_delete_branch "$JOB_DELETE2" stage2 "$DEL_BASE"; then
+        for t in "${TIERS[@]}"; do
+            if _pr_flow "削除・項目とオブジェクト（${t}）" "$JOB_DELETE2" "verify: ${_WHAT}（項目・オブジェクト）を削除" "$t" delete; then
+                _vchk "削除・項目とオブジェクト（${t}）: ログに、${VERIFY_SAMPLE_OBJ} が出ている" verify_run_log_has "$REPO" "$FLOW_RUN" "$VERIFY_SAMPLE_OBJ" || true
+                _left_del "$t"   # この段階のサンプルは、消えた
+            else
+                STOPPED=1
+                break
+            fi
+        done
+    else
+        STOPPED=1
+    fi
+    if [[ $STOPPED -eq 1 ]]; then
+        _guidance
+        exit $RET_NG
+    fi
+fi
+fi   # VALIDATE_ONLY
 
 # ------------------------------------------------------------------------------
 # 5b. 後始末: 今回作った作業用ブランチを削除する
@@ -474,10 +570,13 @@ fi
 _delete_job_branches() {
     local b deleted=0
     log "HEADER" "後始末（作業用ブランチの削除）"
-    for b in "$JOB_RELEASE" "$JOB_DELETE"; do
-        # --cleanup は、リリース用のブランチを、作っていない
+    for b in "$JOB_RELEASE" "$JOB_DELETE" "$JOB_DELETE2"; do
+        [[ -n "$b" ]] || continue
+        # --cleanup は、リリース用のブランチを、作っていない。--validate-only は、削除用のブランチを、作っていない
         [[ $CLEANUP_ONLY -eq 1 && "$b" == "$JOB_RELEASE" ]] && continue
-        if ! [[ "$b" =~ ^verify-hello(-delete)?-[0-9]{6}$ ]]; then
+        [[ $VALIDATE_ONLY -eq 1 && "$b" != "$JOB_RELEASE" ]] && continue
+        [[ "$b" == "$JOB_DELETE2" && $MADE_DELETE2 -eq 0 ]] && continue
+        if ! [[ "$b" =~ ^verify-(hello|comp)(-delete2?)?-[0-9]{6}$ ]]; then
             log "WARNING" "  ${b}: 想定の形式の名前ではないため、削除しません。"
             continue
         fi
@@ -504,7 +603,13 @@ log "HEADER" "結果"
 log "INFO" "  確認: ${OK_COUNT} 件成功 / ${NG_COUNT} 件失敗"
 (( FLAKY > 0 )) && log "WARNING" "  再実行で成功したワークフローが ${FLAKY} 件あります（一時的な失敗の可能性）。"
 if [[ $NG_COUNT -eq 0 ]]; then
-    log "SUCCESS" "検証: すべて成功しました。${REPO} は、段階ごとの組織に対して、リリースと削除が動いています。"
+    if [[ $VALIDATE_ONLY -eq 1 ]]; then
+        log "SUCCESS" "検証: すべて成功しました。サンプル（パターン別のコンポーネント）の検証（dry-run）が、develop の組織に対して通りました（反映はしていません）。"
+    elif [[ $COMPONENTS -eq 1 ]]; then
+        log "SUCCESS" "検証: すべて成功しました。サンプル（パターン別のコンポーネント）の、リリースと削除が、develop の組織に対して動いています。"
+    else
+        log "SUCCESS" "検証: すべて成功しました。${REPO} は、段階ごとの組織に対して、リリースと削除が動いています。"
+    fi
     exit $RET_OK
 fi
 log "ERROR" "検証: 失敗した確認があります（上の [NG] を確認してください）。"

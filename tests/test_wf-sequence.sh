@@ -103,6 +103,15 @@ test_wf_sequence_out_of_order() {
     rm -rf "$(dirname "$repo")"
 }
 
+test_wf_sequence_skip_both() {
+    local repo out; repo=$(_make_repo)
+    # どちらにもマージされていない状態で、main へ PR（一気に飛び越し）
+    out=$(_run_check "$repo" feature-a main)
+    assert_output_contains "$out" "out_of_order=true" "一気に飛び越し（staging・develop とも未）→ out_of_order=true"
+    assert_output_contains "$out" "prev=staging, develop" "未マージの段階が、両方（staging, develop）出力される"
+    rm -rf "$(dirname "$repo")"
+}
+
 test_wf_sequence_lowest_stage() {
     local repo out; repo=$(_make_repo)
     out=$(_run_check "$repo" feature-a develop)
@@ -111,16 +120,34 @@ test_wf_sequence_lowest_stage() {
 }
 
 test_wf_sequence_env_branch_pr_blocked() {
-    local repo out; repo=$(_make_repo)
-    out=$(_run_check "$repo" develop main)
-    assert_output_contains "$out" "RC=1" "環境ブランチ（develop）からの PR → エラーで終わる"
+    local repo out pair; repo=$(_make_repo)
+    # 環境ブランチから直接 PR（develop → main / develop → staging / staging → main）は、エラーで終わり、結果を出力する
+    #   （PR のコメント・Slack が、この出力を使う。出力が、エラーの前に書かれていること）
+    for pair in "develop main" "develop staging" "staging main"; do
+        set -- $pair
+        out=$(_run_check "$repo" "$1" "$2")
+        assert_output_contains "$out" "RC=1" "環境ブランチ（$1）から $2 への PR → エラーで終わる"
+        assert_output_contains "$out" "env_branch=true" "環境ブランチ（$1 → $2）→ env_branch=true を出力する"
+        assert_output_contains "$out" "feature=$1" "環境ブランチ（$1 → $2）→ ブランチ名を出力する"
+    done
     rm -rf "$(dirname "$repo")"
+}
+
+test_wf_sequence_env_branch_notified() {
+    # 環境ブランチからの PR も、PR の会話欄のコメントと、Slack に通知する（直前の step が失敗しても実行する）
+    assert_file_contains "$WF" "steps.sequence_check.outputs.env_branch == 'true'" "コメント・Slack の条件に、環境ブランチからの PR がある"
+    assert_file_contains "$WF" "環境ブランチからの PR は、許可されていません" "PR のコメントに、環境ブランチからの PR の文面がある"
+    assert_file_contains "$WF" "環境ブランチからの PR は許可されていません" "Slack に、環境ブランチからの PR の文面がある"
+    local n; n=$(grep -c "if: always()" "$WF")
+    assert_equals "$n" "2" "コメントと Slack の step は、always() で、エラーのあとも実行される"
 }
 
 test_wf_sequence_extractable
 test_wf_sequence_in_order
 test_wf_sequence_out_of_order
+test_wf_sequence_skip_both
 test_wf_sequence_lowest_stage
 test_wf_sequence_env_branch_pr_blocked
+test_wf_sequence_env_branch_notified
 
 print_summary

@@ -90,16 +90,32 @@ GitHub リポジトリの作成から Salesforce 組織への接続、ブラン�
 
 ### 3.1 入力が必要な項目
 
-GitHub オーナー名とプロジェクト名はフォルダ構成から自動取得されます。
-以下の階層で `sf-init.sh` を実行してください:
+リポジトリ名は **`force-XXXX`**（`force-` は固定。`XXXX` は管理者が決める名前）です。フォルダ構成には、決まりがありません。**作業フォルダ（どこでもよい）** で `sf-init.sh` を実行してください。
+
+```bash
+cd {作業フォルダ}
+sf-init.sh                                  # 対話: オーナーを選び、XXXX を入力
+sf-init.sh --owner yamada-corp --project yamada   # 引数で指定（対話なし）→ yamada-corp/force-yamada
+```
+
+対話では、次のように聞かれます。
 
 ```
-~/home/{github-owner}/{company}/
+  GitHub のオーナー: yamada-corp（gh のログインから取得。複数あれば、番号で選ぶ）
+
+  リポジトリ名は「force-XXXX」の形です。
+  「force-」は自動で付きます。XXXX の部分だけを入力してください。
+     例: acme と入力 → force-acme
+
+  yamada-corp に、すでにあるプロジェクト（XXXX）:
+     acme / beta
+
+  XXXX（force- の後ろ）を入力してください: yamada
 ```
 
-例: `~/home/yamada-corp/yamada/` で実行 → オーナー `yamada-corp`、プロジェクト `yamada` が自動取得されます。
-
-> ⚠️ `~/home/{owner}/{company}/{subdir}/` のように1階層深い場所から実行するとエラーになります。
+- 入力は、**XXXX の部分だけ**です（`force-yamada` と書いても、`yamada` として扱います）。すでにある名前は、警告して、聞きなおします。
+- 管理者用の作業フォルダは `{作業フォルダ}/init-yamada/force-yamada` になります。複数のプロジェクトを、同じ作業フォルダで作っても、途中経過が、衝突しません。
+- **従来のフォルダ構成**（`~/home/{github-owner}/{company}/`。例: `~/home/yamada-corp/yamada/`）で実行したときは、引数も入力もなしで、フォルダ名からオーナーとプロジェクトが決まります（管理者用の作業フォルダは、従来どおり `init`）。
 
 実行中に以下を順番に入力・操作する:
 
@@ -164,7 +180,7 @@ GitHub → Actions → 「[metasync] メタ同期」→ 「Run workflow」で手
 
 ```bash
 # 1. ジョブブランチを作成・クローン・sf-start 起動
-#    ~/home/{owner}/{company}/ で実行
+#    作業フォルダ（作業単位のフォルダを置く場所）で実行
 sf-job.sh
 ```
 

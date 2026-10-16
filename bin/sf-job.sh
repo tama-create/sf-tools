@@ -2,27 +2,39 @@
 # ==============================================================================
 # sf-job.sh - 作業用ブランチの作成とローカル環境セットアップ
 # ==============================================================================
-# company フォルダをカレントに実行する。ジョブ名（例: JOB-20260323）を入力すると
+# 作業フォルダ（作業単位のフォルダを置く場所）をカレントに実行する。ジョブ名（例: JOB-20260323）を入力すると
 # GitHub 上にブランチを作成し、ローカルにクローンして sf-start.sh まで一気に実行する。
 #
-# 【前提フォルダ構成】
-#   ~/home/
-#   └── {github-owner}/          ← GitHub ユーザー名（フォルダ名から自動取得）
-#       └── {company}/           ← このフォルダをカレントにして実行すること
-#           └── JOB-xxx/         ← sf-job.sh が作成するジョブフォルダ
-#               └── force-company/  ← クローン先
+# 【フォルダ構成】
+#   フォルダ構成には、決まりがない（作業フォルダは、どこでもよい）。
+#   {作業フォルダ}/
+#   ├── JOB-xxx/              ← 作業単位（sf-job.sh が作成するジョブフォルダ。同じ force-XXXX を、同時に複数開くための入れ物）
+#   │   └── force-XXXX/       ← クローン先（プロジェクト。VS Code で開く単位）
+#   └── init-XXXX/ など       ← sf-init.sh が作る管理者用の作業フォルダ（従来の構成では init）
+#   従来の構成 …/home/{github-owner}/{company}/ も、そのまま動く。
+#
+# 【どのプロジェクトか（オーナーと XXXX）の決め方】 リポジトリ名は force-XXXX（force- は固定。XXXX は管理者が決めた名前）
+#   1. 引数 --owner / --project（--project には、XXXX だけを指定する。force- まで書いても、除いて扱う）
+#   2. 従来のフォルダ構成（…/home/{github-owner}/{company}/）で実行したとき（引数がなければ）、そこから自動で取る
+#   3. カレントの下にある、クローン（*/force-*/）の git remote から取る（フォルダ名ではなく、実際の設定から取る）
+#        1 種類 → 自動で決まる / 複数 → 番号で選ぶ（または --project）
+#   4. どれもなければ、対話（オーナー: gh のログインから候補 / XXXX: 入力）
 #
 # 【処理フロー】
-#   Phase 1: 環境チェック（company フォルダから実行されているか確認）
-#   Phase 2: プロジェクト情報の確認（フォルダ構成からOWNERとREPO_NAMEを自動導出）
+#   Phase 1: 環境チェック（管理者用の作業フォルダ・force-* の中から実行されていないか確認）
+#   Phase 2: プロジェクト情報の確認（上の順で決めた OWNER と REPO_NAME で、リポジトリの存在を確認）
 #   Phase 3: ジョブ名の入力と重複チェック（ローカル・GitHub ブランチ）
 #   Phase 4: GitHub 上にジョブブランチを作成
 #   Phase 5: ローカルにクローン（Windows のパス長の上限対策で、core.longpaths=true を付ける）
 #   Phase 6: sf-start.sh を起動（Sandbox 接続・VSCode 起動・sf-launcher.sh 起動）
 #
 # 【使い方】
-#   cd ~/home/{github-owner}/{company}
-#   ~/sf-tools/bin/sf-job.sh
+#   cd {作業フォルダ}
+#   ~/sf-tools/bin/sf-job.sh [--project XXXX] [--owner OWNER]
+#
+# 【オプション】
+#   --project XXXX : プロジェクト名（リポジトリ force-XXXX の XXXX）。複数のプロジェクトがあるときの指定に使う
+#   --owner OWNER  : GitHub のオーナー（組織名またはユーザー名）
 # ==============================================================================
 
 # ------------------------------------------------------------------------------
@@ -53,12 +65,29 @@ source "$COMMON_LIB"
 
 trap '' INT  # Ctrl+C を無効化（q で中断すること）
 
+# 引数の解析
+ARG_OWNER=""
+ARG_PROJECT=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --owner)
+            [[ -n "${2:-}" ]] || die "--owner には、GitHub のオーナー（組織名またはユーザー名）を指定してください。"
+            ARG_OWNER="$2"; shift 2 ;;
+        --project)
+            [[ -n "${2:-}" ]] || die "--project には、プロジェクト名（force-XXXX の XXXX の部分）を指定してください。"
+            ARG_PROJECT="$2"; shift 2 ;;
+        *)
+            die "不明なオプションです: $1
+使い方: ~/sf-tools/bin/sf-job.sh [--project XXXX] [--owner OWNER]" ;;
+    esac
+done
+
 # ------------------------------------------------------------------------------
 # 3. 変数定義
 # ------------------------------------------------------------------------------
-COMPANY_NAME=""       # company フォルダ名（カレントディレクトリ名）
+COMPANY_NAME=""       # プロジェクト名 XXXX（リポジトリ force-XXXX の XXXX の部分）
 REPO_NAME=""          # force-company 形式のリポジトリ名
-GITHUB_OWNER=""       # GitHub ユーザー名または組織名（1つ上のフォルダ名から自動取得）
+GITHUB_OWNER=""       # GitHub ユーザー名または組織名（引数・従来の構成・クローンの git remote・対話のいずれかで決まる）
 REPO_FULL_NAME=""     # OWNER/REPO 形式
 JOB_NAME=""           # ジョブ名（例: JOB-20260323）
 JOB_DIR=""            # ジョブフォルダの絶対パス
@@ -80,16 +109,16 @@ phase_check_environment() {
     local current_dir
     current_dir=$(basename "$PWD")
 
-    # init フォルダ・force-* フォルダからは実行禁止
-    if [[ "$current_dir" == "init" ]]; then
-        die "sf-job.sh は init フォルダからは実行できません。
-  company フォルダに移動して実行してください:
+    # 管理者用の作業フォルダ（init / init-XXXX）・force-* フォルダからは実行禁止
+    if [[ "$current_dir" == "init" || "$current_dir" == init-* ]]; then
+        die "sf-job.sh は管理者用の作業フォルダ（${current_dir}）からは実行できません。
+  作業フォルダ（作業単位のフォルダを置く場所）に移動して実行してください:
     cd ..
     ~/sf-tools/bin/sf-job.sh"
     fi
     if [[ "$current_dir" == force-* ]]; then
         die "sf-job.sh は force-* フォルダからは実行できません。
-  company フォルダに移動して実行してください:
+  作業フォルダ（作業単位のフォルダを置く場所）に移動して実行してください:
     cd ../..
     ~/sf-tools/bin/sf-job.sh"
     fi
@@ -104,23 +133,22 @@ phase_check_environment() {
     return $RET_OK
 }
 
-# 【INFO】プロジェクト情報の確認（フォルダ構成から OWNER と REPO_NAME を自動導出）
+# 【INFO】プロジェクト情報の確認（決めた OWNER と REPO_NAME で、リポジトリの存在を確認）
 phase_load_project_info() {
     log "INFO" "プロジェクト情報を確認中..."
 
-    # GITHUB_OWNER / COMPANY_NAME はメイン処理の check_home_dir でセット済み
+    # GITHUB_OWNER / COMPANY_NAME はメイン処理の resolve_job_identity でセット済み
     REPO_NAME="force-${COMPANY_NAME}"
     REPO_FULL_NAME="${GITHUB_OWNER}/${REPO_NAME}"
 
-    log "INFO" "  GitHub オーナー（フォルダ自動取得）: ${GITHUB_OWNER}"
-    log "INFO" "  リポジトリ名（自動導出）: ${REPO_NAME}"
+    log "INFO" "  GitHub オーナー: ${GITHUB_OWNER}"
+    log "INFO" "  リポジトリ名: ${REPO_NAME}"
 
     # リポジトリの存在確認
     if ! gh repo view "$REPO_FULL_NAME" --json name &>/dev/null; then
         die "リポジトリが見つかりません: ${REPO_FULL_NAME}
-  フォルダ構成 \"{github-owner}/{company-name}\" から自動導出しました。
-  正しいフォルダ構成で実行しているか確認してください:
-    ~/home/{github-owner}/{company-name}/"
+  プロジェクト名（force-XXXX の XXXX）とオーナーが正しいか確認してください。
+  指定して実行する場合: ~/sf-tools/bin/sf-job.sh --project XXXX --owner OWNER"
     fi
 
     log "SUCCESS" "プロジェクト情報確認完了: ${REPO_FULL_NAME}"
@@ -148,8 +176,10 @@ phase_ask_job_name() {
         fi
 
         # --- ローカルフォルダの重複チェック ---
+        #   従来の構成: 同名のフォルダがあれば、重複（1 つの作業フォルダに、プロジェクトは 1 つ）。
+        #   新しい形: 同じジョブ名のフォルダが、別のプロジェクトのクローンだけを含むなら、重複ではない
         JOB_DIR="${PWD}/${JOB_NAME}"
-        if [[ -d "$JOB_DIR" ]]; then
+        if [[ -d "$JOB_DIR" ]] && { [[ "$PROJECT_LAYOUT" == "legacy" ]] || [[ -e "${JOB_DIR}/${REPO_NAME}" ]]; }; then
             log "WARNING" "同名のフォルダがすでに存在します: ${JOB_DIR}"
             log "WARNING" "別のジョブ名を入力してください。"
             JOB_NAME=""
@@ -255,7 +285,7 @@ phase_sf_start() {
 # ------------------------------------------------------------------------------
 log "HEADER" "作業環境セットアップを開始します (${SCRIPT_NAME}.sh)"
 
-check_home_dir            # GITHUB_OWNER / COMPANY_NAME をセット（失敗時は die）
+resolve_job_identity "$ARG_OWNER" "$ARG_PROJECT"   # GITHUB_OWNER / COMPANY_NAME / PROJECT_LAYOUT をセット（引数 → 従来の構成 → クローン → 対話）
 check_gh_owner "$GITHUB_OWNER"
 
 log "INFO" "中断するには q を入力してください。"

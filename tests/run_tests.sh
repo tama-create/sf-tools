@@ -163,6 +163,7 @@ TEST_FILES=(
     test_e2e.sh
     test_sf-sync-wf.sh
     test_wf-sequence.sh
+    test_project-identity.sh
 )
 
 # ------------------------------------------------------------------------------
@@ -204,7 +205,7 @@ if [[ "${1:-}" == "--changed" ]]; then
                 _t="test_$(basename "$_file")"
                 _changed_tests+=("$_t")
                 ;;
-            lib/common.sh|lib/input.sh|lib/platform.sh|lib/project.sh)
+            lib/common.sh|lib/input.sh|lib/platform.sh)
                 # common.sh は、input.sh / platform.sh / project.sh を source する（どれを変えても、test_common.sh）
                 _changed_tests+=("test_common.sh")
                 ;;
@@ -213,6 +214,9 @@ if [[ "${1:-}" == "--changed" ]]; then
                 ;;
             lib/org.sh)
                 _changed_tests+=("test_org.sh")
+                ;;
+            lib/project.sh)
+                _changed_tests+=("test_common.sh" "test_project-identity.sh")
                 ;;
             lib/diag.sh)
                 _changed_tests+=("test_diag.sh")

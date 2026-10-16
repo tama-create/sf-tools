@@ -409,6 +409,121 @@ echo -e "${CLR_HEAD}========================================"
 echo "  sf-job.sh テスト"
 echo -e "========================================${CLR_RST}"
 
+# ==============================================================================
+# フォルダ構成に頼らない（任意の作業フォルダ）のテスト
+#   リポジトリ名は force-XXXX。オーナーと XXXX は、引数・クローンの git remote・対話で決める
+# ==============================================================================
+_setup_flex_dir() {
+    local base; base=$(mktemp -d "${TMPDIR:-/tmp}/test-flex-XXXX")
+    mkdir -p "$base/work"
+    echo "$base/work"
+}
+
+test_flex_args() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] 任意の作業フォルダ + --owner / --project → 入力なしで決まる${CLR_RST}"
+
+    local mb mock_home wdir
+    mb=$(setup_mock_bin); export MOCK_CALL_LOG="$mb/calls.log"
+    mock_home=$(setup_mock_home); wdir=$(_setup_flex_dir)
+    create_mock_git "$mb"; create_mock_gh_for_job "$mb"; _stub_job_subscripts "$mock_home"
+
+    local ec
+    printf 'JOB-test\nY\n' \
+        | (export HOME="$mock_home" PATH="$mb:$PATH"; cd "$wdir" && bash "$mock_home/sf-tools/bin/sf-job.sh" --owner my-org --project force-acme) \
+          > /dev/null 2>&1
+    ec=$?
+
+    assert_exit_ok $ec                                                      "任意の作業フォルダで、引数を指定すると、正常終了する"
+    assert_file_contains "$MOCK_CALL_LOG" "my-org/force-acme"               "引数のオーナーと XXXX（force- は除く）で、リポジトリを扱う"
+    assert_file_contains "$MOCK_CALL_LOG" "git clone"                       "git clone が呼ばれる"
+    assert_file_contains "$MOCK_CALL_LOG" "$wdir/JOB-test/force-acme"       "クローン先は、{作業フォルダ}/{ジョブ名}/force-XXXX"
+
+    teardown "$mb" "$mock_home" "$(dirname "$wdir")"
+}
+
+test_flex_prompt() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] 任意の作業フォルダ・クローンなし → 対話（オーナーと XXXX を入力）${CLR_RST}"
+
+    local mb mock_home wdir
+    mb=$(setup_mock_bin); export MOCK_CALL_LOG="$mb/calls.log"
+    mock_home=$(setup_mock_home); wdir=$(_setup_flex_dir)
+    create_mock_git "$mb"; create_mock_gh_for_job "$mb"; _stub_job_subscripts "$mock_home"
+
+    local ec out
+    # gh が、オーナーの候補を返さない（モック）→ オーナーを入力。続いて XXXX と確認（Y）、ジョブ名と確認（Y）
+    out=$(printf 'my-org\nacme\nY\nJOB-test\nY\n' \
+        | (export HOME="$mock_home" PATH="$mb:$PATH"; cd "$wdir" && bash "$mock_home/sf-tools/bin/sf-job.sh") 2>&1)
+    ec=$?
+
+    assert_exit_ok $ec                                                      "対話で、オーナーと XXXX を入力すると、正常終了する"
+    [[ "$out" == *"force-* のクローンが見つかりません"* ]] && pass "クローンがないとき、その旨を表示する" || fail "クローンがないとき、その旨を表示する" "出力に案内がない"
+    assert_output_contains "$out" "XXXX の部分だけを入力してください"          "「force- は自動で付く。XXXX だけ入力」と案内する"
+    assert_file_contains "$MOCK_CALL_LOG" "my-org/force-acme"               "入力したオーナーと XXXX で、リポジトリを扱う"
+
+    teardown "$mb" "$mock_home" "$(dirname "$wdir")"
+}
+
+test_flex_from_init_xxxx_dir() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] 管理者用の作業フォルダ（init-XXXX）から実行 → エラー${CLR_RST}"
+
+    local mb mock_home base d ec out
+    mb=$(setup_mock_bin); export MOCK_CALL_LOG="$mb/calls.log"
+    mock_home=$(setup_mock_home)
+    base=$(mktemp -d "${TMPDIR:-/tmp}/test-init-XXXX"); d="$base/init-acme"; mkdir -p "$d"
+    create_mock_gh_for_job "$mb"; _stub_job_subscripts "$mock_home"
+
+    out=$(printf 'q\n' | (export HOME="$mock_home" PATH="$mb:$PATH"; cd "$d" && bash "$mock_home/sf-tools/bin/sf-job.sh" --owner my-org --project acme) 2>&1)
+    ec=$?
+    assert_exit_fail $ec "init-XXXX フォルダ → エラー終了"
+    assert_output_contains "$out" "管理者用の作業フォルダ" "管理者用の作業フォルダからは、実行できないと表示する"
+
+    teardown "$mb" "$mock_home" "$base"
+}
+
+test_flex_job_name_per_project() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] 同じジョブ名でも、別のプロジェクトなら重複にしない（同じプロジェクトは重複）${CLR_RST}"
+
+    local mb mock_home wdir ec out
+    mb=$(setup_mock_bin); export MOCK_CALL_LOG="$mb/calls.log"
+    mock_home=$(setup_mock_home); wdir=$(_setup_flex_dir)
+    create_mock_git "$mb"; create_mock_gh_for_job "$mb"; _stub_job_subscripts "$mock_home"
+    mkdir -p "$wdir/JOB-001/force-beta"          # 別のプロジェクト（beta）の、同名のジョブ
+
+    out=$(printf 'JOB-001\nY\n' \
+        | (export HOME="$mock_home" PATH="$mb:$PATH"; cd "$wdir" && bash "$mock_home/sf-tools/bin/sf-job.sh" --owner my-org --project acme) 2>&1)
+    ec=$?
+    assert_exit_ok $ec "別のプロジェクトの同名のジョブがあっても、重複にならず、正常終了する"
+    assert_output_not_contains "$out" "すでに存在します" "重複の警告は、出ない"
+
+    mkdir -p "$wdir/JOB-002/force-acme"          # 同じプロジェクト（acme）の、同名のジョブ
+    out=$(printf 'JOB-002\nJOB-003\nY\n' \
+        | (export HOME="$mock_home" PATH="$mb:$PATH"; cd "$wdir" && bash "$mock_home/sf-tools/bin/sf-job.sh" --owner my-org --project acme) 2>&1)
+    assert_output_contains "$out" "すでに存在します" "同じプロジェクトの同名のジョブ → 重複の警告が出て、聞きなおす"
+
+    teardown "$mb" "$mock_home" "$(dirname "$wdir")"
+}
+
+test_unknown_option() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] 不明なオプション・値のない --project → エラー${CLR_RST}"
+
+    local mb mock_home wdir ec
+    mb=$(setup_mock_bin); export MOCK_CALL_LOG="$mb/calls.log"
+    mock_home=$(setup_mock_home); wdir=$(_setup_flex_dir)
+    create_mock_gh_for_job "$mb"; _stub_job_subscripts "$mock_home"
+
+    (export HOME="$mock_home" PATH="$mb:$PATH"; cd "$wdir" && bash "$mock_home/sf-tools/bin/sf-job.sh" --nope) > /dev/null 2>&1
+    assert_exit_fail $? "不明なオプション → エラー終了"
+    (export HOME="$mock_home" PATH="$mb:$PATH"; cd "$wdir" && bash "$mock_home/sf-tools/bin/sf-job.sh" --project) > /dev/null 2>&1
+    assert_exit_fail $? "--project に値がない → エラー終了"
+
+    teardown "$mb" "$mock_home" "$(dirname "$wdir")"
+}
+
 test_happy_path
 test_owner_auto_derive
 test_from_init_dir
@@ -420,5 +535,10 @@ test_invalid_job_name
 test_branch_create_failure
 test_clone_failure
 test_quit_with_q
+test_flex_args
+test_flex_prompt
+test_flex_from_init_xxxx_dir
+test_flex_job_name_per_project
+test_unknown_option
 
 print_summary

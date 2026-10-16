@@ -5,12 +5,18 @@
 # 新しい force-xxx プロジェクトを GitHub に作成し、sf-tools と連携させるまでの
 # 一連のセットアップを自動化する。
 #
-# 【前提フォルダ構成】
-#   ~/home/
-#   └── {github-owner}/   ← GitHub ユーザー名（フォルダ名から自動取得）
-#       └── {company}/    ← プロジェクト名として使用（例: yamada → force-yamada）
-#           ↑ここをカレントにして実行すること（init/ フォルダは自動作成）
-#           ※ {company}/system/ 等のサブフォルダから実行するとエラー
+# 【プロジェクト名と、実行する場所】
+#   リポジトリ名は「force-XXXX」。force- は固定で、XXXX（プロジェクト名）は、管理者が決める。
+#   フォルダ構成には、決まりがない（どこで実行してもよい）。オーナーと XXXX は、次の順で決める:
+#     1. 引数 --owner / --project（--project には、XXXX だけを指定する。force- まで書いても、除いて扱う）
+#     2. 従来のフォルダ構成 …/home/{github-owner}/{company}/ で実行したとき（引数がなければ）、そこから自動で取る
+#        （従来の環境は、そのまま動く。管理者用の作業フォルダは、init）
+#     3. 対話: オーナーは、gh のログインから候補を出す（管理者の組織。1 つなら自動、複数なら番号で選ぶ）。
+#        XXXX は、入力する（すでにあるプロジェクトの一覧を、参考に表示する。確認の画面つき）
+#   2 以外（新しい形）の管理者用の作業フォルダは、init-XXXX（複数のプロジェクトを、同じ場所で作っても、
+#   途中経過が、衝突しない）。実行した場所（作業フォルダ）に、init-XXXX/force-XXXX ができる。
+#   ※ 管理者用の作業フォルダ（init / init-XXXX）の中や、force-* の中から実行すると、その中に作られてしまうため、
+#      作業フォルダ（sf-job.sh を実行する場所）で実行すること
 #
 # 【処理フロー】
 #   Phase 1:  環境チェック（ツール確認・GitHub CLI 認証確認）
@@ -36,10 +42,10 @@
 #   - 通知先 Slack チャンネルで Bot を招待（/invite @sf-notify-<プロジェクト名>）
 #
 # 【使い方】
-#   cd ~/home/{github-owner}/{company}
-#   ~/sf-tools/bin/sf-init.sh [--resume N] [--only N]
+#   cd {作業フォルダ}                    # 好きな場所（従来の …/home/{owner}/{company}/ でもよい）
+#   ~/sf-tools/bin/sf-init.sh [--owner OWNER] [--project XXXX] [--resume N] [--only N]
 #
-#   cd ~/home/{github-owner}/{company}/system/force-xxx
+#   cd {作業フォルダ}/init-XXXX/force-XXXX  # 管理者用の作業フォルダの中（従来の構成では init/force-XXXX）
 #   ~/sf-tools/bin/sf-init.sh --add-tier staging   # staging tier を追加
 #   ~/sf-tools/bin/sf-init.sh --add-tier develop   # develop tier を追加
 #
@@ -72,6 +78,8 @@
 #   残るファイルに秘密情報が含まれないよう、完了時に .sf-init.env から Token の値の行（*TOKEN_VALUE=）を消す。
 #
 # 【オプション】
+#   --owner OWNER         : GitHub のオーナー（組織名またはユーザー名）。省略すると、gh のログインから候補を出す（対話）
+#   --project XXXX        : プロジェクト名（リポジトリ force-XXXX の XXXX）。省略すると、入力を求める（対話）
 #   --resume N            : Phase N から再開（Phase N 以降を、質問なしで実行する）
 #   --only N              : Phase N のみ実行（デバッグ・単体テストに使用。進捗は記録しない）
 #   --add-tier staging    : 既存プロジェクトに staging tier を追加
@@ -139,6 +147,16 @@ VERIFY_ARGS=()   # --verify のオプション（--plan / --cleanup / --no-metas
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --help|-h) show_help ;;
+        --owner)
+            [[ -n "${2:-}" ]] || die "--owner には、GitHub のオーナー（組織名またはユーザー名）を指定してください。"
+            export SF_INIT_OWNER="$2"
+            shift 2
+            ;;
+        --project)
+            [[ -n "${2:-}" ]] || die "--project には、プロジェクト名（force-XXXX の XXXX の部分）を指定してください。"
+            export SF_INIT_PROJECT="$2"
+            shift 2
+            ;;
         --only)
             ONLY_PHASE="$2"
             shift 2
@@ -177,6 +195,7 @@ while [[ $# -gt 0 ]]; do
             die "不明なオプションです: $1
 使い方:
   ~/sf-tools/bin/sf-init.sh                       # Phase 1〜10 を順次実行（途中で止まった状態があれば、続き / 最初からを選ぶ）
+  ~/sf-tools/bin/sf-init.sh --project XXXX         # プロジェクト名（force-XXXX の XXXX）を指定する（--owner でオーナーも指定できる）
   ~/sf-tools/bin/sf-init.sh --resume N             # Phase N から最後まで順次実行（質問なし）
   ~/sf-tools/bin/sf-init.sh --only N               # Phase N のみ実行
   ~/sf-tools/bin/sf-init.sh --add-tier staging     # staging tier を追加
@@ -243,7 +262,7 @@ else
 fi
 
 # ------------------------------------------------------------------------------
-# 4. 開始画面・実行ディレクトリの検証（~/home/{owner}/{company}/ であること）
+# 4. オーナーとプロジェクト名（XXXX）の決定・開始画面
 # ------------------------------------------------------------------------------
 # 利用者に見せるステップ（全 9 つ）と、内部の Phase の対応。ステップ 9（動作の確認）は、Phase ではなく、verify.sh を呼ぶ最後のステップ。表示と実行順は一致させる（doc/wizard-ux-design.md 4.1）
 WIZ_TOTAL=9
@@ -269,7 +288,7 @@ export SF_TOOLS_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 FULL_START=0
 [[ "$RESUME_PHASE" -eq 1 && -z "$ONLY_PHASE" ]] && FULL_START=1
 
-check_home_dir  # GITHUB_OWNER / COMPANY_NAME をセット（失敗時は die）
+resolve_init_identity  # GITHUB_OWNER / COMPANY_NAME（XXXX）/ PROJECT_LAYOUT をセット（引数 → 従来の構成 → 対話）
 
 # 開始画面（通常の新規実行は、全体像つき。--only / --resume N は、簡易表示）
 if [[ "$FULL_START" -eq 1 ]]; then
@@ -329,9 +348,14 @@ check_gh_owner "$GITHUB_OWNER"
 log "INFO" "セットアップ中は Ctrl+C が無効です。中断するにはターミナルを閉じてください。"
 
 # ------------------------------------------------------------------------------
-# 5. init フォルダの作成・移動
+# 5. 管理者用の作業フォルダ（従来の構成: init / 新しい形: init-XXXX）の作成・移動
 # ------------------------------------------------------------------------------
-INIT_DIR="${PWD}/init"
+INIT_BASE="$PWD"   # 作業フォルダ（sf-job.sh を実行する場所）
+if [[ "$PROJECT_LAYOUT" == "legacy" ]]; then
+    INIT_DIR="${PWD}/init"
+else
+    INIT_DIR="${PWD}/init-${COMPANY_NAME}"
+fi
 run mkdir -p "$INIT_DIR" || die "init フォルダの作成に失敗しました: ${INIT_DIR}"
 cd "$INIT_DIR" || die "init フォルダに移動できません: ${INIT_DIR}"
 
@@ -541,7 +565,7 @@ fi
 
 # 完了画面（できたこと / 次にやること / 管理者用のフォルダ）
 _org_count=$(( ${BRANCH_COUNT:-1} ))
-_admin_dir="${REPO_DIR:-${PWD}/init/force-${COMPANY_NAME}}"
+_admin_dir="${REPO_DIR:-${INIT_DIR}/force-${COMPANY_NAME}}"
 # 動作の確認の結果の行。$( ) の中に case を書かない（Bash 3.2 は、case の「)」を、$( ) の終わりと取り違える）
 case "$VERIFY_RESULT" in
     done)    _verify_line="4. 動作の確認: 成功しました（リリースと削除を、各段階の組織で確認済みです）" ;;
@@ -553,7 +577,7 @@ wizard_done "できました: ${REPO_FULL_NAME:-${GITHUB_OWNER}/force-${COMPANY_
     "GitHub リポジトリ / Token / Slack 通知 / Salesforce の接続（${_org_count} 組織）" \
     -- \
     "1. 開発を始める人は、次のフォルダで、次のコマンドを実行してください" \
-    "     cd ~/home/${GITHUB_OWNER}/${COMPANY_NAME}" \
+    "     cd \"${INIT_BASE}\"" \
     "     sf-job.sh" \
     "2. リポジトリを見る:" \
     "     https://github.com/${REPO_FULL_NAME:-${GITHUB_OWNER}/force-${COMPANY_NAME}}" \

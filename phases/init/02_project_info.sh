@@ -2,16 +2,19 @@
 # ==============================================================================
 # 02_project_info.sh - Phase 2: プロジェクト情報の確認
 # ==============================================================================
-# フォルダ構成から GITHUB_OWNER とプロジェクト名を自動導出し、ユーザーに確認する。
+# GITHUB_OWNER とプロジェクト名（XXXX）を確認する。値は、sf-init.sh が決めたもの（引数・従来のフォルダ構成・対話）。
 # 環境種別（本番/検証）を選択し、.sf-init.env に変数を書き出して後続フェーズと共有する。
 #
-# 【導出ルール】
-#   カレント: ~/home/{github-owner}/{company}/init/（sf-init.sh が自動作成・移動）
-#   PROJECT_NAME  = {company}（init の 1 つ上）
-#   GITHUB_OWNER  = {github-owner}（init の 2 つ上）
-#   REPO_NAME     = force-{company}
-#   REPO_FULL_NAME= {github-owner}/force-{company}
-#   REPO_DIR      = {PWD}/force-{company}
+# 【値の決まり方】
+#   カレント: 管理者用の作業フォルダ（従来の構成: …/home/{owner}/{company}/init/ / 新しい形: {作業フォルダ}/init-XXXX/）
+#             （sf-init.sh が自動作成・移動）
+#   PROJECT_NAME  = XXXX（環境変数 SF_INIT_PROJECT。sf-init.sh が、引数・従来の構成・対話から決める）
+#   GITHUB_OWNER  = オーナー（環境変数 SF_INIT_OWNER）
+#                   ※ この 2 つがないとき（Phase だけを直接実行したとき）は、従来の構成から取る:
+#                     PROJECT_NAME = init の 1 つ上のフォルダ名、GITHUB_OWNER = 2 つ上のフォルダ名
+#   REPO_NAME     = force-{PROJECT_NAME}
+#   REPO_FULL_NAME= {GITHUB_OWNER}/force-{PROJECT_NAME}
+#   REPO_DIR      = {PWD}/force-{PROJECT_NAME}
 #
 # 【環境種別】
 #   配布版 (production)    : SF_TOOLS_BRANCH=main       → GitHub Actions は sf-tools main を使用（通常はこちら）
@@ -50,9 +53,15 @@ log "HEADER" "プロジェクト情報の確認"
 
 log "INFO" "プロジェクト情報を確認中..."
 
-# init の 1つ上 = {company}、2つ上 = {github-owner}
-PROJECT_NAME=$(basename "$(dirname "$PWD")")
-GITHUB_OWNER=$(basename "$(dirname "$(dirname "$PWD")")")
+# sf-init.sh が決めた値（SF_INIT_OWNER / SF_INIT_PROJECT。引数・従来のフォルダ構成・対話のいずれか）を使う。
+#   Phase だけを直接実行したとき（値がないとき）は、従来のフォルダ構成から取る: init の 1つ上 = {company}、2つ上 = {github-owner}
+if [[ -n "${SF_INIT_OWNER:-}" && -n "${SF_INIT_PROJECT:-}" ]]; then
+    PROJECT_NAME="$SF_INIT_PROJECT"
+    GITHUB_OWNER="$SF_INIT_OWNER"
+else
+    PROJECT_NAME=$(basename "$(dirname "$PWD")")
+    GITHUB_OWNER=$(basename "$(dirname "$(dirname "$PWD")")")
+fi
 REPO_NAME="force-${PROJECT_NAME}"
 REPO_FULL_NAME="${GITHUB_OWNER}/${REPO_NAME}"
 REPO_DIR="${PWD}/${REPO_NAME}"
@@ -61,13 +70,12 @@ REPO_DIR="${PWD}/${REPO_NAME}"
 if [[ -z "$GITHUB_OWNER" ]] || \
    [[ ! "$GITHUB_OWNER" =~ ^[a-zA-Z0-9]([a-zA-Z0-9-]{0,37}[a-zA-Z0-9])?$ ]]; then
     die "GitHub オーナー名が無効です: \"${GITHUB_OWNER}\"
-  2つ上のフォルダ名を GitHub ユーザー名として使用します。
-  正しいフォルダ構成で実行してください:
-    ~/home/{github-owner}/{company}/"
+  オーナー名は、英数字とハイフンのみ使えます（先頭・末尾は英数字）。
+  --owner で指定するか、対話で、入力してください。"
 fi
 
-log "INFO" "  GitHub オーナー（フォルダ自動取得）: ${GITHUB_OWNER}"
-log "INFO" "  リポジトリ名（自動導出）: ${REPO_NAME}"
+log "INFO" "  GitHub オーナー: ${GITHUB_OWNER}"
+log "INFO" "  リポジトリ名: ${REPO_NAME}（force- + ${PROJECT_NAME}）"
 
 # 確認表示
 echo ""

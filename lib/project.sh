@@ -19,6 +19,7 @@
 #   is_reserved_org_alias     ... 共有環境の組織エイリアス（sf-tools の予約名）か判定
 #   is_protected_branch       ... 指定ブランチが branches.txt の保護対象か判定
 #   ensure_sf_tools_latest    ... sf-tools（Git リポジトリ）が origin の最新であることを確認
+#   clone_matches_repo DIR O R ... DIR が Git のクローンで、origin が GitHub の O/R か（完了済みのプロジェクトの判定に使う）
 #   ensure_admin_branch DIR   ... 管理者用のクローンを、admin ブランチ（ローカル）にする（main の上で、作業しないため）
 #   push_admin_branch DIR     ... admin ブランチを、GitHub にも作る（git push -u origin admin。強制 push はしない）
 #   merge_package_xml OUT IN... ... package.xml 形式のマニフェストを 1 つに統合する（種類ごとに、メンバーを重複なく並べる）
@@ -286,6 +287,12 @@ prompt_project_identity() {
         exists=0
         printf '%s\n' "$existing" | grep -qxF -- "$norm" && exists=1
         if [[ "$mode" == "init" && $exists -eq 1 ]]; then
+            if clone_matches_repo "${PWD}/admin/force-${norm}" "$GITHUB_OWNER" "force-${norm}"; then
+                # この作業フォルダに、管理者用のクローンがある（セットアップ済み）: 次の画面で、状態の確認などを選べる
+                log "INFO" "  ${GITHUB_OWNER}/force-${norm} は、すでに作成済みです（${PWD}/admin/force-${norm}）。次の画面で、接続の確認などを選べます。"
+                COMPANY_NAME="$norm"
+                return 0
+            fi
             log "WARNING" "  ${GITHUB_OWNER}/force-${norm} は、すでに存在します。別の名前を入力してください。"
             continue
         fi
@@ -515,4 +522,18 @@ push_admin_branch() {
     [[ -n "$dir" ]] || return $RET_NG
     run git -C "$dir" push --no-verify -u origin admin || return $RET_NG
     return $RET_OK
+}
+
+# clone_matches_repo - DIR が Git のクローンで、origin が GitHub の OWNER/REPO か
+# ------------------------------------------------------------------------------
+# 【使い方】 clone_matches_repo DIR OWNER REPO        例: clone_matches_repo "$PWD/force-acme" my-org force-acme
+# 【用途】   セットアップが完了したプロジェクトの判定（完了時に、状態ファイルを消すため。管理者用のクローンが、ここにあり、
+#           origin が同じリポジトリなら、完了済みとみなす）
+# 【戻り値】 0 = 一致する / 1 = 一致しない（クローンではない・origin がない・GitHub 以外・別のリポジトリ）
+clone_matches_repo() {
+    local dir="${1:-}" owner="${2:-}" repo="${3:-}" url pair
+    [[ -n "$dir" && -n "$owner" && -n "$repo" && -d "$dir" ]] || return 1
+    url=$(git -C "$dir" remote get-url origin 2>/dev/null) || return 1  # VAR=$(cmd) のため run 不使用
+    pair=$(parse_github_remote "$url") || return 1                         # VAR=$(cmd) のため run 不使用
+    [[ "$pair" == "${owner} ${repo}" ]]
 }

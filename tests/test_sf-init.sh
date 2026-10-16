@@ -251,8 +251,8 @@ test_happy_path_3branches() {
     [[ -n "$jwt_home_ca" && "$jwt_home_ca" == *"sf-tools-home."* && "$jwt_home_ca" != "$mock_home" && ! -e "$jwt_home_ca" ]] \
         && pass "接続アプリ版: JWT 接続テストは、一時的なホームの中で実行され、実行後に削除される" || fail "接続アプリ版: JWT 接続テストの隔離" "HOME=${jwt_home_ca}"
     assert_file_contains "$MOCK_CALL_LOG" "git -c credential.helper= push"           "Phase 8: 認証ヘルパーを無効化して push する"
-    assert_file_not_contains "$init_dir/admin/.sf-init-testproject.env" "PAT_TOKEN_VALUE"         "push 後に .sf-init.env から PAT が削除される"
-    assert_file_contains "$init_dir/admin/.sf-init-testproject.progress" "SF_INIT_DONE_PHASE=10"       "全 Phase 完了後、進捗に Phase 10 が記録される"
+    assert_file_not_exists "$init_dir/admin/.sf-init-testproject.env"                              "全 Phase 完了後、状態ファイル（.env: Token の値を含みうる）は消える"
+    assert_file_not_exists "$init_dir/admin/.sf-init-testproject.progress"                         "全 Phase 完了後、進捗ファイルも消える"
     # ウィザード形式の画面（doc/wizard-ux-design.md）: 開始画面・ステップの見出し・完了画面
     assert_file_contains "/tmp/sf-init-test-happy.log" "新しい Salesforce プロジェクトを作ります"   "開始画面: タイトルが出る"
     assert_file_contains "/tmp/sf-init-test-happy.log" "【先に、用意してください】"                "開始画面: 事前に用意するものが出る"
@@ -466,8 +466,8 @@ test_flex_layout_with_args() {
     assert_file_contains "$MOCK_CALL_LOG" "gh repo create tamashimon/force-testproject"    "引数のオーナーと XXXX（force- は除く）で、リポジトリを作る"
     assert_file_exists   "$work/admin/force-testproject/.github/workflows/wf-validate.yml"  "管理者用の作業フォルダは admin（admin/force-testproject）"
     assert_dir_not_exists "$work/init"                                                     "admin フォルダ（旧構成の名前）は作らない"
-    assert_file_contains "$work/admin/.sf-init-testproject.env" "PROJECT_NAME=\"testproject\""   "途中経過は、admin の中に、プロジェクト名つき（.sf-init-XXXX.env）で保存される"
-    assert_file_exists   "$work/admin/.sf-init-testproject.progress"                       "進捗も、プロジェクト名つき（.sf-init-XXXX.progress）で保存される"
+    assert_file_not_exists "$work/admin/.sf-init-testproject.env"                          "完了後、状態ファイル（.sf-init-XXXX.env）は消える（完了後は読む場所がない）"
+    assert_file_not_exists "$work/admin/.sf-init-testproject.progress"                     "完了後、進捗ファイル（.sf-init-XXXX.progress）も消える"
     assert_file_contains "/tmp/sf-init-test-flex.log" "force- は自動で付くため"             "force- まで指定したとき、除いたことを表示する"
     assert_file_contains "/tmp/sf-init-test-flex.log" "cd \"$work\""                        "完了画面: 次のコマンドに、実際の作業フォルダを表示する（~/home/… ではない）"
     assert_file_contains "$MOCK_CALL_LOG" "checkout admin"                                 "最後に、管理者用のクローンを、admin ブランチにする（モックの git は、admin が既にあると答える）"
@@ -1557,6 +1557,60 @@ ENVEOF
 }
 
 # ==============================================================================
+# テスト 25b: 完了済みのプロジェクトの判定は、状態ファイルではなく、クローンで行う（完了時に、状態ファイルは消えるため）
+# ==============================================================================
+test_completed_by_clone() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] 状態ファイルがなくても、admin のクローンが同じリポジトリなら、完了済みとして扱う${CLR_RST}"
+
+    local mb mock_home init_base init_dir exit_code out
+    mb=$(setup_mock_bin)
+    export MOCK_CALL_LOG="$mb/calls.log"
+    mock_home=$(setup_mock_home)
+    create_all_mocks "$mb"
+    create_mock_gh_for_init "$mb"
+    _stub_subscripts "$mock_home"
+    out="$mb/out.log"
+
+    init_base=$(_setup_init_dir "tamashimon" "testproject")
+    init_dir="$init_base/home/tamashimon/testproject"
+    mkdir -p "$init_dir/admin/force-testproject"     # 状態ファイル（.sf-init-*）は、ない。クローンだけがある
+    export MOCK_GIT_C_REMOTE_URL="https://github.com/tamashimon/force-testproject.git"
+
+    # 引数なし → 完了済みの案内（[q] 終了: 何も実行しない）
+    : > "$MOCK_CALL_LOG"
+    printf 'Y\nq\n' | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
+        bash "$mock_home/sf-tools/bin/sf-init.sh" ) > "$out" 2>&1
+    exit_code=$?
+    assert_exit_ok            "$exit_code"                                                  "クローンで完了済みと判定・q: 正常終了する"
+    assert_file_contains      "$out" "セットアップが、すでに完了しています"                       "クローンで完了済みと判定: 完了済みの案内が出る"
+    assert_file_not_contains  "$MOCK_CALL_LOG" "gh repo create"                              "クローンで完了済みと判定・q: 何も実行しない"
+    assert_file_not_exists    "$init_dir/admin/.sf-init-testproject.env"                     "クローンで完了済みと判定・q: 状態ファイルを作らない"
+
+    # --resume N → 拒否（状態ファイルがなくても、完了済みなら拒否する）
+    : > "$MOCK_CALL_LOG"
+    printf 'Y\n' | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
+        bash "$mock_home/sf-tools/bin/sf-init.sh" --resume 5 ) > "$out" 2>&1
+    exit_code=$?
+    assert_exit_fail          "$exit_code"                                                  "クローンで完了済みと判定・--resume 5: 拒否される"
+    assert_file_contains      "$out" "完了済みのプロジェクトでは、--resume は使えません"          "クローンで完了済みと判定・--resume 5: 理由が表示される"
+    assert_file_not_contains  "$MOCK_CALL_LOG" "gh secret set"                              "クローンで完了済みと判定・--resume 5: 何も登録しない"
+
+    # [1] 接続を見る: クローンのフォルダで status.sh が実行される
+    printf '#!/bin/bash\necho "STATUS-STUB cwd=$PWD"\nexit 0\n' > "$mock_home/sf-tools/phases/init/status.sh"
+    chmod +x "$mock_home/sf-tools/phases/init/status.sh"
+    printf 'Y\n1\n' | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
+        bash "$mock_home/sf-tools/bin/sf-init.sh" ) > "$out" 2>&1
+    exit_code=$?
+    assert_exit_ok            "$exit_code"                                                  "クローンで完了済みと判定・1: 正常終了する"
+    assert_file_contains      "$out" "STATUS-STUB cwd="                                       "クローンで完了済みと判定・1: 接続の確認（status.sh）が実行される"
+    assert_file_contains      "$out" "admin/force-testproject"                                 "クローンで完了済みと判定・1: クローンのフォルダで実行される"
+
+    unset MOCK_GIT_C_REMOTE_URL
+    teardown "$mb" "$mock_home" "$init_base"
+}
+
+# ==============================================================================
 # テスト 25: 途中で止まったときの「続きをやる / 最初からやり直す」
 # ==============================================================================
 test_resume_choice() {
@@ -1611,8 +1665,8 @@ export SF_INIT_LOGIN_URL_PROD=login   # ログイン先を、質問せずに指�
     assert_file_contains      "$out" "ステップ 8 / 9: Salesforce の接続"                                           "続き: Phase 10 から実行される"
     assert_file_contains      "$MOCK_CALL_LOG" "gh secret set SF_CONSUMER_KEY_PROD"          "続き: Phase 10 の処理が実行される"
     assert_file_not_contains  "$MOCK_CALL_LOG" "gh repo create"                              "続き: リポジトリを作り直さない"
-    assert_file_contains      "$progf" "SF_INIT_DONE_PHASE=10"                                "続き: 完了後、進捗が Phase 10 になる"
-    assert_file_not_contains  "$progf" "SF_INIT_DONE_PHASE=9"                                 "続き: 進捗の行は 1 つだけ（更新される）"
+    assert_file_not_exists    "$progf"                                                        "続き: 完了後、進捗ファイルは消える"
+    assert_file_not_exists    "$envf"                                                         "続き: 完了後、状態ファイル（.env）も消える"
     rm -rf "$init_base"
 
     # [q] 中断: 何も実行しない
@@ -1628,7 +1682,7 @@ export SF_INIT_LOGIN_URL_PROD=login   # ログイン先を、質問せずに指�
     assert_exit_ok            "$exit_code"                                                  "[2] 最初から: 正常終了する"
     assert_file_contains      "$out" "ステップ 2 / 9: プロジェクトの確認"                          "最初から: Phase 2 から実行される"
     assert_file_contains      "$MOCK_CALL_LOG" "gh repo create"                              "最初から: Phase 3 が実行される"
-    assert_file_contains      "$progf" "SF_INIT_DONE_PHASE=10"                                "最初から: 完了後、進捗が Phase 10 になる"
+    assert_file_not_exists    "$progf"                                                        "最初から: 完了後、進捗ファイルは消える"
     rm -rf "$init_base"
 
     # 質問が出ない: リポジトリが、この作業フォルダのものではない
@@ -1754,11 +1808,11 @@ export SF_INIT_LOGIN_URL_PROD=login   # ログイン先を、質問せずに指�
     rm -rf "$init_base"
     unset SF_INIT_VERIFY_ASK
 
-    # 完了時の後始末: 残った Token の値の行を、.sf-init.env から消す（admin フォルダは、残すため）
+    # 完了時の後始末: 状態ファイルを消す（残っていた Token の値の行も、一緒に消える）。admin フォルダ自体は、残す
     _rc_run 9 "tamashimon/force-testproject" "" 'Y\n1\n' 'PAT_TOKEN_VALUE="ghp_leftover"'
     assert_exit_ok            "$exit_code"                                                  "完了時の掃除: 正常終了する"
-    assert_file_not_contains  "$envf" "PAT_TOKEN_VALUE"                                       "完了時の掃除: Token の値の行が、.sf-init.env から消える"
-    assert_file_contains      "$envf" "REPO_FULL_NAME"                                        "完了時の掃除: ほかの行は、残る"
+    assert_file_not_exists    "$envf"                                                         "完了時の掃除: 状態ファイル（Token の値の行を含む）が、消える"
+    assert_file_not_exists    "$progf"                                                        "完了時の掃除: 進捗ファイルも、消える"
     assert_file_not_contains  "$out" "ghp_leftover"                                           "完了時の掃除: Token の値が、画面に出ない"
     assert_file_contains      "$out" "管理者用フォルダ"                                         "完了画面: 管理者用のフォルダを案内する"
     assert_file_not_contains  "$out" "削除してよいですか"                                      "admin フォルダの削除の質問は、出さない"
@@ -2316,6 +2370,7 @@ test_wf_propagate_skip_missing_branch
 test_wf_no_script_injection
 test_phase6_pat_token
 test_resume_choice
+test_completed_by_clone
 test_sf_tools_autoupdate
 test_sf_tools_branch_mismatch
 test_org_connection

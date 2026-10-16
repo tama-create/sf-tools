@@ -590,12 +590,25 @@ if [[ "$INIT_RC" -eq 0 ]]; then
         _ADMIN_PROGRESS="${WORK}/admin/.sf-init-${PROJECT}.progress"
         _admin_branch_is()      { [[ "$(git -C "$_ADMIN_CLONE" symbolic-ref --short HEAD 2>/dev/null)" == "$1" ]]; }
         _admin_tracks_remote()  { [[ "$(git -C "$_ADMIN_CLONE" rev-parse --abbrev-ref 'admin@{upstream}' 2>/dev/null)" == "origin/admin" ]]; }
+        _no_state_files()       { local f; for f in "${WORK}"/admin/.sf-init*; do [[ -e "$f" ]] && return 1; done; return 0; }
         _no_old_style_dirs()    { local d; for d in "${WORK}"/init "${WORK}"/init-*; do [[ -e "$d" ]] && return 1; done; return 0; }
         _in_init_out()          { grep -qF -- "$1" "$INIT_OUT"; }
         chk "管理者用フォルダ admin/${REPO_NAME} ができた（作業フォルダは、フォルダ構成に頼らない場所）" test -d "${_ADMIN_CLONE}/.git"
-        chk "途中経過のファイルが、プロジェクト名つき（.sf-init-${PROJECT}.env / .progress）で、admin にある" \
-            test -f "$_ADMIN_ENV" -a -f "$_ADMIN_PROGRESS"
-        chk "進捗が Phase 10 まで記録された（SF_INIT_DONE_PHASE=10）" grep -qx "SF_INIT_DONE_PHASE=10" "$_ADMIN_PROGRESS"
+        # 状態ファイル（.sf-init-XXXX.env / .progress）は、最後まで終わったら、消える（完了後は、読む場所がない）
+        chk "完了後、状態ファイル（.sf-init-${PROJECT}.env / .progress）が、admin から消えている" \
+            test ! -e "$_ADMIN_ENV" -a ! -e "$_ADMIN_PROGRESS"
+        chk "admin に、状態ファイルの残骸（.sf-init-*）がない" _no_state_files
+        # 完了済みの判定は、クローンで行う: 同じオーナー・XXXX で、もう一度 sf-init.sh を実行すると、完了済みの案内が出る
+        #   （対話では、すでにあるプロジェクトでも、admin のクローンがあれば、受け付ける。入力: [オーナーの番号] XXXX、Y（続行の確認）、q（終了））
+        if [[ $WITH_ARGS -eq 1 ]]; then
+            _rerun_input="Y\nq\n"; _rerun_args=(--owner "$E2E_OWNER" --project "$PROJECT")
+        else
+            _rerun_input="$(e2e_make_identity_input "$E2E_OWNER" "$PROJECT" | awk '{ printf "%s\\n", $0 }')q\n"; _rerun_args=()
+        fi
+        chk "完了済みのプロジェクトで、sf-init.sh をもう一度実行すると、完了済みの案内が出る（クローンで判定）" \
+            e2e_run_sf_cmd "sf-init-rerun" "$WORK" "$_rerun_input" "${SF_TOOLS_ROOT}/bin/sf-init.sh" ${_rerun_args[@]+"${_rerun_args[@]}"}
+        chk "完了済みの案内の文言が出た（セットアップが、すでに完了しています）" grep -qF "セットアップが、すでに完了しています" "${E2E_TMP}/sf-init-rerun.out"
+        chk "案内を終了（q）しても、状態ファイルは作られない（何も実行されていない）" _no_state_files
         chk "古い形のフォルダ（init / init-*）ができていない" _no_old_style_dirs
         chk "管理者用のクローンが、admin ブランチにいる（main の上で作業しない）" _admin_branch_is admin
         chk "GitHub にも、admin ブランチがある" _has_branch admin

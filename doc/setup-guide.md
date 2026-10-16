@@ -287,7 +287,7 @@ cat ~/sf-tools/logs/sf-init.log
 - **`admin` フォルダは、削除せず残す**（管理者用のフォルダ。ワークフローの更新・接続の確認・接続先の付け替えなどのメンテナンスに使う。日常の開発には使わない）。クローンは、セットアップの最後に、`admin` ブランチ（`main` から作り、GitHub にも push する）になる。`admin` は `main` から古くなるため、使う前に `git pull origin main` で取り込む。
 - Phase 10（Salesforce の接続）は、段階ごとに完了を記録する。途中で失敗しても、「続きをやる」では、完了した段階は、スキップされる（ブラウザのログインを、やり直さなくてよい）。
 - 完了済みのプロジェクトでは、`--resume N` は、使えない（接続処理を、確認なしで、やり直さないため）。引数なしで実行して、選ぶ。
-- 進捗は `admin/.sf-init-XXXX.progress`（XXXX = プロジェクト名）の `SF_INIT_DONE_PHASE` に記録される（入力内容は `admin/.sf-init-XXXX.env`）。`--resume N`（Phase N から、質問なしで実行）を指定した場合は、この選択肢は出ない。
+- 進捗は `admin/.sf-init-XXXX.progress`（XXXX = プロジェクト名）の `SF_INIT_DONE_PHASE` に記録される（入力内容は `admin/.sf-init-XXXX.env`）。**この 2 つのファイルは、最後まで終わると削除される**（途中で止まったときだけ残る）。完了済みかどうかは、`admin/force-XXXX` のクローン（`origin` が同じリポジトリ）で判定する。`--resume N`（Phase N から、質問なしで実行）を指定した場合は、この選択肢は出ない。
 - リポジトリそのものを作り直したい場合は、GitHub 上のリポジトリと `admin` フォルダを、手動で削除してから実行する。
 
 ### 7.2 ❌ sf-metasync が「push declined due to repository rule violations」で失敗

@@ -142,6 +142,7 @@ case "$1" in
         case "$3" in
             pull) exit "${MOCK_GIT_PULL_EXIT:-0}" ;;
             symbolic-ref) echo "${MOCK_GIT_BRANCH:-feature/test}"; exit 0 ;;
+            remote) echo "${MOCK_GIT_C_REMOTE_URL:-}"; exit 0 ;;   # git -C DIR remote get-url origin（完了済みのプロジェクトの判定）
             push) exit "${MOCK_GIT_C_PUSH_EXIT:-0}" ;;   # git -C DIR push ...（admin ブランチを GitHub に作る処理）
             checkout)
                 # git -C DIR checkout BRANCH（管理者用のクローンを admin ブランチにする処理）

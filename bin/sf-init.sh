@@ -76,6 +76,8 @@
 #   ワークフローの更新（sf-sync-wf.sh）・接続の確認（--status）・接続先の付け替え（--reconnect）などのメンテナンスに使う。
 #   日常の開発には使わない（開発は、sf-job.sh の作業フォルダで行う）。完了画面に、このフォルダのパスを表示する。
 #   残るファイルに秘密情報が含まれないよう、完了時に .sf-init.env から Token の値の行（*TOKEN_VALUE=）を消す。
+#   状態ファイル（.sf-init-XXXX.env / .sf-init-XXXX.progress）は、最後まで終わったら消す（完了後は読む場所がないため）。
+#   完了済みかどうかは、このフォルダのクローン（admin/force-XXXX の origin が同じリポジトリ）で判定する。途中で止まったときは、残る。
 #   このフォルダの force-XXXX は、完了時に、admin ブランチ（main から作る）にし、GitHub にも push する（git push -u origin admin）。
 #   main は保護ブランチのため、その上で作業しないようにするため。すでに admin があれば、作り直さず、切り替える。
 #   admin は、main から古くなる（使う前に、main を取り込む）。push に失敗しても、セットアップは成功のまま、完了画面で知らせる。
@@ -376,15 +378,41 @@ _kv_value() {
     grep "^${1}=" "$2" 2>/dev/null | tail -n 1 | sed 's/^[^=]*=//; s/\r$//; s/^"//; s/"$//'  # 取得専用のため run 不使用
 }
 
+# 完了済みのプロジェクトか（戻り値 0 = 完了済み）。完了時に、状態ファイルは消す（完了後は、読む場所がないため）ので、
+#   ・状態ファイルがある: 進捗が Phase 10 で、リポジトリが一致すること（以前の版が残した、完了済みの状態）
+#   ・状態ファイルがない: このフォルダ（admin）に、同じリポジトリのクローン（force-XXXX）があること
+#   進捗が 2〜9（途中まで）のときは、完了済みではない（続きをやる、の対象）。結果: COMPLETED_REPO / COMPLETED_DIR / COMPLETED_AT
+COMPLETED_REPO=""; COMPLETED_DIR=""; COMPLETED_AT=""
+_project_completed() {
+    local want="${GITHUB_OWNER}/force-${COMPANY_NAME}" _done _repo
+    COMPLETED_REPO=""; COMPLETED_DIR=""; COMPLETED_AT=""
+    if [[ -f "$SF_INIT_ENV_FILE" && -f "$SF_INIT_PROGRESS_FILE" ]]; then
+        _done=$(_kv_value SF_INIT_DONE_PHASE "$SF_INIT_PROGRESS_FILE")   # VAR=$(cmd) のため run 不使用
+        _repo=$(_kv_value REPO_FULL_NAME "$SF_INIT_ENV_FILE")            # VAR=$(cmd) のため run 不使用
+        [[ "$_done" == "10" && "$_repo" == "$want" ]] || return 1
+        COMPLETED_REPO="$_repo"
+        COMPLETED_DIR=$(_kv_value REPO_DIR "$SF_INIT_ENV_FILE")          # VAR=$(cmd) のため run 不使用
+        COMPLETED_AT=$(_kv_value SF_INIT_DONE_AT "$SF_INIT_PROGRESS_FILE")  # VAR=$(cmd) のため run 不使用
+        return 0
+    fi
+    clone_matches_repo "${PWD}/force-${COMPANY_NAME}" "$GITHUB_OWNER" "force-${COMPANY_NAME}" || return 1
+    COMPLETED_REPO="$want"
+    COMPLETED_DIR="${PWD}/force-${COMPANY_NAME}"
+    return 0
+}
+
 # 前回の続きの確認（引数なしで起動したときだけ）
 #   前回、途中まで進んでいて（SF_INIT_DONE_PHASE が 2〜9）、そのリポジトリが、この作業フォルダのものなら、
 #   「続きをやる / 最初からやり直す」を選ばせる。続きを選ぶと、Phase 1（環境チェック）を実行したうえで、次の Phase から始める
 #   表示は、Phase の番号ではなく、利用者向けの名前（WIZ_PHASE_TITLES）で出す
 RESUMED=0
-if [[ "$RESUME_PHASE" -eq 1 && -z "$ONLY_PHASE" && -f "$SF_INIT_ENV_FILE" && -f "$SF_INIT_PROGRESS_FILE" ]]; then
-    prev_done=$(_kv_value SF_INIT_DONE_PHASE "$SF_INIT_PROGRESS_FILE")   # VAR=$(cmd) のため run 不使用
-    prev_at=$(_kv_value SF_INIT_DONE_AT "$SF_INIT_PROGRESS_FILE")        # VAR=$(cmd) のため run 不使用
-    prev_repo=$(_kv_value REPO_FULL_NAME "$SF_INIT_ENV_FILE")            # VAR=$(cmd) のため run 不使用
+if [[ "$RESUME_PHASE" -eq 1 && -z "$ONLY_PHASE" ]]; then
+    prev_done=""; prev_at=""; prev_repo=""
+    if [[ -f "$SF_INIT_ENV_FILE" && -f "$SF_INIT_PROGRESS_FILE" ]]; then
+        prev_done=$(_kv_value SF_INIT_DONE_PHASE "$SF_INIT_PROGRESS_FILE")   # VAR=$(cmd) のため run 不使用
+        prev_at=$(_kv_value SF_INIT_DONE_AT "$SF_INIT_PROGRESS_FILE")        # VAR=$(cmd) のため run 不使用
+        prev_repo=$(_kv_value REPO_FULL_NAME "$SF_INIT_ENV_FILE")            # VAR=$(cmd) のため run 不使用
+    fi
     if [[ "$prev_done" =~ ^[0-9]+$ && "$prev_done" -ge 2 && "$prev_done" -lt 10 \
           && "$prev_repo" == "${GITHUB_OWNER}/force-${COMPANY_NAME}" ]]; then
         next_phase=$((prev_done + 1))
@@ -405,9 +433,9 @@ if [[ "$RESUME_PHASE" -eq 1 && -z "$ONLY_PHASE" && -f "$SF_INIT_ENV_FILE" && -f 
             2) ;;  # 最初から（下で .sf-init.env を削除する）
             *) die "中断しました。" ;;
         esac
-    elif [[ "$prev_done" == "10" && "$prev_repo" == "${GITHUB_OWNER}/force-${COMPANY_NAME}" ]]; then
+    elif _project_completed; then
         # 完了済みのプロジェクト: 「続きをやる」は意味がないため、完了済みであることと、できることを案内する
-        prev_dir=$(_kv_value REPO_DIR "$SF_INIT_ENV_FILE")   # VAR=$(cmd) のため run 不使用
+        prev_dir="$COMPLETED_DIR"; prev_repo="$COMPLETED_REPO"; prev_at="$COMPLETED_AT"
         echo "" >&2
         log "INFO" "このプロジェクトは、セットアップが、すでに完了しています${prev_at:+（${prev_at}）}。（${prev_repo}）"
         echo "" >&2
@@ -437,15 +465,11 @@ fi
 
 # 完了済みのプロジェクトで、--resume N を明示した場合は、拒否する（接続処理などを、確認なしで、やり直さないため）。
 #   やり直したいときは、引数なしで実行して選ぶ（[1] 接続を見る / [2] 動作を確認 / [3] 最初から）か、--reconnect を使う
-if [[ "$RESUME_PHASE" -gt 1 && -z "$ONLY_PHASE" && -f "$SF_INIT_ENV_FILE" && -f "$SF_INIT_PROGRESS_FILE" ]]; then
-    _pd=$(_kv_value SF_INIT_DONE_PHASE "$SF_INIT_PROGRESS_FILE")   # VAR=$(cmd) のため run 不使用
-    _pr=$(_kv_value REPO_FULL_NAME "$SF_INIT_ENV_FILE")            # VAR=$(cmd) のため run 不使用
-    if [[ "$_pd" == "10" && "$_pr" == "${GITHUB_OWNER}/force-${COMPANY_NAME}" ]]; then
-        log "ERROR" "  このプロジェクト（${_pr}）は、セットアップが、すでに完了しています。"
-        log "WARNING" "  接続先を付け替える        : force-* の中で sf-init.sh --reconnect <main|staging|develop>"
-        log "WARNING" "  いまの状態を見る・動作を確認する・最初からやり直す : 引数なしで sf-init.sh を実行して、選んでください"
-        die "完了済みのプロジェクトでは、--resume は使えません。"
-    fi
+if [[ "$RESUME_PHASE" -gt 1 && -z "$ONLY_PHASE" ]] && _project_completed; then
+    log "ERROR" "  このプロジェクト（${COMPLETED_REPO}）は、セットアップが、すでに完了しています。"
+    log "WARNING" "  接続先を付け替える        : force-* の中で sf-init.sh --reconnect <main|staging|develop>"
+    log "WARNING" "  いまの状態を見る・動作を確認する・最初からやり直す : 引数なしで sf-init.sh を実行して、選んでください"
+    die "完了済みのプロジェクトでは、--resume は使えません。"
 fi
 
 # 新規実行時（--resume / --only 時、前回の続きを選んだ時以外）は、前回の残骸を削除する（空ファイルは作らない）
@@ -579,6 +603,14 @@ if [[ "$END_PHASE" -eq 10 && -n "${REPO_DIR:-}" ]]; then
 else
     _admin_branch_line="     ・ブランチは、そのままです（途中までの実行のため）"
     _admin_stale_line=""
+fi
+
+# 状態ファイル（.sf-init-XXXX.env / .progress）は、セットアップが最後まで終わったら、消す。
+#   完了後は、読む場所がないため（完了済みかどうかは、このフォルダのクローンで判定する: _project_completed）。
+#   途中で止まったときは、続きをやるために残る。--only N の実行は、状態を持ち越すため、消さない
+if [[ "$END_PHASE" -eq 10 && -z "$ONLY_PHASE" ]]; then
+    run rm -f "$SF_INIT_ENV_FILE" "$SF_INIT_PROGRESS_FILE" \
+        || log "WARNING" "状態ファイルを削除できませんでした: ${SF_INIT_ENV_FILE}"
 fi
 
 # 完了画面（できたこと / 次にやること / 管理者用のフォルダ）

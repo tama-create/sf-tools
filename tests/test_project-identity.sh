@@ -188,6 +188,45 @@ test_job_identity() {
     teardown "$mb"; _rm_base "$dir"
 }
 
+test_clone_matches_repo() {
+    local mb dir out; mb=$(setup_mock_bin); dir=$(_mkdirs)
+    _mkclone "$dir" "admin" "force-acme" "https://github.com/org-x/force-acme.git"
+    _mkclone "$dir" "admin" "force-ssh" "git@github.com:org-x/force-ssh.git"
+    _mkclone "$dir" "admin" "force-gl" "https://gitlab.com/org-x/force-gl.git"
+    mkdir -p "$dir/admin/force-noorigin"; git -C "$dir/admin/force-noorigin" init -q 2>/dev/null
+    out=$(_run_in "$dir" "" 'clone_matches_repo admin/force-acme org-x force-acme && echo MATCH=yes || echo MATCH=no' "$mb")
+    _has "$out" "MATCH=yes" "origin が同じリポジトリ → 一致する"
+    out=$(_run_in "$dir" "" 'clone_matches_repo admin/force-ssh org-x force-ssh && echo MATCH=yes || echo MATCH=no' "$mb")
+    _has "$out" "MATCH=yes" "SSH の URL でも、一致する"
+    out=$(_run_in "$dir" "" 'clone_matches_repo admin/force-acme org-x force-other && echo MATCH=yes || echo MATCH=no' "$mb")
+    _has "$out" "MATCH=no" "別のリポジトリ名 → 一致しない"
+    out=$(_run_in "$dir" "" 'clone_matches_repo admin/force-acme org-y force-acme && echo MATCH=yes || echo MATCH=no' "$mb")
+    _has "$out" "MATCH=no" "別のオーナー → 一致しない"
+    out=$(_run_in "$dir" "" 'clone_matches_repo admin/force-gl org-x force-gl && echo MATCH=yes || echo MATCH=no' "$mb")
+    _has "$out" "MATCH=no" "GitHub 以外の URL → 一致しない"
+    out=$(_run_in "$dir" "" 'clone_matches_repo admin/force-noorigin org-x force-noorigin && echo MATCH=yes || echo MATCH=no' "$mb")
+    _has "$out" "MATCH=no" "origin がない → 一致しない"
+    out=$(_run_in "$dir" "" 'clone_matches_repo admin/nothing org-x force-nothing && echo MATCH=yes || echo MATCH=no' "$mb")
+    _has "$out" "MATCH=no" "フォルダがない → 一致しない"
+    out=$(_run_in "$dir" "" 'clone_matches_repo "" "" "" && echo MATCH=yes || echo MATCH=no' "$mb")
+    _has "$out" "MATCH=no" "引数が空 → 一致しない"
+    teardown "$mb"; _rm_base "$dir"
+}
+
+test_init_identity_existing_with_clone() {
+    local mb dir out; mb=$(setup_mock_bin); create_mock_gh "$mb"; dir=$(_mkdirs)
+    # すでにあるプロジェクトの名前: 作業フォルダに、同じリポジトリの管理者用のクローンが「ない」→ 断って、聞きなおす
+    out=$(MOCK_GH_API_USER=tama MOCK_GH_REPO_LIST=$'acme' _run_in "$dir" 'acme\nnewp\nY\n' 'resolve_init_identity' "$mb")
+    _has "$out" "tama/force-acme は、すでに存在します" "クローンがない → すでにある名前は、断る"
+    # 「ある」→ 受け付ける（次の画面で、完了済みの案内を選べる）。聞きなおさない・確認（Y）も聞かない
+    _mkclone "$dir" "admin" "force-acme" "https://github.com/tama/force-acme.git"
+    out=$(MOCK_GH_API_USER=tama MOCK_GH_REPO_LIST=$'acme' _run_in "$dir" 'acme\n' 'resolve_init_identity' "$mb")
+    _has "$out" "すでに作成済みです" "同じリポジトリのクローンがある → すでに作成済みとして受け付ける"
+    _has "$out" "project=acme" "受け付けて、acme で決まる"
+    _hasnt "$out" "すでに存在します" "断らない"
+    teardown "$mb"; _rm_base "$dir"
+}
+
 test_parse_github_remote
 test_normalize_project_name
 test_discover_clones
@@ -195,5 +234,7 @@ test_gh_owner_candidates
 test_init_identity_args
 test_init_identity_prompt
 test_job_identity
+test_clone_matches_repo
+test_init_identity_existing_with_clone
 
 print_summary

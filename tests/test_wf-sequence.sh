@@ -1,0 +1,126 @@
+#!/bin/bash
+# ==============================================================================
+# test_wf-sequence.sh - templates/.github/workflows/wf-sequence.yml のテスト
+# ==============================================================================
+# YAML の中の「マージ順序を検証」の run スクリプトを取り出して、実際の git リポジトリ（ローカルのリモートつき）で実行する。
+# 確認すること: 順序どおり・順序外・最下位への PR・環境ブランチからの PR
+source "$(dirname "${BASH_SOURCE[0]}")/test_helper.sh"
+echo -e "${CLR_HEAD}=== wf-sequence.yml ===${CLR_RST}"
+
+WF="$SF_TOOLS_DIR/templates/.github/workflows/wf-sequence.yml"
+
+# YAML から、step「id: sequence_check」の run のスクリプトを取り出す（インデント 10 を除く）
+_extract_script() {
+    awk '
+        /id: sequence_check/ { f = 1 }
+        f && /^        run: \|/ { r = 1; next }
+        r && /^$/ { print ""; next }
+        r && /^          / { sub(/^          /, ""); print; next }
+        r { exit }
+    ' "$WF"
+}
+
+# テスト用のリポジトリを作る（ローカルのリモートつき）。main / staging / develop と、feature-a を作る
+#   出力: 作業ディレクトリのパス
+_make_repo() {
+    local base clone
+    base=$(mktemp -d "${TMPDIR:-/tmp}/wfseq-XXXX")
+    git init -q --bare "$base/origin.git"
+    git clone -q "$base/origin.git" "$base/work" 2>/dev/null
+    clone="$base/work"
+    git -C "$clone" config core.autocrlf false
+    (
+        cd "$clone" || exit 1
+        export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
+        git checkout -q -b main
+        mkdir -p sf-tools/config
+        printf 'main\nstaging\ndevelop\n' > sf-tools/config/branches.txt
+        git add -A && git commit -q -m init
+        git push -q origin main
+        git branch staging && git branch develop
+        git push -q origin staging develop
+        git checkout -q -b feature-a
+        echo a > a.txt && git add a.txt && git commit -q -m a
+        git push -q origin feature-a
+        git checkout -q main
+    )
+    echo "$clone"
+}
+
+# 判定スクリプトを実行する。引数: リポジトリ FEATURE BASE。出力: GITHUB_OUTPUT の内容 + 終了コード（RC=）
+_run_check() {
+    local repo="$1" feature="$2" base="$3" out="$repo/.gh_output" script rc
+    script=$(_extract_script)
+    : > "$out"
+    ( cd "$repo" && FEATURE_REF="$feature" BASE_REF="$base" GITHUB_OUTPUT="$out" bash -c "$script" > "$repo/.gh_stdout" 2>&1 )
+    rc=$?
+    cat "$out"
+    echo "RC=$rc"
+}
+
+# feature-a を、指定したブランチへマージして、リモートへ push する（前の段階にマージ済みの状態を作る）
+_merge_into() {
+    local repo="$1" branch="$2"
+    (
+        cd "$repo" || exit 1
+        export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
+        git checkout -q "$branch" && git merge -q --no-ff -m "merge feature-a" feature-a && git push -q origin "$branch"
+        git checkout -q main
+    )
+}
+
+test_wf_sequence_extractable() {
+    local s; s=$(_extract_script)
+    [[ -n "$s" && "$s" == *"origin/main:sf-tools/config/branches.txt"* ]] && pass "YAML から、判定のスクリプトを取り出せた" || fail "YAML から、判定のスクリプトを取り出せた"
+    assert_file_contains "$WF" "pull-requests: write" "PR にコメントを投稿するための権限（pull-requests: write）がある"
+    assert_file_contains "$WF" "sf-tools:sequence" "コメントの目印（既存コメントの更新用）がある"
+}
+
+test_wf_sequence_in_order() {
+    local repo out; repo=$(_make_repo)
+    _merge_into "$repo" develop
+    _merge_into "$repo" staging
+    out=$(_run_check "$repo" feature-a main)
+    assert_output_contains "$out" "out_of_order=false" "順序どおり（develop・staging にマージ済み）→ out_of_order=false"
+    assert_output_contains "$out" "RC=0" "順序どおり → 終了コード 0"
+    rm -rf "$(dirname "$repo")"
+}
+
+test_wf_sequence_out_of_order() {
+    local repo out; repo=$(_make_repo)
+    # develop にだけマージ済み。staging にマージされていない状態で、main へ PR（飛び越し）
+    _merge_into "$repo" develop
+    out=$(_run_check "$repo" feature-a main)
+    assert_output_contains "$out" "out_of_order=true" "staging 未マージ → out_of_order=true"
+    assert_output_contains "$out" "prev=staging" "未マージの段階（staging）が出力される"
+    assert_output_contains "$out" "feature=feature-a" "対象のブランチ名が出力される"
+    assert_output_contains "$out" "RC=0" "判定スクリプト自体は、成功で終わる（失敗にするのは、後の step）"
+    # 何もマージされていない状態で、staging へ PR → develop が未マージ
+    rm -rf "$(dirname "$repo")"; repo=$(_make_repo)
+    out=$(_run_check "$repo" feature-a staging)
+    assert_output_contains "$out" "out_of_order=true" "develop 未マージで staging へ PR → out_of_order=true"
+    assert_output_contains "$out" "prev=develop" "未マージの段階（develop）が出力される"
+    rm -rf "$(dirname "$repo")"
+}
+
+test_wf_sequence_lowest_stage() {
+    local repo out; repo=$(_make_repo)
+    out=$(_run_check "$repo" feature-a develop)
+    assert_output_contains "$out" "out_of_order=false" "最下位（develop）への PR は、前の段階がないため、順序外にならない"
+    rm -rf "$(dirname "$repo")"
+}
+
+test_wf_sequence_env_branch_pr_blocked() {
+    local repo out; repo=$(_make_repo)
+    out=$(_run_check "$repo" develop main)
+    assert_output_contains "$out" "RC=1" "環境ブランチ（develop）からの PR → エラーで終わる"
+    rm -rf "$(dirname "$repo")"
+}
+
+test_wf_sequence_extractable
+test_wf_sequence_in_order
+test_wf_sequence_out_of_order
+test_wf_sequence_lowest_stage
+test_wf_sequence_env_branch_pr_blocked
+
+print_summary

@@ -84,6 +84,7 @@
 | `test_sf-push.sh` | sf-push.sh |
 | `test_sf-update-secret.sh` | sf-update-secret.sh |
 | `test_sf-sync-wf.sh` | sf-sync-wf.sh |
+| `test_wf-sequence.sh` | templates/.github/workflows/wf-sequence.yml（YAML の判定スクリプトを取り出して、実際の git リポジトリで、順序どおり・順序外・最下位・環境ブランチからの PR を確認） |
 
 ### 2.1.1 テストの実行方式と CI
 

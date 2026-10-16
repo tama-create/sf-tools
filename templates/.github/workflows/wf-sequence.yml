@@ -3,7 +3,13 @@
 # ==============================================================================
 #
 # 【概要】
-#   PR のマージ順序（プロモーション順序）を自動検証する。
+#   PR のマージ順序（プロモーション順序）を自動検証する。順序の定義は sf-tools/config/branches.txt の並び（main から読む）。
+#   順序外（前の段階にマージされていない変更が、後の段階へ PR された）の場合は、警告する（マージは、止めない。緊急の Hotfix を
+#   妨げないため）:
+#     ・PR の会話欄に、警告のコメントを投稿する（レビュアーが、気づけるように。同じ PR では、既存のコメントを更新する）
+#     ・Slack に通知する
+#   開発者が sf-next.sh を使う限り、順序は守られる。このチェックは、ランチャーを使わず、GitHub 上で直接 PR を作った場合に、
+#   レビュアーが気づけるようにするためのもの。気づいたレビュアーが、PR を却下する。
 #
 # 【必要な GitHub Secrets（このリポジトリに設定すること）】
 #   SLACK_BOT_TOKEN  : Slack API の Bot Token（順序未確認時の通知に使用）
@@ -54,6 +60,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      pull-requests: write   # 順序外の警告を、PR の会話欄に投稿するため
 
     steps:
       # --------------------------------------------------------------------------
@@ -165,10 +172,52 @@ jobs:
           BASE=$(json_escape "$BASE_RAW")
           DATETIME=$(TZ='Asia/Tokyo' date '+%Y-%m-%d %H:%M:%S JST')
 
-          MESSAGE=":warning: *マージ順序の確認が必要です*\n• ブランチ \`${FEATURE}\` は \`${PREV}\` にまだマージされていません\n• PR: <${PR_URL}|#${PR_NUMBER} ${PR_TITLE}>\n• 対象: \`${FEATURE}\` → \`${BASE}\`\n• 実行日時: ${DATETIME}\n• 意図的な場合はそのままマージを進めてください"
+          MESSAGE=":warning: *マージ順序の確認が必要です*\n• ブランチ \`${FEATURE}\` は \`${PREV}\` にまだマージされていません\n• PR: <${PR_URL}|#${PR_NUMBER} ${PR_TITLE}>\n• 対象: \`${FEATURE}\` → \`${BASE}\`\n• 実行日時: ${DATETIME}\n• 意図的でなければ、この PR は却下してください"
           PAYLOAD="{\"channel\": \"${SLACK_CHANNEL_ID}\", \"text\": \"${MESSAGE}\"}"
 
           curl -s -X POST "https://slack.com/api/chat.postMessage" \
             -H "Authorization: Bearer ${SLACK_BOT_TOKEN}" \
             -H "Content-Type: application/json" \
             -d "$PAYLOAD"
+
+      # --------------------------------------------------------------------------
+      # Step 4: 順序外の警告を、PR の会話欄に投稿する（レビュアーが、気づけるように）
+      #   同じ PR では、既存のコメント（目印: sf-tools:sequence）を更新する。順序どおりで、以前の警告もない場合は、何も投稿しない
+      # --------------------------------------------------------------------------
+      - name: 順序の結果を PR に投稿
+        if: github.event_name == 'pull_request' && steps.sequence_check.outputs.out_of_order != ''
+        uses: actions/github-script@v7
+        env:
+          # ブランチ名などは、JavaScript のソースに直接埋め込まず、環境変数で受け取る
+          OUT_OF_ORDER: ${{ steps.sequence_check.outputs.out_of_order }}
+          FEATURE: ${{ steps.sequence_check.outputs.feature }}
+          PREV: ${{ steps.sequence_check.outputs.prev }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        with:
+          script: |
+            const 目印 = '<!-- sf-tools:sequence -->';
+            const 順序外 = process.env.OUT_OF_ORDER === 'true';
+            const { owner, repo } = context.repo;
+            const issue_number = context.payload.pull_request.number;
+            const コメント一覧 = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number, per_page: 100 });
+            const 既存 = コメント一覧.find((c) => c.body && c.body.includes(目印));
+            if (!順序外 && !既存) return;
+            let 本文;
+            if (順序外) {
+              本文 = [
+                目印,
+                '## ⚠️ マージ順序の確認が必要です',
+                '',
+                `ブランチ \`${process.env.FEATURE}\` は、\`${process.env.PREV}\` にまだマージされていません。`,
+                `このまま \`${process.env.BASE_REF}\` にマージすると、段階を飛び越すことになります。`,
+                '',
+                '**意図的でなければ、この PR は却下してください。**（通常は、`sf-next.sh` が示す順序で、PR を出します）',
+              ].join('\n');
+            } else {
+              本文 = [目印, '## ✅ マージ順序は、問題ありません', '', '前の段階へのマージを、確認しました。'].join('\n');
+            }
+            if (既存) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: 既存.id, body: 本文 });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body: 本文 });
+            }

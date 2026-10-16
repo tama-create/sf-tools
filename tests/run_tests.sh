@@ -162,6 +162,7 @@ TEST_FILES=(
     test_security.sh
     test_e2e.sh
     test_sf-sync-wf.sh
+    test_wf-sequence.sh
 )
 
 # ------------------------------------------------------------------------------
@@ -218,6 +219,9 @@ if [[ "${1:-}" == "--changed" ]]; then
                 ;;
             lib/typecheck.js)
                 _changed_tests+=("test_sf-typecheck.sh")
+                ;;
+            templates/.github/workflows/wf-sequence.yml)
+                _changed_tests+=("test_wf-sequence.sh" "test_sf-sync-wf.sh")
                 ;;
             config/changeset-types.txt)
                 _changed_tests+=("test_sf-typecheck.sh")

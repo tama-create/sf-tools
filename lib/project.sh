@@ -21,6 +21,7 @@
 #   is_reserved_org_alias     ... 共有環境の組織エイリアス（sf-tools の予約名）か判定
 #   is_protected_branch       ... 指定ブランチが branches.txt の保護対象か判定
 #   ensure_sf_tools_latest    ... sf-tools（Git リポジトリ）が origin の最新であることを確認
+#   ensure_admin_branch DIR   ... 管理者用のクローンを、ローカルだけの admin ブランチにする（main の上で、作業しないため）
 #   merge_package_xml OUT IN... ... package.xml 形式のマニフェストを 1 つに統合する（種類ごとに、メンバーを重複なく並べる）
 # ==============================================================================
 
@@ -534,4 +535,27 @@ ensure_sf_tools_latest() {
     run git -C "$dir" pull --ff-only origin "$cur" || die "sf-tools の更新に失敗しました。"
     log "SUCCESS" "sf-tools を更新しました。"
     return 2
+}
+
+# ensure_admin_branch - 管理者用のクローンを、ローカルだけの admin ブランチにする
+# ------------------------------------------------------------------------------
+# 【使い方】 ensure_admin_branch DIR
+# 【理由】   管理者用のクローン（admin/force-XXXX）は、セットアップ後も、メンテナンス用に残る。main のままだと、
+#           main の上で作業してしまう（main は保護ブランチ。sf-sync-wf.sh も、保護ブランチでは実行を断る）。
+#           そこで、main から、ローカルだけの admin ブランチを作って、そこに置く。GitHub には、push しない
+#           （リモートに長く残るブランチは、main から古くなり、誤って PR にされるため）
+# 【動作】   すでに admin ブランチがあれば、作り直さずに、そこへ切り替える（作業を消さない）。なければ、main から作る
+# 【戻り値】 0 = admin ブランチにいる / 1 = 失敗（Git のクローンではない・切り替えに失敗）。呼び出し側は、警告にとどめる
+ensure_admin_branch() {
+    local dir="${1:-}" cur
+    [[ -n "$dir" ]] || return $RET_NG
+    git -C "$dir" rev-parse --git-dir >/dev/null 2>&1 || return $RET_NG  # if cmd のため run 不使用（クローンかどうかの確認）
+    cur=$(git -C "$dir" symbolic-ref --short HEAD 2>/dev/null || true)    # VAR=$(cmd) のため run 不使用
+    [[ "$cur" == "admin" ]] && return $RET_OK
+    if git -C "$dir" rev-parse --verify --quiet refs/heads/admin >/dev/null 2>&1; then  # if cmd のため run 不使用
+        run git -C "$dir" checkout admin || return $RET_NG
+    else
+        run git -C "$dir" checkout -b admin main || return $RET_NG
+    fi
+    return $RET_OK
 }

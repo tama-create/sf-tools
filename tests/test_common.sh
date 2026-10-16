@@ -937,6 +937,78 @@ test_check_gh_owner_org_admin
 test_check_gh_owner_org_member
 test_check_gh_owner_org_admin_pending
 test_check_gh_owner_org_api_failure
+# ------------------------------------------------------------------------------
+# ensure_admin_branch のテスト（実際の Git で確認する）
+# ------------------------------------------------------------------------------
+# origin(bare) と、main に 1 コミットある clone(c) を作る。戻り値（標準出力）: ベースディレクトリ
+_eab_repo() {
+    local b
+    b=$(mktemp -d "${TMPDIR:-/tmp}/test-eab-XXXX")
+    git init -q --bare --initial-branch=main "$b/origin.git"
+    git clone -q "$b/origin.git" "$b/c" 2>/dev/null
+    (
+        cd "$b/c" || exit 1
+        git -c user.name=t -c user.email=t@example.com checkout -q -b main && echo 1 > f && git add f \
+            && git -c user.name=t -c user.email=t@example.com commit -qm c1 && git push -q origin main
+    ) > /dev/null 2>&1
+    echo "$b"
+}
+# 実行する。引数: クローンのディレクトリ 出力先。出力に RC=戻り値 を残す
+_eab_run() {
+    (
+        export SF_INIT_MODE=1
+        readonly SCRIPT_NAME=test; readonly LOG_FILE=/dev/null; readonly LOG_MODE=NEW
+        source "$SF_TOOLS_DIR/lib/common.sh"
+        ensure_admin_branch "$1"
+        echo "RC=$?"
+    ) > "$2" 2>&1
+}
+
+test_ensure_admin_branch() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] ensure_admin_branch: 管理者用のクローンを、ローカルだけの admin ブランチにする${CLR_RST}"
+    local b cur remote_heads count
+
+    # main にいる → main から admin を作って、切り替わる。GitHub（origin）には、作らない
+    b=$(_eab_repo)
+    _eab_run "$b/c" "$b/out.log"
+    cur=$(git -C "$b/c" symbolic-ref --short HEAD)
+    assert_file_contains "$b/out.log" "RC=0" "main → 戻り値 0"
+    [[ "$cur" == "admin" ]] && pass "main → admin ブランチに切り替わる" || fail "main → admin ブランチに切り替わる" "現在: ${cur}"
+    [[ "$(git -C "$b/c" rev-parse admin)" == "$(git -C "$b/c" rev-parse main)" ]] \
+        && pass "admin は、main と同じ位置から作られる" || fail "admin は、main と同じ位置から作られる"
+    remote_heads=$(git -C "$b/c" ls-remote --heads origin)
+    [[ "$remote_heads" != *"refs/heads/admin"* ]] && pass "admin は、origin に push されない（ローカルだけ）" || fail "admin は、origin に push されない（ローカルだけ）" "$remote_heads"
+
+    # すでに admin にいる → 何も変えない（冪等）
+    _eab_run "$b/c" "$b/out2.log"
+    cur=$(git -C "$b/c" symbolic-ref --short HEAD)
+    assert_file_contains "$b/out2.log" "RC=0" "すでに admin → 戻り値 0"
+    [[ "$cur" == "admin" ]] && pass "すでに admin → そのまま" || fail "すでに admin → そのまま" "現在: ${cur}"
+    teardown "$b"
+
+    # admin ブランチがすでにあり、main にいる → 作り直さずに、切り替える（admin の作業を消さない）
+    b=$(_eab_repo)
+    git -C "$b/c" checkout -q -b admin
+    echo 2 > "$b/c/g"; git -C "$b/c" add g
+    git -C "$b/c" -c user.name=t -c user.email=t@example.com commit -qm admin-work
+    git -C "$b/c" checkout -q main
+    _eab_run "$b/c" "$b/out.log"
+    cur=$(git -C "$b/c" symbolic-ref --short HEAD)
+    count=$(git -C "$b/c" rev-list --count admin)
+    assert_file_contains "$b/out.log" "RC=0" "admin が既にある → 戻り値 0"
+    [[ "$cur" == "admin" ]] && pass "admin が既にある → admin に切り替わる" || fail "admin が既にある → admin に切り替わる" "現在: ${cur}"
+    [[ "$count" -eq 2 ]] && pass "admin が既にある → 作り直さない（admin のコミットが残る）" || fail "admin が既にある → 作り直さない（admin のコミットが残る）" "コミット数: ${count}"
+    teardown "$b"
+
+    # Git のクローンではない・引数なし → 失敗（戻り値 1）
+    b=$(mktemp -d "${TMPDIR:-/tmp}/test-eab-XXXX")
+    _eab_run "$b" "$b/out.log"
+    assert_file_contains "$b/out.log" "RC=1" "Git のクローンではない → 戻り値 1"
+    _eab_run "" "$b/out.log"
+    assert_file_contains "$b/out.log" "RC=1" "ディレクトリの指定がない → 戻り値 1"
+    teardown "$b"
+}
+
 test_read_secret
 test_mask_secrets
 test_is_gitbash
@@ -947,6 +1019,7 @@ test_check_sf_cli_cache
 test_print_admin_warning
 test_run_isolated_home
 test_ensure_sf_tools_latest
+test_ensure_admin_branch
 test_json_get
 test_portable_sed
 test_merge_package_xml

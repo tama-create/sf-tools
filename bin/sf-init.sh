@@ -77,6 +77,8 @@
 #   ワークフローの更新（sf-sync-wf.sh）・接続の確認（--status）・接続先の付け替え（--reconnect）などのメンテナンスに使う。
 #   日常の開発には使わない（開発は、sf-job.sh の作業フォルダで行う）。完了画面に、このフォルダのパスを表示する。
 #   残るファイルに秘密情報が含まれないよう、完了時に .sf-init.env から Token の値の行（*TOKEN_VALUE=）を消す。
+#   このフォルダの force-XXXX は、完了時に、ローカルだけの admin ブランチ（main から作る。GitHub には作らない）にする。
+#   main は保護ブランチのため、その上で作業しないようにするため。すでに admin があれば、作り直さず、切り替える。
 #
 # 【オプション】
 #   --owner OWNER         : GitHub のオーナー（組織名またはユーザー名）。省略すると、gh のログインから候補を出す（対話）
@@ -566,6 +568,19 @@ if [[ "$END_PHASE" -eq 10 && "$FULL_START" -eq 1 && "${GITHUB_ACTIONS:-}" != "tr
     fi
 fi
 
+# 管理者用のクローンを、ローカルだけの admin ブランチにする（main の上で、作業しないため。GitHub には push しない）。
+#   最後（Phase 10）まで実行したときだけ。動作の確認（verify.sh）のあとに行う。
+#   失敗しても、セットアップは成功のまま、完了画面で知らせる
+_admin_branch_line="     ・ブランチは admin です（このコンピューターだけのブランチ。GitHub には、ありません）"
+if [[ "$END_PHASE" -eq 10 && -n "${REPO_DIR:-}" ]]; then
+    if ! ensure_admin_branch "$REPO_DIR"; then
+        log "WARNING" "管理者用のクローンを admin ブランチにできませんでした: ${REPO_DIR}"
+        _admin_branch_line="     ・admin ブランチを作れませんでした（main のままです）。管理者用フォルダで、git switch -c admin を実行してください"
+    fi
+else
+    _admin_branch_line="     ・ブランチは、そのままです（途中までの実行のため）"
+fi
+
 # 完了画面（できたこと / 次にやること / 管理者用のフォルダ）
 _org_count=$(( ${BRANCH_COUNT:-1} ))
 _admin_dir="${REPO_DIR:-${INIT_DIR}/force-${COMPANY_NAME}}"
@@ -587,6 +602,7 @@ wizard_done "できました: ${REPO_FULL_NAME:-${GITHUB_OWNER}/force-${COMPANY_
     "3. 【管理者用フォルダ】は、残してあります（削除しないでください）:" \
     "     ${_admin_dir}" \
     "     ・ワークフローの更新・接続の確認・接続先の付け替えなど、管理者のメンテナンスに使います" \
+    "$_admin_branch_line" \
     "     ・日常の開発には使わないでください（開発は、上の sf-job.sh の作業フォルダで行います）" \
     "$_verify_line"
 

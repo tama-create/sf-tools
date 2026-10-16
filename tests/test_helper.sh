@@ -142,6 +142,10 @@ case "$1" in
         case "$3" in
             pull) exit "${MOCK_GIT_PULL_EXIT:-0}" ;;
             symbolic-ref) echo "${MOCK_GIT_BRANCH:-feature/test}"; exit 0 ;;
+            checkout)
+                # git -C DIR checkout BRANCH（管理者用のクローンを admin ブランチにする処理）
+                [[ -n "${MOCK_GIT_CHECKOUT_FAIL_BRANCH:-}" && "$4" == "${MOCK_GIT_CHECKOUT_FAIL_BRANCH}" ]] && exit 1
+                exit 0 ;;
             rev-parse)
                 # 既定では「Git リポジトリではない」を返す（sf-init の sf-tools 最新化確認をスキップさせ、
                 # 対話入力を消費しないようにする）。最新化確認自体のテストは test_init-common.sh で実際の Git を使う

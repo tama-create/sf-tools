@@ -18,7 +18,7 @@
 #   json_get JSON パス...     ... JSON から値を取り出す（Node の標準機能のみ。sf CLI の出力など）
 #
 #   以下は、責務ごとのファイルに分けてあり、この common.sh が source する（呼び出し側は、common.sh だけでよい）:
-#   project.sh   ... get_target_org / check_force_dir / check_home_dir / check_gh_owner / get_branch_list /
+#   project.sh   ... get_target_org / check_force_dir / resolve_init_identity / resolve_job_identity / check_gh_owner / get_branch_list /
 #                    is_reserved_org_alias / is_protected_branch / ensure_sf_tools_latest
 #   platform.sh  ... is_gitbash / run_isolated_home / check_sf_cli / open_browser
 #   input.sh     ... read_input / read_key / press_enter / read_or_quit / read_secret / ask_yn
@@ -482,7 +482,7 @@ readonly SF_RESERVED_ORG_ALIASES="prod staging develop main"
 # 10. 責務ごとのファイル（ここから読み込む。呼び出し側は、common.sh だけを source すればよい）
 #   input.sh     ... 対話入力（read_input / read_key / press_enter / read_or_quit / read_secret / ask_yn）
 #   platform.sh  ... OS・外部コマンド（is_gitbash / run_isolated_home / check_sf_cli / open_browser）
-#   project.sh   ... プロジェクト（get_target_org / check_force_dir / check_home_dir / check_gh_owner /
+#   project.sh   ... プロジェクト（get_target_org / check_force_dir / resolve_init_identity / resolve_job_identity / check_gh_owner /
 #                    get_branch_list / is_reserved_org_alias / is_protected_branch / ensure_sf_tools_latest）
 # ------------------------------------------------------------------------------
 _COMMON_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

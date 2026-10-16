@@ -4,8 +4,8 @@
 # ==============================================================================
 # 確認すること:
 #   ・parse_github_remote / normalize_project_name / discover_clones / gh_owner_candidates
-#   ・resolve_init_identity: 従来の構成（legacy）・引数（flex）・対話（オーナー候補・XXXX の入力・補助）
-#   ・resolve_job_identity: 引数・従来の構成・クローンの git remote（1 つ / 複数）・対話
+#   ・resolve_init_identity: 引数・対話（オーナー候補・XXXX の入力・補助）。フォルダ構成には頼らない
+#   ・resolve_job_identity: 引数・クローンの git remote（1 つ / 複数）・対話
 # gh は、モック（test_helper.sh の create_mock_gh）。リポジトリ名は force-XXXX（force- は固定、XXXX は任意）
 source "$(dirname "${BASH_SOURCE[0]}")/test_helper.sh"
 echo -e "${CLR_HEAD}=== プロジェクトの特定（オーナーと XXXX）===${CLR_RST}"
@@ -24,15 +24,14 @@ _run_in() {
             readonly SCRIPT_NAME=test; readonly LOG_FILE=/dev/null; readonly LOG_MODE=NEW; export SF_INIT_MODE=1
             source '${SF_TOOLS_DIR}/lib/common.sh'
             ${cmd}
-            echo \"RESULT owner=\${GITHUB_OWNER:-} project=\${COMPANY_NAME:-} layout=\${PROJECT_LAYOUT:-}\"" 2>&1
+            echo \"RESULT owner=\${GITHUB_OWNER:-} project=\${COMPANY_NAME:-}\"" 2>&1
     )
 }
 
-# 作業フォルダを作る。引数 1: legacy（…/home/{owner}/{company}）/ flex（任意の場所）
+# 作業フォルダ（任意の場所。フォルダ名に意味はない）を作る
 _mkdirs() {
     local base; base=$(mktemp -d "${TMPDIR:-/tmp}/test-ident-XXXX")
-    if [[ "$1" == "legacy" ]]; then mkdir -p "$base/home/my-org/acme"; echo "$base/home/my-org/acme"
-    else mkdir -p "$base/work"; echo "$base/work"; fi
+    mkdir -p "$base/work"; echo "$base/work"
 }
 
 # 作業フォルダの、テスト用の一番上のフォルダ（test-ident-*）まで、まとめて削除する
@@ -82,7 +81,7 @@ test_normalize_project_name() {
 }
 
 test_discover_clones() {
-    local mb dir out; mb=$(setup_mock_bin); dir=$(_mkdirs flex)
+    local mb dir out; mb=$(setup_mock_bin); dir=$(_mkdirs)
     _mkclone "$dir" "JOB-1" "force-acme" "https://github.com/my-org/force-acme.git"
     _mkclone "$dir" "JOB-2" "force-acme" "https://github.com/my-org/force-acme.git"     # 同じものは、重複を除く
     _mkclone "$dir" "init-beta" "force-beta" "git@github.com:other-org/force-beta.git"
@@ -107,25 +106,12 @@ test_gh_owner_candidates() {
     teardown "$mb"
 }
 
-test_init_identity_legacy() {
-    local mb dir out; mb=$(setup_mock_bin); create_mock_gh "$mb"; dir=$(_mkdirs legacy)
-    out=$(_run_in "$dir" "" 'resolve_init_identity' "$mb")
-    _has "$out" "RESULT owner=my-org project=acme layout=legacy" "従来の構成 → フォルダから取る（入力なし・layout=legacy）"
-    # 引数が、フォルダと同じ値なら、従来の構成のまま
-    out=$(_run_in "$dir" "" 'export SF_INIT_OWNER=my-org SF_INIT_PROJECT=force-acme; resolve_init_identity' "$mb")
-    _has "$out" "RESULT owner=my-org project=acme layout=legacy" "引数がフォルダと同じ値 → 従来の構成のまま"
-    # 引数が違うなら、新しい形（フォルダの値は、使わない）
-    out=$(_run_in "$dir" "" 'export SF_INIT_OWNER=my-org SF_INIT_PROJECT=beta; resolve_init_identity' "$mb")
-    _has "$out" "RESULT owner=my-org project=beta layout=flex" "引数がフォルダと違う → 引数を使う（layout=flex）"
-    teardown "$mb"; _rm_base "$dir"
-}
-
 test_init_identity_args() {
-    local mb dir out; mb=$(setup_mock_bin); create_mock_gh "$mb"; dir=$(_mkdirs flex)
+    local mb dir out; mb=$(setup_mock_bin); create_mock_gh "$mb"; dir=$(_mkdirs)
     out=$(_run_in "$dir" "" 'export SF_INIT_OWNER=my-org SF_INIT_PROJECT=acme; resolve_init_identity' "$mb")
-    _has "$out" "RESULT owner=my-org project=acme layout=flex" "任意の場所 + 引数 → 入力なしで決まる（layout=flex）"
+    _has "$out" "RESULT owner=my-org project=acme" "任意の場所 + 引数 → 入力なしで決まる（）"
     out=$(_run_in "$dir" "" 'export SF_INIT_OWNER=my-org SF_INIT_PROJECT=force-acme; resolve_init_identity' "$mb")
-    _has "$out" "project=acme layout=flex" "--project に force- まで書いても、除く"
+    _has "$out" "project=acme" "--project に force- まで書いても、除く"
     _has "$out" "force- は自動で付くため" "force- を除いたことを、表示する"
     out=$(_run_in "$dir" "" 'export SF_INIT_OWNER=my-org SF_INIT_PROJECT="a b"; resolve_init_identity' "$mb")
     _has "$out" "プロジェクト名" "不正なプロジェクト名 → エラーで、理由を表示"
@@ -138,10 +124,10 @@ test_init_identity_args() {
 }
 
 test_init_identity_prompt() {
-    local mb dir out; mb=$(setup_mock_bin); create_mock_gh "$mb"; dir=$(_mkdirs flex)
+    local mb dir out; mb=$(setup_mock_bin); create_mock_gh "$mb"; dir=$(_mkdirs)
     # オーナーの候補が 1 つ（自分のアカウントだけ）→ 自動で決まる。XXXX を入力 → 確認 Y
     out=$(MOCK_GH_API_USER=tama MOCK_GH_REPO_LIST=$'force-old' _run_in "$dir" 'acme\nY\n' 'resolve_init_identity' "$mb")
-    _has "$out" "RESULT owner=tama project=acme layout=flex" "候補が 1 つ → オーナーは自動。XXXX を入力して決まる"
+    _has "$out" "RESULT owner=tama project=acme" "候補が 1 つ → オーナーは自動。XXXX を入力して決まる"
     _has "$out" "XXXX の部分だけを入力してください" "「force- は自動で付く。XXXX だけ入力」と案内する"
     _has "$out" "例: acme と入力 → force-acme" "入力例を表示する"
     _has "$out" "作るリポジトリ" "入力のあとに、作るリポジトリ名を表示して確認する"
@@ -149,12 +135,12 @@ test_init_identity_prompt() {
     _has "$out" "admin/force-acme" "管理者用の作業フォルダ（admin）を表示する"
     # 候補が複数 → 番号で選ぶ
     out=$(MOCK_GH_API_USER=tama MOCK_GH_ORGS_ADMIN=$'org-a\norg-b' _run_in "$dir" '2\nacme\nY\n' 'resolve_init_identity' "$mb")
-    _has "$out" "RESULT owner=org-b project=acme layout=flex" "候補が複数 → 番号で選べる（2 = org-b）"
+    _has "$out" "RESULT owner=org-b project=acme" "候補が複数 → 番号で選べる（2 = org-b）"
     # すでにあるプロジェクトの一覧を、参考に表示する。同じ名前は、警告して、聞きなおす
     out=$(MOCK_GH_API_USER=tama MOCK_GH_REPO_LIST=$'acme\nbeta' _run_in "$dir" 'acme\nnewp\nY\n' 'resolve_init_identity' "$mb")
     _has "$out" "acme / beta" "すでにあるプロジェクトの一覧を、参考に表示する"
     _has "$out" "tama/force-acme は、すでに存在します" "すでにある名前 → 警告して、聞きなおす"
-    _has "$out" "project=newp layout=flex" "別の名前（newp）で決まる"
+    _has "$out" "project=newp" "別の名前（newp）で決まる"
     # force- まで入力 → 除く。不正な名前 → 聞きなおす。N → 聞きなおす
     out=$(MOCK_GH_API_USER=tama _run_in "$dir" 'force-acme\nY\n' 'resolve_init_identity' "$mb")
     _has "$out" "project=acme" "force-acme と入力 → acme として扱う"
@@ -175,35 +161,30 @@ test_init_identity_prompt() {
 
 test_job_identity() {
     local mb dir out; mb=$(setup_mock_bin); create_mock_gh "$mb"
-    # 従来の構成
-    dir=$(_mkdirs legacy)
-    out=$(_run_in "$dir" "" 'resolve_job_identity "" ""' "$mb")
-    _has "$out" "RESULT owner=my-org project=acme layout=legacy" "従来の構成 → フォルダから取る（layout=legacy）"
-    teardown "$mb"; _rm_base "$dir"
     # カレントの下のクローンが 1 種類 → 自動
-    mb=$(setup_mock_bin); create_mock_gh "$mb"; dir=$(_mkdirs flex)
-    _mkclone "$dir" "init-acme" "force-acme" "https://github.com/org-x/force-acme.git"
+    mb=$(setup_mock_bin); create_mock_gh "$mb"; dir=$(_mkdirs)
+    _mkclone "$dir" "admin" "force-acme" "https://github.com/org-x/force-acme.git"
     _mkclone "$dir" "JOB-1" "force-acme" "https://github.com/org-x/force-acme.git"
     out=$(_run_in "$dir" "" 'resolve_job_identity "" ""' "$mb")
-    _has "$out" "RESULT owner=org-x project=acme layout=flex" "クローンが 1 種類 → 入力なしで、git remote から決まる"
+    _has "$out" "RESULT owner=org-x project=acme" "クローンが 1 種類 → 入力なしで、git remote から決まる"
     # 複数 → 番号で選ぶ
     _mkclone "$dir" "JOB-2" "force-beta" "https://github.com/org-y/force-beta.git"
     out=$(_run_in "$dir" '2\n' 'resolve_job_identity "" ""' "$mb")
     _has "$out" "どのプロジェクトですか" "クローンが複数 → 選択肢を表示する"
-    _has "$out" "owner=org-y project=beta layout=flex" "番号で選べる（2 = org-y/force-beta）"
+    _has "$out" "owner=org-y project=beta" "番号で選べる（2 = org-y/force-beta）"
     # --project 指定 → 同じリポジトリのクローンから、オーナーを取る
     out=$(_run_in "$dir" "" 'resolve_job_identity "" "beta"' "$mb")
-    _has "$out" "owner=org-y project=beta layout=flex" "--project beta → そのリポジトリのクローンから、オーナーを取る（入力なし）"
+    _has "$out" "owner=org-y project=beta" "--project beta → そのリポジトリのクローンから、オーナーを取る（入力なし）"
     out=$(_run_in "$dir" "" 'resolve_job_identity "" "force-acme"' "$mb")
     _has "$out" "owner=org-x project=acme" "--project force-acme → force- を除いて、acme として扱う"
     out=$(_run_in "$dir" "" 'resolve_job_identity "my-own" "zzz"' "$mb")
-    _has "$out" "owner=my-own project=zzz layout=flex" "--owner と --project の両方 → 入力なしで決まる"
+    _has "$out" "owner=my-own project=zzz" "--owner と --project の両方 → 入力なしで決まる"
     teardown "$mb"; _rm_base "$dir"
     # クローンが 1 つもない → 対話（オーナーは gh のログインから、XXXX は入力）
-    mb=$(setup_mock_bin); create_mock_gh "$mb"; dir=$(_mkdirs flex)
+    mb=$(setup_mock_bin); create_mock_gh "$mb"; dir=$(_mkdirs)
     out=$(MOCK_GH_API_USER=tama _run_in "$dir" 'acme\nY\n' 'resolve_job_identity "" ""' "$mb")
     _has "$out" "force-* のクローンが見つかりません" "クローンがない → その旨を表示して、対話にする"
-    _has "$out" "owner=tama project=acme layout=flex" "対話で決まる"
+    _has "$out" "owner=tama project=acme" "対話で決まる"
     teardown "$mb"; _rm_base "$dir"
 }
 
@@ -211,7 +192,6 @@ test_parse_github_remote
 test_normalize_project_name
 test_discover_clones
 test_gh_owner_candidates
-test_init_identity_legacy
 test_init_identity_args
 test_init_identity_prompt
 test_job_identity

@@ -8,10 +8,8 @@
 # 【提供する関数】
 #   get_target_org [ALIAS]    ... 接続先組織エイリアスを解決
 #   check_force_dir           ... force-* ディレクトリ内か確認
-#   check_home_dir            ... 従来のフォルダ構成 …/home/{owner}/{company}/ か確認し GITHUB_OWNER/COMPANY_NAME をセット（失敗は die）
-#   legacy_home_identity      ... 同上（die しない。従来の構成でなければ戻り値 1）
-#   resolve_init_identity     ... sf-init 用: オーナーとプロジェクト名（XXXX）を、引数・従来の構成・対話で決める
-#   resolve_job_identity O P  ... sf-job 用: 同上（引数・従来の構成・カレントの下のクローンの git remote・対話）
+#   resolve_init_identity     ... sf-init 用: オーナーとプロジェクト名（XXXX）を、引数・対話で決める
+#   resolve_job_identity O P  ... sf-job 用: 同上（引数・カレントの下のクローンの git remote・対話）
 #   parse_github_remote URL   ... GitHub の URL から「owner repo」を取り出す（HTTPS / SSH）
 #   normalize_project_name X  ... 入力から XXXX（force- の後ろ）を取り出す（force- が付いていれば除く。不正なら戻り値 1）
 #   discover_clones DIR       ... DIR/*/force-*/ のクローンの git remote から「owner repo」を取り出す
@@ -143,48 +141,11 @@ check_gh_owner() {
 # プロジェクトの特定（オーナーと、プロジェクト名 XXXX。リポジトリ名は force-XXXX）
 # ------------------------------------------------------------------------------
 # リポジトリ名は「force-」（固定）+ XXXX（任意。管理者が決める）。sf-init.sh と sf-job.sh は、どのリポジトリかを、
-# フォルダ構成に頼らず、次の順で決める（上にあるものが優先）:
+# フォルダ構成に頼らず（作業フォルダは、どこでもよい）、次の順で決める（上にあるものが優先）:
 #   1. 引数（--owner / --project）
-#   2. 従来のフォルダ構成（…/home/{owner}/{company}/ のとき。従来の環境は、そのまま動く）
-#   3. sf-job のみ: カレントの下にある、クローンの git remote（実際の設定から取るため、フォルダ名に依存しない）
-#   4. 対話（オーナー: gh のログインから候補 / XXXX: 入力）
-# 結果は、グローバル変数 GITHUB_OWNER / COMPANY_NAME（XXXX）/ PROJECT_LAYOUT（legacy | flex）にセットする。
-
-# 従来のフォルダ構成（…/home/{owner}/{company}/）から GITHUB_OWNER / COMPANY_NAME を取り出す
-#   検証内容: PWD が */home/ 配下にあり、home/ からの深さがちょうど 2（{owner}/{company}）
-#   戻り値: 0 = 取り出した / 1 = この構成ではない（何も変えない。die しない）
-legacy_home_identity() {
-    local rest depth
-    rest="${PWD#*/home/}"
-    [[ "$rest" == "$PWD" ]] && return 1
-    depth=$(printf '%s' "$rest" | tr -cd '/' | wc -c | tr -d ' ')  # VAR=$(cmd) のため run 不使用
-    [[ "$depth" -eq 1 ]] || return 1
-    GITHUB_OWNER=$(basename "$(dirname "$PWD")")
-    COMPANY_NAME=$(basename "$PWD")
-    return 0
-}
-
-# check_home_dir - 従来のフォルダ構成（…/home/{owner}/{company}/）か確認し変数をセットする（失敗は die）
-# ------------------------------------------------------------------------------
-# 【使い方】
-#   check_home_dir   # 失敗時は die で終了
-#   # 成功時: GITHUB_OWNER / COMPANY_NAME がセットされる
-# 【備考】 sf-init.sh / sf-job.sh は、この関数ではなく resolve_init_identity / resolve_job_identity を使う
-#         （フォルダ構成に頼らない）。この関数は、従来の構成だけを許す呼び出し側のために残している。
-# ------------------------------------------------------------------------------
-check_home_dir() {
-    legacy_home_identity && return 0
-    if [[ "${PWD#*/home/}" == "$PWD" ]]; then
-        # shellcheck disable=SC2088  # 利用者に見せる文面の「~」（展開させない）
-        die "~/home/ 配下で実行してください。
-  正しい場所: ~/home/{github-owner}/{company}/
-  現在の場所: ${PWD}"
-    fi
-    # shellcheck disable=SC2088  # 同上
-    die "実行フォルダの階層が正しくありません。
-  正しい場所: ~/home/{github-owner}/{company}/
-  現在の場所: ${PWD}"
-}
+#   2. sf-job のみ: カレントの下にある、クローンの git remote（実際の設定から取るため、フォルダ名に依存しない）
+#   3. 対話（オーナー: gh のログインから候補 / XXXX: 入力）
+# 結果は、グローバル変数 GITHUB_OWNER / COMPANY_NAME（XXXX）にセットする。
 
 # parse_github_remote - GitHub の URL から「owner repo」（空白区切り）を取り出す
 #   対応: https://github.com/o/r(.git) / https://user@github.com/o/r / git@github.com:o/r(.git) / ssh://git@github.com/o/r
@@ -341,12 +302,11 @@ prompt_project_identity() {
     COMPANY_NAME="$norm"
 }
 
-# resolve_init_identity - sf-init 用: オーナーと XXXX を決める（引数 SF_INIT_OWNER / SF_INIT_PROJECT → 従来の構成 → 対話）
-#   結果: GITHUB_OWNER / COMPANY_NAME / PROJECT_LAYOUT（legacy = 従来の構成。管理者用フォルダは init / flex = admin）
+# resolve_init_identity - sf-init 用: オーナーと XXXX を決める（引数 SF_INIT_OWNER / SF_INIT_PROJECT → 対話）
+#   結果: GITHUB_OWNER / COMPANY_NAME
 #   決めた値は SF_INIT_OWNER / SF_INIT_PROJECT に export する（sf-tools を更新して、実行しなおすときと、Phase 2 が使う）
 resolve_init_identity() {
     local a_owner="${SF_INIT_OWNER:-}" a_project="${SF_INIT_PROJECT:-}" norm=""
-    PROJECT_LAYOUT=""
     if [[ -n "$a_project" ]]; then
         norm=$(normalize_project_name "$a_project") \
             || die "プロジェクト名（force-XXXX の XXXX）が正しくありません: ${a_project}
@@ -356,32 +316,21 @@ resolve_init_identity() {
     if [[ -n "$a_owner" && ! "$a_owner" =~ $_GH_OWNER_RE ]]; then
         die "GitHub のオーナー名が正しくありません: ${a_owner}（英数字とハイフンのみ）"
     fi
-    # 従来のフォルダ構成: 引数がない、または、フォルダから取れる値と同じとき
-    if legacy_home_identity; then
-        if [[ -z "${a_owner}${a_project}" ]] \
-           || { [[ "$norm" == "$COMPANY_NAME" ]] && { [[ -z "$a_owner" ]] || [[ "$a_owner" == "$GITHUB_OWNER" ]]; }; }; then
-            PROJECT_LAYOUT="legacy"
-        fi
-    fi
-    if [[ "$PROJECT_LAYOUT" != "legacy" ]]; then
-        GITHUB_OWNER="$a_owner"
-        COMPANY_NAME="$norm"
-        if [[ -z "$GITHUB_OWNER" || -z "$COMPANY_NAME" ]]; then
-            prompt_project_identity init
-        fi
-        PROJECT_LAYOUT="flex"
+    GITHUB_OWNER="$a_owner"
+    COMPANY_NAME="$norm"
+    if [[ -z "$GITHUB_OWNER" || -z "$COMPANY_NAME" ]]; then
+        prompt_project_identity init
     fi
     export SF_INIT_OWNER="$GITHUB_OWNER" SF_INIT_PROJECT="$COMPANY_NAME"
     return 0
 }
 
-# resolve_job_identity - sf-job 用: オーナーと XXXX を決める（引数 → 従来の構成 → カレントの下のクローン → 対話）
+# resolve_job_identity - sf-job 用: オーナーと XXXX を決める（引数 → カレントの下のクローン → 対話）
 #   引数: オーナー（空でもよい） XXXX（空でもよい）
-#   結果: GITHUB_OWNER / COMPANY_NAME / PROJECT_LAYOUT（legacy / flex）
+#   結果: GITHUB_OWNER / COMPANY_NAME
 resolve_job_identity() {
     local a_owner="${1:-}" a_project="${2:-}" norm="" clones line n
     local list=()
-    PROJECT_LAYOUT=""
     if [[ -n "$a_project" ]]; then
         norm=$(normalize_project_name "$a_project") \
             || die "プロジェクト名（force-XXXX の XXXX）が正しくありません: ${a_project}
@@ -391,14 +340,6 @@ resolve_job_identity() {
     if [[ -n "$a_owner" && ! "$a_owner" =~ $_GH_OWNER_RE ]]; then
         die "GitHub のオーナー名が正しくありません: ${a_owner}（英数字とハイフンのみ）"
     fi
-    if legacy_home_identity; then
-        if [[ -z "${a_owner}${a_project}" ]] \
-           || { [[ "$norm" == "$COMPANY_NAME" ]] && { [[ -z "$a_owner" ]] || [[ "$a_owner" == "$GITHUB_OWNER" ]]; }; }; then
-            PROJECT_LAYOUT="legacy"
-            return 0
-        fi
-    fi
-    PROJECT_LAYOUT="flex"
     GITHUB_OWNER="$a_owner"
     COMPANY_NAME="$norm"
     clones=$(discover_clones "$PWD")  # VAR=$(cmd) のため run 不使用

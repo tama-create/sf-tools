@@ -646,7 +646,7 @@ e2e_cleanup_all() {
 #     検証される。値は、画面に出ない）→ 空行（Phase 7 の press_enter）
 #   → Slack Token → チャンネル ID → 空行（招待の press_enter）→ Phase 10 ログイン先 1（login.salesforce.com。
 #     アプリの種類は聞かない: 既定は外部クライアントアプリ。ログイン先は、段階ごとに 3 択: main の 1 つだけ）
-#   （Phase 10 が最後。init フォルダの削除の質問は、廃止した: init フォルダは、管理者用として残る）
+#   （Phase 10 が最後。admin フォルダの削除の質問は、廃止した: admin フォルダは、管理者用として残る）
 #   引数: 層数（1 = main のみ（既定）/ 2 = main + staging / 3 = main + staging + develop）
 #     Phase 5 の番号は、層数と逆（3 層 = 1、2 層 = 2、1 層 = 3）。ログイン先の 3 択は、段階の数だけ、聞かれる（どれも 1）
 e2e_make_input() {

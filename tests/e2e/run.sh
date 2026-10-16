@@ -197,7 +197,7 @@ _fresh_start() {
     log "HEADER" "sf-init を実行します（${REPO_FULL}。${LAYOUT} 層）"
     INIT_OUT="${E2E_TMP}/sf-init.out"
     e2e_make_input "$LAYOUT" \
-        | ( cd "$WORK" && PATH="${SHIM_DIR}:${PATH}" bash "${SF_TOOLS_ROOT}/bin/sf-init.sh" 2>&1 ) \
+        | ( cd "$WORK" && PATH="${SHIM_DIR}:${PATH}" bash "${SF_TOOLS_ROOT}/bin/sf-init.sh" --owner "$E2E_OWNER" --project "$PROJECT" 2>&1 ) \
         | tee "$INIT_OUT"
     INIT_RC=${PIPESTATUS[1]}
     _elapsed "sf-init の終了"
@@ -297,7 +297,7 @@ _hello_local_job() {
     chk "${label}: sf-job.sh で、ジョブ（ブランチ ${job}）を開始した（ブランチ作成・clone・sf-start.sh）" \
         # 入力: ジョブ名 → 確認（Y）→ 組織のエイリアス → ログイン先（2 = Sandbox。sf-start.sh の質問。e2e では、認証 URL で
         # ログインするため、選んだ URL は、使われない）
-        e2e_run_sf_cmd "sf-job-${job}" "$WORK" "${job}\nY\n${E2E_JOB_ALIAS}\n2\n" "${SF_TOOLS_ROOT}/bin/sf-job.sh" || return 1
+        e2e_run_sf_cmd "sf-job-${job}" "$WORK" "${job}\nY\n${E2E_JOB_ALIAS}\n2\n" "${SF_TOOLS_ROOT}/bin/sf-job.sh" --owner "$E2E_OWNER" --project "$PROJECT" || return 1
     chk "${label}: sf-install.sh（sf-start.sh が背景で実行）が完了した" e2e_wait_sf_install "$repo" || return 1
     chk "${label}: Git フック（pre-push）が設置された" test -f "${repo}/.git/hooks/pre-push"
     chk "${label}: リリース管理フォルダ release/${job}/ が用意された（雛形）" \

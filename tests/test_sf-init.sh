@@ -28,9 +28,13 @@
 
 source "$(dirname "${BASH_SOURCE[0]}")/test_helper.sh"
 
+# sf-init.sh は、オーナーと XXXX を、引数（--owner / --project。環境変数 SF_INIT_OWNER / SF_INIT_PROJECT）か、
+# 対話で決める（フォルダ構成には頼らない）。既定のテストは、環境変数で渡す（引数・対話のテストは、個別に指定する）
+export SF_INIT_OWNER="tamashimon" SF_INIT_PROJECT="testproject"
+
 # ==============================================================================
-# ヘルパー：{github-owner}/{company}/ 構造を作成
-# （init/ は sf-init.sh が自動作成するため、ここでは作らない）
+# ヘルパー：作業フォルダ（{base}/home/{github-owner}/{company}/。フォルダ名に意味はない）を作成
+# （admin/ は sf-init.sh が自動作成するため、ここでは作らない）
 # 戻り値: ベースディレクトリのパス（teardown に渡す）
 # ==============================================================================
 _setup_init_dir() {
@@ -193,7 +197,7 @@ _stub_subscripts() {
 #  19. Y                  (develop Sandbox? - ask_yn read_key)
 #  20. fake_dev_key       (develop コンシューマーキー - read_or_quit)
 #  21. dev@example.com    (develop ユーザー名 - read_or_quit)
-# 入力順（後処理）: なし（init フォルダの削除の質問は、廃止した。init フォルダは、管理者用として残す。Phase 10 が最後）
+# 入力順（後処理）: なし（admin フォルダの削除の質問は、廃止した。admin フォルダは、管理者用として残す。Phase 10 が最後）
 # ==============================================================================
 _make_input_3branches() {
     printf 'Y\nY\n1\n1\nghp_faketoken\n\nxoxb-faketoken\nC01ABCDEFGH\n\n\n1\nfake_prod_key\nprod@example.com\n\nY\nfake_stg_key\nstg@example.com\n\nY\nfake_dev_key\ndev@example.com\n'
@@ -228,8 +232,8 @@ test_happy_path_3branches() {
     assert_file_contains "$MOCK_CALL_LOG" "gh auth status"                           "gh auth status が呼ばれる"
     assert_file_contains "$MOCK_CALL_LOG" "gh repo create"                           "gh repo create が呼ばれる"
     assert_file_contains "$MOCK_CALL_LOG" "git clone"                                "git clone が呼ばれる"
-    assert_file_exists   "$init_dir/init/force-testproject/.github/workflows/wf-validate.yml"  "WF ファイル(wf-validate.yml)がコピーされる"
-    assert_file_exists   "$init_dir/init/force-testproject/.github/workflows/wf-release.yml"   "WF ファイル(wf-release.yml)がコピーされる"
+    assert_file_exists   "$init_dir/admin/force-testproject/.github/workflows/wf-validate.yml"  "WF ファイル(wf-validate.yml)がコピーされる"
+    assert_file_exists   "$init_dir/admin/force-testproject/.github/workflows/wf-release.yml"   "WF ファイル(wf-release.yml)がコピーされる"
     assert_file_contains "$MOCK_CALL_LOG" "sf org login"                             "sf org login jwt が呼ばれる"
     assert_file_contains "$MOCK_CALL_LOG" "gh secret set SF_PRIVATE_KEY"             "SF_PRIVATE_KEY が登録される"
     assert_file_contains "$MOCK_CALL_LOG" "gh secret set SF_CONSUMER_KEY_PROD"       "SF_CONSUMER_KEY_PROD が登録される"
@@ -247,8 +251,8 @@ test_happy_path_3branches() {
     [[ -n "$jwt_home_ca" && "$jwt_home_ca" == *"sf-tools-home."* && "$jwt_home_ca" != "$mock_home" && ! -e "$jwt_home_ca" ]] \
         && pass "接続アプリ版: JWT 接続テストは、一時的なホームの中で実行され、実行後に削除される" || fail "接続アプリ版: JWT 接続テストの隔離" "HOME=${jwt_home_ca}"
     assert_file_contains "$MOCK_CALL_LOG" "git -c credential.helper= push"           "Phase 8: 認証ヘルパーを無効化して push する"
-    assert_file_not_contains "$init_dir/init/.sf-init.env" "PAT_TOKEN_VALUE"         "push 後に .sf-init.env から PAT が削除される"
-    assert_file_contains "$init_dir/init/.sf-init.progress" "SF_INIT_DONE_PHASE=10"       "全 Phase 完了後、進捗に Phase 10 が記録される"
+    assert_file_not_contains "$init_dir/admin/.sf-init-testproject.env" "PAT_TOKEN_VALUE"         "push 後に .sf-init.env から PAT が削除される"
+    assert_file_contains "$init_dir/admin/.sf-init-testproject.progress" "SF_INIT_DONE_PHASE=10"       "全 Phase 完了後、進捗に Phase 10 が記録される"
     # ウィザード形式の画面（doc/wizard-ux-design.md）: 開始画面・ステップの見出し・完了画面
     assert_file_contains "/tmp/sf-init-test-happy.log" "新しい Salesforce プロジェクトを作ります"   "開始画面: タイトルが出る"
     assert_file_contains "/tmp/sf-init-test-happy.log" "【先に、用意してください】"                "開始画面: 事前に用意するものが出る"
@@ -365,7 +369,7 @@ test_sf_login_failure() {
 
     assert_exit_fail "$exit_code"                                              "SF ログイン失敗で非ゼロ終了する"
     assert_file_contains "$MOCK_CALL_LOG" "sf org login"                      "sf org login jwt が試みられる"
-    assert_file_contains "$init_dir/init/.sf-init.progress" "SF_INIT_DONE_PHASE=9"  "Phase 10 が失敗 → 進捗は、成功した Phase 9 までが記録される"
+    assert_file_contains "$init_dir/admin/.sf-init-testproject.progress" "SF_INIT_DONE_PHASE=9"  "Phase 10 が失敗 → 進捗は、成功した Phase 9 までが記録される"
 
     unset MOCK_SF_LOGIN_EXIT
     teardown "$mb" "$mock_home" "$init_base"
@@ -461,7 +465,7 @@ test_flex_layout_with_args() {
     assert_exit_ok   "$exit_code"                                                          "任意の場所で、引数を指定すると、最後まで通る"
     assert_file_contains "$MOCK_CALL_LOG" "gh repo create tamashimon/force-testproject"    "引数のオーナーと XXXX（force- は除く）で、リポジトリを作る"
     assert_file_exists   "$work/admin/force-testproject/.github/workflows/wf-validate.yml"  "管理者用の作業フォルダは admin（admin/force-testproject）"
-    assert_dir_not_exists "$work/init"                                                     "新しい形では、init フォルダを作らない"
+    assert_dir_not_exists "$work/init"                                                     "admin フォルダ（旧構成の名前）は作らない"
     assert_file_contains "$work/admin/.sf-init-testproject.env" "PROJECT_NAME=\"testproject\""   "途中経過は、admin の中に、プロジェクト名つき（.sf-init-XXXX.env）で保存される"
     assert_file_exists   "$work/admin/.sf-init-testproject.progress"                       "進捗も、プロジェクト名つき（.sf-init-XXXX.progress）で保存される"
     assert_file_contains "/tmp/sf-init-test-flex.log" "force- は自動で付くため"             "force- まで指定したとき、除いたことを表示する"
@@ -550,6 +554,7 @@ test_admin_branch_push_failure_is_not_fatal() {
 test_flex_layout_prompt() {
     echo ""
     echo -e "${CLR_HEAD}[TEST] 任意の場所 + 対話（オーナーと XXXX を入力）${CLR_RST}"
+    unset SF_INIT_OWNER SF_INIT_PROJECT     # 対話で決めるため、環境変数を外す（終わりに戻す）
 
     local mb mock_home base work
     mb=$(setup_mock_bin)
@@ -577,6 +582,7 @@ test_flex_layout_prompt() {
     assert_file_contains "$MOCK_CALL_LOG" "gh repo create tamashimon/force-testproject"    "入力したオーナーと XXXX で、リポジトリを作る"
     assert_file_exists   "$work/admin/force-testproject/.github/workflows/wf-validate.yml"  "管理者用の作業フォルダは admin"
 
+    export SF_INIT_OWNER="tamashimon" SF_INIT_PROJECT="testproject"   # 環境変数を戻す
     teardown "$mb" "$mock_home" "$base"
 }
 
@@ -693,9 +699,9 @@ test_only_phase2_creates_env_file() {
     exit_code=$?
 
     assert_exit_ok       "$exit_code"                                                "--only 2 で正常終了する"
-    assert_file_exists   "$init_dir/init/.sf-init.env"                                    ".sf-init.env が生成される"
-    assert_file_contains "$init_dir/init/.sf-init.env" "REPO_FULL_NAME"                  ".sf-init.env に REPO_FULL_NAME が含まれる"
-    assert_file_contains "$init_dir/init/.sf-init.env" "tamashimon/force-testproject"    "正しい REPO_FULL_NAME が書き出される"
+    assert_file_exists   "$init_dir/admin/.sf-init-testproject.env"                                    ".sf-init.env が生成される"
+    assert_file_contains "$init_dir/admin/.sf-init-testproject.env" "REPO_FULL_NAME"                  ".sf-init.env に REPO_FULL_NAME が含まれる"
+    assert_file_contains "$init_dir/admin/.sf-init-testproject.env" "tamashimon/force-testproject"    "正しい REPO_FULL_NAME が書き出される"
 
     teardown "$mb" "$mock_home" "$init_base"
 }
@@ -720,8 +726,8 @@ test_resume_runs_from_specified_phase() {
 
     # .sf-init.env を事前設定（Phase 2〜8 で書き出されるはずの内容）
     # --only 時は sf-init.sh が init/ に cd してから .sf-init.env を参照するため事前作成
-    mkdir -p "$init_dir/init"
-    cat > "$init_dir/init/.sf-init.env" << 'ENVEOF'
+    mkdir -p "$init_dir/admin"
+    cat > "$init_dir/admin/.sf-init-testproject.env" << 'ENVEOF'
 GITHUB_OWNER="tamashimon"
 PROJECT_NAME="testproject"
 REPO_NAME="force-testproject"
@@ -944,7 +950,7 @@ test_env_type_selection() {
     # 1: 本番環境
     init_base=$(_setup_init_dir "tamashimon" "testproject")
     init_dir="$init_base/home/tamashimon/testproject"
-    env_file="$init_dir/init/.sf-init.env"
+    env_file="$init_dir/admin/.sf-init-testproject.env"
     printf 'Y\nY\n1\nN\n' \
         | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
               bash "$mock_home/sf-tools/bin/sf-init.sh" --only 2 ) > /dev/null 2>&1
@@ -957,7 +963,7 @@ test_env_type_selection() {
     # 2 → Y: 検証環境
     init_base=$(_setup_init_dir "tamashimon" "testproject")
     init_dir="$init_base/home/tamashimon/testproject"
-    env_file="$init_dir/init/.sf-init.env"
+    env_file="$init_dir/admin/.sf-init-testproject.env"
     printf 'Y\nY\n2\nY\nN\n' \
         | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
               bash "$mock_home/sf-tools/bin/sf-init.sh" --only 2 ) > /dev/null 2>&1
@@ -970,7 +976,7 @@ test_env_type_selection() {
     # 2 → N → 1: 検証を取り消して選び直し、本番環境
     init_base=$(_setup_init_dir "tamashimon" "testproject")
     init_dir="$init_base/home/tamashimon/testproject"
-    env_file="$init_dir/init/.sf-init.env"
+    env_file="$init_dir/admin/.sf-init-testproject.env"
     printf 'Y\nY\n2\nN\n1\nN\n' \
         | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
               bash "$mock_home/sf-tools/bin/sf-init.sh" --only 2 ) > /dev/null 2>&1
@@ -982,7 +988,7 @@ test_env_type_selection() {
     # 2 → q: 中断
     init_base=$(_setup_init_dir "tamashimon" "testproject")
     init_dir="$init_base/home/tamashimon/testproject"
-    env_file="$init_dir/init/.sf-init.env"
+    env_file="$init_dir/admin/.sf-init-testproject.env"
     printf 'Y\nY\n2\nq\n' \
         | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
               bash "$mock_home/sf-tools/bin/sf-init.sh" --only 2 ) > /dev/null 2>&1
@@ -1012,8 +1018,8 @@ test_phase11_removed() {
     _stub_subscripts "$mock_home"
     init_base=$(_setup_init_dir "tamashimon" "testproject")
     init_dir="$init_base/home/tamashimon/testproject"
-    mkdir -p "$init_dir/init"
-    printf 'REPO_FULL_NAME="tamashimon/force-testproject"\nPROJECT_NAME="testproject"\n' > "$init_dir/init/.sf-init.env"
+    mkdir -p "$init_dir/admin"
+    printf 'REPO_FULL_NAME="tamashimon/force-testproject"\nPROJECT_NAME="testproject"\n' > "$init_dir/admin/.sf-init-testproject.env"
     : > "$MOCK_CALL_LOG"
 
     out=$( printf 'Y\n' | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
@@ -1145,9 +1151,9 @@ test_phase9_ruleset_id() {
     _p9_run() {
         init_base=$(_setup_init_dir "tamashimon" "testproject")
         init_dir="$init_base/home/tamashimon/testproject"
-        mkdir -p "$init_dir/init"
+        mkdir -p "$init_dir/admin"
         printf 'GITHUB_OWNER="tamashimon"\nPROJECT_NAME="testproject"\nREPO_NAME="force-testproject"\nREPO_FULL_NAME="tamashimon/force-testproject"\n' \
-            > "$init_dir/init/.sf-init.env"
+            > "$init_dir/admin/.sf-init-testproject.env"
         : > "$MOCK_CALL_LOG"
         printf 'Y\n' \
             | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
@@ -1196,8 +1202,8 @@ test_phase7_channel_id() {
     _p7_run() {
         init_base=$(_setup_init_dir "tamashimon" "testproject")
         init_dir="$init_base/home/tamashimon/testproject"
-        mkdir -p "$init_dir/init"
-        printf 'REPO_FULL_NAME="tamashimon/force-testproject"\nPROJECT_NAME="testproject"\n' > "$init_dir/init/.sf-init.env"
+        mkdir -p "$init_dir/admin"
+        printf 'REPO_FULL_NAME="tamashimon/force-testproject"\nPROJECT_NAME="testproject"\n' > "$init_dir/admin/.sf-init-testproject.env"
         rm -f "$mb"/var_SLACK_CHANNEL_ID.txt
         : > "$MOCK_CALL_LOG"
         printf '%b' "$1" \
@@ -1269,9 +1275,9 @@ test_phase10_eca_auto() {
     _p10_run() {
         init_base=$(_setup_init_dir "tamashimon" "testproject")
         init_dir="$init_base/home/tamashimon/testproject"
-        mkdir -p "$init_dir/init"
+        mkdir -p "$init_dir/admin"
         printf 'REPO_FULL_NAME="tamashimon/force-testproject"\nREPO_NAME="force-testproject"\nPROJECT_NAME="testproject"\nBRANCH_COUNT="1"\n' \
-            > "$init_dir/init/.sf-init.env"
+            > "$init_dir/admin/.sf-init-testproject.env"
         # 前のケースで生成された証明書が残ると「既存の証明書を再利用しますか？」の確認が出て入力列がずれるため消す
         rm -rf "$mb/deployed_src" "$mb/jwt.cnt" "$mock_home/.sf-jwt"
         : > "$MOCK_CALL_LOG"
@@ -1404,8 +1410,8 @@ test_e2e_input_sequence() {
     assert_file_contains      "$MOCK_CALL_LOG" "gh secret set SF_CONSUMER_KEY_PROD"                   "SF_CONSUMER_KEY_PROD が登録される"
     assert_file_not_contains  "$MOCK_CALL_LOG" "SF_CONSUMER_KEY_STG"                                  "main のみの構成なので、ステージング組織は設定しない"
     assert_file_not_contains  "$MOCK_CALL_LOG" "SF_TOOLS_TOKEN"                                       "SF_TOOLS_TOKEN は登録しない（sf-tools は公開リポジトリのため不要）"
-    assert_dir_exists         "$init_dir/init"                                                        "init フォルダが残る（削除の質問は、廃止した）"
-    assert_file_not_contains  "$mb/out.log" "削除してよいですか"                                       "init フォルダの削除の質問は、出さない"
+    assert_dir_exists         "$init_dir/admin"                                                        "admin フォルダが残る（削除の質問は、廃止した）"
+    assert_file_not_contains  "$mb/out.log" "削除してよいですか"                                       "admin フォルダの削除の質問は、出さない"
     assert_file_not_contains  "$mb/out.log" "ghp_fakepat"                                            "PAT_TOKEN の値が出力に出ない"
 
     unset MOCK_SF_ORG_JSON SF_INIT_JWT_INTERVAL MOCK_CALL_LOG SF_INIT_LOGIN_URL_PROD
@@ -1473,13 +1479,13 @@ test_phase6_pat_token() {
     create_all_mocks "$mb"
     create_mock_gh_for_init "$mb"
     _stub_subscripts "$mock_home"
-    mkdir -p "$init_dir/init"
+    mkdir -p "$init_dir/admin"
 
     # 引数: 標準入力（printf の書式）。先頭の Y は、管理者向けの確認。環境変数（MOCK_GH_*）は、呼ぶ前に export する
     #   REPO_DIR は入れない
     _p6_run() {
         : > "$MOCK_CALL_LOG"
-        cat > "$init_dir/init/.sf-init.env" << 'ENVEOF'
+        cat > "$init_dir/admin/.sf-init-testproject.env" << 'ENVEOF'
 GITHUB_OWNER="tamashimon"
 PROJECT_NAME="testproject"
 REPO_NAME="force-testproject"
@@ -1489,7 +1495,7 @@ ENVEOF
               bash "$mock_home/sf-tools/bin/sf-init.sh" --only 6 ) > "$mb/out.log" 2>&1
         exit_code=$?
     }
-    local envf="$init_dir/init/.sf-init.env"
+    local envf="$init_dir/admin/.sf-init-testproject.env"
 
     # --- 正常: 質問なしで、ブラウザを開く → 検証 OK → 登録 ---
     _p6_run 'Y\nghp_good\n'
@@ -1575,14 +1581,14 @@ export SF_INIT_LOGIN_URL_PROD=login   # ログイン先を、質問せずに指�
         local done_phase="$1" repo="$2" args="$3" input="$4"
         init_base=$(_setup_init_dir "tamashimon" "testproject")
         init_dir="$init_base/home/tamashimon/testproject"
-        envf="$init_dir/init/.sf-init.env"; progf="$init_dir/init/.sf-init.progress"
-        mkdir -p "$init_dir/init"
+        envf="$init_dir/admin/.sf-init-testproject.env"; progf="$init_dir/admin/.sf-init-testproject.progress"
+        mkdir -p "$init_dir/admin"
         {
             printf 'GITHUB_OWNER="tamashimon"\nPROJECT_NAME="testproject"\nREPO_NAME="force-testproject"\n'
             printf 'REPO_FULL_NAME="%s"\nBRANCH_COUNT="1"\n' "$repo"   # REPO_DIR は、5 番目の引数で渡す（既定は入れない）
-            [[ -n "${5:-}" ]] && printf '%s\n' "${5//@INIT@/$init_dir/init}"   # 追加の行（@INIT@ は、init フォルダのパスに置き換える）
+            [[ -n "${5:-}" ]] && printf '%s\n' "${5//@INIT@/$init_dir/admin}"   # 追加の行（@INIT@ は、管理者用フォルダ（admin）のパスに置き換える）
         } > "$envf"
-        [[ "${5:-}" == *REPO_DIR* ]] && mkdir -p "$init_dir/init/force-testproject"
+        [[ "${5:-}" == *REPO_DIR* ]] && mkdir -p "$init_dir/admin/force-testproject"
         printf 'SF_INIT_DONE_PHASE=%s\nSF_INIT_DONE_AT="2026-10-11 14:32"\n' "$done_phase" > "$progf"
         [[ -n "${6:-}" ]] && printf '%b\n' "$6" >> "$progf"   # 進捗ファイルに追加する行（段階ごとの完了の記録など）
         rm -rf "$mb/deployed_src" "$mb/jwt.cnt" "$mock_home/.sf-jwt" "$mb/.repo_view_called"
@@ -1645,7 +1651,7 @@ export SF_INIT_LOGIN_URL_PROD=login   # ログイン先を、質問せずに指�
     _rc_run 10 "tamashimon/force-testproject" "" 'Y\n1\n' 'REPO_DIR="@INIT@/force-testproject"'
     assert_exit_ok            "$exit_code"                                                  "完了済み・1: 正常終了する"
     assert_file_contains      "$out" "STATUS-STUB cwd="                                       "完了済み・1: 接続の確認（status.sh）が実行される"
-    assert_file_contains      "$out" "init/force-testproject"                                  "完了済み・1: 管理者用のフォルダで実行される"
+    assert_file_contains      "$out" "admin/force-testproject"                                 "完了済み・1: 管理者用のフォルダで実行される"
     assert_file_not_contains  "$MOCK_CALL_LOG" "gh repo create"                              "完了済み・1: 何も変更しない"
     rm -rf "$init_base"
 
@@ -1748,14 +1754,14 @@ export SF_INIT_LOGIN_URL_PROD=login   # ログイン先を、質問せずに指�
     rm -rf "$init_base"
     unset SF_INIT_VERIFY_ASK
 
-    # 完了時の後始末: 残った Token の値の行を、.sf-init.env から消す（init フォルダは、残すため）
+    # 完了時の後始末: 残った Token の値の行を、.sf-init.env から消す（admin フォルダは、残すため）
     _rc_run 9 "tamashimon/force-testproject" "" 'Y\n1\n' 'PAT_TOKEN_VALUE="ghp_leftover"'
     assert_exit_ok            "$exit_code"                                                  "完了時の掃除: 正常終了する"
     assert_file_not_contains  "$envf" "PAT_TOKEN_VALUE"                                       "完了時の掃除: Token の値の行が、.sf-init.env から消える"
     assert_file_contains      "$envf" "REPO_FULL_NAME"                                        "完了時の掃除: ほかの行は、残る"
     assert_file_not_contains  "$out" "ghp_leftover"                                           "完了時の掃除: Token の値が、画面に出ない"
     assert_file_contains      "$out" "管理者用フォルダ"                                         "完了画面: 管理者用のフォルダを案内する"
-    assert_file_not_contains  "$out" "削除してよいですか"                                      "init フォルダの削除の質問は、出さない"
+    assert_file_not_contains  "$out" "削除してよいですか"                                      "admin フォルダの削除の質問は、出さない"
     rm -rf "$init_base"
 
     # 質問が出ない: --resume N を明示
@@ -1927,9 +1933,9 @@ test_org_connection() {
     # --- A. Phase 10: 本番は main のみ。staging に本番をつなぐと、アプリを作る前に、中断する ---
     init_base=$(_setup_init_dir "tamashimon" "testproject")
     init_dir="$init_base/home/tamashimon/testproject"
-    mkdir -p "$init_dir/init"
+    mkdir -p "$init_dir/admin"
     printf 'REPO_FULL_NAME="tamashimon/force-testproject"\nREPO_NAME="force-testproject"\nPROJECT_NAME="testproject"\nBRANCH_COUNT="2"\n' \
-        > "$init_dir/init/.sf-init.env"
+        > "$init_dir/admin/.sf-init-testproject.env"
     : > "$MOCK_CALL_LOG"
     printf 'Y\n' \
         | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" MOCK_SF_ORG_INFO="$PROD_JSON" \
@@ -1948,9 +1954,9 @@ test_org_connection() {
     rm -rf "$mock_home/.sf-jwt" "$mb/deployed_src" "$mb/jwt.cnt"   # 前のケースで生成された証明書が残ると、「再利用しますか？」の質問が出るため
     init_base=$(_setup_init_dir "tamashimon" "testproject")
     init_dir="$init_base/home/tamashimon/testproject"
-    mkdir -p "$init_dir/init"
+    mkdir -p "$init_dir/admin"
     printf 'REPO_FULL_NAME="tamashimon/force-testproject"\nREPO_NAME="force-testproject"\nPROJECT_NAME="testproject"\nBRANCH_COUNT="2"\n' \
-        > "$init_dir/init/.sf-init.env"
+        > "$init_dir/admin/.sf-init-testproject.env"
     : > "$MOCK_CALL_LOG"
     printf 'Y\n' \
         | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" MOCK_SF_ORG_INFO="$DE_JSON" \
@@ -2123,9 +2129,9 @@ GITEOF
     rm -rf "$mock_home/.sf-jwt"   # 「既存の証明書を再利用しますか？」の質問を、出さないため
     init_base=$(_setup_init_dir "tamashimon" "testproject")
     init_dir="$init_base/home/tamashimon/testproject"
-    mkdir -p "$init_dir/init"
+    mkdir -p "$init_dir/admin"
     printf 'REPO_FULL_NAME="tamashimon/force-testproject"\nREPO_NAME="force-testproject"\nPROJECT_NAME="testproject"\nBRANCH_COUNT="1"\nAPP_TYPE=2\n' \
-        > "$init_dir/init/.sf-init.env"
+        > "$init_dir/admin/.sf-init-testproject.env"
     printf 'Y\n' \
         | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
               bash "$mock_home/sf-tools/bin/sf-init.sh" --only 10 --legacy-connected-app ) > "$out" 2>&1

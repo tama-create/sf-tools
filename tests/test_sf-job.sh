@@ -5,8 +5,6 @@
 #
 # 【テストケース】
 #   1. ハッピーパス                         - フルフロー正常終了
-#   2. フォルダからオーナー名自動取得        - REPO_FULL_NAME が正しく構成される
-#   3. init フォルダから実行               - 環境チェックで失敗
 #   4. force-* フォルダから実行            - 環境チェックで失敗
 #   5. リポジトリが存在しない              - プロジェクト情報確認で失敗
 #   6. ジョブ名ローカル重複                - WARNING → 再入力 → 正常終了
@@ -67,7 +65,7 @@ _stub_job_subscripts() {
 }
 
 # ==============================================================================
-# ヘルパー：{github-owner}/{company}/ ディレクトリを作成して company パスを返す
+# ヘルパー：作業フォルダを作成してパスを返す（フォルダ名に意味はない。オーナーと XXXX は、引数で渡す）
 # teardown には $(dirname "$(dirname "$(dirname "$cdir")") を渡すこと（home/ 階層を含む3段）
 # ==============================================================================
 setup_company_dir() {
@@ -96,7 +94,7 @@ test_happy_path() {
 
     local ec
     printf 'JOB-test\nY\n' \
-        | (export HOME="$mock_home" PATH="$mb:$PATH"; cd "$cdir" && bash "$mock_home/sf-tools/bin/sf-job.sh") \
+        | (export HOME="$mock_home" PATH="$mb:$PATH"; cd "$cdir" && bash "$mock_home/sf-tools/bin/sf-job.sh" --owner tamashimon-org --project yamada) \
           > /dev/null 2>&1
     ec=$?
 
@@ -108,64 +106,6 @@ test_happy_path() {
     assert_file_contains "$MOCK_CALL_LOG" "git clone -c core.longpaths=true" "git clone に core.longpaths=true が付く（Windows のパス長の上限対策）"
 
     teardown "$mb" "$mock_home" "$(dirname "$(dirname "$(dirname "$cdir")")")"
-}
-
-# ==============================================================================
-# テスト 2: フォルダ名から GitHub オーナー名が自動取得される
-# ==============================================================================
-test_owner_auto_derive() {
-    echo ""
-    echo -e "${CLR_HEAD}[TEST] フォルダ名から GitHub オーナー名を自動取得${CLR_RST}"
-
-    local mb mock_home cdir
-    mb=$(setup_mock_bin); export MOCK_CALL_LOG="$mb/calls.log"
-    mock_home=$(setup_mock_home)
-    # 異なるオーナー名でフォルダを作成
-    cdir=$(setup_company_dir "my-org-name" "yamada")
-
-    create_mock_git "$mb"
-    create_mock_gh_for_job "$mb"
-    _stub_job_subscripts "$mock_home"
-
-    local ec
-    printf 'JOB-test\nY\n' \
-        | (export HOME="$mock_home" PATH="$mb:$PATH"; cd "$cdir" && bash "$mock_home/sf-tools/bin/sf-job.sh") \
-          > /dev/null 2>&1
-    ec=$?
-
-    assert_exit_ok  $ec                                                  "正常終了する"
-    # REPO_FULL_NAME = my-org-name/force-yamada が使われていること
-    assert_file_contains "$MOCK_CALL_LOG" "my-org-name/force-yamada"     "フォルダ名からオーナーが正しく導出される"
-
-    teardown "$mb" "$mock_home" "$(dirname "$(dirname "$(dirname "$cdir")")")"
-}
-
-# ==============================================================================
-# テスト 3: init フォルダから実行 → エラー
-# ==============================================================================
-test_from_init_dir() {
-    echo ""
-    echo -e "${CLR_HEAD}[TEST] init フォルダから実行 → エラー${CLR_RST}"
-
-    local mb mock_home base init_dir
-    mb=$(setup_mock_bin); export MOCK_CALL_LOG="$mb/calls.log"
-    mock_home=$(setup_mock_home)
-    base=$(mktemp -d "${TMPDIR:-/tmp}/test-init-XXXX")
-    init_dir="$base/init"
-    mkdir -p "$init_dir"
-
-    create_mock_gh_for_job "$mb"
-    _stub_job_subscripts "$mock_home"
-
-    local ec
-    printf 'q\n' \
-        | (export HOME="$mock_home" PATH="$mb:$PATH"; cd "$init_dir" && bash "$mock_home/sf-tools/bin/sf-job.sh") \
-          > /dev/null 2>&1
-    ec=$?
-
-    assert_exit_fail $ec "init フォルダ → エラー終了"
-
-    teardown "$mb" "$mock_home" "$base"
 }
 
 # ==============================================================================
@@ -214,7 +154,7 @@ test_repo_not_found() {
     local ec
     printf 'q\n' \
         | (export HOME="$mock_home" PATH="$mb:$PATH" MOCK_GH_REPO_VIEW_EXIT="$MOCK_GH_REPO_VIEW_EXIT"; \
-           cd "$cdir" && bash "$mock_home/sf-tools/bin/sf-job.sh") \
+           cd "$cdir" && bash "$mock_home/sf-tools/bin/sf-job.sh" --owner tamashimon-org --project yamada) \
           > /dev/null 2>&1
     ec=$?
 
@@ -239,11 +179,11 @@ test_local_job_dir_duplicate() {
     create_mock_gh_for_job "$mb"
     _stub_job_subscripts "$mock_home"
 
-    mkdir -p "$cdir/JOB-existing"
+    mkdir -p "$cdir/JOB-existing/force-yamada"   # 同じジョブ名のフォルダに、同じプロジェクトのクローンがある
 
     local ec out
     out=$(printf 'JOB-existing\nJOB-newname\nY\n' \
-        | (export HOME="$mock_home" PATH="$mb:$PATH"; cd "$cdir" && bash "$mock_home/sf-tools/bin/sf-job.sh") 2>&1)
+        | (export HOME="$mock_home" PATH="$mb:$PATH"; cd "$cdir" && bash "$mock_home/sf-tools/bin/sf-job.sh" --owner tamashimon-org --project yamada) 2>&1)
     ec=$?
 
     assert_exit_ok $ec "重複後に新しい名前で正常終了"
@@ -283,7 +223,7 @@ EOF
 
     local ec out
     out=$(printf 'JOB-existing\nJOB-newname\nY\n' \
-        | (export HOME="$mock_home" PATH="$mb:$PATH"; cd "$cdir" && bash "$mock_home/sf-tools/bin/sf-job.sh") 2>&1)
+        | (export HOME="$mock_home" PATH="$mb:$PATH"; cd "$cdir" && bash "$mock_home/sf-tools/bin/sf-job.sh" --owner tamashimon-org --project yamada) 2>&1)
     ec=$?
 
     assert_exit_ok $ec "ブランチ重複後に新しい名前で正常終了"
@@ -309,7 +249,7 @@ test_invalid_job_name() {
 
     local ec out
     out=$(printf 'JOB INVALID\nJOB-valid\nY\n' \
-        | (export HOME="$mock_home" PATH="$mb:$PATH"; cd "$cdir" && bash "$mock_home/sf-tools/bin/sf-job.sh") 2>&1)
+        | (export HOME="$mock_home" PATH="$mb:$PATH"; cd "$cdir" && bash "$mock_home/sf-tools/bin/sf-job.sh" --owner tamashimon-org --project yamada) 2>&1)
     ec=$?
 
     assert_exit_ok $ec "無効な名前の後に有効な名前で正常終了"
@@ -337,7 +277,7 @@ test_branch_create_failure() {
     local ec
     printf 'JOB-test\nY\n' \
         | (export HOME="$mock_home" PATH="$mb:$PATH" MOCK_GH_CREATE_BRANCH_EXIT="$MOCK_GH_CREATE_BRANCH_EXIT"; \
-           cd "$cdir" && bash "$mock_home/sf-tools/bin/sf-job.sh") \
+           cd "$cdir" && bash "$mock_home/sf-tools/bin/sf-job.sh" --owner tamashimon-org --project yamada) \
           > /dev/null 2>&1
     ec=$?
 
@@ -366,7 +306,7 @@ test_clone_failure() {
     local ec
     printf 'JOB-test\nY\n' \
         | (export HOME="$mock_home" PATH="$mb:$PATH" MOCK_GIT_CLONE_EXIT="$MOCK_GIT_CLONE_EXIT"; \
-           cd "$cdir" && bash "$mock_home/sf-tools/bin/sf-job.sh") \
+           cd "$cdir" && bash "$mock_home/sf-tools/bin/sf-job.sh" --owner tamashimon-org --project yamada) \
           > /dev/null 2>&1
     ec=$?
 
@@ -392,7 +332,7 @@ test_quit_with_q() {
 
     local ec
     printf 'q\n' \
-        | (export HOME="$mock_home" PATH="$mb:$PATH"; cd "$cdir" && bash "$mock_home/sf-tools/bin/sf-job.sh") \
+        | (export HOME="$mock_home" PATH="$mb:$PATH"; cd "$cdir" && bash "$mock_home/sf-tools/bin/sf-job.sh" --owner tamashimon-org --project yamada) \
           > /dev/null 2>&1
     ec=$?
 
@@ -525,8 +465,6 @@ test_unknown_option() {
 }
 
 test_happy_path
-test_owner_auto_derive
-test_from_init_dir
 test_from_force_dir
 test_repo_not_found
 test_local_job_dir_duplicate

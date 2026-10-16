@@ -10,15 +10,14 @@
 #   {作業フォルダ}/
 #   ├── JOB-xxx/              ← 作業単位（sf-job.sh が作成するジョブフォルダ。同じ force-XXXX を、同時に複数開くための入れ物）
 #   │   └── force-XXXX/       ← クローン先（プロジェクト。VS Code で開く単位）
-#   └── admin/                ← sf-init.sh が作る管理者用の作業フォルダ（従来の構成では init）
-#   従来の構成 …/home/{github-owner}/{company}/ も、そのまま動く。
+#   └── admin/                ← sf-init.sh が作る管理者用の作業フォルダ
+#   おすすめの作業フォルダ: ~/sf のような、短い名前のフォルダ。
 #
 # 【どのプロジェクトか（オーナーと XXXX）の決め方】 リポジトリ名は force-XXXX（force- は固定。XXXX は管理者が決めた名前）
 #   1. 引数 --owner / --project（--project には、XXXX だけを指定する。force- まで書いても、除いて扱う）
-#   2. 従来のフォルダ構成（…/home/{github-owner}/{company}/）で実行したとき（引数がなければ）、そこから自動で取る
-#   3. カレントの下にある、クローン（*/force-*/）の git remote から取る（フォルダ名ではなく、実際の設定から取る）
+#   2. カレントの下にある、クローン（*/force-*/）の git remote から取る（フォルダ名ではなく、実際の設定から取る）
 #        1 種類 → 自動で決まる / 複数 → 番号で選ぶ（または --project）
-#   4. どれもなければ、対話（オーナー: gh のログインから候補 / XXXX: 入力）
+#   3. どれもなければ、対話（オーナー: gh のログインから候補 / XXXX: 入力）
 #
 # 【処理フロー】
 #   Phase 1: 環境チェック（管理者用の作業フォルダ・force-* の中から実行されていないか確認）
@@ -87,7 +86,7 @@ done
 # ------------------------------------------------------------------------------
 COMPANY_NAME=""       # プロジェクト名 XXXX（リポジトリ force-XXXX の XXXX の部分）
 REPO_NAME=""          # force-company 形式のリポジトリ名
-GITHUB_OWNER=""       # GitHub ユーザー名または組織名（引数・従来の構成・クローンの git remote・対話のいずれかで決まる）
+GITHUB_OWNER=""       # GitHub ユーザー名または組織名（引数・クローンの git remote・対話のいずれかで決まる）
 REPO_FULL_NAME=""     # OWNER/REPO 形式
 JOB_NAME=""           # ジョブ名（例: JOB-20260323）
 JOB_DIR=""            # ジョブフォルダの絶対パス
@@ -109,8 +108,8 @@ phase_check_environment() {
     local current_dir
     current_dir=$(basename "$PWD")
 
-    # 管理者用の作業フォルダ（init / admin）・force-* フォルダからは実行禁止
-    if [[ "$current_dir" == "init" || "$current_dir" == "admin" ]]; then
+    # 管理者用の作業フォルダ（admin）・force-* フォルダからは実行禁止
+    if [[ "$current_dir" == "admin" ]]; then
         die "sf-job.sh は管理者用の作業フォルダ（${current_dir}）からは実行できません。
   作業フォルダ（作業単位のフォルダを置く場所）に移動して実行してください:
     cd ..
@@ -176,10 +175,10 @@ phase_ask_job_name() {
         fi
 
         # --- ローカルフォルダの重複チェック ---
-        #   従来の構成: 同名のフォルダがあれば、重複（1 つの作業フォルダに、プロジェクトは 1 つ）。
-        #   新しい形: 同じジョブ名のフォルダが、別のプロジェクトのクローンだけを含むなら、重複ではない
+        #   同じジョブ名のフォルダに、同じプロジェクトのクローンがあれば、重複。
+        #   別のプロジェクトのクローンだけを含むなら、重複ではない（同じジョブ名で、複数のプロジェクトを扱える）
         JOB_DIR="${PWD}/${JOB_NAME}"
-        if [[ -d "$JOB_DIR" ]] && { [[ "$PROJECT_LAYOUT" == "legacy" ]] || [[ -e "${JOB_DIR}/${REPO_NAME}" ]]; }; then
+        if [[ -e "${JOB_DIR}/${REPO_NAME}" ]]; then
             log "WARNING" "同名のフォルダがすでに存在します: ${JOB_DIR}"
             log "WARNING" "別のジョブ名を入力してください。"
             JOB_NAME=""
@@ -285,7 +284,7 @@ phase_sf_start() {
 # ------------------------------------------------------------------------------
 log "HEADER" "作業環境セットアップを開始します (${SCRIPT_NAME}.sh)"
 
-resolve_job_identity "$ARG_OWNER" "$ARG_PROJECT"   # GITHUB_OWNER / COMPANY_NAME / PROJECT_LAYOUT をセット（引数 → 従来の構成 → クローン → 対話）
+resolve_job_identity "$ARG_OWNER" "$ARG_PROJECT"   # GITHUB_OWNER / COMPANY_NAME をセット（引数 → クローン → 対話）
 check_gh_owner "$GITHUB_OWNER"
 
 log "INFO" "中断するには q を入力してください。"

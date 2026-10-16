@@ -454,7 +454,7 @@ tr -d '\r' < "$key_file" | base64 -w 0 | gh secret set "SF_PRIVATE_KEY" -R "$REP
 
 新規 Salesforce プロジェクトの初期セットアップ。`phases/init/` 配下のフェーズスクリプトを順次実行する。
 
-**オーナーと XXXX の決め方（フォルダ構成に依存しない）**: リポジトリ名は `force-XXXX`（`force-` は固定、XXXX は管理者が決める）。`resolve_init_identity`（`lib/project.sh`）が、①引数 `--owner` / `--project`（環境変数 `SF_INIT_OWNER` / `SF_INIT_PROJECT`）→ ②従来のフォルダ構成（`*/home/{owner}/{company}`、ちょうど 2 階層。引数がないか、引数がフォルダの値と同じとき）→ ③対話（オーナーは `gh` から候補、XXXX は入力。`force-` は自動で付く旨を案内し、既存プロジェクトを参考に表示）の順で決める。決めた値は `SF_INIT_OWNER` / `SF_INIT_PROJECT` に export し、Phase 2 と、sf-tools 更新後の再実行に引き継ぐ。`PROJECT_LAYOUT` は `legacy` / `flex`。管理者用の作業フォルダ（`.sf-init.env` / `.sf-init.progress` の置き場）は、legacy は `init`、flex は `init-XXXX`（同じ作業フォルダで複数プロジェクトを作っても衝突しない）。Phase 1 は `init` と `init-*` を許可する。`sf-job.sh` は、①引数 → ②従来の構成 → ③`{cwd}/*/force-*` のクローンの `git remote` → ④対話で決め（`resolve_job_identity`）、`init` / `init-*` / `force-*` の中では実行できない。重複判定は、legacy はジョブフォルダの有無、flex は `{ジョブ}/force-XXXX` の有無。
+**オーナーと XXXX の決め方（フォルダ構成に依存しない）**: リポジトリ名は `force-XXXX`（`force-` は固定、XXXX は管理者が決める）。`resolve_init_identity`（`lib/project.sh`）が、①引数 `--owner` / `--project`（環境変数 `SF_INIT_OWNER` / `SF_INIT_PROJECT`）→ ②従来のフォルダ構成（`*/home/{owner}/{company}`、ちょうど 2 階層。引数がないか、引数がフォルダの値と同じとき）→ ③対話（オーナーは `gh` から候補、XXXX は入力。`force-` は自動で付く旨を案内し、既存プロジェクトを参考に表示）の順で決める。決めた値は `SF_INIT_OWNER` / `SF_INIT_PROJECT` に export し、Phase 2 と、sf-tools 更新後の再実行に引き継ぐ。`PROJECT_LAYOUT` は `legacy` / `flex`。管理者用の作業フォルダ（`.sf-init.env` / `.sf-init.progress` の置き場）は、legacy は `init`、flex は `admin`（固定。同じ `admin` に複数プロジェクトを置くため、状態ファイルは `.sf-init-XXXX.env` / `.sf-init-XXXX.progress` とプロジェクトごとに分ける。legacy は `.sf-init.env` / `.sf-init.progress` のまま）。Phase 1 は `init` と `admin` を許可する。`sf-job.sh` は、①引数 → ②従来の構成 → ③`{cwd}/*/force-*` のクローンの `git remote` → ④対話で決め（`resolve_job_identity`）、`init` / `admin` / `force-*` の中では実行できない。重複判定は、legacy はジョブフォルダの有無、flex は `{ジョブ}/force-XXXX` の有無。
 
 起動時（フェーズの実行・`--resume` / `--only` / `--add-tier` の前）に `check_sf_cli` で、`sf --version` の終了コードを確認し、0 以外なら案内（npm 版への入れ替え）を表示して中断する（3.3 参照）。
 **ウィザード形式の画面（`lib/wizard.sh`・設計: `doc/wizard-ux-design.md`）:**
@@ -511,7 +511,7 @@ tr -d '\r' < "$key_file" | base64 -w 0 | gh secret set "SF_PRIVATE_KEY" -R "$REP
 実行場所: **`force-*` ディレクトリ内**（`sf-init.sh` の通常実行とは異なる点に注意）
 
 ```bash
-cd {作業フォルダ}/{作業単位}/force-xxx    # 例: init-acme/force-acme（従来の構成では init/force-acme）
+cd {作業フォルダ}/{作業単位}/force-xxx    # 例: admin/force-acme（従来の構成では init/force-acme）
 sf-init.sh --add-tier staging    # main → main+staging
 sf-init.sh --add-tier develop    # main+staging → main+staging+develop
 ```

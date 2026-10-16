@@ -28,10 +28,10 @@ SF_INIT_ENV_FILE="${SF_INIT_ENV_FILE:-${PWD}/.sf-init.env}"
 # ------------------------------------------------------------------------------
 log "HEADER" "環境チェック"
 
-# 管理者用の作業フォルダ（従来の構成: init / 新しい形: init-XXXX）からのみ実行を許可
+# 管理者用の作業フォルダ（従来の構成: init / 新しい形: admin）からのみ実行を許可
 local_dir=$(basename "$PWD")
-if [[ "$local_dir" != "init" && "$local_dir" != init-* ]]; then
-    die "このスクリプトは、管理者用の作業フォルダ（init-XXXX。従来の構成では init）から実行してください。
+if [[ "$local_dir" != "init" && "$local_dir" != "admin" ]]; then
+    die "このスクリプトは、管理者用の作業フォルダ（admin。従来の構成では init）から実行してください。
 実行方法（通常は、sf-init.sh が、このフォルダを作って移動します）:
   ~/sf-tools/bin/sf-init.sh [--owner OWNER] [--project XXXX]"
 fi

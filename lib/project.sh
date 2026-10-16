@@ -330,7 +330,7 @@ prompt_project_identity() {
         echo "  XXXX = ${norm}" >&2
         if [[ "$mode" == "init" ]]; then
             echo "  → 作るリポジトリ         : ${GITHUB_OWNER}/force-${norm}" >&2
-            echo "  → 管理者用の作業フォルダ : ${PWD}/init-${norm}/force-${norm}" >&2
+            echo "  → 管理者用の作業フォルダ : ${PWD}/admin/force-${norm}" >&2
         else
             echo "  → 対象のリポジトリ       : ${GITHUB_OWNER}/force-${norm}" >&2
         fi
@@ -340,7 +340,7 @@ prompt_project_identity() {
 }
 
 # resolve_init_identity - sf-init 用: オーナーと XXXX を決める（引数 SF_INIT_OWNER / SF_INIT_PROJECT → 従来の構成 → 対話）
-#   結果: GITHUB_OWNER / COMPANY_NAME / PROJECT_LAYOUT（legacy = 従来の構成。管理者用フォルダは init / flex = init-XXXX）
+#   結果: GITHUB_OWNER / COMPANY_NAME / PROJECT_LAYOUT（legacy = 従来の構成。管理者用フォルダは init / flex = admin）
 #   決めた値は SF_INIT_OWNER / SF_INIT_PROJECT に export する（sf-tools を更新して、実行しなおすときと、Phase 2 が使う）
 resolve_init_identity() {
     local a_owner="${SF_INIT_OWNER:-}" a_project="${SF_INIT_PROJECT:-}" norm=""

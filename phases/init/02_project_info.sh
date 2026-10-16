@@ -6,7 +6,7 @@
 # 環境種別（本番/検証）を選択し、.sf-init.env に変数を書き出して後続フェーズと共有する。
 #
 # 【値の決まり方】
-#   カレント: 管理者用の作業フォルダ（従来の構成: …/home/{owner}/{company}/init/ / 新しい形: {作業フォルダ}/init-XXXX/）
+#   カレント: 管理者用の作業フォルダ（従来の構成: …/home/{owner}/{company}/init/ / 新しい形: {作業フォルダ}/admin/）
 #             （sf-init.sh が自動作成・移動）
 #   PROJECT_NAME  = XXXX（環境変数 SF_INIT_PROJECT。sf-init.sh が、引数・従来の構成・対話から決める）
 #   GITHUB_OWNER  = オーナー（環境変数 SF_INIT_OWNER）

@@ -433,11 +433,11 @@ test_invalid_owner_folder() {
 }
 
 # ==============================================================================
-# テスト 6b: フォルダ構成に頼らない（任意の場所 + 引数 --owner / --project）→ 管理者用の作業フォルダは init-XXXX
+# テスト 6b: フォルダ構成に頼らない（任意の場所 + 引数 --owner / --project）→ 管理者用の作業フォルダは admin
 # ==============================================================================
 test_flex_layout_with_args() {
     echo ""
-    echo -e "${CLR_HEAD}[TEST] 任意の場所 + --owner / --project → init-XXXX で、最後まで通る${CLR_RST}"
+    echo -e "${CLR_HEAD}[TEST] 任意の場所 + --owner / --project → admin で、最後まで通る${CLR_RST}"
 
     local mb mock_home base work
     mb=$(setup_mock_bin)
@@ -460,9 +460,10 @@ test_flex_layout_with_args() {
 
     assert_exit_ok   "$exit_code"                                                          "任意の場所で、引数を指定すると、最後まで通る"
     assert_file_contains "$MOCK_CALL_LOG" "gh repo create tamashimon/force-testproject"    "引数のオーナーと XXXX（force- は除く）で、リポジトリを作る"
-    assert_file_exists   "$work/init-testproject/force-testproject/.github/workflows/wf-validate.yml"  "管理者用の作業フォルダは init-XXXX（init-testproject/force-testproject）"
+    assert_file_exists   "$work/admin/force-testproject/.github/workflows/wf-validate.yml"  "管理者用の作業フォルダは admin（admin/force-testproject）"
     assert_dir_not_exists "$work/init"                                                     "新しい形では、init フォルダを作らない"
-    assert_file_contains "$work/init-testproject/.sf-init.env" "PROJECT_NAME=\"testproject\""   "途中経過（.sf-init.env）は、init-XXXX の中に保存される"
+    assert_file_contains "$work/admin/.sf-init-testproject.env" "PROJECT_NAME=\"testproject\""   "途中経過は、admin の中に、プロジェクト名つき（.sf-init-XXXX.env）で保存される"
+    assert_file_exists   "$work/admin/.sf-init-testproject.progress"                       "進捗も、プロジェクト名つき（.sf-init-XXXX.progress）で保存される"
     assert_file_contains "/tmp/sf-init-test-flex.log" "force- は自動で付くため"             "force- まで指定したとき、除いたことを表示する"
     assert_file_contains "/tmp/sf-init-test-flex.log" "cd \"$work\""                        "完了画面: 次のコマンドに、実際の作業フォルダを表示する（~/home/… ではない）"
     assert_file_not_contains "/tmp/sf-init-test-flex.log" "~/home/"                         "完了画面に、~/home/ という決まりを出さない"
@@ -501,7 +502,7 @@ test_flex_layout_prompt() {
     assert_file_contains "/tmp/sf-init-test-flex2.log" "XXXX の部分だけを入力してください"     "対話: 「force- は自動で付く。XXXX だけ入力」と案内する"
     assert_file_contains "/tmp/sf-init-test-flex2.log" "作るリポジトリ"                        "対話: 入力のあとに、作るリポジトリ名を表示して確認する"
     assert_file_contains "$MOCK_CALL_LOG" "gh repo create tamashimon/force-testproject"    "入力したオーナーと XXXX で、リポジトリを作る"
-    assert_file_exists   "$work/init-testproject/force-testproject/.github/workflows/wf-validate.yml"  "管理者用の作業フォルダは init-XXXX"
+    assert_file_exists   "$work/admin/force-testproject/.github/workflows/wf-validate.yml"  "管理者用の作業フォルダは admin"
 
     teardown "$mb" "$mock_home" "$base"
 }

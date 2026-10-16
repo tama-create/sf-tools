@@ -13,9 +13,10 @@
 #        （従来の環境は、そのまま動く。管理者用の作業フォルダは、init）
 #     3. 対話: オーナーは、gh のログインから候補を出す（管理者の組織。1 つなら自動、複数なら番号で選ぶ）。
 #        XXXX は、入力する（すでにあるプロジェクトの一覧を、参考に表示する。確認の画面つき）
-#   2 以外（新しい形）の管理者用の作業フォルダは、init-XXXX（複数のプロジェクトを、同じ場所で作っても、
-#   途中経過が、衝突しない）。実行した場所（作業フォルダ）に、init-XXXX/force-XXXX ができる。
-#   ※ 管理者用の作業フォルダ（init / init-XXXX）の中や、force-* の中から実行すると、その中に作られてしまうため、
+#   2 以外（新しい形）の管理者用の作業フォルダは、admin（固定）。実行した場所（作業フォルダ）に、admin/force-XXXX ができる。
+#   複数のプロジェクトを、同じ admin に作ってもよい（途中経過のファイルは、プロジェクトごとに分かれる:
+#   .sf-init-XXXX.env / .sf-init-XXXX.progress。従来の構成の init は、.sf-init.env / .sf-init.progress のまま）。
+#   ※ 管理者用の作業フォルダ（init / admin）の中や、force-* の中から実行すると、その中に作られてしまうため、
 #      作業フォルダ（sf-job.sh を実行する場所）で実行すること
 #
 # 【処理フロー】
@@ -45,12 +46,12 @@
 #   cd {作業フォルダ}                    # 好きな場所（従来の …/home/{owner}/{company}/ でもよい）
 #   ~/sf-tools/bin/sf-init.sh [--owner OWNER] [--project XXXX] [--resume N] [--only N]
 #
-#   cd {作業フォルダ}/init-XXXX/force-XXXX  # 管理者用の作業フォルダの中（従来の構成では init/force-XXXX）
+#   cd {作業フォルダ}/admin/force-XXXX      # 管理者用の作業フォルダの中（従来の構成では init/force-XXXX）
 #   ~/sf-tools/bin/sf-init.sh --add-tier staging   # staging tier を追加
 #   ~/sf-tools/bin/sf-init.sh --add-tier develop   # develop tier を追加
 #
 # 【途中で止まったとき（続きから）】
-#   各 Phase が成功するたびに、進捗を init/.sf-init.progress に記録する（SF_INIT_DONE_PHASE）。
+#   各 Phase が成功するたびに、進捗を管理者用の作業フォルダの .sf-init.progress（新しい形では .sf-init-XXXX.progress）に記録する（SF_INIT_DONE_PHASE）。
 #   途中（Phase 2〜9 まで完了）で止まった状態が残っていて、そのリポジトリがこの作業フォルダのものなら、
 #   引数なしで起動したとき、次の 2 つから選ばせる（既定値はなく、番号を入力する）。
 #     [1] 次の Phase から続きをやる（Phase 1 の環境チェックを実行したうえで、続きから。保存済みの入力内容を使う）
@@ -348,13 +349,15 @@ check_gh_owner "$GITHUB_OWNER"
 log "INFO" "セットアップ中は Ctrl+C が無効です。中断するにはターミナルを閉じてください。"
 
 # ------------------------------------------------------------------------------
-# 5. 管理者用の作業フォルダ（従来の構成: init / 新しい形: init-XXXX）の作成・移動
+# 5. 管理者用の作業フォルダ（従来の構成: init / 新しい形: admin）の作成・移動
 # ------------------------------------------------------------------------------
 INIT_BASE="$PWD"   # 作業フォルダ（sf-job.sh を実行する場所）
 if [[ "$PROJECT_LAYOUT" == "legacy" ]]; then
     INIT_DIR="${PWD}/init"
+    _state_suffix=""                       # 従来の構成: .sf-init.env / .sf-init.progress
 else
-    INIT_DIR="${PWD}/init-${COMPANY_NAME}"
+    INIT_DIR="${PWD}/admin"
+    _state_suffix="-${COMPANY_NAME}"       # 新しい形: プロジェクトごとに分ける（同じ admin に複数のプロジェクトを置くため）
 fi
 run mkdir -p "$INIT_DIR" || die "init フォルダの作成に失敗しました: ${INIT_DIR}"
 cd "$INIT_DIR" || die "init フォルダに移動できません: ${INIT_DIR}"
@@ -363,11 +366,11 @@ cd "$INIT_DIR" || die "init フォルダに移動できません: ${INIT_DIR}"
 # 6. 環境変数の export（各フェーズスクリプトから参照）
 # ------------------------------------------------------------------------------
 export SF_TOOLS_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-# .sf-init.env は init フォルダに配置する（cd 後の PWD が init/ になる）
-export SF_INIT_ENV_FILE="${PWD}/.sf-init.env"
+# .sf-init.env は管理者用の作業フォルダに配置する（cd 後の PWD が init/ か admin/ になる）
+export SF_INIT_ENV_FILE="${PWD}/.sf-init${_state_suffix}.env"
 
 # 進捗ファイル（成功した Phase を記録する。.sf-init.env とは別にする: 書き換えるときに、外部コマンドを使わないため）
-export SF_INIT_PROGRESS_FILE="${PWD}/.sf-init.progress"
+export SF_INIT_PROGRESS_FILE="${PWD}/.sf-init${_state_suffix}.progress"
 # Phase 10 の、段階ごとの再開（完了した段階を、進捗に記録し、再実行ではスキップする）。--only のときは、使わない
 [[ -z "$ONLY_PHASE" ]] && export SF_INIT_TIER_RESUME=1
 

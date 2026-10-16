@@ -467,17 +467,17 @@ test_flex_prompt() {
 
 test_flex_from_init_xxxx_dir() {
     echo ""
-    echo -e "${CLR_HEAD}[TEST] 管理者用の作業フォルダ（init-XXXX）から実行 → エラー${CLR_RST}"
+    echo -e "${CLR_HEAD}[TEST] 管理者用の作業フォルダ（admin）から実行 → エラー${CLR_RST}"
 
     local mb mock_home base d ec out
     mb=$(setup_mock_bin); export MOCK_CALL_LOG="$mb/calls.log"
     mock_home=$(setup_mock_home)
-    base=$(mktemp -d "${TMPDIR:-/tmp}/test-init-XXXX"); d="$base/init-acme"; mkdir -p "$d"
+    base=$(mktemp -d "${TMPDIR:-/tmp}/test-init-XXXX"); d="$base/admin"; mkdir -p "$d"
     create_mock_gh_for_job "$mb"; _stub_job_subscripts "$mock_home"
 
     out=$(printf 'q\n' | (export HOME="$mock_home" PATH="$mb:$PATH"; cd "$d" && bash "$mock_home/sf-tools/bin/sf-job.sh" --owner my-org --project acme) 2>&1)
     ec=$?
-    assert_exit_fail $ec "init-XXXX フォルダ → エラー終了"
+    assert_exit_fail $ec "admin フォルダ → エラー終了"
     assert_output_contains "$out" "管理者用の作業フォルダ" "管理者用の作業フォルダからは、実行できないと表示する"
 
     teardown "$mb" "$mock_home" "$base"

@@ -10,7 +10,7 @@
 #   {作業フォルダ}/
 #   ├── JOB-xxx/              ← 作業単位（sf-job.sh が作成するジョブフォルダ。同じ force-XXXX を、同時に複数開くための入れ物）
 #   │   └── force-XXXX/       ← クローン先（プロジェクト。VS Code で開く単位）
-#   └── init-XXXX/ など       ← sf-init.sh が作る管理者用の作業フォルダ（従来の構成では init）
+#   └── admin/                ← sf-init.sh が作る管理者用の作業フォルダ（従来の構成では init）
 #   従来の構成 …/home/{github-owner}/{company}/ も、そのまま動く。
 #
 # 【どのプロジェクトか（オーナーと XXXX）の決め方】 リポジトリ名は force-XXXX（force- は固定。XXXX は管理者が決めた名前）
@@ -109,8 +109,8 @@ phase_check_environment() {
     local current_dir
     current_dir=$(basename "$PWD")
 
-    # 管理者用の作業フォルダ（init / init-XXXX）・force-* フォルダからは実行禁止
-    if [[ "$current_dir" == "init" || "$current_dir" == init-* ]]; then
+    # 管理者用の作業フォルダ（init / admin）・force-* フォルダからは実行禁止
+    if [[ "$current_dir" == "init" || "$current_dir" == "admin" ]]; then
         die "sf-job.sh は管理者用の作業フォルダ（${current_dir}）からは実行できません。
   作業フォルダ（作業単位のフォルダを置く場所）に移動して実行してください:
     cd ..

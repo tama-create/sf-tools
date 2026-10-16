@@ -146,7 +146,7 @@ test_init_identity_prompt() {
     _has "$out" "例: acme と入力 → force-acme" "入力例を表示する"
     _has "$out" "作るリポジトリ" "入力のあとに、作るリポジトリ名を表示して確認する"
     _has "$out" "tama/force-acme" "作るリポジトリ名は、オーナー/force-XXXX の形"
-    _has "$out" "init-acme/force-acme" "管理者用の作業フォルダ（init-XXXX）を表示する"
+    _has "$out" "admin/force-acme" "管理者用の作業フォルダ（admin）を表示する"
     # 候補が複数 → 番号で選ぶ
     out=$(MOCK_GH_API_USER=tama MOCK_GH_ORGS_ADMIN=$'org-a\norg-b' _run_in "$dir" '2\nacme\nY\n' 'resolve_init_identity' "$mb")
     _has "$out" "RESULT owner=org-b project=acme layout=flex" "候補が複数 → 番号で選べる（2 = org-b）"

@@ -965,7 +965,7 @@ _eab_run() {
 }
 
 test_ensure_admin_branch() {
-    echo ""; echo -e "${CLR_HEAD}[TEST] ensure_admin_branch: 管理者用のクローンを、ローカルだけの admin ブランチにする${CLR_RST}"
+    echo ""; echo -e "${CLR_HEAD}[TEST] ensure_admin_branch: 管理者用のクローンを、admin ブランチ（ローカル）にする${CLR_RST}"
     local b cur remote_heads count
 
     # main にいる → main から admin を作って、切り替わる。GitHub（origin）には、作らない
@@ -977,7 +977,7 @@ test_ensure_admin_branch() {
     [[ "$(git -C "$b/c" rev-parse admin)" == "$(git -C "$b/c" rev-parse main)" ]] \
         && pass "admin は、main と同じ位置から作られる" || fail "admin は、main と同じ位置から作られる"
     remote_heads=$(git -C "$b/c" ls-remote --heads origin)
-    [[ "$remote_heads" != *"refs/heads/admin"* ]] && pass "admin は、origin に push されない（ローカルだけ）" || fail "admin は、origin に push されない（ローカルだけ）" "$remote_heads"
+    [[ "$remote_heads" != *"refs/heads/admin"* ]] && pass "ensure_admin_branch 単体では、origin に push しない（push は push_admin_branch）" || fail "ensure_admin_branch 単体では、origin に push しない（push は push_admin_branch）" "$remote_heads"
 
     # すでに admin にいる → 何も変えない（冪等）
     _eab_run "$b/c" "$b/out2.log"
@@ -1009,6 +1009,74 @@ test_ensure_admin_branch() {
     teardown "$b"
 }
 
+test_push_admin_branch() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] push_admin_branch: admin ブランチを GitHub にも作る（強制 push はしない）${CLR_RST}"
+    local b up remote_sha other
+
+    # admin にいる → origin にも admin ができ、追跡（upstream）が設定される
+    b=$(_eab_repo)
+    _eab_run "$b/c" "$b/out.log"
+    (
+        export SF_INIT_MODE=1
+        readonly SCRIPT_NAME=test; readonly LOG_FILE=/dev/null; readonly LOG_MODE=NEW
+        source "$SF_TOOLS_DIR/lib/common.sh"
+        push_admin_branch "$b/c"
+        echo "RC=$?"
+    ) > "$b/push.log" 2>&1
+    assert_file_contains "$b/push.log" "RC=0" "admin → push できる（戻り値 0）"
+    [[ "$(git -C "$b/c" ls-remote --heads origin)" == *"refs/heads/admin"* ]] \
+        && pass "origin にも、admin ブランチができる" || fail "origin にも、admin ブランチができる"
+    up=$(git -C "$b/c" rev-parse --abbrev-ref admin@{upstream} 2>/dev/null)
+    [[ "$up" == "origin/admin" ]] && pass "追跡ブランチが origin/admin になる（-u）" || fail "追跡ブランチが origin/admin になる（-u）" "upstream: ${up}"
+
+    # 2 回目 → すでに最新でも、失敗しない
+    (
+        export SF_INIT_MODE=1
+        readonly SCRIPT_NAME=test; readonly LOG_FILE=/dev/null; readonly LOG_MODE=NEW
+        source "$SF_TOOLS_DIR/lib/common.sh"
+        push_admin_branch "$b/c"
+        echo "RC=$?"
+    ) > "$b/push2.log" 2>&1
+    assert_file_contains "$b/push2.log" "RC=0" "すでに最新 → 戻り値 0"
+    teardown "$b"
+
+    # GitHub 側の admin が食い違っている → 失敗（戻り値 1）にして、GitHub 側を上書きしない
+    b=$(_eab_repo)
+    git clone -q "$b/origin.git" "$b/other" 2>/dev/null
+    (
+        cd "$b/other" || exit 1
+        git checkout -q -b admin && echo x > other.txt && git add other.txt \
+            && git -c user.name=t -c user.email=t@example.com commit -qm other && git push -q origin admin
+    ) > /dev/null 2>&1
+    remote_sha=$(git -C "$b/c" ls-remote --heads origin admin | cut -f1)
+    _eab_run "$b/c" "$b/out.log"
+    echo y > "$b/c/local.txt"; git -C "$b/c" add local.txt
+    git -C "$b/c" -c user.name=t -c user.email=t@example.com commit -qm local-work
+    (
+        export SF_INIT_MODE=1
+        readonly SCRIPT_NAME=test; readonly LOG_FILE=/dev/null; readonly LOG_MODE=NEW
+        source "$SF_TOOLS_DIR/lib/common.sh"
+        push_admin_branch "$b/c"
+        echo "RC=$?"
+    ) > "$b/push3.log" 2>&1
+    assert_file_contains "$b/push3.log" "RC=1" "GitHub 側の admin と食い違う → 戻り値 1"
+    [[ "$(git -C "$b/c" ls-remote --heads origin admin | cut -f1)" == "$remote_sha" ]] \
+        && pass "食い違うとき、GitHub 側の admin を上書きしない" || fail "食い違うとき、GitHub 側の admin を上書きしない"
+    teardown "$b"
+
+    # ディレクトリの指定がない → 失敗
+    b=$(mktemp -d "${TMPDIR:-/tmp}/test-eab-XXXX")
+    (
+        export SF_INIT_MODE=1
+        readonly SCRIPT_NAME=test; readonly LOG_FILE=/dev/null; readonly LOG_MODE=NEW
+        source "$SF_TOOLS_DIR/lib/common.sh"
+        push_admin_branch ""
+        echo "RC=$?"
+    ) > "$b/out.log" 2>&1
+    assert_file_contains "$b/out.log" "RC=1" "ディレクトリの指定がない → 戻り値 1"
+    teardown "$b"
+}
+
 test_read_secret
 test_mask_secrets
 test_is_gitbash
@@ -1020,6 +1088,7 @@ test_print_admin_warning
 test_run_isolated_home
 test_ensure_sf_tools_latest
 test_ensure_admin_branch
+test_push_admin_branch
 test_json_get
 test_portable_sed
 test_merge_package_xml

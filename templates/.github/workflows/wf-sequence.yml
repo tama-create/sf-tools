@@ -3,7 +3,15 @@
 # ==============================================================================
 #
 # 【概要】
-#   PR のマージ順序（プロモーション順序）を自動検証する。
+#   PR のマージ順序（プロモーション順序）を自動検証する。順序の定義は sf-tools/config/branches.txt の並び（main から読む）。
+#   順序外（前の段階にマージされていない変更が、後の段階へ PR された）の場合は、警告する（マージは、止めない。緊急の Hotfix を
+#   妨げないため）:
+#     ・PR の会話欄に、警告のコメントを投稿する（レビュアーが、気づけるように。同じ PR では、既存のコメントを更新する）
+#     ・Slack に通知する
+#   環境ブランチ（branches.txt のブランチ）から直接 PR した場合も、同様に、PR の会話欄にコメントを投稿し、Slack に通知する
+#   （チェックは、エラーで失敗する）。
+#   開発者が sf-next.sh を使う限り、順序は守られる。このチェックは、ランチャーを使わず、GitHub 上で直接 PR を作った場合に、
+#   レビュアーが気づけるようにするためのもの。気づいたレビュアーが、PR を却下する。
 #
 # 【必要な GitHub Secrets（このリポジトリに設定すること）】
 #   SLACK_BOT_TOKEN  : Slack API の Bot Token（順序未確認時の通知に使用）
@@ -40,6 +48,15 @@ jobs:
           has_content() {
             [[ -f "$1" ]] && grep -qvE '^\s*(#|$|\[files\]|\[members\])' "$1"
           }
+          # 環境ブランチ（branches.txt のブランチ）から直接出された PR は、デプロイ対象がなくても、必ず、順序チェックを行う。
+          #   環境ブランチには、通常、sf-tools/release/<ブランチ名>/ がなく、下の判定でスキップされて、素通りになるため。
+          #   branches.txt は、main から読む（PR のマージ結果には、含まれない場合があるため）
+          ENV_BRANCHES=$(git fetch origin main --depth=1 -q 2>/dev/null && git show FETCH_HEAD:sf-tools/config/branches.txt 2>/dev/null | grep -v '^[[:space:]]*#' | grep -v '^[[:space:]]*$' | tr -d '\r')
+          if echo "$ENV_BRANCHES" | grep -qxF -- "$HEAD"; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "環境ブランチ（${HEAD}）からの PR のため、デプロイ対象がなくても、順序チェックを実行します。"
+            exit 0
+          fi
           if ! has_content "$DEPLOY" && ! has_content "$REMOVE"; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
             echo "デプロイ対象なし（${DEPLOY} / ${REMOVE} に内容なし）のためスキップします。"
@@ -54,6 +71,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      pull-requests: write   # 順序外の警告を、PR の会話欄に投稿するため
 
     steps:
       # --------------------------------------------------------------------------
@@ -90,6 +108,8 @@ jobs:
 
           # 環境ブランチ間の直接 PR はエラーでブロック
           if echo "$BRANCHES" | grep -qxF -- "$FEATURE"; then
+            echo "env_branch=true" >> "$GITHUB_OUTPUT"
+            echo "feature=${FEATURE}" >> "$GITHUB_OUTPUT"
             echo "::error title=マージ元ブランチ不正::${FEATURE} からのPRは許可されていません。必ずフィーチャーブランチからPRを作成してください。"
             exit 1
           fi
@@ -143,8 +163,9 @@ jobs:
       # Step 3: 順序未確認時の Slack 通知
       # --------------------------------------------------------------------------
       - name: Slack に順序未確認を通知
-        if: steps.sequence_check.outputs.out_of_order == 'true'
+        if: always() && (steps.sequence_check.outputs.out_of_order == 'true' || steps.sequence_check.outputs.env_branch == 'true')
         env:
+          ENV_BRANCH: ${{ steps.sequence_check.outputs.env_branch }}
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           SLACK_CHANNEL_ID: ${{ vars.SLACK_CHANNEL_ID }}
           # ブランチ名・PR のタイトルは、シェルのスクリプトに直接埋め込まず、環境変数で受け取る
@@ -165,10 +186,67 @@ jobs:
           BASE=$(json_escape "$BASE_RAW")
           DATETIME=$(TZ='Asia/Tokyo' date '+%Y-%m-%d %H:%M:%S JST')
 
-          MESSAGE=":warning: *マージ順序の確認が必要です*\n• ブランチ \`${FEATURE}\` は \`${PREV}\` にまだマージされていません\n• PR: <${PR_URL}|#${PR_NUMBER} ${PR_TITLE}>\n• 対象: \`${FEATURE}\` → \`${BASE}\`\n• 実行日時: ${DATETIME}\n• 意図的な場合はそのままマージを進めてください"
+          if [ "$ENV_BRANCH" = "true" ]; then
+            MESSAGE=":no_entry: *環境ブランチからの PR は許可されていません*\n• ブランチ \`${FEATURE}\` は、環境ブランチです\n• PR: <${PR_URL}|#${PR_NUMBER} ${PR_TITLE}>\n• 対象: \`${FEATURE}\` → \`${BASE}\`\n• 実行日時: ${DATETIME}\n• この PR は却下し、feature ブランチから作り直してください"
+          else
+            MESSAGE=":warning: *マージ順序の確認が必要です*\n• ブランチ \`${FEATURE}\` は \`${PREV}\` にまだマージされていません\n• PR: <${PR_URL}|#${PR_NUMBER} ${PR_TITLE}>\n• 対象: \`${FEATURE}\` → \`${BASE}\`\n• 実行日時: ${DATETIME}\n• 意図的でなければ、この PR は却下してください"
+          fi
           PAYLOAD="{\"channel\": \"${SLACK_CHANNEL_ID}\", \"text\": \"${MESSAGE}\"}"
 
           curl -s -X POST "https://slack.com/api/chat.postMessage" \
             -H "Authorization: Bearer ${SLACK_BOT_TOKEN}" \
             -H "Content-Type: application/json" \
             -d "$PAYLOAD"
+
+      # --------------------------------------------------------------------------
+      # Step 4: 順序外の警告を、PR の会話欄に投稿する（レビュアーが、気づけるように）
+      #   同じ PR では、既存のコメント（目印: sf-tools:sequence）を更新する。順序どおりで、以前の警告もない場合は、何も投稿しない
+      # --------------------------------------------------------------------------
+      - name: 順序の結果を PR に投稿
+        if: always() && github.event_name == 'pull_request' && (steps.sequence_check.outputs.out_of_order != '' || steps.sequence_check.outputs.env_branch == 'true')
+        uses: actions/github-script@v7
+        env:
+          # ブランチ名などは、JavaScript のソースに直接埋め込まず、環境変数で受け取る
+          ENV_BRANCH: ${{ steps.sequence_check.outputs.env_branch }}
+          OUT_OF_ORDER: ${{ steps.sequence_check.outputs.out_of_order }}
+          FEATURE: ${{ steps.sequence_check.outputs.feature }}
+          PREV: ${{ steps.sequence_check.outputs.prev }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        with:
+          script: |
+            const 目印 = '<!-- sf-tools:sequence -->';
+            const 順序外 = process.env.OUT_OF_ORDER === 'true';
+            const 環境ブランチ = process.env.ENV_BRANCH === 'true';
+            const { owner, repo } = context.repo;
+            const issue_number = context.payload.pull_request.number;
+            const コメント一覧 = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number, per_page: 100 });
+            const 既存 = コメント一覧.find((c) => c.body && c.body.includes(目印));
+            if (!順序外 && !環境ブランチ && !既存) return;
+            let 本文;
+            if (環境ブランチ) {
+              本文 = [
+                目印,
+                '## ⛔ 環境ブランチからの PR は、許可されていません',
+                '',
+                `\`${process.env.FEATURE}\` は、環境ブランチ（\`branches.txt\` に記載のブランチ）です。\`${process.env.BASE_REF}\` への PR は、feature ブランチから作成してください。`,
+                '',
+                '**この PR は却下し、feature ブランチから作り直してください。**（通常は、`sf-next.sh` が示す順序で、PR を出します）',
+              ].join('\n');
+            } else if (順序外) {
+              本文 = [
+                目印,
+                '## ⚠️ マージ順序の確認が必要です',
+                '',
+                `ブランチ \`${process.env.FEATURE}\` は、\`${process.env.PREV}\` にまだマージされていません。`,
+                `このまま \`${process.env.BASE_REF}\` にマージすると、段階を飛び越すことになります。`,
+                '',
+                '**意図的でなければ、この PR は却下してください。**（通常は、`sf-next.sh` が示す順序で、PR を出します）',
+              ].join('\n');
+            } else {
+              本文 = [目印, '## ✅ マージ順序は、問題ありません', '', '前の段階へのマージを、確認しました。'].join('\n');
+            }
+            if (既存) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: 既存.id, body: 本文 });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body: 本文 });
+            }

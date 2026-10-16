@@ -76,7 +76,8 @@
 | `test_sf-release.sh` | sf-release.sh |
 | `test_sf-deploy.sh` | sf-deploy.sh |
 | `test_sf-dryrun.sh` | sf-dryrun.sh |
-| `test_sf-job.sh` | sf-job.sh |
+| `test_sf-job.sh` | sf-job.sh（任意の作業フォルダ・`--owner` / `--project`・クローンの git remote・同名ジョブの重複判定を含む） |
+| `test_project-identity.sh` | lib/project.sh のオーナー・XXXX の決め方（`parse_github_remote` / `normalize_project_name` / `discover_clones` / `gh_owner_candidates` / `resolve_init_identity` / `resolve_job_identity`） |
 | `test_sf-next.sh` | sf-next.sh |
 | `test_sf-check.sh` | sf-check.sh（種類の可否の判定・同梱の表 `config/metadata-capability.txt` の形式を含む） |
 | `test_sf-typecheck.sh` | sf-typecheck.sh / lib/typecheck.js（node が無い環境では、スキップ。sf はモック） |
@@ -84,6 +85,7 @@
 | `test_sf-push.sh` | sf-push.sh |
 | `test_sf-update-secret.sh` | sf-update-secret.sh |
 | `test_sf-sync-wf.sh` | sf-sync-wf.sh |
+| `test_wf-sequence.sh` | templates/.github/workflows/wf-sequence.yml（YAML の判定スクリプトを取り出して、実際の git リポジトリで、順序どおり・順序外・最下位・環境ブランチからの PR を確認） |
 
 ### 2.1.1 テストの実行方式と CI
 
@@ -124,7 +126,7 @@
 ## 3. 共通ライブラリ (`lib/common.sh`) 詳細
 
 > **構成**: `lib/common.sh` が窓口で、ログ（`log`）・実行（`run`）・終了（`die`）・`json_get` と定数を持つ。残りの関数は、責務ごとのファイルに分けてあり、`common.sh` が `source` する（呼び出し側は、これまでどおり、`common.sh` だけを `source` すればよい）。
-> `lib/input.sh`（対話入力: `read_input` / `read_key` / `press_enter` / `read_or_quit` / `read_secret` / `ask_yn`）・`lib/platform.sh`（OS・外部コマンド: `is_gitbash` / `run_isolated_home` / `check_sf_cli` / `open_browser`）・`lib/project.sh`（プロジェクト: `get_target_org` / `check_force_dir` / `check_home_dir` / `check_gh_owner` / `get_branch_list` / `is_reserved_org_alias` / `is_protected_branch` / `ensure_sf_tools_latest` / `merge_package_xml`）。テストは、すべて `tests/test_common.sh`。
+> `lib/input.sh`（対話入力: `read_input` / `read_key` / `press_enter` / `read_or_quit` / `read_secret` / `ask_yn`）・`lib/platform.sh`（OS・外部コマンド: `is_gitbash` / `run_isolated_home` / `check_sf_cli` / `open_browser`）・`lib/project.sh`（プロジェクト: `get_target_org` / `check_force_dir` / `check_home_dir` / `resolve_init_identity` / `resolve_job_identity` / `check_gh_owner` / `get_branch_list` / `is_reserved_org_alias` / `is_protected_branch` / `ensure_sf_tools_latest` / `merge_package_xml`）。テストは、すべて `tests/test_common.sh`。
 
 全スクリプトは `source "$SCRIPT_DIR/lib/common.sh"` の前に以下を `readonly` で定義すること。
 
@@ -148,7 +150,14 @@
 | `json_get` | `VALS=$(json_get "$JSON" パス...) \|\| ...`（複数のパスは `mapfile -t V <<< "$VALS"`） | JSON から値を取り出す（sf CLI の出力など。GitHub の情報は `gh --jq`）。Node の標準機能のみ。パスは `.` 区切り（`result.records.0.Id`。先頭の `.` は許容）。パス 1 つにつき 1 行（値なし・null は空行。値の中の改行は空白 1 つ）。まず全体を厳密に読み、失敗したときだけ最初の `{` から最後の `}` までを読む（`run` は標準エラーも標準出力に混ぜるため、sf の警告が前後に付く）。読み取れない・node がないときは終了コード 1 |
 | `get_target_org` | `get_target_org [ALIAS]` | 対象組織エイリアスを解決して出力 |
 | `check_force_dir` | `check_force_dir` | `force-*` ディレクトリか検証 |
-| `check_home_dir` | `check_home_dir` | `~/home/{owner}/{company}/` の階層を検証し `GITHUB_OWNER` / `COMPANY_NAME` をセット |
+| `check_home_dir` | `check_home_dir` | 従来のフォルダ構成 `…/home/{owner}/{company}/` を検証し `GITHUB_OWNER` / `COMPANY_NAME` をセット（失敗は die。`sf-init` / `sf-job` は、次の `resolve_*_identity` を使う） |
+| `legacy_home_identity` | `legacy_home_identity` | 同上（die しない。従来の構成でなければ戻り値 1） |
+| `resolve_init_identity` | `resolve_init_identity` | sf-init 用: オーナーと XXXX を、引数（`SF_INIT_OWNER` / `SF_INIT_PROJECT`）→ 従来の構成 → 対話で決め、`GITHUB_OWNER` / `COMPANY_NAME` / `PROJECT_LAYOUT`（`legacy` / `flex`）をセット。決めた値は `SF_INIT_OWNER` / `SF_INIT_PROJECT` に export する |
+| `resolve_job_identity` | `resolve_job_identity OWNER XXXX` | sf-job 用: 引数 → 従来の構成 → カレントの下のクローンの git remote（`discover_clones`）→ 対話 |
+| `parse_github_remote` | `parse_github_remote URL` | GitHub の URL（HTTPS / SSH）から `owner repo` を取り出す |
+| `normalize_project_name` | `normalize_project_name X` | 入力から XXXX を取り出す（先頭の `force-` を除く。使える文字: 英数字・`-`・`_`・`.`） |
+| `discover_clones` | `discover_clones DIR` | `DIR/*/force-*/` のクローンの `git remote` から `owner repo` を出す（GitHub の `force-*` だけ） |
+| `gh_owner_candidates` | `gh_owner_candidates admin\|member` | `gh` のログインから、オーナー候補を出す（組織 → 自分のアカウント） |
 | `check_gh_owner` | `check_gh_owner OWNER` | gh 認証ユーザーがリポジトリオーナーと一致するか確認（不一致は die。オーナーが組織で、ユーザーがその有効な admin なら通過。gh が空を返す場合はスキップ） |
 | （`lib/org.sh`） | `org_choose_login_url VAR LABEL TIER [SUFFIX]` / `org_read_info ALIAS` / `org_parse_info JSON` / `org_kind` / `org_guard TIER LABEL` / `org_jwt_test ALIAS KEY KEYFILE USER URL` / `org_save SUFFIX` | Salesforce 組織の接続情報の共通部品（`doc/wizard-ux-design.md` 4.7）。ログイン先は URL の 3 択（Enter = Sandbox。環境変数 `SF_INIT_LOGIN_URL_<PROD\|STG\|DEV\|START>` で、質問なしで指定できる）。ログイン後に `Organization`（`Id`・`Name`・`IsSandbox`・`OrganizationType`・`TrialExpirationDate`）を読み取り、種類（production / sandbox / developer / trial / unknown）を判定する（読み取れない・矛盾するときは unknown。推測しない）。`org_guard`: **Salesforce の本番組織は main のみ**（staging・develop に本番は、戻り値 2。**判定不能（unknown）も、main 以外は戻り値 2**。確認では通さない。main は、unknown でも続行）。`org_jwt_test`: 従来の接続アプリ用。JWT 接続テストと組織情報の読み取りを、同じ一時的なホームの中で行う（Secrets を登録する前にガードできるように）。`org_save`: 組織の ID・名前・種類・確認日時を GitHub Variables（`SF_ORG_*_<接尾辞>`）に保存 |
 | （`lib/diag.sh`） | `diag_run REPO 段階...`（結果の不足の数は `DIAG_NG`） | セットアップの診断（`sf-init.sh --status` が使う）。リポジトリ・ブランチ・ワークフロー・Secrets・Variables・直近の実行を、GitHub から読み取って、✓ / ✗（直し方つき）/ ！ / ？ で表示する。読み取りのみ。一覧を取得できないものは「？」とし、不足に数えない |
@@ -236,7 +245,7 @@ fi
 `gh` コマンドを使うすべての管理者向けスクリプトは、リポジトリオーナーが確定した直後に `check_gh_owner` を呼び出す。認証ユーザーがオーナーと一致しない場合は `die` で即終了する（`die` のメッセージは事実のみで、復旧案内は含めない）。ただし、オーナーが組織で、認証ユーザーがその組織の有効な管理者（`role=admin` かつ `state=active`）である場合は通過する。
 
 ```bash
-check_home_dir               # GITHUB_OWNER / COMPANY_NAME をセット
+resolve_init_identity        # GITHUB_OWNER / COMPANY_NAME / PROJECT_LAYOUT をセット（引数 → 従来のフォルダ構成 → 対話）
 check_gh_owner "$GITHUB_OWNER"   # 認証ユーザーの一致確認
 ```
 
@@ -445,10 +454,12 @@ tr -d '\r' < "$key_file" | base64 -w 0 | gh secret set "SF_PRIVATE_KEY" -R "$REP
 
 新規 Salesforce プロジェクトの初期セットアップ。`phases/init/` 配下のフェーズスクリプトを順次実行する。
 
+**オーナーと XXXX の決め方（フォルダ構成に依存しない）**: リポジトリ名は `force-XXXX`（`force-` は固定、XXXX は管理者が決める）。`resolve_init_identity`（`lib/project.sh`）が、①引数 `--owner` / `--project`（環境変数 `SF_INIT_OWNER` / `SF_INIT_PROJECT`）→ ②従来のフォルダ構成（`*/home/{owner}/{company}`、ちょうど 2 階層。引数がないか、引数がフォルダの値と同じとき）→ ③対話（オーナーは `gh` から候補、XXXX は入力。`force-` は自動で付く旨を案内し、既存プロジェクトを参考に表示）の順で決める。決めた値は `SF_INIT_OWNER` / `SF_INIT_PROJECT` に export し、Phase 2 と、sf-tools 更新後の再実行に引き継ぐ。`PROJECT_LAYOUT` は `legacy` / `flex`。管理者用の作業フォルダ（`.sf-init.env` / `.sf-init.progress` の置き場）は、legacy は `init`、flex は `admin`（固定。同じ `admin` に複数プロジェクトを置くため、状態ファイルは `.sf-init-XXXX.env` / `.sf-init-XXXX.progress` とプロジェクトごとに分ける。legacy は `.sf-init.env` / `.sf-init.progress` のまま）。Phase 1 は `init` と `admin` を許可する。`sf-job.sh` は、①引数 → ②従来の構成 → ③`{cwd}/*/force-*` のクローンの `git remote` → ④対話で決め（`resolve_job_identity`）、`init` / `admin` / `force-*` の中では実行できない。重複判定は、legacy はジョブフォルダの有無、flex は `{ジョブ}/force-XXXX` の有無。
+
 起動時（フェーズの実行・`--resume` / `--only` / `--add-tier` の前）に `check_sf_cli` で、`sf --version` の終了コードを確認し、0 以外なら案内（npm 版への入れ替え）を表示して中断する（3.3 参照）。
 **ウィザード形式の画面（`lib/wizard.sh`・設計: `doc/wizard-ux-design.md`）:**
 - 利用者に見せるのは、Phase の番号ではなく、**全 9 ステップ**（`WIZ_STEP_TITLES`。ステップ 9 は「動作の確認」で、Phase ではなく、`phases/init/verify.sh` を呼ぶ最後のステップ）。Phase とステップの対応は `WIZ_PHASE_STEP`（1→1, 2→2, 3・4→3, 5→4, 6→5, 7→6, 8・9→7, 10→8）。フェーズループが、新しいステップに入るときに `wizard_step`（現在地・完了済み・目的の 1 文）を出す。各 Phase スクリプトの見出しからは、「Phase N」を外した。
-- 開始画面（通常の新規実行のみ。`--only` / `--resume N` は従来の簡易表示）: `wizard_banner` → 作るもの・所要時間の目安 → 管理者向けの警告ボックス（従来どおり）→ `wizard_checklist`（先に用意するもの）→ 全ステップの一覧 → `wizard_confirm`（Enter / Y で進む。N / q は die。CLAUDE.md 2.4 の `ask_yn || die` と同じく、「N / q で必ず中断」）。`check_home_dir` は、開始画面の前に実行する（作るリポジトリ名を表示するため）。
+- 開始画面（通常の新規実行のみ。`--only` / `--resume N` は従来の簡易表示）: `wizard_banner` → 作るもの・所要時間の目安 → 管理者向けの警告ボックス（従来どおり）→ `wizard_checklist`（先に用意するもの）→ 全ステップの一覧 → `wizard_confirm`（Enter / Y で進む。N / q は die。CLAUDE.md 2.4 の `ask_yn || die` と同じく、「N / q で必ず中断」）。`resolve_init_identity` は、開始画面の前に実行する（作るリポジトリ名を表示するため）。
 - sf-tools の最新化（P14）: 開始画面の、**管理者向けの警告のあと・確認の前**に、**現在のブランチを対象に** `ensure_sf_tools_branch` を呼ぶ（本番 / 検証の選択には依存しない。Git リポジトリのときだけ）。遅れていれば、確認のうえ `git pull --ff-only` し、戻り値 2 を返す。`sf-init.sh` は、`SF_INIT_RESTARTED=1` を付けて、同じ引数で `exec` する（実行しなおしたあとも、開始画面・管理者向けの警告・確認は、毎回出す。確認を飛ばさない）。確認済みのブランチは `SF_INIT_TOOLS_CHECKED_BRANCH` で Phase 2 に渡し、Phase 2 は、最新化を二重に確認せず、選んだ環境とのブランチ違いだけを確認する。Phase 2 が戻り値 2 を受けたとき（起動時に確認できなかった場合）は、終了コード 75 で終了し、`sf-init.sh` が実行しなおす。**実行しなおしは 1 回だけ**（`SF_INIT_RESTARTED` が立っているのに、再び 75 なら、die。無限に繰り返さない）。
 - 完了画面: `wizard_done`（できたこと・次にやること: `sf-job.sh` と、リポジトリの URL）。`init` フォルダは、**削除せず、管理者用として残す**（削除の質問は廃止）。完了画面に、管理者用フォルダ（`REPO_DIR`）のパスと用途（メンテナンス用・日常の開発には使わない）を表示する。完了時（`END_PHASE` が 10 のときだけ）、`.sf-init.env` から `*TOKEN_VALUE=` の行を念のため消す（通常は Phase 8 の push 後に消えている）。
 - 失敗時: `wizard_fail` で、「どこから再開されるか」を、利用者向けの名前で出す（再開の単位は、Phase の先頭）。`die` は、事実のみ（従来の規約）。
@@ -500,7 +511,7 @@ tr -d '\r' < "$key_file" | base64 -w 0 | gh secret set "SF_PRIVATE_KEY" -R "$REP
 実行場所: **`force-*` ディレクトリ内**（`sf-init.sh` の通常実行とは異なる点に注意）
 
 ```bash
-cd ~/home/{owner}/{company}/system/force-xxx
+cd {作業フォルダ}/{作業単位}/force-xxx    # 例: admin/force-acme（従来の構成では init/force-acme）
 sf-init.sh --add-tier staging    # main → main+staging
 sf-init.sh --add-tier develop    # main+staging → main+staging+develop
 ```
@@ -671,7 +682,7 @@ sf-init.sh --add-tier develop    # main+staging → main+staging+develop
 | PAT の種類・取得方法 | `doc/setup-guide.md` セクション3.1、`doc/sf-cicd-strategy.md` セクション7.1・8 |
 | WF ファイル名・ジョブ名 | `doc/setup-guide.md` セクション5、`doc/sf-cicd-strategy.md` セクション4.2 |
 | `templates/.github/workflows/` の `name:` | `doc/setup-guide.md` のワークフロー一覧 |
-| `templates/.github/workflows/` の内容 | `phases/init/08_repo_rules.sh` の `required_status_checks.context` との整合 |
+| `templates/.github/workflows/` の内容 | `phases/init/09_repo_rules.sh` の `required_status_checks.context` との整合 |
 | mm / rr の運用・リリース手順 | `CLAUDE.md` 1.3・4.3、`README.md` セクション 9、本書セクション 9 |
 
 > ドキュメントの詳細（フロー・パス等）はコードを確認してから記載すること。推測で書かないこと。

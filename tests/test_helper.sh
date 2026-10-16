@@ -378,6 +378,10 @@ case "$1 $2" in
     "variable set") exit "${MOCK_GH_VARIABLE_SET_EXIT:-0}" ;;
     "variable get") echo "${MOCK_GH_VARIABLE_GET_VALUE:-fake@example.com}" ; exit "${MOCK_GH_VARIABLE_GET_EXIT:-0}" ;;
     "api user")    echo "${MOCK_GH_API_USER:-tamashimon-org}" ;;
+    # オーナー候補・既存プロジェクトの一覧（jq で絞ったあとの出力を、そのまま返す）: 改行区切り
+    "api user/memberships/orgs") [[ -n "${MOCK_GH_ORGS_ADMIN:-}" ]] && printf '%s\n' "$MOCK_GH_ORGS_ADMIN"; exit 0 ;;
+    "api user/orgs")             [[ -n "${MOCK_GH_ORGS_MEMBER:-}" ]] && printf '%s\n' "$MOCK_GH_ORGS_MEMBER"; exit 0 ;;
+    "repo list")                 [[ -n "${MOCK_GH_REPO_LIST:-}" ]] && printf '%s\n' "$MOCK_GH_REPO_LIST"; exit 0 ;;
     *) exit 0 ;;
 esac
 EOF

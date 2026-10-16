@@ -8,7 +8,14 @@
 # 【提供する関数】
 #   get_target_org [ALIAS]    ... 接続先組織エイリアスを解決
 #   check_force_dir           ... force-* ディレクトリ内か確認
-#   check_home_dir            ... ~/home/{owner}/{company}/ の正しい階層か確認し GITHUB_OWNER/COMPANY_NAME をセット
+#   check_home_dir            ... 従来のフォルダ構成 …/home/{owner}/{company}/ か確認し GITHUB_OWNER/COMPANY_NAME をセット（失敗は die）
+#   legacy_home_identity      ... 同上（die しない。従来の構成でなければ戻り値 1）
+#   resolve_init_identity     ... sf-init 用: オーナーとプロジェクト名（XXXX）を、引数・従来の構成・対話で決める
+#   resolve_job_identity O P  ... sf-job 用: 同上（引数・従来の構成・カレントの下のクローンの git remote・対話）
+#   parse_github_remote URL   ... GitHub の URL から「owner repo」を取り出す（HTTPS / SSH）
+#   normalize_project_name X  ... 入力から XXXX（force- の後ろ）を取り出す（force- が付いていれば除く。不正なら戻り値 1）
+#   discover_clones DIR       ... DIR/*/force-*/ のクローンの git remote から「owner repo」を取り出す
+#   gh_owner_candidates MODE  ... gh のログインから、オーナーの候補を出す（MODE: admin / member）
 #   check_gh_owner OWNER      ... gh 認証ユーザーが期待するオーナーと一致するか確認（組織の有効な admin も許可）
 #   get_branch_list           ... branches.txt からブランチ一覧を取得
 #   is_reserved_org_alias     ... 共有環境の組織エイリアス（sf-tools の予約名）か判定
@@ -130,37 +137,296 @@ check_gh_owner() {
     die "gh の認証ユーザー（${gh_user}）がリポジトリオーナー（${expected_owner}）と一致せず、組織の管理者（admin）でもありません。"
 }
 
-# check_home_dir - ~/home/{owner}/{company}/ の正しい階層か確認し変数をセットする
+# ------------------------------------------------------------------------------
+# プロジェクトの特定（オーナーと、プロジェクト名 XXXX。リポジトリ名は force-XXXX）
+# ------------------------------------------------------------------------------
+# リポジトリ名は「force-」（固定）+ XXXX（任意。管理者が決める）。sf-init.sh と sf-job.sh は、どのリポジトリかを、
+# フォルダ構成に頼らず、次の順で決める（上にあるものが優先）:
+#   1. 引数（--owner / --project）
+#   2. 従来のフォルダ構成（…/home/{owner}/{company}/ のとき。従来の環境は、そのまま動く）
+#   3. sf-job のみ: カレントの下にある、クローンの git remote（実際の設定から取るため、フォルダ名に依存しない）
+#   4. 対話（オーナー: gh のログインから候補 / XXXX: 入力）
+# 結果は、グローバル変数 GITHUB_OWNER / COMPANY_NAME（XXXX）/ PROJECT_LAYOUT（legacy | flex）にセットする。
+
+# 従来のフォルダ構成（…/home/{owner}/{company}/）から GITHUB_OWNER / COMPANY_NAME を取り出す
+#   検証内容: PWD が */home/ 配下にあり、home/ からの深さがちょうど 2（{owner}/{company}）
+#   戻り値: 0 = 取り出した / 1 = この構成ではない（何も変えない。die しない）
+legacy_home_identity() {
+    local rest depth
+    rest="${PWD#*/home/}"
+    [[ "$rest" == "$PWD" ]] && return 1
+    depth=$(printf '%s' "$rest" | tr -cd '/' | wc -c | tr -d ' ')  # VAR=$(cmd) のため run 不使用
+    [[ "$depth" -eq 1 ]] || return 1
+    GITHUB_OWNER=$(basename "$(dirname "$PWD")")
+    COMPANY_NAME=$(basename "$PWD")
+    return 0
+}
+
+# check_home_dir - 従来のフォルダ構成（…/home/{owner}/{company}/）か確認し変数をセットする（失敗は die）
 # ------------------------------------------------------------------------------
 # 【使い方】
 #   check_home_dir   # 失敗時は die で終了
 #   # 成功時: GITHUB_OWNER / COMPANY_NAME がセットされる
-#
-# 【検証内容】
-#   - PWD が */home/ 配下にある
-#   - home/ からの深さがちょうど 2（{owner}/{company}）
-#
-# 【セット先変数】
-#   GITHUB_OWNER  : 1つ上のフォルダ名（例: tamashimon-org）
-#   COMPANY_NAME  : カレントフォルダ名（例: yamada）
+# 【備考】 sf-init.sh / sf-job.sh は、この関数ではなく resolve_init_identity / resolve_job_identity を使う
+#         （フォルダ構成に頼らない）。この関数は、従来の構成だけを許す呼び出し側のために残している。
 # ------------------------------------------------------------------------------
 check_home_dir() {
-    local rest depth
-    rest="${PWD#*/home/}"
-    if [[ "$rest" == "$PWD" ]]; then
+    legacy_home_identity && return 0
+    if [[ "${PWD#*/home/}" == "$PWD" ]]; then
         # shellcheck disable=SC2088  # 利用者に見せる文面の「~」（展開させない）
         die "~/home/ 配下で実行してください。
   正しい場所: ~/home/{github-owner}/{company}/
   現在の場所: ${PWD}"
     fi
-    depth=$(printf '%s' "$rest" | tr -cd '/' | wc -c)
-    if [[ $depth -ne 1 ]]; then
-        die "実行フォルダの階層が正しくありません。
+    # shellcheck disable=SC2088  # 同上
+    die "実行フォルダの階層が正しくありません。
   正しい場所: ~/home/{github-owner}/{company}/
   現在の場所: ${PWD}"
+}
+
+# parse_github_remote - GitHub の URL から「owner repo」（空白区切り）を取り出す
+#   対応: https://github.com/o/r(.git) / https://user@github.com/o/r / git@github.com:o/r(.git) / ssh://git@github.com/o/r
+#   戻り値: 0 = 取り出した / 1 = GitHub の URL ではない・形が違う
+parse_github_remote() {
+    local u="$1" rest
+    case "$u" in
+        https://github.com/*|https://*@github.com/*|http://github.com/*) rest="${u#*github.com/}" ;;
+        git@github.com:*)        rest="${u#git@github.com:}" ;;
+        ssh://git@github.com/*)  rest="${u#ssh://git@github.com/}" ;;
+        *) return 1 ;;
+    esac
+    rest="${rest%/}"
+    rest="${rest%.git}"
+    case "$rest" in
+        */*/*|/*|*/|"") return 1 ;;
+        */*) ;;
+        *) return 1 ;;
+    esac
+    echo "${rest%%/*} ${rest##*/}"
+}
+
+# normalize_project_name - 入力から XXXX（リポジトリ名 force-XXXX の、force- の後ろ）を取り出す
+#   前後の空白を除き、先頭の「force-」（大文字小文字を問わない）が付いていれば除く（force-force-XXXX を防ぐ）。
+#   使える文字: 英数字・ハイフン・アンダースコア・ピリオド（先頭は英数字・61 文字まで・.. や末尾の . / .git は不可）
+#   戻り値: 0 = 出力した / 1 = 不正
+normalize_project_name() {
+    local n="$1"
+    n="${n#"${n%%[![:space:]]*}"}"
+    n="${n%"${n##*[![:space:]]}"}"
+    case "$n" in [Ff][Oo][Rr][Cc][Ee]-*) n="${n:6}" ;; esac
+    [[ "$n" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,60}$ ]] || return 1
+    case "$n" in *..*|*.|*.git) return 1 ;; esac
+    echo "$n"
+}
+
+# discover_clones - DIR/*/force-*/ のクローン（作業単位のフォルダの中の force-xxx）の git remote から「owner repo」を出す
+#   フォルダ名ではなく、クローンに記録された住所（git clone のときに、Git が書き込む）から読む。
+#   force- で始まる GitHub のリポジトリだけを対象にする（無関係なリポジトリは、無視する）。重複は除く
+discover_clones() {
+    local d u parsed
+    for d in "$1"/*/force-*; do
+        [[ -e "$d/.git" ]] || continue
+        u=$(git -C "$d" remote get-url origin 2>/dev/null) || continue  # VAR=$(cmd) のため run 不使用
+        parsed=$(parse_github_remote "$u") || continue
+        case "${parsed##* }" in force-?*) echo "$parsed" ;; esac
+    done | sort -u
+}
+
+# gh_owner_candidates - gh のログインから、オーナーの候補を 1 行ずつ出す（組織 → 自分のアカウント。重複なし）
+#   引数: admin = 自分が管理者の組織（sf-init 用） / member = 自分が所属する組織（sf-job 用）
+#   gh が使えない・未認証なら、何も出さない（呼び出し側が、入力に切り替える）
+gh_owner_candidates() {
+    {
+        if [[ "${1:-member}" == "admin" ]]; then
+            gh api user/memberships/orgs --jq '.[] | select(.role=="admin" and .state=="active") | .organization.login' 2>/dev/null
+        else
+            gh api user/orgs --jq '.[].login' 2>/dev/null
+        fi
+        gh api user --jq .login 2>/dev/null
+    } | awk 'NF && !seen[$0]++'
+    return 0
+}
+
+# gh_existing_projects - そのオーナーにある force-* リポジトリの、XXXX（force- を除いた名前）を 1 行ずつ出す
+gh_existing_projects() {
+    gh repo list "$1" --limit 200 --json name --jq '.[].name | select(startswith("force-")) | sub("^force-";"")' 2>/dev/null
+    return 0
+}
+
+# _pick_from_list VAR 見出し 項目... - 番号で選ばせて、選んだ項目を VAR に入れる（q で中断）
+_pick_from_list() {
+    local _pl_var="$1" _pl_title="$2" _pl_n _pl_i=1 _pl_item _pl_ans
+    shift 2
+    _pl_n=$#
+    echo "  ${_pl_title}" >&2
+    for _pl_item in "$@"; do
+        echo "    ${_pl_i}. ${_pl_item}" >&2
+        _pl_i=$(( _pl_i + 1 ))
+    done
+    while true; do
+        read_or_quit _pl_ans "  番号を入力してください（q で中断）: "
+        if [[ "$_pl_ans" =~ ^[0-9]+$ ]] && [[ "$_pl_ans" -ge 1 && "$_pl_ans" -le $_pl_n ]]; then
+            set_var "$_pl_var" "${!_pl_ans}"
+            return 0
+        fi
+        log "WARNING" "  1〜${_pl_n} の番号を入力してください。"
+    done
+}
+
+# 対話で、オーナーと XXXX を決める（GITHUB_OWNER / COMPANY_NAME が、すでにセットされていれば、その項目は聞かない）
+#   引数: init（新しく作る。管理者）/ job（すでにあるプロジェクトを使う）
+_GH_OWNER_RE='^[a-zA-Z0-9]([a-zA-Z0-9-]{0,37}[a-zA-Z0-9])?$'
+prompt_project_identity() {
+    local mode="$1" cands c raw norm existing exists
+    local list=()
+    if [[ -z "${GITHUB_OWNER:-}" ]]; then
+        if [[ "$mode" == "init" ]]; then cands=$(gh_owner_candidates admin); else cands=$(gh_owner_candidates member); fi  # VAR=$(cmd) のため run 不使用
+        while IFS= read -r c; do [[ -n "$c" ]] && list+=("$c"); done <<< "$cands"
+        case ${#list[@]} in
+            0)
+                while true; do
+                    read_or_quit GITHUB_OWNER "  GitHub のオーナー（組織名またはユーザー名）を入力してください: "
+                    [[ "$GITHUB_OWNER" =~ $_GH_OWNER_RE ]] && break
+                    log "WARNING" "  オーナー名が正しくありません（英数字とハイフンのみ）。"
+                done ;;
+            1)
+                GITHUB_OWNER="${list[0]}"
+                log "INFO" "  GitHub のオーナー: ${GITHUB_OWNER}（gh のログインから取得）" ;;
+            *)
+                _pick_from_list GITHUB_OWNER "GitHub のオーナーを選んでください:" "${list[@]}" ;;
+        esac
     fi
-    GITHUB_OWNER=$(basename "$(dirname "$PWD")")
-    COMPANY_NAME=$(basename "$PWD")
+    [[ -n "${COMPANY_NAME:-}" ]] && return 0
+
+    existing=$(gh_existing_projects "$GITHUB_OWNER")  # VAR=$(cmd) のため run 不使用
+    echo "" >&2
+    if [[ "$mode" == "init" ]]; then
+        echo "  リポジトリ名は「force-XXXX」の形です。" >&2
+    else
+        echo "  対象のリポジトリ名は「force-XXXX」の形です。" >&2
+    fi
+    echo "  「force-」は自動で付きます。XXXX の部分だけを入力してください。" >&2
+    echo "     例: acme と入力 → force-acme" >&2
+    if [[ -n "$existing" ]]; then
+        echo "" >&2
+        echo "  ${GITHUB_OWNER} に、すでにあるプロジェクト（XXXX）:" >&2
+        echo "     $(printf '%s' "$existing" | tr '\n' '/' | sed 's#/$##; s#/# / #g')" >&2
+    fi
+    echo "" >&2
+    while true; do
+        read_or_quit raw "  XXXX（force- の後ろ）を入力してください: "
+        norm=$(normalize_project_name "$raw") || {
+            log "WARNING" "  使えない名前です。英数字・ハイフン・アンダースコア・ピリオドだけを使ってください（先頭は英数字）。"
+            continue
+        }
+        [[ "$norm" != "$raw" ]] && log "INFO" "  force- は自動で付くため、「${norm}」として扱います。"
+        exists=0
+        printf '%s\n' "$existing" | grep -qxF -- "$norm" && exists=1
+        if [[ "$mode" == "init" && $exists -eq 1 ]]; then
+            log "WARNING" "  ${GITHUB_OWNER}/force-${norm} は、すでに存在します。別の名前を入力してください。"
+            continue
+        fi
+        echo "" >&2
+        echo "  XXXX = ${norm}" >&2
+        if [[ "$mode" == "init" ]]; then
+            echo "  → 作るリポジトリ         : ${GITHUB_OWNER}/force-${norm}" >&2
+            echo "  → 管理者用の作業フォルダ : ${PWD}/admin/force-${norm}" >&2
+        else
+            echo "  → 対象のリポジトリ       : ${GITHUB_OWNER}/force-${norm}" >&2
+        fi
+        if ask_yn "  これでよいですか？"; then break; fi
+    done
+    COMPANY_NAME="$norm"
+}
+
+# resolve_init_identity - sf-init 用: オーナーと XXXX を決める（引数 SF_INIT_OWNER / SF_INIT_PROJECT → 従来の構成 → 対話）
+#   結果: GITHUB_OWNER / COMPANY_NAME / PROJECT_LAYOUT（legacy = 従来の構成。管理者用フォルダは init / flex = admin）
+#   決めた値は SF_INIT_OWNER / SF_INIT_PROJECT に export する（sf-tools を更新して、実行しなおすときと、Phase 2 が使う）
+resolve_init_identity() {
+    local a_owner="${SF_INIT_OWNER:-}" a_project="${SF_INIT_PROJECT:-}" norm=""
+    PROJECT_LAYOUT=""
+    if [[ -n "$a_project" ]]; then
+        norm=$(normalize_project_name "$a_project") \
+            || die "プロジェクト名（force-XXXX の XXXX）が正しくありません: ${a_project}
+  英数字・ハイフン・アンダースコア・ピリオドだけを使えます（先頭は英数字）。force- は、自動で付きます。"
+        [[ "$norm" != "$a_project" ]] && log "INFO" "force- は自動で付くため、「${norm}」として扱います。"
+    fi
+    if [[ -n "$a_owner" && ! "$a_owner" =~ $_GH_OWNER_RE ]]; then
+        die "GitHub のオーナー名が正しくありません: ${a_owner}（英数字とハイフンのみ）"
+    fi
+    # 従来のフォルダ構成: 引数がない、または、フォルダから取れる値と同じとき
+    if legacy_home_identity; then
+        if [[ -z "${a_owner}${a_project}" ]] \
+           || { [[ "$norm" == "$COMPANY_NAME" ]] && { [[ -z "$a_owner" ]] || [[ "$a_owner" == "$GITHUB_OWNER" ]]; }; }; then
+            PROJECT_LAYOUT="legacy"
+        fi
+    fi
+    if [[ "$PROJECT_LAYOUT" != "legacy" ]]; then
+        GITHUB_OWNER="$a_owner"
+        COMPANY_NAME="$norm"
+        if [[ -z "$GITHUB_OWNER" || -z "$COMPANY_NAME" ]]; then
+            prompt_project_identity init
+        fi
+        PROJECT_LAYOUT="flex"
+    fi
+    export SF_INIT_OWNER="$GITHUB_OWNER" SF_INIT_PROJECT="$COMPANY_NAME"
+    return 0
+}
+
+# resolve_job_identity - sf-job 用: オーナーと XXXX を決める（引数 → 従来の構成 → カレントの下のクローン → 対話）
+#   引数: オーナー（空でもよい） XXXX（空でもよい）
+#   結果: GITHUB_OWNER / COMPANY_NAME / PROJECT_LAYOUT（legacy / flex）
+resolve_job_identity() {
+    local a_owner="${1:-}" a_project="${2:-}" norm="" clones line n
+    local list=()
+    PROJECT_LAYOUT=""
+    if [[ -n "$a_project" ]]; then
+        norm=$(normalize_project_name "$a_project") \
+            || die "プロジェクト名（force-XXXX の XXXX）が正しくありません: ${a_project}
+  英数字・ハイフン・アンダースコア・ピリオドだけを使えます（先頭は英数字）。force- は、自動で付きます。"
+        [[ "$norm" != "$a_project" ]] && log "INFO" "force- は自動で付くため、「${norm}」として扱います。"
+    fi
+    if [[ -n "$a_owner" && ! "$a_owner" =~ $_GH_OWNER_RE ]]; then
+        die "GitHub のオーナー名が正しくありません: ${a_owner}（英数字とハイフンのみ）"
+    fi
+    if legacy_home_identity; then
+        if [[ -z "${a_owner}${a_project}" ]] \
+           || { [[ "$norm" == "$COMPANY_NAME" ]] && { [[ -z "$a_owner" ]] || [[ "$a_owner" == "$GITHUB_OWNER" ]]; }; }; then
+            PROJECT_LAYOUT="legacy"
+            return 0
+        fi
+    fi
+    PROJECT_LAYOUT="flex"
+    GITHUB_OWNER="$a_owner"
+    COMPANY_NAME="$norm"
+    clones=$(discover_clones "$PWD")  # VAR=$(cmd) のため run 不使用
+    if [[ -n "$norm" ]]; then
+        # XXXX は指定済み。オーナーは、指定がなければ、同じリポジトリのクローンから取る（なければ、対話）
+        if [[ -z "$GITHUB_OWNER" ]]; then
+            line=$(printf '%s\n' "$clones" | awk -v r="force-${norm}" '$2 == r { print $1; exit }')  # VAR=$(cmd) のため run 不使用
+            GITHUB_OWNER="$line"
+        fi
+        [[ -z "$GITHUB_OWNER" ]] && prompt_project_identity job
+        return 0
+    fi
+    while IFS= read -r line; do [[ -n "$line" ]] && list+=("$line"); done <<< "$clones"
+    n=${#list[@]}
+    case $n in
+        0)
+            log "INFO" "このフォルダの下に、force-* のクローンが見つかりません。プロジェクトを指定してください。"
+            prompt_project_identity job ;;
+        1)
+            GITHUB_OWNER="${list[0]%% *}"
+            COMPANY_NAME="${list[0]##* }"; COMPANY_NAME="${COMPANY_NAME#force-}"
+            log "INFO" "プロジェクト: ${GITHUB_OWNER}/force-${COMPANY_NAME}（このフォルダの下のクローンから取得）" ;;
+        *)
+            local labels=() i=0 pick=""
+            while [[ $i -lt $n ]]; do labels+=("${list[$i]%% *}/${list[$i]##* }"); i=$(( i + 1 )); done
+            _pick_from_list pick "どのプロジェクトですか？（このフォルダの下に、複数あります）" "${labels[@]}"
+            GITHUB_OWNER="${pick%%/*}"
+            COMPANY_NAME="${pick##*/}"; COMPANY_NAME="${COMPANY_NAME#force-}" ;;
+    esac
+    return 0
 }
 
 get_branch_list() {

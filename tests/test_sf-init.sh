@@ -433,6 +433,112 @@ test_invalid_owner_folder() {
 }
 
 # ==============================================================================
+# テスト 6b: フォルダ構成に頼らない（任意の場所 + 引数 --owner / --project）→ 管理者用の作業フォルダは admin
+# ==============================================================================
+test_flex_layout_with_args() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] 任意の場所 + --owner / --project → admin で、最後まで通る${CLR_RST}"
+
+    local mb mock_home base work
+    mb=$(setup_mock_bin)
+    export MOCK_CALL_LOG="$mb/calls.log"
+    mock_home=$(setup_mock_home)
+    base=$(mktemp -d "${TMPDIR:-/tmp}/test-init-XXXX")
+    work="$base/my-work"          # …/home/{owner}/{company}/ ではない、任意の場所
+    mkdir -p "$work"
+
+    create_all_mocks "$mb"
+    create_mock_gh_for_init "$mb"
+    _stub_subscripts "$mock_home"
+
+    local exit_code
+    _make_input_3branches \
+        | ( cd "$work" && HOME="$mock_home" PATH="$mb:$PATH" \
+              bash "$mock_home/sf-tools/bin/sf-init.sh" --owner tamashimon --project force-testproject --legacy-connected-app ) \
+          > /tmp/sf-init-test-flex.log 2>&1
+    exit_code=$?
+
+    assert_exit_ok   "$exit_code"                                                          "任意の場所で、引数を指定すると、最後まで通る"
+    assert_file_contains "$MOCK_CALL_LOG" "gh repo create tamashimon/force-testproject"    "引数のオーナーと XXXX（force- は除く）で、リポジトリを作る"
+    assert_file_exists   "$work/admin/force-testproject/.github/workflows/wf-validate.yml"  "管理者用の作業フォルダは admin（admin/force-testproject）"
+    assert_dir_not_exists "$work/init"                                                     "新しい形では、init フォルダを作らない"
+    assert_file_contains "$work/admin/.sf-init-testproject.env" "PROJECT_NAME=\"testproject\""   "途中経過は、admin の中に、プロジェクト名つき（.sf-init-XXXX.env）で保存される"
+    assert_file_exists   "$work/admin/.sf-init-testproject.progress"                       "進捗も、プロジェクト名つき（.sf-init-XXXX.progress）で保存される"
+    assert_file_contains "/tmp/sf-init-test-flex.log" "force- は自動で付くため"             "force- まで指定したとき、除いたことを表示する"
+    assert_file_contains "/tmp/sf-init-test-flex.log" "cd \"$work\""                        "完了画面: 次のコマンドに、実際の作業フォルダを表示する（~/home/… ではない）"
+    assert_file_not_contains "/tmp/sf-init-test-flex.log" "~/home/"                         "完了画面に、~/home/ という決まりを出さない"
+
+    teardown "$mb" "$mock_home" "$base"
+}
+
+# ==============================================================================
+# テスト 6c: 任意の場所 + 対話（オーナーと XXXX を聞く。「force- は自動で付く」と案内する）
+# ==============================================================================
+test_flex_layout_prompt() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] 任意の場所 + 対話（オーナーと XXXX を入力）${CLR_RST}"
+
+    local mb mock_home base work
+    mb=$(setup_mock_bin)
+    export MOCK_CALL_LOG="$mb/calls.log"
+    mock_home=$(setup_mock_home)
+    base=$(mktemp -d "${TMPDIR:-/tmp}/test-init-XXXX")
+    work="$base/work"
+    mkdir -p "$work"
+
+    create_all_mocks "$mb"
+    create_mock_gh_for_init "$mb"
+    _stub_subscripts "$mock_home"
+
+    local exit_code
+    # 先頭の 3 行が、オーナーの入力・XXXX の入力・確認（Y）。以降は、通常の入力
+    { printf 'tamashimon\ntestproject\nY\n'; _make_input_3branches; } \
+        | ( cd "$work" && HOME="$mock_home" PATH="$mb:$PATH" \
+              bash "$mock_home/sf-tools/bin/sf-init.sh" --legacy-connected-app ) \
+          > /tmp/sf-init-test-flex2.log 2>&1
+    exit_code=$?
+
+    assert_exit_ok   "$exit_code"                                                          "任意の場所 + 対話で、最後まで通る"
+    assert_file_contains "/tmp/sf-init-test-flex2.log" "XXXX の部分だけを入力してください"     "対話: 「force- は自動で付く。XXXX だけ入力」と案内する"
+    assert_file_contains "/tmp/sf-init-test-flex2.log" "作るリポジトリ"                        "対話: 入力のあとに、作るリポジトリ名を表示して確認する"
+    assert_file_contains "$MOCK_CALL_LOG" "gh repo create tamashimon/force-testproject"    "入力したオーナーと XXXX で、リポジトリを作る"
+    assert_file_exists   "$work/admin/force-testproject/.github/workflows/wf-validate.yml"  "管理者用の作業フォルダは admin"
+
+    teardown "$mb" "$mock_home" "$base"
+}
+
+# ==============================================================================
+# テスト 6d: 不正な --project は、リポジトリを作る前に、エラーで止まる
+# ==============================================================================
+test_flex_invalid_project_arg() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] 不正な --project → 何も作らずにエラー${CLR_RST}"
+
+    local mb mock_home base work out
+    mb=$(setup_mock_bin)
+    export MOCK_CALL_LOG="$mb/calls.log"
+    mock_home=$(setup_mock_home)
+    base=$(mktemp -d "${TMPDIR:-/tmp}/test-init-XXXX")
+    work="$base/work"
+    mkdir -p "$work"
+    create_all_mocks "$mb"
+    create_mock_gh_for_init "$mb"
+
+    out=$( { printf 'x\n' | ( cd "$work" && HOME="$mock_home" PATH="$mb:$PATH" \
+              bash "$mock_home/sf-tools/bin/sf-init.sh" --owner tamashimon --project "bad name" --legacy-connected-app ); } 2>&1 )
+    assert_exit_fail "$?" "空白を含むプロジェクト名 → エラー終了"
+    assert_output_contains "$out" "プロジェクト名" "エラーに、プロジェクト名（XXXX）の説明が出る"
+    assert_file_not_contains "$MOCK_CALL_LOG" "gh repo create" "リポジトリを作る前に、止まる"
+    assert_dir_not_exists "$work/init-bad name" "作業フォルダも作らない"
+
+    out=$( { printf 'x\n' | ( cd "$work" && HOME="$mock_home" PATH="$mb:$PATH" \
+              bash "$mock_home/sf-tools/bin/sf-init.sh" --project ); } 2>&1 )
+    assert_exit_fail "$?" "--project に値がない → エラー終了"
+
+    teardown "$mb" "$mock_home" "$base"
+}
+
+# ==============================================================================
 # テスト 7: リポジトリ visibility - 常に --private で作成
 # ==============================================================================
 test_repo_visibility_private() {
@@ -2103,6 +2209,9 @@ test_repo_create_failure
 test_sf_login_failure
 test_unauthorized_user
 test_invalid_owner_folder
+test_flex_layout_with_args
+test_flex_layout_prompt
+test_flex_invalid_project_arg
 test_repo_visibility_private
 test_only_option_runs_single_phase
 test_only_phase2_creates_env_file

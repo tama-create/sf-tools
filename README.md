@@ -94,14 +94,32 @@ export PATH="$HOME/sf-tools/bin:$PATH"
 
 ## 3. 使い方
 
-ドキュメント内で使用する `~/home/{owner}/{company}/` の意味:
+#### 3.0.1 プロジェクトと、フォルダの構成
 
-| プレースホルダー | 内容 | 例 |
-|---|---|---|
-| `{owner}` | GitHub 組織名（固定）| `my-org` |
-| `{company}` | Salesforce 使用者の会社名または部署名（自由）| `acme` / `sales-dept` |
+| 呼び方 | 内容 |
+|---|---|
+| **プロジェクト** | `force-XXXX`（リポジトリのクローン。VS Code で開く単位）。**`force-` は固定、`XXXX` は管理者が決める名前**（例: `acme` → `force-acme`） |
+| **作業単位** | プロジェクトの**直上のフォルダ**（`JOB-xxx` / `admin` など）。同じ `force-XXXX` を、同時に複数、別々の作業として開くための入れ物 |
+| **作業フォルダ** | 作業単位のフォルダを置く場所。**どこでもよい**（`sf-init.sh` / `sf-job.sh` は、ここで実行する） |
 
-例: `~/home/my-org/acme/`
+```
+{作業フォルダ}\                    ← 好きな場所・好きな名前（例: C:\sf や ~/sf）
+├── admin\force-acme\              ← 管理者用（sf-init.sh が作る。メンテナンス用として残す）
+├── admin\force-beta\              ← 別のプロジェクトも、同じ admin に置く
+├── JOB-20261016\force-acme\       ← ジョブごとのクローン（sf-job.sh が作る）。同じ force-acme を、同時に複数開ける
+└── JOB-20261017\force-beta\       ← 別のプロジェクトを、同じ作業フォルダに置いてもよい
+```
+
+**どのプロジェクトか（オーナーと XXXX）は、フォルダの名前では決まりません。** 次の順で決めます。
+
+| コマンド | 決め方（上にあるものが優先） |
+|---|---|
+| `sf-init.sh`（管理者） | ① 引数 `--owner` / `--project` → ② 従来のフォルダ構成（下記）→ ③ 対話: オーナーは `gh` のログインから候補を出す（1 つなら自動・複数なら番号で選ぶ）。**XXXX は、管理者が入力**する（「force- は自動で付きます。XXXX の部分だけを入力してください」と案内し、すでにあるプロジェクトの一覧を、参考に表示する） |
+| `sf-job.sh`（開発者） | ① 引数 `--owner` / `--project` → ② 従来のフォルダ構成 → ③ 作業フォルダの下にあるクローンの **`git remote`**（クローンした時点で、Git が記録した住所から、オーナーとリポジトリ名を読む。1 種類なら自動、複数なら番号で選ぶ）→ ④ 対話 |
+
+- **従来のフォルダ構成** `~/home/{owner}/{company}/`（`home` という名前のフォルダの下の、ちょうど 2 階層）は、**そのまま動きます**（この構成で実行したときは、フォルダ名から取り、管理者用の作業フォルダは、従来どおり `init`）。
+- 新しい形で `sf-init.sh` を実行すると、管理者用の作業フォルダは **`admin`**（固定）になります。複数のプロジェクトを、同じ `admin` に作ってもよく、途中経過のファイルは、プロジェクトごとに分かれます（`.sf-init-XXXX.env` / `.sf-init-XXXX.progress`）。セットアップが終わっても削除せず、更新・接続の確認・やり直しなどの、管理者のメンテナンスに使います。
+- `sf-job.sh` は、管理者用の作業フォルダ（`init` / `admin`）と `force-*` の中では、実行できません。作業フォルダで実行してください。
 
 ---
 
@@ -120,11 +138,15 @@ sf-check.sh -h
 
 ### 3.2 新規プロジェクトを作成する（管理者）
 
-`~/home/{owner}/{company}/` ディレクトリで実行します。
+作業フォルダ（どこでもよい）で実行します。
 
 ```bash
-sf-init.sh
+sf-init.sh                                  # 対話: オーナーを選び、XXXX（force- の後ろ）を入力
+sf-init.sh --owner my-org --project acme    # 引数で指定（対話なし）→ my-org/force-acme を作る
 ```
+
+- `--project` には、**XXXX だけ**を指定します（`force-` は自動で付きます。`force-acme` と書いても、`acme` として扱います）。
+- 従来のフォルダ構成（`~/home/{owner}/{company}/`）で実行したときは、引数なし・入力なしで、フォルダ名から決まります。
 
 以下を自動実行します。
 
@@ -159,10 +181,11 @@ sf-init.sh --add-tier develop    # main + staging → main + staging + develop
 
 ### 3.3 新規作業を始める（sf-job）
 
-`~/home/{owner}/{company}/` で実行します。
+作業フォルダで実行します。
 
 ```bash
-sf-job.sh
+sf-job.sh                          # 作業フォルダの下のクローンから、プロジェクトが決まる（複数なら、番号で選ぶ）
+sf-job.sh --project acme           # プロジェクトを指定する（force-acme）
 ```
 
 ブランチ名の入力だけで、以下をすべて自動実行します。
@@ -183,7 +206,7 @@ sf-start.sh
 
 | | sf-job | sf-start |
 |---|---|---|
-| 実行場所 | `~/home/{owner}/{company}/` | `force-*` ディレクトリ内 |
+| 実行場所 | 作業フォルダ（作業単位を置く場所） | `force-*` ディレクトリ内 |
 | ブランチ作成 | ✅ 自動 | ❌（既存ブランチを使用）|
 | VS Code 起動 | ✅ | ✅ |
 | 使うタイミング | 新規作業開始時 | 2回目以降の作業再開時 |
@@ -300,7 +323,7 @@ sfl
 sf-job.sh
 ```
 
-新しい作業（ブランチ）を始めるときのオールインワンスクリプトです。`~/home/{owner}/{company}/` 階層で実行します。
+新しい作業（ブランチ）を始めるときのオールインワンスクリプトです。作業フォルダ（作業単位のフォルダを置く場所）で実行します。
 
 主な処理:
 - ジョブ名（例: `JOB-20260323`）を入力してブランチを生成
@@ -480,6 +503,17 @@ sf-next.sh
 - GitHub Actions のデプロイ WF は直接 PR のマージイベントで起動するため、伝播では WF が動かない
 
 **スキップしたブランチにデプロイしたい場合は、新しいブランチを切って改めて順序通りに PR を出し直す必要があります。**
+
+**順序外の PR を、レビュアーが見つけられる仕組み（`wf-sequence`）:**
+
+`sf-next.sh` を使う限り、PR 先は「次の段階」だけです。ランチャーを使わず、GitHub 上で直接 PR を作って、段階を飛び越した場合は、PR を作った時点で、次のように、レビュアーに知らせます。
+
+| 通知先 | 内容 |
+|---|---|
+| PR の会話欄 | 「⚠️ マージ順序の確認が必要です。意図的でなければ、この PR は却下してください」というコメント（同じ PR では、既存のコメントを更新） |
+| Slack | 通知 |
+
+- マージは、止めません（緊急の Hotfix を妨げないため。Free プランの Private リポジトリでは、GitHub が、そもそも止められません）。**気づいたレビュアーが、PR を却下します。**
 
 #### 4.5.4 補足
 
@@ -976,9 +1010,18 @@ sf-tools/
 │   └── sf-tools/
 │       ├── config/             ← metadata.txt / branches.txt 雛形
 │       └── release/__BRANCH__/ ← deploy-target.txt / remove-target.txt 雛形
+├── config/                     ← sf-tools 自身の設定・データ（force-* には配布されない）
+│   ├── metadata-capability.txt ← メタデータの種類ごとの、リリース・削除の可否の表（sf-typecheck.sh が確認。sf-check.sh が参照）
+│   └── changeset-types.txt     ← 変更セットで扱える種類の一覧（公式の Metadata Coverage Report。sf-typecheck.sh --coverage が参照）
 ├── doc/
-│   ├── setup-guide.md
-│   └── sf-cicd-strategy.md
+│   ├── setup-guide.md          ← 新規プロジェクトのセットアップ手順（管理者向け）
+│   ├── sf-cicd-strategy.md     ← Git 運用・CI/CD の基本戦略・設計思想
+│   ├── sf-tools-vision.md      ← 設計思想・競合との差別化・位置づけ（内部ドキュメント）
+│   ├── wf-distribution-strategy.md ← ワークフローの配布・更新の戦略（sf-sync-wf.sh）
+│   ├── jwt-auth-spec.md        ← JWT 認証方式の仕様
+│   ├── wizard-ux-design.md     ← ウィザード形式（sf-init など）の UX 設計
+│   ├── sf-logwatch-design.md   ← sf-logwatch.sh の設計書（未実装）
+│   └── dev-reference.md        ← 実装の詳細リファレンス（AI・開発者向け）
 ├── tests/                      ← 単体テスト一式
 │   └── e2e/                    ← 実環境での通し検証（sf-init の自動実行。9.3 参照）
 ├── CLAUDE.md

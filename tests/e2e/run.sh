@@ -8,6 +8,8 @@
 # 【処理の流れ】
 #   1. 前掃除      : 前回の失敗で残ったテスト用リソースを削除する（名前の形式とオーナーが一致するものだけ）
 #   2. 実行        : sf-init を Phase 1〜10 まで自動で実行する（検証環境 = SF_TOOLS_BRANCH=development。層数は --layout で選ぶ。既定は main のみ）
+#                    ・既定は、引数なしの対話（管理者が実際に行う操作）: オーナーの選択 → XXXX の入力 → 確認を、標準入力で流す。
+#                      --with-args を付けると、引数 --owner / --project で指定する（対話の画面は通らない）
 #                    ・質問への答えは標準入力に流す
 #                    ・sf org login web は、認証 URL でのログインに差し替える（tests/e2e/shims/sf）
 #                    ・ブラウザは開かない（tests/e2e/shims の start / xdg-open / open）
@@ -17,6 +19,13 @@
 #                    リリース・削除の作業は、通常の運用と同じく、sf-tools のコマンドで行う: sf-job.sh（ブランチ作成・clone・sf-start.sh）
 #                    → ファイルを書く → sf-dryrun.sh（ローカルの検証）→ sf-push.sh（commit・push・pre-push フック）。PR の作成・マージは gh。
 #                    リリース後は、sf-next.sh（マージ済みの表示）と、sf-deploy.sh（共有環境への強制リリースの拒否）も確認する
+#                    【管理者用フォルダ（admin）の確認】 admin/force-XXXX ができたこと・状態ファイルがプロジェクト名つきであること・
+#                    古い形のフォルダ（init / init-*）がないこと・クローンが admin ブランチ（ローカルと GitHub の両方）であること・
+#                    完了画面の案内・admin ブランチで sf-sync-wf.sh --check が実行でき、main では断られること。
+#                    sf-job.sh は、既定では引数なしで実行し、作業フォルダの下のクローンの git remote から、プロジェクトが決まること
+#                    【--add-tier の確認】 1 層のとき（鍵一式に staging の組織があれば）、最後に、管理者用のクローン（admin ブランチ）で
+#                    sf-init.sh --add-tier staging を実行し、組織への接続・Secret / Variable・ブランチ・PR ができること、
+#                    終わったあとも admin ブランチにいること、main へ直接 push していないことを確認する（約 4 分）
 #                    【層数に応じた確認】 リポジトリの構成（main のみ / main + staging / main + staging + develop）を、自動で判定し、
 #                    段階の数だけ、リリースを繰り返す（同じブランチから、develop → staging → main の順に、段階ごとの PR を出す）:
 #                      ・各段階の PR をマージするたびに、その段階の組織にだけ、クラスができること（まだ先の段階の組織には、入っていないこと）
@@ -43,6 +52,8 @@
 #   --resume      : 前回残したテスト用リポジトリ（最新の 1 つ）を使い、Hello World の部分（sf-job → sf-dryrun → sf-push → PR → リリース → 削除、
 #                   sf-next・sf-deploy の確認）だけを再実行する。前掃除・sf-init・wf-metasync は、行わない（約 15 分。直しの確認を、早く繰り返すため）。
 #                   ジョブ名は、毎回、時刻付きの別の名前になる。前回の残りの Hello World の Apex が、組織にあれば、最初に削除する
+#   --no-add-tier : --add-tier の確認（1 層のとき、最後に staging を足す。約 4 分）を省略する
+#   --with-args   : sf-init.sh / sf-job.sh に、引数 --owner / --project を付けて実行する（既定は、引数なしの対話・自動判定）
 #   --layout N    : 新しく作るリポジトリの層数（1 = main のみ（既定）/ 2 = main + staging / 3 = main + staging + develop）。
 #                   2・3 には、鍵一式に staging（3 は develop も）の組織が必要。--resume では、リポジトリの構成を、自動で判定する
 #   --no-actions  : GitHub Actions の実行確認（wf-metasync・Hello World のリリースと削除）を省略する（約 8〜12 分短くなる）
@@ -70,6 +81,8 @@ START_SEC=$SECONDS   # 経過時間の表示用
 KEEP=1   # 既定は、終了時に削除しない（あとから見返せるように。次回の前掃除で削除される）
 SKIP_ACTIONS=0
 RESUME=0
+ADD_TIER_CHECK=1 # 1 = 最後に、admin ブランチから --add-tier staging を実行して確認する（1 層で、staging の組織があるとき）
+WITH_ARGS=0      # 1 = sf-init / sf-job に、引数 --owner / --project を付ける（既定: 引数なし。対話と、クローンからの自動判定を確認する）
 LAYOUT=""        # 新しく作るリポジトリの層数（1 / 2 / 3）。--resume では、リポジトリの構成から判定する
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -77,6 +90,8 @@ while [[ $# -gt 0 ]]; do
         --cleanup)    KEEP=0 ;;
         --no-actions) SKIP_ACTIONS=1 ;;
         --resume)     RESUME=1 ;;
+        --with-args)  WITH_ARGS=1 ;;
+        --no-add-tier) ADD_TIER_CHECK=0 ;;
         --layout)     [[ -n "${2:-}" ]] || die "--layout には、1・2・3 のいずれかを指定してください。"
                       LAYOUT="$2"; shift ;;
         *) die "不明なオプションです: $1" ;;
@@ -187,6 +202,8 @@ _set_project() {   # 引数: プロジェクト名。PROJECT / REPO_NAME / REPO_
     REPO_NAME="force-${PROJECT}"
     REPO_FULL="${E2E_OWNER}/${REPO_NAME}"
     WORK="${E2E_HOME_ROOT}/${E2E_OWNER}/${PROJECT}"
+    JOB_ARGS=()   # sf-job.sh に渡す引数。既定は、なし（作業フォルダの下のクローンの git remote から決まる）
+    [[ $WITH_ARGS -eq 0 ]] || JOB_ARGS=(--owner "$E2E_OWNER" --project "$PROJECT")
 }
 
 _fresh_start() {
@@ -196,8 +213,16 @@ _fresh_start() {
 
     log "HEADER" "sf-init を実行します（${REPO_FULL}。${LAYOUT} 層）"
     INIT_OUT="${E2E_TMP}/sf-init.out"
-    e2e_make_input "$LAYOUT" \
-        | ( cd "$WORK" && PATH="${SHIM_DIR}:${PATH}" bash "${SF_TOOLS_ROOT}/bin/sf-init.sh" --owner "$E2E_OWNER" --project "$PROJECT" 2>&1 ) \
+    # 既定は、引数なしの対話: 先頭に、オーナーの選択・XXXX・確認の入力を足す。--with-args は、引数で指定する
+    local _init_args=() _ident_input=""
+    if [[ $WITH_ARGS -eq 1 ]]; then
+        _init_args=(--owner "$E2E_OWNER" --project "$PROJECT")
+    else
+        _ident_input=$(e2e_make_identity_input "$E2E_OWNER" "$PROJECT") \
+            || die "対話の入力（オーナーの選択）を作れません: gh のログインの候補に、${E2E_OWNER} がありません。"  # VAR=$(cmd) のため run 不使用
+    fi
+    { [[ -z "$_ident_input" ]] || printf '%s\n' "$_ident_input"; e2e_make_input "$LAYOUT"; } \
+        | ( cd "$WORK" && PATH="${SHIM_DIR}:${PATH}" bash "${SF_TOOLS_ROOT}/bin/sf-init.sh" ${_init_args[@]+"${_init_args[@]}"} 2>&1 ) \
         | tee "$INIT_OUT"
     INIT_RC=${PIPESTATUS[1]}
     _elapsed "sf-init の終了"
@@ -294,10 +319,13 @@ _hello_push() { E2E_COMMIT_MSG="$2" e2e_run_sf_cmd "sf-push-$1" "$3" "" "${SF_TO
 # ジョブの開始から push まで。引数: ラベル ブランチ名（= ジョブ名） コミットメッセージ ファイルを書く関数名 テストクラスを検出するか（1 / 0）
 _hello_local_job() {
     local label="$1" job="$2" msg="$3" writefn="$4" expect_tests="$5" repo="${WORK}/$2/${REPO_NAME}"
+    # 入力: ジョブ名 → 確認（Y）→ 組織のエイリアス → ログイン先（2 = Sandbox。sf-start.sh の質問。e2e では、認証 URL で
+    # ログインするため、選んだ URL は、使われない）。コメントは、chk の行の外に置く（行の継続の途中に書くと、コマンドが消える）
     chk "${label}: sf-job.sh で、ジョブ（ブランチ ${job}）を開始した（ブランチ作成・clone・sf-start.sh）" \
-        # 入力: ジョブ名 → 確認（Y）→ 組織のエイリアス → ログイン先（2 = Sandbox。sf-start.sh の質問。e2e では、認証 URL で
-        # ログインするため、選んだ URL は、使われない）
-        e2e_run_sf_cmd "sf-job-${job}" "$WORK" "${job}\nY\n${E2E_JOB_ALIAS}\n2\n" "${SF_TOOLS_ROOT}/bin/sf-job.sh" --owner "$E2E_OWNER" --project "$PROJECT" || return 1
+        e2e_run_sf_cmd "sf-job-${job}" "$WORK" "${job}\nY\n${E2E_JOB_ALIAS}\n2\n" "${SF_TOOLS_ROOT}/bin/sf-job.sh" ${JOB_ARGS[@]+"${JOB_ARGS[@]}"} || return 1
+    # 引数なしのとき: 作業フォルダの下のクローンの git remote から、プロジェクトが決まった（入力なしで、先へ進んだ）
+    [[ $WITH_ARGS -eq 1 ]] || chk "${label}: sf-job.sh は、引数なしで、作業フォルダの下のクローンから、プロジェクトを決めた" \
+        grep -qF "このフォルダの下のクローンから取得" "${E2E_TMP}/sf-job-${job}.out"
     chk "${label}: sf-install.sh（sf-start.sh が背景で実行）が完了した" e2e_wait_sf_install "$repo" || return 1
     chk "${label}: Git フック（pre-push）が設置された" test -f "${repo}/.git/hooks/pre-push"
     chk "${label}: リリース管理フォルダ release/${job}/ が用意された（雛形）" \
@@ -488,6 +516,29 @@ _hello_flow() {
     done
 }
 
+# --add-tier（管理者用のクローン = admin ブランチから、staging を追加する）の確認
+#   新しく作った 1 層のリポジトリに、staging の段階を足す。確認すること: 実行できる（組織への接続・Secret / Variable・ブランチ・PR）、
+#   終わったあとも admin ブランチにいる（main に居座らない）、main へ直接 push していない。
+#   Hello World の確認のあとに行う（先に行うと、リポジトリが 2 層になり、リリースの確認の対象が変わるため）
+_main_sha()   { _e2e_gh api "repos/${REPO_FULL}/branches/main" --jq .commit.sha 2>/dev/null; }
+_has_open_pr_titled() { _e2e_gh pr list -R "$REPO_FULL" --state open --json title --jq '.[].title' 2>/dev/null | grep -qxF -- "$1"; }
+_add_tier_check() {
+    local t=staging sfx=STG main_before
+    log "HEADER" "--add-tier ${t}（管理者用のクローン = admin ブランチから実行）"
+    main_before=$(_main_sha)  # VAR=$(cmd) のため run 不使用
+    chk "add-tier: 実行前、管理者用のクローンは admin ブランチにいる" _admin_branch_is admin
+    # 入力: 続行（Y）→ ログイン先（1 = login.salesforce.com。e2e では、認証 URL でログインするため、選んだ URL は、使われない）
+    chk "add-tier: sf-init.sh --add-tier ${t} が成功した（組織への接続・ブランチ・PR）" \
+        e2e_run_sf_cmd "sf-init-add-tier" "$_ADMIN_CLONE" "Y\n1\n" "${SF_TOOLS_ROOT}/bin/sf-init.sh" --add-tier "$t" || return 0
+    chk "add-tier: 終わったあとも、admin ブランチにいる（main に居座らない）" _admin_branch_is admin
+    chk "add-tier: GitHub に ${t} ブランチができた" _has_branch "$t"
+    chk "add-tier: Secret SF_CONSUMER_KEY_${sfx} が登録された" _has_secret "SF_CONSUMER_KEY_${sfx}"
+    chk "add-tier: Variable SF_USERNAME_${sfx} が登録された" _has_variable "SF_USERNAME_${sfx}"
+    chk "add-tier: Variable SF_INSTANCE_URL_${sfx} が登録された" _has_variable "SF_INSTANCE_URL_${sfx}"
+    chk "add-tier: branches.txt を更新する PR が作られた" _has_open_pr_titled "chore: ${t} tier を追加"
+    chk "add-tier: main へ、直接 push していない（PR を作るだけ）" test "$(_main_sha)" == "$main_before"
+}
+
 log "HEADER" "確認"
 [[ $RESUME -eq 1 ]] || chk "sf-init が正常終了した（終了コード ${INIT_RC}）" test "$INIT_RC" -eq 0   # --resume では、sf-init を実行しない
 
@@ -532,6 +583,37 @@ if [[ "$INIT_RC" -eq 0 ]]; then
         chk "ワークフロー ${_w} がある" _has_workflow "$_w"
     done
 
+    # 管理者用フォルダ（admin）と、admin ブランチ（新しく作ったときだけ。--resume の前回分は、古い形のことがある）
+    if [[ $RESUME -eq 0 ]]; then
+        _ADMIN_CLONE="${WORK}/admin/${REPO_NAME}"
+        _ADMIN_ENV="${WORK}/admin/.sf-init-${PROJECT}.env"
+        _ADMIN_PROGRESS="${WORK}/admin/.sf-init-${PROJECT}.progress"
+        _admin_branch_is()      { [[ "$(git -C "$_ADMIN_CLONE" symbolic-ref --short HEAD 2>/dev/null)" == "$1" ]]; }
+        _admin_tracks_remote()  { [[ "$(git -C "$_ADMIN_CLONE" rev-parse --abbrev-ref 'admin@{upstream}' 2>/dev/null)" == "origin/admin" ]]; }
+        _no_old_style_dirs()    { local d; for d in "${WORK}"/init "${WORK}"/init-*; do [[ -e "$d" ]] && return 1; done; return 0; }
+        _in_init_out()          { grep -qF -- "$1" "$INIT_OUT"; }
+        chk "管理者用フォルダ admin/${REPO_NAME} ができた（作業フォルダは、フォルダ構成に頼らない場所）" test -d "${_ADMIN_CLONE}/.git"
+        chk "途中経過のファイルが、プロジェクト名つき（.sf-init-${PROJECT}.env / .progress）で、admin にある" \
+            test -f "$_ADMIN_ENV" -a -f "$_ADMIN_PROGRESS"
+        chk "進捗が Phase 10 まで記録された（SF_INIT_DONE_PHASE=10）" grep -qx "SF_INIT_DONE_PHASE=10" "$_ADMIN_PROGRESS"
+        chk "古い形のフォルダ（init / init-*）ができていない" _no_old_style_dirs
+        chk "管理者用のクローンが、admin ブランチにいる（main の上で作業しない）" _admin_branch_is admin
+        chk "GitHub にも、admin ブランチがある" _has_branch admin
+        chk "ローカルの admin が、origin/admin を追跡している（push -u）" _admin_tracks_remote
+        chk "完了画面に、admin ブランチの案内が出た（ローカルと GitHub の両方）" _in_init_out "ブランチは admin です（このコンピューターと GitHub の両方にあります）"
+        chk "完了画面に、admin は main から古くなる旨が出た" _in_init_out "main から古くなります"
+        [[ $WITH_ARGS -eq 1 ]] || chk "対話: 「force- は自動で付く。XXXX の部分だけ入力」の案内が出た" _in_init_out "XXXX の部分だけを入力してください"
+        # sf-sync-wf.sh: admin ブランチでは実行できる（--check は、読み取りのみ）。main（保護ブランチ）では断られる
+        chk "admin ブランチで、sf-sync-wf.sh --check が実行できる" \
+            e2e_run_sf_cmd "sf-sync-wf-admin" "$_ADMIN_CLONE" "" "${SF_TOOLS_ROOT}/bin/sf-sync-wf.sh" --check
+        if chk "管理者用のクローンを、一時的に main に切り替えた（確認のため）" git -C "$_ADMIN_CLONE" checkout -q main; then
+            chk "main ブランチ（保護ブランチ）では、sf-sync-wf.sh が断られる" \
+                e2e_run_sf_cmd_refused "sf-sync-wf-main" "$_ADMIN_CLONE" "" "${SF_TOOLS_ROOT}/bin/sf-sync-wf.sh" --check
+            chk "断られた理由が、保護ブランチ（環境ブランチ）である" grep -qF "では実行できません" "${E2E_TMP}/sf-sync-wf-main.out"
+            chk "管理者用のクローンを、admin ブランチに戻した" git -C "$_ADMIN_CLONE" checkout -q admin
+        fi
+    fi
+
     # トークンが、sf-init の出力・ログに出ていないこと
     for _f in "$INIT_OUT" "$HOME/sf-tools/logs/sf-init.log" "$HOME/sf-tools/logs/error.log"; do
         chk "PAT_TOKEN の値が $(basename "$_f") に出ていない"      _not_in_file "$E2E_PAT_TOKEN"       "$_f"
@@ -560,6 +642,16 @@ if [[ "$INIT_RC" -eq 0 ]]; then
         _hello_flow
     else
         log "INFO" "GitHub Actions の実行確認を省略しました（--no-actions）。"
+    fi
+
+    # --add-tier の確認（新しく作った 1 層のリポジトリのとき。staging の組織が必要）
+    if [[ $ADD_TIER_CHECK -eq 1 && $RESUME -eq 0 && "$LAYOUT_DETECTED" -eq 1 ]]; then
+        if e2e_tier_available staging; then
+            _add_tier_check
+            _elapsed "--add-tier の確認の終了"
+        else
+            log "INFO" "--add-tier の確認を省略しました（鍵一式に staging の組織がありません。bootstrap.sh --add-orgs で追加できます）。"
+        fi
     fi
 fi
 

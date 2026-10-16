@@ -663,6 +663,26 @@ e2e_make_input() {
     for ((i = 1; i <= layout; i++)); do printf '%s\n' "1"; done
 }
 
+# 対話（引数なし）で sf-init.sh を実行するときの、先頭の入力（オーナーの選択 → XXXX → 確認）。e2e_make_input の前に流す
+#   引数: オーナー XXXX。オーナーの候補は、sf-init と同じ（gh_owner_candidates admin: lib/project.sh）。
+#     候補が複数 → 番号で選ぶ（番号は、候補の中の位置を調べて決める）/ 1 つ → 自動（入力なし）/ なし → オーナーを入力
+#     候補にオーナーがない → 戻り値 1（鍵一式のオーナーを、選べないため）
+e2e_make_identity_input() {
+    local owner="$1" project="$2" cands n idx
+    cands=$(gh_owner_candidates admin | awk 'NF')  # VAR=$(cmd) のため run 不使用
+    n=$(printf '%s\n' "$cands" | awk 'NF' | wc -l | tr -d ' ')  # VAR=$(cmd) のため run 不使用
+    if [[ "$n" -gt 1 ]]; then
+        idx=$(printf '%s\n' "$cands" | awk -v o="$owner" 'NF { i++; if ($0 == o) { print i; exit } }')  # VAR=$(cmd) のため run 不使用
+        [[ -n "$idx" ]] || return 1
+        printf '%s\n' "$idx"
+    elif [[ "$n" -eq 1 ]]; then
+        [[ "$cands" == "$owner" ]] || return 1
+    else
+        printf '%s\n' "$owner"
+    fi
+    printf '%s\n' "$project" "Y"
+}
+
 # 失敗したワークフローの実行の、失敗したステップのログ（末尾 E2E_FAIL_LOG_LINES 行。既定 40）を表示する。
 #   後掃除でリポジトリが消えると、失敗の原因を追えなくなるため。引数: リポジトリ 実行ID ラベル
 #   鍵一式の値（Token・認証 URL）は、念のため、*** に置き換える。表示だけで、戻り値は常に 0

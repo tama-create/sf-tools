@@ -1086,6 +1086,8 @@ bash tests/e2e/bootstrap.sh --refresh-orgs     # （e2e が RefreshTokenAuthErro
 bash tests/e2e/run.sh
 ```
 
+既定では、**管理者が実際に行う操作と同じ流れ**で確認します（約 30 分）: `sf-init.sh` を引数なしの対話（オーナーの選択 → XXXX の入力 → 確認）で実行し、`admin` ブランチ（ローカルと GitHub）・`sf-sync-wf.sh` の動作・`sf-job.sh` の自動判定を確認し、最後に `--add-tier staging` を実行して、`admin` ブランチに戻ること・PR ができること・`main` へ直接 push しないことを確認します（鍵一式に staging の組織があるときだけ）。引数での指定に切り替えるには `--with-args`、`--add-tier` の確認を省くには `--no-add-tier` を付けます。
+
 | 順 | 内容 |
 |---|---|
 | 1. 前掃除 | 前回の失敗で残ったテスト用のもの（名前が決まった形式で、オーナーが一致するものだけ）を削除する |

@@ -31,6 +31,8 @@ source "$(dirname "${BASH_SOURCE[0]}")/test_helper.sh"
 # sf-init.sh は、オーナーと XXXX を、引数（--owner / --project。環境変数 SF_INIT_OWNER / SF_INIT_PROJECT）か、
 # 対話で決める（フォルダ構成には頼らない）。既定のテストは、環境変数で渡す（引数・対話のテストは、個別に指定する）
 export SF_INIT_OWNER="tamashimon" SF_INIT_PROJECT="testproject"
+# 最初のメタデータの同期（wf-metasync の起動と、完了の待ち）の確認の間隔。モックの gh は、すぐに答えるため、0 にする
+export VERIFY_POLL_SEC=0
 
 # ==============================================================================
 # ヘルパー：作業フォルダ（{base}/home/{github-owner}/{company}/。フォルダ名に意味はない）を作成
@@ -108,8 +110,25 @@ case "$1 $2" in
     "variable list")
         while IFS= read -r _n; do [[ -n "$_n" ]] && printf '%s\tx\t2026-10-11T08:00:00Z\n' "$_n"; done <<< "${MOCK_GH_VARIABLES:-}"
         exit 0 ;;
+    "workflow run")
+        # 最初のメタデータの同期（wf-metasync の手動起動）。MOCK_GH_WORKFLOW_RUN_EXIT=1 → 起動に失敗する
+        exit "${MOCK_GH_WORKFLOW_RUN_EXIT:-0}" ;;
     "run list")
+        case " $* " in
+            *" --event workflow_dispatch "*)
+                # 手動起動した実行の ID: 1 回目（起動の前の基準）は 100、以降は 101（基準より新しい実行が、できたことにする）
+                _c="${MOCK_CALL_LOG%/*}/.wfd_count"; _n=$(cat "$_c" 2>/dev/null || echo 0); echo $(( _n + 1 )) > "$_c"
+                if [[ "$_n" -eq 0 ]]; then echo 100; else echo 101; fi
+                exit 0 ;;
+        esac
         printf '%s\n' "${MOCK_GH_RUN_OUT:-none}"; exit 0 ;;
+    "run view")
+        # 同期の実行の状態と結果。MOCK_GH_SYNC_CONCLUSION=failure → 同期が失敗する
+        case " $* " in
+            *" --json status "*)     echo "completed" ;;
+            *" --json conclusion "*) echo "${MOCK_GH_SYNC_CONCLUSION:-success}" ;;
+        esac
+        exit 0 ;;
     "variable set")
         # --body で値が渡される場合は何もしない（標準入力を読むと、テストの入力列を消費してしまう）
         case " $* " in *" --body "*) exit 0 ;; esac
@@ -470,6 +489,9 @@ test_flex_layout_with_args() {
     assert_file_not_exists "$work/admin/.sf-init-testproject.progress"                     "完了後、進捗ファイル（.sf-init-XXXX.progress）も消える"
     assert_file_contains "/tmp/sf-init-test-flex.log" "force- は自動で付くため"             "force- まで指定したとき、除いたことを表示する"
     assert_file_contains "/tmp/sf-init-test-flex.log" "cd \"$work\""                        "完了画面: 次のコマンドに、実際の作業フォルダを表示する（~/home/… ではない）"
+    assert_file_contains "$MOCK_CALL_LOG" "gh workflow run wf-metasync.yml"                "最後に、最初のメタデータの同期（wf-metasync）を起動する"
+    assert_file_contains "$MOCK_CALL_LOG" "pull --ff-only origin main"                     "同期のあと、管理者用のクローンに、main を取り込む（git pull --ff-only）"
+    assert_file_contains "/tmp/sf-init-test-flex.log" "メタデータは、同期済みです"           "完了画面: メタデータが同期済みであることを知らせる"
     assert_file_contains "$MOCK_CALL_LOG" "checkout admin"                                 "最後に、管理者用のクローンを、admin ブランチにする（モックの git は、admin が既にあると答える）"
     assert_file_contains "$MOCK_CALL_LOG" "push --no-verify -u origin admin"               "admin ブランチを、GitHub にも push する（強制 push ではない）"
     assert_file_contains "/tmp/sf-init-test-flex.log" "ブランチは admin です"               "完了画面: admin ブランチにいることを知らせる"
@@ -546,6 +568,44 @@ test_admin_branch_push_failure_is_not_fatal() {
 
     teardown "$mb" "$mock_home" "$base"
     rm -f /tmp/sf-init-test-pushfail.log
+}
+
+# ==============================================================================
+# テスト 6f: 最初のメタデータの同期に失敗しても、セットアップは成功のまま（完了画面で知らせる。クローンには取り込まない）
+# ==============================================================================
+test_initial_sync_failure_is_not_fatal() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] 最初のメタデータの同期に失敗（起動できない / 同期の失敗）→ セットアップは成功・完了画面で知らせる${CLR_RST}"
+
+    local mb mock_home base work exit_code k
+    mb=$(setup_mock_bin)
+    export MOCK_CALL_LOG="$mb/calls.log"
+    mock_home=$(setup_mock_home)
+    create_all_mocks "$mb"
+    create_mock_gh_for_init "$mb"
+    _stub_subscripts "$mock_home"
+
+    for k in "MOCK_GH_WORKFLOW_RUN_EXIT=1" "MOCK_GH_SYNC_CONCLUSION=failure"; do
+        base=$(mktemp -d "${TMPDIR:-/tmp}/test-init-XXXX")
+        work="$base/my-work"; mkdir -p "$work"
+        rm -rf "$mb/deployed_src" "$mb/jwt.cnt" "$mock_home/.sf-jwt" "$mb/.repo_view_called" "$mb/.wfd_count"
+        : > "$MOCK_CALL_LOG"
+        _make_input_3branches \
+            | ( export "$k"; cd "$work" && HOME="$mock_home" PATH="$mb:$PATH" \
+                  bash "$mock_home/sf-tools/bin/sf-init.sh" --owner tamashimon --project testproject --legacy-connected-app ) \
+              > /tmp/sf-init-test-syncfail.log 2>&1
+        exit_code=$?
+        assert_exit_ok   "$exit_code"                                                         "同期に失敗しても（${k}）、セットアップは成功する"
+        assert_file_contains "/tmp/sf-init-test-syncfail.log" "同期は、できませんでした"           "（${k}）完了画面で、同期できなかったことを知らせる"
+        assert_file_contains "/tmp/sf-init-test-syncfail.log" "gh workflow run wf-metasync.yml -R tamashimon/force-testproject"  "（${k}）すぐ同期する方法を案内する"
+        assert_file_not_contains "$MOCK_CALL_LOG" "pull --ff-only origin main"                "（${k}）同期できていないため、クローンに取り込まない"
+        assert_file_not_contains "/tmp/sf-init-test-syncfail.log" "同期済みです"               "（${k}）「同期済み」とは、表示しない"
+        rm -rf "$base"
+    done
+    assert_file_contains "/tmp/sf-init-test-syncfail.log" "同期が、失敗しました"                "同期の失敗: 失敗の理由（ログの URL つき）を表示する"
+
+    teardown "$mb" "$mock_home"
+    rm -f /tmp/sf-init-test-syncfail.log
 }
 
 # ==============================================================================
@@ -2348,6 +2408,7 @@ test_flex_layout_with_args
 test_flex_layout_prompt
 test_admin_branch_failure_is_not_fatal
 test_admin_branch_push_failure_is_not_fatal
+test_initial_sync_failure_is_not_fatal
 test_flex_invalid_project_arg
 test_repo_visibility_private
 test_only_option_runs_single_phase

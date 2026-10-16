@@ -67,7 +67,10 @@ else
     log "INFO" "リポジトリをクローン中..."
     clone_base="$(dirname "$REPO_DIR")"
     run mkdir -p "$clone_base" || die "クローン先ディレクトリを作成できません: $clone_base"
-    run git clone "https://github.com/${REPO_FULL_NAME}.git" "$REPO_DIR" \
+    # core.longpaths=true: Windows のパスの長さの上限（260 文字）対策。設定は、クローン先に残る（あとで、同期したメタデータを
+    #   git pull するとき、長い名前のメタデータ（例: DevOps Center の objectTranslations）で、失敗しないため。sf-job.sh も同じ）。
+    #   Windows 以外では、無視される
+    run git clone -c core.longpaths=true "https://github.com/${REPO_FULL_NAME}.git" "$REPO_DIR" \
         || die "クローンに失敗しました。"
     log "SUCCESS" "リポジトリをクローンしました: ${REPO_DIR}"
 fi

@@ -615,6 +615,14 @@ if [[ "$INIT_RC" -eq 0 ]]; then
         chk "ローカルの admin が、origin/admin を追跡している（push -u）" _admin_tracks_remote
         chk "完了画面に、admin ブランチの案内が出た（ローカルと GitHub の両方）" _in_init_out "ブランチは admin です（このコンピューターと GitHub の両方にあります）"
         chk "完了画面に、admin は main から古くなる旨が出た" _in_init_out "main から古くなります"
+        # 最初のメタデータの同期: セットアップが終わった瞬間に、クローンへ、同期済みのメタデータが、全部入っている
+        _clone_has_metadata()   { git -C "$_ADMIN_CLONE" ls-tree -r --name-only admin 2>/dev/null | grep '^force-app/' | grep -qv '/\.gitkeep$'; }
+        _main_has_sync_commit() { _e2e_gh api "repos/${REPO_FULL}/commits?sha=main&per_page=10" --jq '.[].commit.message' 2>/dev/null | grep -qF "定期更新: Salesforce変更の自動反映"; }
+        _local_main_is_remote() { [[ -n "$(git -C "$_ADMIN_CLONE" rev-parse main 2>/dev/null)" && "$(git -C "$_ADMIN_CLONE" rev-parse main 2>/dev/null)" == "$(git -C "$_ADMIN_CLONE" ls-remote origin refs/heads/main 2>/dev/null | awk '{print $1}')" ]]; }
+        chk "完了画面に、メタデータが同期済みである旨が出た" _in_init_out "メタデータは、同期済みです"
+        chk "完了直後のクローン（admin ブランチ）に、同期済みのメタデータが入っている（force-app が、空のひな型ではない）" _clone_has_metadata
+        chk "GitHub の main に、同期のコミット（定期更新: Salesforce変更の自動反映）がある" _main_has_sync_commit
+        chk "ローカルの main が、origin/main と一致している（同期した内容を、取り込み済み）" _local_main_is_remote
         [[ $WITH_ARGS -eq 1 ]] || chk "対話: 「force- は自動で付く。XXXX の部分だけ入力」の案内が出た" _in_init_out "XXXX の部分だけを入力してください"
         # sf-sync-wf.sh: admin ブランチでは実行できる（--check は、読み取りのみ）。main（保護ブランチ）では断られる
         chk "admin ブランチで、sf-sync-wf.sh --check が実行できる" \

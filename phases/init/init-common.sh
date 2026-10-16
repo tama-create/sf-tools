@@ -7,6 +7,7 @@
 #
 # 【提供する関数】
 #   open_browser URL          ... OS を判定してブラウザを開く（lib/common.sh に同名関数あり）
+#   initial_metadata_sync     ... セットアップの最後に、wf-metasync を実行して完了を待ち、同期した内容を、管理者用のクローンに取り込む
 #   generate_jwt_cert         ... JWT 用秘密鍵・証明書を openssl で生成する（生成後に、発行先が空でないことを確認する）
 #   ensure_jwt_cert_subject   ... 既存の証明書の発行先が空なら、秘密鍵はそのままで、証明書だけを作り直す
 #   register_jwt_secret       ... JWT 認証情報を取得・テストして GitHub Secret に登録する
@@ -576,4 +577,55 @@ register_jwt_secret_eca() {
     log "SUCCESS" "  SF_CONSUMER_KEY_${suffix}（Secret）/ SF_USERNAME_${suffix}（Variable）/ SF_INSTANCE_URL_${suffix}（Variable）を登録しました。"
     # 組織の情報（ID・名前・種類・確認日時）を保存する（sf-init.sh --status の表示用。読み取れていなければ、保存しない）
     org_save "$suffix"
+}
+
+# ------------------------------------------------------------------------------
+# initial_metadata_sync - セットアップの最後に、Salesforce のメタデータを、リポジトリと、管理者用のクローンに入れる
+# ------------------------------------------------------------------------------
+# 【使い方】 initial_metadata_sync REPO_FULL_NAME REPO_DIR        （Phase 10 のあと。sf-init.sh が呼ぶ）
+# 【理由】   初期コミットの force-app は、空のひな型。何もしないと、メタデータは、次の定期実行（平日 3 時間おき）まで入らない。
+#           セットアップが終わった瞬間に、クローンへ、同期済みのメタデータが、全部入っているようにする。
+#           クローン（Phase 3）は、初期コミットの push に必要なため、同期（Phase 10 の接続情報が必要）より、先になる。
+#           そこで、同期（wf-metasync）が終わってから、クローンに git pull する（作り直したクローンと、同じ結果になる）。
+# 【動作】   wf-metasync（GitHub Actions）を手動で起動し、完了を待つ（SF_INIT_SYNC_TIMEOUT 秒。既定 1200。30 秒おきに経過を表示）。
+#           成功したら、クローンの main を git pull --ff-only する（core.longpaths=true も設定する）。
+#           組織のメタデータは、main にコミットされる（PAT による保護のバイパス。wf-metasync の設計どおり）。
+# 【戻り値】 0 = 同期して、クローンに取り込んだ / 1 = 失敗（起動できない・時間切れ・同期の失敗・pull の失敗）。
+#           呼び出し側は、セットアップを、成功のままにして、警告にとどめる
+initial_metadata_sync() {
+    local repo="${1:-}" dir="${2:-}" id status="" concl cur waited=0 poll timeout
+    [[ -n "$repo" && -n "$dir" ]] || return 1
+    timeout="${SF_INIT_SYNC_TIMEOUT:-1200}"
+    poll=$(_sfv_poll)  # VAR=$(cmd) のため run 不使用
+    log "INFO" "  Salesforce のメタデータを、リポジトリに同期します（wf-metasync。組織の大きさにより、数分かかります）..."
+    id=$(verify_dispatch_workflow "$repo" wf-metasync.yml main) || {
+        log "WARNING" "  wf-metasync を起動できませんでした。"
+        return 1
+    }  # VAR=$(cmd) のため run 不使用
+    log "INFO" "  同期を起動しました: https://github.com/${repo}/actions/runs/${id}"
+    while (( waited < timeout )); do
+        status=$(verify_gh run view "$id" -R "$repo" --json status --jq .status 2>/dev/null)  # VAR=$(cmd) のため run 不使用
+        [[ "$status" == "completed" ]] && break
+        sleep "$poll"; waited=$((waited + (poll > 0 ? poll : 1)))  # run 不使用: 待機（間隔が 0 でも、上限に達する）
+        (( waited % 30 == 0 )) && log "INFO" "    … 同期中（経過 ${waited} 秒）"
+    done
+    if [[ "$status" != "completed" ]]; then
+        log "WARNING" "  同期が、${timeout} 秒以内に、終わりませんでした: https://github.com/${repo}/actions/runs/${id}"
+        return 1
+    fi
+    concl=$(verify_run_conclusion "$repo" "$id")  # VAR=$(cmd) のため run 不使用
+    if [[ "$concl" != "success" ]]; then
+        log "WARNING" "  同期が、失敗しました（結果: ${concl:-不明}）。ログ: https://github.com/${repo}/actions/runs/${id}"
+        return 1
+    fi
+    log "SUCCESS" "  Salesforce のメタデータを、リポジトリ（main）に同期しました。"
+    # 同期した内容を、管理者用のクローンに取り込む（main にいること）
+    cur=$(git -C "$dir" symbolic-ref --short HEAD 2>/dev/null || true)  # VAR=$(cmd) のため run 不使用
+    if [[ "$cur" != "main" ]]; then
+        run git -C "$dir" checkout main || { log "WARNING" "  main に切り替えられませんでした: ${dir}"; return 1; }
+    fi
+    run git -C "$dir" config core.longpaths true || true  # Windows のパス長の上限対策。失敗しても続ける（意図的エラー無視）
+    run git -C "$dir" pull --ff-only origin main || { log "WARNING" "  同期した内容を、クローンに取り込めませんでした: ${dir}"; return 1; }
+    log "SUCCESS" "  同期した内容を、管理者用のクローンに取り込みました。"
+    return 0
 }

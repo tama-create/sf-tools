@@ -152,9 +152,14 @@ sf-init.sh --owner yamada-corp --project yamada   # 引数で指定（対話な�
      - `SF_PRIVATE_KEY`: PEM 秘密鍵（全組織共通）
      - `SF_CONSUMER_KEY_*` / `SF_USERNAME_*` / `SF_INSTANCE_URL_*`（例: `https://login.salesforce.com`）
 
+8. **最初のメタデータの同期（自動）**
+   - Phase 10 のあとに、`wf-metasync` を実行して完了を待ち、同期した内容を、管理者用のクローン（`admin/force-XXXX`）に `git pull` します（数分。組織の大きさで伸びます）
+   - **セットアップが終わった瞬間に、Salesforce のメタデータが、GitHub の `main` にも、手元のクローンにも、入っています**（初期コミットの `force-app` は、空のひな型です）
+   - 失敗しても、セットアップは成功のままです。完了画面に、すぐ同期する方法が出ます（定期実行は、平日 3 時間おきです）
+
 > JWT 秘密鍵の事前準備: `openssl genrsa -out server.key 2048` で生成し、公開鍵を各 Salesforce 組織の Connected App に登録しておくこと。
 
-> クローン先は sf-init.sh を実行したディレクトリに自動設定されます。
+> クローン先は、sf-init.sh を実行したフォルダ（作業フォルダ）の `admin/force-XXXX` です。
 
 ### 3.2 SF_TOOLS_TOKEN は不要です
 

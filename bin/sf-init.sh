@@ -29,6 +29,9 @@
 #   Phase 8:  初回コミット＆プッシュ
 #   Phase 9:  GitHub リポジトリ設定・Ruleset の適用
 #   Phase 10: JWT 認証情報の設定（Salesforce GitHub Secrets 登録）
+#   最後:     最初のメタデータの同期（wf-metasync を実行して完了を待ち、管理者用のクローンに git pull する。Phase 10 のあと。
+#             セットアップが終わった瞬間に、クローンへ、同期済みのメタデータが、全部入っている。失敗しても、セットアップは成功）
+#             → 動作の確認（任意）→ 管理者用のクローンを admin ブランチにして GitHub にも push
 #
 # 【前提】
 #   Salesforce CLI（sf）は npm 版（npm install -g @salesforce/cli）であること。
@@ -133,6 +136,7 @@ fi
 source "$COMMON_LIB"
 source "${SCRIPT_DIR}/../lib/wizard.sh"                 # ウィザード形式の画面の部品（doc/wizard-ux-design.md）
 source "${SCRIPT_DIR}/../phases/init/init-common.sh"    # ensure_sf_tools_branch など（各フェーズと共通）
+source "${SCRIPT_DIR}/../lib/verify-common.sh"           # 最初のメタデータの同期（initial_metadata_sync）が使う、ワークフローの起動・待ち
 
 trap '' INT  # Ctrl+C を無効化（子プロセスにも継承される）
 
@@ -552,6 +556,21 @@ if [[ "$END_PHASE" -eq 10 && -f "$SF_INIT_ENV_FILE" ]]; then
     run sed_inplace '/^[A-Z_]*TOKEN_VALUE=/d' "$SF_INIT_ENV_FILE"
 fi
 
+# 最初のメタデータの同期: セットアップが終わった瞬間に、Salesforce のメタデータが、リポジトリ（main）と、管理者用のクローンに、
+#   全部入っているようにする（初期コミットの force-app は、空のひな型。何もしないと、次の定期実行（平日 3 時間おき）まで入らない）。
+#   Phase 10（接続情報の登録）のあとでないと動かないため、クローンの作成（Phase 3）のあと。wf-metasync を実行し、
+#   終わったら、クローンに git pull する。失敗しても、セットアップは成功のまま、完了画面で知らせる。
+#   Phase 10 を実行した、最後までの実行のときだけ（--only N では行わない）
+SYNC_RESULT=""   # "" = 行わなかった / done = 同期して、クローンに取り込んだ / failed = できなかった
+if [[ "$END_PHASE" -eq 10 && -z "$ONLY_PHASE" && "$START_PHASE" -le 10 && -n "${REPO_DIR:-}" && -n "${REPO_FULL_NAME:-}" ]]; then
+    log "HEADER" "最初のメタデータの同期（Salesforce → GitHub → この管理者用のクローン）"
+    if initial_metadata_sync "$REPO_FULL_NAME" "$REPO_DIR"; then
+        SYNC_RESULT="done"
+    else
+        SYNC_RESULT="failed"
+    fi
+fi
+
 # ステップ 9: 動作の確認（verify.sh）。聞くのは、「通しの実行」と、中断後の「続きをやる」だけ（FULL_START。
 #   --resume N / --only N を明示した実行では、聞かない: Phase 単位のやり直しに、20 分ほどの検証を、混ぜないため）。
 #   対話できる端末のときだけ聞く（SF_INIT_VERIFY_ASK=1 で、端末でなくても聞く: テスト用。GITHUB_ACTIONS 上では、聞かない）
@@ -593,6 +612,12 @@ fi
 _admin_branch_line="     ・ブランチは admin です（このコンピューターと GitHub の両方にあります）"
 _admin_stale_line="     ・admin は、main から古くなります。使う前に、main を取り込んでください（git pull origin main）"
 if [[ "$END_PHASE" -eq 10 && -n "${REPO_DIR:-}" ]]; then
+    # 動作の確認（verify.sh）で、Hello World のリリースと削除が main に入っているときは、最新の main を取り込んでから、admin を作る
+    if [[ "$VERIFY_RESULT" == "done" || "$VERIFY_RESULT" == "failed" ]] \
+       && [[ "$(git -C "$REPO_DIR" symbolic-ref --short HEAD 2>/dev/null || true)" == "main" ]]; then  # 条件チェックのため run 不使用
+        run git -C "$REPO_DIR" pull --ff-only origin main \
+            || log "WARNING" "動作の確認のあとの main を、取り込めませんでした: ${REPO_DIR}"
+    fi
     if ! ensure_admin_branch "$REPO_DIR"; then
         log "WARNING" "管理者用のクローンを admin ブランチにできませんでした: ${REPO_DIR}"
         _admin_branch_line="     ・admin ブランチを作れませんでした（main のままです）。管理者用フォルダで、git switch -c admin を実行してください"
@@ -623,6 +648,12 @@ case "$VERIFY_RESULT" in
     skipped) _verify_line="4. 動作の確認は、あとで行えます: 管理者用フォルダで、~/sf-tools/bin/sf-init.sh --verify（または、sf-init.sh を再実行して、2 を選ぶ）" ;;
     *)       _verify_line="4. 動作の確認は、あとで行えます: 管理者用フォルダで、~/sf-tools/bin/sf-init.sh --verify" ;;
 esac
+# 最初のメタデータの同期の結果の行
+case "$SYNC_RESULT" in
+    done)   _sync_line="5. Salesforce のメタデータは、同期済みです（リポジトリにも、この管理者用のクローンにも、入っています）。以後は、平日 3 時間おきに、自動で同期されます" ;;
+    failed) _sync_line="5. Salesforce のメタデータの同期は、できませんでした（セットアップは、完了しています）。次の定期実行（平日 3 時間おき）で入ります。すぐ同期するには: gh workflow run wf-metasync.yml -R ${REPO_FULL_NAME:-${GITHUB_OWNER}/force-${COMPANY_NAME}}（終わったら、管理者用フォルダで git pull origin main）" ;;
+    *)      _sync_line="5. （途中までの実行のため、メタデータの同期は、行っていません。定期実行は、平日 3 時間おきです）" ;;
+esac
 wizard_done "できました: ${REPO_FULL_NAME:-${GITHUB_OWNER}/force-${COMPANY_NAME}}" \
     "GitHub リポジトリ / Token / Slack 通知 / Salesforce の接続（${_org_count} 組織）" \
     -- \
@@ -637,6 +668,7 @@ wizard_done "できました: ${REPO_FULL_NAME:-${GITHUB_OWNER}/force-${COMPANY_
     "$_admin_branch_line" \
     "$_admin_stale_line" \
     "     ・日常の開発には使わないでください（開発は、上の sf-job.sh の作業フォルダで行います）" \
-    "$_verify_line"
+    "$_verify_line" \
+    "$_sync_line"
 
 exit $RET_OK

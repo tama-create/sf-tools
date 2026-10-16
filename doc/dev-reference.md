@@ -671,7 +671,7 @@ sf-init.sh --add-tier develop    # main+staging → main+staging+develop
 | PAT の種類・取得方法 | `doc/setup-guide.md` セクション3.1、`doc/sf-cicd-strategy.md` セクション7.1・8 |
 | WF ファイル名・ジョブ名 | `doc/setup-guide.md` セクション5、`doc/sf-cicd-strategy.md` セクション4.2 |
 | `templates/.github/workflows/` の `name:` | `doc/setup-guide.md` のワークフロー一覧 |
-| `templates/.github/workflows/` の内容 | `phases/init/08_repo_rules.sh` の `required_status_checks.context` との整合 |
+| `templates/.github/workflows/` の内容 | `phases/init/09_repo_rules.sh` の `required_status_checks.context` との整合 |
 | mm / rr の運用・リリース手順 | `CLAUDE.md` 1.3・4.3、`README.md` セクション 9、本書セクション 9 |
 
 > ドキュメントの詳細（フロー・パス等）はコードを確認してから記載すること。推測で書かないこと。

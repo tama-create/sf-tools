@@ -206,7 +206,7 @@ sf org login jwt \
 
 | ファイル | 変更種別 | 内容 |
 |---|---|---|
-| `phases/init/06_sf_auth.sh` | 全面書き換え | JWT フローに変更 |
+| `phases/init/10_sf_auth.sh`（旧 `06_sf_auth.sh`） | 全面書き換え | JWT フローに変更 |
 | `phases/init/init-common.sh` | 関数差し替え | `register_sf_secret` 削除・`register_jwt_secret` 追加 |
 | `bin/sf-update-secret.sh` | 全面書き換え | JWT Secrets 対応 |
 | `templates/.github/workflows/wf-validate.yml` | 認証ステップ変更・自己完結化 | sfdxAuthUrl → JWT、reusable WF パターン廃止 |

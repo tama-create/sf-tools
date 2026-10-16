@@ -976,9 +976,18 @@ sf-tools/
 │   └── sf-tools/
 │       ├── config/             ← metadata.txt / branches.txt 雛形
 │       └── release/__BRANCH__/ ← deploy-target.txt / remove-target.txt 雛形
+├── config/                     ← sf-tools 自身の設定・データ（force-* には配布されない）
+│   ├── metadata-capability.txt ← メタデータの種類ごとの、リリース・削除の可否の表（sf-typecheck.sh が確認。sf-check.sh が参照）
+│   └── changeset-types.txt     ← 変更セットで扱える種類の一覧（公式の Metadata Coverage Report。sf-typecheck.sh --coverage が参照）
 ├── doc/
-│   ├── setup-guide.md
-│   └── sf-cicd-strategy.md
+│   ├── setup-guide.md          ← 新規プロジェクトのセットアップ手順（管理者向け）
+│   ├── sf-cicd-strategy.md     ← Git 運用・CI/CD の基本戦略・設計思想
+│   ├── sf-tools-vision.md      ← 設計思想・競合との差別化・位置づけ（内部ドキュメント）
+│   ├── wf-distribution-strategy.md ← ワークフローの配布・更新の戦略（sf-sync-wf.sh）
+│   ├── jwt-auth-spec.md        ← JWT 認証方式の仕様
+│   ├── wizard-ux-design.md     ← ウィザード形式（sf-init など）の UX 設計
+│   ├── sf-logwatch-design.md   ← sf-logwatch.sh の設計書（未実装）
+│   └── dev-reference.md        ← 実装の詳細リファレンス（AI・開発者向け）
 ├── tests/                      ← 単体テスト一式
 │   └── e2e/                    ← 実環境での通し検証（sf-init の自動実行。9.3 参照）
 ├── CLAUDE.md

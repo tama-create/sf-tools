@@ -12,7 +12,8 @@
 #      → 外部クライアントアプリの自動作成 → JWT 認証情報（SF_CONSUMER_KEY_xxx / SF_USERNAME_xxx / SF_INSTANCE_URL_xxx）を登録
 #      （--legacy-connected-app のときは、コンシューマー鍵・ユーザー名を手動で入力）。接続できなければ、何も変更しない
 #   4. GitHub にブランチを作成
-#   5. 作業用ブランチで branches.txt を更新し、PR を作成する（main へは、直接 push しない）
+#   5. 作業用ブランチで branches.txt を更新し、PR を作成する（main へは、直接 push しない）。
+#      終わったら、実行前のブランチ（管理者用のクローンでは admin）に戻る
 #
 # 【登録する Secrets / Variables】
 #   staging 追加時: SF_CONSUMER_KEY_STG（Secret）/ SF_USERNAME_STG / SF_INSTANCE_URL_STG（Variable）
@@ -136,6 +137,11 @@ fi
 # ------------------------------------------------------------------------------
 log "HEADER" "Step 2: ${ADD_TIER} ブランチを追加します。"
 
+# 実行前のブランチを覚える（管理者用のクローンは admin ブランチに置くため、終わったら、そこへ戻る。main に居座らない）
+ORIGINAL_BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null || true)  # VAR=$(cmd) のため run 不使用
+[[ -n "$ORIGINAL_BRANCH" ]] || ORIGINAL_BRANCH="main"
+log "INFO" "実行前のブランチ: ${ORIGINAL_BRANCH}（終わったら、ここへ戻ります）"
+
 run git checkout main || die "main ブランチへの切り替えに失敗しました。"
 
 # 5-1. リモートに ${ADD_TIER} ブランチを作成（main から派生）
@@ -180,7 +186,7 @@ PR_URL=$(run gh pr create --base main --head "$PR_BRANCH" -R "$REPO_FULL_NAME" \
     --title "chore: ${ADD_TIER} tier を追加" \
     --body "branches.txt に ${ADD_TIER} を追加します（sf-init.sh --add-tier ${ADD_TIER} で作成）。マージすると、段階として有効になります。") \
     || die "PR の作成に失敗しました。"  # VAR=$(cmd) のため、PR の URL を取得する
-run git checkout main || die "main ブランチへの切り替えに失敗しました。"
+run git checkout "$ORIGINAL_BRANCH" || die "${ORIGINAL_BRANCH} ブランチへの切り替えに失敗しました。"
 
 log "SUCCESS" "tier 追加の準備ができました: ${ADD_TIER}（${LABEL}）"
 log "INFO"    "次のステップ:"

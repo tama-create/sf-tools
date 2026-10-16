@@ -466,9 +466,82 @@ test_flex_layout_with_args() {
     assert_file_exists   "$work/admin/.sf-init-testproject.progress"                       "進捗も、プロジェクト名つき（.sf-init-XXXX.progress）で保存される"
     assert_file_contains "/tmp/sf-init-test-flex.log" "force- は自動で付くため"             "force- まで指定したとき、除いたことを表示する"
     assert_file_contains "/tmp/sf-init-test-flex.log" "cd \"$work\""                        "完了画面: 次のコマンドに、実際の作業フォルダを表示する（~/home/… ではない）"
+    assert_file_contains "$MOCK_CALL_LOG" "checkout admin"                                 "最後に、管理者用のクローンを、admin ブランチにする（モックの git は、admin が既にあると答える）"
+    assert_file_contains "$MOCK_CALL_LOG" "push --no-verify -u origin admin"               "admin ブランチを、GitHub にも push する（強制 push ではない）"
+    assert_file_contains "/tmp/sf-init-test-flex.log" "ブランチは admin です"               "完了画面: admin ブランチにいることを知らせる"
+    assert_file_contains "/tmp/sf-init-test-flex.log" "GitHub の両方にあります"            "完了画面: ローカルと GitHub の両方にあることを知らせる"
+    assert_file_contains "/tmp/sf-init-test-flex.log" "main から古くなります"               "完了画面: admin は main から古くなる旨を知らせる"
     assert_file_not_contains "/tmp/sf-init-test-flex.log" "~/home/"                         "完了画面に、~/home/ という決まりを出さない"
 
     teardown "$mb" "$mock_home" "$base"
+}
+
+# ==============================================================================
+# テスト 6d: 管理者用のクローンを admin ブランチにできなくても、セットアップは成功のまま（完了画面で知らせる）
+# ==============================================================================
+test_admin_branch_failure_is_not_fatal() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] admin ブランチへの切り替えに失敗 → セットアップは成功・完了画面で知らせる${CLR_RST}"
+
+    local mb mock_home base work exit_code
+    mb=$(setup_mock_bin)
+    export MOCK_CALL_LOG="$mb/calls.log"
+    mock_home=$(setup_mock_home)
+    base=$(mktemp -d "${TMPDIR:-/tmp}/test-init-XXXX")
+    work="$base/my-work"; mkdir -p "$work"
+
+    create_all_mocks "$mb"
+    create_mock_gh_for_init "$mb"
+    _stub_subscripts "$mock_home"
+
+    export MOCK_GIT_CHECKOUT_FAIL_BRANCH=admin
+    _make_input_3branches \
+        | ( cd "$work" && HOME="$mock_home" PATH="$mb:$PATH" \
+              bash "$mock_home/sf-tools/bin/sf-init.sh" --owner tamashimon --project testproject --legacy-connected-app ) \
+          > /tmp/sf-init-test-adminfail.log 2>&1
+    exit_code=$?
+    unset MOCK_GIT_CHECKOUT_FAIL_BRANCH
+
+    assert_exit_ok   "$exit_code"                                                       "admin ブランチにできなくても、セットアップは成功する"
+    assert_file_contains "/tmp/sf-init-test-adminfail.log" "admin ブランチにできませんでした"  "警告を表示する"
+    assert_file_contains "/tmp/sf-init-test-adminfail.log" "git switch -c admin"        "完了画面で、手動で作る方法を知らせる"
+
+    teardown "$mb" "$mock_home" "$base"
+    rm -f /tmp/sf-init-test-adminfail.log
+}
+
+# ==============================================================================
+# テスト 6e: admin ブランチを GitHub に push できなくても、セットアップは成功のまま（完了画面で知らせる）
+# ==============================================================================
+test_admin_branch_push_failure_is_not_fatal() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] admin ブランチの push に失敗 → セットアップは成功・完了画面で知らせる${CLR_RST}"
+
+    local mb mock_home base work exit_code
+    mb=$(setup_mock_bin)
+    export MOCK_CALL_LOG="$mb/calls.log"
+    mock_home=$(setup_mock_home)
+    base=$(mktemp -d "${TMPDIR:-/tmp}/test-init-XXXX")
+    work="$base/my-work"; mkdir -p "$work"
+
+    create_all_mocks "$mb"
+    create_mock_gh_for_init "$mb"
+    _stub_subscripts "$mock_home"
+
+    export MOCK_GIT_C_PUSH_EXIT=1
+    _make_input_3branches \
+        | ( cd "$work" && HOME="$mock_home" PATH="$mb:$PATH" \
+              bash "$mock_home/sf-tools/bin/sf-init.sh" --owner tamashimon --project testproject --legacy-connected-app ) \
+          > /tmp/sf-init-test-pushfail.log 2>&1
+    exit_code=$?
+    unset MOCK_GIT_C_PUSH_EXIT
+
+    assert_exit_ok   "$exit_code"                                                        "admin の push に失敗しても、セットアップは成功する"
+    assert_file_contains "/tmp/sf-init-test-pushfail.log" "admin ブランチを GitHub に push できませんでした"  "警告を表示する"
+    assert_file_contains "/tmp/sf-init-test-pushfail.log" "git push -u origin admin"     "完了画面で、手動で push する方法を知らせる"
+
+    teardown "$mb" "$mock_home" "$base"
+    rm -f /tmp/sf-init-test-pushfail.log
 }
 
 # ==============================================================================
@@ -709,6 +782,7 @@ test_add_tier_staging_happy() {
 echo "git $*" >> "${MOCK_CALL_LOG:-/dev/null}"
 case "$1 $2" in
     "remote get-url") echo "https://github.com/tamashimon/force-testproject.git" ;;
+    "symbolic-ref --short") echo "admin" ;;  # 管理者用のクローンは、admin ブランチにいる（実行後に、ここへ戻る）
     "ls-remote --exit-code") exit 1 ;;  # ブランチ未存在
     *) exit 0 ;;
 esac
@@ -734,6 +808,7 @@ GITEOF
     # main への直接 push は、しない（PR を作成する）
     assert_file_not_contains "$MOCK_CALL_LOG" "origin main"                         "main への直接 push をしない"
     assert_file_contains "$MOCK_CALL_LOG" "gh pr create --base main"                "PR を作成する"
+    assert_file_contains "$MOCK_CALL_LOG" "git checkout admin"                      "終わったら、実行前のブランチ（管理者用の admin）に戻る（main に居座らない）"
     assert_file_contains "$MOCK_CALL_LOG" "origin system-add-tier-staging-"         "作業用のブランチを push する"
 
     unset MOCK_SF_ORG_JSON SF_INIT_JWT_INTERVAL
@@ -2211,6 +2286,8 @@ test_unauthorized_user
 test_invalid_owner_folder
 test_flex_layout_with_args
 test_flex_layout_prompt
+test_admin_branch_failure_is_not_fatal
+test_admin_branch_push_failure_is_not_fatal
 test_flex_invalid_project_arg
 test_repo_visibility_private
 test_only_option_runs_single_phase

@@ -21,6 +21,8 @@
 #   is_reserved_org_alias     ... 共有環境の組織エイリアス（sf-tools の予約名）か判定
 #   is_protected_branch       ... 指定ブランチが branches.txt の保護対象か判定
 #   ensure_sf_tools_latest    ... sf-tools（Git リポジトリ）が origin の最新であることを確認
+#   ensure_admin_branch DIR   ... 管理者用のクローンを、admin ブランチ（ローカル）にする（main の上で、作業しないため）
+#   push_admin_branch DIR     ... admin ブランチを、GitHub にも作る（git push -u origin admin。強制 push はしない）
 #   merge_package_xml OUT IN... ... package.xml 形式のマニフェストを 1 つに統合する（種類ごとに、メンバーを重複なく並べる）
 # ==============================================================================
 
@@ -534,4 +536,42 @@ ensure_sf_tools_latest() {
     run git -C "$dir" pull --ff-only origin "$cur" || die "sf-tools の更新に失敗しました。"
     log "SUCCESS" "sf-tools を更新しました。"
     return 2
+}
+
+# ensure_admin_branch - 管理者用のクローンを、admin ブランチ（ローカル）にする
+# ------------------------------------------------------------------------------
+# 【使い方】 ensure_admin_branch DIR
+# 【理由】   管理者用のクローン（admin/force-XXXX）は、セットアップ後も、メンテナンス用に残る。main のままだと、
+#           main の上で作業してしまう（main は保護ブランチ。sf-sync-wf.sh も、保護ブランチでは実行を断る）。
+#           そこで、main から admin ブランチを作って、そこに置く。この関数は、ローカルだけを扱う（GitHub への push は、
+#           push_admin_branch）
+# 【動作】   すでに admin ブランチがあれば、作り直さずに、そこへ切り替える（作業を消さない）。なければ、main から作る
+# 【戻り値】 0 = admin ブランチにいる / 1 = 失敗（Git のクローンではない・切り替えに失敗）。呼び出し側は、警告にとどめる
+ensure_admin_branch() {
+    local dir="${1:-}" cur
+    [[ -n "$dir" ]] || return $RET_NG
+    git -C "$dir" rev-parse --git-dir >/dev/null 2>&1 || return $RET_NG  # if cmd のため run 不使用（クローンかどうかの確認）
+    cur=$(git -C "$dir" symbolic-ref --short HEAD 2>/dev/null || true)    # VAR=$(cmd) のため run 不使用
+    [[ "$cur" == "admin" ]] && return $RET_OK
+    if git -C "$dir" rev-parse --verify --quiet refs/heads/admin >/dev/null 2>&1; then  # if cmd のため run 不使用
+        run git -C "$dir" checkout admin || return $RET_NG
+    else
+        run git -C "$dir" checkout -b admin main || return $RET_NG
+    fi
+    return $RET_OK
+}
+
+# push_admin_branch - admin ブランチを、GitHub にも作る
+# ------------------------------------------------------------------------------
+# 【使い方】 push_admin_branch DIR        （事前に ensure_admin_branch で admin にいること）
+# 【理由】   管理者の変更は、main を取り込み → 変更 → push → PR で、GitHub に反映する。どのみち push するため、
+#           最初から、ローカルと GitHub の両方に、同じ admin があるほうが自然（別のコンピューターからも使える）
+# 【動作】   git push --no-verify -u origin admin。--no-verify: 管理者による自動の操作のため、pre-push フック（検証の実行）を省く
+#           （phases/init/add_tier.sh の push と同じ扱い）。強制 push はしない（GitHub 側の admin と食い違うときは、失敗にする）
+# 【戻り値】 0 = push した（または、すでに最新）/ 1 = 失敗。呼び出し側は、警告にとどめる
+push_admin_branch() {
+    local dir="${1:-}"
+    [[ -n "$dir" ]] || return $RET_NG
+    run git -C "$dir" push --no-verify -u origin admin || return $RET_NG
+    return $RET_OK
 }

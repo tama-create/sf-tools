@@ -48,6 +48,15 @@ jobs:
           has_content() {
             [[ -f "$1" ]] && grep -qvE '^\s*(#|$|\[files\]|\[members\])' "$1"
           }
+          # 環境ブランチ（branches.txt のブランチ）から直接出された PR は、デプロイ対象がなくても、必ず、順序チェックを行う。
+          #   環境ブランチには、通常、sf-tools/release/<ブランチ名>/ がなく、下の判定でスキップされて、素通りになるため。
+          #   branches.txt は、main から読む（PR のマージ結果には、含まれない場合があるため）
+          ENV_BRANCHES=$(git fetch origin main --depth=1 -q 2>/dev/null && git show FETCH_HEAD:sf-tools/config/branches.txt 2>/dev/null | grep -v '^[[:space:]]*#' | grep -v '^[[:space:]]*$' | tr -d '\r')
+          if echo "$ENV_BRANCHES" | grep -qxF -- "$HEAD"; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "環境ブランチ（${HEAD}）からの PR のため、デプロイ対象がなくても、順序チェックを実行します。"
+            exit 0
+          fi
           if ! has_content "$DEPLOY" && ! has_content "$REMOVE"; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
             echo "デプロイ対象なし（${DEPLOY} / ${REMOVE} に内容なし）のためスキップします。"

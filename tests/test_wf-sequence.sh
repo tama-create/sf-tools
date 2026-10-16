@@ -11,8 +11,8 @@ WF="$SF_TOOLS_DIR/templates/.github/workflows/wf-sequence.yml"
 
 # YAML から、step「id: sequence_check」の run のスクリプトを取り出す（インデント 10 を除く）
 _extract_script() {
-    awk '
-        /id: sequence_check/ { f = 1 }
+    awk -v id="${1:-sequence_check}" '
+        $0 ~ ("id: " id "$") { f = 1 }
         f && /^        run: \|/ { r = 1; next }
         r && /^$/ { print ""; next }
         r && /^          / { sub(/^          /, ""); print; next }
@@ -53,6 +53,17 @@ _run_check() {
     script=$(_extract_script)
     : > "$out"
     ( cd "$repo" && FEATURE_REF="$feature" BASE_REF="$base" GITHUB_OUTPUT="$out" bash -c "$script" > "$repo/.gh_stdout" 2>&1 )
+    rc=$?
+    cat "$out"
+    echo "RC=$rc"
+}
+
+# 「対象ファイル確認」（スキップの判定）を実行する。引数: リポジトリ HEAD_REF。出力: GITHUB_OUTPUT の内容 + RC=
+_run_skipcheck() {
+    local repo="$1" head="$2" out="$repo/.gh_output_skip" script rc
+    script=$(_extract_script check)
+    : > "$out"
+    ( cd "$repo" && HEAD_REF="$head" GITHUB_OUTPUT="$out" bash -c "$script" > "$repo/.gh_stdout_skip" 2>&1 )
     rc=$?
     cat "$out"
     echo "RC=$rc"
@@ -103,6 +114,26 @@ test_wf_sequence_out_of_order() {
     rm -rf "$(dirname "$repo")"
 }
 
+test_wf_sequence_skip_decision() {
+    local repo out; repo=$(_make_repo)
+    # デプロイ対象がない feature ブランチ → スキップ
+    out=$(_run_skipcheck "$repo" feature-a)
+    assert_output_contains "$out" "skip=true" "デプロイ対象がない feature ブランチの PR → スキップ"
+    # デプロイ対象がある feature ブランチ → チェックを実行
+    mkdir -p "$repo/sf-tools/release/feature-a"
+    printf '[members]\nCustomLabel:X\n' > "$repo/sf-tools/release/feature-a/deploy-target.txt"
+    out=$(_run_skipcheck "$repo" feature-a)
+    assert_output_contains "$out" "skip=false" "デプロイ対象がある feature ブランチの PR → チェックを実行"
+    # 環境ブランチから直接出された PR → デプロイ対象がなくても、必ず、チェックを実行する（これが無いと、素通りになる）
+    local b
+    for b in develop staging main; do
+        out=$(_run_skipcheck "$repo" "$b")
+        assert_output_contains "$out" "skip=false" "環境ブランチ（$b）からの PR → デプロイ対象がなくても、チェックを実行する"
+        assert_output_contains "$out" "RC=0" "環境ブランチ（$b）→ 対象ファイル確認の step は、成功で終わる"
+    done
+    rm -rf "$(dirname "$repo")"
+}
+
 test_wf_sequence_skip_both() {
     local repo out; repo=$(_make_repo)
     # どちらにもマージされていない状態で、main へ PR（一気に飛び越し）
@@ -145,6 +176,7 @@ test_wf_sequence_env_branch_notified() {
 test_wf_sequence_extractable
 test_wf_sequence_in_order
 test_wf_sequence_out_of_order
+test_wf_sequence_skip_decision
 test_wf_sequence_skip_both
 test_wf_sequence_lowest_stage
 test_wf_sequence_env_branch_pr_blocked

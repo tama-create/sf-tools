@@ -7,21 +7,20 @@
 #
 # 【プロジェクト名と、実行する場所】
 #   リポジトリ名は「force-XXXX」。force- は固定で、XXXX（プロジェクト名）は、管理者が決める。
-#   フォルダ構成には、決まりがない（どこで実行してもよい）。オーナーと XXXX は、次の順で決める:
+#   フォルダ構成には、決まりがない（どこで実行してもよい。おすすめ: ~/sf のような、短い名前のフォルダ）。
+#   オーナーと XXXX は、次の順で決める:
 #     1. 引数 --owner / --project（--project には、XXXX だけを指定する。force- まで書いても、除いて扱う）
-#     2. 従来のフォルダ構成 …/home/{github-owner}/{company}/ で実行したとき（引数がなければ）、そこから自動で取る
-#        （従来の環境は、そのまま動く。管理者用の作業フォルダは、init）
-#     3. 対話: オーナーは、gh のログインから候補を出す（管理者の組織。1 つなら自動、複数なら番号で選ぶ）。
+#     2. 対話: オーナーは、gh のログインから候補を出す（管理者の組織。1 つなら自動、複数なら番号で選ぶ）。
 #        XXXX は、入力する（すでにあるプロジェクトの一覧を、参考に表示する。確認の画面つき）
-#   2 以外（新しい形）の管理者用の作業フォルダは、admin（固定）。実行した場所（作業フォルダ）に、admin/force-XXXX ができる。
+#   管理者用の作業フォルダは、admin（固定）。実行した場所（作業フォルダ）に、admin/force-XXXX ができる。
 #   複数のプロジェクトを、同じ admin に作ってもよい（途中経過のファイルは、プロジェクトごとに分かれる:
-#   .sf-init-XXXX.env / .sf-init-XXXX.progress。従来の構成の init は、.sf-init.env / .sf-init.progress のまま）。
-#   ※ 管理者用の作業フォルダ（init / admin）の中や、force-* の中から実行すると、その中に作られてしまうため、
+#   .sf-init-XXXX.env / .sf-init-XXXX.progress）。
+#   ※ 管理者用の作業フォルダ（admin）の中や、force-* の中から実行すると、その中に作られてしまうため、
 #      作業フォルダ（sf-job.sh を実行する場所）で実行すること
 #
 # 【処理フロー】
 #   Phase 1:  環境チェック（ツール確認・GitHub CLI 認証確認）
-#   Phase 2:  プロジェクト情報の確認（フォルダ構成からOWNERとプロジェクト名を自動導出）
+#   Phase 2:  プロジェクト情報の確認（引数・対話で決めた OWNER とプロジェクト名 XXXX を確認）
 #   Phase 3:  リポジトリ作成（gh repo create + git clone）
 #   Phase 4:  ファイル生成（sf-install.sh / sf-hook.sh）
 #   Phase 5:  ブランチ構成（対話選択 → branches.txt 更新）
@@ -43,10 +42,10 @@
 #   - 通知先 Slack チャンネルで Bot を招待（/invite @sf-notify-<プロジェクト名>）
 #
 # 【使い方】
-#   cd {作業フォルダ}                    # 好きな場所（従来の …/home/{owner}/{company}/ でもよい）
+#   cd {作業フォルダ}                    # 好きな場所
 #   ~/sf-tools/bin/sf-init.sh [--owner OWNER] [--project XXXX] [--resume N] [--only N]
 #
-#   cd {作業フォルダ}/admin/force-XXXX      # 管理者用の作業フォルダの中（従来の構成では init/force-XXXX）
+#   cd {作業フォルダ}/admin/force-XXXX      # 管理者用の作業フォルダの中
 #   ~/sf-tools/bin/sf-init.sh --add-tier staging   # staging tier を追加
 #   ~/sf-tools/bin/sf-init.sh --add-tier develop   # develop tier を追加
 #
@@ -55,7 +54,7 @@
 #   途中（Phase 2〜9 まで完了）で止まった状態が残っていて、そのリポジトリがこの作業フォルダのものなら、
 #   引数なしで起動したとき、次の 2 つから選ばせる（既定値はなく、番号を入力する）。
 #     [1] 次の Phase から続きをやる（Phase 1 の環境チェックを実行したうえで、続きから。保存済みの入力内容を使う）
-#     [2] 最初からやり直す（保存した状態を消して Phase 1 から。作成済みのリポジトリ・init フォルダは、そのまま使う）
+#     [2] 最初からやり直す（保存した状態を消して Phase 1 から。作成済みのリポジトリ・admin フォルダは、そのまま使う）
 #   管理者向けの警告・確認と gh のオーナー確認は、どちらの場合も、毎回、実行する。
 #   --resume N / --only N を指定した場合は、この質問をせず、指定を優先する。ただし、完了済みのプロジェクトでは、
 #   --resume N は拒否する（接続処理などを、確認なしで、やり直さないため）。
@@ -72,8 +71,8 @@
 #   （確認は、ここの 1 回だけ。SF_VERIFY_CONFIRMED=1）。確認の失敗は、セットアップの失敗にはしない（結果と、直し方を表示する）。
 #   完了済みのプロジェクトで再実行したときは、[2] 動作を、確認する、でも実行できる。
 #
-# 【init フォルダ（管理者用フォルダ）】
-#   セットアップが終わっても、init フォルダは削除しない（削除の質問は廃止した）。管理者用のフォルダとして残し、
+# 【admin フォルダ（管理者用フォルダ）】
+#   セットアップが終わっても、admin フォルダは削除しない（削除の質問は廃止した）。管理者用のフォルダとして残し、
 #   ワークフローの更新（sf-sync-wf.sh）・接続の確認（--status）・接続先の付け替え（--reconnect）などのメンテナンスに使う。
 #   日常の開発には使わない（開発は、sf-job.sh の作業フォルダで行う）。完了画面に、このフォルダのパスを表示する。
 #   残るファイルに秘密情報が含まれないよう、完了時に .sf-init.env から Token の値の行（*TOKEN_VALUE=）を消す。
@@ -292,7 +291,7 @@ export SF_TOOLS_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 FULL_START=0
 [[ "$RESUME_PHASE" -eq 1 && -z "$ONLY_PHASE" ]] && FULL_START=1
 
-resolve_init_identity  # GITHUB_OWNER / COMPANY_NAME（XXXX）/ PROJECT_LAYOUT をセット（引数 → 従来の構成 → 対話）
+resolve_init_identity  # GITHUB_OWNER / COMPANY_NAME（XXXX）をセット（引数 → 対話）
 
 # 開始画面（通常の新規実行は、全体像つき。--only / --resume N は、簡易表示）
 if [[ "$FULL_START" -eq 1 ]]; then
@@ -352,24 +351,19 @@ check_gh_owner "$GITHUB_OWNER"
 log "INFO" "セットアップ中は Ctrl+C が無効です。中断するにはターミナルを閉じてください。"
 
 # ------------------------------------------------------------------------------
-# 5. 管理者用の作業フォルダ（従来の構成: init / 新しい形: admin）の作成・移動
+# 5. 管理者用の作業フォルダ（admin）の作成・移動
 # ------------------------------------------------------------------------------
 INIT_BASE="$PWD"   # 作業フォルダ（sf-job.sh を実行する場所）
-if [[ "$PROJECT_LAYOUT" == "legacy" ]]; then
-    INIT_DIR="${PWD}/init"
-    _state_suffix=""                       # 従来の構成: .sf-init.env / .sf-init.progress
-else
-    INIT_DIR="${PWD}/admin"
-    _state_suffix="-${COMPANY_NAME}"       # 新しい形: プロジェクトごとに分ける（同じ admin に複数のプロジェクトを置くため）
-fi
-run mkdir -p "$INIT_DIR" || die "init フォルダの作成に失敗しました: ${INIT_DIR}"
-cd "$INIT_DIR" || die "init フォルダに移動できません: ${INIT_DIR}"
+INIT_DIR="${PWD}/admin"
+_state_suffix="-${COMPANY_NAME}"           # 途中経過のファイルは、プロジェクトごとに分ける（同じ admin に複数のプロジェクトを置くため）
+run mkdir -p "$INIT_DIR" || die "管理者用フォルダの作成に失敗しました: ${INIT_DIR}"
+cd "$INIT_DIR" || die "管理者用フォルダに移動できません: ${INIT_DIR}"
 
 # ------------------------------------------------------------------------------
 # 6. 環境変数の export（各フェーズスクリプトから参照）
 # ------------------------------------------------------------------------------
 export SF_TOOLS_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-# .sf-init.env は管理者用の作業フォルダに配置する（cd 後の PWD が init/ か admin/ になる）
+# .sf-init-XXXX.env は管理者用の作業フォルダに配置する（cd 後の PWD が admin/ になる）
 export SF_INIT_ENV_FILE="${PWD}/.sf-init${_state_suffix}.env"
 
 # 進捗ファイル（成功した Phase を記録する。.sf-init.env とは別にする: 書き換えるときに、外部コマンドを使わないため）
@@ -398,7 +392,7 @@ if [[ "$RESUME_PHASE" -eq 1 && -z "$ONLY_PHASE" && -f "$SF_INIT_ENV_FILE" && -f 
         log "INFO" "前回のセットアップは、「${WIZ_PHASE_TITLES[$prev_done]}」まで完了しています${prev_at:+（${prev_at}）}。（${prev_repo}）"
         echo "" >&2
         echo "    [1] 「${WIZ_PHASE_TITLES[$next_phase]}」から、続きをやる   ← おすすめ" >&2
-        echo "    [2] 最初からやり直す（作成済みのリポジトリ・init フォルダは、そのまま使います）" >&2
+        echo "    [2] 最初からやり直す（作成済みのリポジトリ・admin フォルダは、そのまま使います）" >&2
         echo "    [q] 中断" >&2
         echo "" >&2
         read_key resume_choice "  ▶ 番号を入力してください [1-2/q]: " "[12Qq]"
@@ -526,7 +520,7 @@ done
 # .sf-init.env から REPO_DIR などを取得（完了画面の管理者用フォルダの案内に使用）
 [[ -f "$SF_INIT_ENV_FILE" ]] && source "$SF_INIT_ENV_FILE"
 
-# init フォルダは、削除せずに残す（管理者用のフォルダ。更新・接続の確認・やり直しなどのメンテナンスに使う）
+# admin フォルダは、削除せずに残す（管理者用のフォルダ。更新・接続の確認・やり直しなどのメンテナンスに使う）
 #   以前は、最後に削除する質問を出していたが、廃止した。残るファイルに、秘密情報（Token の値）が含まれないように、
 #   念のため、Token の値の行を .sf-init.env から消す（通常は、Phase 8 の push 後に、消えている）。
 #   最後（Phase 10）まで実行したときだけ行う（--only 6 などの途中までの実行では、Phase 8 が、あとで使うため、消さない）

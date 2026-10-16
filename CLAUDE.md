@@ -23,11 +23,12 @@
 | 変更前 | 方針・内容を提示 → GO を待つ |
 | 変更中 | `run` ラッパー必須・日本語コメント・UTF-8/LF 維持 |
 | 変更後 | `bash tests/run_tests.sh` で全件 PASS → mm を依頼 |
-| 検証 | 検証環境の force-*（`SF_TOOLS_BRANCH=development`）で実動作を確認（ユーザーが実施・報告） |
+| 検証 | **Claude が `bash tests/e2e/run.sh` を実行して報告**（検証環境 = `SF_TOOLS_BRANCH=development`。約 30 分。起動のしかた・確認の内容は `doc/dev-reference.md` 9.6）。ユーザーに手動の確認を頼むのは、e2e で見えないことだけ |
 | リリース | 検証 OK の報告後に rr を依頼 |
 
 > **mm の前にテスト全件 PASS は必須。PASS 確認なしの mm 依頼は禁止。**
-> **rr の前に、テスト全件 PASS と検証環境での実動作確認の報告が必須。どちらかが欠けた rr 依頼は断ること。**
+> **rr の前に、テスト全件 PASS と、e2e による実動作確認の結果が必須。どちらかが欠けた rr 依頼は断ること。**
+> **変更に e2e の確認が足りないときは、e2e のほうを広げる**（手動の検証を、ユーザーに頼まない）。
 
 ### 1.3 mm / rr 実行手順
 
@@ -190,7 +191,7 @@ bash tests/run_tests.sh                        # 全テスト実行（mm 前に�
 bash tests/run_tests.sh test_sf-metasync.sh   # 単体実行
 bash tests/run_tests.sh --changed             # 変更ファイルに対応するテストのみ実行
 bash tests/run_tests.sh --jobs 4 / --serial   # 同時に動かすファイル数（既定: CPU の数。--serial は 1 つずつ）
-bash tests/e2e/run.sh                          # 実環境の通し検証（開発者が手動実行。通常のテストには含まれない）
+bash tests/e2e/run.sh                          # 実環境の通し検証（検証のとき Claude が実行。通常のテストには含まれない）
 ```
 
 > **開発中は `--changed`、mm 前は全件** が基本ワークフロー。PR（main・development 向け）と development への push では、GitHub Actions（`.github/workflows/test.yml`）も、全件テストと shellcheck を実行する。

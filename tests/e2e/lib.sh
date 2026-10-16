@@ -646,7 +646,7 @@ e2e_cleanup_all() {
 #     検証される。値は、画面に出ない）→ 空行（Phase 7 の press_enter）
 #   → Slack Token → チャンネル ID → 空行（招待の press_enter）→ Phase 10 ログイン先 1（login.salesforce.com。
 #     アプリの種類は聞かない: 既定は外部クライアントアプリ。ログイン先は、段階ごとに 3 択: main の 1 つだけ）
-#   （Phase 10 が最後。init フォルダの削除の質問は、廃止した: init フォルダは、管理者用として残る）
+#   （Phase 10 が最後。admin フォルダの削除の質問は、廃止した: admin フォルダは、管理者用として残る）
 #   引数: 層数（1 = main のみ（既定）/ 2 = main + staging / 3 = main + staging + develop）
 #     Phase 5 の番号は、層数と逆（3 層 = 1、2 層 = 2、1 層 = 3）。ログイン先の 3 択は、段階の数だけ、聞かれる（どれも 1）
 e2e_make_input() {
@@ -661,6 +661,26 @@ e2e_make_input() {
         "$E2E_PAT_TOKEN" "" \
         "$E2E_SLACK_BOT_TOKEN" "$E2E_SLACK_CHANNEL_ID" ""
     for ((i = 1; i <= layout; i++)); do printf '%s\n' "1"; done
+}
+
+# 対話（引数なし）で sf-init.sh を実行するときの、先頭の入力（オーナーの選択 → XXXX → 確認）。e2e_make_input の前に流す
+#   引数: オーナー XXXX。オーナーの候補は、sf-init と同じ（gh_owner_candidates admin: lib/project.sh）。
+#     候補が複数 → 番号で選ぶ（番号は、候補の中の位置を調べて決める）/ 1 つ → 自動（入力なし）/ なし → オーナーを入力
+#     候補にオーナーがない → 戻り値 1（鍵一式のオーナーを、選べないため）
+e2e_make_identity_input() {
+    local owner="$1" project="$2" cands n idx
+    cands=$(gh_owner_candidates admin | awk 'NF')  # VAR=$(cmd) のため run 不使用
+    n=$(printf '%s\n' "$cands" | awk 'NF' | wc -l | tr -d ' ')  # VAR=$(cmd) のため run 不使用
+    if [[ "$n" -gt 1 ]]; then
+        idx=$(printf '%s\n' "$cands" | awk -v o="$owner" 'NF { i++; if ($0 == o) { print i; exit } }')  # VAR=$(cmd) のため run 不使用
+        [[ -n "$idx" ]] || return 1
+        printf '%s\n' "$idx"
+    elif [[ "$n" -eq 1 ]]; then
+        [[ "$cands" == "$owner" ]] || return 1
+    else
+        printf '%s\n' "$owner"
+    fi
+    printf '%s\n' "$project" "Y"
 }
 
 # 失敗したワークフローの実行の、失敗したステップのログ（末尾 E2E_FAIL_LOG_LINES 行。既定 40）を表示する。

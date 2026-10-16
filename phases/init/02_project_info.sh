@@ -2,16 +2,14 @@
 # ==============================================================================
 # 02_project_info.sh - Phase 2: プロジェクト情報の確認
 # ==============================================================================
-# GITHUB_OWNER とプロジェクト名（XXXX）を確認する。値は、sf-init.sh が決めたもの（引数・従来のフォルダ構成・対話）。
+# GITHUB_OWNER とプロジェクト名（XXXX）を確認する。値は、sf-init.sh が決めたもの（引数・対話）。
 # 環境種別（本番/検証）を選択し、.sf-init.env に変数を書き出して後続フェーズと共有する。
 #
 # 【値の決まり方】
-#   カレント: 管理者用の作業フォルダ（従来の構成: …/home/{owner}/{company}/init/ / 新しい形: {作業フォルダ}/admin/）
-#             （sf-init.sh が自動作成・移動）
-#   PROJECT_NAME  = XXXX（環境変数 SF_INIT_PROJECT。sf-init.sh が、引数・従来の構成・対話から決める）
+#   カレント: 管理者用の作業フォルダ（{作業フォルダ}/admin/。sf-init.sh が自動作成・移動）
+#   PROJECT_NAME  = XXXX（環境変数 SF_INIT_PROJECT。sf-init.sh が、引数・対話から決める）
 #   GITHUB_OWNER  = オーナー（環境変数 SF_INIT_OWNER）
-#                   ※ この 2 つがないとき（Phase だけを直接実行したとき）は、従来の構成から取る:
-#                     PROJECT_NAME = init の 1 つ上のフォルダ名、GITHUB_OWNER = 2 つ上のフォルダ名
+#                   ※ この 2 つは必須（Phase だけを直接実行するときも、環境変数で渡す）
 #   REPO_NAME     = force-{PROJECT_NAME}
 #   REPO_FULL_NAME= {GITHUB_OWNER}/force-{PROJECT_NAME}
 #   REPO_DIR      = {PWD}/force-{PROJECT_NAME}
@@ -53,15 +51,10 @@ log "HEADER" "プロジェクト情報の確認"
 
 log "INFO" "プロジェクト情報を確認中..."
 
-# sf-init.sh が決めた値（SF_INIT_OWNER / SF_INIT_PROJECT。引数・従来のフォルダ構成・対話のいずれか）を使う。
-#   Phase だけを直接実行したとき（値がないとき）は、従来のフォルダ構成から取る: init の 1つ上 = {company}、2つ上 = {github-owner}
-if [[ -n "${SF_INIT_OWNER:-}" && -n "${SF_INIT_PROJECT:-}" ]]; then
-    PROJECT_NAME="$SF_INIT_PROJECT"
-    GITHUB_OWNER="$SF_INIT_OWNER"
-else
-    PROJECT_NAME=$(basename "$(dirname "$PWD")")
-    GITHUB_OWNER=$(basename "$(dirname "$(dirname "$PWD")")")
-fi
+# sf-init.sh が決めた値（SF_INIT_OWNER / SF_INIT_PROJECT。引数・対話のいずれか）を使う
+PROJECT_NAME="${SF_INIT_PROJECT:-}"
+GITHUB_OWNER="${SF_INIT_OWNER:-}"
+[[ -n "$PROJECT_NAME" ]] || die "プロジェクト名（SF_INIT_PROJECT）が設定されていません。sf-init.sh から実行してください。"
 REPO_NAME="force-${PROJECT_NAME}"
 REPO_FULL_NAME="${GITHUB_OWNER}/${REPO_NAME}"
 REPO_DIR="${PWD}/${REPO_NAME}"

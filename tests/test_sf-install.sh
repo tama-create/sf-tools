@@ -232,7 +232,7 @@ test_sf_cli_warning_only() {
 
 
 # sf-init.sh から呼ばれた場合（SF_INIT_RUNNING=1）は、package.json があっても npm install をスキップする
-#   （init フォルダは、設定とプッシュだけに使い、最後に削除する一時フォルダのため。約 90 秒の短縮）
+#   （admin フォルダは、設定とプッシュだけに使い、最後に削除する一時フォルダのため。約 90 秒の短縮）
 test_npm_install_skipped_when_sf_init_running() {
     local td mb mh
     setup_std_env td mb mh

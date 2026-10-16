@@ -1407,6 +1407,38 @@ test_e2e_layout() {
 }
 
 # ------------------------------------------------------------------------------
+# 対話（引数なし）の sf-init に流す、先頭の入力（オーナーの選択 → XXXX → 確認）
+# ------------------------------------------------------------------------------
+test_e2e_identity_input() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] e2e_make_identity_input: 対話の入力の台本（オーナーの選択・XXXX・確認）${CLR_RST}"
+    local mb; mb=$(setup_mock_bin); MB="$mb"; FX="$mb/fx.env"; HM="$mb"
+    create_mock_gh "$mb"; _mk_fixture "$FX"
+
+    # 候補が複数（org-a・tamashimon-org・自分の tama）→ tamashimon-org は 2 番目
+    export MOCK_GH_ORGS_ADMIN=$'org-a\ntamashimon-org' MOCK_GH_API_USER=tama
+    _e2e_call 'e2e_make_identity_input tamashimon-org e2e-1 | tr "\n" ","; echo "RC=${PIPESTATUS[0]}"'
+    assert_file_contains "$MB/out.log" "2,e2e-1,Y,RC=0" "候補が複数 → 番号（位置）で選び、XXXX と確認 Y を続ける"
+
+    # 候補が 1 つ（自分のアカウントだけ）で、それがオーナー → 番号は聞かれない
+    export MOCK_GH_ORGS_ADMIN="" MOCK_GH_API_USER=tamashimon-org
+    _e2e_call 'e2e_make_identity_input tamashimon-org e2e-1 | tr "\n" ","; echo "RC=${PIPESTATUS[0]}"'
+    assert_file_contains "$MB/out.log" "e2e-1,Y,RC=0" "候補が 1 つ → 番号なしで、XXXX と確認 Y だけ"
+
+    # オーナーが候補にない → 戻り値 1（誤った組織を選ばない）
+    export MOCK_GH_ORGS_ADMIN=$'org-a\norg-b' MOCK_GH_API_USER=tama
+    _e2e_call 'e2e_make_identity_input tamashimon-org e2e-1 > /dev/null; echo "RC=$?"'
+    assert_file_contains "$MB/out.log" "RC=1" "オーナーが候補にない → 戻り値 1"
+
+    # gh が使えない（候補なし）→ オーナーを入力する
+    printf '#!/bin/bash\nexit 1\n' > "$mb/gh"; chmod +x "$mb/gh"
+    _e2e_call 'e2e_make_identity_input tamashimon-org e2e-1 | tr "\n" ","; echo "RC=${PIPESTATUS[0]}"'
+    assert_file_contains "$MB/out.log" "tamashimon-org,e2e-1,Y,RC=0" "候補がない → オーナーを入力してから、XXXX と確認 Y"
+
+    unset MOCK_GH_ORGS_ADMIN MOCK_GH_API_USER
+    teardown "$mb"
+}
+
+# ------------------------------------------------------------------------------
 # bootstrap.sh --add-orgs: staging・develop の組織の追加（別々の組織であることの確認）
 #   sf のモック: 組織の ID は、認証 URL から決まる（同じ URL = 同じ組織）。login web は、MOCK_SF_WEB_URLS（改行区切り）を、順に使う
 # ------------------------------------------------------------------------------
@@ -1645,6 +1677,7 @@ test_e2e_sf_cmd
 test_e2e_review_fixes
 test_e2e_tiers
 test_e2e_layout
+test_e2e_identity_input
 test_e2e_bootstrap_add_orgs
 test_e2e_bootstrap_refresh_orgs
 

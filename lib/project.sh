@@ -19,7 +19,12 @@
 #   is_reserved_org_alias     ... 共有環境の組織エイリアス（sf-tools の予約名）か判定
 #   is_protected_branch       ... 指定ブランチが branches.txt の保護対象か判定
 #   ensure_sf_tools_latest    ... sf-tools（Git リポジトリ）が origin の最新であることを確認
-#   clone_matches_repo DIR O R ... DIR が Git のクローンで、origin が GitHub の O/R か（完了済みのプロジェクトの判定に使う）
+#   clone_matches_repo DIR O R ... DIR が Git のクローンで、origin が GitHub の O/R か（大文字と小文字は区別しない）
+#   state_matches_repo FILE O R .. 状態ファイル（.sf-init-XXXX.env）の REPO_FULL_NAME が O/R か（大文字と小文字は区別しない）
+#   mark_setup_complete DIR   ... クローンに、セットアップ完了の印（git config sf-tools.setup-complete=1）を付ける
+#   clear_setup_mark DIR      ... 完了の印を 0（やり直し中）にする（やり直しの開始時）
+#   clone_setup_completed DIR O R ... DIR が O/R のセットアップ済みのクローンか（印 1 / 印がなければ admin ブランチの有無。印 0 は未完了）
+#   git_origin_redacted DIR   ... origin の URL を、認証情報を伏せて出す（エラーの文言・ログ用）
 #   ensure_admin_branch DIR   ... 管理者用のクローンを、admin ブランチ（ローカル）にする（main の上で、作業しないため）
 #   push_admin_branch DIR     ... admin ブランチを、GitHub にも作る（git push -u origin admin。強制 push はしない）
 #   merge_package_xml OUT IN... ... package.xml 形式のマニフェストを 1 つに統合する（種類ごとに、メンバーを重複なく並べる）
@@ -171,15 +176,19 @@ parse_github_remote() {
 
 # normalize_project_name - 入力から XXXX（リポジトリ名 force-XXXX の、force- の後ろ）を取り出す
 #   前後の空白を除き、先頭の「force-」（大文字小文字を問わない）が付いていれば除く（force-force-XXXX を防ぐ）。
-#   使える文字: 英数字・ハイフン・アンダースコア・ピリオド（先頭は英数字・61 文字まで・.. や末尾の . / .git は不可）
+#   使える文字: 英数字・ハイフン・アンダースコア・ピリオド。区切り（- _ .）は、英数字の間に、1 つだけ（連続・先頭・末尾は不可）。
+#   50 文字まで・末尾の .git は不可。
+#   理由: Phase 10 の外部クライアントアプリの名前（SF_TOOLS_ + force-XXXX の区切りを _ にしたもの + _glbloauth）が、
+#   Salesforce の API 名の制約（連続した _ ・末尾の _ は不可。80 文字まで）を満たすため。守らないと、セットアップの終盤で失敗する
 #   戻り値: 0 = 出力した / 1 = 不正
 normalize_project_name() {
     local n="$1"
     n="${n#"${n%%[![:space:]]*}"}"
     n="${n%"${n##*[![:space:]]}"}"
     case "$n" in [Ff][Oo][Rr][Cc][Ee]-*) n="${n:6}" ;; esac
-    [[ "$n" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,60}$ ]] || return 1
-    case "$n" in *..*|*.|*.git) return 1 ;; esac
+    [[ "${#n}" -le 50 ]] || return 1
+    [[ "$n" =~ ^[A-Za-z0-9]+([._-][A-Za-z0-9]+)*$ ]] || return 1
+    case "$n" in *.git) return 1 ;; esac
     echo "$n"
 }
 
@@ -285,11 +294,13 @@ prompt_project_identity() {
         }
         [[ "$norm" != "$raw" ]] && log "INFO" "  force- は自動で付くため、「${norm}」として扱います。"
         exists=0
-        printf '%s\n' "$existing" | grep -qxF -- "$norm" && exists=1
+        printf '%s\n' "$existing" | grep -qixF -- "$norm" && exists=1   # 大文字と小文字は、区別しない（GitHub は、区別しない）
         if [[ "$mode" == "init" && $exists -eq 1 ]]; then
-            if clone_matches_repo "${PWD}/admin/force-${norm}" "$GITHUB_OWNER" "force-${norm}"; then
-                # この作業フォルダに、管理者用のクローンがある（セットアップ済み）: 次の画面で、状態の確認などを選べる
-                log "INFO" "  ${GITHUB_OWNER}/force-${norm} は、すでに作成済みです（${PWD}/admin/force-${norm}）。次の画面で、接続の確認などを選べます。"
+            if clone_matches_repo "${PWD}/admin/force-${norm}" "$GITHUB_OWNER" "force-${norm}" \
+               || state_matches_repo "${PWD}/admin/.sf-init-${norm}.env" "$GITHUB_OWNER" "force-${norm}"; then
+                # この作業フォルダに、同じリポジトリの管理者用のクローン、または、途中の状態がある: 断らずに、受け付ける
+                #   （次の画面で、完了済みの案内・続きをやる、のどちらかが出る）
+                log "INFO" "  ${GITHUB_OWNER}/force-${norm} の作業フォルダが、すでにあります（${PWD}/admin）。状態に応じて、次の画面に進みます。"
                 COMPANY_NAME="$norm"
                 return 0
             fi
@@ -350,6 +361,10 @@ resolve_job_identity() {
     GITHUB_OWNER="$a_owner"
     COMPANY_NAME="$norm"
     clones=$(discover_clones "$PWD")  # VAR=$(cmd) のため run 不使用
+    if [[ -n "$a_owner" ]]; then
+        # --owner の指定があれば、そのオーナーのクローンだけを対象にする（大文字と小文字は区別しない）
+        clones=$(printf '%s\n' "$clones" | awk -v o="$a_owner" 'tolower($1) == tolower(o)')  # VAR=$(cmd) のため run 不使用
+    fi
     if [[ -n "$norm" ]]; then
         # XXXX は指定済み。オーナーは、指定がなければ、同じリポジトリのクローンから取る（なければ、対話）
         if [[ -z "$GITHUB_OWNER" ]]; then
@@ -527,13 +542,80 @@ push_admin_branch() {
 # clone_matches_repo - DIR が Git のクローンで、origin が GitHub の OWNER/REPO か
 # ------------------------------------------------------------------------------
 # 【使い方】 clone_matches_repo DIR OWNER REPO        例: clone_matches_repo "$PWD/force-acme" my-org force-acme
-# 【用途】   セットアップが完了したプロジェクトの判定（完了時に、状態ファイルを消すため。管理者用のクローンが、ここにあり、
-#           origin が同じリポジトリなら、完了済みとみなす）
+# 【用途】   管理者用のクローンが、これから作る（または、完了済みの）リポジトリのものかの確認。別のリポジトリのクローンに、
+#           書き込み・push しないための番人（オーナーと XXXX で決まるプロジェクトを、XXXX だけのフォルダ名で扱うため）
+# 【比較】   大文字と小文字は、区別しない（GitHub は、区別しない）
 # 【戻り値】 0 = 一致する / 1 = 一致しない（クローンではない・origin がない・GitHub 以外・別のリポジトリ）
 clone_matches_repo() {
-    local dir="${1:-}" owner="${2:-}" repo="${3:-}" url pair
+    local dir="${1:-}" owner="${2:-}" repo="${3:-}" url pair want
     [[ -n "$dir" && -n "$owner" && -n "$repo" && -d "$dir" ]] || return 1
     url=$(git -C "$dir" remote get-url origin 2>/dev/null) || return 1  # VAR=$(cmd) のため run 不使用
     pair=$(parse_github_remote "$url") || return 1                         # VAR=$(cmd) のため run 不使用
-    [[ "$pair" == "${owner} ${repo}" ]]
+    pair=$(printf '%s' "$pair" | tr 'A-Z' 'a-z')                           # VAR=$(cmd) のため run 不使用
+    want=$(printf '%s %s' "$owner" "$repo" | tr 'A-Z' 'a-z')               # VAR=$(cmd) のため run 不使用
+    [[ "$pair" == "$want" ]]
 }
+
+# state_matches_repo - 状態ファイル（.sf-init-XXXX.env）の REPO_FULL_NAME が OWNER/REPO か（大文字と小文字は区別しない）
+#   使い方: state_matches_repo FILE OWNER REPO。ファイルがない・読めない・一致しないときは、戻り値 1
+state_matches_repo() {
+    local f="${1:-}" owner="${2:-}" repo="${3:-}" v want
+    [[ -f "$f" && -n "$owner" && -n "$repo" ]] || return 1
+    v=$(grep '^REPO_FULL_NAME=' "$f" 2>/dev/null | tail -n 1 | sed 's/^[^=]*=//; s/\r$//; s/^"//; s/"$//' | tr 'A-Z' 'a-z')  # VAR=$(cmd) のため run 不使用
+    want=$(printf '%s/%s' "$owner" "$repo" | tr 'A-Z' 'a-z')                                                                    # VAR=$(cmd) のため run 不使用
+    [[ -n "$v" && "$v" == "$want" ]]
+}
+
+# セットアップ完了の印: クローンの git config（sf-tools.setup-complete）に持たせる。値は 3 つの状態:
+#   1    = 完了した
+#   0    = やり直し中（「最初から、やり直す」の開始時に、0 にする。完了したら、1 にする）
+#   未設定 = 印を導入する前の版（99d420d〜ff690db）で完了したプロジェクト、または、一度も完了していないクローン
+#   状態ファイルは、完了時に消すため、完了済みかどうかを、ファイルなしで判定する必要がある。
+#   「クローンがある」だけでは、やり直しの途中で止まったとき（状態ファイルを消したあと）に、未完了を完了と誤判定する。
+#   かといって「印がない = 未完了」では、印を導入する前に完了したプロジェクトを、未完了と誤判定し、運用中のリポジトリを
+#   新規セットアップとして上書きしてしまう。そこで、やり直し中は、印を消さず、0 にして、未設定と区別する。
+#   印は、クローンの .git/config にあり、GitHub には送られない
+mark_setup_complete() {
+    local dir="${1:-}"
+    [[ -n "$dir" && -d "$dir" ]] || return 1
+    run git -C "$dir" config sf-tools.setup-complete 1
+}
+# clear_setup_mark - やり直しの開始時に、印を 0（やり直し中）にする。クローンがなければ、何もしない（常に戻り値 0）
+clear_setup_mark() {
+    local dir="${1:-}"
+    [[ -n "$dir" && -d "$dir" ]] || return 0
+    git -C "$dir" config sf-tools.setup-complete 0 >/dev/null 2>&1 || true  # 失敗しても、やり直しは進める（意図的エラー無視）
+    return 0
+}
+
+# clone_setup_completed - DIR が、OWNER/REPO の、セットアップ済みのクローンか
+# ------------------------------------------------------------------------------
+# 【使い方】 clone_setup_completed DIR OWNER REPO
+# 【判定】   origin が OWNER/REPO（大文字と小文字は区別しない）で、かつ:
+#           ・印が 1 → 完了済み
+#           ・印が 0 → やり直し中（未完了）
+#           ・印が未設定 → ローカルに admin ブランチがあれば、印を導入する前の版で完了したものとみなし、印を 1 にする
+#             （その版は、完了時に admin ブランチを作り、状態ファイルを消すだけで、印を付けなかった）。admin ブランチがなければ、未完了
+# 【戻り値】 0 = 完了済み / 1 = 未完了（origin が別のリポジトリ・クローンでない場合も）
+clone_setup_completed() {
+    local dir="${1:-}" v
+    clone_matches_repo "$dir" "${2:-}" "${3:-}" || return 1
+    v=$(git -C "$dir" config --get sf-tools.setup-complete 2>/dev/null)  # VAR=$(cmd) のため run 不使用
+    case "$v" in
+        1) return 0 ;;
+        0) return 1 ;;
+    esac
+    git -C "$dir" rev-parse --verify --quiet refs/heads/admin >/dev/null 2>&1 || return 1  # 条件チェックのため run 不使用
+    mark_setup_complete "$dir" || true  # 印を付けられなくても、完了済みとして扱う（次回も、同じ判定になる）
+    return 0
+}
+
+# git_origin_redacted - クローンの origin の URL を、認証情報（https://user:TOKEN@ の部分）を伏せて、標準出力に返す
+#   エラーの文言・ログに、origin の URL を出すときに使う（Token つきの URL で作ったクローンが、画面とログに、Token を出さないため）。
+#   origin がなければ「なし」
+git_origin_redacted() {
+    local u
+    u=$(git -C "${1:-.}" remote get-url origin 2>/dev/null) || { printf '%s' "なし"; return 0; }  # VAR=$(cmd) のため run 不使用
+    printf '%s' "$u" | sed 's#//[^@/]*@#//***@#'
+}
+

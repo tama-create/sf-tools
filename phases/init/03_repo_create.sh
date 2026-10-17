@@ -59,7 +59,20 @@ fi
 
 # --- クローン（冪等: すでに存在する場合はスキップ） ---
 if [[ -d "$REPO_DIR/.git" ]]; then
+    # すでにあるクローンは、これから作る（使う）リポジトリのものであること。別のリポジトリのクローン（オーナー違い・
+    #   XXXX は同じ）に、このあとの Phase が、コミット・push しないため。大文字と小文字は、区別しない
+    clone_matches_repo "$REPO_DIR" "$GITHUB_OWNER" "$REPO_NAME" \
+        || die "クローン先（${REPO_DIR}）は、${REPO_FULL_NAME} のクローンではありません（origin: $(git_origin_redacted "$REPO_DIR")）。"
     log "WARNING" "クローン先ディレクトリが既に存在します。クローンをスキップします: ${REPO_DIR}"
+    # main にいること（admin ブランチのまま、あとの Phase が git add / commit すると、main に入らず、admin に入ってしまう）
+    _cur_branch=$(git -C "$REPO_DIR" symbolic-ref --short HEAD 2>/dev/null || true)  # VAR=$(cmd) のため run 不使用
+    if [[ "$_cur_branch" != "main" ]]; then
+        run git -C "$REPO_DIR" checkout main || die "クローンを main に切り替えられません（現在: ${_cur_branch:-不明}）: ${REPO_DIR}"
+    fi
+    # リモートに main があれば、最新を取り込む（リモートが空の新しいリポジトリでは、取り込まない）
+    if git -C "$REPO_DIR" ls-remote --exit-code --heads origin main >/dev/null 2>&1; then  # 条件チェックのため run 不使用
+        run git -C "$REPO_DIR" pull --ff-only origin main || die "main を最新にできません（git pull --ff-only に失敗）: ${REPO_DIR}"
+    fi
 elif [[ -d "$REPO_DIR" ]]; then
     die "クローン先ディレクトリが既に存在しますが Git リポジトリではありません: ${REPO_DIR}
 手動で削除してから再実行してください。"

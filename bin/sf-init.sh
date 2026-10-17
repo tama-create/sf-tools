@@ -53,7 +53,7 @@
 #   ~/sf-tools/bin/sf-init.sh --add-tier develop   # develop tier を追加
 #
 # 【途中で止まったとき（続きから）】
-#   各 Phase が成功するたびに、進捗を管理者用の作業フォルダの .sf-init.progress（新しい形では .sf-init-XXXX.progress）に記録する（SF_INIT_DONE_PHASE）。
+#   各 Phase が成功するたびに、進捗を管理者用の作業フォルダの .sf-init-XXXX.progress に記録する（SF_INIT_DONE_PHASE）。
 #   途中（Phase 2〜9 まで完了）で止まった状態が残っていて、そのリポジトリがこの作業フォルダのものなら、
 #   引数なしで起動したとき、次の 2 つから選ばせる（既定値はなく、番号を入力する）。
 #     [1] 次の Phase から続きをやる（Phase 1 の環境チェックを実行したうえで、続きから。保存済みの入力内容を使う）
@@ -78,9 +78,9 @@
 #   セットアップが終わっても、admin フォルダは削除しない（削除の質問は廃止した）。管理者用のフォルダとして残し、
 #   ワークフローの更新（sf-sync-wf.sh）・接続の確認（--status）・接続先の付け替え（--reconnect）などのメンテナンスに使う。
 #   日常の開発には使わない（開発は、sf-job.sh の作業フォルダで行う）。完了画面に、このフォルダのパスを表示する。
-#   残るファイルに秘密情報が含まれないよう、完了時に .sf-init.env から Token の値の行（*TOKEN_VALUE=）を消す。
+#   残るファイルに秘密情報が含まれないよう、完了時に .sf-init-XXXX.env から Token の値の行（*TOKEN_VALUE=）を消す。
 #   状態ファイル（.sf-init-XXXX.env / .sf-init-XXXX.progress）は、最後まで終わったら消す（完了後は読む場所がないため）。
-#   完了済みかどうかは、このフォルダのクローン（admin/force-XXXX の origin が同じリポジトリ）で判定する。途中で止まったときは、残る。
+#   完了済みかどうかは、このフォルダのクローン（admin/force-XXXX の origin が同じリポジトリで、完了の印（git config sf-tools.setup-complete = 1。未設定なら admin ブランチの有無）が付いている）で判定する。やり直しの開始時に、印を 0 にする。途中で止まったときは、残る。
 #   このフォルダの force-XXXX は、完了時に、admin ブランチ（main から作る）にし、GitHub にも push する（git push -u origin admin）。
 #   main は保護ブランチのため、その上で作業しないようにするため。すでに admin があれば、作り直さず、切り替える。
 #   admin は、main から古くなる（使う前に、main を取り込む）。push に失敗しても、セットアップは成功のまま、完了画面で知らせる。
@@ -297,6 +297,13 @@ export SF_TOOLS_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 FULL_START=0
 [[ "$RESUME_PHASE" -eq 1 && -z "$ONLY_PHASE" ]] && FULL_START=1
 
+# 実行場所の確認: 管理者用フォルダ（admin）・クローン（force-*）の中で実行すると、その中に admin/ ができて、
+#   別のクローンに書き込む経路になる。作業フォルダ（sf-job.sh を実行する場所）で実行すること
+_cwd_top=$(git rev-parse --show-toplevel 2>/dev/null || true)  # VAR=$(cmd) のため run 不使用（Git の作業ツリーの外なら、空）
+if [[ "$(basename "$PWD")" == "admin" || "$(basename "$PWD")" == force-* || "$(basename "${_cwd_top:-.}")" == force-* ]]; then
+    die "sf-init.sh は、管理者用フォルダ（admin）・クローン（force-*）の中では実行できません: ${PWD}"
+fi
+
 resolve_init_identity  # GITHUB_OWNER / COMPANY_NAME（XXXX）をセット（引数 → 対話）
 
 # 開始画面（通常の新規実行は、全体像つき。--only / --resume N は、簡易表示）
@@ -365,6 +372,14 @@ _state_suffix="-${COMPANY_NAME}"           # 途中経過のファイルは、�
 run mkdir -p "$INIT_DIR" || die "管理者用フォルダの作成に失敗しました: ${INIT_DIR}"
 cd "$INIT_DIR" || die "管理者用フォルダに移動できません: ${INIT_DIR}"
 
+# 管理者用フォルダ（admin）には、XXXX だけの名前で、クローン（force-XXXX）を置く。同じ XXXX で、別のオーナーのクローンがあるときは、
+#   中断する（このあとの Phase が、別のリポジトリのクローンに、コミット・push してしまうため。状態ファイルも、消さない）。
+#   大文字と小文字は、区別しない
+if [[ -d "${PWD}/force-${COMPANY_NAME}/.git" ]] \
+   && ! clone_matches_repo "${PWD}/force-${COMPANY_NAME}" "$GITHUB_OWNER" "force-${COMPANY_NAME}"; then
+    die "管理者用フォルダ（${PWD}）の force-${COMPANY_NAME} は、${GITHUB_OWNER}/force-${COMPANY_NAME} のクローンではありません（origin: $(git_origin_redacted "${PWD}/force-${COMPANY_NAME}")）。"
+fi
+
 # ------------------------------------------------------------------------------
 # 6. 環境変数の export（各フェーズスクリプトから参照）
 # ------------------------------------------------------------------------------
@@ -372,7 +387,7 @@ export SF_TOOLS_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 # .sf-init-XXXX.env は管理者用の作業フォルダに配置する（cd 後の PWD が admin/ になる）
 export SF_INIT_ENV_FILE="${PWD}/.sf-init${_state_suffix}.env"
 
-# 進捗ファイル（成功した Phase を記録する。.sf-init.env とは別にする: 書き換えるときに、外部コマンドを使わないため）
+# 進捗ファイル（成功した Phase を記録する。.sf-init-XXXX.env とは別にする: 書き換えるときに、外部コマンドを使わないため）
 export SF_INIT_PROGRESS_FILE="${PWD}/.sf-init${_state_suffix}.progress"
 # Phase 10 の、段階ごとの再開（完了した段階を、進捗に記録し、再実行ではスキップする）。--only のときは、使わない
 [[ -z "$ONLY_PHASE" ]] && export SF_INIT_TIER_RESUME=1
@@ -384,7 +399,9 @@ _kv_value() {
 
 # 完了済みのプロジェクトか（戻り値 0 = 完了済み）。完了時に、状態ファイルは消す（完了後は、読む場所がないため）ので、
 #   ・状態ファイルがある: 進捗が Phase 10 で、リポジトリが一致すること（以前の版が残した、完了済みの状態）
-#   ・状態ファイルがない: このフォルダ（admin）に、同じリポジトリのクローン（force-XXXX）があること
+#   ・状態ファイルがない: このフォルダ（admin）の、同じリポジトリのクローン（force-XXXX）が、セットアップ済みであること
+#     （clone_setup_completed: クローンの git config sf-tools.setup-complete が 1。未設定のときは、admin ブランチがあれば、
+#     印を導入する前の版で完了したものとみなす。0 は、やり直し中）。やり直しの開始時に、印を 0 にする
 #   進捗が 2〜9（途中まで）のときは、完了済みではない（続きをやる、の対象）。結果: COMPLETED_REPO / COMPLETED_DIR / COMPLETED_AT
 COMPLETED_REPO=""; COMPLETED_DIR=""; COMPLETED_AT=""
 _project_completed() {
@@ -393,15 +410,38 @@ _project_completed() {
     if [[ -f "$SF_INIT_ENV_FILE" && -f "$SF_INIT_PROGRESS_FILE" ]]; then
         _done=$(_kv_value SF_INIT_DONE_PHASE "$SF_INIT_PROGRESS_FILE")   # VAR=$(cmd) のため run 不使用
         _repo=$(_kv_value REPO_FULL_NAME "$SF_INIT_ENV_FILE")            # VAR=$(cmd) のため run 不使用
-        [[ "$_done" == "10" && "$_repo" == "$want" ]] || return 1
+        [[ "$_done" == "10" ]] && state_matches_repo "$SF_INIT_ENV_FILE" "$GITHUB_OWNER" "force-${COMPANY_NAME}" || return 1   # リポジトリ名は、大文字と小文字を区別しない
         COMPLETED_REPO="$_repo"
         COMPLETED_DIR=$(_kv_value REPO_DIR "$SF_INIT_ENV_FILE")          # VAR=$(cmd) のため run 不使用
         COMPLETED_AT=$(_kv_value SF_INIT_DONE_AT "$SF_INIT_PROGRESS_FILE")  # VAR=$(cmd) のため run 不使用
         return 0
     fi
-    clone_matches_repo "${PWD}/force-${COMPANY_NAME}" "$GITHUB_OWNER" "force-${COMPANY_NAME}" || return 1
+    clone_setup_completed "${PWD}/force-${COMPANY_NAME}" "$GITHUB_OWNER" "force-${COMPANY_NAME}" || return 1
     COMPLETED_REPO="$want"
     COMPLETED_DIR="${PWD}/force-${COMPANY_NAME}"
+    return 0
+}
+
+# 前回、完了の直前で中断したときの後片付け（進捗は 10 まで進んだが、admin ブランチの作成・完了の印・状態ファイルの削除が、
+#   済んでいない）。何度実行しても、同じ結果になる。引数: クローンのフォルダ
+#   クローンがあれば、admin ブランチにして GitHub にも push し、完了の印を付けてから、状態ファイルを削除する
+_finish_unfinished_setup() {
+    local dir="$1"
+    [[ -d "$dir/.git" ]] || return 0   # クローンがないときは、何もしない（状態ファイルも、そのまま）
+    # 状態ファイルの REPO_DIR が指すクローンが、このプロジェクトのものであること（別の場所の、別のクローンに、push しないため）
+    clone_matches_repo "$dir" "$GITHUB_OWNER" "force-${COMPANY_NAME}" || return 0
+    log "INFO" "前回のセットアップの、最後の後片付け（admin ブランチ・完了の印・状態ファイルの整理）が、済んでいません。いま、済ませます。"
+    if ensure_admin_branch "$dir"; then
+        push_admin_branch "$dir" || log "WARNING" "admin ブランチを GitHub に push できませんでした: ${dir}"
+    else
+        log "WARNING" "管理者用のクローンを admin ブランチにできませんでした: ${dir}"
+    fi
+    if mark_setup_complete "$dir"; then
+        run rm -f "$SF_INIT_ENV_FILE" "$SF_INIT_PROGRESS_FILE" \
+            || log "WARNING" "状態ファイルを削除できませんでした: ${SF_INIT_ENV_FILE}"
+    else
+        log "WARNING" "完了の印を付けられなかったため、状態ファイルは、残します: ${dir}"
+    fi
     return 0
 }
 
@@ -418,7 +458,7 @@ if [[ "$RESUME_PHASE" -eq 1 && -z "$ONLY_PHASE" ]]; then
         prev_repo=$(_kv_value REPO_FULL_NAME "$SF_INIT_ENV_FILE")            # VAR=$(cmd) のため run 不使用
     fi
     if [[ "$prev_done" =~ ^[0-9]+$ && "$prev_done" -ge 2 && "$prev_done" -lt 10 \
-          && "$prev_repo" == "${GITHUB_OWNER}/force-${COMPANY_NAME}" ]]; then
+          ]] && state_matches_repo "$SF_INIT_ENV_FILE" "$GITHUB_OWNER" "force-${COMPANY_NAME}"; then
         next_phase=$((prev_done + 1))
         echo "" >&2
         log "INFO" "前回のセットアップは、「${WIZ_PHASE_TITLES[$prev_done]}」まで完了しています${prev_at:+（${prev_at}）}。（${prev_repo}）"
@@ -434,12 +474,16 @@ if [[ "$RESUME_PHASE" -eq 1 && -z "$ONLY_PHASE" ]]; then
                START_PHASE=$next_phase
                END_PHASE=10
                ;;
-            2) ;;  # 最初から（下で .sf-init.env を削除する）
+            2) ;;  # 最初から（下で .sf-init-XXXX.env を削除する）
             *) die "中断しました。" ;;
         esac
     elif _project_completed; then
         # 完了済みのプロジェクト: 「続きをやる」は意味がないため、完了済みであることと、できることを案内する
         prev_dir="$COMPLETED_DIR"; prev_repo="$COMPLETED_REPO"; prev_at="$COMPLETED_AT"
+        # 状態ファイルが残っている（以前の版・完了の直前の中断）ときは、後片付けを済ませる
+        if [[ -f "$SF_INIT_ENV_FILE" || -f "$SF_INIT_PROGRESS_FILE" ]]; then
+            _finish_unfinished_setup "$prev_dir"
+        fi
         echo "" >&2
         log "INFO" "このプロジェクトは、セットアップが、すでに完了しています${prev_at:+（${prev_at}）}。（${prev_repo}）"
         echo "" >&2
@@ -461,7 +505,7 @@ if [[ "$RESUME_PHASE" -eq 1 && -z "$ONLY_PHASE" ]]; then
                ( cd "$prev_dir" && bash "${SF_TOOLS_DIR}/phases/init/verify.sh" )
                exit $?
                ;;
-            3) ;;  # 最初から（下で .sf-init.env を削除する）
+            3) ;;  # 最初から（下で .sf-init-XXXX.env を削除する）
             *) exit $RET_OK ;;
         esac
     fi
@@ -478,6 +522,14 @@ fi
 
 # 新規実行時（--resume / --only 時、前回の続きを選んだ時以外）は、前回の残骸を削除する（空ファイルは作らない）
 if [[ "$RESUME_PHASE" -eq 1 && -z "$ONLY_PHASE" && "$RESUMED" -eq 0 ]]; then
+    # 前回の「最初から、やり直す」が、途中で止まったままか（印が 0）を、利用者に知らせる（完了済みの案内も、続きの選択も、出ないため）
+    if [[ ! -f "$SF_INIT_ENV_FILE" && ! -f "$SF_INIT_PROGRESS_FILE" \
+          && "$(git -C "${PWD}/force-${COMPANY_NAME}" config --get sf-tools.setup-complete 2>/dev/null || true)" == "0" ]] \
+       && clone_matches_repo "${PWD}/force-${COMPANY_NAME}" "$GITHUB_OWNER" "force-${COMPANY_NAME}"; then  # 条件チェックのため run 不使用
+        log "INFO" "前回の「最初から、やり直す」が、途中で止まっています。最初から、やり直します（作成済みのリポジトリ・クローンは、そのまま使います）。"
+    fi
+    # 完了の印を 0（やり直し中）にする（やり直しの途中で止まったとき、クローンがあるだけで、完了済みと判定しないため）
+    clear_setup_mark "${PWD}/force-${COMPANY_NAME}"
     rm -f "$SF_INIT_ENV_FILE" "$SF_INIT_PROGRESS_FILE"  # 新規実行時は残骸削除のみ（Phase 2 が初回書き出し）
 fi
 
@@ -545,12 +597,12 @@ done
 # ------------------------------------------------------------------------------
 # 8. 後処理（全フェーズ完了後）
 # ------------------------------------------------------------------------------
-# .sf-init.env から REPO_DIR などを取得（完了画面の管理者用フォルダの案内に使用）
+# .sf-init-XXXX.env から REPO_DIR などを取得（完了画面の管理者用フォルダの案内に使用）
 [[ -f "$SF_INIT_ENV_FILE" ]] && source "$SF_INIT_ENV_FILE"
 
 # admin フォルダは、削除せずに残す（管理者用のフォルダ。更新・接続の確認・やり直しなどのメンテナンスに使う）
 #   以前は、最後に削除する質問を出していたが、廃止した。残るファイルに、秘密情報（Token の値）が含まれないように、
-#   念のため、Token の値の行を .sf-init.env から消す（通常は、Phase 8 の push 後に、消えている）。
+#   念のため、Token の値の行を .sf-init-XXXX.env から消す（通常は、Phase 8 の push 後に、消えている）。
 #   最後（Phase 10）まで実行したときだけ行う（--only 6 などの途中までの実行では、Phase 8 が、あとで使うため、消さない）
 if [[ "$END_PHASE" -eq 10 && -f "$SF_INIT_ENV_FILE" ]]; then
     run sed_inplace '/^[A-Z_]*TOKEN_VALUE=/d' "$SF_INIT_ENV_FILE"
@@ -634,6 +686,8 @@ fi
 #   完了後は、読む場所がないため（完了済みかどうかは、このフォルダのクローンで判定する: _project_completed）。
 #   途中で止まったときは、続きをやるために残る。--only N の実行は、状態を持ち越すため、消さない
 if [[ "$END_PHASE" -eq 10 && -z "$ONLY_PHASE" ]]; then
+    mark_setup_complete "${REPO_DIR:-}" \
+        || log "WARNING" "完了の印を付けられませんでした（クローンがありません）: ${REPO_DIR:-なし}"
     run rm -f "$SF_INIT_ENV_FILE" "$SF_INIT_PROGRESS_FILE" \
         || log "WARNING" "状態ファイルを削除できませんでした: ${SF_INIT_ENV_FILE}"
 fi
@@ -645,7 +699,7 @@ _admin_dir="${REPO_DIR:-${INIT_DIR}/force-${COMPANY_NAME}}"
 case "$VERIFY_RESULT" in
     done)    _verify_line="4. 動作の確認: 成功しました（リリースと削除を、各段階の組織で確認済みです）" ;;
     failed)  _verify_line="4. 動作の確認: 失敗した項目があります。上の [NG] を確認してください（削除のみのやり直し: sf-init.sh --verify --cleanup）" ;;
-    skipped) _verify_line="4. 動作の確認は、あとで行えます: 管理者用フォルダで、~/sf-tools/bin/sf-init.sh --verify（または、sf-init.sh を再実行して、2 を選ぶ）" ;;
+    skipped) _verify_line="4. 動作の確認は、あとで行えます: 管理者用フォルダで、~/sf-tools/bin/sf-init.sh --verify（または、作業フォルダ（${INIT_BASE}）で、同じオーナー・プロジェクト名で sf-init.sh を再実行して、2 を選ぶ）" ;;
     *)       _verify_line="4. 動作の確認は、あとで行えます: 管理者用フォルダで、~/sf-tools/bin/sf-init.sh --verify" ;;
 esac
 # 最初のメタデータの同期の結果の行

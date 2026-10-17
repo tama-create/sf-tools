@@ -77,6 +77,20 @@ test_normalize_project_name() {
     _has "$out" "[acme/x] => NG" "/ は、不正"
     _has "$out" "[a b] => NG" "空白は、不正"
     _has "$out" "[acme.git] => NG" ".git で終わる名前は、不正"
+    # 区切り（- _ .）は、英数字の間に、1 つだけ（Phase 10 の外部クライアントアプリ名が、API 名の制約を満たすため）
+    out=$(_run_in "${TMPDIR:-/tmp}" "" 'for n in a--b a-_b a_-b a__b a- a_ a-b a_b a-b_c-d; do echo "[$n] => $(normalize_project_name "$n" || echo NG)"; done' "$mb")
+    _has "$out" "[a--b] => NG" "連続するハイフンは、不正"
+    _has "$out" "[a-_b] => NG" "区切りの連続（- と _）は、不正"
+    _has "$out" "[a_-b] => NG" "区切りの連続（_ と -）は、不正"
+    _has "$out" "[a__b] => NG" "連続するアンダースコアは、不正"
+    _has "$out" "[a-] => NG" "末尾の区切り（-）は、不正"
+    _has "$out" "[a_] => NG" "末尾の区切り（_）は、不正"
+    _has "$out" "[a-b] => a-b" "区切りが 1 つなら、使える（-）"
+    _has "$out" "[a_b] => a_b" "区切りが 1 つなら、使える（_）"
+    _has "$out" "[a-b_c-d] => a-b_c-d" "区切りが、英数字の間に 1 つずつなら、使える"
+    out=$(_run_in "${TMPDIR:-/tmp}" "" 'n50=$(printf "a%.0s" $(seq 1 50)); n51=$(printf "a%.0s" $(seq 1 51)); echo "len50 => $(normalize_project_name "$n50" >/dev/null && echo OK || echo NG)"; echo "len51 => $(normalize_project_name "$n51" >/dev/null && echo OK || echo NG)"' "$mb")
+    _has "$out" "len50 => OK" "50 文字までは、使える"
+    _has "$out" "len51 => NG" "51 文字以上は、不正（外部クライアントアプリ名が、80 文字を超えないように）"
     teardown "$mb"
 }
 
@@ -221,9 +235,153 @@ test_init_identity_existing_with_clone() {
     # 「ある」→ 受け付ける（次の画面で、完了済みの案内を選べる）。聞きなおさない・確認（Y）も聞かない
     _mkclone "$dir" "admin" "force-acme" "https://github.com/tama/force-acme.git"
     out=$(MOCK_GH_API_USER=tama MOCK_GH_REPO_LIST=$'acme' _run_in "$dir" 'acme\n' 'resolve_init_identity' "$mb")
-    _has "$out" "すでに作成済みです" "同じリポジトリのクローンがある → すでに作成済みとして受け付ける"
+    _has "$out" "作業フォルダが、すでにあります" "同じリポジトリのクローンがある → 作業フォルダがあるとして受け付ける"
     _has "$out" "project=acme" "受け付けて、acme で決まる"
     _hasnt "$out" "すでに存在します" "断らない"
+    teardown "$mb"; _rm_base "$dir"
+}
+
+test_clone_matches_repo_case_insensitive() {
+    local mb dir out; mb=$(setup_mock_bin); dir=$(_mkdirs)
+    _mkclone "$dir" "admin" "force-acme" "https://github.com/Org-X/Force-Acme.git"
+    out=$(_run_in "$dir" "" 'clone_matches_repo admin/force-acme org-x force-acme && echo MATCH=yes || echo MATCH=no' "$mb")
+    _has "$out" "MATCH=yes" "大文字と小文字だけが違う → 一致する（GitHub は区別しない）"
+    out=$(_run_in "$dir" "" 'clone_matches_repo admin/force-acme ORG-X FORCE-ACME && echo MATCH=yes || echo MATCH=no' "$mb")
+    _has "$out" "MATCH=yes" "引数のほうが大文字でも、一致する"
+    teardown "$mb"; _rm_base "$dir"
+}
+
+test_state_matches_repo() {
+    local mb dir out; mb=$(setup_mock_bin); dir=$(_mkdirs)
+    mkdir -p "$dir/admin"
+    printf 'GITHUB_OWNER="tama"\nREPO_FULL_NAME="tama/force-acme"\n' > "$dir/admin/.sf-init-acme.env"
+    out=$(_run_in "$dir" "" 'state_matches_repo admin/.sf-init-acme.env tama force-acme && echo MATCH=yes || echo MATCH=no' "$mb")
+    _has "$out" "MATCH=yes" "状態ファイルの REPO_FULL_NAME が一致 → 一致する"
+    out=$(_run_in "$dir" "" 'state_matches_repo admin/.sf-init-acme.env TAMA Force-Acme && echo MATCH=yes || echo MATCH=no' "$mb")
+    _has "$out" "MATCH=yes" "大文字と小文字は、区別しない"
+    out=$(_run_in "$dir" "" 'state_matches_repo admin/.sf-init-acme.env other force-acme && echo MATCH=yes || echo MATCH=no' "$mb")
+    _has "$out" "MATCH=no" "別のオーナー → 一致しない"
+    out=$(_run_in "$dir" "" 'state_matches_repo admin/nothing.env tama force-acme && echo MATCH=yes || echo MATCH=no' "$mb")
+    _has "$out" "MATCH=no" "ファイルがない → 一致しない"
+    teardown "$mb"; _rm_base "$dir"
+}
+
+test_setup_complete_mark() {
+    local mb dir out v; mb=$(setup_mock_bin); dir=$(_mkdirs)
+    _mkclone "$dir" "admin" "force-acme" "https://github.com/tama/force-acme.git"
+    v=$(git -C "$dir/admin/force-acme" config --get sf-tools.setup-complete)
+    [[ -z "$v" ]] && pass "印を付ける前 → 完了の印は、ない（未設定）" || fail "印を付ける前 → 完了の印は、ない（未設定）" "値: ${v}"
+    out=$(_run_in "$dir" "" 'mark_setup_complete admin/force-acme; echo "RC=$?"' "$mb")
+    _has "$out" "RC=0" "印を付ける操作は、成功する"
+    v=$(git -C "$dir/admin/force-acme" config --get sf-tools.setup-complete)
+    [[ "$v" == "1" ]] && pass "印は、クローンの git config（sf-tools.setup-complete=1）にある" || fail "印は、クローンの git config（sf-tools.setup-complete=1）にある" "値: ${v}"
+    out=$(_run_in "$dir" "" 'clear_setup_mark admin/force-acme; echo "RC=$?"' "$mb")
+    _has "$out" "RC=0" "やり直しの開始（印を 0 にする）は、成功する"
+    v=$(git -C "$dir/admin/force-acme" config --get sf-tools.setup-complete)
+    [[ "$v" == "0" ]] && pass "やり直しの開始で、印は、消えずに、0（やり直し中）になる" || fail "やり直しの開始で、印は、消えずに、0（やり直し中）になる" "値: ${v}"
+    out=$(_run_in "$dir" "" 'clear_setup_mark admin/nothing; echo "RC=$?"; mark_setup_complete admin/nothing && echo MARKED=yes || echo MARKED=no' "$mb")
+    _has "$out" "RC=0" "クローンがなくても、やり直しの開始は、失敗にしない"
+    _has "$out" "MARKED=no" "クローンがない → 印は、付けられない（戻り値 1）"
+    teardown "$mb"; _rm_base "$dir"
+}
+
+test_init_identity_existing_case_and_state() {
+    local mb dir out; mb=$(setup_mock_bin); create_mock_gh "$mb"; dir=$(_mkdirs)
+    # すでにあるプロジェクト名は、大文字と小文字を区別せずに、断る（GitHub は、区別しない）
+    out=$(MOCK_GH_API_USER=tama MOCK_GH_REPO_LIST=$'acme' _run_in "$dir" 'ACME\nnewp\nY\n' 'resolve_init_identity' "$mb")
+    _has "$out" "tama/force-ACME は、すでに存在します" "大文字と小文字だけが違う名前も、すでにある名前として断る"
+    _has "$out" "project=newp" "別の名前で決まる"
+    # 途中の状態（状態ファイルの REPO_FULL_NAME が一致）がある → 受け付ける（続きをやるために）
+    mkdir -p "$dir/admin"
+    printf 'REPO_FULL_NAME="tama/force-acme"\n' > "$dir/admin/.sf-init-acme.env"
+    out=$(MOCK_GH_API_USER=tama MOCK_GH_REPO_LIST=$'acme' _run_in "$dir" 'acme\n' 'resolve_init_identity' "$mb")
+    _has "$out" "作業フォルダが、すでにあります" "途中の状態がある → 断らずに、受け付ける（続きをやる）"
+    _has "$out" "project=acme" "受け付けて、acme で決まる"
+    # 別のオーナーの状態は、受け付けない
+    printf 'REPO_FULL_NAME="other/force-acme"\n' > "$dir/admin/.sf-init-acme.env"
+    out=$(MOCK_GH_API_USER=tama MOCK_GH_REPO_LIST=$'acme' _run_in "$dir" 'acme\nnewp\nY\n' 'resolve_init_identity' "$mb")
+    _has "$out" "tama/force-acme は、すでに存在します" "別のオーナーの状態は、受け付けない"
+    teardown "$mb"; _rm_base "$dir"
+}
+
+test_job_identity_owner_filter() {
+    local mb dir out; mb=$(setup_mock_bin); create_mock_gh "$mb"; dir=$(_mkdirs)
+    _mkclone "$dir" "JOB-1" "force-acme" "https://github.com/org-x/force-acme.git"
+    _mkclone "$dir" "JOB-2" "force-beta" "https://github.com/org-y/force-beta.git"
+    # --owner だけの指定: そのオーナーのクローンだけが対象（1 種類なら、番号なしで決まる）
+    out=$(_run_in "$dir" "" 'resolve_job_identity "org-y" ""' "$mb")
+    _has "$out" "owner=org-y project=beta" "--owner だけ → そのオーナーのクローンから、プロジェクトが決まる"
+    _hasnt "$out" "どのプロジェクトですか" "--owner で絞れば、選択肢は出ない"
+    out=$(_run_in "$dir" "" 'resolve_job_identity "ORG-X" ""' "$mb")
+    _has "$out" "project=acme" "オーナーは、大文字と小文字を区別せずに絞る"
+    # そのオーナーのクローンがない → XXXX を聞く（ほかのオーナーのクローンを使わない）
+    out=$(_run_in "$dir" 'zzz\nY\n' 'resolve_job_identity "org-z" ""' "$mb")
+    _has "$out" "owner=org-z project=zzz" "そのオーナーのクローンがない → 対話で決める（ほかのオーナーのクローンは、使わない）"
+    teardown "$mb"; _rm_base "$dir"
+}
+
+# 実際の Git で、クローンを作る（origin つき。コミットが 1 つある）。引数: 作業フォルダ 作業単位 クローン名 URL
+_mkclone_commit() {
+    _mkclone "$1" "$2" "$3" "$4"
+    git -C "$1/$2/$3" -c user.name=t -c user.email=t@example.com commit -q --allow-empty -m init 2>/dev/null
+}
+
+test_clone_setup_completed() {
+    local mb dir out d; mb=$(setup_mock_bin); dir=$(_mkdirs)
+    local url="https://github.com/org-x/force-acme.git"
+    d="$dir/admin/force-acme"
+
+    # 印が 1 → 完了済み
+    _mkclone_commit "$dir" "admin" "force-acme" "$url"
+    git -C "$d" config sf-tools.setup-complete 1
+    out=$(_run_in "$dir" "" 'clone_setup_completed admin/force-acme org-x force-acme && echo DONE=yes || echo DONE=no' "$mb")
+    _has "$out" "DONE=yes" "印が 1 → 完了済み"
+    out=$(_run_in "$dir" "" 'clone_setup_completed admin/force-acme ORG-X Force-Acme && echo DONE=yes || echo DONE=no' "$mb")
+    _has "$out" "DONE=yes" "大文字と小文字は、区別しない"
+    out=$(_run_in "$dir" "" 'clone_setup_completed admin/force-acme org-y force-acme && echo DONE=yes || echo DONE=no' "$mb")
+    _has "$out" "DONE=no" "origin が別のオーナー → 未完了（印が 1 でも）"
+
+    # やり直しの開始（印を 0 に）→ 未完了。admin ブランチがあっても、完了とみなさない（やり直し中の中断を、完了と誤判定しない）
+    git -C "$d" branch admin 2>/dev/null
+    out=$(_run_in "$dir" "" 'clear_setup_mark admin/force-acme; clone_setup_completed admin/force-acme org-x force-acme && echo DONE=yes || echo DONE=no' "$mb")
+    _has "$out" "DONE=no" "完了済みのクローンで、やり直しを始めた（印 0）→ 未完了（admin ブランチがあっても）"
+    [[ "$(git -C "$d" config --get sf-tools.setup-complete)" == "0" ]] \
+        && pass "やり直しの開始で、印は、消えずに、0（やり直し中）になる" || fail "やり直しの開始で、印は、消えずに、0（やり直し中）になる"
+    out=$(_run_in "$dir" "" 'mark_setup_complete admin/force-acme; clone_setup_completed admin/force-acme org-x force-acme && echo DONE=yes || echo DONE=no' "$mb")
+    _has "$out" "DONE=yes" "やり直しが終わって、印を 1 にすると → 完了済み"
+
+    # 印が未設定: 印を導入する前の版で完了したプロジェクト（admin ブランチがある）→ 完了済みとみなし、印を 1 にする
+    git -C "$d" config --unset sf-tools.setup-complete
+    out=$(_run_in "$dir" "" 'clone_setup_completed admin/force-acme org-x force-acme && echo DONE=yes || echo DONE=no' "$mb")
+    _has "$out" "DONE=yes" "印が未設定で、admin ブランチがある → 完了済みとみなす（印を導入する前の版で、完了したもの）"
+    [[ "$(git -C "$d" config --get sf-tools.setup-complete)" == "1" ]] \
+        && pass "印を導入する前の版で完了したものは、印を 1 にする（移行）" || fail "印を導入する前の版で完了したものは、印を 1 にする（移行）"
+
+    # 印が未設定で、admin ブランチがない → 未完了
+    _mkclone_commit "$dir" "admin" "force-beta" "https://github.com/org-x/force-beta.git"
+    out=$(_run_in "$dir" "" 'clone_setup_completed admin/force-beta org-x force-beta && echo DONE=yes || echo DONE=no' "$mb")
+    _has "$out" "DONE=no" "印が未設定で、admin ブランチもない → 未完了"
+    [[ -z "$(git -C "$dir/admin/force-beta" config --get sf-tools.setup-complete)" ]] \
+        && pass "未完了と判定したクローンには、印を付けない" || fail "未完了と判定したクローンには、印を付けない"
+
+    # クローンでない・フォルダがない → 未完了
+    out=$(_run_in "$dir" "" 'clone_setup_completed admin/nothing org-x force-x && echo DONE=yes || echo DONE=no' "$mb")
+    _has "$out" "DONE=no" "フォルダがない → 未完了"
+    teardown "$mb"; _rm_base "$dir"
+}
+
+test_git_origin_redacted() {
+    local mb dir out; mb=$(setup_mock_bin); dir=$(_mkdirs)
+    _mkclone "$dir" "admin" "force-acme" "https://user:SECRETTOKEN@github.com/org-x/force-acme.git"
+    _mkclone "$dir" "admin" "force-plain" "https://github.com/org-x/force-plain.git"
+    mkdir -p "$dir/admin/force-noorigin"; git -C "$dir/admin/force-noorigin" init -q 2>/dev/null
+    out=$(_run_in "$dir" "" 'echo "[$(git_origin_redacted admin/force-acme)]"' "$mb")
+    _has "$out" "[https://***@github.com/org-x/force-acme.git]" "origin の URL の認証情報（user:TOKEN@）を伏せる"
+    _hasnt "$out" "SECRETTOKEN" "Token の値は、出力に出ない"
+    out=$(_run_in "$dir" "" 'echo "[$(git_origin_redacted admin/force-plain)]"' "$mb")
+    _has "$out" "[https://github.com/org-x/force-plain.git]" "認証情報がなければ、そのまま出す"
+    out=$(_run_in "$dir" "" 'echo "[$(git_origin_redacted admin/force-noorigin)]"' "$mb")
+    _has "$out" "[なし]" "origin がなければ「なし」"
     teardown "$mb"; _rm_base "$dir"
 }
 
@@ -236,5 +394,12 @@ test_init_identity_prompt
 test_job_identity
 test_clone_matches_repo
 test_init_identity_existing_with_clone
+test_clone_matches_repo_case_insensitive
+test_state_matches_repo
+test_setup_complete_mark
+test_init_identity_existing_case_and_state
+test_job_identity_owner_filter
+test_clone_setup_completed
+test_git_origin_redacted
 
 print_summary

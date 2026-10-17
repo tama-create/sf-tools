@@ -610,7 +610,10 @@ initial_metadata_sync() {
         (( waited % 30 == 0 )) && log "INFO" "    … 同期中（経過 ${waited} 秒）"
     done
     if [[ "$status" != "completed" ]]; then
-        log "WARNING" "  同期が、${timeout} 秒以内に、終わりませんでした: https://github.com/${repo}/actions/runs/${id}"
+        # 実行が続いたままだと、あとの wf-metasync（動作の確認など）と、同時に動いてしまう（組織への取得が、重なると失敗する）ため、取り消す
+        verify_gh run cancel "$id" -R "$repo" >/dev/null 2>&1 \
+            && log "WARNING" "  同期が、${timeout} 秒以内に、終わらなかったため、取り消しました: https://github.com/${repo}/actions/runs/${id}" \
+            || log "WARNING" "  同期が、${timeout} 秒以内に、終わりませんでした（取り消しもできませんでした。GitHub の Actions で確認してください）: https://github.com/${repo}/actions/runs/${id}"
         return 1
     fi
     concl=$(verify_run_conclusion "$repo" "$id")  # VAR=$(cmd) のため run 不使用

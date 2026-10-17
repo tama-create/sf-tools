@@ -466,22 +466,27 @@ tr -d '\r' < "$key_file" | base64 -w 0 | gh secret set "SF_PRIVATE_KEY" -R "$REP
 
 実行フロー:
 1. 環境チェック（ツール確認・GitHub CLI 認証確認）
-2. プロジェクト情報の確認（フォルダ構成から自動導出）→ `.sf-init.env` に書き出し
+2. プロジェクト情報の確認（引数・対話で決めたオーナーと XXXX。`SF_INIT_OWNER` / `SF_INIT_PROJECT` が必須）→ `.sf-init-XXXX.env` に書き出し
 3. リポジトリ作成（gh repo create + git clone）
 4. ファイル生成（sf-install.sh / sf-hook.sh）
 5. ブランチ構成（対話選択 → branches.txt 更新）
 6. PAT_TOKEN の設定（`phases/init/06_pat_token.sh`。force-* のリポジトリ用の Token であり、sf-tools（公開リポジトリ）とは無関係）。流れ: Token を作るべきアカウント（`REPO_FULL_NAME` のオーナー。組織なら管理者）を表示 → `ask_yn`「発行済みの Token がありますか？」（Y: ブラウザを開かず、使い回しの注意を表示 / N: 手順を表示し `open_browser` + `press_enter`）→ `read_secret`（画面に表示しない）→ `verify_pat_token`（Token は環境変数 `GH_TOKEN` で `gh` に渡し、コマンドの引数に出さない。①`gh api user --jq .login` で認証できるか ②`gh api user --include` の `X-OAuth-Scopes` に `repo`・`workflow` があるか〔ヘッダーがない Fine-grained は不可〕 ③`gh api repos/<REPO_FULL_NAME> --jq .permissions.admin` が `true` か〔個人ならオーナー、組織なら組織の管理者〕。NG なら理由を表示し、3 回まで貼り直し。超えたら die）→ `gh secret set PAT_TOKEN` → `.sf-init.env` に `PAT_TOKEN_VALUE` を書き出し（Phase 8 の push で使用）
 7. Slack 連携の設定（SLACK_BOT_TOKEN を Secret / SLACK_CHANNEL_ID を Variable に登録。チャンネル ID は C または G で始まる形式かを検証し、それ以外（D=DM、U=ユーザーなど）は警告して拒否し、入力し直させる。通知先は全員が参加する共有チャンネルのため）
-8. 初回コミット＆プッシュ（PAT は GIT_ASKPASS で渡しコマンドのログに残さない。push 後に .sf-init.env から PAT を削除する）
+8. 初回コミット＆プッシュ（PAT は GIT_ASKPASS で渡しコマンドのログに残さない。push 後に .sf-init-XXXX.env から PAT を削除する）
 9. GitHub リポジトリ設定・Ruleset の適用（既存 Ruleset の ID は数字のときだけ削除対象にする）
 10. JWT 認証情報の設定（SF_PRIVATE_KEY / SF_CONSUMER_KEY_* を Secret / SF_USERNAME_* / SF_INSTANCE_URL_* を Variable に登録）。アプリ種別が外部クライアントアプリ（2）のときは、組織ごとに `register_jwt_secret_eca`（`init-common.sh`）が自動作成する（`sf org login web` → ユーザー名・プロファイル名（表示名）を取得 → `generate_eca_metadata` で 5 ファイルを生成して `sf project deploy` → `sf project retrieve` でコンシューマー鍵を取得 → JWT 接続テスト（反映待ちのためリトライ。`SF_INIT_JWT_RETRIES` / `SF_INIT_JWT_INTERVAL`）→ 登録）。ログイン用の一時エイリアス（`sf-tools-PROD` / `sf-tools-STG` / `sf-tools-DEV`。ユーザーが運用中のエイリアスと重ならないよう `sf-tools-` を付ける）は、ログイン前に `sf alias unset` で外し（前回の古い認証による誤判定の防止）、終了後にも `sf alias unset` で消す（`sf org logout` は同じユーザー名の全エイリアスの認証を消すため使わない）。`sf` は npm 版が前提（Windows の Git Bash で公式インストーラー版を使うと、成功しても終了コード 1 になるため）。ログイン（`sf org login web`）、接続情報の取得（`sf org display --json`。ユーザー名はその出力から取り出す）、プロファイル名の取得（`sf data query`）、JWT 接続テストの成否は、すべて終了コードで判定し、0 以外なら中断する（JWT 接続テストはリトライ後、スキップの確認）。接続アプリ（1）は従来の手動案内
 
 - **最初のメタデータの同期（`initial_metadata_sync`: `phases/init/init-common.sh`）**: Phase 10 のあと（動作の確認・`admin` ブランチの作成より前）に、`wf-metasync` を実行して、管理者用のクローンに取り込む。初期コミットの `force-app` は空のひな型で、何もしないと、メタデータは次の定期実行（平日 UTC 0・3・6・9 時）まで入らない。クローン（Phase 3）は初期コミットの push に必要なため、同期（Phase 10 の接続情報が必要）より先になる。そこで、同期のあとに `git pull` する（作り直したクローンと同じ結果）。動作: `verify_dispatch_workflow`（`lib/verify-common.sh`）で手動起動 → `SF_INIT_SYNC_TIMEOUT` 秒（既定 1200）まで、30 秒おきに経過を表示して待つ → `verify_run_conclusion` が success → クローンを `main` にして `core.longpaths=true` を設定し、`git pull --ff-only origin main`。実行は `END_PHASE` が 10 で、`--only` がなく、Phase 10 を実行したときだけ。失敗（起動できない・時間切れ・同期の失敗・pull の失敗）しても、`SYNC_RESULT=failed` として警告にとどめ、完了画面に「すぐ同期するには: `gh workflow run wf-metasync.yml -R …`（終わったら `git pull origin main`）」を出す。成功なら `SYNC_RESULT=done`（完了画面: 「同期済みです」）。動作の確認（`verify.sh`）を実行したときは、`admin` ブランチを作る直前に、もう一度 `git pull --ff-only origin main`（Hello World のリリースと削除が `main` に入るため）。Phase 3 の `git clone` には `-c core.longpaths=true` を付ける（Windows のパス長の上限対策。`sf-job.sh` と同じ）。テスト: `tests/test_sf-init.sh`（モックの gh が `workflow run` / `run list`（`--event workflow_dispatch`）/ `run view` に答える。`VERIFY_POLL_SEC=0`。成功・起動失敗・同期失敗）。
+- **実行場所と、別のリポジトリのクローンの確認（2026-10-17 のレビューで追加）**: `admin` や `force-*` の中、Git の作業ツリー（先頭が `force-` のもの）の中では、実行できない（`resolve_init_identity` の前に die。中に `admin/` ができて、別のクローンに書き込む経路になるため）。`admin` に cd したあと、`admin/force-XXXX` が、`${GITHUB_OWNER}/force-XXXX` のクローンでなければ（`clone_matches_repo`: origin を、大文字と小文字を区別せずに比べる）、状態ファイルに触れる前に die する。プロジェクトは「オーナーと XXXX」で決まるが、フォルダと状態ファイルは XXXX だけで決まるため、同じ XXXX で別のオーナーのプロジェクトを、別のリポジトリのクローンに書き込んで push してしまうのを防ぐ。Phase 3 も、すでにあるクローンについて、同じ確認をし（不一致なら die）、`main` に切り替え、リモートに `main` があれば `git pull --ff-only` する（`admin` ブランチのまま、Phase 8 が `git add -A` / `commit` すると、`main` に入らないため。「最初から、やり直す」の経路）。
+- **完了の印（`mark_setup_complete` / `clear_setup_mark` / `clone_setup_completed`: `lib/project.sh`）**: クローンの `git config sf-tools.setup-complete`（`.git/config` にあり、GitHub には送られない）。値は 3 状態: `1` = 完了 / `0` = やり直し中 / 未設定。セットアップの完了時（`END_PHASE` が 10 で `--only` なし）に、`1` を付けてから、状態ファイルを削除する。「最初から、やり直す」を選んだときは、状態ファイルを消す前に、印を **`0`** にする（消さない）。完了済みの判定（`_project_completed` → `clone_setup_completed`）は、状態ファイルがないとき、「`admin/force-XXXX` の origin が同じリポジトリ」で、かつ、印が `1` なら完了、`0` なら未完了（やり直し中）、**未設定なら、ローカルに `admin` ブランチがあれば完了とみなし、印を `1` にする**（印を導入する前の版（99d420d〜ff690db）で完了したプロジェクトは、完了時に `admin` ブランチを作り、状態ファイルを消すだけで、印を付けなかったため。「印がない = 未完了」と読むと、運用中のリポジトリを新規セットアップとして上書きしてしまう）。`admin` ブランチもなければ、未完了。（「クローンがある」だけで完了とすると、やり直しの途中（Phase 1・2）で止まったとき、未完了を完了と誤判定するため、印を 0 にして、未設定と区別する）。状態ファイルが残っている（進捗 10。以前の版、または完了の直前の中断）ときは、完了済みの案内の前に、後片付け（`_finish_unfinished_setup`: クローンを `admin` ブランチにして GitHub にも push → 完了の印 `1` → 状態ファイルの削除。何度実行しても同じ結果。クローンがない、または、状態ファイルの `REPO_DIR` が指すクローンの origin が、このプロジェクトのものでないときは、何もしない（別のクローンに push しない））を済ませる。印が `0` のまま止まっているとき（やり直しの途中で中断）に、再実行すると、「前回の「最初から、やり直す」が、途中で止まっています。最初から、やり直します」と表示して、最初から始める。状態ファイルのリポジトリ名の比較（続きをやる・完了済み）は、`state_matches_repo`（大文字と小文字を区別しない）。エラーの文言に origin の URL を出すときは、`git_origin_redacted` で、認証情報（`user:TOKEN@`）を伏せる。
+- **XXXX の検証（`normalize_project_name`）**: 英数字と、区切り（`-` `_` `.`）。区切りは、英数字の間に 1 つだけ（連続・先頭・末尾は不可）、50 文字まで、末尾の `.git` は不可。Phase 10 の外部クライアントアプリの名前（`SF_TOOLS_` + `force-XXXX` の区切りを `_` にしたもの + `_glbloauth`）が、Salesforce の API 名の制約（連続した `_`・末尾の `_` は不可。80 文字まで）を満たすため。守らないと、セットアップの終盤で失敗する。対話での、すでにあるプロジェクト名の比較は、大文字と小文字を区別しない。途中の状態（`admin/.sf-init-XXXX.env` の `REPO_FULL_NAME` が一致: `state_matches_repo`）がある名前は、断らずに受け付ける（続きをやるため。Phase 3 で、リポジトリを作れたがクローンに失敗した場合など）。
+- `sf-job.sh --owner X`（`--project` なし）: そのオーナーのクローンだけを対象にする（大文字と小文字は区別しない）。
+- 最初のメタデータの同期が時間切れのとき: `gh run cancel` で、その実行を取り消す（実行が続いたままだと、あとの `wf-metasync`（動作の確認など）と同時に動き、組織への取得が重なって失敗するため）。
 **進捗の記録と「続きから」の選択（`bin/sf-init.sh`）:**
 - フェーズループで、Phase 2 以降が成功するたびに、**`admin/.sf-init-XXXX.progress`**（入力内容を保存する `.sf-init.env` とは別のファイル）を、`SF_INIT_DONE_PHASE=N` と `SF_INIT_DONE_AT="日時"` の 2 行で書き直す（外部コマンドを使わない）。Phase 1 は状態を持たないため記録しない。`--only` は記録しない。失敗した Phase は記録されない。Phase 10 の実行中は、段階ごとの完了（`SF_INIT_DONE_TIER_*`）が、追記される。
 - 引数なしで起動し、`.sf-init-XXXX.env` と `.sf-init-XXXX.progress` があり、`SF_INIT_DONE_PHASE` が 2〜9 で、`REPO_FULL_NAME` が `${GITHUB_OWNER}/force-${COMPANY_NAME}`（作業フォルダのもの）と一致するとき、管理者警告・`check_gh_owner`・admin フォルダへの移動のあとに、`read_key` で `[1] 続き / [2] 最初から / [q] 中断` を選ばせる（既定値なし）。
-  - `1`: `START_PHASE=N+1`、`RESUMED=1`。`.sf-init.env` は消さない。Phase 1（環境チェック）を、先頭に付け足して、毎回実行する。
-  - `2`: 従来どおり `.sf-init.env` を削除して Phase 1 から。リポジトリ・admin フォルダは削除しない（Phase 3 が冪等のため）。
+  - `1`: `START_PHASE=N+1`、`RESUMED=1`。`.sf-init-XXXX.env` は消さない。Phase 1（環境チェック）を、先頭に付け足して、毎回実行する。
+  - `2`: 完了の印を外し、`.sf-init-XXXX.env` / `.progress` を削除して Phase 1 から。リポジトリ・admin フォルダは削除しない（Phase 3 が冪等のため）。
   - `q`: `die`。
 - `SF_INIT_DONE_PHASE` が `10`（完了済み）で、リポジトリが一致するとき: 続きの選択肢の代わりに「セットアップが、すでに完了しています」を表示し、`[1]` 管理者用フォルダ（`REPO_DIR`）で `phases/init/status.sh` を実行して終了（何も変更しない）／`[2]` 管理者用フォルダで `phases/init/verify.sh` を実行し、その終了コードで終了（確認は phases/init/verify.sh の中で聞く）／`[3]` 最初からやり直す（上の `2` と同じ）／`[q]` 終了、を選ばせる。
 - **ステップ 9（動作の確認）**: **通しの実行（`FULL_START`）と、中断後の「続きをやる」のときだけ**、最後（`END_PHASE` が 10）まで実行し、`GITHUB_ACTIONS` でなく、端末（`-t 0`。テストは `SF_INIT_VERIFY_ASK=1`）のとき、完了処理（Token の値の行の掃除）のあと、完了画面の前に、`read_input` で「Enter = 確認する / s = あとで」を聞く（EOF は「あとで」）。`--resume N` / `--only N` の明示では、聞かない。Enter なら、`(cd "$REPO_DIR" && SF_VERIFY_CONFIRMED=1 bash phases/init/verify.sh)`。結果（`VERIFY_RESULT`: done / failed / skipped）は、完了画面の 4 番目の項目に表示する。確認の失敗は、sf-init の終了コードに影響しない。進捗（`.sf-init.progress`）には、記録しない（Phase ではないため）。
@@ -546,7 +551,7 @@ sf-init.sh --add-tier develop    # main+staging → main+staging+develop
 
 `phases/init/add_tier.sh` だけは、`force-*/sf-tools/config/.sf-init.env` を読む（別の場所。admin フォルダのものではない）。
 
-#### `.sf-init.env` のキー
+#### `.sf-init-XXXX.env` のキー
 
 | キー | 意味 | 書く | 読む |
 |---|---|---|---|
@@ -560,7 +565,7 @@ sf-init.sh --add-tier develop    # main+staging → main+staging+develop
 | `PAT_TOKEN_VALUE` | PAT（**秘密情報。一時的**） | Phase 6（追記） | Phase 8（push に使い、直後に、この行を消す） |
 | `APP_TYPE` | Salesforce の接続の種別（`1` = 接続アプリ（従来）/ `2` = 外部クライアントアプリ） | Phase 10（追記） | Phase 10（再開時に再利用。指定と食い違うと中断） |
 
-#### `.sf-init.progress` のキー
+#### `.sf-init-XXXX.progress` のキー
 
 | キー | 意味 | 書く | 読む |
 |---|---|---|---|
@@ -859,7 +864,7 @@ sf-tools の `main` への反映は、全ユーザーへの配布と同義であ
 - **止まったのか、動いているのか分かるように:** `e2e_run_sf_cmd` は、`E2E_HEARTBEAT_SEC` 秒（既定 30）おきに、経過時間を表示し、`E2E_CMD_TIMEOUT` 秒（既定 1200）を超えたら、打ち切る（終了コード 124、「時間切れ」と表示）。run.sh は、各段階の終わりに、`経過時間: N 分 M 秒` を表示する
 - **管理者用フォルダ・対話・`--add-tier` の確認（2026-10-16 追加。手動の検証を、e2e に置き換えた）:**
   - `sf-init.sh` は、既定では**引数なしの対話**で実行する。先頭に、オーナーの選択 → XXXX の入力 → 確認の入力を足す（`e2e_make_identity_input OWNER XXXX`。オーナーの候補は `gh_owner_candidates admin` と同じ。複数なら位置の番号、1 つなら番号なし、なしならオーナーを入力）。`--with-args` で、引数 `--owner` / `--project` に切り替える。`sf-job.sh` も、既定は引数なし（作業フォルダの下のクローンの git remote から決まる。出力の「このフォルダの下のクローンから取得」で確認する）。
-  - `sf-init` のあとの確認（新しく作ったときだけ。`--resume` の前回分は、古い形のことがある）: `admin/force-XXXX` ができた / 状態ファイルが `.sf-init-XXXX.env` / `.progress`（プロジェクト名つき）/ 進捗が Phase 10 / 古い形のフォルダ（`init` / `init-*`）がない / クローンが `admin` ブランチ（ローカル）/ GitHub に `admin` がある / `origin/admin` を追跡 / 完了画面の案内（「ローカルと GitHub の両方」「`main` から古くなる」。対話のときは、XXXX だけ入力の案内も）/ `sf-sync-wf.sh --check` が `admin` で実行でき、`main`（保護ブランチ）では断られる（確認のため一時的に `main` に切り替え、`admin` に戻す）。
+  - `sf-init` のあとの確認（新しく作ったときだけ。`--resume` の前回分は、古い形のことがある）: `admin/force-XXXX` ができた / 完了後に、状態ファイル（`.sf-init-XXXX.env` / `.progress`）が消えている / 完了の印（クローンの `git config sf-tools.setup-complete`）がある / 古い形のフォルダ（`init` / `init-*`）がない / クローンが `admin` ブランチ（ローカル）/ GitHub に `admin` がある / `origin/admin` を追跡 / 完了画面の案内（「ローカルと GitHub の両方」「`main` から古くなる」。対話のときは、XXXX だけ入力の案内も）/ `sf-sync-wf.sh --check` が `admin` で実行でき、`main`（保護ブランチ）では断られる（確認のため一時的に `main` に切り替え、`admin` に戻す）。
   - **最初のメタデータの同期の確認**（`sf-init` のあと）: 完了直後のクローン（`admin` ブランチ）に、メタデータのファイル（`.gitkeep` 以外）が入っている / `main` に「定期更新」のコミットがある / ローカルの `main` が `origin/main` と一致 / 完了画面に「同期済みです」。
   - `--add-tier`（`_add_tier_check`）: 新しく作った**1 層**のリポジトリで、鍵一式に staging の組織があるとき、**Hello World の確認のあと**（先に行うとリポジトリが 2 層になり、リリースの確認の対象が変わるため）に、管理者用のクローン（`admin` ブランチ）で `sf-init.sh --add-tier staging`（入力: `Y` → ログイン先 `1`）を実行する。確認: コマンドの成功 / 終わったあとも `admin` ブランチ / `staging` ブランチ / Secret・Variable（`*_STG`）/ `branches.txt` を更新する PR / `main` へ直接 push していない（`main` の SHA が変わらない）。約 4 分。`--no-add-tier` で省略できる。
   - **起動のしかた（Windows）:** 標準の Git Bash（`C:\Git\bin\bash.exe -l`。`MSYSTEM=UCRT64`）で起動する。`C:\Git\usr\bin\bash.exe`（`MSYSTEM=MSYS` / `MINGW64` にしても）は、`openssl` が MSYS 版になり、`sf-init` の `-subj "//CN=…"`（Git Bash の Windows 版 `openssl` 向けの書き方）が読み飛ばされて、Phase 10 の証明書の生成で失敗する（コードの不具合ではない）。`gh` は、鍵一式の `E2E_GH_USER`（テスト用の組織の管理者）のトークンを、`GH_TOKEN` に設定して実行する（gh のアクティブなアカウントは書き換えない）。確認の質問には `Y` を渡す。所要時間は約 30 分。

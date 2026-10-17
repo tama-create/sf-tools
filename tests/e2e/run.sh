@@ -595,6 +595,8 @@ if [[ "$INIT_RC" -eq 0 ]]; then
         _in_init_out()          { grep -qF -- "$1" "$INIT_OUT"; }
         chk "管理者用フォルダ admin/${REPO_NAME} ができた（作業フォルダは、フォルダ構成に頼らない場所）" test -d "${_ADMIN_CLONE}/.git"
         # 状態ファイル（.sf-init-XXXX.env / .progress）は、最後まで終わったら、消える（完了後は、読む場所がない）
+        _setup_marked() { [[ "$(git -C "$_ADMIN_CLONE" config --get sf-tools.setup-complete 2>/dev/null)" == "1" ]]; }
+        chk "完了の印（クローンの git config sf-tools.setup-complete）が付いている（状態ファイルを消しても、完了済みと判定できる）" _setup_marked
         chk "完了後、状態ファイル（.sf-init-${PROJECT}.env / .progress）が、admin から消えている" \
             test ! -e "$_ADMIN_ENV" -a ! -e "$_ADMIN_PROGRESS"
         chk "admin に、状態ファイルの残骸（.sf-init-*）がない" _no_state_files

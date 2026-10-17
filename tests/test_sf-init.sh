@@ -125,7 +125,7 @@ case "$1 $2" in
     "run view")
         # 同期の実行の状態と結果。MOCK_GH_SYNC_CONCLUSION=failure → 同期が失敗する
         case " $* " in
-            *" --json status "*)     echo "completed" ;;
+            *" --json status "*)     echo "${MOCK_GH_SYNC_STATUS:-completed}" ;;   # MOCK_GH_SYNC_STATUS=in_progress → 終わらない（時間切れ）
             *" --json conclusion "*) echo "${MOCK_GH_SYNC_CONCLUSION:-success}" ;;
         esac
         exit 0 ;;
@@ -606,6 +606,330 @@ test_initial_sync_failure_is_not_fatal() {
 
     teardown "$mb" "$mock_home"
     rm -f /tmp/sf-init-test-syncfail.log
+}
+
+# ==============================================================================
+# テスト 6g: 実行場所の確認（admin・force-* の中では、実行できない）
+# ==============================================================================
+test_refuse_inside_admin_or_clone() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] admin・force-* の中で実行 → 中断（別のクローンに、書き込まない）${CLR_RST}"
+    local mb mock_home base d exit_code out
+    mb=$(setup_mock_bin); export MOCK_CALL_LOG="$mb/calls.log"
+    mock_home=$(setup_mock_home)
+    create_all_mocks "$mb"; create_mock_gh_for_init "$mb"; _stub_subscripts "$mock_home"
+    for d in admin force-testproject; do
+        base=$(mktemp -d "${TMPDIR:-/tmp}/test-init-XXXX"); mkdir -p "$base/$d"
+        : > "$MOCK_CALL_LOG"
+        out=$(printf 'Y\n' | ( cd "$base/$d" && HOME="$mock_home" PATH="$mb:$PATH" \
+            bash "$mock_home/sf-tools/bin/sf-init.sh" ) 2>&1)
+        exit_code=$?
+        assert_exit_fail "$exit_code"                                                    "${d} の中で実行 → 異常終了する"
+        assert_output_contains "$out" "中では実行できません"                              "${d} の中で実行 → 理由を表示する"
+        assert_file_not_contains "$MOCK_CALL_LOG" "gh repo create"                       "${d} の中で実行 → 何も作らない"
+        assert_dir_not_exists "$base/$d/admin"                                           "${d} の中で実行 → admin/ を作らない"
+        rm -rf "$base"
+    done
+    teardown "$mb" "$mock_home"
+}
+
+# ==============================================================================
+# テスト 6h: 別のリポジトリ（別のオーナー・同じ XXXX）のクローンがあるときは、中断する
+# ==============================================================================
+test_refuse_foreign_clone() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] admin/force-XXXX が別のリポジトリのクローン → 中断（書き込み・push・状態ファイルの削除をしない）${CLR_RST}"
+    local mb mock_home base work exit_code out
+    mb=$(setup_mock_bin); export MOCK_CALL_LOG="$mb/calls.log"
+    mock_home=$(setup_mock_home)
+    create_all_mocks "$mb"; create_mock_gh_for_init "$mb"; _stub_subscripts "$mock_home"
+    base=$(mktemp -d "${TMPDIR:-/tmp}/test-init-XXXX"); work="$base/my-work"
+    mkdir -p "$work/admin/force-testproject/.git"
+    printf 'REPO_FULL_NAME="other/force-testproject"\n' > "$work/admin/.sf-init-testproject.env"   # ほかのリポジトリの、途中の状態
+    printf 'SF_INIT_DONE_PHASE=5\n' > "$work/admin/.sf-init-testproject.progress"
+    export MOCK_GIT_C_REMOTE_URL="https://user:SECRETTOKEN@github.com/other/force-testproject.git"   # Token つきの URL
+    : > "$MOCK_CALL_LOG"
+    out=$(printf 'Y\n' | ( cd "$work" && HOME="$mock_home" PATH="$mb:$PATH" \
+        bash "$mock_home/sf-tools/bin/sf-init.sh" --owner tamashimon --project testproject ) 2>&1)
+    exit_code=$?
+    unset MOCK_GIT_C_REMOTE_URL
+    assert_exit_fail "$exit_code"                                                        "別のリポジトリのクローン → 異常終了する"
+    assert_output_not_contains "$out" "SECRETTOKEN"                                      "別のリポジトリのクローン → origin の URL の Token を、画面に出さない"
+    assert_output_contains "$out" "tamashimon/force-testproject のクローンではありません"   "別のリポジトリのクローン → 理由（どのリポジトリか）を表示する"
+    assert_file_not_contains "$MOCK_CALL_LOG" "gh repo create"                           "別のリポジトリのクローン → リポジトリを作らない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "push"                                     "別のリポジトリのクローン → push しない"
+    assert_file_exists "$work/admin/.sf-init-testproject.env"                            "別のリポジトリのクローン → ほかのリポジトリの状態ファイルを、消さない"
+    assert_file_exists "$work/admin/.sf-init-testproject.progress"                       "別のリポジトリのクローン → 進捗ファイルも、消さない"
+    teardown "$mb" "$mock_home" "$base"
+}
+
+# ==============================================================================
+# テスト 6i: Phase 3: すでにあるクローンが、別のリポジトリなら中断する・同じなら main に切り替える
+# ==============================================================================
+test_phase3_existing_clone() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] Phase 3: すでにあるクローン（別のリポジトリ → 中断 / 同じ → main に切り替え・最新にする）${CLR_RST}"
+    local mb mock_home base work exit_code out
+    mb=$(setup_mock_bin); export MOCK_CALL_LOG="$mb/calls.log"
+    mock_home=$(setup_mock_home)
+    create_all_mocks "$mb"; create_mock_gh_for_init "$mb"; _stub_subscripts "$mock_home"
+    base=$(mktemp -d "${TMPDIR:-/tmp}/test-init-XXXX"); work="$base/my-work"
+    mkdir -p "$work/admin/force-testproject/.git"
+    cat > "$work/admin/.sf-init-testproject.env" <<ENVEOF
+GITHUB_OWNER="tamashimon"
+PROJECT_NAME="testproject"
+REPO_NAME="force-testproject"
+REPO_FULL_NAME="tamashimon/force-testproject"
+REPO_DIR="$work/admin/force-testproject"
+ENV_TYPE="production"
+SF_TOOLS_BRANCH="main"
+ENVEOF
+    # 別のリポジトリ（Phase 3 の確認。--only 3 は、sf-init.sh の確認を通らずに、Phase 3 だけを実行する）
+    export MOCK_GIT_C_REMOTE_URL="https://github.com/other/force-testproject.git"
+    : > "$MOCK_CALL_LOG"
+    out=$(printf 'Y\n' | ( cd "$work" && HOME="$mock_home" PATH="$mb:$PATH" \
+        bash "$mock_home/sf-tools/bin/sf-init.sh" --only 3 --owner tamashimon --project testproject ) 2>&1)
+    exit_code=$?
+    assert_exit_fail "$exit_code"                                                        "Phase 3・別のリポジトリのクローン → 異常終了する"
+    assert_file_not_contains "$MOCK_CALL_LOG" "checkout main"                            "Phase 3・別のリポジトリのクローン → 切り替えもしない"
+    # 同じリポジトリ（admin ブランチにいる想定: モックの symbolic-ref は main 以外を返す）
+    export MOCK_GIT_C_REMOTE_URL="https://github.com/Tamashimon/Force-TestProject.git"   # 大文字と小文字は、区別しない
+    : > "$MOCK_CALL_LOG"
+    out=$(printf 'Y\n' | ( cd "$work" && HOME="$mock_home" PATH="$mb:$PATH" \
+        bash "$mock_home/sf-tools/bin/sf-init.sh" --only 3 --owner tamashimon --project testproject ) 2>&1)
+    exit_code=$?
+    unset MOCK_GIT_C_REMOTE_URL
+    assert_exit_ok "$exit_code"                                                          "Phase 3・同じリポジトリのクローン（大文字と小文字の違いは許す）→ 正常終了する"
+    assert_file_contains "$MOCK_CALL_LOG" "checkout main"                                "Phase 3・admin ブランチのままだと、あとの Phase のコミットが main に入らないため、main に切り替える"
+    assert_file_contains "$MOCK_CALL_LOG" "pull --ff-only origin main"                   "Phase 3・main を最新にする（git pull --ff-only）"
+    teardown "$mb" "$mock_home" "$base"
+}
+
+# ==============================================================================
+# テスト 6j: 前回、完了の直前で中断した（進捗は 10 のまま）→ 後片付けを済ませてから、完了済みの案内を出す
+# ==============================================================================
+test_finish_unfinished_setup() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] 進捗 10 の状態ファイルが残っている → admin ブランチ・完了の印・状態ファイルの整理を済ませる${CLR_RST}"
+    local mb mock_home base work exit_code out
+    mb=$(setup_mock_bin); export MOCK_CALL_LOG="$mb/calls.log"
+    mock_home=$(setup_mock_home)
+    create_all_mocks "$mb"; create_mock_gh_for_init "$mb"; _stub_subscripts "$mock_home"
+    base=$(mktemp -d "${TMPDIR:-/tmp}/test-init-XXXX"); work="$base/my-work"
+    mkdir -p "$work/admin/force-testproject/.git"
+    cat > "$work/admin/.sf-init-testproject.env" <<ENVEOF
+GITHUB_OWNER="tamashimon"
+PROJECT_NAME="testproject"
+REPO_NAME="force-testproject"
+REPO_FULL_NAME="tamashimon/force-testproject"
+REPO_DIR="$work/admin/force-testproject"
+ENVEOF
+    printf 'SF_INIT_DONE_PHASE=10\nSF_INIT_DONE_AT="2026-10-17 01:00"\n' > "$work/admin/.sf-init-testproject.progress"
+    export MOCK_GIT_C_REMOTE_URL="https://github.com/tamashimon/force-testproject.git"   # 同じリポジトリのクローン
+    : > "$MOCK_CALL_LOG"
+    out=$(printf 'Y\nq\n' | ( cd "$work" && HOME="$mock_home" PATH="$mb:$PATH" \
+        bash "$mock_home/sf-tools/bin/sf-init.sh" ) 2>&1)
+    exit_code=$?
+    unset MOCK_GIT_C_REMOTE_URL
+    assert_exit_ok "$exit_code"                                                          "後片付け・q: 正常終了する"
+    assert_output_contains "$out" "最後の後片付け"                                         "後片付け: 済んでいない旨を表示する"
+    assert_file_contains "$MOCK_CALL_LOG" "checkout admin"                               "後片付け: クローンを admin ブランチにする"
+    assert_file_contains "$MOCK_CALL_LOG" "push --no-verify -u origin admin"             "後片付け: admin ブランチを GitHub にも push する"
+    assert_file_contains "$MOCK_CALL_LOG" "config sf-tools.setup-complete 1"             "後片付け: 完了の印を付ける"
+    assert_file_not_exists "$work/admin/.sf-init-testproject.env"                        "後片付け: 状態ファイル（.env）を削除する"
+    assert_file_not_exists "$work/admin/.sf-init-testproject.progress"                   "後片付け: 進捗ファイルを削除する"
+    assert_output_contains "$out" "セットアップが、すでに完了しています"                      "後片付けのあと: 完了済みの案内が出る"
+    teardown "$mb" "$mock_home" "$base"
+}
+
+# ==============================================================================
+# テスト 6k: 「最初から、やり直す」を選ぶと、完了の印を外す（やり直しの途中で止まっても、完了済みと誤判定しない）
+# ==============================================================================
+test_restart_clears_mark() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] 完了済みで [3] 最初から → 完了の印を 0（やり直し中）にする（その後 Phase 1・2 で止まっても、完了済みにならない）${CLR_RST}"
+    local mb mock_home base work exit_code out
+    mb=$(setup_mock_bin); export MOCK_CALL_LOG="$mb/calls.log"
+    mock_home=$(setup_mock_home)
+    create_all_mocks "$mb"; create_mock_gh_for_init "$mb"; _stub_subscripts "$mock_home"
+    base=$(mktemp -d "${TMPDIR:-/tmp}/test-init-XXXX"); work="$base/my-work"
+    mkdir -p "$work/admin/force-testproject/.git"
+    export MOCK_GIT_C_REMOTE_URL="https://github.com/tamashimon/force-testproject.git"
+    export MOCK_GIT_C_CONFIG_VALUE=1     # 完了の印がある
+    export MOCK_GH_AUTH_STATUS_EXIT=1    # Phase 1（環境チェック）で、失敗して止まる
+    : > "$MOCK_CALL_LOG"
+    out=$(printf 'Y\n3\n' | ( cd "$work" && HOME="$mock_home" PATH="$mb:$PATH" \
+        bash "$mock_home/sf-tools/bin/sf-init.sh" ) 2>&1)
+    exit_code=$?
+    unset MOCK_GIT_C_REMOTE_URL MOCK_GIT_C_CONFIG_VALUE MOCK_GH_AUTH_STATUS_EXIT
+    assert_exit_fail "$exit_code"                                                        "[3]・Phase 1 の失敗で止まる → 異常終了する"
+    assert_output_contains "$out" "セットアップが、すでに完了しています"                      "[3]: 完了済みの案内が、最初に出る"
+    assert_file_contains "$MOCK_CALL_LOG" "config sf-tools.setup-complete 0"             "[3] 最初から: 完了の印を 0（やり直し中）にする（消さない）"
+    teardown "$mb" "$mock_home" "$base"
+}
+
+# ==============================================================================
+# テスト 6l: admin ブランチは、新しく作る場合、main から作る
+# ==============================================================================
+test_admin_branch_created_from_main() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] admin ブランチがまだないとき → main から作る（checkout -b admin main）${CLR_RST}"
+    local mb mock_home base work exit_code
+    mb=$(setup_mock_bin); export MOCK_CALL_LOG="$mb/calls.log"
+    mock_home=$(setup_mock_home)
+    create_all_mocks "$mb"; create_mock_gh_for_init "$mb"; _stub_subscripts "$mock_home"
+    base=$(mktemp -d "${TMPDIR:-/tmp}/test-init-XXXX"); work="$base/my-work"; mkdir -p "$work"
+    export MOCK_GIT_REV_VERIFY_EXIT=1     # admin ブランチは、まだない
+    _make_input_3branches \
+        | ( cd "$work" && HOME="$mock_home" PATH="$mb:$PATH" \
+              bash "$mock_home/sf-tools/bin/sf-init.sh" --owner tamashimon --project testproject --legacy-connected-app ) \
+          > /tmp/sf-init-test-newadmin.log 2>&1
+    exit_code=$?
+    unset MOCK_GIT_REV_VERIFY_EXIT
+    assert_exit_ok "$exit_code"                                                          "admin ブランチがまだない → 正常終了する"
+    assert_file_contains "$MOCK_CALL_LOG" "checkout -b admin main"                       "admin ブランチは、main から作る"
+    assert_file_contains "$MOCK_CALL_LOG" "config sf-tools.setup-complete 1"             "完了時に、クローンに完了の印を付ける"
+    teardown "$mb" "$mock_home" "$base"
+    rm -f /tmp/sf-init-test-newadmin.log
+}
+
+# ==============================================================================
+# テスト 6m: 同期が時間切れ → 実行を取り消す（あとの wf-metasync と、同時に動かさない）
+# ==============================================================================
+test_initial_sync_timeout_cancels() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] 同期が、上限の時間内に終わらない → 取り消して、セットアップは成功のまま${CLR_RST}"
+    local mb mock_home base work exit_code
+    mb=$(setup_mock_bin); export MOCK_CALL_LOG="$mb/calls.log"
+    mock_home=$(setup_mock_home)
+    create_all_mocks "$mb"; create_mock_gh_for_init "$mb"; _stub_subscripts "$mock_home"
+    base=$(mktemp -d "${TMPDIR:-/tmp}/test-init-XXXX"); work="$base/my-work"; mkdir -p "$work"
+    export MOCK_GH_SYNC_STATUS=in_progress SF_INIT_SYNC_TIMEOUT=2
+    _make_input_3branches \
+        | ( cd "$work" && HOME="$mock_home" PATH="$mb:$PATH" \
+              bash "$mock_home/sf-tools/bin/sf-init.sh" --owner tamashimon --project testproject --legacy-connected-app ) \
+          > /tmp/sf-init-test-synctimeout.log 2>&1
+    exit_code=$?
+    unset MOCK_GH_SYNC_STATUS SF_INIT_SYNC_TIMEOUT
+    assert_exit_ok "$exit_code"                                                          "同期が時間切れでも、セットアップは成功する"
+    assert_file_contains "$MOCK_CALL_LOG" "gh run cancel 101"                            "時間切れ → 同期の実行を取り消す"
+    assert_file_contains "/tmp/sf-init-test-synctimeout.log" "取り消しました"             "時間切れ → 取り消した旨を表示する"
+    assert_file_contains "/tmp/sf-init-test-synctimeout.log" "同期は、できませんでした"    "時間切れ → 完了画面で、同期できなかったことを知らせる"
+    assert_file_not_contains "$MOCK_CALL_LOG" "pull --ff-only origin main"               "時間切れ → クローンに取り込まない"
+    teardown "$mb" "$mock_home" "$base"
+    rm -f /tmp/sf-init-test-synctimeout.log
+}
+
+# ==============================================================================
+# テスト 6n: 印を導入する前の版で完了したプロジェクト（印も状態ファイルもない・admin ブランチはある）→ 完了済みとして扱う
+# ==============================================================================
+test_completed_before_mark_existed() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] 印がない（以前の版で完了）・admin ブランチがある → 完了済みの案内（新規セットアップとして、上書きしない）${CLR_RST}"
+    local mb mock_home base work exit_code out
+    mb=$(setup_mock_bin); export MOCK_CALL_LOG="$mb/calls.log"
+    mock_home=$(setup_mock_home)
+    create_all_mocks "$mb"; create_mock_gh_for_init "$mb"; _stub_subscripts "$mock_home"
+    base=$(mktemp -d "${TMPDIR:-/tmp}/test-init-XXXX"); work="$base/my-work"
+    mkdir -p "$work/admin/force-testproject/.git"                      # 状態ファイルは、ない
+    export MOCK_GIT_C_REMOTE_URL="https://github.com/tamashimon/force-testproject.git"
+    # MOCK_GIT_C_CONFIG_VALUE は、未設定（印がない）。モックの git は、admin ブランチが「ある」と答える（rev-parse --verify）
+    : > "$MOCK_CALL_LOG"
+    out=$(printf 'Y\nq\n' | ( cd "$work" && HOME="$mock_home" PATH="$mb:$PATH" \
+        bash "$mock_home/sf-tools/bin/sf-init.sh" ) 2>&1)
+    exit_code=$?
+    assert_exit_ok "$exit_code"                                                          "印がなく admin ブランチがある・q: 正常終了する"
+    assert_output_contains "$out" "セットアップが、すでに完了しています"                      "印がなく admin ブランチがある: 完了済みの案内が出る"
+    assert_file_not_contains "$MOCK_CALL_LOG" "gh repo create"                           "印がなく admin ブランチがある: 新規セットアップとして、動かない"
+    assert_file_contains "$MOCK_CALL_LOG" "config sf-tools.setup-complete 1"             "印がなく admin ブランチがある: 印を付ける（移行）"
+    # --resume N も、拒否される
+    : > "$MOCK_CALL_LOG"
+    out=$(printf 'Y\n' | ( cd "$work" && HOME="$mock_home" PATH="$mb:$PATH" \
+        bash "$mock_home/sf-tools/bin/sf-init.sh" --resume 5 ) 2>&1)
+    exit_code=$?
+    unset MOCK_GIT_C_REMOTE_URL
+    assert_exit_fail "$exit_code"                                                        "印がなく admin ブランチがある・--resume 5: 拒否される"
+    assert_file_not_contains "$MOCK_CALL_LOG" "gh secret set"                            "印がなく admin ブランチがある・--resume 5: 何も登録しない"
+    teardown "$mb" "$mock_home" "$base"
+}
+
+# ==============================================================================
+# テスト 6o: 状態ファイルのリポジトリ名の比較は、大文字と小文字を区別しない（続きをやる）
+# ==============================================================================
+test_resume_state_case_insensitive() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] --owner の大文字と小文字だけが違っても、途中の状態の「続きをやる」の案内が出る${CLR_RST}"
+    local mb mock_home base work exit_code out
+    mb=$(setup_mock_bin); export MOCK_CALL_LOG="$mb/calls.log"
+    mock_home=$(setup_mock_home)
+    create_all_mocks "$mb"; create_mock_gh_for_init "$mb"; _stub_subscripts "$mock_home"
+    base=$(mktemp -d "${TMPDIR:-/tmp}/test-init-XXXX"); work="$base/my-work"; mkdir -p "$work/admin"
+    printf 'GITHUB_OWNER="tamashimon"\nPROJECT_NAME="testproject"\nREPO_NAME="force-testproject"\nREPO_FULL_NAME="tamashimon/force-testproject"\nBRANCH_COUNT="1"\n' > "$work/admin/.sf-init-testproject.env"
+    printf 'SF_INIT_DONE_PHASE=5\nSF_INIT_DONE_AT="2026-10-17 01:00"\n' > "$work/admin/.sf-init-testproject.progress"
+    : > "$MOCK_CALL_LOG"
+    out=$(printf 'Y\nq\n' | ( cd "$work" && HOME="$mock_home" PATH="$mb:$PATH" \
+        bash "$mock_home/sf-tools/bin/sf-init.sh" --owner TAMASHIMON --project testproject ) 2>&1)
+    exit_code=$?
+    assert_output_contains "$out" "前回のセットアップは、「ブランチの構成」まで完了しています"   "オーナーの大文字と小文字が違っても、続きをやる案内が出る"
+    assert_file_exists "$work/admin/.sf-init-testproject.progress"                       "[q] 中断: 状態ファイルを、消さない（最初からやり直しにならない）"
+    teardown "$mb" "$mock_home" "$base"
+}
+
+# ==============================================================================
+# テスト 6p: 前回の「最初から、やり直す」が途中で止まっている（印が 0）→ その旨を表示して、最初から、やり直す
+# ==============================================================================
+test_restart_interrupted_notice() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] 印が 0（やり直し中に中断）→ 「途中で止まっています。最初から、やり直します」と表示する${CLR_RST}"
+    local mb mock_home base work exit_code out
+    mb=$(setup_mock_bin); export MOCK_CALL_LOG="$mb/calls.log"
+    mock_home=$(setup_mock_home)
+    create_all_mocks "$mb"; create_mock_gh_for_init "$mb"; _stub_subscripts "$mock_home"
+    base=$(mktemp -d "${TMPDIR:-/tmp}/test-init-XXXX"); work="$base/my-work"
+    mkdir -p "$work/admin/force-testproject/.git"                        # 状態ファイルは、ない
+    export MOCK_GIT_C_REMOTE_URL="https://github.com/tamashimon/force-testproject.git"
+    export MOCK_GIT_C_CONFIG_VALUE=0                                      # やり直し中の印
+    export MOCK_GH_AUTH_STATUS_EXIT=1                                     # Phase 1 で、止まる（最初から、始まったことの確認）
+    : > "$MOCK_CALL_LOG"
+    out=$(printf 'Y\n' | ( cd "$work" && HOME="$mock_home" PATH="$mb:$PATH" \
+        bash "$mock_home/sf-tools/bin/sf-init.sh" ) 2>&1)
+    exit_code=$?
+    unset MOCK_GIT_C_REMOTE_URL MOCK_GIT_C_CONFIG_VALUE MOCK_GH_AUTH_STATUS_EXIT
+    assert_output_contains "$out" "前回の「最初から、やり直す」が、途中で止まっています"      "印が 0 → 途中で止まっていた旨を表示する"
+    assert_output_not_contains "$out" "セットアップが、すでに完了しています"                   "印が 0 → 完了済みの案内は、出さない（未完了）"
+    teardown "$mb" "$mock_home" "$base"
+}
+
+# ==============================================================================
+# テスト 6q: 後片付けは、状態ファイルの REPO_DIR が指すクローンが、別のリポジトリなら、何もしない
+# ==============================================================================
+test_finish_skips_foreign_repo_dir() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] 状態ファイルの REPO_DIR が別のリポジトリのクローン → 後片付けで、push しない${CLR_RST}"
+    local mb mock_home base work other exit_code out
+    mb=$(setup_mock_bin); export MOCK_CALL_LOG="$mb/calls.log"
+    mock_home=$(setup_mock_home)
+    create_all_mocks "$mb"; create_mock_gh_for_init "$mb"; _stub_subscripts "$mock_home"
+    base=$(mktemp -d "${TMPDIR:-/tmp}/test-init-XXXX"); work="$base/my-work"; other="$base/elsewhere/force-testproject"
+    mkdir -p "$work/admin" "$other/.git"
+    cat > "$work/admin/.sf-init-testproject.env" <<ENVEOF
+GITHUB_OWNER="tamashimon"
+PROJECT_NAME="testproject"
+REPO_NAME="force-testproject"
+REPO_FULL_NAME="tamashimon/force-testproject"
+REPO_DIR="$other"
+ENVEOF
+    printf 'SF_INIT_DONE_PHASE=10\nSF_INIT_DONE_AT="2026-10-17 01:00"\n' > "$work/admin/.sf-init-testproject.progress"
+    export MOCK_GIT_C_REMOTE_URL="https://github.com/someone-else/force-testproject.git"   # REPO_DIR のクローンは、別のリポジトリ
+    : > "$MOCK_CALL_LOG"
+    out=$(printf 'Y\nq\n' | ( cd "$work" && HOME="$mock_home" PATH="$mb:$PATH" \
+        bash "$mock_home/sf-tools/bin/sf-init.sh" ) 2>&1)
+    exit_code=$?
+    unset MOCK_GIT_C_REMOTE_URL
+    assert_file_not_contains "$MOCK_CALL_LOG" "push"                                     "別のリポジトリのクローン → 後片付けで、push しない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "setup-complete 1"                         "別のリポジトリのクローン → 完了の印を付けない"
+    assert_file_exists "$work/admin/.sf-init-testproject.env"                            "別のリポジトリのクローン → 状態ファイルも、消さない"
+    teardown "$mb" "$mock_home" "$base"
 }
 
 # ==============================================================================
@@ -1636,6 +1960,7 @@ test_completed_by_clone() {
     init_dir="$init_base/home/tamashimon/testproject"
     mkdir -p "$init_dir/admin/force-testproject"     # 状態ファイル（.sf-init-*）は、ない。クローンだけがある
     export MOCK_GIT_C_REMOTE_URL="https://github.com/tamashimon/force-testproject.git"
+    export MOCK_GIT_C_CONFIG_VALUE=1                 # 完了の印（クローンの git config sf-tools.setup-complete=1）がある
 
     # 引数なし → 完了済みの案内（[q] 終了: 何も実行しない）
     : > "$MOCK_CALL_LOG"
@@ -1666,7 +1991,7 @@ test_completed_by_clone() {
     assert_file_contains      "$out" "STATUS-STUB cwd="                                       "クローンで完了済みと判定・1: 接続の確認（status.sh）が実行される"
     assert_file_contains      "$out" "admin/force-testproject"                                 "クローンで完了済みと判定・1: クローンのフォルダで実行される"
 
-    unset MOCK_GIT_C_REMOTE_URL
+    unset MOCK_GIT_C_REMOTE_URL MOCK_GIT_C_CONFIG_VALUE
     teardown "$mb" "$mock_home" "$init_base"
 }
 
@@ -2409,6 +2734,17 @@ test_flex_layout_prompt
 test_admin_branch_failure_is_not_fatal
 test_admin_branch_push_failure_is_not_fatal
 test_initial_sync_failure_is_not_fatal
+test_refuse_inside_admin_or_clone
+test_refuse_foreign_clone
+test_phase3_existing_clone
+test_finish_unfinished_setup
+test_restart_clears_mark
+test_admin_branch_created_from_main
+test_initial_sync_timeout_cancels
+test_completed_before_mark_existed
+test_resume_state_case_insensitive
+test_restart_interrupted_notice
+test_finish_skips_foreign_repo_dir
 test_flex_invalid_project_arg
 test_repo_visibility_private
 test_only_option_runs_single_phase

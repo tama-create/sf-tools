@@ -12,7 +12,7 @@
 #                      --with-args を付けると、引数 --owner / --project で指定する（対話の画面は通らない）
 #                    ・質問への答えは標準入力に流す
 #                    ・sf org login web は、認証 URL でのログインに差し替える（tests/e2e/shims/sf）
-#                    ・ブラウザは開かない（tests/e2e/shims の start / xdg-open / open）
+#                    ・ブラウザは開かない（tests/e2e/shims の start / xdg-open / open / powershell.exe / wslview。WSL の open_browser は powershell.exe を使う）
 #   3. 確認        : Secret / Variable / ブランチ / ワークフローの存在、トークンがログに出ていないこと、
 #                    GitHub Actions の実行: wf-metasync（手動起動。完了を待つ。Hello World と同時に動かすと、組織へのデプロイと取得が重なって失敗する）、続けて Hello World の Apex を PR 経由で
 #                    リリース（wf-validate → マージ → wf-release）し、続けて削除する（sf-tools の本来の機能の通し）。
@@ -158,7 +158,7 @@ SHIM_DIR="${E2E_TMP}/shims"
 mkdir -p "$SHIM_DIR"  # run 不使用: 差し替え用コマンドの置き場（一時フォルダ内）
 cp "${E2E_SCRIPT_DIR}/shims/sf" "${SHIM_DIR}/sf"  # run 不使用: 差し替え用コマンドの配置（一時フォルダ内）
 cp "${E2E_SCRIPT_DIR}/shims/code" "${SHIM_DIR}/code"  # run 不使用: 差し替え用コマンドの配置（一時フォルダ内）
-for _n in start xdg-open open; do cp "${E2E_SCRIPT_DIR}/shims/browser" "${SHIM_DIR}/${_n}"; done
+for _n in start xdg-open open powershell.exe wslview; do cp "${E2E_SCRIPT_DIR}/shims/browser" "${SHIM_DIR}/${_n}"; done
 chmod +x "${SHIM_DIR}"/* 2>/dev/null || true  # run 不使用: 実行権限の付与（Windows は効果なし・意図的エラー無視）
 export E2E_SHIM_DIR="$SHIM_DIR"
 export E2E_SFDX_URL_FILE="${E2E_TMP}/sfdx-url.txt"

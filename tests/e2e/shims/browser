@@ -2,6 +2,6 @@
 # ==============================================================================
 # ブラウザ起動コマンド（差し替え用）- e2e テストで PATH の先頭に置く
 # ==============================================================================
-# sf-init の open_browser が呼ぶ start / xdg-open / open の代わりに、何もしない。
-# run.sh が、このファイルを start / xdg-open / open の名前で、一時フォルダにコピーして使う。
+# sf-init の open_browser が呼ぶ start / xdg-open / open / powershell.exe / wslview の代わりに、何もしない。
+# run.sh が、このファイルを、それらの名前で、一時フォルダにコピーして使う（WSL の open_browser は powershell.exe を使う）。
 exit 0

@@ -25,6 +25,7 @@
 #  19. sf-tools のコマンドの実行（sf-job.sh / sf-push.sh など）と、code の差し替え
 #  20. doctor.sh（e2e を動かせる環境かの確認。秘密の値を出さない）
 #  21. 検証の記録（e2e の最後に表示する、表の 1 行）
+#  22. ブラウザの差し替え（OS ごとの open_browser が使うコマンドを、すべて差し替える）
 # ==============================================================================
 source "$(dirname "${BASH_SOURCE[0]}")/test_helper.sh"
 echo -e "${CLR_HEAD}=== tests/e2e（安全ガードと部品）===${CLR_RST}"
@@ -1694,6 +1695,20 @@ test_e2e_doctor() {
     assert_file_not_contains "$mb/out.log" "fakeurl"        "画面に、認証 URL の値を出さない"
     assert_file_not_contains "$mb/sf-tools/logs/e2e-doctor.log" "ghp_fakepat" "ログにも、PAT の値を出さない"
 
+    # git のコミットの作者: 環境変数で、決まる・決まらないを作り分ける（名前が空だと、git は「empty ident name」で拒否する）
+    GIT_CONFIG_NOSYSTEM=1 GIT_AUTHOR_NAME= GIT_AUTHOR_EMAIL=a@example.com GIT_COMMITTER_NAME= GIT_COMMITTER_EMAIL=a@example.com _run_doctor; rc=$?
+    assert_exit_fail "$rc" "コミットの作者が決まらない: 非ゼロで終わる"
+    assert_file_contains "$mb/out.log" "ユーザー名・メールアドレスが決まりません" "コミットの作者が決まらない: その旨と対処を表示する"
+    GIT_CONFIG_NOSYSTEM=1 GIT_AUTHOR_NAME=Tester GIT_AUTHOR_EMAIL=t@example.com GIT_COMMITTER_NAME=Tester GIT_COMMITTER_EMAIL=t@example.com _run_doctor
+    assert_file_contains "$mb/out.log" "コミットの作者（ユーザー名・メールアドレス）が決まる" "コミットの作者が決まれば、OK"
+
+    # git の認証の仕組み（credential helper）: システム・ユーザーの設定を読まず（HOME は、モックの場所）、環境変数で、有無を作り分ける
+    GIT_CONFIG_NOSYSTEM=1 _run_doctor; rc=$?
+    assert_exit_fail "$rc" "credential helper がない: 非ゼロで終わる"
+    assert_file_contains "$mb/out.log" "GitHub の認証の仕組み（credential helper）がありません" "credential helper がない: その旨と対処を表示する"
+    GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=credential.helper GIT_CONFIG_VALUE_0=store _run_doctor
+    assert_file_contains "$mb/out.log" "credential helper）が設定されている" "credential helper があれば、OK"
+
     sedi '/E2E_PAT_TOKEN/d' "$FX"; _run_doctor; rc=$?
     assert_exit_fail "$rc" "項目が未設定: 非ゼロで終わる"
     assert_file_contains "$mb/out.log" "未設定の項目があります: E2E_PAT_TOKEN" "項目が未設定: 項目名を表示する"
@@ -1737,6 +1752,19 @@ test_e2e_record_line() {
     teardown "$mb"
 }
 
+# ------------------------------------------------------------------------------
+# 22. ブラウザの差し替え（OS ごとの open_browser が使うコマンドを、すべて差し替える）
+# ------------------------------------------------------------------------------
+test_e2e_browser_shims() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] e2e のブラウザの差し替え（Git Bash: start / macOS: open / Linux: xdg-open / WSL: powershell.exe）${CLR_RST}"
+    local n
+    for n in start open xdg-open powershell.exe wslview; do
+        assert_file_contains "$E2E_DIR/run.sh" "$n" "run.sh は、${n} を差し替える（実際のブラウザを開かない）"
+    done
+    assert_file_contains "$E2E_DIR/run.sh" 'for _n in start xdg-open open powershell.exe wslview' "差し替えのコマンドを、1 つの一覧で、コピーしている"
+    bash "$E2E_DIR/shims/browser"; assert_exit_ok $? "差し替え用のブラウザは、何もせず、正常終了する"
+}
+
 test_e2e_names
 test_e2e_guard
 test_e2e_delete_guards
@@ -1764,5 +1792,6 @@ test_e2e_bootstrap_add_orgs
 test_e2e_bootstrap_refresh_orgs
 test_e2e_doctor
 test_e2e_record_line
+test_e2e_browser_shims
 
 print_summary

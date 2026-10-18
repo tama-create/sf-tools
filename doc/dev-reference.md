@@ -39,14 +39,12 @@
 
 ### 1.3 新規スクリプト追加・大きな変更後のチェック
 
-**検証済み動作環境（必ず動くこと）:**
+**動作環境（すべての OS で動くことが目標。どの環境を、実際に動かして確かめたかは、9.7 の記録が正本）:**
 
-- **ローカル: Windows + Git Bash**
-- **サーバー: Linux（GitHub Actions / Ubuntu ランナー）**
-
-**意識する動作環境（クロスプラットフォーム方針・検証はしない）:**
-
-- **macOS / WSL**
+- **Windows + Git Bash** / **macOS** / **WSL（Ubuntu）**: 単体テスト（CI または手元）と、実環境の通し検証（e2e）を、実際に動かして確認済み
+- **Linux（GitHub Actions / Ubuntu ランナー）**: 単体テストと shellcheck を、CI で毎回確認。Linux の実機での e2e は、未検証
+- 新しい環境や、未検証の環境で動かすときは、先に `bash tests/e2e/doctor.sh` で、環境を確認する（9.6）
+- 環境ごとの「検証済み」は、実際に動かした範囲だけを書く（README の表と 9.7 の記録を、実際の確認と一致させる）
 
 - プラットフォーム固有コマンド（`powershell.exe` / `open` / `xdg-open` 等）は `command -v` で存在確認してから使うこと
 - `/proc/version` / `/proc/` 配下のファイルは macOS / GitBash に存在しないため `2>/dev/null` を付けること

@@ -1,6 +1,6 @@
 name: テスト
 
-# sf-tools 自体のテスト（モックベースの単体テスト 約 1,600 件）と、シェルの静的解析（shellcheck）。
+# sf-tools 自体のテスト（モックベースの単体テスト。件数は変わるため、書かない）と、シェルの静的解析（shellcheck）。
 # 実際の GitHub / Salesforce には触れない（Secrets は使わない）。実環境の確認は tests/e2e（開発者が手動で実行する）。
 # shellcheck の設定（無効にしている項目と、その理由）は、リポジトリの .shellcheckrc。
 on:

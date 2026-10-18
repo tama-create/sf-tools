@@ -26,6 +26,7 @@
 #  20. doctor.sh（e2e を動かせる環境かの確認。秘密の値を出さない）
 #  21. 検証の記録（e2e の最後に表示する、表の 1 行）
 #  22. ブラウザの差し替え（OS ごとの open_browser が使うコマンドを、すべて差し替える）
+#  23. wf-sequence の確認の部品（PR を閉じる・コメントの確認・動き出した検証の取り消し）
 # ==============================================================================
 source "$(dirname "${BASH_SOURCE[0]}")/test_helper.sh"
 echo -e "${CLR_HEAD}=== tests/e2e（安全ガードと部品）===${CLR_RST}"
@@ -53,7 +54,13 @@ case "$*" in
         _n=$(( $(cat "$_d/disp.cnt" 2>/dev/null || echo 0) + 1 )); echo "$_n" > "$_d/disp.cnt"
         if [[ $_n -eq 1 ]]; then echo "${MOCK_GH_DISPATCH_BEFORE:-100}"; else echo "${MOCK_GH_DISPATCH_AFTER:-101}"; fi
         exit 0 ;;
+    # 動いている（待ち・実行中の）実行の一覧（e2e_cancel_pr_runs）: MOCK_GH_ACTIVE_RUNS に、空白区切りの ID を入れる
+    "run list"*"--status"*)              for _i in ${MOCK_GH_ACTIVE_RUNS:-}; do echo "$_i"; done; exit 0 ;;
     "run list"*)                         [[ "${MOCK_GH_RUN_NONE:-}" == "1" ]] && exit 0; echo "${MOCK_GH_RUN_ID:-555}"; exit 0 ;;
+    "run cancel"*)                       exit "${MOCK_GH_CANCEL_EXIT:-0}" ;;
+    # PR の会話欄のコメント（MOCK_GH_PR_COMMENTS: 本文。MOCK_GH_PR_VIEW_EXIT=1: 取得に失敗する）
+    "pr view"*"--json comments"*)        [[ "${MOCK_GH_PR_VIEW_EXIT:-0}" -ne 0 ]] && exit "$MOCK_GH_PR_VIEW_EXIT"; printf '%s\n' "${MOCK_GH_PR_COMMENTS:-}"; exit 0 ;;
+    "pr close"*)                         exit "${MOCK_GH_PR_CLOSE_EXIT:-0}" ;;
     # 失敗したステップのログ（形式: ジョブ名 TAB ステップ名 TAB 時刻 本文。色の指定と Token を含む）
     "run view"*"--log-failed"*)
         [[ "${MOCK_GH_LOG_NONE:-}" == "1" ]] && exit 0
@@ -1765,6 +1772,80 @@ test_e2e_browser_shims() {
     bash "$E2E_DIR/shims/browser"; assert_exit_ok $? "差し替え用のブラウザは、何もせず、正常終了する"
 }
 
+# ------------------------------------------------------------------------------
+# 23. wf-sequence の確認の部品（PR を閉じる・コメントの確認・動き出した検証の取り消し）
+# ------------------------------------------------------------------------------
+test_e2e_sequence_parts() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] wf-sequence の確認の部品（マージしない PR・コメント・取り消し）${CLR_RST}"
+    _mk_cleanup_env
+    local pre='e2e_load_fixture; e2e_guard_env;'
+    local repo="tamashimon-org/force-e2e-20260101-000000"
+
+    # PR を、マージせずに閉じる
+    : > "$MOCK_CALL_LOG"
+    _e2e_call "$pre"" e2e_gh_pr_close $repo 9; echo RC=\$?"
+    assert_file_contains "$MOCK_CALL_LOG" "pr close 9 -R ${repo}" "PR を閉じる: 閉じるコマンドを実行する"
+    assert_file_not_contains "$MOCK_CALL_LOG" "pr merge" "PR を閉じる: マージは、しない"
+    assert_file_contains "$MB/out.log" "RC=0" "PR を閉じる: 成功 → 戻り値 0"
+    MOCK_GH_PR_CLOSE_EXIT=1 _e2e_call "$pre"" e2e_gh_pr_close $repo 9; echo RC=\$?"
+    assert_file_contains "$MB/out.log" "RC=1" "PR を閉じる: 失敗 → 戻り値 1"
+    : > "$MOCK_CALL_LOG"
+    _e2e_call "$pre"' e2e_gh_pr_close "tamashimon-org/force-test-win" 9; echo DONE'
+    assert_file_not_contains "$MB/out.log" "DONE" "PR を閉じる: テスト用ではないリポジトリは、拒否する（異常終了）"
+    assert_file_not_contains "$MOCK_CALL_LOG" "pr close" "PR を閉じる: テスト用ではないリポジトリでは、閉じるコマンドを実行しない"
+
+    # コメントに文字列があるか
+    MOCK_GH_PR_COMMENTS=$'<!-- sf-tools:sequence -->\n## ⚠️ マージ順序の確認が必要です\nブランチ x は staging, develop にまだマージされていません。' \
+        E2E_POLL_SEC=0 _e2e_call "$pre"" e2e_pr_comment_has $repo 9 'sf-tools:sequence'; echo RC=\$?"
+    assert_file_contains "$MB/out.log" "RC=0" "コメントの確認（ある）: 目印があれば、戻り値 0"
+    MOCK_GH_PR_COMMENTS=$'<!-- sf-tools:sequence -->\n## ⚠️ マージ順序の確認が必要です\nブランチ x は staging, develop にまだマージされていません。' \
+        E2E_POLL_SEC=0 _e2e_call "$pre"" e2e_pr_comment_has $repo 9 'にまだマージされていません'; echo RC=\$?"
+    assert_file_contains "$MB/out.log" "RC=0" "コメントの確認（ある）: 文言があれば、戻り値 0"
+    : > "$MOCK_CALL_LOG"
+    MOCK_GH_PR_COMMENTS='関係のないコメント' E2E_COMMENT_TRIES=3 E2E_POLL_SEC=0 _e2e_call "$pre"" e2e_pr_comment_has $repo 9 'sf-tools:sequence'; echo RC=\$?"
+    assert_file_contains "$MB/out.log" "RC=1" "コメントの確認（ある）: 見つからなければ、戻り値 1"
+    [[ "$(grep -c 'pr view' "$MOCK_CALL_LOG")" -eq 3 ]] && pass "コメントの確認（ある）: 上限（3 回）まで、やり直す" || fail "コメントの確認（ある）: 上限まで、やり直す" "回数: $(grep -c 'pr view' "$MOCK_CALL_LOG")"
+    _e2e_call "$pre"' e2e_pr_comment_has "tamashimon-org/force-test-win" 9 x; echo DONE'
+    assert_file_not_contains "$MB/out.log" "DONE" "コメントの確認（ある）: テスト用ではないリポジトリは、拒否する（異常終了）"
+
+    # コメントに文字列がないこと（取得の失敗を、「ない」と取り違えない）
+    MOCK_GH_PR_COMMENTS='関係のないコメント' _e2e_call "$pre"" e2e_pr_comment_absent $repo 9 'sf-tools:sequence'; echo RC=\$?"
+    assert_file_contains "$MB/out.log" "RC=0" "コメントの確認（ない）: 含まれていなければ、戻り値 0"
+    MOCK_GH_PR_COMMENTS='<!-- sf-tools:sequence -->' _e2e_call "$pre"" e2e_pr_comment_absent $repo 9 'sf-tools:sequence'; echo RC=\$?"
+    assert_file_contains "$MB/out.log" "RC=1" "コメントの確認（ない）: 含まれていれば、戻り値 1"
+    MOCK_GH_PR_VIEW_EXIT=1 _e2e_call "$pre"" e2e_pr_comment_absent $repo 9 'sf-tools:sequence'; echo RC=\$?"
+    assert_file_contains "$MB/out.log" "RC=1" "コメントの確認（ない）: 取得に失敗したら、「ない」とせず、戻り値 1"
+
+    # 動き出した検証の取り消し
+    : > "$MOCK_CALL_LOG"
+    MOCK_GH_ACTIVE_RUNS="701 702" _e2e_call "$pre"" e2e_cancel_pr_runs $repo develop; echo RC=\$?"
+    assert_file_contains "$MOCK_CALL_LOG" "run cancel 701 -R ${repo}" "取り消し: 動いている実行（1 つ目）を取り消す"
+    assert_file_contains "$MOCK_CALL_LOG" "run cancel 702 -R ${repo}" "取り消し: 動いている実行（2 つ目）を取り消す"
+    assert_file_contains "$MOCK_CALL_LOG" "--branch develop --event pull_request --status queued" "取り消し: 待ちの実行を、ブランチと PR のイベントで探す"
+    assert_file_contains "$MOCK_CALL_LOG" "--branch develop --event pull_request --status in_progress" "取り消し: 実行中の実行を、ブランチと PR のイベントで探す"
+    assert_file_contains "$MB/out.log" "RC=0" "取り消し: 戻り値は、0"
+    : > "$MOCK_CALL_LOG"
+    MOCK_GH_ACTIVE_RUNS="701" MOCK_GH_CANCEL_EXIT=1 _e2e_call "$pre"" e2e_cancel_pr_runs $repo develop; echo RC=\$?"
+    assert_file_contains "$MB/out.log" "RC=0" "取り消し: 取り消せなくても、失敗にしない（戻り値 0）"
+    : > "$MOCK_CALL_LOG"
+    MOCK_GH_ACTIVE_RUNS="" _e2e_call "$pre"" e2e_cancel_pr_runs $repo develop; echo RC=\$?"
+    assert_file_not_contains "$MOCK_CALL_LOG" "run cancel" "取り消し: 動いている実行がなければ、取り消さない"
+    : > "$MOCK_CALL_LOG"
+    MOCK_GH_ACTIVE_RUNS="701" _e2e_call "$pre"' e2e_cancel_pr_runs "tamashimon-org/force-test-win" develop; echo DONE'
+    assert_file_not_contains "$MB/out.log" "DONE" "取り消し: テスト用ではないリポジトリは、拒否する（異常終了）"
+    assert_file_not_contains "$MOCK_CALL_LOG" "run cancel" "取り消し: テスト用ではないリポジトリでは、取り消さない"
+
+    # run.sh の流れ（実環境でしか動かせないため、骨組みを確認する）
+    assert_file_contains "$E2E_DIR/run.sh" "_sequence_pr_check" "run.sh: wf-sequence の、順序を守らない PR の確認がある"
+    assert_file_contains "$E2E_DIR/run.sh" 'にまだマージされていません' "run.sh: 順序外のコメントの文言を確認する"
+    assert_file_contains "$E2E_DIR/run.sh" '環境ブランチからの PR は、許可されていません' "run.sh: 環境ブランチからの PR のコメントの文言を確認する"
+    assert_file_contains "$E2E_DIR/run.sh" 'label" == リリース*' "run.sh: 順序どおりの確認は、リリースの PR だけ（削除の PR は、順序外が正しい動き）"
+    assert_file_contains "$E2E_DIR/run.sh" 'SEQ_CHECK=1' "run.sh: wf-sequence の確認は、2 層以上のときだけ"
+
+    unset MOCK_CALL_LOG MOCK_GH_ACTIVE_RUNS
+    teardown "$CB"
+}
+
 test_e2e_names
 test_e2e_guard
 test_e2e_delete_guards
@@ -1793,5 +1874,6 @@ test_e2e_bootstrap_refresh_orgs
 test_e2e_doctor
 test_e2e_record_line
 test_e2e_browser_shims
+test_e2e_sequence_parts
 
 print_summary

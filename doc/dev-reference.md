@@ -901,6 +901,8 @@ sf-tools の `main` への反映は、全ユーザーへの配布と同義であ
 
 **sf のエイリアス:** `sf-init` は `prod` / `staging` / `develop` を付けるため、実行前の状態を保存し、終了時に復元する（増えたものは外し、変わったものは戻す）。
 
+**wf-sequence の確認（2 層以上のとき。`run.sh` の `_hello_flow` / `_sequence_pr_check` / `_hello_pr_flow`）:** 1 層では、前の段階がなく、順序チェックが成り立たないため、行わない。①リリースの PR（staging・main へ）は、順序どおり: 実行が成功し、PR に警告のコメント（目印 `sf-tools:sequence`）が付かない（削除の PR は、main へ直接出す仕様で、順序外の警告が付くのが正しい動きのため、対象外）。②リリース用のブランチを、前の段階にマージしないまま main へ PR（順序外）: 実行は成功（警告のみで、止めない）し、PR に「にまだマージされていません」のコメントが付き、Slack の通知（`"ok":true`）が成功する。③最初の段階（develop など）をリリースしたあと、その環境ブランチから main へ直接 PR: 実行が失敗し、「環境ブランチからの PR は、許可されていません」のコメントと Slack の通知が付く（この時点で、環境ブランチは main より進んでいるため、PR を作れる）。②③の PR は、**マージせずに閉じ**、走り出した検証（`wf-validate`）を `e2e_cancel_pr_runs` で取り消す（push のイベントで起動したものは、対象外）。部品（`lib.sh` の `e2e_gh_pr_close` / `e2e_pr_comment_has` / `e2e_pr_comment_absent` / `e2e_cancel_pr_runs`）は、モックの単体テストがある。
+
 **前提と限界:**
 
 - 台本（`e2e_make_input`）は、`sf-init` の質問の順番に依存する。質問を変えたら、台本も直す。`tests/test_sf-init.sh` の `test_e2e_input_sequence`（モック）が、ずれを検知する
@@ -924,7 +926,8 @@ sf-tools の `main` への反映は、全ユーザーへの配布と同義であ
 | WSL（Ubuntu・WSL2） | 5.2 | — | da9622b | 2026-10-18 | 単体テスト 2237 件成功（手元の `run_tests.sh`。Git Bash から WSL に自動で移る） |
 | macOS 27.0.1（Apple silicon。Mac mini の実機） | 3.2.57（標準の `/bin/bash`） | LibreSSL 3.3.6 | f60a79a | 2026-10-18 | e2e: 119 件成功 / 0 件失敗（1 層・既定。`--add-tier` の確認を含む。12 分 31 秒） |
 | WSL（Ubuntu 24.04.1 LTS） | 5.2.21 | OpenSSL 3.0.13 | c594ebd（＋ `doctor.sh` の確認項目と `powershell.exe` の差し替えの変更） | 2026-10-18 | e2e: 119 件成功 / 0 件失敗（1 層・既定。`--add-tier` の確認を含む。17 分 5 秒）。WSL 用の `gh`・`sf`（npm 版 2.154.4）を、ホームに導入。`git` の認証と作者は、環境変数で渡した |
-| Linux（GitHub Actions の `ubuntu-latest`。サーバー） | 5.x | — | 5344f40 / f60a79a / c594ebd 時点の development | 2026-10-18 | ワークフロー wf-validate（検証）・wf-release（リリース）・wf-metasync（メタデータ同期）が、上の 3 回の e2e の中で、実際の Salesforce に対して成功。wf-propagate は実行・完了（1 層の構成では、反映先なし）。wf-sequence は、e2e では確認していない |
+| WSL（Ubuntu 24.04.1 LTS） | 5.2.21 | OpenSSL 3.0.13 | 850bf23（＋ wf-sequence の確認の追加ほか） | 2026-10-19 | e2e: 181 件成功 / 0 件失敗（**3 層**: main + staging + develop。25 分 51 秒）。develop → staging → main の段階別リリース（各段階の組織にだけクラスができ、先の段階の組織には入らないこと）、main へのリリース後に `wf-propagate` が develop・staging に main の最新を反映したこと、**`wf-sequence` の 3 つの動き**（①順序どおりの PR は成功し、警告が付かない ②順序外の PR は、警告のコメントと Slack 通知で、止めない ③環境ブランチからの直接の PR は、失敗し、⛔ のコメントと Slack 通知）を確認。②③の PR は、マージせずに閉じた。（同日の 1 回前の 3 層の実行は、`wf-sequence` の確認を含まず、161 件成功） |
+| Linux（GitHub Actions の `ubuntu-latest`。サーバー） | 5.x | — | 5344f40 / f60a79a / c594ebd 時点の development | 2026-10-18 | ワークフロー wf-validate（検証）・wf-release（リリース）・wf-metasync（メタデータ同期）が、上の 3 回の e2e の中で、実際の Salesforce に対して成功。wf-propagate は、1 層では実行・完了（反映先なし）、3 層（WSL の行）では、develop・staging への反映まで確認。wf-sequence は、3 層（WSL の行）で、順序どおり・順序外・環境ブランチからの PR の 3 つの動きを確認 |
 | Linux をクライアント PC として使う | — | — | — | — | 想定しない（対象外。WSL の Ubuntu は、上のとおり確認済み） |
 
 > **WSL（Ubuntu）の検証で分かったこと（初回の 3 回は失敗。4 回目に全件成功）:** ①`git` に GitHub の認証の仕組み（credential helper）が無く、https のクローンが、パスワードを待って 22 分止まった（→ `doctor.sh` が検出。e2e には `GIT_CONFIG_*` の環境変数で渡す。`GIT_TERMINAL_PROMPT=0` で、待たずに失敗させる）。②`git` のユーザー名・メールアドレスが無く、初回のコミットが失敗した（→ `doctor.sh` が検出。e2e には `GIT_AUTHOR_*` / `GIT_COMMITTER_*` で渡す）。③WSL の `open_browser` は `powershell.exe` を使うため、e2e の差し替えに加えた（`shims/browser`）。④1 回だけ、Hello World の `sf-dryrun.sh` が、メッセージなしの `Error (1)` で失敗したが、同じ条件で手動で 3 回実行して、すべて成功し、4 回目の通しも成功した（原因は特定できていない。Salesforce 側の一時的な失敗の可能性）。WSL では、`sf` と `gh` が Windows 側のものを使えないため、WSL 用を、`sudo` なしで、ホームに入れた（`gh` は、チェックサムを確認して `~/.local/gh`、`sf` は nvm の `npm -g`）。

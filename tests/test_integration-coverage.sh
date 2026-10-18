@@ -18,7 +18,8 @@ source "$(dirname "${BASH_SOURCE[0]}")/test_helper.sh"
 echo -e "${CLR_HEAD}=== 結合テストのカバレッジ表のガード ===${CLR_RST}"
 
 PLAN_DOC="$SF_TOOLS_DIR/doc/integration-test-plan.md"
-SEP=$'\001'   # 列の区切り（空白ではない文字。空の列を、詰めないため）
+SEP='|'   # 列の区切り。空白ではない文字（空の列を、詰めないため）。表のセルの中には、| は入らない（| で、列を分けているため）。
+          # 制御文字（\001 など）は、macOS 標準の Bash 3.2 の read で、正しく分割されないため、使わない
 
 # 計画書の 10.2〜10.4 の表を読み、1 行ずつ「区分 SEP 対象 SEP 結合 SEP パターン SEP 理由」で出す
 #   区分: cmd（10.2）/ hook（10.3）/ wf（10.4）。引数: 計画書
@@ -34,7 +35,7 @@ _cov_rows() {
         }
         sec != "" && /^\| `/ {
             gsub(/`/, "", $2); gsub(/\*/, "", $3)
-            printf "%s\001%s\001%s\001%s\001%s\n", sec, trim($2), trim($3), trim($4), trim($5)
+            printf "%s|%s|%s|%s|%s\n", sec, trim($2), trim($3), trim($4), trim($5)
         }
     ' "$1"
 }

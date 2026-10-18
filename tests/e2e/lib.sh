@@ -455,6 +455,50 @@ e2e_gh_pr_merge() {
     verify_pr_merge "$1" "$2"
 }
 
+# PR を、マージせずに閉じる（ブランチは残る）。wf-sequence の確認で、わざと順序外・環境ブランチからの PR を出したあとに使う。
+#   引数: リポジトリ PR 番号
+e2e_gh_pr_close() {
+    _e2e_check_repo "$1"
+    verify_pr_close "$1" "$2"
+}
+
+# PR の会話欄のコメントに、指定した文字列が含まれているか。投稿の反映が遅れることがあるため、E2E_COMMENT_TRIES 回（既定 5）まで、やり直す。
+#   引数: リポジトリ PR 番号 探す文字列。戻り値: 0 = ある / 1 = 上限までに、見つからない
+e2e_pr_comment_has() {
+    local repo="$1" n="$2" want="$3" i out tries="${E2E_COMMENT_TRIES:-5}"
+    _e2e_check_repo "$repo"
+    for (( i = 1; i <= tries; i++ )); do
+        out=$(_e2e_gh pr view "$n" -R "$repo" --json comments --jq '[.comments[].body] | join("\n---\n")' 2>/dev/null)  # VAR=$(cmd) のため run 不使用
+        printf '%s' "$out" | grep -qF -- "$want" && return 0
+        (( i < tries )) && sleep "${E2E_POLL_SEC:-5}"  # run 不使用: 待機
+    done
+    return 1
+}
+
+# PR の会話欄のコメントに、指定した文字列が含まれていないこと。コメントの取得に失敗したときは、「含まれていない」と取り違えず、戻り値 1
+#   引数: リポジトリ PR 番号 探す文字列。戻り値: 0 = 含まれていない / 1 = 含まれている、または、取得に失敗した
+e2e_pr_comment_absent() {
+    local out
+    _e2e_check_repo "$1"
+    out=$(_e2e_gh pr view "$2" -R "$1" --json comments --jq '[.comments[].body] | join("\n---\n")' 2>/dev/null) || return 1  # VAR=$(cmd) のため run 不使用
+    ! printf '%s' "$out" | grep -qF -- "$3"
+}
+
+# PR のイベントで起動して、まだ待っている・実行中のワークフローを、すべて取り消す。マージしない PR を閉じたあとに、
+#   走り出した検証（wf-validate）を止めるために使う。取り消せなくても、失敗にしない（戻り値は、常に 0）。
+#   push のイベントで起動したもの（wf-release など）は、対象にしない。引数: リポジトリ ブランチ名（PR の head ブランチ）
+e2e_cancel_pr_runs() {
+    local repo="$1" br="$2" st id
+    _e2e_check_repo "$repo"
+    for st in queued in_progress; do
+        for id in $(_e2e_gh run list -R "$repo" --branch "$br" --event pull_request --status "$st" --json databaseId --jq '.[].databaseId' 2>/dev/null); do
+            [[ "$id" =~ ^[0-9]+$ ]] || continue
+            _e2e_gh run cancel "$id" -R "$repo" >/dev/null 2>&1 || true  # 取り消せなくても、続ける（意図的エラー無視）
+        done
+    done
+    return 0
+}
+
 # PR のイベントで起動した、ワークフローの最新の実行の ID を、標準出力に返す（なければ 0）。
 #   同じブランチから、段階ごとに PR を出すとき、新しい PR の実行を、前の PR の実行と取り違えないための基準にする。
 #   引数: リポジトリ ワークフロー名 ブランチ名（PR の head ブランチ）

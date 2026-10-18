@@ -26,6 +26,10 @@
 #                    【--add-tier の確認】 1 層のとき（鍵一式に staging の組織があれば）、最後に、管理者用のクローン（admin ブランチ）で
 #                    sf-init.sh --add-tier staging を実行し、組織への接続・Secret / Variable・ブランチ・PR ができること、
 #                    終わったあとも admin ブランチにいること、main へ直接 push していないことを確認する（約 4 分）
+#                    【wf-sequence（順序チェック）の確認】 2 層以上のとき: ①順序どおりの PR（staging・main へ）は、成功し、警告のコメントが付かない
+#                    ②前の段階にマージしないまま main へ出した PR（順序外）は、警告（実行は成功。止めない）: PR の会話欄に ⚠️ のコメントが付き、
+#                    Slack に通知される ③環境ブランチから main への直接の PR（develop → main など）は、実行が失敗し、⛔ のコメントが付き、Slack に通知される。
+#                    ②と③の PR は、マージせずに閉じ、走り出した検証（wf-validate）を取り消す
 #                    【層数に応じた確認】 リポジトリの構成（main のみ / main + staging / main + staging + develop）を、自動で判定し、
 #                    段階の数だけ、リリースを繰り返す（同じブランチから、develop → staging → main の順に、段階ごとの PR を出す）:
 #                      ・各段階の PR をマージするたびに、その段階の組織にだけ、クラスができること（まだ先の段階の組織には、入っていないこと）
@@ -369,12 +373,22 @@ _run_ok() {
 #   引数: ラベル ブランチ名（push 済み） PR のタイトル 先の段階（main / staging / develop。既定 main）
 #   同じブランチから、段階ごとに PR を出すため、PR を作る前の最新の実行 ID を覚え、それより新しい実行だけを、この PR の実行とみなす
 _hello_pr_flow() {
-    local label="$1" br="$2" title="$3" base="${4:-main}" prn runid b_val b_rel b_pro
+    local label="$1" br="$2" title="$3" base="${4:-main}" prn runid b_val b_rel b_pro b_seq sid
+    b_seq=$(e2e_latest_run_id "$REPO_FULL" wf-sequence.yml "$br")    # VAR=$(cmd) のため run 不使用
     b_val=$(e2e_latest_run_id "$REPO_FULL" wf-validate.yml "$br")    # VAR=$(cmd) のため run 不使用
     b_rel=$(e2e_latest_run_id "$REPO_FULL" wf-release.yml "$br")     # VAR=$(cmd) のため run 不使用
     b_pro=$(e2e_latest_run_id "$REPO_FULL" wf-propagate.yml "$br")   # VAR=$(cmd) のため run 不使用
     prn=$(e2e_gh_pr_create "$REPO_FULL" "$br" "$title" "$base") || prn=""   # VAR=$(cmd) のため run 不使用
     chk "${label}: PR を作成した" test -n "$prn" || return 1
+    # wf-sequence（順序チェック。main・staging への PR だけで起動する）: 順序どおりなので、成功し、警告のコメントは付かない。失敗しても、続きの確認は進める
+    #   削除の PR は、対象外（main へ直接出す仕様で、前の段階を経由しないため、順序外の警告が付くのが、正しい動き）
+    if [[ "${SEQ_CHECK:-0}" == "1" && ( "$base" == "main" || "$base" == "staging" ) && "$label" == リリース* ]]; then
+        sid=$(e2e_wait_pr_run "$REPO_FULL" wf-sequence.yml "$br" "$b_seq") || sid=""   # VAR=$(cmd) のため run 不使用
+        if chk "${label}: wf-sequence（順序チェック）が実行され、完了した" test -n "$sid"; then
+            chk "${label}: wf-sequence が成功した（順序どおり）" test "$(_run_conclusion "$sid")" == "success"
+            chk "${label}: 順序どおりなので、PR に警告のコメント（sf-tools:sequence）が付かない" e2e_pr_comment_absent "$REPO_FULL" "$prn" "sf-tools:sequence"
+        fi
+    fi
     runid=$(e2e_wait_pr_run "$REPO_FULL" wf-validate.yml "$br" "$b_val") || runid=""   # VAR=$(cmd) のため run 不使用
     chk "${label}: wf-validate（検証）が実行され、完了した" test -n "$runid" || return 1
     chk "${label}: wf-validate が成功した（失敗したら、1 回だけ再実行）" _run_ok "$runid" "${label}: wf-validate" || return 1
@@ -443,9 +457,32 @@ _org_id_matches() {   # 引数: 段階
     want=$(E2E_TIER="$1" e2e_org_id "$(E2E_TIER="$1" _e2e_cur_alias)")                                      # VAR=$(cmd) のため run 不使用
     [[ -n "$have" && -n "$want" && "${have:0:15}" == "${want:0:15}" ]]
 }
+# wf-sequence の、順序を守らない PR への動きの確認（2 層以上）。PR は、マージせずに閉じる（段階を飛び越えた変更を、組織に入れないため）
+#   引数: ラベル head ブランチ base タイトル 期待する実行の結果（success: 警告のみで止めない / failure: 環境ブランチからの PR は失敗） コメントの文言
+#   確認: wf-sequence が実行され、期待どおりの結果になる / PR の会話欄に、目印（sf-tools:sequence）と文言のコメントが付く / Slack への通知が成功する
+_sequence_pr_check() {
+    local label="$1" head="$2" base="$3" title="$4" want="$5" text="$6" b_seq prn sid
+    b_seq=$(e2e_latest_run_id "$REPO_FULL" wf-sequence.yml "$head")    # VAR=$(cmd) のため run 不使用
+    prn=$(e2e_gh_pr_create "$REPO_FULL" "$head" "$title" "$base") || prn=""   # VAR=$(cmd) のため run 不使用
+    chk "${label}: PR を作成した" test -n "$prn" || return 0
+    sid=$(e2e_wait_pr_run "$REPO_FULL" wf-sequence.yml "$head" "$b_seq") || sid=""   # VAR=$(cmd) のため run 不使用
+    if chk "${label}: wf-sequence が実行され、完了した" test -n "$sid"; then
+        chk "${label}: wf-sequence の結果が ${want} だった" test "$(_run_conclusion "$sid")" == "$want"
+        chk "${label}: PR の会話欄に、警告のコメント（sf-tools:sequence）が付いた" e2e_pr_comment_has "$REPO_FULL" "$prn" "sf-tools:sequence"
+        chk "${label}: コメントの文言が正しい（${text}）" e2e_pr_comment_has "$REPO_FULL" "$prn" "$text"
+        chk "${label}: Slack への通知が成功した（ok:true）" verify_run_log_has "$REPO_FULL" "$sid" '"ok":true'
+    fi
+    chk "${label}: PR を、マージせずに閉じた" e2e_gh_pr_close "$REPO_FULL" "$prn"
+    e2e_cancel_pr_runs "$REPO_FULL" "$head"   # 走り出した検証（wf-validate）を止める（取り消せなくても、続ける）
+    return 0
+}
+
 _hello_flow() {
     HELLO_RELEASE_RUN=""
     local t i j n=${#TIERS[@]} lbl repo
+    # wf-sequence の確認は、段階が 2 つ以上あり、リポジトリに wf-sequence.yml があるときだけ（1 層では、前の段階がなく、順序チェックが成り立たない）
+    SEQ_CHECK=0
+    if (( n >= 2 )) && _has_workflow wf-sequence.yml; then SEQ_CHECK=1; fi
     # 各段階の組織に、管理用ログインする（問い合わせ用）
     for t in "${TIERS[@]}"; do
         chk "Hello World: Salesforce への管理用ログイン（問い合わせ用）$(_tag "$t")ができた" _admin_login_tier "$t" || return 0
@@ -465,6 +502,13 @@ _hello_flow() {
 
     # ジョブの開始から push まで（1 回。同じブランチから、段階ごとに PR を出す）
     _hello_local_job "リリース" "$JOB_RELEASE" "e2e: Hello World をリリース" _hello_write_release 1 || return 0
+
+    # wf-sequence: 前の段階（staging・develop）に、まだマージしていないのに、main へ PR を出す（順序外）→ 警告（止めない）。マージはしない
+    if [[ "$SEQ_CHECK" == "1" ]]; then
+        log "HEADER" "wf-sequence: 順序外の PR（前の段階に、マージせずに、main へ）"
+        _sequence_pr_check "wf-sequence（順序外）" "$JOB_RELEASE" main "e2e: wf-sequence の順序外の確認（マージしない）" success "にまだマージされていません"
+        _elapsed "wf-sequence（順序外）の確認の終了"
+    fi
 
     # 段階ごとに、PR → wf-validate → マージ → wf-release。上流（develop）から、main の順
     for (( i = 0; i < n; i++ )); do
@@ -488,6 +532,13 @@ _hello_flow() {
             chk "リリース後: まだ、${TIERS[j]} の組織には、${E2E_APEX_HELLO} が入っていない（意図した組織にだけ入る）" \
                 _apex_is "${TIERS[j]}" "$E2E_APEX_HELLO" 0
         done
+        # wf-sequence: 最初の段階（develop など）をリリースしたあと、その環境ブランチから main へ、直接 PR を出す（許可されない）→ 失敗する。マージはしない
+        #   （この時点で、環境ブランチは、main より進んでいるため、PR を作れる）
+        if (( i == 0 )) && [[ "$SEQ_CHECK" == "1" ]]; then
+            log "HEADER" "wf-sequence: 環境ブランチからの直接の PR（${t} → main）"
+            _sequence_pr_check "wf-sequence（${t} → main）" "$t" main "e2e: wf-sequence の環境ブランチからの PR の確認（マージしない）" failure "環境ブランチからの PR は、許可されていません"
+            _elapsed "wf-sequence（環境ブランチからの PR）の確認の終了"
+        fi
     done
     _elapsed "リリース側（sf-job → PR → wf-release）の終了"
 

@@ -108,7 +108,7 @@ git pull origin main                     # main の最新を取り込む
   - **新規ファイル作成後は必ず LF 変換すること**（Write ツールは CRLF を生成するため）
   - 変換コマンド: `wsl bash -c "sed -i 's/\r//' <file>"`
 - `jq` など追加依存は原則追加しないこと（`awk` / `sed` / `grep` など標準コマンドを使う）。**JSON の読み取り**: GitHub の情報は `gh --jq`、sf CLI の出力などは `json_get`（`lib/common.sh`。Node の標準機能のみ）。シェルの `grep` / `sed` で JSON を読まない
-- **クロスプラットフォーム（Windows の Git Bash・macOS・Linux で、同じように動くこと。絶対条件）**: GNU 固有の書き方を使わない。`sed -i` は使わず `sed_inplace`（`lib/platform.sh`）、sed の `\x1b` / `\t` は使わず `$'\033'` / `$'\t'` で展開してから渡す（`_strip_ansi`・`_strip_term_codes`）、`date -d` / `readlink -f` / `grep -P` / `stat -c`（`_get_mtime` を使う）・`touch -d`・`timeout` などは避ける。`wc -l` の結果を文字列として使うときは `tr -d ' '` を付ける（BSD は先頭に空白が付く）。CI（`test-macos` / `test-windows`）で、macOS 標準の Bash 3.2・BSD の sed のまま確認する
+- **クロスプラットフォーム（Windows の Git Bash・macOS・Linux で、同じように動くこと。絶対条件）**: GNU 固有の書き方を使わない。`sed -i` は使わず `sed_inplace`（`lib/platform.sh`）、`base64 -w 0` は使わず `base64_oneline`、sed の `\x1b` / `\t` は使わず `$'\033'` / `$'\t'` で展開してから渡す（`_strip_ansi`・`_strip_term_codes`）、`date -d` / `readlink -f` / `grep -P` / `stat -c`（`_get_mtime` を使う）・`touch -d`・`timeout` などは避ける。`wc -l` の結果を文字列として使うときは `tr -d ' '` を付ける（BSD は先頭に空白が付く）。CI（`test-macos` / `test-windows`）で、macOS 標準の Bash 3.2・BSD の sed のまま確認する
 - **言語の方針**: 新機能は、基本的にシェルで書く。JSON / XML の処理や、状態・分岐が多い処理など、シェルだけでは重いと判断した場合に限り、
   Node（標準ライブラリのみ・追加パッケージなし。`sf` が npm 版のため、Node は前提）を、**境界を 1 か所にして**使ってよい。
   呼び出す側からは、シェルの関数・コマンドとして見えるようにする（テストも、既存の `tests/run_tests.sh` から回す）

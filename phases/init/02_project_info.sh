@@ -3,7 +3,7 @@
 # 02_project_info.sh - Phase 2: プロジェクト情報の確認
 # ==============================================================================
 # GITHUB_OWNER とプロジェクト名（XXXX）を確認する。値は、sf-init.sh が決めたもの（引数・対話）。
-# 環境種別（本番/検証）を選択し、.sf-init.env に変数を書き出して後続フェーズと共有する。
+# 環境種別（本番/検証）を選択し、.sf-init-XXXX.env に変数を書き出して後続フェーズと共有する。
 #
 # 【値の決まり方】
 #   カレント: 管理者用の作業フォルダ（{作業フォルダ}/admin/。sf-init.sh が自動作成・移動）
@@ -40,7 +40,7 @@ export SF_INIT_MODE=1
 source "${SF_TOOLS_DIR}/lib/common.sh"
 source "${SF_TOOLS_DIR}/phases/init/init-common.sh"
 
-# 変数の復元（前フェーズで書き出した .sf-init.env を読み込む）
+# 変数の復元（前フェーズで書き出した .sf-init-XXXX.env を読み込む）
 SF_INIT_ENV_FILE="${SF_INIT_ENV_FILE:-${PWD}/.sf-init.env}"
 [[ -f "$SF_INIT_ENV_FILE" ]] && source "$SF_INIT_ENV_FILE"
 

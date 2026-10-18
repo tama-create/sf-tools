@@ -10,7 +10,8 @@
 # 【確認する内容】
 #   1. 環境      : OS・Bash・openssl の種類（検証の記録に書く内容）
 #   2. コマンド  : git / gh / sf（npm 版）/ node / openssl と、awk / sed / base64 / mktemp
-#   3. gh        : ログイン済みか・delete_repo の権限・fixture.env の E2E_GH_USER と同じユーザーか
+#   3. gh / git  : gh がログイン済みか・delete_repo の権限・git が GitHub に認証できるか（credential helper。無いと、https のクローンが
+#                  パスワードを待って止まる。WSL・Linux で起こる）・git のユーザー名とメールアドレス（無いと、コミットで失敗する）。fixture.env の E2E_GH_USER と同じユーザーか
 #   4. 鍵一式    : fixture.env の有無・権限（600。Windows は除く）・必須の項目・認証 URL の形式・作業フォルダ（E2E_HOME_ROOT）
 #   5. openssl   : JWT 用の鍵と証明書を、sf-init と同じ関数で作れるか（PKCS#1 形式・発行先が空でないこと）
 #   6. sf-tools  : 手元の sf-tools が development で、origin/development と一致しているか（GitHub Actions は origin を使うため）
@@ -101,6 +102,23 @@ if command -v gh >/dev/null 2>&1; then
         GH_LOGIN=""
         _ng "gh: ログインしていない、または GitHub に接続できません" "gh auth login（テスト用の組織の管理者のアカウントで）"
     fi
+fi
+
+# git が GitHub の認証に使う仕組み（credential helper）。無いと、https で private のリポジトリをクローンするとき、
+# パスワードの入力を待って止まる（Windows は GCM、macOS は osxkeychain、gh auth login / gh auth setup-git でも設定される）
+_cred=$(git config --get-regexp '^credential\..*helper$' 2>/dev/null)  # VAR=$(cmd) のため run 不使用
+if [[ -n "$_cred" ]]; then
+    _ok "git: GitHub への認証の仕組み（credential helper）が設定されている"
+else
+    _ng "git に、GitHub の認証の仕組み（credential helper）がありません。https のクローンが、パスワードを待って止まります" "gh auth setup-git（gh のログインを、git にも使う）。e2e だけなら、環境変数 GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=credential.https://github.com.helper GIT_CONFIG_VALUE_0='!gh auth git-credential' でも渡せる"
+fi
+
+# git のユーザー名とメールアドレス（コミットの作者）。決まらないと、sf-init の初回のコミットで「Author identity unknown」になる
+# （git var は、設定・環境変数・OS のユーザー情報から、コミットのときと同じ規則で、作者を決められるかを調べる）
+if git var GIT_AUTHOR_IDENT >/dev/null 2>&1 && git var GIT_COMMITTER_IDENT >/dev/null 2>&1; then   # 条件チェックのため run 不使用
+    _ok "git: コミットの作者（ユーザー名・メールアドレス）が決まる"
+else
+    _ng "git のユーザー名・メールアドレスが決まりません。コミットで「Author identity unknown」になります" "git config --global user.name \"（名前）\" と git config --global user.email \"（メールアドレス）\""
 fi
 
 # ------------------------------------------------------------------------------

@@ -845,11 +845,11 @@ sf-tools の `main` への反映は、全ユーザーへの配布と同義であ
 | `tests/e2e/run.sh` | 前掃除 → `sf-init.sh` の実行 → 確認 → 終了。既定では、終了時にテスト用のリポジトリなどを削除せず残す（あとから見返せる。次回の前掃除で削除）。`--cleanup`（終了時に削除）、`--resume`（前回残したリポジトリで、Hello World の部分だけを再実行。前掃除・sf-init・wf-metasync は行わない。ジョブ名は時刻付き。前回の残りの Hello World の Apex は、最初に削除する）、`--no-actions`（Actions の確認を省略）。`--keep` は、以前の名残り（何もしない） |
 | `tests/e2e/cleanup.sh` | 削除。既定は一覧のみ、`--yes` で削除（確認で `delete` の入力が必要。`--no-confirm` で省略） |
 | `tests/e2e/bootstrap.sh` | 鍵一式（`~/.sf-tools-e2e/fixture.env`）の作成。最初の 1 回だけ。雛形は `fixture.example.env`。`--add-orgs`: 既存の鍵一式に、staging・develop の組織の認証 URL（`E2E_SFDX_AUTH_URL_STG` / `_DEV`）だけを追加する（ほかの段階と同じ組織は拒否）。`--refresh-orgs`: 登録済みの認証 URL（main・staging・develop）で、実際にログイン（`sf org login sfdx-url`）して有効性を確認し、**無効なものだけ**を、確認のうえ、ブラウザでログインし直して取り直す（Token などは変えない。取り直した組織が、ほかの段階と同じなら中断し、保存は、すべての確認の後にまとめて行う。無効なまま残したときは、非ゼロで終了）。リフレッシュトークンは、同じユーザーで、ログインを繰り返すと、古いものから失効する（e2e が `RefreshTokenAuthError` で失敗する） |
-| `tests/e2e/doctor.sh` | e2e を動かせる環境かの確認（読み取りのみ。Windows・macOS・Linux・WSL 共通）。OS・Bash・openssl、コマンド（`git` / `gh` / `sf`（npm 版）/ `node` / `openssl`）、`gh` のログイン・`delete_repo`・`E2E_GH_USER` との一致、鍵一式（有無・権限 600・必須の項目・認証 URL の形式・`E2E_HOME_ROOT`。**値は出さない**）、`generate_jwt_cert`（`sf-init` と同じ関数）で鍵（PKCS#1）と証明書（発行先が空でない）を作れるか、手元の sf-tools が `origin/development` と一致しているか。要対応があれば戻り値 1。新しい環境（Mac など）で `run.sh` の前に実行する |
+| `tests/e2e/doctor.sh` | e2e を動かせる環境かの確認（読み取りのみ。Windows・macOS・Linux・WSL 共通）。OS・Bash・openssl、コマンド（`git` / `gh` / `sf`（npm 版）/ `node` / `openssl`）、`gh` のログイン・`delete_repo`・`E2E_GH_USER` との一致、git の `credential helper`（無いと、https のクローンがパスワードを待って止まる。WSL・Linux）、git のユーザー名・メールアドレス（無いと、初回のコミットが `Author identity unknown` で失敗する）、鍵一式（有無・権限 600・必須の項目・認証 URL の形式・`E2E_HOME_ROOT`。**値は出さない**）、`generate_jwt_cert`（`sf-init` と同じ関数）で鍵（PKCS#1）と証明書（発行先が空でない）を作れるか、手元の sf-tools が `origin/development` と一致しているか。要対応があれば戻り値 1。新しい環境（Mac など）で `run.sh` の前に実行する |
 | `lib.sh` の `e2e_record_line` / `e2e_os_label` / `e2e_openssl_label` | 検証の記録（9.7）の表の 1 行を作る。`run.sh` が、終わりに表示する（列: OS / Bash / openssl / コミット / 日付 / 結果。未コミットの変更があれば、コミットの欄に付記する。`--no-actions` などで確認を省いたときは、結果の欄に書く） |
 | （層数対応: `run.sh` / `lib.sh`） | `--layout 1\|2\|3`: `e2e_make_input N`（Phase 5 の番号は、3 層 = 1・2 層 = 2・1 層 = 3。ログイン先の答えは段階の数だけ）。リポジトリの構成は、ブランチから判定（`TIERS`: develop → staging → main）し、`_hello_flow` が、段階の数だけ、`_hello_pr_flow`（同じブランチから、段階ごとの PR）を繰り返す。実行の取り違え防止: PR を作る前の最新の実行 ID（`e2e_latest_run_id`）を覚え、それより新しい実行だけを、その PR の実行とする（`e2e_wait_pr_run` の 4 番目の引数）。段階の指定: 環境変数 `E2E_TIER`（`e2e_sf_admin_login` / `e2e_apex_count` / `e2e_list_target_apex` / `e2e_delete_apex` などが、その段階の組織・エイリアス（`sf-tools-e2e-admin[-stg\|-dev]`）を使う）。`sf` の差し替えは、`--alias` の末尾（STG / DEV）で、段階の認証 URL を選ぶ。確認: 各段階のリリースで、その段階の組織にだけクラスができる（先の段階にはない）・`wf-propagate` で staging / develop に main が入る（`compare` の `ahead_by` = 0）・main の削除は、ほかの段階に及ばない。 |
 | `tests/e2e/shims/sf` | `sf org login web` だけを `sf org login sfdx-url`（認証 URL）に差し替える。他のコマンドは本物の `sf` に渡す |
-| `tests/e2e/shims/browser` | `start` / `xdg-open` / `open` の名前でコピーされ、ブラウザを開かない |
+| `tests/e2e/shims/browser` | `start` / `xdg-open` / `open` / `powershell.exe` / `wslview` の名前でコピーされ、ブラウザを開かない（WSL の `open_browser` は `powershell.exe` を使うため、WSL で e2e を動かすときに要る） |
 
 **テスト用の名前:** プロジェクト `e2e-YYYYMMDD-HHMMSS` → リポジトリ `force-e2e-YYYYMMDD-HHMMSS` → 外部クライアントアプリ `SF_TOOLS_force_e2e_YYYYMMDD_HHMMSS`。毎回別の名前なので、前回の削除を待たずに実行できる。
 
@@ -907,7 +907,7 @@ sf-tools の `main` への反映は、全ユーザーへの配布と同義であ
 
 - 台本（`e2e_make_input`）は、`sf-init` の質問の順番に依存する。質問を変えたら、台本も直す。`tests/test_sf-init.sh` の `test_e2e_input_sequence`（モック）が、ずれを検知する
 - Token の作成と、テスト用組織への最初のログインは自動化できない（`bootstrap.sh` で 1 回だけ手動）
-- **通しの検証が済んでいるのは、Windows（Git Bash）と macOS**（9.7）。Linux・WSL でも動くように書いてあるが、通しの検証は未了。動かす前に `doctor.sh` で環境を確認する。macOS は、`openssl`（LibreSSL）・`stat`・`base64`・`sed` などの差に注意する（`-subj` / `-traditional` は対応済み）。`sf` は npm 版が前提（`sf-init.sh` の `check_sf_cli` が確認する）。`run.sh` / `cleanup.sh` / `bootstrap.sh` も、冒頭の `check_sf_cli` で、終了コードが 0 でなければ中断する。e2e の `sf` の成否も、すべて終了コードで判定する（回避用の `E2E_SF_REDIRECTED` は廃止）
+- **通しの検証が済んでいるのは、Windows（Git Bash）・macOS・WSL（Ubuntu）**（9.7）。Linux の実機では、通しの検証は未了。動かす前に `doctor.sh` で環境を確認する。macOS は、`openssl`（LibreSSL）・`stat`・`base64`・`sed` などの差に注意する（`-subj` / `-traditional` は対応済み）。`sf` は npm 版が前提（`sf-init.sh` の `check_sf_cli` が確認する）。`run.sh` / `cleanup.sh` / `bootstrap.sh` も、冒頭の `check_sf_cli` で、終了コードが 0 でなければ中断する。e2e の `sf` の成否も、すべて終了コードで判定する（回避用の `E2E_SF_REDIRECTED` は廃止）
 - テスト用組織は、本番または Developer Edition（Sandbox ではない）
 - リポジトリの削除には、`gh` の `delete_repo` の権限が要る（`gh auth refresh -h github.com -s delete_repo`）
 
@@ -925,6 +925,9 @@ sf-tools の `main` への反映は、全ユーザーへの配布と同義であ
 | Linux（`ubuntu-latest`） | 5.x | — | 1fe7ed7 | 2026-10-18 | 単体テスト・shellcheck 全件成功（GitHub Actions） |
 | WSL（Ubuntu・WSL2） | 5.2 | — | da9622b | 2026-10-18 | 単体テスト 2237 件成功（手元の `run_tests.sh`。Git Bash から WSL に自動で移る） |
 | macOS 27.0.1（Apple silicon。Mac mini の実機） | 3.2.57（標準の `/bin/bash`） | LibreSSL 3.3.6 | f60a79a | 2026-10-18 | e2e: 119 件成功 / 0 件失敗（1 層・既定。`--add-tier` の確認を含む。12 分 31 秒） |
-| Linux・WSL の実機 | — | — | — | — | e2e: **未実施**（`doctor.sh` で確認してから、`run.sh` を実行する） |
+| WSL（Ubuntu 24.04.1 LTS） | 5.2.21 | OpenSSL 3.0.13 | c594ebd（＋ `doctor.sh` の確認項目と `powershell.exe` の差し替えの変更） | 2026-10-18 | e2e: 119 件成功 / 0 件失敗（1 層・既定。`--add-tier` の確認を含む。17 分 5 秒）。WSL 用の `gh`・`sf`（npm 版 2.154.4）を、ホームに導入。`git` の認証と作者は、環境変数で渡した |
+| Linux の実機 | — | — | — | — | e2e: **未実施**（`doctor.sh` で確認してから、`run.sh` を実行する） |
+
+> **WSL（Ubuntu）の検証で分かったこと（初回の 3 回は失敗。4 回目に全件成功）:** ①`git` に GitHub の認証の仕組み（credential helper）が無く、https のクローンが、パスワードを待って 22 分止まった（→ `doctor.sh` が検出。e2e には `GIT_CONFIG_*` の環境変数で渡す。`GIT_TERMINAL_PROMPT=0` で、待たずに失敗させる）。②`git` のユーザー名・メールアドレスが無く、初回のコミットが失敗した（→ `doctor.sh` が検出。e2e には `GIT_AUTHOR_*` / `GIT_COMMITTER_*` で渡す）。③WSL の `open_browser` は `powershell.exe` を使うため、e2e の差し替えに加えた（`shims/browser`）。④1 回だけ、Hello World の `sf-dryrun.sh` が、メッセージなしの `Error (1)` で失敗したが、同じ条件で手動で 3 回実行して、すべて成功し、4 回目の通しも成功した（原因は特定できていない。Salesforce 側の一時的な失敗の可能性）。WSL では、`sf` と `gh` が Windows 側のものを使えないため、WSL 用を、`sudo` なしで、ホームに入れた（`gh` は、チェックサムを確認して `~/.local/gh`、`sf` は nvm の `npm -g`）。
 
 > Windows の Git Bash は、標準の Git Bash（`C:\Git\bin\bash.exe`。`openssl` が `/ucrt64/bin`）で動かす。`C:\Git\usr\bin\bash.exe`（MSYS 版の `openssl`）では、証明書の発行先が空になり、Phase 10 が失敗する（`doctor.sh` が検出する）。

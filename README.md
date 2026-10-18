@@ -9,13 +9,19 @@ Salesforce 開発で毎回発生する環境構築、デプロイ、事前チェ
 
 ## 1. 前提条件
 
-> ⚠️ **検証済み動作環境:**
-> - **ローカル:** Windows + Git Bash
-> - **サーバー:** Linux（GitHub Actions / Ubuntu ランナー）
+> ⚠️ **検証済み動作環境（実際に動かして確かめた範囲だけを書いています）:**
 >
-> **macOS:** 標準のターミナル（zsh）と、標準の Bash（`/bin/bash` 3.2）のままで動くように実装しています（Homebrew などで、Bash を入れ直す必要はありません）。モックを使った全件テストは、macOS 標準の Bash 3.2 で通ることを確認しています。実際の GitHub / Salesforce を使った通しの動作（`sf-init.sh` など）は、macOS では、まだ検証していません。
+> | 環境 | 単体テスト（モック。約 2,200 件） | 実環境の通し検証（`sf-init.sh` など。GitHub / Salesforce を実際に操作） |
+> |---|---|---|
+> | **Windows + Git Bash**（開発の主環境） | ✅ GitHub Actions（`windows-latest`）と手元 | ✅ e2e（119 件）を手元で実行 |
+> | **WSL**（Ubuntu） | ✅ 手元（Git Bash から `run_tests.sh` を実行すると、自動で WSL に移って実行） | 未検証 |
+> | **macOS**（標準の Bash 3.2・BSD の `sed` のまま） | ✅ GitHub Actions（`macos-latest`） | ✅ e2e（119 件）を Mac mini の実機（macOS 27・Apple silicon）で実行 |
+> | **Linux**（Ubuntu） | ✅ GitHub Actions（`ubuntu-latest`）と shellcheck | `force-*` の GitHub Actions のワークフローは、Linux のランナーで動作（e2e で確認）。`sf-init.sh` を Linux で通しで動かすことは、未検証 |
 >
-> WSL でも動作するよう意識して実装していますが、動作検証は行っていません。
+> 単体テストは、`development` への push と、`main` / `development` 向けの PR のたびに、GitHub Actions が、Linux・macOS・Windows の 3 つの環境で、自動で実行します。
+> どの環境で、どのコミットを、いつ確認したかの記録は、`doc/dev-reference.md` の 9.7 にあります。
+>
+> **すべての環境で動くことが、目標です。** macOS は、標準のターミナル（zsh）と、標準の Bash（`/bin/bash` 3.2）のままで動くように実装しています（Homebrew などで、Bash を入れ直す必要はありません）。Mac mini の実機で、通しの検証（e2e）まで確認しています（以前にも、Mac の実機で、証明書とキーチェーンの不具合を見つけて直しました）。WSL・Linux は、動くように実装していますが、通しの検証は行っていません。「未検証」の環境で動かすときは、先に `bash tests/e2e/doctor.sh` で、足りないものを確認できます（9.3 参照）。
 
 以下のコマンドが使えること。
 
@@ -1069,6 +1075,8 @@ sf-tools の `main` ブランチは、**そのまま全ユーザーに配布さ�
 `sf-init.sh` を検証するたびに、Token の作成、Slack の設定、Salesforce へのログイン、前回のテスト用リポジトリの削除などを手作業で繰り返すのは大変です。`tests/e2e/` は、これを自動化します。実際の GitHub と Salesforce を使うため、通常のテスト（`bash tests/run_tests.sh`）には含まれず、開発者が手動で実行します。
 
 **仕組み:** `sf-init.sh` 自体は変えません。質問への答えを標準入力に流し、`sf org login web`（ブラウザでのログイン）だけを「認証 URL でのログイン」に差し替え、ブラウザは開かないようにします。それ以外（リポジトリの作成、外部クライアントアプリの作成、JWT のログイン、Secret の登録など）は、本物がそのまま動きます。
+
+**新しい環境（Mac など）で動かすとき:** 先に `bash tests/e2e/doctor.sh` を実行します。必要なコマンド（`git` / `gh` / npm 版の `sf` / `node` / `openssl`）、`gh` のログインと権限、鍵一式（`fixture.env`）の有無・権限・必須の項目・作業フォルダ（`E2E_HOME_ROOT`）、JWT 用の鍵と証明書を作れるか（macOS 標準の LibreSSL の確認）を調べ、足りないものを、対処つきで表示します（何も作らず、鍵一式の値は表示しません）。すべて OK なら `bash tests/e2e/run.sh` を実行します。**鍵一式は、安全な方法（AirDrop・USB など）で、別のマシンからコピーして `chmod 600` にしてください。チャットや Git には載せないでください。** 作業フォルダ（`E2E_HOME_ROOT`）は、そのマシンの場所に書き換えます。`run.sh` は、終わりに、「どの環境で、どのコミットを、何件確認したか」を、表の 1 行にして表示します。成功したら、それを `doc/dev-reference.md` の 9.7 に追記し、この表（README の「検証済み動作環境」）を更新します。
 
 **最初の 1 回だけ（手動）:**
 

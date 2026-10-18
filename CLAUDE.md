@@ -191,6 +191,7 @@ bash tests/run_tests.sh                        # 全テスト実行（mm 前に�
 bash tests/run_tests.sh test_sf-metasync.sh   # 単体実行
 bash tests/run_tests.sh --changed             # 変更ファイルに対応するテストのみ実行
 bash tests/run_tests.sh --jobs 4 / --serial   # 同時に動かすファイル数（既定: CPU の数。--serial は 1 つずつ）
+bash tests/e2e/doctor.sh                       # e2e を動かせる環境かの確認（読み取りのみ。新しい環境で、run.sh の前に実行）
 bash tests/e2e/run.sh                          # 実環境の通し検証（検証のとき Claude が実行。通常のテストには含まれない）
 ```
 
@@ -220,6 +221,7 @@ Salesforce 開発の環境構築と日々の作業を自動化するシェルス
 - 実行場所は各 Salesforce プロジェクト (`force-*`) 側
 - `sf-hook.sh` は `hooks/pre-push` をコピーする設計
 - husky が設定されている場合は `core.hooksPath` を削除する設計
+- **動作環境（Windows の Git Bash・macOS・Linux・WSL）の「検証済み」は、実際に動かした環境だけを書く**（README の表と `doc/dev-reference.md` 9.7 の記録を、実際の確認と一致させる。未検証は「未検証」と書く。目標は、すべての OS で動くこと）。新しい環境は、`bash tests/e2e/doctor.sh` で確認してから `bash tests/e2e/run.sh`
 - Salesforce CLI（`sf`）は **npm 版が前提**（`check_sf_cli`）。Windows の Git Bash で公式インストーラー版を使うと、成功しても終了コード 1 になるため非対応（`run` は終了コードのみで判定する。詳細は `doc/dev-reference.md` 3.3）
 
 ### 4.2 ディレクトリ構成

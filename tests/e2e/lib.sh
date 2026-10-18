@@ -826,3 +826,50 @@ e2e_rerun_and_wait() {
     _e2e_check_repo "$1"
     verify_rerun_and_wait "$1" "$2"
 }
+
+# ------------------------------------------------------------------------------
+# 検証の記録（どの環境で、どのコミットを、e2e で確かめたか。doc/dev-reference.md 9.7 の表に追記する）
+# ------------------------------------------------------------------------------
+# README の「検証済み動作環境」は、実際に動かした環境だけを書く。その根拠として、e2e の最後に、表に貼れる 1 行を表示する。
+
+# e2e_os_label - 実行している OS の表示名（macOS / Windows（Git Bash）/ WSL / Linux）
+e2e_os_label() {
+    local os arch ver pretty
+    os=$(uname -s 2>/dev/null)    # VAR=$(cmd) のため run 不使用
+    arch=$(uname -m 2>/dev/null)  # VAR=$(cmd) のため run 不使用
+    case "$os" in
+        Darwin*)
+            ver=$(sw_vers -productVersion 2>/dev/null)  # VAR=$(cmd) のため run 不使用
+            printf 'macOS %s (%s)' "${ver:-不明}" "$arch" ;;
+        MINGW*|MSYS*|CYGWIN*)
+            printf 'Windows（Git Bash。%s）' "$(uname -s)" ;;
+        Linux*)
+            pretty=$( . /etc/os-release 2>/dev/null; printf '%s' "${PRETTY_NAME:-Linux}" )  # VAR=$(cmd) のため run 不使用
+            if grep -qi microsoft /proc/version 2>/dev/null; then  # 条件チェックのため run 不使用
+                printf 'WSL（%s）' "$pretty"
+            else
+                printf 'Linux（%s）' "$pretty"
+            fi ;;
+        *) printf '%s (%s)' "$os" "$arch" ;;
+    esac
+}
+
+# e2e_openssl_label - openssl の種類とバージョン（macOS 標準は LibreSSL。OpenSSL 3 とは、鍵の出力形式などが違う）
+e2e_openssl_label() {
+    local v
+    v=$(openssl version 2>/dev/null | awk '{print $1 " " $2}')  # パイプのみのため run 不使用
+    printf '%s' "${v:-openssl なし}"
+}
+
+# e2e_record_line RESULT - 検証の記録の表の 1 行を、標準出力に返す
+#   列: OS | Bash | openssl | sf-tools のコミット | 日付 | 結果
+#   コミットは、手元の sf-tools の HEAD（追跡しているファイルに、未コミットの変更があれば、その旨を付ける。記録を、実際の内容と一致させるため。
+#   未追跡のファイル（AGENTS.md など）は、動かしたコードに関係しないため、数えない）
+e2e_record_line() {
+    local root commit dirty=""
+    root="$(cd "${E2E_LIB_DIR}/../.." && pwd)"
+    commit=$(git -C "$root" rev-parse --short HEAD 2>/dev/null || echo 不明)  # VAR=$(cmd) のため run 不使用
+    [[ -z "$(git -C "$root" status --porcelain --untracked-files=no 2>/dev/null)" ]] || dirty="（未コミットの変更あり）"  # 条件チェックのため run 不使用
+    printf '| %s | Bash %s | %s | %s%s | %s | %s |\n' \
+        "$(e2e_os_label)" "${BASH_VERSION%%(*}" "$(e2e_openssl_label)" "$commit" "$dirty" "$(date +%Y-%m-%d)" "$1"
+}

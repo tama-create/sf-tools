@@ -23,6 +23,8 @@
 #  17. Hello World の Apex（名前の判定・一覧・件数・削除・後掃除）
 #  18. GitHub の PR を使った流れ（ブランチ・ファイル・PR・マージ・Actions の待ち）
 #  19. sf-tools のコマンドの実行（sf-job.sh / sf-push.sh など）と、code の差し替え
+#  20. doctor.sh（e2e を動かせる環境かの確認。秘密の値を出さない）
+#  21. 検証の記録（e2e の最後に表示する、表の 1 行）
 # ==============================================================================
 source "$(dirname "${BASH_SOURCE[0]}")/test_helper.sh"
 echo -e "${CLR_HEAD}=== tests/e2e（安全ガードと部品）===${CLR_RST}"
@@ -1655,6 +1657,86 @@ EOF
     teardown "$mb"
 }
 
+# ------------------------------------------------------------------------------
+# 20. doctor.sh（e2e を動かせる環境かの確認。読み取りのみ。秘密の値を出さない）
+# ------------------------------------------------------------------------------
+test_e2e_doctor() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] doctor.sh（e2e の環境チェック。秘密の値を出さない）${CLR_RST}"
+    local mb rc
+    mb=$(setup_mock_bin); MB="$mb"; FX="$mb/fx.env"; HM="$mb"
+    export MOCK_CALL_LOG="$mb/calls.log"; _mk_mocks "$mb"
+    mkdir -p "$mb/root/home"
+    _run_doctor() {  # 引数: doctor.sh のオプション。結果は $MB/out.log。戻り値は doctor.sh の終了コード
+        (
+            cd "$HM" || exit 1
+            export HOME="$HM" PATH="$MB:$PATH" E2E_FIXTURE="$FX" TMPDIR="$MB"
+            bash "$E2E_DIR/doctor.sh" "$@"
+        ) > "$MB/out.log" 2>&1
+    }
+
+    _run_doctor --help; rc=$?
+    assert_exit_ok "$rc" "--help: 正常終了する"
+    assert_file_contains     "$mb/out.log" "e2e を動かす前に実行する" "--help: 説明が表示される"
+    assert_file_not_contains "$mb/out.log" "[OK]" "--help: 確認は、実行しない"
+
+    FX="$mb/none.env"; _run_doctor; rc=$?
+    assert_exit_fail "$rc" "鍵一式がない: 要対応として、非ゼロで終わる"
+    assert_file_contains "$mb/out.log" "鍵一式のファイルがありません" "鍵一式がない: その旨と対処を表示する"
+
+    FX="$mb/fx.env"; _mk_fixture "$FX" tamashimon "$mb/root/home"
+    _run_doctor
+    assert_file_contains "$mb/out.log" "必須の項目が、すべて設定されている" "鍵一式あり: 必須の項目の確認が通る"
+    assert_file_contains "$mb/out.log" "gh: ログイン済み（tamashimon）" "gh のログインユーザーを表示する"
+    assert_file_contains "$mb/out.log" "E2E_GH_USER（tamashimon）と一致している" "gh のユーザーと E2E_GH_USER の一致を確認する"
+    assert_file_contains "$mb/out.log" "作業フォルダ（E2E_HOME_ROOT）がある" "作業フォルダがあれば、OK"
+    assert_file_not_contains "$mb/out.log" "ghp_fakepat"    "画面に、PAT の値を出さない"
+    assert_file_not_contains "$mb/out.log" "xoxb-fakeslack" "画面に、Slack の Token の値を出さない"
+    assert_file_not_contains "$mb/out.log" "fakeurl"        "画面に、認証 URL の値を出さない"
+    assert_file_not_contains "$mb/sf-tools/logs/e2e-doctor.log" "ghp_fakepat" "ログにも、PAT の値を出さない"
+
+    sedi '/E2E_PAT_TOKEN/d' "$FX"; _run_doctor; rc=$?
+    assert_exit_fail "$rc" "項目が未設定: 非ゼロで終わる"
+    assert_file_contains "$mb/out.log" "未設定の項目があります: E2E_PAT_TOKEN" "項目が未設定: 項目名を表示する"
+
+    _mk_fixture "$FX" tamashimon "$mb/none/root"; _run_doctor; rc=$?
+    assert_exit_fail "$rc" "作業フォルダがない: 非ゼロで終わる"
+    assert_file_contains "$mb/out.log" "作業フォルダ（E2E_HOME_ROOT）がない" "作業フォルダがない: その旨と対処を表示する"
+
+    _mk_fixture "$FX" tamashimon "$mb/root/home"; MOCK_GH_API_USER=someone-else _run_doctor; rc=$?
+    assert_exit_fail "$rc" "gh のユーザーが違う: 非ゼロで終わる"
+    assert_file_contains "$mb/out.log" "と一致しません" "gh のユーザーが違う: その旨を表示する"
+
+    if [[ "$OSTYPE" != "msys"* && "$OSTYPE" != "mingw"* && "$OSTYPE" != "cygwin"* ]]; then
+        _mk_fixture "$FX" tamashimon "$mb/root/home"; chmod 644 "$FX"; _run_doctor; rc=$?
+        assert_exit_fail "$rc" "権限が 600 でない: 非ゼロで終わる"
+        assert_file_contains "$mb/out.log" "権限が 600 ではありません" "権限が 600 でない: その旨と対処を表示する"
+    fi
+
+    unset MOCK_CALL_LOG
+    teardown "$mb"
+}
+
+# ------------------------------------------------------------------------------
+# 21. 検証の記録（e2e の最後に表示する、表の 1 行）
+# ------------------------------------------------------------------------------
+test_e2e_record_line() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] 検証の記録（e2e_record_line / e2e_os_label）${CLR_RST}"
+    local mb line today
+    mb=$(setup_mock_bin); MB="$mb"; FX="$mb/fx.env"; HM="$mb"
+    _mk_mocks "$mb"
+    _e2e_call 'e2e_record_line "e2e 3 件成功 / 0 件失敗（1 層）"; echo "OS=$(e2e_os_label)"'
+    line=$(grep '^| ' "$mb/out.log" | head -1)
+    today=$(date +%Y-%m-%d)
+    assert_equals "$([[ "$line" == "| "* && "$line" == *" |" ]] && echo yes || echo no)" "yes" "表の 1 行の形（| ... |）になっている"
+    assert_equals "$(printf '%s' "$line" | tr -cd '|' | wc -c | tr -d ' ')" "7" "6 列（OS・Bash・openssl・コミット・日付・結果）ある"
+    assert_equals "$([[ "$line" == *"Bash "* ]] && echo yes || echo no)" "yes" "Bash のバージョンが入っている"
+    assert_equals "$([[ "$line" == *"| ${today} |"* ]] && echo yes || echo no)" "yes" "日付が入っている"
+    assert_equals "$([[ "$line" == *"| e2e 3 件成功 / 0 件失敗（1 層） |" ]] && echo yes || echo no)" "yes" "結果が、そのまま入っている"
+    assert_equals "$(grep -c '^OS=.\+' "$mb/out.log")" "1" "OS の表示名が、空でない"
+    assert_file_contains "$E2E_DIR/run.sh" 'e2e_record_line' "run.sh は、終わりに、検証の記録を表示する"
+    teardown "$mb"
+}
+
 test_e2e_names
 test_e2e_guard
 test_e2e_delete_guards
@@ -1680,5 +1762,7 @@ test_e2e_layout
 test_e2e_identity_input
 test_e2e_bootstrap_add_orgs
 test_e2e_bootstrap_refresh_orgs
+test_e2e_doctor
+test_e2e_record_line
 
 print_summary

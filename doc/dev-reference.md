@@ -78,6 +78,7 @@
 | `test_project-identity.sh` | lib/project.sh のオーナー・XXXX の決め方（`parse_github_remote` / `normalize_project_name` / `discover_clones` / `gh_owner_candidates` / `resolve_init_identity` / `resolve_job_identity`） |
 | `test_sf-next.sh` | sf-next.sh |
 | `test_sf-check.sh` | sf-check.sh（種類の可否の判定・同梱の表 `config/metadata-capability.txt` の形式を含む） |
+| `test_integration-coverage.sh` | 結合テストのカバレッジ表（`doc/integration-test-plan.md` の 10）のガード。全コマンド・フック・ワークフローが表に載っていること、各行が「結合あり（パターンの番号が定義済み）」か「結合なし（理由が空でない）」であることを確かめる。新しいコマンドを足して、表に載せ忘れると失敗する |
 | `test_sf-typecheck.sh` | sf-typecheck.sh / lib/typecheck.js（node が無い環境では、スキップ。sf はモック） |
 | `test_sf-prepush.sh` | hooks/pre-push |
 | `test_sf-push.sh` | sf-push.sh |

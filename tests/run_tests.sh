@@ -164,6 +164,7 @@ TEST_FILES=(
     test_sf-sync-wf.sh
     test_wf-sequence.sh
     test_project-identity.sh
+    test_integration-coverage.sh
 )
 
 # ------------------------------------------------------------------------------
@@ -199,6 +200,12 @@ if [[ "${1:-}" == "--changed" ]]; then
     _run_all=0
 
     while IFS= read -r _file; do
+        # 結合テストのカバレッジ表のガード: コマンド・フック・ワークフロー・計画書が変わったとき
+        case "$_file" in
+            bin/sf-*.sh|hooks/*|templates/.github/workflows/*.yml|doc/integration-test-plan.md|tests/test_integration-coverage.sh)
+                _changed_tests+=("test_integration-coverage.sh")
+                ;;
+        esac
         case "$_file" in
             bin/sf-*.sh)
                 # bin/sf-foo.sh → test_sf-foo.sh

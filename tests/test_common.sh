@@ -799,6 +799,13 @@ test_portable_sed() {
     out=$(printf '%s[32mOK%s[0m ✅ 完了 🔥 ⚠️ done\n' "$esc" "$esc" | _ps '_strip_term_codes')
     assert_equals "$out" "OK  完了   done" "_strip_term_codes: ANSI と絵文字を除き、日本語は残す"
 
+    # base64_oneline: 76 文字を超える入力でも、1 行（改行なし）になり、元に戻せる。-w 0 を使わない（BSD の base64 にはない）
+    local long; long=$(printf 'abcdefghij%.0s' 1 2 3 4 5 6 7 8 9 10 11 12)   # 120 文字
+    out=$(printf '%s' "$long" | _ps 'base64_oneline')
+    assert_equals "$(printf '%s' "$out" | wc -l | tr -d ' ')" "0" "base64_oneline: 出力に改行を含まない（1 行）"
+    assert_equals "$(printf '%s' "$out" | base64 -d 2>/dev/null)" "$long" "base64_oneline: base64 -d で、元の内容に戻る"
+    assert_equals "$(grep -c -e '| base64 -w' "$SF_TOOLS_DIR"/bin/*.sh "$SF_TOOLS_DIR"/lib/*.sh "$SF_TOOLS_DIR"/phases/init/*.sh | awk -F: '{s+=$NF} END{print s+0}')" "0" "base64 -w は、使わない（macOS の base64 にはない）"
+
     rm -rf "$td"
 }
 

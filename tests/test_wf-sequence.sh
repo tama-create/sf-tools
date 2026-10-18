@@ -49,7 +49,8 @@ _make_repo() {
 
 # 判定スクリプトを実行する。引数: リポジトリ FEATURE BASE。出力: GITHUB_OUTPUT の内容 + 終了コード（RC=）
 _run_check() {
-    local repo="$1" feature="$2" base="$3" out="$repo/.gh_output" script rc
+    local repo="$1" feature="$2" base="$3" script rc
+    local out="$repo/.gh_output"   # repo を使うため、local を分ける（同じ local 内では、$repo が展開されない）
     script=$(_extract_script)
     : > "$out"
     ( cd "$repo" && FEATURE_REF="$feature" BASE_REF="$base" GITHUB_OUTPUT="$out" bash -c "$script" > "$repo/.gh_stdout" 2>&1 )
@@ -60,7 +61,8 @@ _run_check() {
 
 # 「対象ファイル確認」（スキップの判定）を実行する。引数: リポジトリ HEAD_REF。出力: GITHUB_OUTPUT の内容 + RC=
 _run_skipcheck() {
-    local repo="$1" head="$2" out="$repo/.gh_output_skip" script rc
+    local repo="$1" head="$2" script rc
+    local out="$repo/.gh_output_skip"   # repo を使うため、local を分ける
     script=$(_extract_script check)
     : > "$out"
     ( cd "$repo" && HEAD_REF="$head" GITHUB_OUTPUT="$out" bash -c "$script" > "$repo/.gh_stdout_skip" 2>&1 )

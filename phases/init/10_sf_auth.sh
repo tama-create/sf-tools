@@ -178,7 +178,7 @@ fi
 log "HEADER" "SF_PRIVATE_KEY を GitHub Secrets に登録します。"
 # run 不使用: 秘密鍵の内容をログに記録しないため直接実行（base64 エンコードして改行コード問題を回避）
 # tr -d '\r': Windows(Git Bash)環境で生成された PEM に含まれる CR(0x0D) を除去してから base64 エンコード
-tr -d '\r' < "${JWT_DIR}/server.key" | base64 -w 0 | gh secret set "SF_PRIVATE_KEY" -R "$REPO_FULL_NAME" \
+tr -d '\r' < "${JWT_DIR}/server.key" | base64_oneline | gh secret set "SF_PRIVATE_KEY" -R "$REPO_FULL_NAME" \
     || die "SF_PRIVATE_KEY の登録に失敗しました。"
 log "SUCCESS" "SF_PRIVATE_KEY を登録しました。"
 

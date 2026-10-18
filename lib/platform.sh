@@ -9,6 +9,7 @@
 #   is_gitbash                     ... Windows の Git Bash か判定（$OSTYPE が msys / mingw / cygwin）
 #   set_var VARNAME VALUE          ... 指定した名前の変数に代入する（nameref の代わり。Bash 3.2 で動く）
 #   sed_inplace SCRIPT FILE        ... ファイルを、その場で置換する（GNU / BSD の sed 共通）
+#   base64_oneline                 ... 標準入力を base64 にして、1 行で出す（GNU の -w 0 は macOS にないため、改行を tr で除く）
 #   run_with_timeout 秒 CMD [ARGS] ... 時間の上限つきで実行する（timeout がない macOS でも動く。時間切れは 124）
 #   run_isolated_home CMD [ARGS]   ... 一時的なホームフォルダの中でコマンドを実行（sf の認証・エイリアスを隔離）
 #   check_sf_cli [--warn-only] [--cache] ... sf が終了コードを正しく返すか確認（npm 版が前提。NG なら案内して die）
@@ -50,6 +51,14 @@ sed_inplace() {
     rm -f "${file}.bak"  # run 不使用: バックアップの削除（なくても続行）
     return $rc
 }
+
+# base64_oneline - 標準入力を base64 にして、改行なしの 1 行で、標準出力に出す（GNU / BSD（macOS）の、両方で動く）
+# ------------------------------------------------------------------------------
+# 【使い方】 tr -d '\r' < server.key | base64_oneline | gh secret set ...
+# 【理由】   `base64 -w 0`（折り返しなし）は GNU 版だけのオプションで、macOS の base64 にはない（エラーになる）。
+#           GNU 版は 76 文字で折り返し、BSD 版は折り返さない。どちらも、改行を除けば同じ 1 行になる。
+# ------------------------------------------------------------------------------
+base64_oneline() { base64 | tr -d '\r\n'; }
 
 # run_with_timeout - コマンドを、時間の上限つきで実行する（timeout コマンドがない macOS でも動く）
 # ------------------------------------------------------------------------------

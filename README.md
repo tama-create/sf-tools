@@ -16,12 +16,14 @@ Salesforce 開発で毎回発生する環境構築、デプロイ、事前チェ
 > | **Windows + Git Bash**（開発の主環境） | ✅ GitHub Actions（`windows-latest`）と手元 | ✅ e2e（119 件）を手元で実行 |
 > | **WSL**（Ubuntu 24.04） | ✅ 手元（Git Bash から `run_tests.sh` を実行すると、自動で WSL に移って実行） | ✅ e2e（119 件）を手元で実行 |
 > | **macOS**（標準の Bash 3.2・BSD の `sed` のまま） | ✅ GitHub Actions（`macos-latest`） | ✅ e2e（119 件）を Mac mini の実機（macOS 27・Apple silicon）で実行 |
-> | **Linux**（Ubuntu） | ✅ GitHub Actions（`ubuntu-latest`）と shellcheck | WSL の Ubuntu で、e2e（119 件）を確認済み。Linux の実機では、未検証。`force-*` の GitHub Actions のワークフローは、Linux のランナーで動作（e2e で確認） |
+> | **Linux**（GitHub Actions の `ubuntu-latest`。**サーバー**として使う） | ✅ 単体テストと shellcheck を毎回 | ✅ 検証・リリース・メタデータ同期のワークフローが、`sf-release.sh` / `sf-metasync.sh` を、実際の Salesforce に対して実行（e2e で確認） |
+>
+> **使い分け:** クライアント PC（開発者・管理者が手元で使う）は、Windows（Git Bash）・macOS・WSL です。Linux は、サーバー（GitHub Actions）としてだけ使います（PR の検証・Salesforce へのリリース・メタデータ同期）。Linux を、クライアント PC として使うことは、想定していません。
 >
 > 単体テストは、`development` への push と、`main` / `development` 向けの PR のたびに、GitHub Actions が、Linux・macOS・Windows の 3 つの環境で、自動で実行します。
 > どの環境で、どのコミットを、いつ確認したかの記録は、`doc/dev-reference.md` の 9.7 にあります。
 >
-> **すべての環境で動くことが、目標です。** macOS は、標準のターミナル（zsh）と、標準の Bash（`/bin/bash` 3.2）のままで動くように実装しています（Homebrew などで、Bash を入れ直す必要はありません）。Mac mini の実機で、通しの検証（e2e）まで確認しています（以前にも、Mac の実機で、証明書とキーチェーンの不具合を見つけて直しました）。WSL（Ubuntu）も、通しの検証（e2e）まで確認しています。Linux の実機では、通しの検証は行っていません。「未検証」の環境（Linux の実機など）で動かすときは、先に `bash tests/e2e/doctor.sh` で、足りないものを確認できます（9.3 参照）。
+> **すべての環境で動くことが、目標です。** macOS は、標準のターミナル（zsh）と、標準の Bash（`/bin/bash` 3.2）のままで動くように実装しています（Homebrew などで、Bash を入れ直す必要はありません）。Mac mini の実機で、通しの検証（e2e）まで確認しています（以前にも、Mac の実機で、証明書とキーチェーンの不具合を見つけて直しました）。WSL（Ubuntu）も、通しの検証（e2e）まで確認しています。新しい環境（別の Mac など）で動かすときは、先に `bash tests/e2e/doctor.sh` で、足りないものを確認できます（9.3 参照）。
 
 以下のコマンドが使えること。
 

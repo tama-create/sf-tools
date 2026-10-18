@@ -41,8 +41,8 @@
 
 **動作環境（すべての OS で動くことが目標。どの環境を、実際に動かして確かめたかは、9.7 の記録が正本）:**
 
-- **Windows + Git Bash** / **macOS** / **WSL（Ubuntu）**: 単体テスト（CI または手元）と、実環境の通し検証（e2e）を、実際に動かして確認済み
-- **Linux（GitHub Actions / Ubuntu ランナー）**: 単体テストと shellcheck を、CI で毎回確認。Linux の実機での e2e は、未検証
+- **クライアント PC: Windows + Git Bash / macOS / WSL（Ubuntu）**: 単体テスト（CI または手元）と、実環境の通し検証（e2e）を、実際に動かして確認済み
+- **サーバー: Linux（GitHub Actions の Ubuntu ランナー）**: 検証・リリース・メタデータ同期のワークフローが、`sf-release.sh` / `sf-metasync.sh` を実行する。単体テストと shellcheck を CI で毎回確認し、ワークフローは e2e で実際の Salesforce に対して実行して確認済み。**Linux をクライアント PC として使うことは、想定しない**（WSL の Ubuntu は、確認済み）
 - 新しい環境や、未検証の環境で動かすときは、先に `bash tests/e2e/doctor.sh` で、環境を確認する（9.6）
 - 環境ごとの「検証済み」は、実際に動かした範囲だけを書く（README の表と 9.7 の記録を、実際の確認と一致させる）
 
@@ -905,7 +905,7 @@ sf-tools の `main` への反映は、全ユーザーへの配布と同義であ
 
 - 台本（`e2e_make_input`）は、`sf-init` の質問の順番に依存する。質問を変えたら、台本も直す。`tests/test_sf-init.sh` の `test_e2e_input_sequence`（モック）が、ずれを検知する
 - Token の作成と、テスト用組織への最初のログインは自動化できない（`bootstrap.sh` で 1 回だけ手動）
-- **通しの検証が済んでいるのは、Windows（Git Bash）・macOS・WSL（Ubuntu）**（9.7）。Linux の実機では、通しの検証は未了。動かす前に `doctor.sh` で環境を確認する。macOS は、`openssl`（LibreSSL）・`stat`・`base64`・`sed` などの差に注意する（`-subj` / `-traditional` は対応済み）。`sf` は npm 版が前提（`sf-init.sh` の `check_sf_cli` が確認する）。`run.sh` / `cleanup.sh` / `bootstrap.sh` も、冒頭の `check_sf_cli` で、終了コードが 0 でなければ中断する。e2e の `sf` の成否も、すべて終了コードで判定する（回避用の `E2E_SF_REDIRECTED` は廃止）
+- **クライアント PC としての通しの検証が済んでいるのは、Windows（Git Bash）・macOS・WSL（Ubuntu）**（9.7）。Linux は、サーバー（GitHub Actions）としてだけ使う想定で、ワークフローは e2e で確認している。動かす前に `doctor.sh` で環境を確認する。macOS は、`openssl`（LibreSSL）・`stat`・`base64`・`sed` などの差に注意する（`-subj` / `-traditional` は対応済み）。`sf` は npm 版が前提（`sf-init.sh` の `check_sf_cli` が確認する）。`run.sh` / `cleanup.sh` / `bootstrap.sh` も、冒頭の `check_sf_cli` で、終了コードが 0 でなければ中断する。e2e の `sf` の成否も、すべて終了コードで判定する（回避用の `E2E_SF_REDIRECTED` は廃止）
 - テスト用組織は、本番または Developer Edition（Sandbox ではない）
 - リポジトリの削除には、`gh` の `delete_repo` の権限が要る（`gh auth refresh -h github.com -s delete_repo`）
 
@@ -924,7 +924,8 @@ sf-tools の `main` への反映は、全ユーザーへの配布と同義であ
 | WSL（Ubuntu・WSL2） | 5.2 | — | da9622b | 2026-10-18 | 単体テスト 2237 件成功（手元の `run_tests.sh`。Git Bash から WSL に自動で移る） |
 | macOS 27.0.1（Apple silicon。Mac mini の実機） | 3.2.57（標準の `/bin/bash`） | LibreSSL 3.3.6 | f60a79a | 2026-10-18 | e2e: 119 件成功 / 0 件失敗（1 層・既定。`--add-tier` の確認を含む。12 分 31 秒） |
 | WSL（Ubuntu 24.04.1 LTS） | 5.2.21 | OpenSSL 3.0.13 | c594ebd（＋ `doctor.sh` の確認項目と `powershell.exe` の差し替えの変更） | 2026-10-18 | e2e: 119 件成功 / 0 件失敗（1 層・既定。`--add-tier` の確認を含む。17 分 5 秒）。WSL 用の `gh`・`sf`（npm 版 2.154.4）を、ホームに導入。`git` の認証と作者は、環境変数で渡した |
-| Linux の実機 | — | — | — | — | e2e: **未実施**（`doctor.sh` で確認してから、`run.sh` を実行する） |
+| Linux（GitHub Actions の `ubuntu-latest`。サーバー） | 5.x | — | 5344f40 / f60a79a / c594ebd 時点の development | 2026-10-18 | ワークフロー wf-validate（検証）・wf-release（リリース）・wf-metasync（メタデータ同期）が、上の 3 回の e2e の中で、実際の Salesforce に対して成功。wf-propagate は実行・完了（1 層の構成では、反映先なし）。wf-sequence は、e2e では確認していない |
+| Linux をクライアント PC として使う | — | — | — | — | 想定しない（対象外。WSL の Ubuntu は、上のとおり確認済み） |
 
 > **WSL（Ubuntu）の検証で分かったこと（初回の 3 回は失敗。4 回目に全件成功）:** ①`git` に GitHub の認証の仕組み（credential helper）が無く、https のクローンが、パスワードを待って 22 分止まった（→ `doctor.sh` が検出。e2e には `GIT_CONFIG_*` の環境変数で渡す。`GIT_TERMINAL_PROMPT=0` で、待たずに失敗させる）。②`git` のユーザー名・メールアドレスが無く、初回のコミットが失敗した（→ `doctor.sh` が検出。e2e には `GIT_AUTHOR_*` / `GIT_COMMITTER_*` で渡す）。③WSL の `open_browser` は `powershell.exe` を使うため、e2e の差し替えに加えた（`shims/browser`）。④1 回だけ、Hello World の `sf-dryrun.sh` が、メッセージなしの `Error (1)` で失敗したが、同じ条件で手動で 3 回実行して、すべて成功し、4 回目の通しも成功した（原因は特定できていない。Salesforce 側の一時的な失敗の可能性）。WSL では、`sf` と `gh` が Windows 側のものを使えないため、WSL 用を、`sudo` なしで、ホームに入れた（`gh` は、チェックサムを確認して `~/.local/gh`、`sf` は nvm の `npm -g`）。
 

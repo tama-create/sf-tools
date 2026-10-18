@@ -907,7 +907,7 @@ sf-tools の `main` への反映は、全ユーザーへの配布と同義であ
 
 - 台本（`e2e_make_input`）は、`sf-init` の質問の順番に依存する。質問を変えたら、台本も直す。`tests/test_sf-init.sh` の `test_e2e_input_sequence`（モック）が、ずれを検知する
 - Token の作成と、テスト用組織への最初のログインは自動化できない（`bootstrap.sh` で 1 回だけ手動）
-- **検証済みの環境は、Windows（Git Bash）だけ**（9.7）。macOS・Linux・WSL でも動くように書いてあるが、通しの検証は未了。動かす前に `doctor.sh` で環境を確認する。macOS は、`openssl`（LibreSSL）・`stat`・`base64`・`sed` などの差に注意する（`-subj` / `-traditional` は対応済み）。`sf` は npm 版が前提（`sf-init.sh` の `check_sf_cli` が確認する）。`run.sh` / `cleanup.sh` / `bootstrap.sh` も、冒頭の `check_sf_cli` で、終了コードが 0 でなければ中断する。e2e の `sf` の成否も、すべて終了コードで判定する（回避用の `E2E_SF_REDIRECTED` は廃止）
+- **通しの検証が済んでいるのは、Windows（Git Bash）と macOS**（9.7）。Linux・WSL でも動くように書いてあるが、通しの検証は未了。動かす前に `doctor.sh` で環境を確認する。macOS は、`openssl`（LibreSSL）・`stat`・`base64`・`sed` などの差に注意する（`-subj` / `-traditional` は対応済み）。`sf` は npm 版が前提（`sf-init.sh` の `check_sf_cli` が確認する）。`run.sh` / `cleanup.sh` / `bootstrap.sh` も、冒頭の `check_sf_cli` で、終了コードが 0 でなければ中断する。e2e の `sf` の成否も、すべて終了コードで判定する（回避用の `E2E_SF_REDIRECTED` は廃止）
 - テスト用組織は、本番または Developer Edition（Sandbox ではない）
 - リポジトリの削除には、`gh` の `delete_repo` の権限が要る（`gh auth refresh -h github.com -s delete_repo`）
 
@@ -924,7 +924,7 @@ sf-tools の `main` への反映は、全ユーザーへの配布と同義であ
 | macOS（`macos-latest`） | 3.2（標準の `/bin/bash`） | — | 1fe7ed7 | 2026-10-18 | 単体テスト全件成功（GitHub Actions） |
 | Linux（`ubuntu-latest`） | 5.x | — | 1fe7ed7 | 2026-10-18 | 単体テスト・shellcheck 全件成功（GitHub Actions） |
 | WSL（Ubuntu・WSL2） | 5.2 | — | da9622b | 2026-10-18 | 単体テスト 2237 件成功（手元の `run_tests.sh`。Git Bash から WSL に自動で移る） |
-| macOS 実機 | — | — | — | — | e2e: **未実施**（Mac mini で実施予定） |
-| Linux・WSL の実機 | — | — | — | — | e2e: **未実施** |
+| macOS 27.0.1（Apple silicon。Mac mini の実機） | 3.2.57（標準の `/bin/bash`） | LibreSSL 3.3.6 | f60a79a | 2026-10-18 | e2e: 119 件成功 / 0 件失敗（1 層・既定。`--add-tier` の確認を含む。12 分 31 秒） |
+| Linux・WSL の実機 | — | — | — | — | e2e: **未実施**（`doctor.sh` で確認してから、`run.sh` を実行する） |
 
 > Windows の Git Bash は、標準の Git Bash（`C:\Git\bin\bash.exe`。`openssl` が `/ucrt64/bin`）で動かす。`C:\Git\usr\bin\bash.exe`（MSYS 版の `openssl`）では、証明書の発行先が空になり、Phase 10 が失敗する（`doctor.sh` が検出する）。

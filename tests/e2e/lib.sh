@@ -863,12 +863,13 @@ e2e_openssl_label() {
 
 # e2e_record_line RESULT - 検証の記録の表の 1 行を、標準出力に返す
 #   列: OS | Bash | openssl | sf-tools のコミット | 日付 | 結果
-#   コミットは、手元の sf-tools の HEAD（未コミットの変更があれば、その旨を付ける。記録を、実際の内容と一致させるため）
+#   コミットは、手元の sf-tools の HEAD（追跡しているファイルに、未コミットの変更があれば、その旨を付ける。記録を、実際の内容と一致させるため。
+#   未追跡のファイル（AGENTS.md など）は、動かしたコードに関係しないため、数えない）
 e2e_record_line() {
     local root commit dirty=""
     root="$(cd "${E2E_LIB_DIR}/../.." && pwd)"
     commit=$(git -C "$root" rev-parse --short HEAD 2>/dev/null || echo 不明)  # VAR=$(cmd) のため run 不使用
-    [[ -z "$(git -C "$root" status --porcelain 2>/dev/null)" ]] || dirty="（未コミットの変更あり）"  # 条件チェックのため run 不使用
+    [[ -z "$(git -C "$root" status --porcelain --untracked-files=no 2>/dev/null)" ]] || dirty="（未コミットの変更あり）"  # 条件チェックのため run 不使用
     printf '| %s | Bash %s | %s | %s%s | %s | %s |\n' \
         "$(e2e_os_label)" "${BASH_VERSION%%(*}" "$(e2e_openssl_label)" "$commit" "$dirty" "$(date +%Y-%m-%d)" "$1"
 }

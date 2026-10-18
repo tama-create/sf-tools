@@ -37,7 +37,11 @@
 #                    （終了後に、GitHub の画面で、Actions の実行・PR・ファイルを見返せるようにするため。次回の前掃除で、自動で削除される）。
 #                    --cleanup を付けると、終了時に削除する（途中で止まって残った Hello World の Apex も含む）
 #
+#   5. 検証の記録  : 最後に、どの環境（OS・Bash・openssl）で、どのコミットを、何件確認したかを、表の 1 行にして表示する
+#                    （README の「検証済み動作環境」の根拠。成功したら、doc/dev-reference.md 9.7 の表に追記する）
+#
 # 【前提】
+#   ・新しい環境（Mac など）で動かす前に、bash tests/e2e/doctor.sh で、足りないものを確認できる（読み取りのみ）
 #   ・~/.sf-tools-e2e/fixture.env（鍵一式。bootstrap.sh で作成。E2E_FIXTURE 環境変数で場所を変更できる）
 #   ・gh のログインユーザーが、fixture.env の E2E_GH_USER であること（テスト用の組織の管理者）
 #   ・gh に delete_repo の権限があること: gh auth refresh -h github.com -s delete_repo
@@ -704,6 +708,14 @@ fi
 if [[ $CLEAN_RC -ne 0 ]]; then
     log "ERROR" "  後掃除に失敗したものがあります。tests/e2e/cleanup.sh で確認してください。"
 fi
+# 検証の記録（doc/dev-reference.md 9.7 の表に追記する 1 行）。省いた確認（--no-actions など）は、結果の欄に書く
+_rec_opts="${LAYOUT_DETECTED:-$LAYOUT} 層"
+[[ $WITH_ARGS -eq 1 ]]       && _rec_opts="${_rec_opts}・--with-args"
+[[ $SKIP_ACTIONS -eq 1 ]]    && _rec_opts="${_rec_opts}・--no-actions（Actions の確認を省略）"
+[[ $ADD_TIER_CHECK -eq 0 ]]  && _rec_opts="${_rec_opts}・--no-add-tier（--add-tier の確認を省略）"
+[[ $RESUME -eq 1 ]]          && _rec_opts="${_rec_opts}・--resume（Hello World の部分のみ）"
+log "INFO" "  検証の記録（成功したときだけ、doc/dev-reference.md 9.7 の表に追記する）:"
+echo "$(e2e_record_line "e2e ${CHECK_PASS} 件成功 / ${CHECK_FAIL} 件失敗（${_rec_opts}）")"
 if [[ $CHECK_FAIL -eq 0 && $CLEAN_RC -eq 0 ]]; then
     log "SUCCESS" "e2e: すべて成功しました。"
     exit $RET_OK

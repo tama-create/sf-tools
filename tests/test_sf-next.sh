@@ -15,7 +15,7 @@ case "$1" in
     symbolic-ref)   echo "${MOCK_GIT_BRANCH:-feature/test}"; exit 0 ;;
     remote)
         if [[ "$2" == "get-url" ]]; then
-            echo "https://github.com/test-owner/force-tama.git"
+            echo "${MOCK_GIT_REMOTE_URL:-https://github.com/test-owner/force-tama.git}"
         fi
         exit 0 ;;
     fetch)          exit 0 ;;
@@ -309,6 +309,25 @@ test_staging_synced() {
 
 test_next_is_staging
 test_next_is_main
+# --- PR 作成画面の URL: origin の URL の形（https / scp 形式 / ssh://）によらず、https の URL になる ---
+#   結合テスト A5 で見つかった: ssh://git@github.com/... の origin だと、ssh:// のままの、開けない URL になった
+test_pr_url_from_remote_forms() {
+    local td mb mh u
+    for u in "https://github.com/test-owner/force-tama.git" "git@github.com:test-owner/force-tama.git" "ssh://git@github.com/test-owner/force-tama.git"; do
+        setup_std_env td mb mh
+        create_mock_git_with_remote "$mb"
+        create_mock_browser "$mb"
+        export MOCK_GIT_REMOTE_URL="$u"
+        export MOCK_GIT_BRANCH="feature/my-feature"
+        export MOCK_GH_MERGED_PRS="feature/my-feature->develop"
+        export MOCK_GH_OPEN_PRS=""
+        local out; out=$(cd "$td" && echo "y" | PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-next.sh" 2>&1)
+        assert_output_contains "$out" "https://github.com/test-owner/force-tama/compare/staging...feature/my-feature" "origin が ${u} → https の PR 作成画面の URL になる"
+        unset MOCK_GIT_REMOTE_URL MOCK_GIT_BRANCH MOCK_GH_MERGED_PRS MOCK_GH_OPEN_PRS
+        teardown "$td" "$mb"
+    done
+}
+
 # --- PR 作成画面を開く: open_browser で、OS に合ったコマンド（Git Bash: start / WSL: powershell / macOS: open / Linux: xdg-open）を使う ---
 test_pr_open_browser() {
     local td mb mh
@@ -336,6 +355,7 @@ test_none_merged
 test_two_branches_none_merged
 test_pr_open_shown
 test_pr_open_browser
+test_pr_url_from_remote_forms
 test_out_of_order_merge
 test_staging_synced
 test_protected_branch_blocked

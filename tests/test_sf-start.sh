@@ -28,6 +28,27 @@ test_connected_org() {
     teardown "$td" "$mb" "$mh"
 }
 
+# 未接続で、標準入力が閉じている（EOF）→ エイリアスの入力を、無限に繰り返さず、中断する
+#   結合テスト X5-3 で見つかった: 以前は、EOF でも、空の入力を、無限に繰り返した
+test_alias_prompt_eof_aborts() {
+    local td mb mh
+    setup_std_env td mb mh
+    create_all_mocks "$mb"
+    mkdir -p "$mh/sf-tools/bin"
+    printf '#!/bin/bash\nexit 0\n' > "$mh/sf-tools/bin/sf-launcher.sh"
+    chmod +x "$mh/sf-tools/bin/sf-launcher.sh"
+    rm -f "$td/.sf/config.json"    # 初回起動（未接続）→ エイリアスの入力になる
+    source "$SF_TOOLS_DIR/lib/platform.sh"   # run_with_timeout（時間の上限つき実行）
+
+    local out; out=$(cd "$td" && HOME="$mh" PATH="$mb:$PATH" run_with_timeout 20 bash "$SF_TOOLS_DIR/bin/sf-start.sh" < /dev/null 2>&1)
+    local ec=$?
+
+    assert_exit_fail $ec "EOF → 中断する（無限に繰り返さない。時間切れ 124 ではない）"
+    [[ $ec -ne 124 ]] && pass "EOF → 時間切れにならない" || fail "EOF → 時間切れにならない" "終了コード 124（入力を繰り返し続けた）"
+    [[ "$out" == *"入力が中断されました"* ]] && pass "EOF → 理由が表示される" || fail "EOF → 理由が表示される" "$(echo "$out" | tail -4)"
+    teardown "$td" "$mb" "$mh"
+}
+
 # 接続済みの場合 → VS Code の設定ファイルが書き込まれる
 test_config_files_written() {
     local td mb mh
@@ -136,6 +157,7 @@ test_outside_force_dir() {
 }
 
 test_connected_org
+test_alias_prompt_eof_aborts
 test_config_files_written
 test_force_relogin
 test_login_url_not_by_alias

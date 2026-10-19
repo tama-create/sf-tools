@@ -211,7 +211,7 @@ fi
 if ask_yn "${NEXT_TARGET} にPRを出しますか？"; then
     # リモートリポジトリ情報を取得
     REPO_URL=$(git remote get-url origin 2>/dev/null \
-        | sed 's|git@github\.com:|https://github.com/|; s|\.git$||')
+        | sed 's|git@github\.com:|https://github.com/|; s|ssh://git@github\.com/|https://github.com/|; s|\.git$||')
     PR_URL="${REPO_URL}/compare/${NEXT_TARGET}...${CURRENT_BRANCH}?expand=1"
     log "INFO" "ブラウザでPR作成画面を開きます..."
     # open_browser（lib/platform.sh）が、OS に合ったコマンドで開く（Git Bash: start / WSL: powershell / macOS: open / Linux: xdg-open）

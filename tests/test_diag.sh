@@ -143,6 +143,20 @@ test_tier_count() {
     _dc
 }
 
+# SF_TOOLS_BRANCH は、検証環境（開発版）だけが登録する任意の Variable（未設定なら、ワークフローは main を使う）。
+#   なくても、不足にしない。結合テスト X3-9 で見つかった: 配布版のプロジェクトで、--status が、必ず「不足」と表示した
+test_tools_branch_optional() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] SF_TOOLS_BRANCH（任意）がなくても、不足にしない${CLR_RST}"
+    _all_ok_env
+    export MOCK_GH_SECRETS=$'PAT_TOKEN\nSLACK_BOT_TOKEN\nSF_PRIVATE_KEY\nSF_CONSUMER_KEY_PROD'
+    export MOCK_GH_VARIABLES=$'SLACK_CHANNEL_ID\nSF_USERNAME_PROD\nSF_INSTANCE_URL_PROD\nSF_ORG_ID_PROD'   # SF_TOOLS_BRANCH なし（配布版）
+    export MOCK_GH_BRANCHES="main"
+    _d main
+    assert_equals "$NG" "0"                                                        "SF_TOOLS_BRANCH がなくても、不足は 0 件（配布版は、登録しない）"
+    assert_file_not_contains "$OUT" "SF_TOOLS_BRANCH"                              "SF_TOOLS_BRANCH は、不足として、表示しない"
+    _dc
+}
+
 test_org_record() {
     echo ""; echo -e "${CLR_HEAD}[TEST] 組織の種類の記録（SF_ORG_ID_*）がない → ！（不足に数えない）${CLR_RST}"
     _all_ok_env
@@ -191,6 +205,7 @@ test_all_ok
 test_missing
 test_unknown
 test_tier_count
+test_tools_branch_optional
 test_org_record
 test_runs
 test_repo_missing

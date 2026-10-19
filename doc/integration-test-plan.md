@@ -371,21 +371,21 @@ Actions 上の実行は、コマンドによって扱いが違う。「全部拒
 
 凡例: ✅ = L1 を実装済み / △ = 一部だけ実装（残りは、右の欄） / — = 未実装 / 対象外 = 結合では扱わない（理由つき）。**L2（実環境）は、既存の e2e（`tests/e2e/`）が一部を代替しているが、シナリオ方式の L2 は、まだ作っていない**。
 
-実装ファイル: `tests/test_integration.sh`（日常の通し）・`-git.sh`（フック・取り込み・競合・並行）・`-guards.sh`（安全ガード）・`-secrets.sh`（秘密情報）・`-job.sh`（sf-job の失敗）・`-misc.sh`（日常の分岐・設定の不正・再実行）・`-init.sh`（sf-init の通し・中断と再開・生成物の改変）・`-init2.sh`（sf-init の状態の食い違い・失敗・同時実行）・`-metasync.sh`（sf-metasync のローカルの動作・後始末）。部品は `tests/integration/lib.sh`・`init-lib.sh`。
+実装ファイル: `tests/test_integration.sh`（日常の通し）・`-git.sh`（フック・取り込み・競合・並行）・`-guards.sh`（安全ガード）・`-secrets.sh`（秘密情報）・`-job.sh`（sf-job の失敗）・`-misc.sh`（日常の分岐・設定の不正・再実行）・`-init.sh`（sf-init の通し・中断と再開・生成物の改変）・`-init2.sh`（sf-init の状態の食い違い・失敗・同時実行）・`-metasync.sh`（sf-metasync のローカルの動作・後始末）・`-next.sh`（sf-next の判定）・`-init3.sh`（sf-init の診断・欠け・Salesforce の失敗・同時の作成）。部品は `tests/integration/lib.sh`・`init-lib.sh`。
 
 | パターン | 状態 | 場所・備考 |
 |---|---|---|
 | A1 壊れた Apex → dryrun | ✅ L1 | misc。L2 は未 |
 | A2 pre-push フック | ✅ | git（`main` への直接 push の拒否を含む） |
 | A4 sf-check の指摘 | ✅ | guards（X6-4）・misc（X3-3） |
-| A5 main が進んだ | △ | git（push 前の自動取り込み）。`sf-next` の判定は未 |
+| A5 main が進んだ・sf-next の判定 | ✅ | git（push 前の自動取り込み）・next（3 層で、なし・PR 発行中・マージ済み・順序外・Y で開く URL。origin が ssh:// のとき、開く URL が https にならない不具合を見つけて、直した） |
 | A6 / X4-2 コンフリクト | ✅ | git |
 | A7 2 つのジョブ | ✅ | git |
 | A9 sf-unhook ⇄ sf-hook | ✅ | git。`sf-unhook` が pre-push だけを外す（pre-commit は残る）のは、意図した仕様（プッシュの検証だけを止めるのが狙い。2026-10-19 に確認済み） |
 | A10 sf-install の間隔・判定 | ✅ | misc |
 | A12 sf-deploy の確認 | ✅ | misc |
 | A13 sf-init の生成物 → 後続コマンド | ✅ | init（A13）。A13a は `tests/test_integration.sh`（テンプレート版） |
-| A14 URL からのプロジェクト判定（複数 clone） | — | 単体（`test_project-identity.sh`）のみ |
+| A14 URL からのプロジェクト判定（複数 clone） | ✅ | job（A14）。同じ XXXX が別のオーナーに複数あるとき、最初のものを黙って使っていた不具合を見つけて、直した（選ばせる） |
 | A15 pre-commit フック | ✅ | git |
 | A3・A8 | — | L2 のみ（未） |
 | B1 / X2-1 sf-init の中断と再開 | ✅ L1 | init（5 つの止め方）。L2 は未 |
@@ -396,31 +396,31 @@ Actions 上の実行は、コマンドによって扱いが違う。「全部拒
 | X1-1 GitHub の一時的な失敗 | △ | job（ブランチ作成の失敗 → 再実行）。ほかの API は未 |
 | X1-2 PAT の権限不足・失効 | ✅ | init2（権限不足・無効） |
 | X1-3 別ユーザー・名前の衝突 | ✅ | init2・job |
-| X1-4 認証 URL の失効 | △ | secrets（JWT の接続テストの失敗）。`sf-init` の Phase 10 の失敗は未 |
+| X1-4 認証 URL の失効・JWT の失敗 | ✅ L1 | secrets（sf-update-secret の接続テストの失敗）・init3（Phase 10 のログインの失敗 → 続きから）。L2 は未 |
 | X1-6 テスト失敗・コンパイルエラー | △ | misc（コンパイルエラー）。カバレッジ不足は L2 |
-| X1-8 ネットワークの断 | △ | job・init（clone の失敗）。`npm` は未 |
+| X1-8 ネットワークの断 | ✅ | job・init（clone の失敗）・misc（npm install の失敗・sf-tools の origin に、つながらない: 警告で続行） |
 | X1-5 組織のロック | — | L2 |
 | X1-7・X10-1・X10-2 Slack の失敗 | 対象外（L1） | `curl` を使うのはワークフロー（YAML）だけで、L1 では動かせない。L2 |
 | X2-2 sf-job の途中の失敗 | ✅ | job（同じジョブ名で「続ける」と、ブランチを作らず、clone だけをやり直せる。重複しない） |
 | X2-3 sf-push のプッシュ失敗 | ✅ | test_integration.sh（不具合を見つけ、修正した） |
 | X2-5 進捗の更新前の停止 | ✅ | init（Phase 8 の push の失敗） |
 | X2-4 | — | L2 |
-| X3-1 手動削除後の再実行 | △ | init2（X3-6・X3-7: `main` がない状態）。Secret・ブランチの削除は未 |
+| X3-1 手動削除後の再実行 | ✅ L1 | init3（Secret・Variable・ワークフロー・ブランチ・リポジトリの削除を、--status が見つけて、直し方を示す）・init2（main の削除 = X3-6・X3-7）。L2 は未 |
 | X3-2 branches.txt の不正 | ✅ | misc（origin にないブランチ名は、警告してスキップし、push は止めない） |
 | X3-3 deploy-target の不正 | ✅ | misc |
 | X3-4 古い `~/sf-tools` | ✅ | misc（sf-sync-wf の更新確認） |
 | X3-5 状態ファイルのリポジトリ名の食い違い | ✅ | init2 |
 | X3-6 進捗が先行 | ✅ | init2（不具合を見つけ、修正した） |
-| X3-7 完了の印と進捗の矛盾 | △ | init2（進捗 10 で `main` がない）。印 1・進捗途中などは未 |
+| X3-7 完了の印と進捗の矛盾 | ✅ | init2（進捗 10 で main がない・印 1 で進捗が途中・印 0 の完了済み） |
 | X3-10 改変点ごとの拒否の表 | △ | init（A13 のクローンで: origin が別のリポジトリ・branches.txt がない（止まる。黙って作り直さない）・release/ がない（sf-install が復元）・組織に未接続）。ほかの改変点は未 |
-| X3-8・X3-9 | — | 未 |
+| X3-8 admin の欠け・X3-9 欠けの検出 | ✅ | init3（admin ブランチが origin から消えた → 後片付けで戻る・--status の欠けの検出。`SF_TOOLS_BRANCH` を、配布版でも、不足にしていた不具合を見つけて、直した） |
 | X4-1 sf-init の同時起動 | ✅ | init2（見つけた競合を直した: 同じプロジェクトの sf-init は、ロックで排他する。2 つ目は拒否・強制終了で残った古いロックは引き継ぐ） |
 | X4-1a 同時 push | ✅ | git |
-| X4-1b・X4-1c（GitHub・Salesforce の競合） | — | 未（fake の競合の仕組みが要る） |
+| X4-1b GitHub の競合・X4-1c Salesforce の競合 | ✅ | init3（同名のリポジトリの同時作成: 片方だけが成功。別のフォルダからの同時作成では、Ruleset が重複することがある現状の限界を記録）・misc（同じ組織への同時のデプロイ: ロックで失敗し、再実行で成功） |
 | X4-3・X4-4・X4-5 | — | L2 |
 | X5-1 ジョブ名の不正 | ✅ | job |
 | X5-2 パスの空白・日本語 | ✅ | job |
-| X5-3 CRLF・`node` なし・書き込めない | — | 未 |
+| X5-3 CRLF・node なし・インストーラー版の sf | ✅ | misc（インストーラー版の sf・node が動かない・branches.txt が CRLF）。`sf-start` が、EOF で、入力を無限に繰り返す不具合を見つけて、直した。書き込めないフォルダは、扱わない（所有者が、書き込めるため、環境によって結果が違う） |
 | X6-1 管理者向けコマンドの拒否 | ✅ | test_integration.sh（Actions 上）・guards（別のオーナー・admin・force-* の外・prod） |
 | X6-2 確認の n / q / EOF / 空 | ✅ | test_integration.sh |
 | X6-3 main への push の拒否 | △ | git（L1 のフック部分）。Actions 側は L2 |
@@ -431,11 +431,13 @@ Actions 上の実行は、コマンドによって扱いが違う。「全部拒
 | X8-1 再実行の表 | △ | misc（hook・unhook）・test_integration.sh（install）・guards（sync-wf）・init（完了済みの sf-init）。ほかは未 |
 | X8-4 主処理の失敗と後始末 | ✅ | metasync（SGD の失敗・push の拒否でも、元のブランチへ戻り、stash が復元される）。再実行で、push できなかったコミットが、origin に届く（直した） |
 | X8-5 後始末の一部の失敗 | △ | metasync（stash の復元が衝突しても、手元の変更は、失われない）。ほかの後始末は未 |
-| X8-2・X8-3 | — | 未 |
-| X9-1・X9-2 | — | 未 |
+| X8-2 失敗の画面が案内する復旧 | ✅ L1 | init（案内の表示と、実際の再開）・job（同名のブランチで続ける）・sf-push・sf-metasync（再実行で、未プッシュのコミットが届く）。L2 は未 |
+| X8-3 | — | L2（未） |
+| X9-1 リトライの上限 | ✅ | init3（JWT の接続テストは、上限で止まる。スキップすれば、Secret の登録まで進む） |
+| X9-2 | — | L2（未） |
 | X10-3・X10-4 | — | L2・e2e（未） |
 
-**この段階で見つかり、直したもの**: `sf-push` の再実行（X2-3）・`sf-check` の外部パス（X6-4）・`sf-init` の進捗の先行（X3-6・X3-7）・`sf-init` の同時起動（X4-1。Windows で、Ruleset が重複した。ロックを入れた）・`sf-prepush` の `branches.txt`（origin にないブランチ名が、すべての push を止めた。X3-2）・`sf-job` の同名ブランチ（clone だけをやり直せなかった。X2-2。環境ブランチの名前も、ジョブ名に使えないようにした）・`sf-metasync`（フックのあるクローンで main への push が止められた・push できなかったコミットが取り残された。M0・M4）。**意図した仕様（確認済み）**: `sf-unhook` は pre-push だけを外す（プッシュの検証だけを止めるのが狙い）。
+**この段階で見つかり、直したもの**: `sf-push` の再実行（X2-3）・`sf-check` の外部パス（X6-4）・`sf-init` の進捗の先行（X3-6・X3-7）・`sf-init` の同時起動（X4-1。Windows で、Ruleset が重複した。ロックを入れた）・`sf-prepush` の `branches.txt`（origin にないブランチ名が、すべての push を止めた。X3-2）・`sf-job` の同名ブランチ（clone だけをやり直せなかった。X2-2。環境ブランチの名前も、ジョブ名に使えないようにした）・`sf-metasync`（フックのあるクローンで main への push が止められた・push できなかったコミットが取り残された。M0・M4）・`lib/project.sh`（同じ XXXX が別のオーナーに複数あるとき、最初のものを黙って使った。A14）・`sf-next`（origin が ssh:// のとき、開く URL が https にならなかった。A5）・`sf-start`（標準入力が閉じたとき、エイリアスの入力を無限に繰り返した。X5-3）・`lib/diag.sh`（`SF_TOOLS_BRANCH` は任意なのに、配布版のプロジェクトで、必ず「不足」と表示した。X3-9）。**意図した仕様（確認済み）**: `sf-unhook` は pre-push だけを外す（プッシュの検証だけを止めるのが狙い）。
 
 ---
 

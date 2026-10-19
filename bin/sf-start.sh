@@ -85,7 +85,7 @@ fi
 # パターンB: 未接続 または 強制再ログイン
 if [ "$SKIP_LOGIN" -eq 0 ]; then
     while true; do
-        read_input ORG_ALIAS "${CLR_PROMPT}接続する組織のエイリアスを入力してください [q で中断]: ${CLR_RESET}"
+        read_input ORG_ALIAS "${CLR_PROMPT}接続する組織のエイリアスを入力してください [q で中断]: ${CLR_RESET}" || die "入力が中断されました。"  # EOF → 中断（空の再入力を、無限に繰り返さない）
         [[ "$ORG_ALIAS" == "q" || "$ORG_ALIAS" == "Q" ]] && die "中断しました。"
         [[ -n "$ORG_ALIAS" ]] && break
         # 空 Enter → 行を戻してクリアし再プロンプト

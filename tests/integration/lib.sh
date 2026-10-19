@@ -236,9 +236,11 @@ case "$1 $2" in
     "auth token") echo "fake-token"; exit 0 ;;
     "repo create")
         # 新しいリポジトリ = 空の bare の origin（すでに登録されていれば、名前の衝突で失敗する）
-        grep -qxF "$3" "$IT_STATE/repos" 2>/dev/null && { echo "GraphQL: Name already exists on this account (createRepository)" >&2; exit 1; }
+        # 作成は、原子的（mkdir のロックの中で、名前の確認と登録を行う。同時の作成で、片方だけが、成功する）
+        mkdir "$IT_STATE/repo.create.lock" 2>/dev/null || { sleep 1; mkdir "$IT_STATE/repo.create.lock" 2>/dev/null || { echo "GraphQL: could not obtain the creation lock" >&2; exit 1; }; }
+        if grep -qxF "$3" "$IT_STATE/repos" 2>/dev/null; then rmdir "$IT_STATE/repo.create.lock"; echo "GraphQL: Name already exists on this account (createRepository)" >&2; exit 1; fi
         [[ -d "$IT_ORIGIN" ]] || git init -q --bare -b main "$IT_ORIGIN" || exit 1
-        echo "$3" >> "$IT_STATE/repos"; echo "https://github.com/$3"; exit 0 ;;
+        echo "$3" >> "$IT_STATE/repos"; rmdir "$IT_STATE/repo.create.lock"; echo "https://github.com/$3"; exit 0 ;;
     "repo edit") exit 0 ;;
     "repo view")
         grep -qxF "$3" "$IT_STATE/repos" 2>/dev/null && { echo '{"name":"x"}'; exit 0; }
@@ -271,6 +273,12 @@ X-Oauth-Scopes: %s
                 tr -d ' \n' < "$IT_STATE/rulesets/$_f" | grep -q "\"name\":\"$_want\"" && echo "$_f"
             done; exit 0 ;;
         user/memberships/orgs/*) cat "$IT_STATE/gh.org_role" 2>/dev/null || exit 1; exit 0 ;;
+        repos/*/branches)
+            # ブランチの一覧（--paginate --jq .[].name）: bare の origin のブランチ名を、1 行ずつ
+            git --git-dir="$IT_ORIGIN" for-each-ref --format="%(refname:short)" refs/heads; exit 0 ;;
+        repos/*/contents/.github/workflows)
+            # ワークフローのファイル名の一覧（--jq .[].name）: origin の main の .github/workflows
+            git --git-dir="$IT_ORIGIN" ls-tree --name-only "main:.github/workflows/" 2>/dev/null | sed "s|^.*/||" || exit 1; exit 0 ;;
         repos/*/branches/*)
             _b="${_path##*/branches/}"
             _sha=$(git --git-dir="$IT_ORIGIN" rev-parse --verify -q "refs/heads/$_b") || { echo '{"message":"Branch not found"}' >&2; exit 1; }
@@ -292,6 +300,12 @@ X-Oauth-Scopes: %s
     esac
 fi
 case "$1 $2" in
+    "pr list")
+        # PR の一覧: state/prs の「状態|ヘッド|ベース」の行から、指定の状態（--state）のものを、「ヘッド<TAB>ベース」で出す
+        _st=""; _p=""; for _a in "$@"; do [[ "$_p" == "--state" ]] && _st="$_a"; _p="$_a"; done
+        [[ -f "$IT_STATE/prs" ]] && while IFS="|" read -r _s _h _b; do [[ "$_s" == "$_st" ]] && printf "%s	%s
+" "$_h" "$_b"; done < "$IT_STATE/prs"
+        exit 0 ;;
     "workflow run")
         # ワークフローの手動起動: 実行の記録を作る（結果は state/gh.run_conclusion。既定は success）
         _wf="$3"; _ev=workflow_dispatch; mkdir -p "$IT_STATE/runs"
@@ -393,6 +407,11 @@ case "$1 $2" in
     "project deploy")
         if [[ -f "$IT_STATE/sf.deployfail" ]]; then cat "$IT_STATE/sf.deployfail" >&2; exit 1; fi
         if [[ -f "$IT_STATE/sf.lock" ]]; then echo "UNABLE_TO_LOCK_ROW: unable to obtain exclusive access to this record" >&2; exit 1; fi
+        # 同じ組織への、同時のデプロイ: 先に始めた方が、ロックを持つ（mkdir は原子的）。後から来た方は、ロックで失敗する。
+        #   デプロイにかかる時間は、state/sf.deploy_delay（秒）で決める（ロックを持つ間）
+        if ! mkdir "$IT_STATE/sf.deploying" 2>/dev/null; then echo "UNABLE_TO_LOCK_ROW: unable to obtain exclusive access to this record (another deployment is running)" >&2; exit 1; fi
+        trap 'rmdir "$IT_STATE/sf.deploying" 2>/dev/null' EXIT
+        [[ -f "$IT_STATE/sf.deploy_delay" ]] && sleep "$(cat "$IT_STATE/sf.deploy_delay")"
         if [[ -f "$IT_STATE/sf.testfail" ]]; then echo "Test Failures: SampleTest.testSomething: System.AssertException" >&2; exit 1; fi
         echo "Deploy Succeeded."; echo "Test Results Summary"; echo "Passing: 1"; echo "Failing: 0"
         exit 0 ;;
@@ -445,7 +464,7 @@ exit 99
 SSHEOF
     local n
     for n in open start xdg-open wslview powershell.exe; do
-        printf '#!/bin/bash\nexit 0\n' > "$IT_BIN/$n"
+        printf '#!/bin/bash\necho "browser $*" >> "$IT_STATE/calls.log"\nexit 0\n' > "$IT_BIN/$n"   # ブラウザは開かない（開こうとした URL を、記録する）
     done
     chmod +x "$IT_BIN"/*
 }
@@ -549,3 +568,34 @@ it_sftools_advance() {
 
 # 組織からの取得（retrieve）で、カレントに書かれるファイルを決める。引数: 「パス|内容」…（なければ、何も書かない）
 it_set_retrieve() { : > "$IT_STATE/sf.retrieve"; local l; for l in "$@"; do printf '%s\n' "$l" >> "$IT_STATE/sf.retrieve"; done; }
+
+# PR を記録する（fake の gh pr list が返す）。引数: 状態（open / merged） ヘッド ベース
+it_pr_add() { printf '%s|%s|%s\n' "$1" "$2" "$3" >> "$IT_STATE/prs"; }
+it_pr_clear() { rm -f "$IT_STATE/prs"; }
+
+# origin 上で、ブランチを、別のブランチへ、マージする（PR のマージの再現。フックを通さない）。引数: 元 先
+it_origin_merge() {
+    local src="$1" dst="$2" w="$IT_ROOT/merge.$$.$RANDOM"
+    _it_git clone -q "$IT_ORIGIN" "$w" || return 1
+    ( cd "$w" || exit 1
+      _it_git checkout -q "$dst" || exit 1
+      _it_git merge -q --no-ff --no-edit "origin/$src" -m "Merge $src into $dst" || exit 1
+      _it_git push -q origin "$dst" ) || { rm -rf "$w"; return 1; }
+    rm -rf "$w"
+}
+
+# bare の origin のブランチから、ファイルを消す／戻す（手動の削除の再現。フックを通さない）。引数: ブランチ パス
+it_origin_delete_file() {
+    local br="$1" path="$2" w="$IT_ROOT/del.$$.$RANDOM"
+    _it_git clone -q "$IT_ORIGIN" "$w" || return 1
+    ( cd "$w" || exit 1
+      _it_git checkout -q "$br" && _it_git rm -q "$path" && _it_git commit -q -m "手動で削除: $path" --no-verify && _it_git push -q origin "$br" ) || { rm -rf "$w"; return 1; }
+    rm -rf "$w"
+}
+it_origin_restore_file() {
+    local br="$1" path="$2" w="$IT_ROOT/res.$$.$RANDOM"
+    _it_git clone -q "$IT_ORIGIN" "$w" || return 1
+    ( cd "$w" || exit 1
+      _it_git checkout -q "$br" && _it_git checkout -q "HEAD~1" -- "$path" && _it_git commit -q -m "復元: $path" --no-verify && _it_git push -q origin "$br" ) || { rm -rf "$w"; return 1; }
+    rm -rf "$w"
+}

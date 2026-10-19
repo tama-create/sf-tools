@@ -194,6 +194,23 @@ test_job_identity() {
     out=$(_run_in "$dir" "" 'resolve_job_identity "my-own" "zzz"' "$mb")
     _has "$out" "owner=my-own project=zzz" "--owner と --project の両方 → 入力なしで決まる"
     teardown "$mb"; _rm_base "$dir"
+    # --project 指定で、同じ XXXX のクローンが、複数のオーナーにある → 最初のものを黙って使わず、選ばせる（A14）
+    mb=$(setup_mock_bin); create_mock_gh "$mb"; dir=$(_mkdirs)
+    _mkclone "$dir" "JOB-1" "force-acme" "https://github.com/org-x/force-acme.git"
+    _mkclone "$dir" "JOB-2" "force-acme" "https://github.com/org-z/force-acme.git"
+    out=$(_run_in "$dir" '2\n' 'resolve_job_identity "" "acme"' "$mb")
+    _has "$out" "どのオーナーの force-acme ですか" "同じ XXXX が複数のオーナーにある → 選択肢を表示する"
+    _has "$out" "owner=org-z project=acme" "番号で選べる（2 = org-z）"
+    out=$(_run_in "$dir" '1\n' 'resolve_job_identity "" "acme"' "$mb")
+    _has "$out" "owner=org-x project=acme" "番号で選べる（1 = org-x）"
+    out=$(_run_in "$dir" "" 'resolve_job_identity "org-z" "acme"' "$mb")
+    _hasnt "$out" "どのオーナーの" "--owner 指定 → 選ばせない"
+    _has "$out" "owner=org-z project=acme" "--owner 指定 → そのオーナーで決まる"
+    # 大文字と小文字だけが違うオーナーは、同じ扱い（1 つ → 選ばせない）
+    _mkclone "$dir" "JOB-3" "force-acme" "https://github.com/ORG-X/force-acme.git"
+    out=$(_run_in "$dir" '1\n' 'resolve_job_identity "" "acme"' "$mb")
+    _has "$out" "どのオーナーの force-acme" "オーナーが 2 種類（org-x と org-z。ORG-X は org-x と同じ）→ 選ばせる"
+    teardown "$mb"; _rm_base "$dir"
     # クローンが 1 つもない → 対話（オーナーは gh のログインから、XXXX は入力）
     mb=$(setup_mock_bin); create_mock_gh "$mb"; dir=$(_mkdirs)
     out=$(MOCK_GH_API_USER=tama _run_in "$dir" 'acme\nY\n' 'resolve_job_identity "" ""' "$mb")

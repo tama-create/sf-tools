@@ -88,6 +88,8 @@
 | `test_integration-init.sh` | 結合テスト L1: sf-init の通し（1 層）・生成物を後続コマンドが使う・完了済みの再実行・中断と再開（clone・push・Secret・SIGTERM・SIGKILL）・PAT の扱い（I1・A13・X8-1・X2-1・X7-1） |
 | `test_integration-init2.sh` | 結合テスト L1: sf-init の状態の食い違い（X3-5〜X3-7）・PAT の権限不足・別ユーザー・名前の衝突（X1-2・X1-3）・同時起動（X4-1） |
 | `test_integration-metasync.sh` | 結合テスト L1: sf-metasync のローカルの動作（作業ブランチから main への反映・元のブランチへの復帰・stash の復元・失敗時の後始末）（B3 のローカル部分・X8-4・X8-5） |
+| `test_integration-next.sh` | 結合テスト L1: sf-next の判定（3 層で、なし・PR 発行中・マージ済み・順序外・Y で開く URL）と、main が進んだときの取り込み（A5） |
+| `test_integration-init3.sh` | 結合テスト L1: sf-init の診断（--status が、Secret・Variable・ワークフロー・ブランチ・リポジトリの欠けを見つける）・admin ブランチの欠け・Salesforce の失敗・JWT のリトライの上限・同名のリポジトリの同時作成（X3-8・X3-9・X1-4・X9-1・X4-1b） |
 | `test_sf-typecheck.sh` | sf-typecheck.sh / lib/typecheck.js（node が無い環境では、スキップ。sf はモック） |
 | `test_sf-prepush.sh` | hooks/pre-push |
 | `test_sf-push.sh` | sf-push.sh |
@@ -481,6 +483,10 @@ tr -d '\r' < "$key_file" | base64 -w 0 | gh secret set "SF_PRIVATE_KEY" -R "$REP
 
 - **`sf-job.sh`（X2-2）**: ジョブ名に、環境ブランチ・管理者用のブランチの名前（`main` / `staging` / `develop` / `admin`）は使えない。GitHub 上に同名のブランチがすでにあるときは、最後のコミットの作者・日時（`gh api ... --jq`）を表示して、`ask_yn` で確認する。Y なら `USE_EXISTING_BRANCH=1`（`phase_create_branch` は、作成の API を呼ばずに、戻る。ブランチ作成のあとに、clone が失敗した前回のジョブの、続き）。N なら、別のジョブ名を聞く。
 - **`sf-prepush.sh`（X3-2）**: `phase_fetch` は、`branches.txt` のブランチが、origin に（`git ls-remote --exit-code origin <名前>`）まだないとき、取得せず、警告を出して続ける（以前は、`git fetch` が「見つからない」で失敗し、すべての push が止まった）。
+- **`lib/project.sh`（A14）**: `resolve_job_identity` は、`--project` だけの指定で、同じ XXXX のクローンが、複数のオーナーにある（大文字と小文字だけの違いは、同じ）とき、最初のものを黙って使わず、`_pick_from_list` で、選ばせる（`--owner` を指定すれば、選ばせない）。
+- **`sf-next.sh`（A5）**: 開く PR 作成画面の URL は、origin の URL が `ssh://git@github.com/...`・`git@github.com:...`・https のどれでも、https の URL にする。
+- **`sf-start.sh`（X5-3）**: エイリアスの入力（`read_input`）が EOF（標準入力が閉じた）のときは、「入力が中断されました」で中断する（以前は、空の入力を、無限に繰り返した）。
+- **`lib/diag.sh`（X3-9）**: `SF_TOOLS_BRANCH` は、検証環境（開発版）だけが登録する任意の Variable。診断は、なくても、不足にしない。
 
 ### 4.13 sf-init.sh
 
@@ -541,7 +547,7 @@ tr -d '\r' < "$key_file" | base64 -w 0 | gh secret set "SF_PRIVATE_KEY" -R "$REP
 - `--reconnect main|staging|develop`: 1 つの段階の接続先（Salesforce 組織）の付け替え（`phases/init/reconnect.sh`。force-* 内で実行。現在の接続を表示 → 確認 → ログイン先の選択 → ログイン → 種類の読み取り → 本番は main のみのガード → 外部クライアントアプリの自動作成 → JWT 接続テスト → Secrets / Variables の一括更新。古い組織が別の組織なら、残る外部クライアントアプリと片付け方を表示する（自動では削除しない））
 - `--status`: セットアップの診断と、段階ごとの接続の一覧（`phases/init/status.sh`。読み取りのみ。終了コード: 診断で不足がある、または、本番が main 以外にあれば 1）。
 - `--verify`: 動作の確認（`phases/init/verify.sh`。`--plan` / `--cleanup` / `--no-metasync` / `--components` / `--validate-only` / `--with-objects` は、そのまま渡す。`--verify` なしの指定は `die`）。詳細は 4.15.1
-  - 診断（`lib/diag.sh` の `diag_run REPO 段階...`）: リポジトリ・branches.txt の各ブランチ・ワークフロー 5 本（`gh api` / `gh repo view`）、Secrets（`gh secret list`）、Variables（`gh variable list`）、直近の実行（`gh run list --workflow`）を、✓ / ✗ / ！ / ？ で表示する。不足（✗）には、直し方（`--only N` / `--reconnect` / `--add-tier` / `sf-sync-wf.sh`）を表示し、件数を `DIAG_NG` に入れる。一覧を取得できなかったものは「？」とし、不足に数えない（通信エラー・権限不足を、不足と誤認しない）。組織の種類の記録（`SF_ORG_ID_*`）がないものは「！」（不足に数えない。古いバージョンで作ったプロジェクトのため）。直近の実行の失敗も「！」（セットアップの不足ではないため）。
+  - 診断（`lib/diag.sh` の `diag_run REPO 段階...`）: リポジトリ・branches.txt の各ブランチ・ワークフロー 5 本（`gh api` / `gh repo view`）、Secrets（`gh secret list`）、Variables（`gh variable list`）、直近の実行（`gh run list --workflow`）を、✓ / ✗ / ！ / ？ で表示する。不足（✗）には、直し方（`--only N` / `--reconnect` / `--add-tier` / `sf-sync-wf.sh`）を表示し、件数を `DIAG_NG` に入れる。一覧を取得できなかったものは「？」とし、不足に数えない（通信エラー・権限不足を、不足と誤認しない）。組織の種類の記録（`SF_ORG_ID_*`）がないものは「！」（不足に数えない。古いバージョンで作ったプロジェクトのため）。直近の実行の失敗も「！」（セットアップの不足ではないため）。 `SF_TOOLS_BRANCH` は、検証環境（開発版）だけが登録する任意の Variable（未設定ならワークフローは main を使う）のため、診断は、なくても、不足にしない（結合テスト X3-9 で見つかった。以前は、配布版のプロジェクトで、必ず「不足」と表示した）。
   - Salesforce 側（外部クライアントアプリ・JWT 接続）は、ログインが必要なため確認しない。直近の wf-metasync / wf-release の成功で、接続できていることが分かる。
   - 接続の一覧: GitHub Variables を読むだけ。同じ組織が複数の段階にあれば警告、本番が main 以外にあればエラー表示。
 - `--legacy-connected-app`（環境変数 `SF_INIT_LEGACY_CONNECTED_APP=1`）: 従来の接続アプリケーション（手動の入力）を使う。既定は外部クライアントアプリ。保存済みの `APP_TYPE=2` と食い違うときは中断する

@@ -107,7 +107,7 @@
 - **不変条件の部品**: `it_snap`（HEAD・コミット数・ブランチ・フック数・未コミット数）・`it_remote_snap`・`it_mutating_calls`（外部へ書き込む呼び出しの一覧）・`it_leak_count`（秘密の漏れ）。
 - **時間**: シナリオごとの所要時間を出す。`IT_SHOW_RUNS=1` で、遅い呼び出しの上位を出す。CI の実測（2026-10-19）は、Ubuntu 約 40 秒・macOS 約 1 分・Windows 約 2 分。手元の Windows（Git Bash）は、プロセスの起動が遅く、約 10 分かかる。`IT_SCENARIOS`（実行するシナリオ。既定は全部）・`IT_X62_QUICK=1`（X6-2 の入力を n と EOF に絞る）で、短くできる。
 - **実行**: `run_tests.sh` の全件に含まれる（時間のかかるファイルとして先に起動）。CI の全件テストのジョブは、`SF_TEST_SKIP_INTEGRATION=1` で外し、別のジョブ `integration`（Ubuntu・macOS・Windows）で動かす。`--changed` は、`bin/sf-*.sh`・`hooks/*`・`tests/integration/*` の変更で、含める。
-- **見つかった現状の挙動**: `sf-push` は、コミット対象の変更がないと「コミット対象なし」で終わる。プッシュが失敗した後に再実行しても、未プッシュのコミットは、プッシュされない（X2-3 に、現状として記録。挙動を変えたら、テストを直す）。
+- **結合テストで見つかり、直したもの**: `sf-push` は、変更がないと「コミット対象なし」で終わり、コミット後にプッシュが失敗した再実行で、未プッシュのコミットが取り残された。現在は、変更がなくても、追跡先（upstream）より進んだコミットがあれば、コミットせず、`git push` だけ行う（X2-3 が確認する）。
 
 ### 2.2 `test_helper.sh` の前提
 
@@ -407,7 +407,7 @@ check_gh_owner "$GITHUB_OWNER"   # 認証ユーザーの一致確認
 1. origin/main を fetch して現在ブランチにマージ（main ブランチ自身はスキップ）
    - コンフリクト発生時は `merge --abort` してエラー中止
 2. カレント配下だけを `git add --all`
-3. 変更なしなら WARNING で正常終了
+3. 変更なしのとき: 未プッシュのコミット（追跡先より進んだコミット）があれば、コミットせず `git push` だけ行って終了（コミット後にプッシュが失敗した再実行用）。なければ WARNING で正常終了
 4. `sf-check.sh` でターゲットファイルを検証（エラーなら中止）
 5. VS Code を別ウィンドウで開いてコミットメッセージを入力
 6. メッセージ未入力なら何もせず正常終了
@@ -941,6 +941,8 @@ sf-tools の `main` への反映は、全ユーザーへの配布と同義であ
 | 環境 | Bash | openssl | コミット | 日付 | 確認の種類と結果 |
 |---|---|---|---|---|---|
 | Windows 11（Git Bash。`C:\Git\bin\bash.exe -l`） | 5.x | OpenSSL 3.5（`/ucrt64/bin/openssl`） | 5344f40 | 2026-10-18 | e2e: 119 件成功 / 0 件失敗（1 層・既定。`--add-tier` の確認を含む） |
+| Windows 11（Git Bash。`C:\Git\bin\bash.exe -l`） | 5.3.15 | OpenSSL 3.5.9 | 1aa67b3 | 2026-10-19 | e2e: 119 件成功 / 0 件失敗（1 層。`sf-push` の変更後の確認。`--add-tier` の確認を含む） |
+| Windows・macOS・Linux（GitHub Actions の `windows-latest` / `macos-latest` / `ubuntu-latest`） | 5.x / 3.2 / 5.x | — | 1aa67b3 | 2026-10-19 | 全件テスト・shellcheck・結合テスト L1（`tests/test_integration.sh`）が、3 つの OS ですべて成功 |
 | Windows（`windows-latest` の Git Bash） | 5.x | — | 1fe7ed7 | 2026-10-18 | 単体テスト全件成功（GitHub Actions） |
 | macOS（`macos-latest`） | 3.2（標準の `/bin/bash`） | — | 1fe7ed7 | 2026-10-18 | 単体テスト全件成功（GitHub Actions） |
 | Linux（`ubuntu-latest`） | 5.x | — | 1fe7ed7 | 2026-10-18 | 単体テスト・shellcheck 全件成功（GitHub Actions） |

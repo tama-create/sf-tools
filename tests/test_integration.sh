@@ -9,7 +9,7 @@
 # 【シナリオ】
 #   A13a  新しい開発者の最初の 1 時間（sf-job → sf-start → sf-install → sf-hook → sf-dryrun → sf-push）
 #         ※ sf-init の生成物ではなく、テンプレートから作った最小のリポジトリ。sf-init との通しは L2（C1）
-#   X2-3  sf-push: コミットは成功・プッシュは失敗 → 再実行したときの、コミットとプッシュの状態
+#   X2-3  sf-push: コミットは成功・プッシュは失敗 → 再実行で、コミットが二重にならず、未プッシュのコミットが届く
 #   X6-2  確認の入力（n / q / EOF / 空 Enter）で、破壊的な操作（gh・sf の書き込み）が、起きないこと
 #   X6-1  管理者向けコマンドの、GitHub Actions 上での挙動（コマンドごとの表。実装の仕様どおり）
 # ==============================================================================
@@ -116,12 +116,11 @@ test_X2_3() {
     it_origin_reject off
     it_run "$CL" bash "$IT_HOME/sf-tools/bin/sf-push.sh"
     assert_equals "$(it_snap_get "$(it_snap "$CL")" count)" "$((before_count + 1))" "X2-3: 再実行で、コミットが、二重にならない"
-    # 【現状】変更がないため「コミット対象なし」で終わり、未プッシュのコミットは、プッシュされない（取り残される）。挙動を変えたら、この確認を直す
-    it_out_has "コミット対象の変更がありません" && pass "X2-3: 【現状】変更なしの再実行は「コミット対象なし」で終わる" || fail "X2-3: 【現状】変更なしの再実行は「コミット対象なし」で終わる"
-    assert_equals "$(_it_git --git-dir="$IT_ORIGIN" rev-parse refs/heads/JOB-1)" "$remote_before" "X2-3: 【現状】再実行では、未プッシュのコミットは、origin に届かない"
-    assert_equals "$(_it_git -C "$CL" rev-list --count origin/JOB-1..HEAD)" "1" "X2-3: 【現状】手元は、origin より 1 コミット進んだまま"
-    it_run "$CL" git push   # 後続のシナリオのために、手で、プッシュして揃える
-    assert_equals "$(_it_git --git-dir="$IT_ORIGIN" rev-parse refs/heads/JOB-1)" "$(_it_git -C "$CL" rev-parse HEAD)" "X2-3: 手で git push すれば、届く"
+    # 変更がなくても、未プッシュのコミットがあれば、コミットせず、プッシュだけ行う
+    assert_exit_ok "$IT_RC" "X2-3: 再実行は成功する"
+    it_out_has "未プッシュのコミットが 1 件" && pass "X2-3: 未プッシュのコミットがあると表示される" || fail "X2-3: 未プッシュのコミットがあると表示される"
+    assert_equals "$(_it_git --git-dir="$IT_ORIGIN" rev-parse refs/heads/JOB-1)" "$(_it_git -C "$CL" rev-parse HEAD)" "X2-3: 再実行で、手元のコミットが、origin に届く"
+    assert_equals "$(_it_git -C "$CL" rev-list --count origin/JOB-1..HEAD)" "0" "X2-3: 手元は、origin と揃う"
 }
 
 # ------------------------------------------------------------------------------

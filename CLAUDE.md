@@ -27,7 +27,7 @@
 | リリース | 検証 OK の報告後に rr を依頼 |
 
 > **mm の前にテスト全件 PASS は必須。PASS 確認なしの mm 依頼は禁止。**
-> **rr の前に、テスト全件 PASS と、e2e による実動作確認の結果が必須。どちらかが欠けた rr 依頼は断ること。**
+> **rr の前に、テスト全件 PASS（CI も成功）が必須。さらに、`main` との差分に配布物のパス（`bin/` `lib/` `phases/` `hooks/` `templates/` `config/`）が含まれるときは、e2e による実動作確認の結果も必須。** 配布物のパスの変更がなく、`tests/` `doc/` `.github/workflows/test.yml` などだけの変更なら、e2e は不要（確認: `git diff --stat origin/main...development -- bin lib phases hooks templates config` が空）。必須の項目が欠けた rr 依頼は断ること。
 > **変更に e2e の確認が足りないときは、e2e のほうを広げる**（手動の検証を、ユーザーに頼まない）。
 
 ### 1.3 mm / rr 実行手順
@@ -191,6 +191,7 @@ bash tests/run_tests.sh                        # 全テスト実行（mm 前に�
 bash tests/run_tests.sh test_sf-metasync.sh   # 単体実行
 bash tests/run_tests.sh --changed             # 変更ファイルに対応するテストのみ実行
 bash tests/run_tests.sh --jobs 4 / --serial   # 同時に動かすファイル数（既定: CPU の数。--serial は 1 つずつ）
+bash tests/test_integration.sh                # 結合テスト L1（実 git ＋ fake。run_tests.sh の全件にも含まれる。手元の Windows は約 10 分、CI は 2 分ほど）
 bash tests/e2e/doctor.sh                       # e2e を動かせる環境かの確認（読み取りのみ。新しい環境で、run.sh の前に実行）
 bash tests/e2e/run.sh                          # 実環境の通し検証（検証のとき Claude が実行。通常のテストには含まれない）
 ```

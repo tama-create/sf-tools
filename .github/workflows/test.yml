@@ -22,6 +22,9 @@ jobs:
     name: 全件テスト
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      # 結合テスト（test_integration.sh）は、別のジョブ（下の integration）で動かす
+      SF_TEST_SKIP_INTEGRATION: "1"
     steps:
       - name: ソースコードを取得
         uses: actions/checkout@v4
@@ -61,6 +64,8 @@ jobs:
     name: 全件テスト（macOS）
     runs-on: macos-latest
     timeout-minutes: 45
+    env:
+      SF_TEST_SKIP_INTEGRATION: "1"   # 結合テストは、別のジョブ（integration）で動かす
     steps:
       - name: ソースコードを取得
         uses: actions/checkout@v4
@@ -83,6 +88,7 @@ jobs:
     env:
       # Git Bash のまま実行する（run_tests.sh は、WSL を使えるとき、WSL に移るが、ランナーには WSL のディストリビューションがない）
       SF_TEST_NO_WSL: "1"
+      SF_TEST_SKIP_INTEGRATION: "1"   # 結合テストは、別のジョブ（integration）で動かす
       # 起動するテストファイルを順に表示する（異常終了したとき、どのファイルで止まったかを分かるようにする）
       SF_TEST_PROGRESS: "1"
     steps:
@@ -101,3 +107,35 @@ jobs:
         run: |
           bash --version | head -1
           bash tests/run_tests.sh
+
+  # --------------------------------------------------------------------------
+  # 結合テスト L1（ローカル結合）: 実際の git ＋ ローカルの bare リポジトリ ＋ gh・sf・npm の fake で、
+  # 複数のコマンドを連動させる（tests/test_integration.sh。計画: doc/integration-test-plan.md）。
+  # 全件テストとは別のジョブにして、3 つの OS で並行して動かす（2026-10-19 の実測: Ubuntu 約 40 秒・macOS 約 1 分・Windows 約 2 分）。
+  # --------------------------------------------------------------------------
+  integration:
+    name: 結合テスト L1（${{ matrix.os }}）
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: 改行の自動変換を止める
+        run: git config --global core.autocrlf false
+
+      - name: ソースコードを取得
+        uses: actions/checkout@v4
+
+      # macOS は、標準の Bash 3.2（/bin/bash）のまま実行する。Windows は Git Bash
+      - name: 結合テストを実行（Windows 以外）
+        if: runner.os != 'Windows'
+        run: /bin/bash tests/test_integration.sh
+
+      - name: 結合テストを実行（Windows・Git Bash）
+        if: runner.os == 'Windows'
+        run: bash tests/test_integration.sh

@@ -11,7 +11,8 @@
 #   2. Git の最新状態をプル (Rebase)
 #   3. SGD (Salesforce Git Delta) による差分抽出
 #   4. 組織からのメタデータ取得 (Retrieve)
-#   5. 変更がある場合のみ Git Commit & Push
+#   5. 変更がある場合のみ Git Commit & Push（pre-push フックは、このコマンドの push では通さない: --no-verify。サーバー側の保護は、そのまま効く）
+#      変更がなくても、前回の同期のコミットの push が失敗して、未プッシュのコミットが残っているときは、push だけ行う
 #
 # 【前提】
 #   Salesforce CLI（sf）は npm 版であること。起動時に check_sf_cli（sf --version の終了コード）で確認し、
@@ -184,8 +185,20 @@ phase_git_sync() {
     log "INFO" "Git リポジトリへ反映中..."
     run git add -A || return $RET_NG
 
-    # ステージに変更がなければ早期終了
+    # ステージに変更がなければ、未プッシュのコミットを確認する。あれば（前回、コミットのあとに push が失敗した）、push だけ行う。
+    #   なければ、早期終了（組織側に変更なし）
     if run git diff-index --quiet HEAD --; then
+        local _ahead
+        _ahead=$(git rev-list --count "origin/${BRANCH_NAME}..HEAD" 2>/dev/null || echo 0)  # VAR=$(cmd) のため run 不使用
+        if [[ "$_ahead" =~ ^[0-9]+$ && "$_ahead" -gt 0 ]]; then
+            log "INFO" "未プッシュのコミットが ${_ahead} 件あります（前回の同期のコミットの push が、失敗した可能性があります）。push だけ行います。"
+            if [[ "${GITHUB_ACTIONS:-false}" != "true" ]]; then
+                git log --oneline "origin/${BRANCH_NAME}..HEAD" >&2  # run 不使用: 確認表示のため
+                ask_yn "上記のコミットを main にプッシュします。よろしいですか？" || die "中断しました。"
+            fi
+            run git push --no-verify origin "$BRANCH_NAME" || return $RET_NG
+            return $RET_OK
+        fi
         return $RET_NO_CHANGE
     fi
 
@@ -196,7 +209,9 @@ phase_git_sync() {
     fi
 
     run git commit -m "$COMMIT_MSG" || return $RET_NG
-    run git push origin "$BRANCH_NAME" || return $RET_NG
+    # --no-verify: このコマンドは、main への同期の専用（管理者が、確認して実行する。GitHub Actions では、フックがない）。
+    #   pre-push フック（開発者の main への直接 push を止める）を、ここでだけ通さない。サーバー側の保護（Ruleset）は、そのまま効く
+    run git push --no-verify origin "$BRANCH_NAME" || return $RET_NG
 }
 
 # 【PROPAGATE】main の変更を下流ブランチへ直接伝播 (main → staging、main → develop)

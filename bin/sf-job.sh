@@ -23,7 +23,10 @@
 #   Phase 1: 環境チェック（管理者用の作業フォルダ・force-* の中から実行されていないか確認）
 #   Phase 2: プロジェクト情報の確認（上の順で決めた OWNER と REPO_NAME で、リポジトリの存在を確認）
 #   Phase 3: ジョブ名の入力と重複チェック（ローカル・GitHub ブランチ）
-#   Phase 4: GitHub 上にジョブブランチを作成
+#            環境ブランチ・管理者用のブランチの名前（main / staging / develop / admin）は使えない。
+#            GitHub 上に、同名のブランチがすでにあるときは、最後のコミットの作者・日時を表示して、確認する（Y: そのブランチを使って続ける
+#            = 前回、ブランチの作成のあとに clone が失敗したジョブの続き / N: 別のジョブ名）
+#   Phase 4: GitHub 上にジョブブランチを作成（すでにあるブランチを使うと選んだときは、作成しない）
 #   Phase 5: ローカルにクローン（Windows のパス長の上限対策で、core.longpaths=true を付ける）
 #   Phase 6: sf-start.sh を起動（Sandbox 接続・VSCode 起動・sf-launcher.sh 起動）
 #
@@ -92,6 +95,7 @@ JOB_NAME=""           # ジョブ名（例: JOB-20260323）
 JOB_DIR=""            # ジョブフォルダの絶対パス
 REPO_DIR=""           # クローン先の絶対パス
 BASE_BRANCH=""        # ジョブブランチの分岐元ブランチ
+USE_EXISTING_BRANCH=0 # 1 = GitHub 上に、すでにある同名のブランチを使う（前回、ブランチ作成のあとの clone で失敗したジョブの、続き）
 
 # ------------------------------------------------------------------------------
 # 4. ヘルパー関数
@@ -174,6 +178,14 @@ phase_ask_job_name() {
             continue
         fi
 
+        # 環境ブランチ・管理者用のブランチと同じ名前は使えない（同名のブランチが、すでにあり、それを使って続けてしまわないため）
+        case "$JOB_NAME" in
+            main|staging|develop|admin)
+                log "WARNING" "この名前は、環境ブランチ・管理者用のブランチの名前のため、使えません: ${JOB_NAME}"
+                JOB_NAME=""
+                continue ;;
+        esac
+
         # --- ローカルフォルダの重複チェック ---
         #   同じジョブ名のフォルダに、同じプロジェクトのクローンがあれば、重複。
         #   別のプロジェクトのクローンだけを含むなら、重複ではない（同じジョブ名で、複数のプロジェクトを扱える）
@@ -187,16 +199,22 @@ phase_ask_job_name() {
 
         # --- GitHub ブランチの重複チェック ---
         log "INFO" "GitHub ブランチの存在を確認中..."
-        local branch_exists=0
-        for check_branch in develop staging main; do
-            if gh api "repos/${REPO_FULL_NAME}/branches/${JOB_NAME}" &>/dev/null 2>&1; then
-                branch_exists=1
-                break
-            fi
-        done
+        local branch_exists=0 _last=""
+        if gh api "repos/${REPO_FULL_NAME}/branches/${JOB_NAME}" &>/dev/null 2>&1; then
+            branch_exists=1
+        fi
 
         if [[ $branch_exists -eq 1 ]]; then
-            log "WARNING" "GitHub 上にすでに同名のブランチが存在します: ${JOB_NAME}"
+            log "WARNING" "GitHub 上に、すでに同名のブランチがあります: ${JOB_NAME}"
+            # 前回、ブランチの作成のあとに、clone が失敗した同じジョブなら、そのブランチを使って、続けられる（このフォルダには、clone がない）。
+            #   ほかの人のジョブのブランチなら、別のジョブ名にする。最後のコミットの作者と日時を表示して、判断の材料にする
+            _last=$(gh api "repos/${REPO_FULL_NAME}/branches/${JOB_NAME}" --jq ".commit.commit.author.name + \" / \" + .commit.commit.author.date" 2>/dev/null || true)  # VAR=$(cmd) のため run 不使用
+            [[ -n "$_last" ]] && log "INFO" "  最後のコミット: ${_last}"
+            log "INFO" "  自分が作った、clone に失敗したジョブなら、このブランチを使って、続けられます。ほかの人のジョブなら、N で、別のジョブ名にしてください。"
+            if ask_yn "このブランチを使って、続けますか？"; then
+                USE_EXISTING_BRANCH=1
+                break
+            fi
             log "WARNING" "別のジョブ名を入力してください。"
             JOB_NAME=""
             continue
@@ -211,7 +229,11 @@ phase_ask_job_name() {
     echo ""
     echo "  --------------------------------------------------"
     echo "  ジョブ名   : ${JOB_NAME}"
-    echo "  ブランチ   : ${JOB_NAME}（${REPO_FULL_NAME} から作成）"
+    if [[ $USE_EXISTING_BRANCH -eq 1 ]]; then
+        echo "  ブランチ   : ${JOB_NAME}（${REPO_FULL_NAME} の、すでにあるブランチを使う）"
+    else
+        echo "  ブランチ   : ${JOB_NAME}（${REPO_FULL_NAME} から作成）"
+    fi
     echo "  クローン先 : ${REPO_DIR}"
     echo "  --------------------------------------------------"
     echo ""
@@ -222,6 +244,10 @@ phase_ask_job_name() {
 
 # 【BRANCH】GitHub 上にジョブブランチを作成
 phase_create_branch() {
+    if [[ $USE_EXISTING_BRANCH -eq 1 ]]; then
+        log "INFO" "GitHub 上の、すでにあるブランチを使います（作成しません）: ${JOB_NAME}"
+        return $RET_OK
+    fi
     log "INFO" "分岐元ブランチを確認中..."
 
     # 作業用ブランチは常に main から作成する

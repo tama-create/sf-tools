@@ -23,6 +23,7 @@ test_changes_are_committed() {
 
     assert_file_contains "$MOCK_CALL_LOG" "git commit" "変更あり → commit が実行された"
     assert_file_contains "$MOCK_CALL_LOG" "git push" "変更あり → push が実行された"
+    assert_file_contains "$MOCK_CALL_LOG" "git push --no-verify origin main" "main への同期の push は、pre-push フックを通さない（--no-verify）"
     unset MOCK_GIT_BRANCH MOCK_GIT_DIFF_EXIT MOCK_GIT_DIFF_EXIT_2ND MOCK_SF_ORG_JSON
     teardown "$td" "$mb"
 }
@@ -127,8 +128,39 @@ test_stash_pop_on_exit() {
     teardown "$td" "$mb"
 }
 
+# 変更なしでも、未プッシュのコミットがあれば、push だけ行う（前回の同期のコミットの push が、失敗していた）
+#   結合テスト X8-4 で見つかった: 以前は、再実行しても「変更なし」で終わり、未プッシュのコミットが取り残された
+test_unpushed_commit_pushed() {
+    local td mb mh
+    setup_std_env td mb mh
+    create_all_mocks "$mb"
+
+    export MOCK_GIT_BRANCH="main"
+    export MOCK_GIT_DIFF_EXIT=0          # 組織側に変更なし（ステージに変更なし）
+    export MOCK_GIT_REV_LIST_COUNT=2     # 未プッシュのコミットが 2 件
+    export MOCK_SF_ORG_JSON='{"result":{"alias":"testorg","id":"00D000000000001AAA"}}'
+
+    local out; out=$( printf 'Y\nY\n' | ( cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-metasync.sh" ) 2>&1 )
+    local ec=$?
+
+    assert_exit_ok $ec "変更なし＋未プッシュあり → 正常終了"
+    assert_file_contains "$MOCK_CALL_LOG" "git push --no-verify origin main" "未プッシュのコミットがあれば、push だけ行う"
+    assert_file_not_contains "$MOCK_CALL_LOG" "git commit" "未プッシュのみのとき、新しいコミットは作らない"
+    assert_output_contains "$out" "未プッシュのコミットが 2 件" "未プッシュの件数が表示される"
+
+    # 確認で N → push しない
+    : > "$MOCK_CALL_LOG"
+    out=$( printf 'Y\nn\n' | ( cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-metasync.sh" ) 2>&1 )
+    ec=$?
+    assert_exit_fail $ec "未プッシュのコミットの push の確認に n → 中断する"
+    assert_file_not_contains "$MOCK_CALL_LOG" "git push" "確認に n → push しない"
+    unset MOCK_GIT_BRANCH MOCK_GIT_DIFF_EXIT MOCK_GIT_REV_LIST_COUNT MOCK_SF_ORG_JSON
+    teardown "$td" "$mb"
+}
+
 test_changes_are_committed
 test_no_changes
+test_unpushed_commit_pushed
 test_non_main_branch_switches
 test_staging_fail_dev_merges_main
 # sf の終了コードが 0 以外（インストーラー版の不具合）→ 案内を表示して中断する

@@ -20,7 +20,7 @@
 #   it_fault CMD パターン N 回数 終了コード メッセージ [遅延]   故障注入（CMD の、パターンに合う N 回目から、回数だけ失敗させる）
 #   it_calls [CMD]                 fake の呼び出しの記録（CMD で、絞り込める）
 #   it_snap DIR / it_remote_snap   不変条件の確認用の、ローカル・リモートの状態
-#   it_leak_count 文字列           サンドボックス内のファイル（出力・ログ・状態）に、文字列が何件あるか（秘密の漏れの確認）
+#   it_leak_count 文字列 [除外するファイル名]   サンドボックス内のファイル（出力・ログ・状態・一時ファイル。fake が保持する秘密の保管場所は除く）に、文字列が何件あるか（秘密の漏れの確認）
 # ==============================================================================
 
 # run_with_timeout（時間の上限つき実行。macOS にも動く）
@@ -52,6 +52,8 @@ it_setup() {
     _it_git config --global core.autocrlf false
     _it_git config --global protocol.file.allow always
     _it_git config --global advice.detachedHead false
+    # https://github.com/ を ssh://git@github.com/ に読み替える（fake の ssh が、ローカルの bare に向ける。理由は、it_seed_repo の説明）
+    _it_git config --global "url.ssh://git@github.com/.insteadOf" "https://github.com/"
     # ~/sf-tools を git リポジトリにする（sf-install の git pull が、本物と同じように動くように。origin は、ローカルの bare）
     _it_git init -q --bare -b main "$IT_ROOT/sftools-origin.git"
     (
@@ -74,7 +76,13 @@ it_attach() { IT_ROOT="$1"; IT_HOME="$IT_ROOT/home"; IT_BIN="$IT_ROOT/bin"; IT_S
 it_teardown() {
     [[ -n "${IT_SHOW_RUNS:-}" && -f "$IT_STATE/runs.log" ]] && sort -rn "$IT_STATE/runs.log" | head -15
     [[ -n "${IT_KEEP:-}" ]] && { echo "IT_KEEP: $IT_ROOT" >&2; return 0; }
-    [[ -n "${IT_ROOT:-}" && -d "$IT_ROOT" ]] && rm -rf "$IT_ROOT"
+    # sf-start がバックグラウンドで起動した sf-install などが、まだ書き込んでいることがある。消えるまで、数回やり直す
+    local _i
+    for _i in 1 2 3 4 5 6 7 8 9 10 11 12; do
+        [[ -n "${IT_ROOT:-}" && -d "$IT_ROOT" ]] || break
+        rm -rf "$IT_ROOT" 2>/dev/null
+        [[ -d "$IT_ROOT" ]] && sleep 2
+    done
     IT_ROOT=""
 }
 
@@ -130,10 +138,11 @@ it_run() {
         export HOME="$IT_HOME" PATH="$IT_BIN:$PATH" IT_STATE IT_ORIGIN
         # CI（GitHub Actions）の環境変数を持ち込まない（持ち込むと、管理者向けの確認が省略され、結果が変わる）。X6-1 は env で明示する
         unset GITHUB_ACTIONS CI GH_TOKEN GITHUB_TOKEN
+        mkdir -p "$IT_ROOT/tmp"; export TMPDIR="$IT_ROOT/tmp"   # 一時ファイルの残りを、サンドボックスの中で検査できるように
         export SF_LAUNCHER_ACTIVE=1 SF_TOOLS_SF_CHECK_STAMP=/dev/null
         export GIT_TERMINAL_PROMPT=0 GIT_CONFIG_NOSYSTEM=1 GIT_SSH_COMMAND="$IT_BIN/ssh"
         export E2E_COMMIT_MSG="${IT_COMMIT_MSG:-$IT_COMMIT_MSG_DEFAULT}"
-        printf '%b' "$input" | run_with_timeout "${IT_TIMEOUT:-120}" "$@"
+        printf '%b' "$input" | run_with_timeout "${IT_TIMEOUT:-300}" "$@"
     ) > "$IT_OUT" 2>&1
     IT_RC=$?
     printf '%s秒 rc=%s %s\n' "$((SECONDS - t0))" "$IT_RC" "$*" >> "$IT_STATE/runs.log"   # 所要時間の記録（遅い呼び出しの特定用）
@@ -182,7 +191,7 @@ it_remote_count() { _it_git --git-dir="$IT_ORIGIN" rev-list --count "${1:-main}"
 # サンドボックスの中のファイル（出力・ログ・状態・作業フォルダ。.git の中は除く）に、文字列が、何ファイルにあるか
 it_leak_count() {
     local n
-    n=$(grep -rlF --exclude-dir=.git -- "$1" "$IT_ROOT" 2>/dev/null | grep -c . || true)
+    n=$(grep -rlF --exclude-dir=.git --exclude-dir=secrets --exclude-dir=variables --exclude="${2:-.it-no-exclude}" -- "$1" "$IT_ROOT" 2>/dev/null | grep -c . || true)
     printf '%s' "${n:-0}"
 }
 
@@ -223,7 +232,14 @@ _login=$(cat "$IT_STATE/gh.login" 2>/dev/null || echo "tamashimon-org")
 _has_jq=0; for _a in "$@"; do [[ "$_a" == "--jq" ]] && _has_jq=1; done
 case "$1 $2" in
     "auth status"|"auth login") exit 0 ;;
+    "--version "*) echo "gh version 2.50.0 (2026-01-01)"; exit 0 ;;
     "auth token") echo "fake-token"; exit 0 ;;
+    "repo create")
+        # 新しいリポジトリ = 空の bare の origin（すでに登録されていれば、名前の衝突で失敗する）
+        grep -qxF "$3" "$IT_STATE/repos" 2>/dev/null && { echo "GraphQL: Name already exists on this account (createRepository)" >&2; exit 1; }
+        [[ -d "$IT_ORIGIN" ]] || git init -q --bare -b main "$IT_ORIGIN" || exit 1
+        echo "$3" >> "$IT_STATE/repos"; echo "https://github.com/$3"; exit 0 ;;
+    "repo edit") exit 0 ;;
     "repo view")
         grep -qxF "$3" "$IT_STATE/repos" 2>/dev/null && { echo '{"name":"x"}'; exit 0; }
         echo "Could not resolve to a Repository with the name '$3'." >&2; exit 1 ;;
@@ -235,7 +251,25 @@ if [[ "$1" == "api" ]]; then
         _prev="$_a"
     done
     case "$_path" in
-        user) echo "$_login"; exit 0 ;;
+        user)
+            for _a in "$@"; do
+                [[ "$_a" == "--include" ]] && { printf "HTTP/2.0 200 OK
+X-Oauth-Scopes: %s
+
+{\"login\":\"%s\"}
+" "$(cat "$IT_STATE/gh.scopes" 2>/dev/null || echo "repo, workflow")" "$_login"; exit 0; }
+            done
+            echo "$_login"; exit 0 ;;
+        repos/*/rulesets)
+            # 一覧（GET）: 保存済みの名前に合うものの ID を出す（--jq の select(.name=="…") の名前で探す）。作成（POST --input -）: 本文を保存する
+            mkdir -p "$IT_STATE/rulesets"
+            if [[ " $* " == *" --method POST "* || " $* " == *" -X POST "* ]]; then
+                _n=$(( $(ls "$IT_STATE/rulesets" | wc -l | tr -d ' ') + 1 )); cat > "$IT_STATE/rulesets/$_n"; echo "{\"id\":$_n}"; exit 0
+            fi
+            _want=$(printf '%s' "$*" | sed -n 's/.*select(.name=="\([^"]*\)").*/\1/p')
+            for _f in $(ls "$IT_STATE/rulesets" 2>/dev/null | sort -n); do
+                tr -d ' \n' < "$IT_STATE/rulesets/$_f" | grep -q "\"name\":\"$_want\"" && echo "$_f"
+            done; exit 0 ;;
         user/memberships/orgs/*) cat "$IT_STATE/gh.org_role" 2>/dev/null || exit 1; exit 0 ;;
         repos/*/branches/*)
             _b="${_path##*/branches/}"
@@ -251,8 +285,48 @@ if [[ "$1" == "api" ]]; then
             [[ -n "$_ref" && -n "$_sha" ]] || _it_unsupported gh "$*"
             git --git-dir="$IT_ORIGIN" update-ref "$_ref" "$_sha" || exit 1
             echo "{\"ref\":\"$_ref\"}"; exit 0 ;;
+        repos/*/*)   # リポジトリの情報（permissions.admin など）。他のパターンに合わなかった repos/OWNER/REPO だけ
+            case "$_path" in repos/*/*/*) ;; *)
+                if [[ $_has_jq -eq 1 ]]; then echo "$(cat "$IT_STATE/gh.repo_admin" 2>/dev/null || echo true)"; else echo "{\"permissions\":{\"admin\":true}}"; fi; exit 0 ;;
+            esac ;;
     esac
 fi
+case "$1 $2" in
+    "workflow run")
+        # ワークフローの手動起動: 実行の記録を作る（結果は state/gh.run_conclusion。既定は success）
+        _wf="$3"; _ev=workflow_dispatch; mkdir -p "$IT_STATE/runs"
+        _id=$(( $(ls "$IT_STATE/runs" | wc -l | tr -d " ") + 1001 ))
+        printf "wf=%s
+event=%s
+status=completed
+conclusion=%s
+" "$_wf" "$_ev" "$(cat "$IT_STATE/gh.run_conclusion" 2>/dev/null || echo success)" > "$IT_STATE/runs/$_id"
+        exit 0 ;;
+    "run list")
+        _wf=""; _ev=""; _jq=""; _p=""; for _a in "$@"; do case "$_p" in --workflow) _wf="$_a" ;; --event) _ev="$_a" ;; --jq) _jq="$_a" ;; esac; _p="$_a"; done
+        _last=""; for _f in $(ls "$IT_STATE/runs" 2>/dev/null | sort -n); do
+            grep -qxF "wf=$_wf" "$IT_STATE/runs/$_f" || continue
+            [[ -z "$_ev" ]] || grep -qxF "event=$_ev" "$IT_STATE/runs/$_f" || continue
+            _last="$_f"; done
+        if [[ -n "$_last" ]]; then echo "$_last"; else case "$_jq" in *"// 0"*) echo 0 ;; esac; fi; exit 0 ;;
+    "run view")
+        _id="$3"; [[ -f "$IT_STATE/runs/$_id" ]] || { echo "HTTP 404: Not Found" >&2; exit 1; }
+        _jq=""; _p=""; for _a in "$@"; do [[ "$_p" == "--jq" ]] && _jq="$_a"; _p="$_a"; done
+        case "$_jq" in
+            .status) sed -n "s/^status=//p" "$IT_STATE/runs/$_id" ;;
+            .conclusion) sed -n "s/^conclusion=//p" "$IT_STATE/runs/$_id" ;;
+            .attempt) echo 1 ;;
+            *) echo "Slack response: {\"ok\":true}" ;;
+        esac; exit 0 ;;
+    "run cancel"|"run rerun") exit 0 ;;
+    "secret set")   mkdir -p "$IT_STATE/secrets"; cat > "$IT_STATE/secrets/$3"; exit 0 ;;   # 値は、標準入力から読み、state/secrets にだけ置く（呼び出しの記録には、値を残さない）
+    "secret list")  ls "$IT_STATE/secrets" 2>/dev/null; exit 0 ;;
+    "variable set")
+        _v=""; _p=""; for _a in "$@"; do [[ "$_p" == "--body" || "$_p" == "-b" ]] && _v="$_a"; _p="$_a"; done
+        mkdir -p "$IT_STATE/variables"; printf "%s" "$_v" > "$IT_STATE/variables/$3"; exit 0 ;;
+    "variable get")  [[ -f "$IT_STATE/variables/$3" ]] && { cat "$IT_STATE/variables/$3"; exit 0; }; echo "HTTP 404: Not Found" >&2; exit 1 ;;
+    "variable list") ls "$IT_STATE/variables" 2>/dev/null; exit 0 ;;
+esac
 _it_unsupported gh "$*"
 GHEOF
 
@@ -265,6 +339,14 @@ _it_fault sf "$*"
 _alias=$(cat "$IT_STATE/sf.alias" 2>/dev/null || true)
 [[ "$1" == "--version" ]] && { echo "@salesforce/cli/2.0.0 linux-x64 node-v20.0.0"; exit 0; }
 case "$1 $2" in
+    "data query")
+        case "$*" in *"Profile.Name"*) echo "{\"status\":0,\"result\":{\"records\":[{\"Profile\":{\"Name\":\"System Administrator\"}}],\"totalSize\":1}}"; exit 0 ;; esac
+        echo "{\"status\":0,\"result\":{\"records\":[{\"Id\":\"00D000000000001AAA\",\"Name\":\"IT Org\",\"IsSandbox\":false,\"OrganizationType\":\"Developer Edition\",\"TrialExpirationDate\":null}],\"totalSize\":1}}"; exit 0 ;;
+    "sgd source")
+        # 差分の抽出（sf sgd source delta ... --output-dir D）: 出力フォルダだけ作る（package.xml は作らない）
+        _o=""; _p=""; for _a in "$@"; do [[ "$_p" == "--output-dir" ]] && _o="$_a"; _p="$_a"; done
+        [[ -f "$IT_STATE/sf.sgdfail" ]] && { cat "$IT_STATE/sf.sgdfail" >&2; exit 1; }
+        [[ -n "$_o" ]] && mkdir -p "$_o"; exit 0 ;;
     "org display")
         if [[ -z "$_alias" ]]; then echo '{"status":1,"name":"NoDefaultEnvError","message":"No default org"}'; exit 1; fi
         echo "{\"status\":0,\"result\":{\"alias\":\"$_alias\",\"id\":\"00D000000000001AAA\",\"username\":\"it@example.invalid\",\"instanceUrl\":\"https://it.my.salesforce.com\",\"connectedStatus\":\"Connected\"}}"
@@ -292,7 +374,24 @@ case "$1 $2" in
           for _f in "${_files[@]}"; do _m=$(basename "$_f"); echo "    <types><members>${_m%%.*}</members><name>ApexClass</name></types>"; done
           echo '    <version>60.0</version>'; echo '</Package>'; } > "$_out/$_name"
         echo "successfully wrote $_name to $_out"; exit 0 ;;
+    "project retrieve")
+        case "$*" in *ExtlClntAppGlobalOauthSettings:*) ;; *)
+            # 一般の retrieve（sf-metasync など）: state/sf.retrieve の「パス|内容」の行を、カレントに書く。state/sf.retrievefail があれば、その内容で失敗する
+            [[ -f "$IT_STATE/sf.retrievefail" ]] && { cat "$IT_STATE/sf.retrievefail" >&2; exit 1; }
+            if [[ -f "$IT_STATE/sf.retrieve" ]]; then
+                while IFS="|" read -r _fp _fc; do [[ -n "$_fp" ]] || continue; mkdir -p "$(dirname "$_fp")"; printf "%s
+" "$_fc" > "$_fp"; done < "$IT_STATE/sf.retrieve"
+            fi
+            exit 0 ;;
+        esac
+        # コンシューマー鍵の取得（ExtlClntAppGlobalOauthSettings:名前_glbloauth）。鍵の値は、名前から決まる目印
+        _m=""; _p=""; for _a in "$@"; do [[ "$_p" == "--metadata" ]] && _m="$_a"; _p="$_a"; done
+        _n="${_m#*:}"; mkdir -p force-app/main/default/extlClntAppGlobalOauthSets
+        printf "<ExtlClntAppGlobalOauthSettings><consumerKey>ITECAKEY-%s</consumerKey></ExtlClntAppGlobalOauthSettings>
+" "$_n" > "force-app/main/default/extlClntAppGlobalOauthSets/${_n}.ecaGlblOauth-meta.xml"
+        exit 0 ;;
     "project deploy")
+        if [[ -f "$IT_STATE/sf.deployfail" ]]; then cat "$IT_STATE/sf.deployfail" >&2; exit 1; fi
         if [[ -f "$IT_STATE/sf.lock" ]]; then echo "UNABLE_TO_LOCK_ROW: unable to obtain exclusive access to this record" >&2; exit 1; fi
         if [[ -f "$IT_STATE/sf.testfail" ]]; then echo "Test Failures: SampleTest.testSomething: System.AssertException" >&2; exit 1; fi
         echo "Deploy Succeeded."; echo "Test Results Summary"; echo "Passing: 1"; echo "Failing: 0"
@@ -329,10 +428,17 @@ CODEEOF
     # ssh の代わり: git が送る「git-upload-pack / git-receive-pack」を、ローカルの bare に向けて実行する
     cat > "$IT_BIN/ssh" << "SSHEOF"
 #!/bin/bash
+if [[ -f "$IT_STATE/ssh.fail" ]]; then echo "ssh: Could not resolve hostname github.com: Temporary failure in name resolution" >&2; exit 255; fi
 _cmd="${!#}"
 _svc="${_cmd%% *}"
 case "$_svc" in
-    git-upload-pack|git-receive-pack) exec "$_svc" "$IT_ORIGIN" ;;
+    git-upload-pack|git-receive-pack)
+        # 登録されているリポジトリ（OWNER/REPO。state/repos）だけに、つなぐ。別の名前は、「見つからない」（別のリポジトリへの誤接続の再現）
+        _q="'"; _repo="${_cmd#* }"; _repo="${_repo//$_q/}"; _repo="${_repo%.git}"; _repo="${_repo#/}"
+        if [[ -f "$IT_STATE/repos" ]] && ! grep -qixF "$_repo" "$IT_STATE/repos"; then
+            echo "ERROR: Repository not found." >&2; echo "fatal: Could not read from remote repository." >&2; exit 128
+        fi
+        exec "$_svc" "$IT_ORIGIN" ;;
 esac
 echo "fake ssh: 未対応の呼び出し: $*" >&2
 exit 99
@@ -373,3 +479,73 @@ it_origin_reject() {
         rm -f "$IT_ORIGIN/hooks/pre-receive"
     fi
 }
+
+# ------------------------------------------------------------------------------
+# 作業用のクローンを、手早く作る（sf-job・sf-start・sf-install を通さない版。通しは A13a が確認する）
+# ------------------------------------------------------------------------------
+# it_make_clone 名前 ブランチ [分岐元]  → クローンを $IT_WORK/名前/$IT_REPO に作り、IT_CL に入れる
+#   ・origin からクローン → ブランチを作って push → sf のログイン状態 → sf-hook でフック設置 → release/ブランチ/ を準備
+it_make_clone() {
+    local name="$1" branch="$2" base="${3:-main}"
+    IT_CL="$IT_WORK/$name/$IT_REPO"
+    mkdir -p "$IT_WORK/$name"
+    it_run "$IT_WORK/$name" git clone -q "https://github.com/${IT_OWNER}/${IT_REPO}.git" "$IT_CL" || return 1
+    [[ $IT_RC -eq 0 ]] || return 1
+    it_run "$IT_CL" bash -c "git checkout -q -b '$branch' 'origin/$base' && git push -q -u origin '$branch'" || return 1
+    [[ $IT_RC -eq 0 ]] || return 1
+    echo "itorg" > "$IT_STATE/sf.alias"
+    it_run "$IT_CL" bash "$IT_HOME/sf-tools/bin/sf-hook.sh" || return 1
+    [[ $IT_RC -eq 0 ]] || return 1
+    mkdir -p "$IT_CL/sf-tools/release/$branch"
+    printf '%s\n' "$branch" > "$IT_CL/sf-tools/release/branch_name.txt"
+    cp "$IT_HOME/sf-tools/templates/sf-tools/release/__BRANCH__/"*.txt "$IT_CL/sf-tools/release/$branch/"
+    mkdir -p "$IT_CL/force-app/main/default/classes"
+    return 0
+}
+
+# Apex クラスを 1 つ作る（クラスと meta）。引数: クローン 名前 [内容]
+it_add_class() {
+    printf '%s\n' "${3:-public class $2 { }}" > "$1/force-app/main/default/classes/$2.cls"
+    printf '<?xml version="1.0"?>\n<ApexClass xmlns="http://soap.sforce.com/2006/04/metadata"><apiVersion>60.0</apiVersion><status>Active</status></ApexClass>\n' \
+        > "$1/force-app/main/default/classes/$2.cls-meta.xml"
+}
+
+# deploy-target.txt を書く。引数: クローン ブランチ [ファイル...]（[files] セクション）
+it_set_deploy_target() {
+    local cl="$1" branch="$2"; shift 2
+    { echo "[files]"; for f in "$@"; do echo "$f"; done; } > "$cl/sf-tools/release/$branch/deploy-target.txt"
+}
+
+# bare の origin に、別の開発者として、コミットを積む（フックを通さない）。引数: ブランチ ファイルのパス 内容 メッセージ
+it_origin_commit() {
+    local br="$1" path="$2" content="$3" msg="$4" w="$IT_ROOT/other.$$.$RANDOM"
+    _it_git clone -q "$IT_ORIGIN" "$w" || return 1
+    ( cd "$w" || exit 1
+      _it_git checkout -q "$br" || exit 1
+      mkdir -p "$(dirname "$path")"; printf '%s\n' "$content" > "$path"
+      _it_git add -A && _it_git commit -q -m "$msg" --no-verify && _it_git push -q origin "$br" ) || { rm -rf "$w"; return 1; }
+    rm -rf "$w"
+}
+
+# fake の ssh（git の通信）を失敗させる／戻す（ネットワークの断の再現）
+it_ssh_fail() {
+    if [[ "$1" == "on" ]]; then : > "$IT_STATE/ssh.fail"; else rm -f "$IT_STATE/ssh.fail"; fi
+}
+
+# デプロイを失敗させる／戻す（コンパイルエラーなど）。引数: on メッセージ | off
+it_deploy_fail() {
+    if [[ "$1" == "on" ]]; then printf '%s\n' "${2:-Deploy failed}" > "$IT_STATE/sf.deployfail"; else rm -f "$IT_STATE/sf.deployfail"; fi
+}
+
+# ~/sf-tools の origin（ローカルの bare）に、新しいコミットを積む（利用者の ~/sf-tools が古くなった状態を作る）
+it_sftools_advance() {
+    local w="$IT_ROOT/sftools-w.$$"
+    _it_git clone -q "$IT_ROOT/sftools-origin.git" "$w" || return 1
+    ( cd "$w" || exit 1
+      echo "# 新しい版 $RANDOM" >> README.md
+      _it_git add -A && _it_git commit -q -m "sf-tools の新しい版" && _it_git push -q origin main ) || { rm -rf "$w"; return 1; }
+    rm -rf "$w"
+}
+
+# 組織からの取得（retrieve）で、カレントに書かれるファイルを決める。引数: 「パス|内容」…（なければ、何も書かない）
+it_set_retrieve() { : > "$IT_STATE/sf.retrieve"; local l; for l in "$@"; do printf '%s\n' "$l" >> "$IT_STATE/sf.retrieve"; done; }

@@ -9,7 +9,9 @@
 #   1. 現在のブランチ名を表示
 #   2. origin/main を fetch して現在ブランチにマージ（コンフリクトはエラー中止）
 #   3. カレント配下だけを git add --all
-#   4. 変更の有無をチェック（なければ終了）
+#   4. 変更の有無をチェック。なければ、未プッシュのコミットを確認する
+#        未プッシュのコミットがあれば、コミットせず、git push だけ行って終了（コミット後にプッシュが失敗した後の再実行用）
+#        なければ、何もせず終了
 #   5. sf-check.sh でターゲットファイルを検証（エラーなら終了）
 #   6. VS Code を別ウィンドウで開いてコミットメッセージを入力
 #   7. 入力があれば git commit / git push
@@ -87,6 +89,16 @@ run git -C "$REPO_ROOT" add --all -- "$TARGET_PATHSPEC" \
     || die "git add に失敗しました。"
 
 if git -C "$REPO_ROOT" diff --cached --quiet -- "$TARGET_PATHSPEC"; then
+    # 変更がなくても、未プッシュのコミットがあれば、プッシュだけ行う
+    #   （コミットは成功し、プッシュが失敗した後の再実行で、取り残されないように）。追跡先（upstream）がないときは、0 件として扱う
+    _unpushed=$(git -C "$REPO_ROOT" rev-list --count '@{u}..HEAD' 2>/dev/null) || _unpushed=0  # VAR=$(cmd) のため run 不使用
+    if [[ "$_unpushed" =~ ^[0-9]+$ && "$_unpushed" -gt 0 ]]; then
+        log "INFO" "未プッシュのコミットが ${_unpushed} 件あります。コミットはせず、プッシュだけ行います。"
+        run git -C "$REPO_ROOT" push \
+            || die "git push に失敗しました。"
+        log "SUCCESS" "未プッシュのコミットのプッシュが完了しました。"
+        exit $RET_OK
+    fi
     log "WARNING" "現在のディレクトリ配下に、コミット対象の変更がありません。"
     exit $RET_OK
 fi

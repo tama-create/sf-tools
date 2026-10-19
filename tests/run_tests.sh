@@ -176,6 +176,7 @@ TEST_FILES=(
     test_integration-metasync.sh
     test_integration-next.sh
     test_integration-init3.sh
+    test_integration-rerun.sh
 )
 
 # ------------------------------------------------------------------------------
@@ -220,7 +221,7 @@ if [[ "${1:-}" == "--changed" ]]; then
         # 結合テスト（L1）: コマンド・フック・結合テストの部品が変わったとき（時間がかかる: 1 回に数分）
         case "$_file" in
             bin/sf-*.sh|hooks/*|tests/integration/*|tests/test_integration.sh|tests/test_integration-[!c]*.sh)
-                _changed_tests+=("test_integration.sh" "test_integration-git.sh" "test_integration-guards.sh" "test_integration-secrets.sh" "test_integration-job.sh" "test_integration-misc.sh" "test_integration-init.sh" "test_integration-init2.sh" "test_integration-metasync.sh" "test_integration-next.sh" "test_integration-init3.sh")
+                _changed_tests+=("test_integration.sh" "test_integration-git.sh" "test_integration-guards.sh" "test_integration-secrets.sh" "test_integration-job.sh" "test_integration-misc.sh" "test_integration-init.sh" "test_integration-init2.sh" "test_integration-metasync.sh" "test_integration-next.sh" "test_integration-init3.sh" "test_integration-rerun.sh")
                 ;;
         esac
         case "$_file" in

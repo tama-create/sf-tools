@@ -371,7 +371,7 @@ Actions 上の実行は、コマンドによって扱いが違う。「全部拒
 
 凡例: ✅ = L1 を実装済み / △ = 一部だけ実装（残りは、右の欄） / — = 未実装 / 対象外 = 結合では扱わない（理由つき）。**L2（実環境）は、既存の e2e（`tests/e2e/`）が一部を代替しているが、シナリオ方式の L2 は、まだ作っていない**。
 
-実装ファイル: `tests/test_integration.sh`（日常の通し）・`-git.sh`（フック・取り込み・競合・並行）・`-guards.sh`（安全ガード）・`-secrets.sh`（秘密情報）・`-job.sh`（sf-job の失敗）・`-misc.sh`（日常の分岐・設定の不正・再実行）・`-init.sh`（sf-init の通し・中断と再開・生成物の改変）・`-init2.sh`（sf-init の状態の食い違い・失敗・同時実行）・`-metasync.sh`（sf-metasync のローカルの動作・後始末）・`-next.sh`（sf-next の判定）・`-init3.sh`（sf-init の診断・欠け・Salesforce の失敗・同時の作成）。部品は `tests/integration/lib.sh`・`init-lib.sh`。
+実装ファイル: `tests/test_integration.sh`（日常の通し）・`-git.sh`（フック・取り込み・競合・並行）・`-guards.sh`（安全ガード）・`-secrets.sh`（秘密情報）・`-job.sh`（sf-job の失敗）・`-misc.sh`（日常の分岐・設定の不正・再実行）・`-init.sh`（sf-init の通し・中断と再開・生成物の改変）・`-init2.sh`（sf-init の状態の食い違い・失敗・同時実行）・`-metasync.sh`（sf-metasync のローカルの動作・後始末）・`-next.sh`（sf-next の判定）・`-init3.sh`（sf-init の診断・欠け・Salesforce の失敗・同時の作成）・`-rerun.sh`（再実行・フックの改変）。部品は `tests/integration/lib.sh`・`init-lib.sh`。
 
 | パターン | 状態 | 場所・備考 |
 |---|---|---|
@@ -412,7 +412,7 @@ Actions 上の実行は、コマンドによって扱いが違う。「全部拒
 | X3-5 状態ファイルのリポジトリ名の食い違い | ✅ | init2 |
 | X3-6 進捗が先行 | ✅ | init2（不具合を見つけ、修正した） |
 | X3-7 完了の印と進捗の矛盾 | ✅ | init2（進捗 10 で main がない・印 1 で進捗が途中・印 0 の完了済み） |
-| X3-10 改変点ごとの拒否の表 | △ | init（A13 のクローンで: origin が別のリポジトリ・branches.txt がない（止まる。黙って作り直さない）・release/ がない（sf-install が復元）・組織に未接続）。ほかの改変点は未 |
+| X3-10 改変点ごとの拒否の表 | △ | init（A13 のクローンで: origin が別のリポジトリ・branches.txt がない（止まる。黙って作り直さない）・release/ がない（sf-install が復元））・rerun（フックの改変・削除 → sf-hook が戻す）・組織に未接続。ほかの改変点は未（sfdx-project.json の欠落は、fake の sf が、本物の sf のように、プロジェクトの外でのデプロイを拒否しないため、L1 では判定できない。L2） |
 | X3-8 admin の欠け・X3-9 欠けの検出 | ✅ | init3（admin ブランチが origin から消えた → 後片付けで戻る・--status の欠けの検出。`SF_TOOLS_BRANCH` を、配布版でも、不足にしていた不具合を見つけて、直した） |
 | X4-1 sf-init の同時起動 | ✅ | init2（見つけた競合を直した: 同じプロジェクトの sf-init は、ロックで排他する。2 つ目は拒否・強制終了で残った古いロックは引き継ぐ） |
 | X4-1a 同時 push | ✅ | git |
@@ -428,7 +428,7 @@ Actions 上の実行は、コマンドによって扱いが違う。「全部拒
 | X6-5 sf-sync-wf の上書き | ✅ | guards |
 | X7-1 秘密が漏れない | ✅ L1 | secrets・init（成功時・失敗時・中断時）。Actions のログ・Slack は L2 |
 | X7-2 一時ファイルの後始末 | △ | secrets（一時ファイルが残らない）。権限 600 は init（PAT の状態ファイル） |
-| X8-1 再実行の表 | △ | misc（hook・unhook）・test_integration.sh（install）・guards（sync-wf）・init（完了済みの sf-init）。ほかは未 |
+| X8-1 再実行の表 | ✅ | misc（hook・unhook）・test_integration.sh（install）・guards（sync-wf）・init（完了済みの sf-init）・rerun（sf-push の変更なしの再実行・sf-dryrun の連続実行・sf-update-secret の同じ入力の再実行）・metasync（変更なしの再実行 = M2）・job（同名の再実行 = X2-2） |
 | X8-4 主処理の失敗と後始末 | ✅ | metasync（SGD の失敗・push の拒否でも、元のブランチへ戻り、stash が復元される）。再実行で、push できなかったコミットが、origin に届く（直した） |
 | X8-5 後始末の一部の失敗 | △ | metasync（stash の復元が衝突しても、手元の変更は、失われない）。ほかの後始末は未 |
 | X8-2 失敗の画面が案内する復旧 | ✅ L1 | init（案内の表示と、実際の再開）・job（同名のブランチで続ける）・sf-push・sf-metasync（再実行で、未プッシュのコミットが届く）。L2 は未 |

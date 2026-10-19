@@ -170,6 +170,8 @@ test_X2_1_push() {
     git init -q --bare -b main "$IT_ORIGIN"; it_origin_reject on   # 空の bare を先に作り、push を拒否させる
     _init "$FULL_INPUT"
     assert_exit_fail "$IT_RC" "X2-1（push）: push が拒否されると、sf-init は失敗で終わる"
+    # X8-2: 失敗の画面が案内する復旧の手順（もう一度 sf-init.sh を実行し、「続きをやる」を選ぶ）が、出る。実際に通ることは、下の再開で確認する
+    it_out_has "「続きをやる」を選ぶと" && pass "X8-2: 失敗の画面に、復旧の手順（「続きをやる」を選ぶ）が、案内される" || fail "X8-2: 失敗の画面に、復旧の手順が、案内される" "$(it_out | sed 's/\x1b\[[0-9;]*m//g' | tail -5)"
     assert_equals "$(_progress)" "7" "X2-1（push）: 進捗は、Phase 7 まで（Phase 8 は、記録されない）"
     assert_equals "$(it_remote_snap | wc -l | tr -d ' ')" "0" "X2-1（push）: origin には、何も届いていない"
     _no_leak "$PAT_MARK" "X2-1（push）: 中断時の出力・ログ・一時ファイル"

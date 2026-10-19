@@ -89,6 +89,91 @@ ROWS
     assert_exit_ok "$IT_RC" "X3-2: branches.txt を戻すと、push が通る"
 }
 
+test_X5_3() {
+    echo -e "\n${CLR_HEAD}--- X5-3: 環境の不備（インストーラー版の sf・node なし・npm の失敗・CRLF）---${CLR_RST}"
+    local c _sp
+    IT_TIMEOUT=180
+
+    # sf が、npm 版でない（インストーラー版: sf --version が、成功しても 1 を返す）
+    it_fault_clear; it_fault sf "--version" 1 99 1 "sf: command failed"
+    it_run "$CL" bash "$IT_HOME/sf-tools/bin/sf-install.sh"
+    assert_exit_ok "$IT_RC" "X5-3（インストーラー版の sf）: sf-install は、警告だけで、続行する（sf-tools の最新化を、止めない）"
+    it_out_has "インストーラー版" && pass "X5-3（インストーラー版の sf）: sf-install は、警告で知らせる" || fail "X5-3（インストーラー版の sf）: sf-install は、警告で知らせる"
+    for c in "sf-metasync.sh" "sf-release.sh --release" "sf-dryrun.sh -n" "sf-start.sh"; do
+        read -ra _sp <<< "$c"; it_calls_clear
+        it_run "$CL" -i 'Y\nY\n' bash "$IT_HOME/sf-tools/bin/${_sp[0]}" "${_sp[@]:1}"
+        assert_exit_fail "$IT_RC" "X5-3（インストーラー版の sf）: ${c} は、中断する"
+        assert_equals "$(it_calls sf | grep -c 'deploy start')" "0" "X5-3（インストーラー版の sf）: ${c} は、デプロイしない"
+    done
+    it_fault_clear
+
+    # node がない（動かない）: 組織の情報を、読めないため、sf-dryrun は、デプロイせず、失敗で終わる
+    printf '#!/bin/bash\necho "node: command not found" >&2\nexit 127\n' > "$IT_BIN/node"; chmod +x "$IT_BIN/node"
+    it_calls_clear
+    it_run "$CL" bash "$IT_HOME/sf-tools/bin/sf-dryrun.sh" -n
+    assert_exit_fail "$IT_RC" "X5-3（node がない）: sf-dryrun は、失敗で終わる"
+    assert_equals "$(it_calls sf | grep -c 'deploy start')" "0" "X5-3（node がない）: デプロイ（検証）を呼ばない"
+    rm -f "$IT_BIN/node"
+
+    # npm install の失敗: 警告で続行する（sf-tools の最新化・フックの設置を、止めない）
+    echo "{}" > "$CL/package-lock.json"; touch "$CL/package-lock.json"
+    rm -rf "$CL/node_modules"
+    it_fault npm "install" 1 99 1 "npm ERR! network"
+    it_run "$CL" bash "$IT_HOME/sf-tools/bin/sf-install.sh"
+    assert_exit_ok "$IT_RC" "X5-3（npm install の失敗）: sf-install は、警告だけで、続行する"
+    it_out_has "npm install に失敗しました" && pass "X5-3（npm install の失敗）: 警告で知らせる" || fail "X5-3（npm install の失敗）: 警告で知らせる"
+    it_fault_clear
+    rm -f "$CL/package-lock.json"
+
+    # sf-tools の origin に、つながらない（ネットワークの断）: sf-install は、警告だけで、続行する（フックの設置などを、止めない）
+    mv "$IT_ROOT/sftools-origin.git" "$IT_ROOT/sftools-origin.git.off"
+    it_run "$CL" bash "$IT_HOME/sf-tools/bin/sf-install.sh"
+    assert_exit_ok "$IT_RC" "X1-8（sf-tools の origin に、つながらない）: sf-install は、警告だけで、続行する"
+    it_out_has "最新化に失敗しました" && pass "X1-8（sf-tools の origin に、つながらない）: 警告で知らせる" || fail "X1-8（sf-tools の origin に、つながらない）: 警告で知らせる" "$(it_out | tail -6)"
+    assert_file_exists "$CL/.git/hooks/pre-push" "X1-8（sf-tools の origin に、つながらない）: フックは、入っている（設置を、止めない）"
+    mv "$IT_ROOT/sftools-origin.git.off" "$IT_ROOT/sftools-origin.git"
+
+    # branches.txt の改行が CRLF（Windows で編集）でも、push のフックが、動く
+    local bt="$CL/sf-tools/config/branches.txt"; local orig; orig=$(cat "$bt")
+    printf 'main\r\nmain\r\n' > "$bt"; echo "crlf" > "$CL/ittmp-crlf.txt"
+    it_run "$CL" bash -c "git add -A && git commit -q -m 'crlf' --no-verify && git push origin JOB-A"
+    assert_exit_ok "$IT_RC" "X5-3（branches.txt が CRLF）: push のフックが、動いて、push できる"
+    printf '%s\n' "$orig" > "$bt"
+    IT_TIMEOUT=300
+}
+
+test_X4_1c() {
+    echo -e "\n${CLR_HEAD}--- X4-1c: 同じ組織への、同時のデプロイ（ロックの競合）---${CLR_RST}"
+    IT_TIMEOUT=300
+    it_make_clone devB JOB-B || { fail "X4-1c: devB の作成"; return; }
+    local clb="$IT_CL" pid i rc_a rc_b
+    it_add_class "$clb" ItLockB
+    it_set_deploy_target "$clb" JOB-B "force-app/main/default/classes/ItLockB.cls"
+    it_add_class "$CL" ItLockA
+    it_set_deploy_target "$CL" JOB-A "force-app/main/default/classes/ItLockA.cls"
+    echo 20 > "$IT_STATE/sf.deploy_delay"   # 1 つ目のデプロイは、20 秒かかる（その間、ロックを持つ）
+    it_calls_clear
+    (
+        export HOME="$IT_HOME" PATH="$IT_BIN:$PATH" IT_STATE IT_ORIGIN SF_LAUNCHER_ACTIVE=1 SF_TOOLS_SF_CHECK_STAMP=/dev/null TMPDIR="$IT_ROOT/tmp"
+        unset GITHUB_ACTIONS CI
+        cd "$CL" && bash "$IT_HOME/sf-tools/bin/sf-dryrun.sh" -n > "$IT_ROOT/lock_a.out" 2>&1; echo $? > "$IT_ROOT/lock_a.rc"
+    ) &
+    pid=$!
+    for i in $(seq 1 120); do [[ -d "$IT_STATE/sf.deploying" ]] && break; sleep 1; done
+    it_run "$clb" bash "$IT_HOME/sf-tools/bin/sf-dryrun.sh" -n      # 2 つ目: ロックで失敗する
+    rc_b=$IT_RC
+    wait "$pid"; rc_a=$(cat "$IT_ROOT/lock_a.rc")
+    assert_equals "$rc_a" "0" "X4-1c: 先に始めたデプロイは、成功する"
+    [[ "$rc_b" != "0" ]] && pass "X4-1c: 同時に始めた 2 つ目は、ロックで失敗する" || fail "X4-1c: 同時に始めた 2 つ目は、ロックで失敗する"
+    it_out_has "UNABLE_TO_LOCK_ROW" && pass "X4-1c: ロックの失敗の理由が、表示される" || fail "X4-1c: ロックの失敗の理由が、表示される"
+    [[ -d "$IT_STATE/sf.deploying" ]] && fail "X4-1c: ロックが、残らない" || pass "X4-1c: ロックが、残らない"
+    # 再実行（ロックが、解けている）→ 成功する
+    rm -f "$IT_STATE/sf.deploy_delay"
+    it_run "$clb" bash "$IT_HOME/sf-tools/bin/sf-dryrun.sh" -n
+    assert_exit_ok "$IT_RC" "X4-1c: ロックが解けた後の再実行は、成功する"
+    assert_equals "$(it_mutating_calls | wc -l | tr -d ' ')" "0" "X4-1c: dry-run は、どの場合も、組織へ書き込まない"
+}
+
 test_X3_3() {
     echo -e "\n${CLR_HEAD}--- X3-3: deploy-target.txt の書式の不正・CRLF ---${CLR_RST}"
     local dt="$CL/sf-tools/release/JOB-A/deploy-target.txt" label content
@@ -180,7 +265,7 @@ test_X8_1() {
 _it_timed() { local t0=$SECONDS rc; "$@"; rc=$?; echo "  （所要時間: $1 = $((SECONDS - t0)) 秒）"; return $rc; }
 
 test_setup || { print_summary; exit 1; }
-for _sc in ${IT_SCENARIOS:-A1 A12 X3_2 X3_3 X3_4 A10 X8_1}; do
+for _sc in ${IT_SCENARIOS:-A1 A12 X3_2 X5_3 X4_1c X3_3 X3_4 A10 X8_1}; do
     _it_timed "test_${_sc}" || break
 done
 

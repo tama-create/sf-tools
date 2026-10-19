@@ -23,6 +23,7 @@ _job() {
     local dir="$1" inp="$2"; shift 2
     local -a args=("$@")
     [[ ${#args[@]} -eq 0 ]] && args=(--owner "$IT_OWNER" --project "$IT_PROJECT")
+    [[ "${args[0]:-}" == "NOARGS" ]] && args=()   # 引数なし（NOARGS を渡す）
     it_run "$dir" -i "$inp" bash "$IT_HOME/sf-tools/bin/sf-job.sh" "${args[@]}"
 }
 _branches() { it_remote_snap | awk '{print $1}' | sed 's|refs/heads/||' | sort | tr '\n' ','; }
@@ -151,10 +152,40 @@ ROWS
     assert_dir_exists "$sp/JOB-SPACE/$IT_REPO/.git" "X5-2: 空白を含むパスに、clone できる"
 }
 
+# ------------------------------------------------------------------------------
+# A14: プロジェクトの判定（複数のクローン・同名で別のオーナー）
+# ------------------------------------------------------------------------------
+test_A14() {
+    echo -e "\n${CLR_HEAD}--- A14: クローンの git remote からの、プロジェクトの判定 ---${CLR_RST}"
+    local p="$IT_WORK/a14" b0; b0=$(_branches)
+    IT_TIMEOUT=180
+    mkdir -p "$p"
+    _mk() { mkdir -p "$p/$1"; _it_git init -q "$p/$1/$2"; _it_git -C "$p/$1/$2" remote add origin "ssh://git@github.com/$3/$2.git"; }
+    _mk JOB-1 force-itproj ownerA; _mk JOB-2 force-itproj ownerB; _mk JOB-3 force-other ownerA
+
+    # 引数なし: 複数のプロジェクトがあるとき、選ばせる
+    _job "$p" '1\n' NOARGS
+    it_out_has "どのプロジェクトですか" && pass "A14: クローンが複数あるとき、プロジェクトを選ばせる" || fail "A14: クローンが複数あるとき、プロジェクトを選ばせる" "$(it_out | tail -6)"
+
+    # --project だけ、同じ XXXX が、別のオーナーに 2 つ → 黙って最初のものを使わず、選ばせる
+    _job "$p" '2\n' --project itproj
+    it_out_has "どのオーナーの force-itproj ですか" && pass "A14: 同じ名前で、別のオーナーのクローンがあるとき、オーナーを選ばせる" || fail "A14: 同じ名前で、別のオーナーのクローンがあるとき、オーナーを選ばせる" "$(it_out | tail -6)"
+    it_out_has "リポジトリオーナー（ownerB）" && pass "A14: 選んだオーナー（ownerB）で、先へ進む（ownerA を、黙って使わない）" || fail "A14: 選んだオーナー（ownerB）で、先へ進む" "$(it_out | tail -4)"
+    _job "$p" '1\n' --project itproj
+    it_out_has "リポジトリオーナー（ownerA）" && pass "A14: 選んだオーナー（ownerA）で、先へ進む" || fail "A14: 選んだオーナー（ownerA）で、先へ進む" "$(it_out | tail -4)"
+
+    # --owner を指定すれば、選ばせず、そのオーナーのクローンから決まる
+    _job "$p" '' --owner ownerB --project itproj
+    it_out_has "どのオーナーの" && fail "A14: --owner 指定のときは、選ばせない" || pass "A14: --owner 指定のときは、選ばせない"
+    it_out_has "リポジトリオーナー（ownerB）" && pass "A14: --owner ownerB → ownerB で進む" || fail "A14: --owner ownerB → ownerB で進む"
+    assert_equals "$(_branches)" "$b0" "A14: どの場合も、origin にブランチを作らない"
+    IT_TIMEOUT=300
+}
+
 _it_timed() { local t0=$SECONDS rc; "$@"; rc=$?; echo "  （所要時間: $1 = $((SECONDS - t0)) 秒）"; return $rc; }
 
 test_setup || { print_summary; exit 1; }
-for _sc in ${IT_SCENARIOS:-gh_failures clone_failure invalid_input}; do
+for _sc in ${IT_SCENARIOS:-gh_failures clone_failure invalid_input A14}; do
     _it_timed "test_${_sc}" || break
 done
 

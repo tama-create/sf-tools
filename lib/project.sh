@@ -368,8 +368,18 @@ resolve_job_identity() {
     if [[ -n "$norm" ]]; then
         # XXXX は指定済み。オーナーは、指定がなければ、同じリポジトリのクローンから取る（なければ、対話）
         if [[ -z "$GITHUB_OWNER" ]]; then
-            line=$(printf '%s\n' "$clones" | awk -v r="force-${norm}" '$2 == r { print $1; exit }')  # VAR=$(cmd) のため run 不使用
-            GITHUB_OWNER="$line"
+            # 同じ XXXX のクローンが、複数のオーナーにあるときは、最初のものを、黙って使わず、選ばせる（別のオーナーの同名の
+            #   リポジトリを、操作してしまわないため）。大文字と小文字は、区別しない
+            local owners=() _o
+            while IFS= read -r _o; do [[ -n "$_o" ]] && owners+=("$_o"); done < <(printf '%s\n' "$clones" | awk -v r="force-${norm}" '$2 == r && !seen[tolower($1)]++ { print $1 }')
+            case ${#owners[@]} in
+                0) GITHUB_OWNER="" ;;
+                1) GITHUB_OWNER="${owners[0]}" ;;
+                *) local _labels=() _k pick=""
+                   for _k in "${owners[@]}"; do _labels+=("${_k}/force-${norm}"); done
+                   _pick_from_list pick "どのオーナーの force-${norm} ですか？（このフォルダの下に、同じ名前で、複数のオーナーのクローンがあります）" "${_labels[@]}"
+                   GITHUB_OWNER="${pick%%/*}" ;;
+            esac
         fi
         [[ -z "$GITHUB_OWNER" ]] && prompt_project_identity job
         return 0

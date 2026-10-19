@@ -61,6 +61,29 @@ test_X3_7() {
     assert_file_exists "$(_progf)" "X3-7: 保存した状態は、消さない"
 }
 
+test_X3_7b() {
+    echo -e "\n${CLR_HEAD}--- X3-7: 完了の印と進捗の矛盾 ---${CLR_RST}"
+    # (1) 完了の印は 1 だが、進捗は途中（7）→ 「完了済み」とは、扱わず、「続きをやる」を出す
+    mk_interrupted
+    _it_git -C "$(_admin)" config sf-tools.setup-complete 1
+    it_calls_clear
+    _init 'Y\nq\n'
+    it_out_has "前回のセットアップは" && pass "X3-7（印 1・進捗 7）: 「続きをやる」の質問が出る" || fail "X3-7（印 1・進捗 7）: 「続きをやる」の質問が出る" "$(it_out | tail -6)"
+    it_out_has "すでに完了しています" && fail "X3-7（印 1・進捗 7）: 完了済みとは、扱わない" || pass "X3-7（印 1・進捗 7）: 完了済みとは、扱わない"
+    assert_equals "$(it_mutating_calls | wc -l | tr -d ' ')" "0" "X3-7（印 1・進捗 7）: q で中断すると、外部へ書き込まない"
+
+    # (2) 完了済み（印 1・状態ファイルなし）のプロジェクトの、印を 0 に戻す → 完了済みとは、扱わない（途中で止まった「やり直し」の扱い）
+    _fresh || return 1; IT_TIMEOUT=900
+    _init "$FULL_INPUT"
+    assert_exit_ok "$IT_RC" "X3-7（印 0）: 準備: sf-init が、最後まで成功する"
+    IT_TIMEOUT=300
+    _it_git -C "$(_admin)" config sf-tools.setup-complete 0
+    it_calls_clear
+    _init 'Y\nq\n'
+    it_out_has "すでに完了しています" && fail "X3-7（印 0）: 印が 0 のプロジェクトは、完了済みとは、扱わない" || pass "X3-7（印 0）: 印が 0 のプロジェクトは、完了済みとは、扱わない"
+    it_out_has "途中で止まっています" && pass "X3-7（印 0）: 「やり直しが、途中で止まっています」と、知らせる" || fail "X3-7（印 0）: 「やり直しが、途中で止まっています」と、知らせる" "$(it_out | sed 's/\x1b\[[0-9;]*m//g' | tail -6)"
+}
+
 test_X1_2() {
     echo -e "\n${CLR_HEAD}--- X1-2: PAT の権限不足・無効な PAT ---${CLR_RST}"
     _fresh || return 1; IT_TIMEOUT=900
@@ -155,7 +178,7 @@ test_X4_1_stale() {
 
 _it_timed() { local t0=$SECONDS rc; "$@"; rc=$?; echo "  （所要時間: $1 = $((SECONDS - t0)) 秒）"; return $rc; }
 
-for _sc in ${IT_SCENARIOS:-X3_5 X3_6 X3_7 X1_2 X1_3 X4_1 X4_1_stale}; do
+for _sc in ${IT_SCENARIOS:-X3_5 X3_6 X3_7 X3_7b X1_2 X1_3 X4_1 X4_1_stale}; do
     _it_timed "test_${_sc}" || break
 done
 

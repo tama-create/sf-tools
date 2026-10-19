@@ -14,7 +14,7 @@
 # 【確認する項目】
 #   1. リポジトリ    : GitHub にあるか / branches.txt の各ブランチがあるか / ワークフロー 5 本があるか
 #   2. Secrets       : PAT_TOKEN / SLACK_BOT_TOKEN / SF_PRIVATE_KEY / 段階ごとの SF_CONSUMER_KEY_*
-#   3. Variables     : SLACK_CHANNEL_ID / SF_TOOLS_BRANCH / 段階ごとの SF_USERNAME_* / SF_INSTANCE_URL_*
+#   3. Variables     : SLACK_CHANNEL_ID / 段階ごとの SF_USERNAME_* / SF_INSTANCE_URL_*
 #                      （組織の種類の記録 SF_ORG_* は、なくても不足に数えない: 古いバージョンで作ったプロジェクトのため）
 #   4. 直近の実行    : wf-metasync / wf-release / wf-validate / wf-propagate の、直近の 1 回の結果（参考）
 #   Salesforce 側（外部クライアントアプリ・JWT 接続）は、ログインが必要なため、ここでは確認しない。
@@ -161,7 +161,6 @@ diag_run() {
     echo "  Variables" >&2
     if names=$(_diag_names variable "$repo"); then  # 条件チェック
         _diag_need "$names" SLACK_CHANNEL_ID "プロジェクトのフォルダで sf-init.sh --only 7"
-        _diag_need "$names" SF_TOOLS_BRANCH "プロジェクトのフォルダで sf-init.sh --only 9"
         for tier in "${tiers[@]}"; do
             suffix=$(_diag_suffix "$tier")
             [[ -n "$suffix" ]] || continue

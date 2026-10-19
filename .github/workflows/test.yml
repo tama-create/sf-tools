@@ -111,7 +111,7 @@ jobs:
   # --------------------------------------------------------------------------
   # 結合テスト L1（ローカル結合）: 実際の git ＋ ローカルの bare リポジトリ ＋ gh・sf・npm の fake で、
   # 複数のコマンドを連動させる（tests/test_integration.sh。計画: doc/integration-test-plan.md）。
-  # 全件テストとは別のジョブにして、3 つの OS で並行して動かす（Windows は、プロセスの起動が遅いため、シナリオと入力を絞る）。
+  # 全件テストとは別のジョブにして、3 つの OS で並行して動かす（2026-10-19 の実測: Ubuntu 約 40 秒・macOS 約 1 分・Windows 約 2 分）。
   # --------------------------------------------------------------------------
   integration:
     name: 結合テスト L1（${{ matrix.os }}）
@@ -136,10 +136,6 @@ jobs:
         if: runner.os != 'Windows'
         run: /bin/bash tests/test_integration.sh
 
-      # Windows は、時間の予算のため、シナリオと入力を絞る（A13a と X6-1 の表と、X6-2 の n・EOF）
-      - name: 結合テストを実行（Windows）
+      - name: 結合テストを実行（Windows・Git Bash）
         if: runner.os == 'Windows'
-        env:
-          IT_SCENARIOS: "A13a X6_2 X6_1"
-          IT_X62_QUICK: "1"
         run: bash tests/test_integration.sh

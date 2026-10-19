@@ -128,6 +128,8 @@ it_run() {
     (
         cd "$dir" || exit 99
         export HOME="$IT_HOME" PATH="$IT_BIN:$PATH" IT_STATE IT_ORIGIN
+        # CI（GitHub Actions）の環境変数を持ち込まない（持ち込むと、管理者向けの確認が省略され、結果が変わる）。X6-1 は env で明示する
+        unset GITHUB_ACTIONS CI GH_TOKEN GITHUB_TOKEN
         export SF_LAUNCHER_ACTIVE=1 SF_TOOLS_SF_CHECK_STAMP=/dev/null
         export GIT_TERMINAL_PROMPT=0 GIT_CONFIG_NOSYSTEM=1 GIT_SSH_COMMAND="$IT_BIN/ssh"
         export E2E_COMMIT_MSG="${IT_COMMIT_MSG:-$IT_COMMIT_MSG_DEFAULT}"

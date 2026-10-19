@@ -102,9 +102,10 @@
 - **リモートの扱い**: グローバルの git の設定 `url."ssh://git@github.com/".insteadOf "https://github.com/"` ＋ 環境変数 `GIT_SSH_COMMAND`（fake の `ssh`）で、`https://github.com/...` を、ローカルの bare に向ける。`https` のまま bare に向けると、`git remote get-url origin` がローカルのパスを返し、オーナー・リポジトリ名を読むコード（`lib/project.sh` など）が動かないため、`ssh://git@github.com/OWNER/REPO` の形で返るようにしている（`sf-init --verify` など、URL を読むコマンドが動く）。
 - **fake**: `gh`（`auth`・`repo view`・`api user`・`api repos/R/branches/B`・`api repos/R/git/refs` の POST のみ。ブランチの作成は、bare への `update-ref`）・`sf`（`org display`・`org login`・`project generate manifest`・`project deploy start` など。ログイン状態は `state/sf.alias`）・`npm`・`curl`・`code`（`--wait` で渡されたファイルに、コミットメッセージを書く）。**未対応の呼び出しは、終了コード 99 と「未対応の呼び出し」で失敗する**（黙って成功しない）。呼び出しは、すべて `state/calls.log` に記録する。
 - **故障注入**: `it_fault CMD パターン N 回数 終了コード メッセージ [遅延]`（fake の呼び出しの N 回目から、回数だけ失敗させる）。git のプッシュの失敗は、`it_origin_reject on`（bare の `pre-receive` フック）。
+- **環境の隔離**: `it_run` は、`GITHUB_ACTIONS`・`CI`・`GH_TOKEN`・`GITHUB_TOKEN` を外して実行する（CI のランナーは `GITHUB_ACTIONS=true` を持っており、持ち込むと、管理者向けの確認が省略され、結果が変わる。CI で初めて見つかった）。X6-1 は、`env GITHUB_ACTIONS=true` で明示する。
 - **ツール更新の保護**: `sf-install` の 24 時間に 1 回のツール更新は、Windows で本物の `git update-git-for-windows` を動かすため、サンドボックスには、更新済みのスタンプ（`.sf-tools-last-update`）を置く。更新の経路を確かめるテストでは、先に `it_block_git_update` を呼ぶ。
 - **不変条件の部品**: `it_snap`（HEAD・コミット数・ブランチ・フック数・未コミット数）・`it_remote_snap`・`it_mutating_calls`（外部へ書き込む呼び出しの一覧）・`it_leak_count`（秘密の漏れ）。
-- **時間**: シナリオごとの所要時間を出す。`IT_SHOW_RUNS=1` で、遅い呼び出しの上位を出す。Linux（WSL）では、全体で 1 分未満。Windows（Git Bash）は、プロセスの起動が遅く、約 10 分。CI では、Windows だけ、シナリオを `A13a X6_2 X6_1` に絞り（`IT_SCENARIOS`）、X6-2 の入力を n と EOF に絞る（`IT_X62_QUICK=1`）。
+- **時間**: シナリオごとの所要時間を出す。`IT_SHOW_RUNS=1` で、遅い呼び出しの上位を出す。CI の実測（2026-10-19）は、Ubuntu 約 40 秒・macOS 約 1 分・Windows 約 2 分。手元の Windows（Git Bash）は、プロセスの起動が遅く、約 10 分かかる。`IT_SCENARIOS`（実行するシナリオ。既定は全部）・`IT_X62_QUICK=1`（X6-2 の入力を n と EOF に絞る）で、短くできる。
 - **実行**: `run_tests.sh` の全件に含まれる（時間のかかるファイルとして先に起動）。CI の全件テストのジョブは、`SF_TEST_SKIP_INTEGRATION=1` で外し、別のジョブ `integration`（Ubuntu・macOS・Windows）で動かす。`--changed` は、`bin/sf-*.sh`・`hooks/*`・`tests/integration/*` の変更で、含める。
 - **見つかった現状の挙動**: `sf-push` は、コミット対象の変更がないと「コミット対象なし」で終わる。プッシュが失敗した後に再実行しても、未プッシュのコミットは、プッシュされない（X2-3 に、現状として記録。挙動を変えたら、テストを直す）。
 

@@ -159,7 +159,8 @@ test_X4_1b() {
     local ok=0; [[ "$rc1" == "0" ]] && ok=$((ok + 1)); [[ "$rc2" == "0" ]] && ok=$((ok + 1))
     assert_equals "$ok" "1" "X4-1b: 同名のリポジトリの同時作成は、片方だけが、成功する"
     local loser_out="$IT_ROOT/r1.out"; [[ "$rc1" == "0" ]] && loser_out="$IT_ROOT/r2.out"
-    grep -q "作成に失敗\|already exists" "$loser_out" && pass "X4-1b: 負けた側に、作成の失敗の理由が、表示される" || fail "X4-1b: 負けた側に、作成の失敗の理由が、表示される" "$(sed 's/\x1b\[[0-9;]*m//g' "$loser_out" | tail -5)"
+    # 負けた側が止まる場所は、タイミングで変わる（作成の失敗 / 先に勝った側が main を push した後の初回コミットの失敗）。どちらも、失敗の画面（原因つき）が出ること
+    grep -q "作成に失敗\|already exists\|原因     :" "$loser_out" && pass "X4-1b: 負けた側に、失敗の画面（原因つき）が、表示される" || fail "X4-1b: 負けた側に、失敗の画面（原因つき）が、表示される" "$(sed 's/\x1b\[[0-9;]*m//g' "$loser_out" | tail -5)"
     assert_equals "$(it_remote_count main)" "1" "X4-1b: main の初回コミットは 1 つ（重複しない）"
     assert_equals "$(grep -cxF "${IT_OWNER}/${IT_REPO}" "$IT_STATE/repos")" "1" "X4-1b: リポジトリは、1 つだけ登録されている"
     # 【現状の限界】排他（ロック）は、同じ admin フォルダの中だけ。別のフォルダから、同名のリポジトリを同時に作ると、作成に失敗した側も、

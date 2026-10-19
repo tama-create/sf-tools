@@ -27,7 +27,7 @@
 | リリース | 検証 OK の報告後に rr を依頼 |
 
 > **mm の前にテスト全件 PASS は必須。PASS 確認なしの mm 依頼は禁止。**
-> **rr の前に、テスト全件 PASS と、e2e による実動作確認の結果が必須。どちらかが欠けた rr 依頼は断ること。**
+> **rr の前に、テスト全件 PASS（CI も成功）が必須。さらに、`main` との差分に配布物のパス（`bin/` `lib/` `phases/` `hooks/` `templates/` `config/`）が含まれるときは、e2e による実動作確認の結果も必須。** 配布物のパスの変更がなく、`tests/` `doc/` `.github/workflows/test.yml` などだけの変更なら、e2e は不要（確認: `git diff --stat origin/main...development -- bin lib phases hooks templates config` が空）。必須の項目が欠けた rr 依頼は断ること。
 > **変更に e2e の確認が足りないときは、e2e のほうを広げる**（手動の検証を、ユーザーに頼まない）。
 
 ### 1.3 mm / rr 実行手順

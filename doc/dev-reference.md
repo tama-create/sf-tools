@@ -827,6 +827,10 @@ sf-tools の `main` への反映は、全ユーザーへの配布と同義であ
 
 変更内容に応じて、必要な項目を実施し、結果をユーザーが報告する。
 
+**配布物のパス**は、利用者が `git pull` で受け取る実行物の `bin/` `lib/` `phases/` `hooks/` `templates/` `config/`。`tests/` `doc/` `.github/workflows/test.yml` `README.md` などは、実行に使われないため、配布物ではない（同じリポジトリにあるが、利用者の動作には影響しない）。
+
+`git diff --stat origin/main...development -- bin lib phases hooks templates config` が**空**（配布物のパスの変更がない）なら、下の表のうち「テスト」だけを確認する（e2e・ワークフローの手動実行は不要）。**空でなければ**、変更内容に応じて、表の該当する項目を実施する。
+
 | 確認項目 | 方法 |
 |---|---|
 | テスト | `bash tests/run_tests.sh` が全件 PASS |
@@ -838,7 +842,7 @@ sf-tools の `main` への反映は、全ユーザーへの配布と同義であ
 
 ### 9.4 リリース（rr）
 
-1. 9.3 の確認が完了し、ユーザーが結果を報告している
+1. 9.3 の確認が完了している（配布物のパスの変更がないときは、全件テストと CI の成功だけでよい）
 2. 「rr」の指示で、`development` → `main` の PR を作成してマージする（手順は `CLAUDE.md` 1.3.2）
 3. マージ後、`main` の内容を検証環境の force-* でもう一度確認する
 

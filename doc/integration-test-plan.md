@@ -358,7 +358,7 @@ Actions 上の実行は、コマンドによって扱いが違う。「全部拒
 1. **L1 の基盤（最小）**: 実 `git` ＋ローカル bare ＋ 複数 clone、呼び出し別の故障注入つきの `gh`・`sf`・`curl` のモック、不変条件の確認の部品（4.5）。これで、**A13・X6-1・X6-2・X6-4（L1）・X2-3・X7-1** を入れる。
    - **実装済み（第 1 弾）**: `tests/integration/lib.sh`（ハーネス・fake・故障注入・不変条件の部品）と、`tests/test_integration.sh` の **A13a・X2-3・X6-2・X6-1**（詳細は `doc/dev-reference.md` 2.1.2）。A13a は、テンプレートから作った最小のリポジトリで、`sf-job` → `sf-start` → `sf-install` → `sf-hook` → `sf-dryrun` → `sf-push` を通す（`sf-init` の生成物との通しは L2 の C1）。
    - **第 1 弾で分かったこと**: (1) `sf-push` は、プッシュが失敗した後の再実行で、未プッシュのコミットを、プッシュしなかった（X2-3 で見つかり、変更がなくても未プッシュのコミットがあれば、プッシュだけ行うように直した）。(2) X6-1 は「Actions 上は全部拒否」ではなく、コマンドごとに違う（6.6.1）。(3) `git remote get-url` を使うコードのため、リモートは `ssh://git@github.com/...` に読み替える形にした。(4) `sf-install` のツール更新は、Windows で本物の Git 更新を動かすため、スタンプで止めている。
-   - **未実装（第 1 弾に含めなかった）**: X6-4（L1）・X7-1。`sf-init --verify` は、結合では扱わない（6.6.1）。
+   - **その後（同日）の追加**: X6-4・X7-1 を含め、L1 の多くを実装した。**実装状況の一覧（どこまで終わったか）は、8.1**。`sf-init --verify` は、結合では扱わない（6.6.1）。
 2. **状態を持つ fake**（4.4.1 の 1・2・6・7）を足し、**X2-1（6.2.1 の表）・X3-5〜X3-10・X4-1a〜c・X8-4・X8-5** を入れる。
 3. L1 に、A1・A5・X1-2・X1-7・X10-1・X3-2 を足す。
 4. L2 をシナリオ方式に分け、**C1・B1・B3・X3-1・X8-2** を足す。
@@ -366,6 +366,76 @@ Actions 上の実行は、コマンドによって扱いが違う。「全部拒
 6. 残りは、優先度の順に、変更に関わるものから、足していく。
 
 > 既存の単体テスト（`tests/test_sf-init.sh`・`tests/test_wf-sequence.sh` など）で、代替できるケースは、重複して作らない（作る前に、代替できるかを確認する）。
+
+### 8.1 実装状況（2026-10-19 時点。どこまで終わったか）
+
+凡例: ✅ = L1 を実装済み / △ = 一部だけ実装（残りは、右の欄） / — = 未実装 / 対象外 = 結合では扱わない（理由つき）。**L2（実環境）は、既存の e2e（`tests/e2e/`）が一部を代替しているが、シナリオ方式の L2 は、まだ作っていない**。
+
+実装ファイル: `tests/test_integration.sh`（日常の通し）・`-git.sh`（フック・取り込み・競合・並行）・`-guards.sh`（安全ガード）・`-secrets.sh`（秘密情報）・`-job.sh`（sf-job の失敗）・`-misc.sh`（日常の分岐・設定の不正・再実行）・`-init.sh`（sf-init の通し・中断と再開・生成物の改変）・`-init2.sh`（sf-init の状態の食い違い・失敗・同時実行）・`-metasync.sh`（sf-metasync のローカルの動作・後始末）。部品は `tests/integration/lib.sh`・`init-lib.sh`。
+
+| パターン | 状態 | 場所・備考 |
+|---|---|---|
+| A1 壊れた Apex → dryrun | ✅ L1 | misc。L2 は未 |
+| A2 pre-push フック | ✅ | git（`main` への直接 push の拒否を含む） |
+| A4 sf-check の指摘 | ✅ | guards（X6-4）・misc（X3-3） |
+| A5 main が進んだ | △ | git（push 前の自動取り込み）。`sf-next` の判定は未 |
+| A6 / X4-2 コンフリクト | ✅ | git |
+| A7 2 つのジョブ | ✅ | git |
+| A9 sf-unhook ⇄ sf-hook | ✅ | git。`sf-unhook` が pre-push だけを外す（pre-commit は残る）のは、意図した仕様（プッシュの検証だけを止めるのが狙い。2026-10-19 に確認済み） |
+| A10 sf-install の間隔・判定 | ✅ | misc |
+| A12 sf-deploy の確認 | ✅ | misc |
+| A13 sf-init の生成物 → 後続コマンド | ✅ | init（A13）。A13a は `tests/test_integration.sh`（テンプレート版） |
+| A14 URL からのプロジェクト判定（複数 clone） | — | 単体（`test_project-identity.sh`）のみ |
+| A15 pre-commit フック | ✅ | git |
+| A3・A8 | — | L2 のみ（未） |
+| B1 / X2-1 sf-init の中断と再開 | ✅ L1 | init（5 つの止め方）。L2 は未 |
+| B2 sf-update-secret | △ | secrets（L1）。L2 は未 |
+| B4 sf-sync-wf | △ | guards（X6-5。L1 のローカル部分）。L2 は未 |
+| B3 wf-metasync の実差分の反映 | △ | metasync（ローカルの同期の動作。フックのあるクローンでは、main への push が止められる現状を記録）。実環境の差分の反映は L2（未） |
+| B5〜B8・C1〜C7 | — | L2・手動（未） |
+| X1-1 GitHub の一時的な失敗 | △ | job（ブランチ作成の失敗 → 再実行）。ほかの API は未 |
+| X1-2 PAT の権限不足・失効 | ✅ | init2（権限不足・無効） |
+| X1-3 別ユーザー・名前の衝突 | ✅ | init2・job |
+| X1-4 認証 URL の失効 | △ | secrets（JWT の接続テストの失敗）。`sf-init` の Phase 10 の失敗は未 |
+| X1-6 テスト失敗・コンパイルエラー | △ | misc（コンパイルエラー）。カバレッジ不足は L2 |
+| X1-8 ネットワークの断 | △ | job・init（clone の失敗）。`npm` は未 |
+| X1-5 組織のロック | — | L2 |
+| X1-7・X10-1・X10-2 Slack の失敗 | 対象外（L1） | `curl` を使うのはワークフロー（YAML）だけで、L1 では動かせない。L2 |
+| X2-2 sf-job の途中の失敗 | ✅ | job（同じジョブ名で「続ける」と、ブランチを作らず、clone だけをやり直せる。重複しない） |
+| X2-3 sf-push のプッシュ失敗 | ✅ | test_integration.sh（不具合を見つけ、修正した） |
+| X2-5 進捗の更新前の停止 | ✅ | init（Phase 8 の push の失敗） |
+| X2-4 | — | L2 |
+| X3-1 手動削除後の再実行 | △ | init2（X3-6・X3-7: `main` がない状態）。Secret・ブランチの削除は未 |
+| X3-2 branches.txt の不正 | ✅ | misc（origin にないブランチ名は、警告してスキップし、push は止めない） |
+| X3-3 deploy-target の不正 | ✅ | misc |
+| X3-4 古い `~/sf-tools` | ✅ | misc（sf-sync-wf の更新確認） |
+| X3-5 状態ファイルのリポジトリ名の食い違い | ✅ | init2 |
+| X3-6 進捗が先行 | ✅ | init2（不具合を見つけ、修正した） |
+| X3-7 完了の印と進捗の矛盾 | △ | init2（進捗 10 で `main` がない）。印 1・進捗途中などは未 |
+| X3-10 改変点ごとの拒否の表 | △ | init（A13 のクローンで: origin が別のリポジトリ・branches.txt がない（止まる。黙って作り直さない）・release/ がない（sf-install が復元）・組織に未接続）。ほかの改変点は未 |
+| X3-8・X3-9 | — | 未 |
+| X4-1 sf-init の同時起動 | ✅ | init2（見つけた競合を直した: 同じプロジェクトの sf-init は、ロックで排他する。2 つ目は拒否・強制終了で残った古いロックは引き継ぐ） |
+| X4-1a 同時 push | ✅ | git |
+| X4-1b・X4-1c（GitHub・Salesforce の競合） | — | 未（fake の競合の仕組みが要る） |
+| X4-3・X4-4・X4-5 | — | L2 |
+| X5-1 ジョブ名の不正 | ✅ | job |
+| X5-2 パスの空白・日本語 | ✅ | job |
+| X5-3 CRLF・`node` なし・書き込めない | — | 未 |
+| X6-1 管理者向けコマンドの拒否 | ✅ | test_integration.sh（Actions 上）・guards（別のオーナー・admin・force-* の外・prod） |
+| X6-2 確認の n / q / EOF / 空 | ✅ | test_integration.sh |
+| X6-3 main への push の拒否 | △ | git（L1 のフック部分）。Actions 側は L2 |
+| X6-4 remove-target の危険な入力 | ✅ L1 | guards（不具合を見つけ、修正した）。L2 の代表 1 ケースは未 |
+| X6-5 sf-sync-wf の上書き | ✅ | guards |
+| X7-1 秘密が漏れない | ✅ L1 | secrets・init（成功時・失敗時・中断時）。Actions のログ・Slack は L2 |
+| X7-2 一時ファイルの後始末 | △ | secrets（一時ファイルが残らない）。権限 600 は init（PAT の状態ファイル） |
+| X8-1 再実行の表 | △ | misc（hook・unhook）・test_integration.sh（install）・guards（sync-wf）・init（完了済みの sf-init）。ほかは未 |
+| X8-4 主処理の失敗と後始末 | ✅ | metasync（SGD の失敗・push の拒否でも、元のブランチへ戻り、stash が復元される）。再実行で、push できなかったコミットが、origin に届く（直した） |
+| X8-5 後始末の一部の失敗 | △ | metasync（stash の復元が衝突しても、手元の変更は、失われない）。ほかの後始末は未 |
+| X8-2・X8-3 | — | 未 |
+| X9-1・X9-2 | — | 未 |
+| X10-3・X10-4 | — | L2・e2e（未） |
+
+**この段階で見つかり、直したもの**: `sf-push` の再実行（X2-3）・`sf-check` の外部パス（X6-4）・`sf-init` の進捗の先行（X3-6・X3-7）・`sf-init` の同時起動（X4-1。Windows で、Ruleset が重複した。ロックを入れた）・`sf-prepush` の `branches.txt`（origin にないブランチ名が、すべての push を止めた。X3-2）・`sf-job` の同名ブランチ（clone だけをやり直せなかった。X2-2。環境ブランチの名前も、ジョブ名に使えないようにした）・`sf-metasync`（フックのあるクローンで main への push が止められた・push できなかったコミットが取り残された。M0・M4）。**意図した仕様（確認済み）**: `sf-unhook` は pre-push だけを外す（プッシュの検証だけを止めるのが狙い）。
 
 ---
 

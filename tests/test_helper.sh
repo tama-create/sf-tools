@@ -204,7 +204,11 @@ case "$1" in
         exit "${MOCK_GIT_DIFF_EXIT:-0}" ;;
     config)         exit 0 ;;
     remote)         echo "https://github.com/mock-owner/mock-repo.git"; exit 0 ;;
-    ls-remote)      exit "${MOCK_GIT_LS_REMOTE_EXIT:-0}" ;;
+    ls-remote)
+        # MOCK_GIT_LS_REMOTE_MISSING=<ブランチ名（空白区切り）>: そのブランチだけ、リモートにない（exit 2）
+        for _m in ${MOCK_GIT_LS_REMOTE_MISSING:-}; do [[ " $* " == *" $_m "* ]] && exit 2; done
+        exit "${MOCK_GIT_LS_REMOTE_EXIT:-0}" ;;
+    rev-list)       echo "${MOCK_GIT_REV_LIST_COUNT:-0}"; exit 0 ;;   # 未プッシュのコミットの件数（git rev-list --count origin/X..HEAD）
     update-git-for-windows) exit 0 ;;
     *)              exit 0 ;;
 esac

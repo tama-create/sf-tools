@@ -310,8 +310,35 @@ test_fetch_targets_safe() {
 }
 
 # ------------------------------------------------------------------------------
+# branches.txt に、origin にまだないブランチ名があっても、push は止まらない（その名前だけ取得しない）
+#   結合テスト X3-2 で見つかった: 以前は、git fetch が「見つからない」で失敗し、すべての push が止まった
+# ------------------------------------------------------------------------------
+test_missing_remote_branch_skipped() {
+    local td mb
+    td=$(setup_force_dir); mb=$(setup_mock_bin)
+    export MOCK_CALL_LOG="$mb/calls.log"
+    export MOCK_GIT_BRANCH="feature/test"
+    export MOCK_GIT_LOG_BRANCH_OUTPUT=""
+    export MOCK_GIT_LOG_MAIN_OUTPUT=""
+    export MOCK_GIT_LS_REMOTE_MISSING="staging"
+    create_mock_git "$mb"
+    printf 'main\nstaging\ndevelop\n' > "$td/sf-tools/config/branches.txt"
+
+    local out; out=$(run_prepush "$td" "$mb")
+    local ec=$?
+
+    assert_exit_ok $ec "origin にないブランチ名が書かれていても → 正常終了（push を止めない）"
+    assert_file_contains "$mb/calls.log" "git fetch -q origin -- feature/test main develop" \
+        "origin にあるブランチだけを git fetch に渡す（staging は渡さない）"
+    assert_output_contains "$out" "origin に、まだありません（取得しません）: staging" "取得しなかったブランチを、警告で知らせる"
+    teardown "$td" "$mb"
+    unset MOCK_GIT_BRANCH MOCK_GIT_LOG_BRANCH_OUTPUT MOCK_GIT_LOG_MAIN_OUTPUT MOCK_GIT_LS_REMOTE_MISSING
+}
+
+# ------------------------------------------------------------------------------
 # 実行
 # ------------------------------------------------------------------------------
+test_missing_remote_branch_skipped
 test_fetch_targets_safe
 test_block_push_to_main
 test_block_push_to_staging

@@ -131,11 +131,14 @@ jobs:
       - name: ソースコードを取得
         uses: actions/checkout@v4
 
-      # macOS は、標準の Bash 3.2（/bin/bash）のまま実行する。Windows は Git Bash
+      # 結合テストのファイル（tests/test_integration*.sh。表のガード test_integration-coverage.sh は、全件テストで動くため除く）を、
+      # run_tests.sh で、並列に実行する。macOS は、標準の Bash 3.2（/bin/bash）のまま実行する。Windows は Git Bash（WSL には移らない）
       - name: 結合テストを実行（Windows 以外）
         if: runner.os != 'Windows'
-        run: /bin/bash tests/test_integration.sh
+        run: /bin/bash tests/run_tests.sh $(cd tests && ls test_integration*.sh | grep -v coverage)
 
       - name: 結合テストを実行（Windows・Git Bash）
         if: runner.os == 'Windows'
-        run: bash tests/test_integration.sh
+        env:
+          SF_TEST_NO_WSL: "1"
+        run: bash tests/run_tests.sh $(cd tests && ls test_integration*.sh | grep -v coverage)

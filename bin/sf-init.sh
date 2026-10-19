@@ -59,6 +59,8 @@
 #     [1] 次の Phase から続きをやる（Phase 1 の環境チェックを実行したうえで、続きから。保存済みの入力内容を使う）
 #     [2] 最初からやり直す（保存した状態を消して Phase 1 から。作成済みのリポジトリ・admin フォルダは、そのまま使う）
 #   管理者向けの警告・確認と gh のオーナー確認は、どちらの場合も、毎回、実行する。
+#   ただし、Phase 8（初回コミットの push）まで完了と記録されているのに、GitHub に main ブランチがないとき（状態ファイルと実体の食い違い）は、
+#   [1] を選んでも続けずに拒否する（main のないまま「完了」と表示しないため）。完了の直前の記録（進捗 10）も、同じ確認をする。
 #   --resume N / --only N を指定した場合は、この質問をせず、指定を優先する。ただし、完了済みのプロジェクトでは、
 #   --resume N は拒否する（接続処理などを、確認なしで、やり直さないため）。
 #   Phase 10（Salesforce の接続）は、段階（main / staging / develop）ごとに、完了を進捗に記録し、再実行では、完了した段階を、
@@ -66,6 +68,10 @@
 #   セットアップが完了済み（SF_INIT_DONE_PHASE=10）のプロジェクトで起動したときは、「続きをやる」ではなく、
 #   [1] いまの Salesforce の接続を見る（status.sh。何も変更しない） / [2] 動作を確認する（verify.sh = --verify） /
 #   [3] 最初からやり直す / [q] 終了 を選ばせる。
+#
+# 【同時実行】
+#   同じ作業フォルダの admin・同じ XXXX で、sf-init.sh を、同時に 2 つ動かすことはできない（後から起動した方は、「すでに実行中です」で拒否される）。
+#   admin/.sf-init-XXXX.lock（フォルダ。中に PID）で排他する。実行していたプロセスが、強制終了などで、もういないときは、古いロックとして引き継ぐ。
 #
 # 【動作の確認（最後のステップ）】
 #   最後（Phase 10）まで実行したあと、対話できる端末のときは、「動作を確認しますか？ [Enter = 確認する / s = あとで]」を聞く
@@ -389,6 +395,22 @@ export SF_INIT_ENV_FILE="${PWD}/.sf-init${_state_suffix}.env"
 
 # 進捗ファイル（成功した Phase を記録する。.sf-init-XXXX.env とは別にする: 書き換えるときに、外部コマンドを使わないため）
 export SF_INIT_PROGRESS_FILE="${PWD}/.sf-init${_state_suffix}.progress"
+
+# 同じプロジェクト（同じ admin フォルダ・同じ XXXX）の sf-init を、同時に 2 つ動かさない（状態ファイルの取り合い・重複作成を防ぐ）。
+#   ロックは、フォルダ（mkdir は、原子的）。中に、実行中の PID を書く。PID のプロセスが、もういなければ、古いロックとして引き継ぐ
+#   （強制終了・SIGTERM では、ロックが残るため）。終了時に、削除する（EXIT トラップ）
+_init_lock_dir="${PWD}/.sf-init${_state_suffix}.lock"
+if ! mkdir "$_init_lock_dir" 2>/dev/null; then  # 条件チェックのため run 不使用（ロックの取得は、mkdir の成否で決まる）
+    _init_lock_pid=$(cat "$_init_lock_dir/pid" 2>/dev/null || true)  # VAR=$(cmd) のため run 不使用
+    if [[ "$_init_lock_pid" =~ ^[0-9]+$ ]] && kill -0 "$_init_lock_pid" 2>/dev/null; then  # 存在確認のため run 不使用
+        die "同じプロジェクト（${COMPANY_NAME}）の sf-init が、すでに実行中です（PID ${_init_lock_pid}。${_init_lock_dir}）。"
+    fi
+    log "WARNING" "前回の sf-init の、古いロックを引き継ぎます（実行中のプロセスは、ありません）: ${_init_lock_dir}"
+    rm -rf "$_init_lock_dir"  # 古いロックの削除（実行中のプロセスがいないことを確認済み）
+    mkdir "$_init_lock_dir" 2>/dev/null || die "ロックを取得できません（別の sf-init が、同時に、起動した可能性があります）: ${_init_lock_dir}"
+fi
+echo "$$" > "$_init_lock_dir/pid"
+trap 'rm -rf "$_init_lock_dir"' EXIT
 # Phase 10 の、段階ごとの再開（完了した段階を、進捗に記録し、再実行ではスキップする）。--only のときは、使わない
 [[ -z "$ONLY_PHASE" ]] && export SF_INIT_TIER_RESUME=1
 
@@ -445,6 +467,14 @@ _finish_unfinished_setup() {
     return 0
 }
 
+# origin に main ブランチがあることを確認する。なければ die（事実のみ）。引数: リポジトリ（OWNER/REPO） 理由の文（先頭に付ける）
+#   gh で確認できないとき（通信の失敗など）も、確認できないため、die する
+_require_origin_main() {
+    local repo="$1" why="$2"
+    gh api "repos/${repo}/branches/main" >/dev/null 2>&1 \
+        || die "${why}が、${repo} の main ブランチを確認できません（状態ファイルと、実際の GitHub が、食い違っている可能性があります）。"   # 条件チェックのため run 不使用
+}
+
 # 前回の続きの確認（引数なしで起動したときだけ）
 #   前回、途中まで進んでいて（SF_INIT_DONE_PHASE が 2〜9）、そのリポジトリが、この作業フォルダのものなら、
 #   「続きをやる / 最初からやり直す」を選ばせる。続きを選ぶと、Phase 1（環境チェック）を実行したうえで、次の Phase から始める
@@ -470,7 +500,12 @@ if [[ "$RESUME_PHASE" -eq 1 && -z "$ONLY_PHASE" ]]; then
         read_key resume_choice "  ▶ 番号を入力してください [1-2/q]: " "[12Qq]"
         # shellcheck disable=SC2154  # resume_choice は、read_key（lib/input.sh）が、名前で受け取って代入する
         case "$resume_choice" in
-            1) RESUMED=1
+            1) # Phase 8（初回コミットの push）まで完了と記録されているのに、origin に main がないときは、続けない
+               #   （状態ファイルと、実際の GitHub が、食い違っている。続けると、main のないまま、完了と表示してしまう）
+               if [[ "$prev_done" -ge 8 ]]; then
+                   _require_origin_main "$prev_repo" "「${WIZ_PHASE_TITLES[$prev_done]}」まで完了と記録されています"
+               fi
+               RESUMED=1
                START_PHASE=$next_phase
                END_PHASE=10
                ;;
@@ -478,6 +513,10 @@ if [[ "$RESUME_PHASE" -eq 1 && -z "$ONLY_PHASE" ]]; then
             *) die "中断しました。" ;;
         esac
     elif _project_completed; then
+        # 状態ファイルが残っているとき（完了の直前の中断）は、origin に main があること（なければ、完了にしない）
+        if [[ -f "$SF_INIT_ENV_FILE" || -f "$SF_INIT_PROGRESS_FILE" ]]; then
+            _require_origin_main "$COMPLETED_REPO" "セットアップは完了と記録されています"
+        fi
         # 完了済みのプロジェクト: 「続きをやる」は意味がないため、完了済みであることと、できることを案内する
         prev_dir="$COMPLETED_DIR"; prev_repo="$COMPLETED_REPO"; prev_at="$COMPLETED_AT"
         # 状態ファイルが残っている（以前の版・完了の直前の中断）ときは、後片付けを済ませる

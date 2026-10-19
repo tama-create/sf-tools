@@ -222,12 +222,59 @@ EOF
     _stub_job_subscripts "$mock_home"
 
     local ec out
-    out=$(printf 'JOB-existing\nJOB-newname\nY\n' \
+    out=$(printf 'JOB-existing\nN\nJOB-newname\nY\n' \
         | (export HOME="$mock_home" PATH="$mb:$PATH"; cd "$cdir" && bash "$mock_home/sf-tools/bin/sf-job.sh" --owner tamashimon-org --project yamada) 2>&1)
     ec=$?
 
     assert_exit_ok $ec "ブランチ重複後に新しい名前で正常終了"
     assert_output_contains "$out" "すでに同名のブランチ" "GitHub ブランチ重複 WARNING が表示される"
+
+    teardown "$mb" "$mock_home" "$(dirname "$(dirname "$(dirname "$cdir")")")"
+}
+
+# ==============================================================================
+# テスト 7b: 同名のブランチが GitHub にある → 続ける（Y）なら、ブランチを作らず、clone する / 環境ブランチの名前は使えない
+#   結合テスト X2-2 で見つかった: 以前は、ブランチ作成のあとに clone が失敗すると、同じジョブ名では、続けられなかった
+# ==============================================================================
+test_github_branch_resume() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] 同名のブランチが GitHub にある → 続ける（Y）/ 環境ブランチの名前は拒否${CLR_RST}"
+
+    local mb mock_home cdir ec out
+    mb=$(setup_mock_bin); export MOCK_CALL_LOG="$mb/calls.log"
+    mock_home=$(setup_mock_home); cdir=$(setup_company_dir)
+    cat > "$mb/gh" << 'GHEOF'
+#!/bin/bash
+echo "gh $*" >> "${MOCK_CALL_LOG:-/dev/null}"
+if [[ "$1" == "repo" && "$2" == "view" ]]; then echo '{"name":"force-yamada"}'; exit 0; fi
+if [[ "$1" == "api" && "$2" == */branches/main ]]; then exit 0; fi
+if [[ "$1" == "api" && "$2" == */branches/* ]]; then
+    [[ "$2" == *"existing"* ]] && { echo "Tama / 2026-10-19T00:00:00Z"; exit 0; } || exit 1
+fi
+exit 0
+GHEOF
+    chmod +x "$mb/gh"
+    create_mock_git "$mb"
+    _stub_job_subscripts "$mock_home"
+
+    # Y: 既存のブランチを使う（作成の API は、呼ばない）。最後のコミットの作者が、表示される
+    out=$(printf 'JOB-existing\nY\nY\n' \
+        | (export HOME="$mock_home" PATH="$mb:$PATH"; cd "$cdir" && bash "$mock_home/sf-tools/bin/sf-job.sh" --owner tamashimon-org --project yamada) 2>&1)
+    ec=$?
+    assert_exit_ok $ec "同名のブランチがあり、続ける（Y）→ 正常終了"
+    assert_output_contains "$out" "最後のコミット: Tama" "最後のコミットの作者・日時が表示される"
+    assert_file_not_contains "$MOCK_CALL_LOG" "git/refs" "続ける（Y）→ ブランチの作成の API を呼ばない"
+    assert_file_contains "$MOCK_CALL_LOG" "git clone" "続ける（Y）→ clone する"
+    assert_file_contains "$MOCK_CALL_LOG" "--branch JOB-existing" "続ける（Y）→ 既存のブランチを clone する"
+
+    # 環境ブランチ・管理者用のブランチの名前は、使えない（同名のブランチが、すでにあり、続けてしまわないため）
+    : > "$MOCK_CALL_LOG"
+    out=$(printf 'main\nadmin\nstaging\nq\n' \
+        | (export HOME="$mock_home" PATH="$mb:$PATH"; cd "$cdir" && bash "$mock_home/sf-tools/bin/sf-job.sh" --owner tamashimon-org --project yamada) 2>&1)
+    assert_output_contains "$out" "環境ブランチ・管理者用のブランチの名前のため、使えません: main" "main は、ジョブ名に使えない"
+    assert_output_contains "$out" "使えません: admin" "admin は、ジョブ名に使えない"
+    assert_output_contains "$out" "使えません: staging" "staging は、ジョブ名に使えない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "git/refs" "環境ブランチの名前では、ブランチを作らない"
 
     teardown "$mb" "$mock_home" "$(dirname "$(dirname "$(dirname "$cdir")")")"
 }
@@ -469,6 +516,7 @@ test_from_force_dir
 test_repo_not_found
 test_local_job_dir_duplicate
 test_github_branch_duplicate
+test_github_branch_resume
 test_invalid_job_name
 test_branch_create_failure
 test_clone_failure

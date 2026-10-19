@@ -48,6 +48,41 @@ test_files_missing_path() {
 }
 
 # ------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
+# [files] セクション: リポジトリの外を指すパス（絶対パス・.. を含むパス）→ 存在するファイルでも、エラー終了
+#   （結合テスト X6-4 で見つかった: 外のファイルを、リリース・削除の対象にできてしまう）
+# ------------------------------------------------------------------------------
+test_files_outside_repo_path() {
+    local td outside
+    td=$(setup_force_dir)
+    mkdir -p "$td/force-app/main/default/classes"
+    outside=$(mktemp "${TMPDIR:-/tmp}/outside-XXXXXX")   # リポジトリの外にある、存在するファイル
+    touch "$td/force-app/main/default/classes/Inside.cls"
+    printf '[files]\n' > "$td/deploy.txt"
+
+    local name path out ret
+    for name in "絶対パス" ".. を含む（先頭）" ".. を含む（途中）"; do
+        case "$name" in
+            "絶対パス")           path="$outside" ;;
+            ".. を含む（先頭）")  path="../$(basename "$outside")" ;;
+            *)                    path="force-app/../../$(basename "$outside")" ;;
+        esac
+        printf '[files]\n%s\n' "$path" > "$td/remove.txt"
+        out=$(cd "$td" && bash "$SF_TOOLS_DIR/bin/sf-check.sh" "$td/deploy.txt" "$td/remove.txt" 2>&1); ret=$?
+        assert_exit_fail "$ret" "[files] リポジトリの外（${name}）→ エラー終了"
+        assert_output_contains "$out" "リポジトリの外を指すパス" "[files] リポジトリの外（${name}）→ 専用のメッセージ"
+    done
+
+    # リポジトリの中の、普通のパスは、これまでどおり通る（名前に .. を含むだけのものも）
+    mkdir -p "$td/force-app/main/default/classes/a..b"
+    touch "$td/force-app/main/default/classes/a..b/Ok.cls"
+    printf '[files]\nforce-app/main/default/classes/Inside.cls\nforce-app/main/default/classes/a..b/Ok.cls\n' > "$td/remove.txt"
+    out=$(cd "$td" && bash "$SF_TOOLS_DIR/bin/sf-check.sh" "$td/deploy.txt" "$td/remove.txt" 2>&1); ret=$?
+    assert_exit_ok "$ret" "[files] リポジトリの中のパス（名前に .. を含むだけのものを含む）→ 正常終了"
+    rm -f "$outside"
+    teardown "$td"
+}
+
 # [members] セクション: 正しい書式（種別:名前） → 正常終了
 # ------------------------------------------------------------------------------
 test_members_valid_format() {
@@ -318,6 +353,7 @@ test_capability_shipped_table_blocks_standard_value_set_delete() {
 
 test_files_valid_path
 test_files_missing_path
+test_files_outside_repo_path
 test_members_valid_format
 test_members_invalid_format
 test_markers_only_no_error

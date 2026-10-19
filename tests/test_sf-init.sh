@@ -80,6 +80,9 @@ case "$1 $2" in
         exit 0 ;;
     "repo create") exit "${MOCK_GH_REPO_CREATE_EXIT:-0}" ;;
     "secret set")  exit "${MOCK_GH_SECRET_SET_EXIT:-0}" ;;
+    "api repos/"*"/branches/main")
+        # 続きから: origin の main の確認。MOCK_GH_BRANCH_MAIN_EXIT=1 → main がない（状態ファイルと、実際の GitHub の食い違い）
+        exit "${MOCK_GH_BRANCH_MAIN_EXIT:-0}" ;;
     "api user")
         # Phase 6 の Token 検証（GH_TOKEN 付きの呼び出し）:
         #   MOCK_GH_BAD_TOKEN=<値>     → その Token のとき、認証に失敗（exit 1）
@@ -2053,6 +2056,18 @@ export SF_INIT_LOGIN_URL_PROD=login   # ログイン先を、質問せずに指�
     assert_file_not_exists    "$progf"                                                        "続き: 完了後、進捗ファイルは消える"
     assert_file_not_exists    "$envf"                                                         "続き: 完了後、状態ファイル（.env）も消える"
     rm -rf "$init_base"
+
+    # [1] 続き（Phase 8 まで完了と記録）なのに、origin に main がない → 続けない（main のないまま、完了と表示しない）
+    export MOCK_GH_BRANCH_MAIN_EXIT=1
+    _rc_run 9 "tamashimon/force-testproject" "" 'Y
+1
+'
+    assert_exit_fail          "$exit_code"                                                  "main なし: 続きを選んでも、失敗で終わる"
+    assert_file_contains      "$out" "main ブランチを確認できません"                                "main なし: 理由が表示される"
+    assert_file_not_contains  "$MOCK_CALL_LOG" "gh secret set SF_CONSUMER_KEY_PROD"          "main なし: Phase 10 の処理は、実行されない"
+    assert_file_contains      "$progf" "SF_INIT_DONE_PHASE=9"                                 "main なし: 保存した状態は、消さない"
+    rm -rf "$init_base"
+    unset MOCK_GH_BRANCH_MAIN_EXIT
 
     # [q] 中断: 何も実行しない
     _rc_run 5 "tamashimon/force-testproject" "" 'Y\nq\n'

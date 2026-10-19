@@ -23,7 +23,7 @@ CL=""   # 作業中のクローン（A13a が作る）
 
 # バックグラウンドの sf-install の完了を待つ。引数: クローン 待つ秒数（既定 120）
 _it_wait_install() {
-    local cl="$1" max="${2:-120}" i=0
+    local cl="$1" max="${2:-300}" i=0
     while (( i < max )); do
         grep -q "npm install の確認が完了しました" "$cl/sf-tools/logs/sf-install.log" 2>/dev/null && return 0
         sleep 1; i=$((i + 1))
@@ -129,7 +129,7 @@ test_X2_3() {
 test_X6_2() {
     echo -e "\n${CLR_HEAD}--- X6-2: 確認の入力（n / q / EOF / 空 Enter）---${CLR_RST}"
     local spec inp label snap remote_before
-    IT_TIMEOUT=30
+    IT_TIMEOUT=180
     # 入力の種類: n / q / EOF（入力なし）/ 空 Enter。IT_X62_QUICK=1 のときは n と EOF だけ（Windows は、プロセスの起動が遅く、時間の予算のため）
     local inputs="n q eof enter"
     [[ "${IT_X62_QUICK:-}" == "1" ]] && inputs="n eof"
@@ -145,7 +145,7 @@ test_X6_2() {
             assert_equals "$(it_snap_get "$(it_snap "$CL")" head)" "$(it_snap_get "$snap" head)" "X6-2: ${spec} に ${label} → 手元の HEAD は動かない"
         done
     done
-    IT_TIMEOUT=120
+    IT_TIMEOUT=300
 }
 
 # ------------------------------------------------------------------------------
@@ -159,7 +159,7 @@ test_X6_2() {
 test_X6_1() {
     echo -e "\n${CLR_HEAD}--- X6-1: GitHub Actions 上の挙動（コマンドごとの表）---${CLR_RST}"
     local row spec want_prompt want_text _sp
-    IT_TIMEOUT=40
+    IT_TIMEOUT=180
     # 書式: コマンドと引数 | 確認を出す(1)/出さない(0) | 出力に含まれる文字（なければ空）
     while IFS='|' read -r spec want_prompt want_text; do
         [[ -n "$spec" ]] || continue
@@ -185,7 +185,7 @@ ROWS
     it_run "$CL" -i '' env GITHUB_ACTIONS=true bash "$IT_HOME/sf-tools/bin/sf-typecheck.sh" -y --org itorg
     assert_exit_fail "$IT_RC" "X6-1: sf-typecheck は、Actions 上では、失敗で終わる"
     assert_equals "$(it_mutating_calls | wc -l | tr -d ' ')" "0" "X6-1: sf-typecheck は、Actions 上では、外部へ書き込まない"
-    IT_TIMEOUT=120
+    IT_TIMEOUT=300
 }
 
 # 各シナリオの所要時間（秒）を出す（CI の時間の予算の確認用）

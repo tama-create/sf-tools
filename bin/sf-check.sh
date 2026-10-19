@@ -10,7 +10,7 @@
 #   引数省略時は sf-tools/release/<branch>/ 配下を自動解決します。
 #
 # 【チェック内容】
-#   - [files]   セクション: パスがリポジトリ内に存在するか
+#   - [files]   セクション: パスがリポジトリ内に存在するか（絶対パス・.. を含むパスなど、リポジトリの外を指すパスは、存在してもエラー）
 #   - [members] セクション: 「種別名:メンバー名」形式になっているか
 #   - 種類の可否: config/metadata-capability.txt（sf-typecheck.sh が、実際の組織で確かめた表）で、リリース・削除できないと
 #     確認済み（ng）の種類を、deploy-target.txt（リリース）・remove-target.txt（削除）に書くと、エラーにする。
@@ -204,8 +204,12 @@ check_target_file() {
         entry_count=$(( entry_count + 1 ))
 
         if [[ "$section" == "files" ]]; then
-            # [files]: パスがリポジトリ内にファイルとして存在するか
-            if [[ ! -f "$clean" ]]; then
+            # [files]: リポジトリの外を指すパス（絶対パス・.. を含むパス）は使えない。そのうえで、ファイルとして存在するか
+            #   （外のファイルを、リリース・削除の対象にしないため。存在するファイルでも、エラーにする）
+            if [[ "$clean" == /* || "$clean" == [A-Za-z]:/* || "$clean" == [A-Za-z]:\\* || "$clean" == ".." || "$clean" == ../* || "$clean" == */../* || "$clean" == */.. ]]; then
+                print_gcc_message "error" "$label" "$lineno" "$clean" "リポジトリの外を指すパスは使えません（絶対パス・.. を含むパス）"
+                error_count=$(( error_count + 1 ))
+            elif [[ ! -f "$clean" ]]; then
                 print_gcc_message "error" "$label" "$lineno" "$clean" "パスが存在しません"
                 error_count=$(( error_count + 1 ))
             else

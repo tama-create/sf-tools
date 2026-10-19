@@ -80,6 +80,14 @@
 | `test_sf-check.sh` | sf-check.sh（種類の可否の判定・同梱の表 `config/metadata-capability.txt` の形式を含む） |
 | `test_integration-coverage.sh` | 結合テストのカバレッジ表（`doc/integration-test-plan.md` の 10）のガード。全コマンド・フック・ワークフローが表に載っていること、各行が「結合あり（パターンの番号が定義済み）」か「結合なし（理由が空でない）」であることを確かめる。新しいコマンドを足して、表に載せ忘れると失敗する |
 | `test_integration.sh` | 結合テスト L1（ローカル結合）。実 git ＋ローカルの bare の origin ＋ fake（gh・sf・npm・curl・code・ssh。`tests/integration/lib.sh`）で、複数のコマンドを連動させる。シナリオ: A13a（sf-job → sf-start → sf-install → sf-hook → sf-dryrun → sf-push）・X2-3（プッシュ失敗 → 再実行）・X6-2（確認の n / q / EOF / 空 Enter で、外部へ書き込まない）・X6-1（`GITHUB_ACTIONS=true` での、コマンドごとの挙動の表）。計画: `doc/integration-test-plan.md`。詳細は 2.1.2 |
+| `test_integration-git.sh` | 結合テスト L1: 実 git のフック（pre-commit・pre-push）・main の取り込み・コンフリクト・2 つのジョブ・sf-unhook ⇄ sf-hook・同時 push（A15・A2・A5・A6・A7・A9・X4-1a） |
+| `test_integration-guards.sh` | 結合テスト L1: 安全ガード（別のオーナー・admin・force-* の外・prod 接続中の拒否（X6-1b）・remove-target の危険な入力（X6-4）・sf-sync-wf の上書き（X6-5）） |
+| `test_integration-secrets.sh` | 結合テスト L1: sf-update-secret の成功・失敗で、秘密鍵・コンシューマーキーが、画面・ログ・一時ファイルに残らない（X7-1・X7-2・B2 のローカル部分） |
+| `test_integration-job.sh` | 結合テスト L1: sf-job の失敗（gh・権限・リポジトリ・ブランチの衝突・API の失敗・clone の失敗）・ジョブ名の不正・パスの空白（X1・X2-2・X5-1・X5-2） |
+| `test_integration-misc.sh` | 結合テスト L1: 壊れた Apex・sf-deploy の確認・branches.txt と deploy-target の不正・古い ~/sf-tools・sf-install の間隔・再実行（A1・A10・A12・X3-2〜X3-4・X8-1） |
+| `test_integration-init.sh` | 結合テスト L1: sf-init の通し（1 層）・生成物を後続コマンドが使う・完了済みの再実行・中断と再開（clone・push・Secret・SIGTERM・SIGKILL）・PAT の扱い（I1・A13・X8-1・X2-1・X7-1） |
+| `test_integration-init2.sh` | 結合テスト L1: sf-init の状態の食い違い（X3-5〜X3-7）・PAT の権限不足・別ユーザー・名前の衝突（X1-2・X1-3）・同時起動（X4-1） |
+| `test_integration-metasync.sh` | 結合テスト L1: sf-metasync のローカルの動作（作業ブランチから main への反映・元のブランチへの復帰・stash の復元・失敗時の後始末）（B3 のローカル部分・X8-4・X8-5） |
 | `test_sf-typecheck.sh` | sf-typecheck.sh / lib/typecheck.js（node が無い環境では、スキップ。sf はモック） |
 | `test_sf-prepush.sh` | hooks/pre-push |
 | `test_sf-push.sh` | sf-push.sh |
@@ -94,20 +102,23 @@
 - **クロスプラットフォームの CI**: 同じワークフローに、`test-macos`（`macos-latest`。macOS 標準の `/bin/bash`（3.2）と、BSD の `sed` などを、そのまま使う。何も追加で入れない）と `test-windows`（`windows-latest` の Git Bash。`SF_TEST_NO_WSL=1`・`core.autocrlf=false`）がある。**2026-10-14 から、失敗扱い**（`continue-on-error` なし。以前は、導入の初期として、結果の表示のみだった）。Windows は、並列で実行する（約 15 分）。再び異常終了するときは、`--serial` に戻す。**BSD / GNU の差**として、`sed -i`（BSD は、`-i` の直後に拡張子が必要 → `sed_inplace`）・sed の `\x` / `\t`（BSD は解釈しない → Bash の `$'..'` で展開）・`date -d`・`touch -d`・`stat -c`・`nproc`・`timeout`（macOS にない → `run_with_timeout`）・`base64 -w 0`（macOS にない → `base64_oneline`）・`wc -l`（BSD は、数字の前に空白が付く → 文字列として使うときは `tr -d ' '`）に注意する。`openssl req -subj`（先頭の `//` は Git Bash 専用。macOS・Linux に渡すと、発行先が空の証明書ができ、Salesforce が「証明書ではありません」と拒否する → `_jwt_cert_subject_arg` が OS で切り替え、`generate_jwt_cert` が生成後に空でないことを確認する。既存の空の証明書は、`ensure_jwt_cert_subject` が、秘密鍵そのままで作り直す）。macOS の `TMPDIR` は、`/` で終わる（`"${TMPDIR:-/tmp}/x"` が `T//x` になり、bash の `cd` が作る PWD（`T/x`）と、テストの期待値が食い違う）ため、`tests/test_helper.sh` が、末尾の `/` を除く。macOS の `tar` は、日本語のファイル名を NFD に変えて展開するため、テストで、HOME を差し替えて git を使うときは、`core.precomposeunicode` をリポジトリに設定する。
 - **CI**: `.github/workflows/test.yml`（Ubuntu のランナー）。PR（main・development 向け）と development への push で、全件テスト（`bash tests/run_tests.sh`）と shellcheck（`-S warning`。バージョン固定 `shellcheck-py==0.11.0.1`）を実行し、どちらも失敗扱いになる。Secrets は使わない。shellcheck の設定は、リポジトリ直下の `.shellcheckrc`（`SC1090` / `SC1091`・`SC2034`・`SC2155` を、理由つきで無効化）。個別の誤検知は、該当行の直前に `# shellcheck disable=SCxxxx  # 理由` で除外する。手元での実行: `shellcheck -S warning $(git ls-files 'bin/*.sh' 'lib/*.sh' 'phases/*.sh' 'hooks/*' 'templates/*.sh')`（`pip install shellcheck-py` など）。
 
-### 2.1.2 結合テスト L1（`tests/test_integration.sh`・`tests/integration/lib.sh`）
+### 2.1.2 結合テスト L1（`tests/test_integration*.sh`・`tests/integration/lib.sh`・`init-lib.sh`）
 
 実際の `git` で、複数のコマンドを、続けて動かす（単体テストは、コマンドごとに、`git` などをモックにする。結合テストは、モックにしない）。
 
 - **サンドボックス**: `mktemp -d` の下に、`home/`（HOME。`~/sf-tools` に、`bin lib hooks config templates phases` の写し。git リポジトリにして、`sf-install` の `git pull` が動くようにする）・`bin/`（fake）・`state/`（fake の状態）・`origin.git`（bare。実 git）・`work/`（作業フォルダ）を作る。終了時に、`trap` で削除する（`IT_KEEP=1` で残せる。調査用に `it_attach` でつなぎ直せる）。
 - **リモートの扱い**: グローバルの git の設定 `url."ssh://git@github.com/".insteadOf "https://github.com/"` ＋ 環境変数 `GIT_SSH_COMMAND`（fake の `ssh`）で、`https://github.com/...` を、ローカルの bare に向ける。`https` のまま bare に向けると、`git remote get-url origin` がローカルのパスを返し、オーナー・リポジトリ名を読むコード（`lib/project.sh` など）が動かないため、`ssh://git@github.com/OWNER/REPO` の形で返るようにしている（`sf-init --verify` など、URL を読むコマンドが動く）。
 - **fake**: `gh`（`auth`・`repo view`・`api user`・`api repos/R/branches/B`・`api repos/R/git/refs` の POST のみ。ブランチの作成は、bare への `update-ref`）・`sf`（`org display`・`org login`・`project generate manifest`・`project deploy start` など。ログイン状態は `state/sf.alias`）・`npm`・`curl`・`code`（`--wait` で渡されたファイルに、コミットメッセージを書く）。**未対応の呼び出しは、終了コード 99 と「未対応の呼び出し」で失敗する**（黙って成功しない）。呼び出しは、すべて `state/calls.log` に記録する。
+- **fake の追加分**: `gh` の `repo create`（空の bare を作る）・`repo edit`・`api user --include`（PAT のスコープ。`state/gh.scopes`）・`api repos/R`（`permissions.admin`）・`rulesets`（POST で本文を保存・GET で名前から ID）・`secret set` / `variable set`（値は `state/secrets`・`state/variables`。呼び出しの記録には残さない）・`workflow run` / `run list` / `run view`（実行の記録 `state/runs`。結果は `state/gh.run_conclusion`）、`sf` の `data query`（Organization・プロファイル）・`project retrieve start`（コンシューマーキーの目印）・`project generate manifest`・`org login jwt`。`ssh` の失敗は `it_ssh_fail`、デプロイの失敗は `it_deploy_fail`、push の拒否は `it_origin_reject`、古い `~/sf-tools` は `it_sftools_advance`。
+- **手早いクローン**: `it_make_clone 名前 ブランチ` は、origin から clone → ブランチ作成 → フック設置 → `release/ブランチ/` の準備までを行う（`sf-job`・`sf-start`・`sf-install` を通さない版。通しは A13a・A13 が確認する）。`it_add_class`・`it_set_deploy_target`・`it_origin_commit`（別の開発者として origin に積む）も、部品。
+- **sf-init の部品**（`tests/integration/init-lib.sh`）: 標準の入力（1 層）・`_init`・`_state`（完了後の状態を 1 行にして、通しの基準と比べる）・`mk_interrupted`（push の拒否で止めた状態）・`_init_kill`（バックグラウンドで起動し、fake の呼び出しが始まったら SIGTERM / SIGKILL で止める。遅い呼び出しは `it_fault ... 0 "" 25`（25 秒の遅延）で作る）・`_no_leak`（秘密の目印が、出力・ログ・一時ファイルに残らない。陽性対照つき）。
 - **故障注入**: `it_fault CMD パターン N 回数 終了コード メッセージ [遅延]`（fake の呼び出しの N 回目から、回数だけ失敗させる）。git のプッシュの失敗は、`it_origin_reject on`（bare の `pre-receive` フック）。
 - **環境の隔離**: `it_run` は、`GITHUB_ACTIONS`・`CI`・`GH_TOKEN`・`GITHUB_TOKEN` を外して実行する（CI のランナーは `GITHUB_ACTIONS=true` を持っており、持ち込むと、管理者向けの確認が省略され、結果が変わる。CI で初めて見つかった）。X6-1 は、`env GITHUB_ACTIONS=true` で明示する。
 - **ツール更新の保護**: `sf-install` の 24 時間に 1 回のツール更新は、Windows で本物の `git update-git-for-windows` を動かすため、サンドボックスには、更新済みのスタンプ（`.sf-tools-last-update`）を置く。更新の経路を確かめるテストでは、先に `it_block_git_update` を呼ぶ。
 - **不変条件の部品**: `it_snap`（HEAD・コミット数・ブランチ・フック数・未コミット数）・`it_remote_snap`・`it_mutating_calls`（外部へ書き込む呼び出しの一覧）・`it_leak_count`（秘密の漏れ）。
-- **時間**: シナリオごとの所要時間を出す。`IT_SHOW_RUNS=1` で、遅い呼び出しの上位を出す。CI の実測（2026-10-19）は、Ubuntu 約 40 秒・macOS 約 1 分・Windows 約 2 分。手元の Windows（Git Bash）は、プロセスの起動が遅く、約 10 分かかる。`IT_SCENARIOS`（実行するシナリオ。既定は全部）・`IT_X62_QUICK=1`（X6-2 の入力を n と EOF に絞る）で、短くできる。
-- **実行**: `run_tests.sh` の全件に含まれる（時間のかかるファイルとして先に起動）。CI の全件テストのジョブは、`SF_TEST_SKIP_INTEGRATION=1` で外し、別のジョブ `integration`（Ubuntu・macOS・Windows）で動かす。`--changed` は、`bin/sf-*.sh`・`hooks/*`・`tests/integration/*` の変更で、含める。
-- **結合テストで見つかり、直したもの**: `sf-push` は、変更がないと「コミット対象なし」で終わり、コミット後にプッシュが失敗した再実行で、未プッシュのコミットが取り残された。現在は、変更がなくても、追跡先（upstream）より進んだコミットがあれば、コミットせず、`git push` だけ行う（X2-3 が確認する）。
+- **時間**: シナリオごとの所要時間を出す。`IT_SHOW_RUNS=1` で、遅い呼び出しの上位を出す。CI の実測（2026-10-19。結合テストの第 1 弾）は、Ubuntu 約 16 秒・macOS 約 40 秒・Windows 約 2 分。手元の Windows（Git Bash）は、プロセスの起動が遅く、10 倍ほどかかる。`IT_SCENARIOS`（実行するシナリオ。既定は全部）・`IT_X62_QUICK=1` で、短くできる。
+- **実行**: `run_tests.sh` の全件に含まれる（時間のかかるファイルとして先に起動）。CI の全件テストのジョブは、`SF_TEST_SKIP_INTEGRATION=1` で、結合テスト（`test_integration*.sh`。表のガード `test_integration-coverage.sh` は残す）を外し、別のジョブ `integration`（Ubuntu・macOS・Windows）で、`run_tests.sh` に名前を渡して並列に動かす。`--changed` は、`bin/sf-*.sh`・`hooks/*`・`tests/integration/*`・結合テストの変更で、結合テスト全部を含める。
+- **結合テストで見つかり、直したもの**: `sf-push` は、変更がないと「コミット対象なし」で終わり、コミット後にプッシュが失敗した再実行で、未プッシュのコミットが取り残された。現在は、変更がなくても、追跡先（upstream）より進んだコミットがあれば、コミットせず、`git push` だけ行う（X2-3 が確認する）。 そのほか、`sf-check` は、存在していても、リポジトリの外を指すパス（絶対パス・`..` を含むパス）を、エラーにするようにした（X6-4）。`sf-init` の「続きから」は、Phase 8 まで完了と記録されているのに、origin に `main` がないときは、続けずに拒否する（完了の直前の記録のときも、完了にしない。X3-6・X3-7）。
 
 ### 2.2 `test_helper.sh` の前提
 
@@ -315,6 +326,8 @@ check_gh_owner "$GITHUB_OWNER"   # 認証ユーザーの一致確認
 - `sf sgd source delta` で変更差分を算出
 - 差分対象メタデータを retrieve
 - 変更があれば commit / push / PR 作成まで進める
+- 変更がなくても、未プッシュのコミット（前回の push の失敗で残った）があれば、確認のうえ（`GITHUB_ACTIONS=true` では確認なし）、push だけ行う（`git rev-list --count origin/main..HEAD`）
+- main への push は `git push --no-verify`（このコマンド専用。pre-push フックは、開発者の main への直接 push を止めるためのもの。サーバー側の保護は、そのまま効く。結合テスト M0・M4 で見つかった）
 
 **安全ガード（セクション 3.4）:**
 - メインフロー先頭で赤い警告ボックス + `ask_yn || die`（`GITHUB_ACTIONS=true` 時はスキップ）
@@ -462,7 +475,12 @@ tr -d '\r' < "$key_file" | base64 -w 0 | gh secret set "SF_PRIVATE_KEY" -R "$REP
 ### 4.12 sf-hook.sh / sf-unhook.sh
 
 - `sf-hook.sh`: `.git/hooks/pre-push` と `.git/hooks/pre-commit` を上書き生成し、`~/sf-tools/hooks/` からコピーする
-- `sf-unhook.sh`: `.git/hooks/pre-push` を削除する
+- `sf-unhook.sh`: `.git/hooks/pre-push` を削除する（pre-commit は残す。プッシュの検証だけを止めるのが狙い。意図した仕様として確認済み）
+
+### 4.12.1 sf-job.sh・sf-prepush.sh の、結合テストで見つかった変更
+
+- **`sf-job.sh`（X2-2）**: ジョブ名に、環境ブランチ・管理者用のブランチの名前（`main` / `staging` / `develop` / `admin`）は使えない。GitHub 上に同名のブランチがすでにあるときは、最後のコミットの作者・日時（`gh api ... --jq`）を表示して、`ask_yn` で確認する。Y なら `USE_EXISTING_BRANCH=1`（`phase_create_branch` は、作成の API を呼ばずに、戻る。ブランチ作成のあとに、clone が失敗した前回のジョブの、続き）。N なら、別のジョブ名を聞く。
+- **`sf-prepush.sh`（X3-2）**: `phase_fetch` は、`branches.txt` のブランチが、origin に（`git ls-remote --exit-code origin <名前>`）まだないとき、取得せず、警告を出して続ける（以前は、`git fetch` が「見つからない」で失敗し、すべての push が止まった）。
 
 ### 4.13 sf-init.sh
 
@@ -494,6 +512,8 @@ tr -d '\r' < "$key_file" | base64 -w 0 | gh secret set "SF_PRIVATE_KEY" -R "$REP
 
 - **最初のメタデータの同期（`initial_metadata_sync`: `phases/init/init-common.sh`）**: Phase 10 のあと（動作の確認・`admin` ブランチの作成より前）に、`wf-metasync` を実行して、管理者用のクローンに取り込む。初期コミットの `force-app` は空のひな型で、何もしないと、メタデータは次の定期実行（平日 UTC 0・3・6・9 時）まで入らない。クローン（Phase 3）は初期コミットの push に必要なため、同期（Phase 10 の接続情報が必要）より先になる。そこで、同期のあとに `git pull` する（作り直したクローンと同じ結果）。動作: `verify_dispatch_workflow`（`lib/verify-common.sh`）で手動起動 → `SF_INIT_SYNC_TIMEOUT` 秒（既定 1200）まで、30 秒おきに経過を表示して待つ → `verify_run_conclusion` が success → クローンを `main` にして `core.longpaths=true` を設定し、`git pull --ff-only origin main`。実行は `END_PHASE` が 10 で、`--only` がなく、Phase 10 を実行したときだけ。失敗（起動できない・時間切れ・同期の失敗・pull の失敗）しても、`SYNC_RESULT=failed` として警告にとどめ、完了画面に「すぐ同期するには: `gh workflow run wf-metasync.yml -R …`（終わったら `git pull origin main`）」を出す。成功なら `SYNC_RESULT=done`（完了画面: 「同期済みです」）。動作の確認（`verify.sh`）を実行したときは、`admin` ブランチを作る直前に、もう一度 `git pull --ff-only origin main`（Hello World のリリースと削除が `main` に入るため）。Phase 3 の `git clone` には `-c core.longpaths=true` を付ける（Windows のパス長の上限対策。`sf-job.sh` と同じ）。テスト: `tests/test_sf-init.sh`（モックの gh が `workflow run` / `run list`（`--event workflow_dispatch`）/ `run view` に答える。`VERIFY_POLL_SEC=0`。成功・起動失敗・同期失敗）。
 - **実行場所と、別のリポジトリのクローンの確認（2026-10-17 のレビューで追加）**: `admin` や `force-*` の中、Git の作業ツリー（先頭が `force-` のもの）の中では、実行できない（`resolve_init_identity` の前に die。中に `admin/` ができて、別のクローンに書き込む経路になるため）。`admin` に cd したあと、`admin/force-XXXX` が、`${GITHUB_OWNER}/force-XXXX` のクローンでなければ（`clone_matches_repo`: origin を、大文字と小文字を区別せずに比べる）、状態ファイルに触れる前に die する。プロジェクトは「オーナーと XXXX」で決まるが、フォルダと状態ファイルは XXXX だけで決まるため、同じ XXXX で別のオーナーのプロジェクトを、別のリポジトリのクローンに書き込んで push してしまうのを防ぐ。Phase 3 も、すでにあるクローンについて、同じ確認をし（不一致なら die）、`main` に切り替え、リモートに `main` があれば `git pull --ff-only` する（`admin` ブランチのまま、Phase 8 が `git add -A` / `commit` すると、`main` に入らないため。「最初から、やり直す」の経路）。
+- **続きから・完了の直前の記録と、実際の GitHub の食い違い（`_require_origin_main`: `bin/sf-init.sh`。結合テスト X3-6・X3-7 で見つかった）**: 状態ファイルが「Phase 8（初回コミットの push）まで完了」と記録しているのに、origin に `main` ブランチがないときは、「続きをやる」を選んでも、続けずに拒否する（`main` のないまま、「完了」と表示しないため）。完了の直前（進捗 10）で状態ファイルが残っているときも、同じ確認をして、なければ完了にしない（`gh api repos/R/branches/main` で確認。通信の失敗なども、確認できないため拒否）。
+- **同時実行の排他（`.sf-init-XXXX.lock`: `bin/sf-init.sh`。結合テスト X4-1 で見つかった）**: 同じ admin フォルダ・同じ XXXX の sf-init を、同時に 2 つ動かすと、状態ファイルの取り合いで、Ruleset が重複することがあった（Windows で確認）。そのため、`.sf-init-XXXX.lock`（フォルダ。`mkdir` は原子的。中に PID を書く）で排他する。2 つ目は「すでに実行中です」で拒否する。PID のプロセスが、もういなければ（強制終了・SIGTERM で残った）、古いロックとして、引き継ぐ。終了時に、EXIT トラップで削除する。
 - **完了の印（`mark_setup_complete` / `clear_setup_mark` / `clone_setup_completed`: `lib/project.sh`）**: クローンの `git config sf-tools.setup-complete`（`.git/config` にあり、GitHub には送られない）。値は 3 状態: `1` = 完了 / `0` = やり直し中 / 未設定。セットアップの完了時（`END_PHASE` が 10 で `--only` なし）に、`1` を付けてから、状態ファイルを削除する。「最初から、やり直す」を選んだときは、状態ファイルを消す前に、印を **`0`** にする（消さない）。完了済みの判定（`_project_completed` → `clone_setup_completed`）は、状態ファイルがないとき、「`admin/force-XXXX` の origin が同じリポジトリ」で、かつ、印が `1` なら完了、`0` なら未完了（やり直し中）、**未設定なら、ローカルに `admin` ブランチがあれば完了とみなし、印を `1` にする**（印を導入する前の版（99d420d〜ff690db）で完了したプロジェクトは、完了時に `admin` ブランチを作り、状態ファイルを消すだけで、印を付けなかったため。「印がない = 未完了」と読むと、運用中のリポジトリを新規セットアップとして上書きしてしまう）。`admin` ブランチもなければ、未完了。（「クローンがある」だけで完了とすると、やり直しの途中（Phase 1・2）で止まったとき、未完了を完了と誤判定するため、印を 0 にして、未設定と区別する）。状態ファイルが残っている（進捗 10。以前の版、または完了の直前の中断）ときは、完了済みの案内の前に、後片付け（`_finish_unfinished_setup`: クローンを `admin` ブランチにして GitHub にも push → 完了の印 `1` → 状態ファイルの削除。何度実行しても同じ結果。クローンがない、または、状態ファイルの `REPO_DIR` が指すクローンの origin が、このプロジェクトのものでないときは、何もしない（別のクローンに push しない））を済ませる。印が `0` のまま止まっているとき（やり直しの途中で中断）に、再実行すると、「前回の「最初から、やり直す」が、途中で止まっています。最初から、やり直します」と表示して、最初から始める。状態ファイルのリポジトリ名の比較（続きをやる・完了済み）は、`state_matches_repo`（大文字と小文字を区別しない）。エラーの文言に origin の URL を出すときは、`git_origin_redacted` で、認証情報（`user:TOKEN@`）を伏せる。
 - **XXXX の検証（`normalize_project_name`）**: 英数字と、区切り（`-` `_` `.`）。区切りは、英数字の間に 1 つだけ（連続・先頭・末尾は不可）、50 文字まで、末尾の `.git` は不可。Phase 10 の外部クライアントアプリの名前（`SF_TOOLS_` + `force-XXXX` の区切りを `_` にしたもの + `_glbloauth`）が、Salesforce の API 名の制約（連続した `_`・末尾の `_` は不可。80 文字まで）を満たすため。守らないと、セットアップの終盤で失敗する。対話での、すでにあるプロジェクト名の比較は、大文字と小文字を区別しない。途中の状態（`admin/.sf-init-XXXX.env` の `REPO_FULL_NAME` が一致: `state_matches_repo`）がある名前は、断らずに受け付ける（続きをやるため。Phase 3 で、リポジトリを作れたがクローンに失敗した場合など）。
 - `sf-job.sh --owner X`（`--project` なし）: そのオーナーのクローンだけを対象にする（大文字と小文字は区別しない）。

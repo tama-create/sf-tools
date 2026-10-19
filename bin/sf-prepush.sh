@@ -13,7 +13,7 @@
 # 【備考】
 #   - リモートの取得（git fetch）の対象は、現在のブランチと branches.txt のブランチ。
 #     branches.txt はリポジトリで共有されるため、英数字で始まり英数字・. _ / - だけで構成される名前のみ渡す
-#     （使えない名前は、警告を表示してスキップ。1 つずつ引用して、-- の後ろで渡す）
+#     （使えない名前・origin にまだないブランチは、警告を表示してスキップ。1 つずつ引用して、-- の後ろで渡す）
 #
 # 【オプション】
 #   -v, --verbose       : コマンドの応答（出力）をコンソールにも表示します
@@ -90,6 +90,12 @@ phase_fetch() {
         # 英数字で始まり、英数字・. _ / - だけで構成されるブランチ名のみ許可する（それ以外は、取得せずスキップ）
         if [[ ! "$b" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ ]]; then
             log "WARNING" "branches.txt に、使えないブランチ名があります（取得しません）: ${b}"
+            continue
+        fi
+        # origin に、まだないブランチ（branches.txt にだけ書かれている・消された）は、取得しない（git fetch が「見つからない」で失敗し、
+        #   すべての push が止まるため）。警告だけ出す
+        if ! git ls-remote --exit-code origin "$b" > /dev/null 2>&1; then  # 条件チェックのため run 不使用
+            log "WARNING" "branches.txt のブランチが、origin に、まだありません（取得しません）: ${b}"
             continue
         fi
         fetch_targets+=("$b")

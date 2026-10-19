@@ -88,6 +88,7 @@
 | `test_integration-init.sh` | 結合テスト L1: sf-init の通し（1 層）・生成物を後続コマンドが使う・完了済みの再実行・中断と再開（clone・push・Secret・SIGTERM・SIGKILL）・PAT の扱い（I1・A13・X8-1・X2-1・X7-1） |
 | `test_integration-init2.sh` | 結合テスト L1: sf-init の状態の食い違い（X3-5〜X3-7）・PAT の権限不足・別ユーザー・名前の衝突（X1-2・X1-3）・同時起動（X4-1） |
 | `test_integration-metasync.sh` | 結合テスト L1: sf-metasync のローカルの動作（作業ブランチから main への反映・元のブランチへの復帰・stash の復元・失敗時の後始末）（B3 のローカル部分・X8-4・X8-5） |
+| `test_integration-rerun.sh` | 結合テスト L1: 再実行（冪等）と手元のフックの改変（sf-push・sf-dryrun・sf-update-secret を 2 回続けて実行・フックの改変と削除を sf-hook が戻す）（X8-1・X3-10） |
 | `test_integration-next.sh` | 結合テスト L1: sf-next の判定（3 層で、なし・PR 発行中・マージ済み・順序外・Y で開く URL）と、main が進んだときの取り込み（A5） |
 | `test_integration-init3.sh` | 結合テスト L1: sf-init の診断（--status が、Secret・Variable・ワークフロー・ブランチ・リポジトリの欠けを見つける）・admin ブランチの欠け・Salesforce の失敗・JWT のリトライの上限・同名のリポジトリの同時作成（X3-8・X3-9・X1-4・X9-1・X4-1b） |
 | `test_sf-typecheck.sh` | sf-typecheck.sh / lib/typecheck.js（node が無い環境では、スキップ。sf はモック） |

@@ -79,6 +79,7 @@
 | `test_sf-next.sh` | sf-next.sh |
 | `test_sf-check.sh` | sf-check.sh（種類の可否の判定・同梱の表 `config/metadata-capability.txt` の形式を含む） |
 | `test_integration-coverage.sh` | 結合テストのカバレッジ表（`doc/integration-test-plan.md` の 10）のガード。全コマンド・フック・ワークフローが表に載っていること、各行が「結合あり（パターンの番号が定義済み）」か「結合なし（理由が空でない）」であることを確かめる。新しいコマンドを足して、表に載せ忘れると失敗する |
+| `test_integration.sh` | 結合テスト L1（ローカル結合）。実 git ＋ローカルの bare の origin ＋ fake（gh・sf・npm・curl・code・ssh。`tests/integration/lib.sh`）で、複数のコマンドを連動させる。シナリオ: A13a（sf-job → sf-start → sf-install → sf-hook → sf-dryrun → sf-push）・X2-3（プッシュ失敗 → 再実行）・X6-2（確認の n / q / EOF / 空 Enter で、外部へ書き込まない）・X6-1（`GITHUB_ACTIONS=true` での、コマンドごとの挙動の表）。計画: `doc/integration-test-plan.md`。詳細は 2.1.2 |
 | `test_sf-typecheck.sh` | sf-typecheck.sh / lib/typecheck.js（node が無い環境では、スキップ。sf はモック） |
 | `test_sf-prepush.sh` | hooks/pre-push |
 | `test_sf-push.sh` | sf-push.sh |
@@ -92,6 +93,20 @@
 - **WSL**: Git Bash から実行すると、自動で WSL に移り、ext4 にコピーして実行する（`/mnt/c` の 9P は、遅いため）。WSL には `node` がなく `node.exe` だけがある場合があり、`test_helper.sh` の node のモックは、`node -e` を、本物（`node` または `node.exe`）に渡す（`json_get` のテストのため）。
 - **クロスプラットフォームの CI**: 同じワークフローに、`test-macos`（`macos-latest`。macOS 標準の `/bin/bash`（3.2）と、BSD の `sed` などを、そのまま使う。何も追加で入れない）と `test-windows`（`windows-latest` の Git Bash。`SF_TEST_NO_WSL=1`・`core.autocrlf=false`）がある。**2026-10-14 から、失敗扱い**（`continue-on-error` なし。以前は、導入の初期として、結果の表示のみだった）。Windows は、並列で実行する（約 15 分）。再び異常終了するときは、`--serial` に戻す。**BSD / GNU の差**として、`sed -i`（BSD は、`-i` の直後に拡張子が必要 → `sed_inplace`）・sed の `\x` / `\t`（BSD は解釈しない → Bash の `$'..'` で展開）・`date -d`・`touch -d`・`stat -c`・`nproc`・`timeout`（macOS にない → `run_with_timeout`）・`base64 -w 0`（macOS にない → `base64_oneline`）・`wc -l`（BSD は、数字の前に空白が付く → 文字列として使うときは `tr -d ' '`）に注意する。`openssl req -subj`（先頭の `//` は Git Bash 専用。macOS・Linux に渡すと、発行先が空の証明書ができ、Salesforce が「証明書ではありません」と拒否する → `_jwt_cert_subject_arg` が OS で切り替え、`generate_jwt_cert` が生成後に空でないことを確認する。既存の空の証明書は、`ensure_jwt_cert_subject` が、秘密鍵そのままで作り直す）。macOS の `TMPDIR` は、`/` で終わる（`"${TMPDIR:-/tmp}/x"` が `T//x` になり、bash の `cd` が作る PWD（`T/x`）と、テストの期待値が食い違う）ため、`tests/test_helper.sh` が、末尾の `/` を除く。macOS の `tar` は、日本語のファイル名を NFD に変えて展開するため、テストで、HOME を差し替えて git を使うときは、`core.precomposeunicode` をリポジトリに設定する。
 - **CI**: `.github/workflows/test.yml`（Ubuntu のランナー）。PR（main・development 向け）と development への push で、全件テスト（`bash tests/run_tests.sh`）と shellcheck（`-S warning`。バージョン固定 `shellcheck-py==0.11.0.1`）を実行し、どちらも失敗扱いになる。Secrets は使わない。shellcheck の設定は、リポジトリ直下の `.shellcheckrc`（`SC1090` / `SC1091`・`SC2034`・`SC2155` を、理由つきで無効化）。個別の誤検知は、該当行の直前に `# shellcheck disable=SCxxxx  # 理由` で除外する。手元での実行: `shellcheck -S warning $(git ls-files 'bin/*.sh' 'lib/*.sh' 'phases/*.sh' 'hooks/*' 'templates/*.sh')`（`pip install shellcheck-py` など）。
+
+### 2.1.2 結合テスト L1（`tests/test_integration.sh`・`tests/integration/lib.sh`）
+
+実際の `git` で、複数のコマンドを、続けて動かす（単体テストは、コマンドごとに、`git` などをモックにする。結合テストは、モックにしない）。
+
+- **サンドボックス**: `mktemp -d` の下に、`home/`（HOME。`~/sf-tools` に、`bin lib hooks config templates phases` の写し。git リポジトリにして、`sf-install` の `git pull` が動くようにする）・`bin/`（fake）・`state/`（fake の状態）・`origin.git`（bare。実 git）・`work/`（作業フォルダ）を作る。終了時に、`trap` で削除する（`IT_KEEP=1` で残せる。調査用に `it_attach` でつなぎ直せる）。
+- **リモートの扱い**: グローバルの git の設定 `url."ssh://git@github.com/".insteadOf "https://github.com/"` ＋ 環境変数 `GIT_SSH_COMMAND`（fake の `ssh`）で、`https://github.com/...` を、ローカルの bare に向ける。`https` のまま bare に向けると、`git remote get-url origin` がローカルのパスを返し、オーナー・リポジトリ名を読むコード（`lib/project.sh` など）が動かないため、`ssh://git@github.com/OWNER/REPO` の形で返るようにしている（`sf-init --verify` など、URL を読むコマンドが動く）。
+- **fake**: `gh`（`auth`・`repo view`・`api user`・`api repos/R/branches/B`・`api repos/R/git/refs` の POST のみ。ブランチの作成は、bare への `update-ref`）・`sf`（`org display`・`org login`・`project generate manifest`・`project deploy start` など。ログイン状態は `state/sf.alias`）・`npm`・`curl`・`code`（`--wait` で渡されたファイルに、コミットメッセージを書く）。**未対応の呼び出しは、終了コード 99 と「未対応の呼び出し」で失敗する**（黙って成功しない）。呼び出しは、すべて `state/calls.log` に記録する。
+- **故障注入**: `it_fault CMD パターン N 回数 終了コード メッセージ [遅延]`（fake の呼び出しの N 回目から、回数だけ失敗させる）。git のプッシュの失敗は、`it_origin_reject on`（bare の `pre-receive` フック）。
+- **ツール更新の保護**: `sf-install` の 24 時間に 1 回のツール更新は、Windows で本物の `git update-git-for-windows` を動かすため、サンドボックスには、更新済みのスタンプ（`.sf-tools-last-update`）を置く。更新の経路を確かめるテストでは、先に `it_block_git_update` を呼ぶ。
+- **不変条件の部品**: `it_snap`（HEAD・コミット数・ブランチ・フック数・未コミット数）・`it_remote_snap`・`it_mutating_calls`（外部へ書き込む呼び出しの一覧）・`it_leak_count`（秘密の漏れ）。
+- **時間**: シナリオごとの所要時間を出す。`IT_SHOW_RUNS=1` で、遅い呼び出しの上位を出す。Linux（WSL）では、全体で 1 分未満。Windows（Git Bash）は、プロセスの起動が遅く、約 10 分。CI では、Windows だけ、シナリオを `A13a X6_2 X6_1` に絞り（`IT_SCENARIOS`）、X6-2 の入力を n と EOF に絞る（`IT_X62_QUICK=1`）。
+- **実行**: `run_tests.sh` の全件に含まれる（時間のかかるファイルとして先に起動）。CI の全件テストのジョブは、`SF_TEST_SKIP_INTEGRATION=1` で外し、別のジョブ `integration`（Ubuntu・macOS・Windows）で動かす。`--changed` は、`bin/sf-*.sh`・`hooks/*`・`tests/integration/*` の変更で、含める。
+- **見つかった現状の挙動**: `sf-push` は、コミット対象の変更がないと「コミット対象なし」で終わる。プッシュが失敗した後に再実行しても、未プッシュのコミットは、プッシュされない（X2-3 に、現状として記録。挙動を変えたら、テストを直す）。
 
 ### 2.2 `test_helper.sh` の前提
 

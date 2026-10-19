@@ -191,6 +191,7 @@ bash tests/run_tests.sh                        # 全テスト実行（mm 前に�
 bash tests/run_tests.sh test_sf-metasync.sh   # 単体実行
 bash tests/run_tests.sh --changed             # 変更ファイルに対応するテストのみ実行
 bash tests/run_tests.sh --jobs 4 / --serial   # 同時に動かすファイル数（既定: CPU の数。--serial は 1 つずつ）
+bash tests/test_integration.sh                # 結合テスト L1（実 git ＋ fake。run_tests.sh の全件にも含まれる。Windows は約 10 分）
 bash tests/e2e/doctor.sh                       # e2e を動かせる環境かの確認（読み取りのみ。新しい環境で、run.sh の前に実行）
 bash tests/e2e/run.sh                          # 実環境の通し検証（検証のとき Claude が実行。通常のテストには含まれない）
 ```

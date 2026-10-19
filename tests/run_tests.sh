@@ -129,7 +129,7 @@ if ! [[ "$JOBS" =~ ^[1-9][0-9]*$ ]]; then
 fi
 
 # 時間のかかるファイル（先に起動する。最後に長いものが残って、全体が伸びるのを避ける）
-HEAVY_FIRST=(test_sf-init.sh test_e2e.sh test_verify.sh test_sf-release.sh test_sf-install.sh)
+HEAVY_FIRST=(test_integration.sh test_sf-init.sh test_e2e.sh test_verify.sh test_sf-release.sh test_sf-install.sh)
 
 # 実行するテストファイルを順番に定義
 TEST_FILES=(
@@ -165,6 +165,7 @@ TEST_FILES=(
     test_wf-sequence.sh
     test_project-identity.sh
     test_integration-coverage.sh
+    test_integration.sh
 )
 
 # ------------------------------------------------------------------------------
@@ -204,6 +205,12 @@ if [[ "${1:-}" == "--changed" ]]; then
         case "$_file" in
             bin/sf-*.sh|hooks/*|templates/.github/workflows/*.yml|doc/integration-test-plan.md|tests/test_integration-coverage.sh)
                 _changed_tests+=("test_integration-coverage.sh")
+                ;;
+        esac
+        # 結合テスト（L1）: コマンド・フック・結合テストの部品が変わったとき（時間がかかる: 1 回に数分）
+        case "$_file" in
+            bin/sf-*.sh|hooks/*|tests/integration/*|tests/test_integration.sh)
+                _changed_tests+=("test_integration.sh")
                 ;;
         esac
         case "$_file" in
@@ -277,6 +284,16 @@ fi
 # 引数指定があれば対象を絞る（--changed 以外の通常引数）
 if [[ $# -gt 0 ]]; then
     TEST_FILES=("$@")
+fi
+
+# CI の全件テスト用: 結合テスト（test_integration.sh）は、別のジョブ（OS ごと）で動かすため、全件の実行から外す。
+#   SF_TEST_SKIP_INTEGRATION=1 のとき、引数なし・--changed の実行から外す（ファイルを名指しした実行は、そのまま動く）
+if [[ "${SF_TEST_SKIP_INTEGRATION:-}" == "1" && $# -eq 0 ]]; then
+    _kept=()
+    for _tf in "${TEST_FILES[@]}"; do
+        [[ "$_tf" == "test_integration.sh" ]] || _kept+=("$_tf")
+    done
+    TEST_FILES=("${_kept[@]}")
 fi
 
 # 画面とログファイルの両方に出力する関数

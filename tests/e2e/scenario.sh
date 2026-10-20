@@ -28,6 +28,10 @@
 #   metasync-diff  : 組織側だけに Hello World の Apex を作る → wf-metasync を起動 → main に反映される（B3）。組織・main に書き込む。
 #                    run.sh のあと、main には、Hello World のファイルが残っている（リリースの履歴）。いったん外し（組織側だけの差分にするため）、
 #                    終了時に、組織の Apex を削除し、main を、実行前の状態（Hello World のファイルの有無）に戻す
+#   propagate-fail : main と staging に、同じファイルの、違う内容を入れて、wf-propagate を起動 → コンフリクトで失敗し、Slack に通知され、
+#                    staging は変わらない（X4-5）。main・staging に、コミットする（終了時に、そのファイルを削除する。2 層以上のリポジトリが要る）
+#   restart-org    : sf-restart.sh で、ジョブのクローンの接続先を、別の組織（staging の組織）に切り替える → 接続先が変わり、sf-dryrun が新しい組織を使う → 元の組織に戻す（A8。
+#                    鍵一式に staging の組織があるときだけ。ログインは、認証 URL への差し替え。終了時に、必ず、元の組織へ戻す）
 #   manual-delete  : テスト用リポジトリの Secret（SLACK_BOT_TOKEN）と Variable（SLACK_CHANNEL_ID）を、手で削除 → sf-init.sh --status が
 #                    不足を見つけ、直し方を示す → 元に戻す → 診断が、元に戻る（書き込みあり。終了時に、必ず元に戻す）
 #
@@ -63,7 +67,7 @@ source "${E2E_SCRIPT_DIR}/lib.sh"
 # ------------------------------------------------------------------------------
 # 1. シナリオの一覧
 # ------------------------------------------------------------------------------
-SCENARIO_NAMES="log-secrets manual-delete validate-fail dist-main metasync-diff"   # 実行の順番どおり
+SCENARIO_NAMES="log-secrets manual-delete validate-fail dist-main metasync-diff propagate-fail restart-org"   # 実行の順番どおり
 _scn_desc() {
     case "$1" in
         log-secrets)   echo "Actions のログ・PR のコメントに、秘密情報が出ていない（読み取りのみ）" ;;
@@ -71,6 +75,8 @@ _scn_desc() {
         validate-fail) echo "壊れた Apex の PR で wf-validate が失敗し、コメントが付く → 直すと成功する（ブランチと PR を作り、後で閉じる）" ;;
         dist-main)     echo "配布版（SF_TOOLS_BRANCH 未設定）で、sf-tools の main が使われる。rr の直後だけ（Variable を一時的に削除し、戻す）" ;;
         metasync-diff) echo "組織側だけの Apex が、wf-metasync で main に反映される（組織と main に書き込み、必ず戻す）" ;;
+        propagate-fail) echo "main → staging の伝播がコンフリクトで失敗し、通知され、staging は変わらない（main・staging にファイルを置き、削除する）" ;;
+        restart-org)   echo "sf-restart で接続先を staging の組織に切り替え、sf-dryrun が新しい組織を使う → 元に戻す（ジョブのクローンの接続設定を、一時的に変える）" ;;
         *) echo "" ;;
     esac
 }
@@ -80,6 +86,8 @@ _scn_writes() {
         manual-delete) echo "Secret（SLACK_BOT_TOKEN）と Variable（SLACK_CHANNEL_ID）を、一時的に削除し、すぐに元に戻します" ;;
         validate-fail) echo "テスト用ブランチ（e2e-vf-時刻）と PR を作り、wf-validate を動かします（組織へは dry-run のみ。マージしない）。終了時に、PR を閉じ、ブランチを削除します" ;;
         dist-main)     echo "Variable SF_TOOLS_BRANCH を一時的に削除し、テスト用ブランチ（e2e-dm-時刻）と PR で wf-validate を動かします（dry-run のみ）。終了時に、Variable を戻し、PR を閉じ、ブランチを削除します" ;;
+        propagate-fail) echo "main と staging に、同じファイル（e2e-propagate-conflict.txt）の、違う内容をコミットし、wf-propagate を起動します（コンフリクトで失敗する想定）。終了時に、両方から、そのファイルを削除します" ;;
+        restart-org)   echo "ジョブのクローンの接続先を、sf-restart.sh で、staging の組織に切り替え（sf のエイリアス sf-tools-e2e-restart-STG を、一時的に作る）、dry-run を行います。終了時に、元の組織へ戻し、エイリアスを元の状態にします" ;;
         metasync-diff) echo "テスト用の組織に Apex（SfToolsE2eHello・SfToolsE2eHelloTest）を直接デプロイし、wf-metasync を起動します。main に、その Apex のファイルが、コミットされます（main にすでにあるものは、いったん外します）。終了時に、組織の Apex を削除し、main を実行前の状態に戻します" ;;
         *) echo "" ;;
     esac
@@ -154,8 +162,12 @@ RESTORE_BRANCH=""      # 作ったテスト用ブランチ（e2e-vf-時刻。終
 RESTORE_PR=""          # 開いたままの PR の番号（終了時に、マージせずに閉じる）
 RESTORE_APEX=0         # 1: 組織に Hello World の Apex を作った（終了時に、削除する）
 RESTORE_MAIN_FILES=0   # 1: main の Hello World のファイルを、いじる（終了時に、削除して、実行前に有ったものを、戻す）
+RESTORE_RESTART_CLONE=""   # 接続先を切り替えたジョブのクローン（終了時に、元の組織へ戻す）
+RESTORE_RESTART_ALIAS=""   # 元の接続先のエイリアス
+RESTORE_PROP_FILE=0    # 1: main・staging に、propagate-fail のファイルを置いた（終了時に、両方から削除する）
 RESTORE_MAIN_KEEP=""   # 実行前に main に有った Hello World のファイル（スペース区切り。終了時に、元の本文で戻す）
 SCN_SF_TMP=""          # sf を使うシナリオの一時フォルダ（エイリアスの保存先を含む。終了時に、エイリアスを戻し、削除する）
+SCN_PROP_FILE="e2e-propagate-conflict.txt"   # propagate-fail が、main・staging に置くファイル
 SCN_ALLOW_MAIN_COMMITS=0   # 1: このシナリオは、main にコミットが増えてよい（wf-metasync が反映するため）。main の SHA の比較から外す
 _scn_restore() {
     local rc=0
@@ -215,6 +227,27 @@ _scn_restore() {
             log "INFO" "  元に戻しました: main の Hello World のファイルを、実行前の状態にしました"; RESTORE_MAIN_FILES=0; RESTORE_MAIN_KEEP=""
         else
             log "ERROR" "  main の Hello World のファイルを、戻せませんでした（${REPO_FULL}）。手で確認してください: $(verify_hello_paths | tr '\n' ' ')"; rc=1
+        fi
+    fi
+    if [[ -n "$RESTORE_RESTART_CLONE" ]]; then
+        # 接続先を、元の組織へ戻す（sf-restart.sh を、元のエイリアスで、もう一度。ログインは、認証 URL への差し替え）
+        if e2e_run_sf_cmd "sf-restart-back" "$RESTORE_RESTART_CLONE" "${RESTORE_RESTART_ALIAS}\n2\n" "${E2E_SF_RESTART:-${SF_TOOLS_ROOT}/bin/sf-restart.sh}" \
+            && e2e_wait_sf_install "$RESTORE_RESTART_CLONE"; then
+            log "INFO" "  元に戻しました: ジョブのクローンの接続先を、${RESTORE_RESTART_ALIAS} に戻しました"; RESTORE_RESTART_CLONE=""
+        else
+            log "ERROR" "  ジョブのクローンの接続先を、元（${RESTORE_RESTART_ALIAS}）に戻せませんでした（${RESTORE_RESTART_CLONE}）。そのフォルダで、bash ~/sf-tools/bin/sf-restart.sh を実行して、${RESTORE_RESTART_ALIAS} を選んでください。"; rc=1
+        fi
+    fi
+    if [[ "$RESTORE_PROP_FILE" == "1" ]]; then
+        # main・staging に置いたファイルを削除する（このスクリプトが置く、決まった名前のファイルだけ。なければ、何もしない）
+        local _br _pf=0
+        for _br in main staging; do
+            verify_file_delete "$REPO_FULL" "$_br" "$SCN_PROP_FILE" "e2e: propagate-fail の後始末（${_br}）" || _pf=1
+        done
+        if [[ $_pf -eq 0 ]]; then
+            log "INFO" "  元に戻しました: main・staging から ${SCN_PROP_FILE} を削除しました"; RESTORE_PROP_FILE=0
+        else
+            log "ERROR" "  ${SCN_PROP_FILE} を、main・staging から削除できませんでした（${REPO_FULL}）。手で削除してください。"; rc=1
         fi
     fi
     return $rc
@@ -455,6 +488,33 @@ _scn_sf_prepare() {
     e2e_alias_snapshot "${SCN_SF_TMP}/aliases.txt"
 }
 
+# sf・code・ブラウザの shim と、認証 URL のファイル（main・staging・develop）を、一時フォルダに用意する（run.sh と同じ。ログインを、認証 URL に差し替える）
+#   認証 URL のファイルは、SCN_SF_TMP の中（終了時に、削除される）
+_scn_shims_prepare() {
+    local d n
+    _scn_sf_prepare || return 1
+    d="${SCN_SF_TMP}/shims"
+    mkdir -p "$d"  # run 不使用: 差し替え用コマンドの置き場（一時フォルダ内）
+    cp "${E2E_SCRIPT_DIR}/shims/sf" "${d}/sf"  # run 不使用: 差し替え用コマンドの配置（一時フォルダ内）
+    cp "${E2E_SCRIPT_DIR}/shims/code" "${d}/code"  # run 不使用: 同上
+    for n in start xdg-open open powershell.exe wslview; do cp "${E2E_SCRIPT_DIR}/shims/browser" "${d}/${n}"; done  # run 不使用: 同上
+    chmod +x "${d}"/* 2>/dev/null || true  # run 不使用: 実行権限の付与（Windows は効果なし・意図的エラー無視）
+    export E2E_SHIM_DIR="$d"
+    export E2E_SFDX_URL_FILE="${SCN_SF_TMP}/sfdx-url.txt"
+    printf '%s' "$E2E_SFDX_AUTH_URL" > "$E2E_SFDX_URL_FILE"
+    chmod 600 "$E2E_SFDX_URL_FILE" 2>/dev/null || true  # run 不使用: ファイル権限保護（Windows は効果なし・意図的エラー無視）
+    if e2e_tier_available staging; then
+        export E2E_SFDX_URL_FILE_STG="${SCN_SF_TMP}/sfdx-url-stg.txt"
+        printf '%s' "$E2E_SFDX_AUTH_URL_STG" > "$E2E_SFDX_URL_FILE_STG"
+        chmod 600 "$E2E_SFDX_URL_FILE_STG" 2>/dev/null || true  # run 不使用: 同上
+    fi
+    if e2e_tier_available develop; then
+        export E2E_SFDX_URL_FILE_DEV="${SCN_SF_TMP}/sfdx-url-dev.txt"
+        printf '%s' "$E2E_SFDX_AUTH_URL_DEV" > "$E2E_SFDX_URL_FILE_DEV"
+        chmod 600 "$E2E_SFDX_URL_FILE_DEV" 2>/dev/null || true  # run 不使用: 同上
+    fi
+}
+
 # metasync-diff: 組織側だけに Hello World の Apex を作る → wf-metasync を起動 → main に反映される（B3: 実差分の反映）
 #   組織へ直接デプロイする（Git を通さない）ため、Git には、組織にだけある差分になる。wf-metasync は、それを main にコミットする。
 #   書き込むのは、許可された 2 つの名前（SfToolsE2eHello・SfToolsE2eHelloTest）だけ。終了時に、組織の Apex と main のファイルを、削除する
@@ -501,6 +561,102 @@ scn_metasync_diff() {
         if verify_file_sha "$REPO_FULL" main "$p" >/dev/null; then now="${now:+$now }${p}"; fi
     done
     _chk "main の Hello World のファイルが、実行前と同じ（$(printf '%s' "$orig" | wc -w | tr -d ' ') 個）" "$([[ "$now" == "$orig" ]] && echo 0 || echo 1)"
+}
+
+# propagate-fail: main → staging の伝播（wf-propagate）が、コンフリクトで失敗する経路（X4-5。成功の経路は、run.sh が確認している）
+#   main と staging に、同じファイルの、違う内容をコミットする（どちらにも、まだないファイルの、追加どうしの衝突）。そのうえで、wf-propagate を手動で起動する。
+#   確認: 実行が失敗する・ログにコンフリクトが出る・Slack への通知が成功する（ok:true）・staging の先頭が、実行の前後で変わらない（壊さない）
+#   終了時に、main・staging から、そのファイルを削除する。前提: staging ブランチがある（2 層以上）・main・staging に、そのファイルがない
+scn_propagate_fail() {
+    local f="$SCN_PROP_FILE" br id concl stg_before stg_after
+    SCN_ALLOW_MAIN_COMMITS=1   # main に、コミットする
+    stg_before=$(verify_branch_sha "$REPO_FULL" staging) || stg_before=""  # VAR=$(cmd) のため run 不使用
+    [[ -n "$stg_before" ]] || { SCN_SKIP="staging ブランチがありません（2 層以上のリポジトリが要ります。run.sh --layout 2 など）"; return; }
+    for br in main staging; do
+        if verify_file_sha "$REPO_FULL" "$br" "$f" >/dev/null; then SCN_SKIP="${br} に、すでに ${f} があります（先に消してください）"; return; fi
+    done
+
+    RESTORE_PROP_FILE=1   # 置く前に登録する（途中で止まっても、終了時に削除する）
+    printf '%s\n' "main の内容（コンフリクトの確認）" | verify_file_put "$REPO_FULL" main "$f" "e2e: propagate-fail（main）"
+    _chk "main に ${f} をコミットした" $? || return
+    printf '%s\n' "staging の内容（コンフリクトの確認）" | verify_file_put "$REPO_FULL" staging "$f" "e2e: propagate-fail（staging）"
+    _chk "staging に、同じファイルの、違う内容をコミットした" $? || return
+    stg_before=$(verify_branch_sha "$REPO_FULL" staging) || stg_before=""  # VAR=$(cmd) のため run 不使用（コミットしたあとの先頭）
+
+    id=$(verify_dispatch_workflow "$REPO_FULL" wf-propagate.yml main) || id=""  # VAR=$(cmd) のため run 不使用
+    _chk "wf-propagate を起動した" "$([[ -n "$id" ]] && echo 0 || echo 1)" || return
+    verify_wait_run "$REPO_FULL" "$id"; _chk "wf-propagate が完了した" $? || return
+    concl=$(e2e_run_conclusion "$REPO_FULL" "$id")  # VAR=$(cmd) のため run 不使用
+    _chk "wf-propagate が失敗した（コンフリクトは、失敗として止める）" "$([[ "$concl" == "failure" ]] && echo 0 || echo 1)"
+    verify_run_log_has "$REPO_FULL" "$id" "コンフリクト"; _chk "ログに、コンフリクトが出ている" $?
+    verify_run_log_has "$REPO_FULL" "$id" '"ok":true'; _chk "コンフリクトが、Slack に通知された（ok:true）" $?
+    stg_after=$(verify_branch_sha "$REPO_FULL" staging) || stg_after=""  # VAR=$(cmd) のため run 不使用
+    _chk "失敗しても、staging の先頭は、変わらない（ブランチを壊さない）" "$([[ -n "$stg_before" && "$stg_after" == "$stg_before" ]] && echo 0 || echo 1)"
+
+    # 後始末（main・staging から、ファイルを削除する）
+    _scn_restore; _chk "main・staging から、${f} を削除した" $?
+    for br in main staging; do
+        verify_file_sha "$REPO_FULL" "$br" "$f" >/dev/null
+        _chk "${br} から、${f} が消えた" "$(( $? == 0 ? 1 : 0 ))"
+    done
+}
+
+# restart-org: sf-restart.sh で、ジョブのクローンの接続先を、別の組織（staging の組織）に切り替える（A8）
+#   run.sh が残した、リリース用のジョブのクローン（{作業フォルダ}/e2e-hello-時刻/force-XXXX）を使う。
+#   確認: 接続先（.sf/config.json の target-org）が、新しいエイリアスに変わる・その組織のユーザーが、staging の組織のユーザー（Variable SF_USERNAME_STG）で、
+#         元の組織のユーザーとは違う・sf-dryrun.sh が、新しいエイリアスの組織で、検証する。そのあと、元のエイリアスへ戻し、元の組織のユーザーに戻ったことを確認する。
+#   書き込み: クローンの .sf/config.json・.sfdx/sfdx-config.json（sf-restart が作り直す）・sf のエイリアス sf-tools-e2e-restart-STG（終了時に、元の一覧へ戻す）。
+#             組織への書き込みはない（dry-run のみ）
+#   前提: 鍵一式に staging の組織がある・ジョブのクローン（接続済み）がある・Variable SF_USERNAME_STG がある
+#   E2E_SF_RESTART / E2E_SF_DRYRUN: 実行する sf-restart.sh / sf-dryrun.sh を差し替える（テスト用）
+_scn_org_user() {   # 引数: クローン エイリアス。その組織の接続ユーザー名を返す
+    local out
+    out=$(cd "$1" && sf org display --target-org "$2" --json 2>/dev/null) || return 1  # VAR=$(cmd) のため run 不使用
+    json_get "$out" result.username
+}
+scn_restart_org() {
+    local work="${E2E_HOME_ROOT}/${E2E_OWNER}/${PROJECT}" d clone="" alias0 alias1="sf-tools-e2e-restart-STG" user0 user1 stg_user cfg
+    local restart="${E2E_SF_RESTART:-${SF_TOOLS_ROOT}/bin/sf-restart.sh}" dryrun="${E2E_SF_DRYRUN:-${SF_TOOLS_ROOT}/bin/sf-dryrun.sh}"
+    e2e_tier_available staging || { SCN_SKIP="鍵一式に、staging の組織がありません（bootstrap.sh --add-orgs で追加してください）"; return; }
+    for d in "$work"/e2e-hello-[0-9][0-9][0-9][0-9][0-9][0-9]; do   # 名前の並び順が、時刻順（最新が、最後）
+        [[ -f "${d}/${REPO_NAME}/.sf/config.json" ]] && clone="${d}/${REPO_NAME}"
+    done
+    [[ -n "$clone" ]] || { SCN_SKIP="接続済みのジョブのクローン（${work}/e2e-hello-時刻/${REPO_NAME}/.sf/config.json）がありません（run.sh のリリースの確認が残すものです）"; return; }
+    stg_user=$(_e2e_gh variable get SF_USERNAME_STG -R "$REPO_FULL" 2>/dev/null | tr -d '[:space:]')  # パイプのみのため run 不使用
+    [[ -n "$stg_user" ]] || { SCN_SKIP="Variable SF_USERNAME_STG がありません（staging の組織が、このリポジトリに、接続されていません）"; return; }
+    _scn_shims_prepare || { SCN_SKIP="sf のエイリアスの保存に失敗しました"; return; }
+
+    cfg=$(cat "${clone}/.sf/config.json")  # VAR=$(cmd) のため run 不使用
+    alias0=$(json_get "$cfg" target-org) || alias0=""  # VAR=$(cmd) のため run 不使用
+    [[ -n "$alias0" ]] || { SCN_SKIP="クローンの接続先（target-org）を読み取れません"; return; }
+    # run.sh の終わりに、sf のエイリアスは実行前へ戻るため、クローンの元の接続先（${alias0}）は、いまは、つながっていない。
+    #   main の組織に、元のエイリアスでログインし直してから、ユーザーを読む（このエイリアスは、終了時に、保存した一覧へ戻る）
+    run sf org login sfdx-url --sfdx-url-file "$E2E_SFDX_URL_FILE" --alias "$alias0" >/dev/null 2>&1 \
+        || { SCN_SKIP="元の接続先（${alias0}）に、認証 URL でログインできません"; return; }
+    user0=$(_scn_org_user "$clone" "$alias0") || user0=""  # VAR=$(cmd) のため run 不使用
+    [[ -n "$user0" ]] || { SCN_SKIP="元の接続先（${alias0}）の、ユーザーを取得できません（接続が切れています）"; return; }
+    [[ "$user0" != "$stg_user" ]] || { SCN_SKIP="元の接続先が、すでに staging の組織です（切り替えの確認ができません）"; return; }
+
+    RESTORE_RESTART_CLONE="$clone"; RESTORE_RESTART_ALIAS="$alias0"   # 切り替える前に登録する（途中で止まっても、終了時に戻す）
+    rm -f "${clone}/sf-tools/logs/sf-install.log"  # run 不使用: 前回の完了メッセージを、完了の待ちに、使わないため（ログファイルだけ）
+
+    # --- staging の組織へ切り替える ---
+    e2e_run_sf_cmd "sf-restart-stg" "$clone" "${alias1}\n2\n" "$restart"; _chk "sf-restart.sh で、接続先を ${alias1} に切り替えた" $? || return
+    e2e_wait_sf_install "$clone"; _chk "切り替えのあとの sf-install.sh（背景）が完了した" $? || return
+    cfg=$(cat "${clone}/.sf/config.json")  # VAR=$(cmd) のため run 不使用
+    _chk "接続先（.sf/config.json の target-org）が、${alias1} に変わった" "$([[ "$(json_get "$cfg" target-org)" == "$alias1" ]] && echo 0 || echo 1)"
+    user1=$(_scn_org_user "$clone" "$alias1") || user1=""  # VAR=$(cmd) のため run 不使用
+    _chk "新しい接続先のユーザーが、staging の組織のユーザー（SF_USERNAME_STG）である" "$([[ "$user1" == "$stg_user" ]] && echo 0 || echo 1)"
+    _chk "元の組織のユーザーとは、違う" "$([[ -n "$user1" && "$user1" != "$user0" ]] && echo 0 || echo 1)"
+    e2e_run_sf_cmd "sf-dryrun-restart" "$clone" "" "$dryrun" --no-open; _chk "sf-dryrun.sh が、新しい組織で、検証できた（dry-run）" $?
+    grep -qF "$alias1" "${E2E_TMP}/sf-dryrun-restart.out"; _chk "sf-dryrun.sh の接続先に、新しいエイリアス（${alias1}）が表示された" $?
+
+    # --- 元の組織へ戻す ---
+    _scn_restore; _chk "接続先を、元の組織（${alias0}）に戻した" $?
+    cfg=$(cat "${clone}/.sf/config.json")  # VAR=$(cmd) のため run 不使用
+    _chk "接続先（target-org）が、元の ${alias0} に戻った" "$([[ "$(json_get "$cfg" target-org)" == "$alias0" ]] && echo 0 || echo 1)"
+    user1=$(_scn_org_user "$clone" "$alias0") || user1=""  # VAR=$(cmd) のため run 不使用
+    _chk "元の組織のユーザーに、戻った" "$([[ "$user1" == "$user0" ]] && echo 0 || echo 1)"
 }
 
 # ------------------------------------------------------------------------------

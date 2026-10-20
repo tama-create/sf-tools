@@ -33,6 +33,8 @@
 #  27. シナリオ dist-main（配布版 = SF_TOOLS_BRANCH 未設定で、sf-tools の main が使われる。rr の直後だけ）
 #  28. シナリオ metasync-diff（組織側だけの Apex が、wf-metasync で main に反映される。組織と main を、必ず戻す）
 #  29. 中断→再開（run.sh --interrupt）と、git の shim（main への push を 1 回だけ失敗させる）
+#  30. シナリオ propagate-fail（main → staging の伝播のコンフリクト。失敗し、通知され、staging は変わらない）
+#  31. シナリオ restart-org（sf-restart で接続先を staging の組織に切り替え → dry-run → 元に戻す）
 # ==============================================================================
 source "$(dirname "${BASH_SOURCE[0]}")/test_helper.sh"
 echo -e "${CLR_HEAD}=== tests/e2e（安全ガードと部品）===${CLR_RST}"
@@ -90,11 +92,25 @@ case "$*" in
         _p="${2#repos/*/contents/}"; _p="${_p%%\?*}"
         grep -qxF "$_p" "${MOCK_CALL_LOG%/*}/mainfiles.txt" 2>/dev/null && { echo "sha-$_p"; exit 0; }
         exit 1 ;;
+    # propagate-fail の再現: staging ブランチ（先頭の SHA。MOCK_GH_NO_STAGING=1: なし / MOCK_GH_STAGING_MOVE=1: 3 回目以降は、別の SHA）と、そのファイル（$MB/stagingfiles.txt）
+    "api repos/"*"/git/ref/heads/staging"*)
+        [[ "${MOCK_GH_NO_STAGING:-}" == "1" ]] && exit 1
+        _d="${MOCK_CALL_LOG%/*}"
+        _n=$(( $(cat "$_d/stg.cnt" 2>/dev/null || echo 0) + 1 )); echo "$_n" > "$_d/stg.cnt"
+        if [[ "${MOCK_GH_STAGING_MOVE:-}" == "1" && $_n -ge 3 ]]; then echo "stgsha-moved"; else echo "stgsha-1"; fi
+        exit 0 ;;
+    "api repos/"*"/contents/"*"?ref=staging"*)
+        _p="${2#repos/*/contents/}"; _p="${_p%%\?*}"
+        grep -qxF "$_p" "${MOCK_CALL_LOG%/*}/stagingfiles.txt" 2>/dev/null && { echo "sha-$_p"; exit 0; }
+        exit 1 ;;
+    "api -X PUT repos/"*"/contents/"*"branch=staging"*)
+        _d="${MOCK_CALL_LOG%/*}"; cat > /dev/null; _p="${4#repos/*/contents/}"; echo "$_p" >> "$_d/stagingfiles.txt"; exit 0 ;;
     "api -X PUT repos/"*"/contents/"*"branch=main"*)
         _d="${MOCK_CALL_LOG%/*}"; cat > /dev/null; _p="${4#repos/*/contents/}"; echo "$_p" >> "$_d/mainfiles.txt"; exit 0 ;;
     "api -X DELETE repos/"*"/contents/"*)
-        _d="${MOCK_CALL_LOG%/*}"; _p="${4#repos/*/contents/}"
-        grep -vxF "$_p" "$_d/mainfiles.txt" > "$_d/mainfiles.new" 2>/dev/null; mv "$_d/mainfiles.new" "$_d/mainfiles.txt"; exit 0 ;;
+        _d="${MOCK_CALL_LOG%/*}"; _p="${4#repos/*/contents/}"; _lf="$_d/mainfiles.txt"
+        [[ "$*" == *"branch=staging"* ]] && _lf="$_d/stagingfiles.txt"
+        grep -vxF "$_p" "$_lf" > "$_lf.new" 2>/dev/null; mv "$_lf.new" "$_lf"; exit 0 ;;
     "pr create"*)                        [[ "${MOCK_GH_PR_EXIT:-0}" -ne 0 ]] && exit "$MOCK_GH_PR_EXIT"; echo "https://github.com/tamashimon-org/force-e2e-20260101-000000/pull/${MOCK_GH_PR_NUMBER:-7}"; exit 0 ;;
     "pr merge"*)                         exit "${MOCK_GH_MERGE_EXIT:-0}" ;;
     # 手動起動（gh workflow run / 起動した実行の ID）。MOCK_GH_WORKFLOW_EXIT=1: 起動の呼び出しが失敗する
@@ -190,12 +206,20 @@ case "$1 $2" in
             echo "{\"status\":0,\"result\":{\"username\":\"admin@example.com\",\"sfdxAuthUrl\":\"${MOCK_SF_DISPLAY_URL:-[REDACTED] Use 'sf org auth show-sfdx-auth-url' to view}\"}}"
             exit 0
         fi
+        _t=""; _pv=""; for _a in "$@"; do [[ "$_pv" == "--target-org" ]] && _t="$_a"; _pv="$_a"; done
+        if [[ -n "$_t" && -f "$_dir/org_user.$_t" ]]; then
+            echo "{\"status\":0,\"result\":{\"username\":\"$(cat "$_dir/org_user.$_t")\"}}"; exit 0
+        fi
         echo '{"status":0,"result":{"username":"admin@example.com"}}' ;;
     "org auth")
         # sf org auth show-sfdx-auth-url（MOCK_SF_SHOW_URL=none で、使えない古い sf を再現）
         [[ "${MOCK_SF_SHOW_URL:-}" == "none" ]] && { echo "Error: command not found" >&2; exit 1; }
         echo "{\"status\":0,\"result\":{\"sfdxAuthUrl\":\"${MOCK_SF_SHOW_URL:-force://PlatformCLI::fakeshowtoken@example.my.salesforce.com}\"},\"warnings\":[\"exposes an SFDX Auth URL\"]}" ;;
     "org login")
+        if [[ "$3" == "sfdx-url" ]]; then
+            _t=""; _pv=""; for _a in "$@"; do [[ "$_pv" == "--alias" ]] && _t="$_a"; _pv="$_a"; done
+            case "$_t" in "") ;; *STG) echo "stg@example.com" > "$_dir/org_user.$_t" ;; *) echo "main@example.com" > "$_dir/org_user.$_t" ;; esac
+        fi
         # sfdx-url のログインを、最初の N 回だけ失敗させる（MOCK_SF_ADMIN_FAIL_FIRST=N。一時的な失敗・再試行の再現）
         if [[ "$3" == "sfdx-url" && -n "${MOCK_SF_ADMIN_FAIL_FIRST:-}" ]]; then
             _n=$(( $(cat "$_dir/login.cnt" 2>/dev/null || echo 0) + 1 )); echo "$_n" > "$_dir/login.cnt"
@@ -2412,6 +2436,180 @@ EOF
     teardown "$CB"
 }
 
+# ------------------------------------------------------------------------------
+# 30. シナリオ propagate-fail（main → staging の伝播のコンフリクト。失敗し、通知され、staging は変わらない）
+# ------------------------------------------------------------------------------
+test_e2e_scenario_propagate_fail() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] scenario.sh propagate-fail（main・staging に衝突を作る → wf-propagate が失敗 → 削除して戻す）${CLR_RST}"
+    _mk_cleanup_env
+    local rc f="e2e-propagate-conflict.txt"
+    local ok_log=$'##[error]コンフリクト: main → staging のマージでコンフリクトが発生しました\nSlack response: {"ok":true}'
+    export E2E_CONCLUSION_TRIES=1 VERIFY_DISPATCH_TRIES=2
+    _reset_pf() {
+        rm -f "$MB/disp.cnt" "$MB/concl.cnt" "$MB/stg.cnt"
+        : > "$MB/mainfiles.txt"; : > "$MB/stagingfiles.txt"; : > "$MOCK_CALL_LOG"
+        unset MOCK_GH_NO_STAGING MOCK_GH_STAGING_MOVE
+    }
+
+    # --- 成功: 衝突を作る → wf-propagate が失敗・通知 → staging は変わらない → ファイルを削除 ---
+    _reset_pf
+    MOCK_GH_CONCL_LIST="failure" MOCK_GH_RUN_LOG="$ok_log" _run_scenario -y propagate-fail; rc=$?
+    [[ $rc -eq 0 ]] || sed 's/\x1b\[[0-9;]*m//g' "$MB/out.log" | tail -25
+    assert_exit_ok "$rc" "propagate-fail: 成功する"
+    assert_file_contains "$MB/out.log" "成功（" "propagate-fail: 結果が成功と表示される"
+    assert_equals "$(grep -c "api -X PUT .*contents/${f}.*branch=main" "$MOCK_CALL_LOG")" "1" "propagate-fail: main に、ファイルを 1 回コミットする"
+    assert_equals "$(grep -c "api -X PUT .*contents/${f}.*branch=staging" "$MOCK_CALL_LOG")" "1" "propagate-fail: staging に、ファイルを 1 回コミットする"
+    assert_equals "$(grep -c 'workflow run wf-propagate.yml' "$MOCK_CALL_LOG")" "1" "propagate-fail: wf-propagate を 1 回起動する"
+    assert_equals "$(grep -c 'workflow run' "$MOCK_CALL_LOG")" "1" "propagate-fail: ほかのワークフローは、起動しない"
+    assert_equals "$(grep -c 'api -X DELETE repos/.*/contents/' "$MOCK_CALL_LOG")" "2" "propagate-fail: 削除は、main・staging の 2 回だけ"
+    assert_equals "$(wc -c < "$MB/mainfiles.txt" | tr -d ' ')" "0" "propagate-fail: main に、ファイルが残らない"
+    assert_equals "$(wc -c < "$MB/stagingfiles.txt" | tr -d ' ')" "0" "propagate-fail: staging に、ファイルが残らない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "pr merge" "propagate-fail: PR は、扱わない"
+
+    # --- 伝播が成功してしまった（衝突を検出できない）→ 失敗（それでも、削除する）---
+    _reset_pf
+    MOCK_GH_CONCL_LIST="success" MOCK_GH_RUN_LOG="$ok_log" _run_scenario -y propagate-fail; rc=$?
+    assert_exit_fail "$rc" "propagate-fail: wf-propagate が成功してしまったら、失敗する"
+    assert_equals "$(wc -c < "$MB/mainfiles.txt" | tr -d ' ')" "0" "propagate-fail: 失敗しても、main のファイルは削除される"
+    assert_equals "$(wc -c < "$MB/stagingfiles.txt" | tr -d ' ')" "0" "propagate-fail: 失敗しても、staging のファイルは削除される"
+
+    # --- Slack への通知が出ていない → 失敗 ---
+    _reset_pf
+    MOCK_GH_CONCL_LIST="failure" MOCK_GH_RUN_LOG="コンフリクト" _run_scenario -y propagate-fail; rc=$?
+    assert_exit_fail "$rc" "propagate-fail: Slack への通知（ok:true）がなければ、失敗する"
+
+    # --- staging が、失敗したのに、動いた（壊した）→ 失敗 ---
+    _reset_pf
+    MOCK_GH_STAGING_MOVE=1 MOCK_GH_CONCL_LIST="failure" MOCK_GH_RUN_LOG="$ok_log" _run_scenario -y propagate-fail; rc=$?
+    assert_exit_fail "$rc" "propagate-fail: 失敗した伝播で、staging の先頭が動いたら、失敗する"
+    assert_file_contains "$MB/out.log" "ブランチを壊さない" "propagate-fail: 確認の項目が、表示される"
+
+    # --- ワークフローが動かない → 失敗（途中で止まっても、削除する）---
+    _reset_pf
+    MOCK_GH_WORKFLOW_EXIT=1 _run_scenario -y propagate-fail; rc=$?
+    assert_exit_fail "$rc" "propagate-fail: wf-propagate を起動できなければ、失敗する"
+    assert_equals "$(wc -c < "$MB/mainfiles.txt" | tr -d ' ')" "0" "propagate-fail: 途中で止まっても、main のファイルは削除される"
+    assert_equals "$(wc -c < "$MB/stagingfiles.txt" | tr -d ' ')" "0" "propagate-fail: 途中で止まっても、staging のファイルは削除される"
+
+    # --- 前提: staging がない → 実行できない（何もコミットしない）---
+    _reset_pf
+    MOCK_GH_NO_STAGING=1 _run_scenario -y propagate-fail; rc=$?
+    assert_exit_fail "$rc" "propagate-fail: staging がなければ、実行できない"
+    assert_file_contains "$MB/out.log" "実行できない" "propagate-fail: 「実行できない」と報告する"
+    assert_file_not_contains "$MOCK_CALL_LOG" "api -X PUT" "propagate-fail: 実行できないときは、何もコミットしない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "api -X DELETE" "propagate-fail: 実行できないときは、何も削除しない"
+
+    # --- 前提: すでにファイルがある → 実行できない（触れない）---
+    _reset_pf; echo "$f" > "$MB/mainfiles.txt"
+    _run_scenario -y propagate-fail; rc=$?
+    assert_exit_fail "$rc" "propagate-fail: main にすでにファイルがあれば、実行できない"
+    assert_file_contains "$MB/mainfiles.txt" "$f" "propagate-fail: 実行できないときは、既存のファイルに触れない"
+
+    # --- 開始の警告 ---
+    _reset_pf
+    _run_scenario propagate-fail < <(printf 'N\n'); rc=$?
+    assert_exit_fail "$rc" "propagate-fail: 開始の確認で N → 中止する"
+    assert_file_contains "$MB/out.log" "書き込み（propagate-fail）" "propagate-fail: 警告に、書き込む内容が表示される"
+    assert_file_not_contains "$MOCK_CALL_LOG" "api -X PUT" "propagate-fail: N のとき、何もコミットしない"
+    unset E2E_CONCLUSION_TRIES VERIFY_DISPATCH_TRIES
+    teardown "$CB"
+}
+
+# ------------------------------------------------------------------------------
+# 31. シナリオ restart-org（sf-restart で接続先を staging の組織に切り替え → dry-run → 元に戻す）
+# ------------------------------------------------------------------------------
+# sf-restart.sh の代わりの台本（E2E_SF_RESTART）: 標準入力の 1 行目（エイリアス）で、.sf/config.json を作り直し、その組織のユーザーを記録する
+#   （末尾が STG なら staging のユーザー・それ以外は main のユーザー）。sf-install.sh の完了メッセージも、ログに書く
+_mk_restart_stubs() {
+    cat > "$MB/restart-stub.sh" << 'EOF'
+#!/bin/bash
+d="${MOCK_CALL_LOG%/*}"
+read -r alias
+echo "restart $alias" >> "$d/restart.log"
+[[ "${MOCK_RESTART_FAIL:-}" == "1" ]] && { echo "restart stub: 失敗" >&2; exit 1; }
+mkdir -p .sf sf-tools/logs
+printf '{"target-org": "%s"}\n' "$alias" > .sf/config.json
+case "$alias" in *STG) echo "stg@example.com" > "$d/org_user.$alias" ;; *) echo "main@example.com" > "$d/org_user.$alias" ;; esac
+echo "npm install の確認が完了しました" > sf-tools/logs/sf-install.log
+exit 0
+EOF
+    cat > "$MB/dryrun-stub.sh" << 'EOF'
+#!/bin/bash
+echo "接続先組織: $(sed -n 's/.*"target-org": *"\([^"]*\)".*/\1/p' .sf/config.json)"
+exit "${MOCK_DRYRUN_EXIT:-0}"
+EOF
+    chmod +x "$MB/restart-stub.sh" "$MB/dryrun-stub.sh"
+}
+
+test_e2e_scenario_restart_org() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] scenario.sh restart-org（接続先を staging の組織に切り替え → dry-run → 元に戻す）${CLR_RST}"
+    _mk_cleanup_env
+    _mk_restart_stubs
+    local rc proj="e2e-20260101-000000" repo="force-e2e-20260101-000000"
+    local clone="$CB/root/home/tamashimon-org/$proj/e2e-hello-123456/$repo"
+    local fx_stg="$CB/fx-stg.env"
+    cp "$FX" "$fx_stg"; echo 'E2E_SFDX_AUTH_URL_STG=force://PlatformCLI::stgurl@example.my.salesforce.com' >> "$fx_stg"
+    export E2E_SF_RESTART="$MB/restart-stub.sh" E2E_SF_DRYRUN="$MB/dryrun-stub.sh" E2E_INSTALL_TIMEOUT=2 E2E_CMD_POLL_SEC=1 E2E_HEARTBEAT_SEC=100
+    _reset_ro() {
+        rm -rf "$clone"; mkdir -p "$clone/.sf"
+        printf '{"target-org": "sf-tools-e2e-job"}\n' > "$clone/.sf/config.json"
+        rm -f "$MB"/org_user.* "$MB/restart.log"
+        printf 'SLACK_CHANNEL_ID=C01ABCDEFGH\nSF_USERNAME_STG=stg@example.com\n' > "$MB/vars.txt"; : > "$MB/secrets.txt"
+        : > "$MOCK_CALL_LOG"
+    }
+    _run_scn_stg() { ( cd "$HM" && export HOME="$HM" PATH="$MB:$PATH" E2E_FIXTURE="$fx_stg" E2E_POLL_SEC=0; bash "$E2E_DIR/scenario.sh" "$@" ) > "$MB/out.log" 2>&1; }
+
+    # --- 成功: 切り替え → 組織が変わる → dry-run → 元に戻る ---
+    _reset_ro
+    _run_scn_stg -y restart-org; rc=$?
+    [[ $rc -eq 0 ]] || sed 's/\x1b\[[0-9;]*m//g' "$MB/out.log" | tail -25
+    assert_exit_ok "$rc" "restart-org: 成功する"
+    assert_file_contains "$MB/out.log" "成功（" "restart-org: 結果が成功と表示される"
+    assert_equals "$(tr '\n' ',' < "$MB/restart.log")" "restart sf-tools-e2e-restart-STG,restart sf-tools-e2e-job," "restart-org: 切り替え（STG）→ 戻す（元のエイリアス）の順に、sf-restart を呼ぶ"
+    assert_file_contains "$clone/.sf/config.json" "sf-tools-e2e-job" "restart-org: 終了後、クローンの接続先は、元のエイリアスに戻る"
+    assert_file_contains "$MOCK_CALL_LOG" "org login sfdx-url" "restart-org: 元のエイリアスで、認証 URL でログインし直してから、ユーザーを読む"
+    assert_file_not_contains "$MOCK_CALL_LOG" "project deploy" "restart-org: 組織へ、デプロイしない（dry-run は、台本）"
+    assert_file_not_contains "$MOCK_CALL_LOG" "repo delete" "restart-org: リポジトリは、削除しない"
+
+    # --- dry-run が失敗 → 失敗（それでも、元に戻す）---
+    _reset_ro
+    MOCK_DRYRUN_EXIT=1 _run_scn_stg -y restart-org; rc=$?
+    assert_exit_fail "$rc" "restart-org: dry-run が失敗したら、失敗する"
+    assert_equals "$(tr '\n' ',' < "$MB/restart.log")" "restart sf-tools-e2e-restart-STG,restart sf-tools-e2e-job," "restart-org: 失敗しても、元の組織へ戻す"
+    assert_file_contains "$clone/.sf/config.json" "sf-tools-e2e-job" "restart-org: 失敗しても、クローンの接続先は、元に戻る"
+
+    # --- 切り替え自体が失敗 → 失敗（元に戻す処理も、同じように失敗したら、手での戻し方を案内する）---
+    _reset_ro
+    MOCK_RESTART_FAIL=1 _run_scn_stg -y restart-org; rc=$?
+    assert_exit_fail "$rc" "restart-org: sf-restart が失敗したら、失敗する"
+    assert_file_contains "$MB/out.log" "sf-restart.sh を実行して" "restart-org: 戻せなかったときは、手での戻し方を案内する"
+
+    # --- 前提: staging の組織が、鍵一式にない → 実行できない ---
+    _reset_ro
+    _run_scenario -y restart-org; rc=$?
+    assert_exit_fail "$rc" "restart-org: 鍵一式に staging の組織がなければ、実行できない"
+    assert_file_contains "$MB/out.log" "実行できない" "restart-org: 「実行できない」と報告する"
+    assert_equals "$(wc -l < "$MB/restart.log" 2>/dev/null | tr -d ' ')" "" "restart-org: 実行できないときは、sf-restart を呼ばない"
+
+    # --- 前提: 接続済みのジョブのクローンがない / SF_USERNAME_STG がない → 実行できない ---
+    _reset_ro; rm -rf "$clone"
+    _run_scn_stg -y restart-org; rc=$?
+    assert_exit_fail "$rc" "restart-org: ジョブのクローンがなければ、実行できない"
+    _reset_ro; printf 'SLACK_CHANNEL_ID=C01ABCDEFGH\n' > "$MB/vars.txt"
+    _run_scn_stg -y restart-org; rc=$?
+    assert_exit_fail "$rc" "restart-org: Variable SF_USERNAME_STG がなければ、実行できない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "org login" "restart-org: 実行できないときは、ログインしない"
+
+    # --- 開始の警告 ---
+    _reset_ro
+    _run_scn_stg restart-org < <(printf 'N\n'); rc=$?
+    assert_exit_fail "$rc" "restart-org: 開始の確認で N → 中止する"
+    assert_file_contains "$MB/out.log" "書き込み（restart-org）" "restart-org: 警告に、書き込む内容が表示される"
+    assert_equals "$(wc -l < "$MB/restart.log" 2>/dev/null | tr -d ' ')" "" "restart-org: N のとき、sf-restart を呼ばない"
+    unset E2E_SF_RESTART E2E_SF_DRYRUN E2E_INSTALL_TIMEOUT E2E_CMD_POLL_SEC E2E_HEARTBEAT_SEC
+    teardown "$CB"
+}
+
 test_e2e_names
 test_e2e_guard
 test_e2e_delete_guards
@@ -2447,5 +2645,7 @@ test_e2e_scenario_validate_fail
 test_e2e_scenario_dist_main
 test_e2e_scenario_metasync_diff
 test_e2e_interrupt
+test_e2e_scenario_propagate_fail
+test_e2e_scenario_restart_org
 
 print_summary

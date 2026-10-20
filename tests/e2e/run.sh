@@ -194,16 +194,7 @@ JOB_DELETE="e2e-hello-delete-${RUN_ID}"
 # ------------------------------------------------------------------------------
 # 前回残したテスト用の作業フォルダ（名前が決まった形式のもののうち、最新の 1 つ）の名前を、標準出力に返す。なければ、戻り値 1
 #   名前は、日時（e2e-YYYYMMDD-HHMMSS）なので、フォルダ名の並び順が、新しい順になる
-_find_resume_project() {
-    local d name best=""
-    for d in "${E2E_HOME_ROOT}/${E2E_OWNER}"/e2e-*; do
-        [[ -d "$d" ]] || continue
-        name=$(basename "$d")  # VAR=$(cmd) のため run 不使用
-        e2e_is_target_project "$name" && best="$name"
-    done
-    [[ -n "$best" ]] || return 1
-    printf '%s' "$best"
-}
+_find_resume_project() { e2e_find_latest_project; }   # lib.sh（scenario.sh と共有）
 
 _set_project() {   # 引数: プロジェクト名。PROJECT / REPO_NAME / REPO_FULL / WORK を決める
     PROJECT="$1"

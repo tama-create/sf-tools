@@ -369,7 +369,7 @@ Actions 上の実行は、コマンドによって扱いが違う。「全部拒
 
 ### 8.1 実装状況（2026-10-19 時点。どこまで終わったか）
 
-凡例: ✅ = L1 を実装済み / △ = 一部だけ実装（残りは、右の欄） / — = 未実装 / 対象外 = 結合では扱わない（理由つき）。**L2（実環境）は、既存の e2e（`tests/e2e/`）が一部を代替しているが、シナリオ方式の L2 は、まだ作っていない**。
+凡例: ✅ = L1 を実装済み / △ = 一部だけ実装（残りは、右の欄） / — = 未実装 / 対象外 = 結合では扱わない（理由つき）。**L2（実環境）は、既存の e2e（`tests/e2e/`）が一部を代替している。シナリオ方式の L2（`tests/e2e/scenario.sh`。設計は 11）は、基盤と最初の 1 つ（`log-secrets`）だけ実装済み**。
 
 実装ファイル: `tests/test_integration.sh`（日常の通し）・`-git.sh`（フック・取り込み・競合・並行）・`-guards.sh`（安全ガード）・`-secrets.sh`（秘密情報）・`-job.sh`（sf-job の失敗）・`-misc.sh`（日常の分岐・設定の不正・再実行）・`-init.sh`（sf-init の通し・中断と再開・生成物の改変）・`-init2.sh`（sf-init の状態の食い違い・失敗・同時実行）・`-metasync.sh`（sf-metasync のローカルの動作・後始末）・`-next.sh`（sf-next の判定）・`-init3.sh`（sf-init の診断・欠け・Salesforce の失敗・同時の作成）・`-rerun.sh`（再実行・フックの改変）。部品は `tests/integration/lib.sh`・`init-lib.sh`。
 
@@ -405,7 +405,7 @@ Actions 上の実行は、コマンドによって扱いが違う。「全部拒
 | X2-3 sf-push のプッシュ失敗 | ✅ | test_integration.sh（不具合を見つけ、修正した） |
 | X2-5 進捗の更新前の停止 | ✅ | init（Phase 8 の push の失敗） |
 | X2-4 | — | L2 |
-| X3-1 手動削除後の再実行 | ✅ L1 | init3（Secret・Variable・ワークフロー・ブランチ・リポジトリの削除を、--status が見つけて、直し方を示す）・init2（main の削除 = X3-6・X3-7）。L2 は未 |
+| X3-1 手動削除後の再実行 | ✅ L1・L2（一部） | init3（Secret・Variable・ワークフロー・ブランチ・リポジトリの削除を、--status が見つけて、直し方を示す）・init2（main の削除 = X3-6・X3-7）。L2: `scenario.sh manual-delete`（Secret・Variable の削除 → `--status` が検出 → 元に戻す。ブランチ・リポジトリの削除は未） |
 | X3-2 branches.txt の不正 | ✅ | misc（origin にないブランチ名は、警告してスキップし、push は止めない） |
 | X3-3 deploy-target の不正 | ✅ | misc |
 | X3-4 古い `~/sf-tools` | ✅ | misc（sf-sync-wf の更新確認） |
@@ -423,10 +423,10 @@ Actions 上の実行は、コマンドによって扱いが違う。「全部拒
 | X5-3 CRLF・node なし・インストーラー版の sf | ✅ | misc（インストーラー版の sf・node が動かない・branches.txt が CRLF）。`sf-start` が、EOF で、入力を無限に繰り返す不具合を見つけて、直した。書き込めないフォルダは、扱わない（所有者が、書き込めるため、環境によって結果が違う） |
 | X6-1 管理者向けコマンドの拒否 | ✅ | test_integration.sh（Actions 上）・guards（別のオーナー・admin・force-* の外・prod） |
 | X6-2 確認の n / q / EOF / 空 | ✅ | test_integration.sh |
-| X6-3 main への push の拒否 | △ | git（L1 のフック部分）。Actions 側は L2 |
+| X6-3 main への push の拒否 | △ | git（L1 のフック部分）。Actions 側（Ruleset）は、**L2 の対象外にした**（現在のテスト用の組織は、無料プランの非公開リポジトリで、Ruleset が使えず、使えても、Admin は迂回できる。11.3・11.7） |
 | X6-4 remove-target の危険な入力 | ✅ L1 | guards（不具合を見つけ、修正した）。L2 の代表 1 ケースは未 |
 | X6-5 sf-sync-wf の上書き | ✅ | guards |
-| X7-1 秘密が漏れない | ✅ L1 | secrets・init（成功時・失敗時・中断時）。Actions のログ・Slack は L2 |
+| X7-1 秘密が漏れない | ✅ L1・L2（Actions のログ・PR） | secrets・init（成功時・失敗時・中断時）。L2: `scenario.sh log-secrets`（直近の Actions のログ 10 件・PR の本文とコメント。Slack は未） |
 | X7-2 一時ファイルの後始末 | △ | secrets（一時ファイルが残らない）。権限 600 は init（PAT の状態ファイル） |
 | X8-1 再実行の表 | ✅ | misc（hook・unhook）・test_integration.sh（install）・guards（sync-wf）・init（完了済みの sf-init）・rerun（sf-push の変更なしの再実行・sf-dryrun の連続実行・sf-update-secret の同じ入力の再実行）・metasync（変更なしの再実行 = M2）・job（同名の再実行 = X2-2） |
 | X8-4 主処理の失敗と後始末 | ✅ | metasync（SGD の失敗・push の拒否でも、元のブランチへ戻り、stash が復元される）。再実行で、push できなかったコミットが、origin に届く（直した） |
@@ -537,9 +537,9 @@ Actions 上の実行は、コマンドによって扱いが違う。「全部拒
 
 | 順 | 名前 | 内容 | 計画のパターン | L1 で確かめられない理由 | 見込み | 組織への書き込み |
 |---|---|---|---|---|---|---|
-| 1 | `push-guard` | `main` への直接 push を、フックなし（`--no-verify`）でも、**サーバー側（Ruleset）が拒否する**。`force-*` の `main` を壊さない（拒否される push だけ） | X6-3・C7 | Ruleset は、本物の GitHub にしかない | 約 1 分 | なし |
-| 2 | `manual-delete` | テスト用リポジトリの Secret・Variable・ブランチを、手で削除 → `sf-init --status` が検出 → 案内どおりに直る | X3-1 | 本物の `gh` の応答・権限 | 約 3 分 | なし |
-| 3 | `log-secrets` | 直近の Actions の実行ログと PR のコメントに、PAT・認証 URL・秘密鍵が出ていない | X7-1・C6 | Actions のログは、本物にしかない | 約 1 分 | なし |
+| 1 | ~~`push-guard`~~ | **作れなかった（2026-10-20）**。`main` への直接 push を、サーバー側が拒否することの確認だった。実際に確かめたところ、(a) テスト用の組織が**無料プラン**で、非公開リポジトリには Ruleset が使えない（`gh api repos/…/rulesets` が「Upgrade to GitHub Pro or make this repository public」で 403。`sf-init` も「無料プランでは利用不可」と警告する）。(b) 使えても、`protect-main` の迂回の許可（`bypass_actors`）に Admin が入っていて、e2e を実行する管理者は拒否されない。**この環境では、Ruleset の効きを、確認できない**（公開リポジトリか有料プランが要る。判断は 11.7） | X6-3・C7 | — | — | — |
+| 2 | `manual-delete`（**実装済み**） | テスト用リポジトリの Secret（SLACK_BOT_TOKEN）と Variable（SLACK_CHANNEL_ID）を、手で削除 → `sf-init --status` が、不足として終了し、直し方（`sf-init.sh --only 7`）を表示する → 元に戻す → 診断が、元に戻る。戻せるものだけを対象にする（Secret は、値が読めないため、鍵一式の値で戻せる SLACK_BOT_TOKEN。Variable は、削除の前に値を保存）。終了時（中断を含む）に、必ず戻す | X3-1 | 本物の `gh` の応答・権限 | 約 3 分 | 書き込みあり（テスト用リポジトリの Secret・Variable。すぐ戻す）
+| 3 | `log-secrets`（**実装済み**） | 直近の Actions の実行ログ（10 件）と PR の本文・コメントに、PAT・Slack の Token・認証 URL・秘密鍵が出ていない。検査できないとき（実行が 0 件・ログが空）は、成功にせず「実行できない」と報告する | X7-1・C6 | Actions のログは、本物にしかない | 約 1 分 | なし |
 | 4 | `dist-main` | **配布版（`SF_TOOLS_BRANCH` 未設定 → `main`）で、`main` のワークフロー・雛形が使われる**。生成物に、`development` 固有の変更が混ざらない。**前提: `origin/main` と `origin/development` の、配布物のパスの差分が空のとき**（rr の直後だけ。差分があると、確認の意味が変わるため、実行しない） | C1 | 実際の `main` を使うのは、本物の Actions だけ | 約 10 分 | なし（検証だけ） |
 | 5 | `metasync-diff` | 組織側で変更（**既存の許可された名前 `SfToolsE2eHello` の Apex だけ**）→ `wf-metasync` を起動 → `main` に反映される → 削除して元に戻す | B3 | 本物の組織との差分の取得 | 約 10 分 | あり（e2e の Apex のみ） |
 | 6 | `validate-fail` | 壊れた Apex の PR → `wf-validate` が失敗 → PR のコメント → 直して push → 再検証が成功。PR は、マージせずに閉じる | A3・X1-6 | 本物の Salesforce のコンパイル | 約 10 分 | なし（dry-run のみ） |
@@ -547,7 +547,7 @@ Actions 上の実行は、コマンドによって扱いが違う。「全部拒
 | 8 | `layout-fail` | `wf-propagate` の失敗の経路（別の変更があって取り込めない）・順序チェックの組み合わせ | X4-5 | 2 層以上の**別々の組織**が必要 | 約 15 分 | あり |
 | 9 | `restart-org` | `sf-restart`（接続先の切り替え）→ `sf-dryrun` が、新しい組織を使う | A8 | 2 つ以上の組織が必要 | 約 5 分 | なし |
 
-- **順 1〜3 は、組織にも GitHub にも書き込まない**（読み取り・拒否される操作だけ）。最初に作る。
+- **順 3 は、組織にも GitHub にも書き込まない**（読み取りだけ）。順 2 は、テスト用リポジトリの Secret などを、手で削除する点だけが、書き込み。順 1 は、上のとおり、作れなかった。
 - 順 4 は、**rr の直後にだけ**意味がある。実行の前に、前提（`main` = `development`）を、自分で確認して、満たさなければ、「実行しない」と報告して終わる。
 - 順 8・9 は、鍵一式（`fixture.env`）に、staging・develop の組織があるときだけ（`e2e_tier_available`）。なければ、「実行できない」と報告する（成功とは、数えない）。
 
@@ -575,8 +575,8 @@ Actions 上の実行は、コマンドによって扱いが違う。「全部拒
 
 ### 11.6 実装の段階
 
-1. **基盤**: `tests/e2e/scenario.sh`（名前で選ぶ・前提の確認（前）・後始末と確認（後）・結果の表・`--list`）と、`tests/test_e2e.sh` の単体テスト（モック。選び方・前提が崩れたときに止まること・ガードを通ること）。シナリオは、`push-guard` だけを入れる（組織に書き込まない）。
-2. **書き込みのない読み取り系**: `manual-delete`・`log-secrets`。
+1. **基盤（実装済み 2026-10-20）**: `tests/e2e/scenario.sh`（名前で選ぶ・前提の確認（前）・状態の確認（後）・結果の表・`--list`・開始の確認）と、`tests/test_e2e.sh` の単体テスト（モック。選び方・ガード・状態が変わったときに後続を止めること・読み取りのみであること）。最初のシナリオは、`push-guard` が作れなかったため、`log-secrets`（読み取りのみ）。実環境（残っているテスト用リポジトリ）で、13 件（実行 10 件・PR 3 件）が成功した。
+2. **書き込みの少ない系（実装済み 2026-10-20）**: `manual-delete`。実環境で 15 件が成功した（所要 155 秒。見込みの 3 分とほぼ同じ）。
 3. **Actions を使う系**: `validate-fail`・`metasync-diff`・`dist-main`。
 4. **新しいリポジトリを作る系**: `resume-recovery`。
 5. **複数の組織が要る系**: `layout-fail`・`restart-org`（組織が用意できたとき）。
@@ -589,4 +589,5 @@ Actions 上の実行は、コマンドによって扱いが違う。「全部拒
 - 前提の確認で比べる「状態」の範囲（11.2 の表は、案）。
 - `dist-main` で、`SF_TOOLS_BRANCH` を外す方法（Variable の削除と復元。**必ず復元する**。失敗したときの復元の保証が、必要）。
 - Slack への通知の確認（今は、Slack の読み取りの手段がない。PR のコメントだけで確認し、Slack は、対象外にするか）。
-- 実測の所要時間（見込みを、実際の値に直す）。
+- 実測の所要時間（見込みを、実際の値に直す。`log-secrets` は、実測 46 秒）。
+- **Ruleset の効きの確認（X6-3・C7）【決定 2026-10-20】**: L2 の対象外にする（無料プランの非公開リポジトリでは確認できず、公開リポジトリ・有料プランは、費用と、公開する内容の判断が要るため、採らない）。代わりに、`sf-init` が「無料プランでは利用不可」と警告すること（`phases/init/09_repo_rules.sh`）と、L1 のフックの確認（git）で、押さえる。有料プランに移る・公開のテスト用リポジトリを使う判断をしたときに、`push-guard` を作る（11.3 の順 1）。

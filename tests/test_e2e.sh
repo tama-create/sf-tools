@@ -27,6 +27,8 @@
 #  21. 検証の記録（e2e の最後に表示する、表の 1 行）
 #  22. ブラウザの差し替え（OS ごとの open_browser が使うコマンドを、すべて差し替える）
 #  23. wf-sequence の確認の部品（PR を閉じる・コメントの確認・動き出した検証の取り消し）
+#  24. シナリオ方式（scenario.sh。読み取りのみ・状態の確認・ガード）と、秘密情報の検査（e2e_scan_secrets）
+#  25. シナリオ manual-delete（Secret・Variable の削除 → 検出 → 元に戻す。終了時に必ず戻す）
 # ==============================================================================
 source "$(dirname "${BASH_SOURCE[0]}")/test_helper.sh"
 echo -e "${CLR_HEAD}=== tests/e2e（安全ガードと部品）===${CLR_RST}"
@@ -44,6 +46,31 @@ _mk_mocks() {
 echo "gh $*" >> "${MOCK_CALL_LOG:-/dev/null}"
 # PR を使った流れの再現（ブランチ作成・ファイル追加・PR・Actions の実行）
 case "$*" in
+    # シナリオ（scenario.sh）の読み取り: 実行の一覧（MOCK_GH_RUN_IDS）・ログ（MOCK_GH_RUN_LOG）・PR の一覧（MOCK_GH_PR_NUMBERS）・PR の本文とコメント（MOCK_GH_PR_BODY）
+    #   main の SHA（MOCK_GH_MAIN_SHA。MOCK_GH_MAIN_SHA_CHANGE=1: 2 回目以降は、別の値を返す）・ブランチ・PR の数
+    "run list -R "*" --limit "[0-9]*" --json databaseId --jq .[].databaseId")  [[ "${MOCK_GH_RUN_LIST_EXIT:-0}" -ne 0 ]] && exit "$MOCK_GH_RUN_LIST_EXIT"; for _i in ${MOCK_GH_RUN_IDS:-}; do echo "$_i"; done; exit 0 ;;
+    "run view"*" --log")                 printf '%s\n' "${MOCK_GH_RUN_LOG:-}"; exit 0 ;;
+    "pr list"*"--jq length")             echo "${MOCK_GH_PR_COUNT:-3}"; exit 0 ;;
+    "pr list"*"--jq .[].number")         for _i in ${MOCK_GH_PR_NUMBERS:-}; do echo "$_i"; done; exit 0 ;;
+    "pr view"*"--json body,comments"*)   printf '%s\n' "${MOCK_GH_PR_BODY:-}"; exit 0 ;;
+    "api repos/"*"/git/ref/heads/main"*)
+        _d="${MOCK_CALL_LOG%/*}"
+        _n=$(( $(cat "$_d/mainsha.cnt" 2>/dev/null || echo 0) + 1 )); echo "$_n" > "$_d/mainsha.cnt"
+        if [[ "${MOCK_GH_MAIN_SHA_CHANGE:-}" == "1" && $_n -ge 2 ]]; then echo "changedsha"; else echo "${MOCK_GH_MAIN_SHA:-abc123}"; fi
+        exit 0 ;;
+    "api repos/"*"/branches"*)           printf 'main\nadmin\n'; exit 0 ;;
+    # Secret・Variable の状態（manual-delete の再現）: $MB/secrets.txt（名前の行）・$MB/vars.txt（「名前=値」の行）。ファイルがなければ、空
+    #   MOCK_GH_SECRET_SET_FAIL_FIRST=1: secret set の 1 回目が失敗する（元に戻す処理の失敗と、終了時の再試行の再現）
+    "secret list"*"--jq .[].name")       cat "${MOCK_CALL_LOG%/*}/secrets.txt" 2>/dev/null; exit 0 ;;
+    "secret delete "*)                   _d="${MOCK_CALL_LOG%/*}"; grep -vx "$3" "$_d/secrets.txt" > "$_d/secrets.new" 2>/dev/null; mv "$_d/secrets.new" "$_d/secrets.txt"; exit 0 ;;
+    "secret set "*)
+        _d="${MOCK_CALL_LOG%/*}"; cat > /dev/null
+        if [[ "${MOCK_GH_SECRET_SET_FAIL_FIRST:-}" == "1" && ! -f "$_d/secretset.failed" ]]; then : > "$_d/secretset.failed"; echo "HTTP 502" >&2; exit 1; fi
+        echo "$3" >> "$_d/secrets.txt"; exit 0 ;;
+    "variable list"*"--jq .[].name")     cut -d= -f1 "${MOCK_CALL_LOG%/*}/vars.txt" 2>/dev/null; exit 0 ;;
+    "variable get "*)                    grep "^$3=" "${MOCK_CALL_LOG%/*}/vars.txt" 2>/dev/null | head -1 | cut -d= -f2-; exit 0 ;;
+    "variable delete "*)                 _d="${MOCK_CALL_LOG%/*}"; grep -v "^$3=" "$_d/vars.txt" > "$_d/vars.new" 2>/dev/null; mv "$_d/vars.new" "$_d/vars.txt"; exit 0 ;;
+    "variable set "*)                    _d="${MOCK_CALL_LOG%/*}"; echo "$3=${@: -1}" >> "$_d/vars.txt"; exit 0 ;;
     "pr create"*)                        [[ "${MOCK_GH_PR_EXIT:-0}" -ne 0 ]] && exit "$MOCK_GH_PR_EXIT"; echo "https://github.com/tamashimon-org/force-e2e-20260101-000000/pull/${MOCK_GH_PR_NUMBER:-7}"; exit 0 ;;
     "pr merge"*)                         exit "${MOCK_GH_MERGE_EXIT:-0}" ;;
     # 手動起動（gh workflow run / 起動した実行の ID）。MOCK_GH_WORKFLOW_EXIT=1: 起動の呼び出しが失敗する
@@ -97,6 +124,7 @@ case "$1 $2" in
             fi
         fi
         for n in ${MOCK_GH_REPOS:-}; do echo "$n"; done ;;
+    "repo view")   exit "${MOCK_GH_REPO_VIEW_EXIT:-0}" ;;
     "repo delete") exit 0 ;;
     *)             exit 0 ;;
 esac
@@ -1846,6 +1874,198 @@ test_e2e_sequence_parts() {
     teardown "$CB"
 }
 
+# ------------------------------------------------------------------------------
+# 24. シナリオ方式（scenario.sh）と、秘密情報の検査（e2e_scan_secrets）
+# ------------------------------------------------------------------------------
+_run_scenario() {  # 引数: scenario.sh への引数。標準入力はそのまま使う
+    (
+        cd "$HM" || exit 1
+        export HOME="$HM" PATH="$MB:$PATH" E2E_FIXTURE="$FX" E2E_POLL_SEC=0
+        bash "$E2E_DIR/scenario.sh" "$@"
+    ) > "$MB/out.log" 2>&1
+}
+
+test_e2e_scenario() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] scenario.sh（シナリオ方式。読み取りのみ・状態の確認・ガード）と e2e_scan_secrets${CLR_RST}"
+    _mk_cleanup_env
+    local rc pre='e2e_load_fixture;'
+
+    # --- e2e_scan_secrets: 見つけた「種類」だけを返し、値は出さない ---
+    _e2e_call "$pre"' printf "%s" "ふつうの ログ ***" | e2e_scan_secrets; echo RC=$?'
+    assert_file_contains "$MB/out.log" "RC=0" "秘密の検査: 何も含まれなければ、戻り値 0"
+    _e2e_call "$pre"' printf "%s" "token=ghp_fakepat done" | e2e_scan_secrets; echo RC=$?'
+    assert_file_contains "$MB/out.log" "E2E_PAT_TOKEN の値" "秘密の検査: PAT の値が含まれていれば、種類を返す"
+    assert_file_contains "$MB/out.log" "RC=1" "秘密の検査: 含まれていれば、戻り値 1"
+    assert_file_not_contains "$MB/out.log" "ghp_fakepat" "秘密の検査: 値そのものは、出力しない"
+    _e2e_call "$pre"' printf "%s" "x xoxb-fakeslack y" | e2e_scan_secrets; echo RC=$?'
+    assert_file_contains "$MB/out.log" "E2E_SLACK_BOT_TOKEN の値" "秘密の検査: Slack の Token の値を検出する"
+    _e2e_call "$pre"' printf "%s\n" "-----BEGIN RSA PRIVATE KEY-----" "MIIE" | e2e_scan_secrets; echo RC=$?'
+    assert_file_contains "$MB/out.log" "秘密鍵の本文" "秘密の検査: 秘密鍵の開始行を検出する（形式）"
+    _e2e_call "$pre"' printf "%s" "url=force://PlatformCLI::abcdefghijklmnopqrstuvwxyz1234@a.my.salesforce.com" | e2e_scan_secrets; echo RC=$?'
+    assert_file_contains "$MB/out.log" "伏せられていない認証 URL" "秘密の検査: 伏せられていない認証 URL を検出する（形式）"
+    _e2e_call "$pre"' printf "%s" "url=force://PlatformCLI::***@a.my.salesforce.com" | e2e_scan_secrets; echo RC=$?'
+    assert_file_contains "$MB/out.log" "RC=0" "秘密の検査: 伏せられた認証 URL（***）は、漏れとして数えない"
+
+    # --- 一覧・名前なし・不明な名前・ヘルプ: 実環境に接続しない ---
+    : > "$MOCK_CALL_LOG"
+    _run_scenario --list; rc=$?
+    assert_exit_ok "$rc" "scenario.sh --list は成功する"
+    assert_file_contains "$MB/out.log" "log-secrets" "--list: シナリオの名前が表示される"
+    _run_scenario; rc=$?
+    assert_exit_ok "$rc" "シナリオ名なしは、何も実行せずに成功で終わる"
+    assert_file_contains "$MB/out.log" "何も実行していません" "名前なし: 何も実行していないと表示される"
+    _run_scenario nope; rc=$?
+    assert_exit_fail "$rc" "不明なシナリオ名は、中止する"
+    bash "$E2E_DIR/scenario.sh" --help 2>&1 | grep -q "処理の流れ" && pass "scenario.sh --help が表示できる" || fail "scenario.sh --help が表示できる"
+    assert_equals "$(grep -c '^gh ' "$MOCK_CALL_LOG")" "0" "一覧・名前なし・不明な名前・ヘルプでは、gh を呼ばない"
+
+    # --- ガード ---
+    : > "$MOCK_CALL_LOG"
+    ( cd "$HM" && export HOME="$HM" PATH="$MB:$PATH" E2E_FIXTURE="$FX" GITHUB_ACTIONS=true
+      bash "$E2E_DIR/scenario.sh" -y log-secrets ) > "$MB/out.log" 2>&1; rc=$?
+    assert_exit_fail "$rc" "GitHub Actions 上では、シナリオを実行しない"
+    assert_equals "$(grep -c 'run list' "$MOCK_CALL_LOG")" "0" "GitHub Actions 上: 何も読まない"
+    MOCK_GH_API_USER=someone-else _run_scenario -y log-secrets; rc=$?
+    assert_exit_fail "$rc" "gh のログインユーザーが E2E_GH_USER と違うと、中止する"
+    assert_equals "$(grep -c 'run list' "$MOCK_CALL_LOG")" "0" "ユーザー不一致: 何も読まない"
+    ( cd "$HM" && export HOME="$HM" PATH="$MB:$PATH" E2E_FIXTURE="$CB/none.env"
+      bash "$E2E_DIR/scenario.sh" -y log-secrets ) > "$MB/out.log" 2>&1; rc=$?
+    assert_exit_fail "$rc" "鍵一式がないと、中止する"
+    MOCK_GH_REPO_VIEW_EXIT=1 _run_scenario -y log-secrets; rc=$?
+    assert_exit_fail "$rc" "テスト用リポジトリが GitHub にないと、中止する"
+    assert_file_contains "$MB/out.log" "run.sh" "リポジトリがない: run.sh で作るよう案内する"
+    rm -rf "$CB/root/home/tamashimon-org/e2e-20260101-000000"
+    _run_scenario -y log-secrets; rc=$?
+    assert_exit_fail "$rc" "前回残したテスト用の作業フォルダがないと、中止する（黙って、作らない）"
+    assert_file_contains "$MB/out.log" "run.sh" "作業フォルダがない: run.sh で作るよう案内する"
+    mkdir -p "$CB/root/home/tamashimon-org/e2e-20260101-000000"
+    : > "$MOCK_CALL_LOG"
+    _run_scenario log-secrets < <(printf 'N\n'); rc=$?
+    assert_exit_fail "$rc" "開始の確認で N → 中止する"
+    assert_equals "$(grep -c 'run list' "$MOCK_CALL_LOG")" "0" "確認で N: 何も読まない"
+
+    # --- log-secrets: 成功 ---
+    : > "$MOCK_CALL_LOG"
+    MOCK_GH_RUN_IDS="101 102" MOCK_GH_PR_NUMBERS="1 2" MOCK_GH_RUN_LOG="ふつうのログ ***" MOCK_GH_PR_BODY="ふつうの本文" \
+        _run_scenario -y log-secrets; rc=$?
+    assert_exit_ok "$rc" "log-secrets: 秘密が出ていなければ、成功する"
+    assert_file_contains "$MB/out.log" "成功（4 件）" "log-secrets: 実行 2 件・PR 2 件で、4 件の確認"
+    assert_file_contains "$MB/out.log" "検証の記録" "log-secrets: 成功したら、検証の記録の行を表示する"
+    assert_file_not_contains "$MOCK_CALL_LOG" "repo delete" "log-secrets: 何も削除しない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "pr merge" "log-secrets: マージしない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "workflow run" "log-secrets: ワークフローを起動しない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "pr create" "log-secrets: PR を作らない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "--method POST" "log-secrets: 書き込みの API を呼ばない"
+
+    # --- log-secrets: 漏れを見つけたら、失敗（種類だけを表示）---
+    MOCK_GH_RUN_IDS="101" MOCK_GH_PR_NUMBERS="1" MOCK_GH_RUN_LOG="leak ghp_fakepat" MOCK_GH_PR_BODY="ok" \
+        _run_scenario -y log-secrets; rc=$?
+    assert_exit_fail "$rc" "log-secrets: ログに PAT が出ていたら、失敗する"
+    assert_file_contains "$MB/out.log" "E2E_PAT_TOKEN の値" "log-secrets: 見つけた種類が表示される"
+    MOCK_GH_RUN_IDS="101" MOCK_GH_PR_NUMBERS="1" MOCK_GH_RUN_LOG="ok" MOCK_GH_PR_BODY="leak xoxb-fakeslack" \
+        _run_scenario -y log-secrets; rc=$?
+    assert_exit_fail "$rc" "log-secrets: PR の本文・コメントに Token が出ていたら、失敗する"
+
+    # --- log-secrets: 検査できないときは、成功にしない ---
+    MOCK_GH_RUN_IDS="" MOCK_GH_PR_NUMBERS="1" MOCK_GH_PR_BODY="ok" _run_scenario -y log-secrets; rc=$?
+    assert_exit_fail "$rc" "log-secrets: 実行が 0 件なら、成功にしない"
+    assert_file_contains "$MB/out.log" "実行できない" "log-secrets: 「実行できない」と報告する"
+    MOCK_GH_RUN_IDS="101" MOCK_GH_RUN_LOG="" MOCK_GH_PR_NUMBERS="" _run_scenario -y log-secrets; rc=$?
+    assert_exit_fail "$rc" "log-secrets: ログが空なら、成功にしない（検査していない）"
+    MOCK_GH_RUN_LIST_EXIT=1 _run_scenario -y log-secrets; rc=$?
+    assert_exit_fail "$rc" "log-secrets: 一覧を取得できなければ、成功にしない"
+
+    # --- 状態の確認: シナリオの前後で main の SHA が変わったら、失敗（後続は実行しない）---
+    rm -f "$MB/mainsha.cnt"
+    MOCK_GH_MAIN_SHA_CHANGE=1 MOCK_GH_RUN_IDS="101" MOCK_GH_PR_NUMBERS="1" MOCK_GH_RUN_LOG="ok" MOCK_GH_PR_BODY="ok" \
+        _run_scenario -y log-secrets log-secrets; rc=$?
+    assert_exit_fail "$rc" "状態の確認: main の SHA が変わったら、失敗する"
+    assert_file_contains "$MB/out.log" "状態" "状態の確認: 変わったことが表示される"
+    assert_file_contains "$MB/out.log" "以降のシナリオは実行していません" "状態の確認: 後続のシナリオは、実行しない"
+    teardown "$CB"
+}
+
+# ------------------------------------------------------------------------------
+# 25. シナリオ manual-delete（Secret・Variable を手で削除 → --status が見つける → 元に戻す）
+# ------------------------------------------------------------------------------
+# --status の代わりの台本（E2E_SF_INIT）: mock の Secret・Variable の状態を見て、不足があれば、終了コード 1 を返す（診断の形式を真似る）
+_mk_status_stub() {
+    cat > "$MB/status-stub.sh" << 'EOF'
+#!/bin/bash
+d="${MOCK_CALL_LOG%/*}"
+[[ "${1:-}" == "--status" ]] || exit 9
+echo "$PWD" >> "$d/status.cwd"
+rc=0
+if grep -qx SLACK_BOT_TOKEN "$d/secrets.txt" 2>/dev/null; then echo "    ✓ SLACK_BOT_TOKEN"; else echo "    ✗ SLACK_BOT_TOKEN が、ありません → プロジェクトのフォルダで sf-init.sh --only 7"; rc=1; fi
+if grep -q '^SLACK_CHANNEL_ID=' "$d/vars.txt" 2>/dev/null; then echo "    ✓ SLACK_CHANNEL_ID"; else echo "    ✗ SLACK_CHANNEL_ID が、ありません → プロジェクトのフォルダで sf-init.sh --only 7"; rc=1; fi
+[[ "${MOCK_STATUS_BLIND:-}" == "1" ]] && exit 0   # 不足を見つけられない診断の再現
+exit $rc
+EOF
+    chmod +x "$MB/status-stub.sh"
+}
+
+test_e2e_scenario_manual_delete() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] scenario.sh manual-delete（削除 → 検出 → 元に戻す。終了時に必ず戻す）${CLR_RST}"
+    _mk_cleanup_env
+    _mk_status_stub
+    local rc admin="$CB/root/home/tamashimon-org/e2e-20260101-000000/admin/force-e2e-20260101-000000"
+    mkdir -p "$admin/.git"
+    _reset_state() { printf 'PAT_TOKEN\nSLACK_BOT_TOKEN\n' > "$MB/secrets.txt"; printf 'SLACK_CHANNEL_ID=C01ABCDEFGH\nSF_USERNAME_PROD=a@example.com\n' > "$MB/vars.txt"; rm -f "$MB/secretset.failed" "$MB/status.cwd"; : > "$MOCK_CALL_LOG"; }
+    export E2E_SF_INIT="$MB/status-stub.sh" E2E_STATUS_TRIES=2
+
+    # --- 成功: 削除 → 検出（直し方つき）→ 元に戻る ---
+    _reset_state
+    _run_scenario -y manual-delete; rc=$?
+    assert_exit_ok "$rc" "manual-delete: 成功する"
+    assert_file_contains "$MB/out.log" "成功（15 件）" "manual-delete: 15 件の確認が成功する"
+    assert_file_contains "$MB/out.log" "sf-init.sh --only 7" "manual-delete: 直し方が、確認されている"
+    assert_equals "$(sort "$MB/secrets.txt" | tr '\n' ',')" "PAT_TOKEN,SLACK_BOT_TOKEN," "manual-delete: Secret が、元の一覧に戻る"
+    assert_equals "$(grep '^SLACK_CHANNEL_ID=' "$MB/vars.txt")" "SLACK_CHANNEL_ID=C01ABCDEFGH" "manual-delete: Variable が、元の値で戻る"
+    assert_equals "$(sort "$MB/vars.txt" | tr '\n' ',')" "SF_USERNAME_PROD=a@example.com,SLACK_CHANNEL_ID=C01ABCDEFGH," "manual-delete: 触っていない Variable は、そのまま"
+    assert_equals "$(grep -c 'secret delete SLACK_BOT_TOKEN' "$MOCK_CALL_LOG")" "1" "manual-delete: 削除するのは、SLACK_BOT_TOKEN だけ（1 回）"
+    assert_equals "$(grep -c 'secret delete' "$MOCK_CALL_LOG")" "1" "manual-delete: ほかの Secret は、削除しない"
+    assert_equals "$(grep -c 'variable delete SLACK_CHANNEL_ID' "$MOCK_CALL_LOG")" "1" "manual-delete: 削除する Variable は、SLACK_CHANNEL_ID だけ（1 回）"
+    assert_equals "$(grep -c 'variable delete' "$MOCK_CALL_LOG")" "1" "manual-delete: ほかの Variable は、削除しない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "repo delete" "manual-delete: リポジトリは、削除しない"
+    grep -qx "$admin" "$MB/status.cwd" && pass "manual-delete: --status は、管理者用のクローンで実行される" || fail "manual-delete: --status は、管理者用のクローンで実行される" "$(cat "$MB/status.cwd")"
+
+    # --- 診断が不足を見つけられない → 失敗（それでも、元に戻す）---
+    _reset_state
+    MOCK_STATUS_BLIND=1 _run_scenario -y manual-delete; rc=$?
+    assert_exit_fail "$rc" "manual-delete: 診断が、不足を見つけなければ、失敗する"
+    assert_equals "$(sort "$MB/secrets.txt" | tr '\n' ',')" "PAT_TOKEN,SLACK_BOT_TOKEN," "manual-delete: 失敗しても、Secret は、元に戻る"
+    assert_equals "$(grep '^SLACK_CHANNEL_ID=' "$MB/vars.txt")" "SLACK_CHANNEL_ID=C01ABCDEFGH" "manual-delete: 失敗しても、Variable は、元に戻る"
+
+    # --- 元に戻す処理の 1 回目が失敗 → 終了時に、再試行して、戻る ---
+    _reset_state
+    MOCK_GH_SECRET_SET_FAIL_FIRST=1 _run_scenario -y manual-delete; rc=$?
+    assert_exit_fail "$rc" "manual-delete: 元に戻す処理が失敗すると、失敗として報告する"
+    assert_file_contains "$MB/out.log" "元に戻せませんでした" "manual-delete: 戻せなかったことと、手での戻し方が表示される"
+    assert_equals "$(sort "$MB/secrets.txt" | tr '\n' ',')" "PAT_TOKEN,SLACK_BOT_TOKEN," "manual-delete: 終了時の再試行で、Secret が、戻る"
+
+    # --- 前提が満たされないとき: 実行できない（何も削除しない）---
+    _reset_state
+    rm -rf "$admin"
+    _run_scenario -y manual-delete; rc=$?
+    assert_exit_fail "$rc" "manual-delete: 管理者用のクローンがなければ、実行できない"
+    assert_file_contains "$MB/out.log" "実行できない" "manual-delete: 「実行できない」と報告する"
+    assert_file_not_contains "$MOCK_CALL_LOG" "secret delete" "manual-delete: 実行できないときは、何も削除しない"
+    mkdir -p "$admin/.git"
+    _reset_state; printf 'PAT_TOKEN\n' > "$MB/secrets.txt"
+    _run_scenario -y manual-delete; rc=$?
+    assert_exit_fail "$rc" "manual-delete: もともと不足があれば、実行できない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "secret delete" "manual-delete: もともと不足があるときは、何も削除しない"
+
+    # --- 開始の警告: 書き込む内容が表示され、N で中止すると、何も削除しない ---
+    _reset_state
+    _run_scenario manual-delete < <(printf 'N\n'); rc=$?
+    assert_exit_fail "$rc" "manual-delete: 開始の確認で N → 中止する"
+    assert_file_contains "$MB/out.log" "書き込み（manual-delete）" "manual-delete: 警告に、書き込む内容が表示される"
+    assert_file_not_contains "$MOCK_CALL_LOG" "secret delete" "manual-delete: N のとき、何も削除しない"
+    unset E2E_SF_INIT E2E_STATUS_TRIES
+    teardown "$CB"
+}
+
 test_e2e_names
 test_e2e_guard
 test_e2e_delete_guards
@@ -1875,5 +2095,7 @@ test_e2e_doctor
 test_e2e_record_line
 test_e2e_browser_shims
 test_e2e_sequence_parts
+test_e2e_scenario
+test_e2e_scenario_manual_delete
 
 print_summary

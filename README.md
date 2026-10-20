@@ -1146,6 +1146,8 @@ bash tests/e2e/run.sh --layout 3            # 3 層で、通しで確認する
 bash tests/e2e/run.sh --resume
 ```
 
+`--interrupt` を付けると、`sf-init` を、わざと途中（Phase 8 の初回コミットの push）で失敗させ、失敗の画面が案内する「続きをやる」で再開してから、いつもの確認を行います（中断→再開が、実環境で正しく動くことの確認です。`--resume` とは同時に指定できません）。
+
 `--resume` では、前掃除・`sf-init`・`wf-metasync` を行いません。ジョブ名は、毎回、時刻付きの別の名前（`e2e-hello-時刻`）になるので、同じリポジトリで、何度でも実行できます。前回の失敗で、Hello World の Apex クラスが組織に残っていたら、最初に削除します（名前が完全に一致するものだけ）。前回残したリポジトリがない場合は、エラーになります（通常の実行をしてください）。
 
 **シナリオを 1 つずつ動かす（`scenario.sh`）:** `run.sh` が残したテスト用リポジトリに対して、確かめたいことだけを、短く動かします。`bash tests/e2e/scenario.sh --list` で一覧を見て、`bash tests/e2e/scenario.sh log-secrets` のように名前で選びます（名前なしは、何も実行しません）。実行の前後で、`main` の SHA・ブランチ・PR の数を比べ、変わっていたら、後続を実行しません。現在あるのは、`log-secrets`（直近の Actions のログと PR のコメントに、PAT・Slack の Token・認証 URL・秘密鍵が出ていないこと。読み取りのみ）、`validate-fail`（壊れた Apex の PR で `wf-validate` が失敗してコメントが付き、直すと成功すること。PR は、マージせずに閉じます）、`dist-main`（配布版 = `SF_TOOLS_BRANCH` 未設定で、sf-tools の `main` が使われること。`main` と `development` の配布物に差がない rr の直後だけ実行できます）、`metasync-diff`（組織にだけ作った Apex が、`wf-metasync` で `main` に反映されること。組織と `main` は、実行前の状態に戻します）、`manual-delete`（テスト用リポジトリの Secret・Variable を手で削除 → `sf-init.sh --status` が見つけ、直し方を示す → 元に戻す。書き込みがあるため、開始の前に、書き込む内容が表示されます。終了時に、必ず元に戻します）です。「実行できない」（検査できるログがない、など）は、成功には数えません。

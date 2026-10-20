@@ -32,6 +32,7 @@
 #  26. シナリオ validate-fail（壊れた Apex の PR → wf-validate が失敗 → 直すと成功。マージしない・必ず後始末する）
 #  27. シナリオ dist-main（配布版 = SF_TOOLS_BRANCH 未設定で、sf-tools の main が使われる。rr の直後だけ）
 #  28. シナリオ metasync-diff（組織側だけの Apex が、wf-metasync で main に反映される。組織と main を、必ず戻す）
+#  29. 中断→再開（run.sh --interrupt）と、git の shim（main への push を 1 回だけ失敗させる）
 # ==============================================================================
 source "$(dirname "${BASH_SOURCE[0]}")/test_helper.sh"
 echo -e "${CLR_HEAD}=== tests/e2e（安全ガードと部品）===${CLR_RST}"
@@ -2339,6 +2340,66 @@ test_e2e_scenario_metasync_diff() {
     teardown "$CB"
 }
 
+# ------------------------------------------------------------------------------
+# 29. 中断→再開（run.sh --interrupt）と、git の shim
+# ------------------------------------------------------------------------------
+test_e2e_interrupt() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] run.sh --interrupt（Phase 8 の push を 1 回だけ失敗させる git の shim）${CLR_RST}"
+    _mk_cleanup_env
+    local rc shim="$E2E_DIR/shims/git"
+    # 本物の git の代わり: 呼ばれた引数を記録する
+    cat > "$MB/realgit" << 'EOF'
+#!/bin/bash
+echo "REAL: $*" >> "${MOCK_CALL_LOG%/*}/realgit.log"
+exit 0
+EOF
+    chmod +x "$MB/realgit"
+    _git_shim() { E2E_REAL_GIT="$MB/realgit" E2E_GIT_FAIL_MARK="$MB/mark" bash "$shim" "$@" > "$MB/shim.out" 2>&1; }
+
+    # --- main への push は、1 回目だけ失敗する ---
+    rm -f "$MB/mark" "$MB/realgit.log"
+    _git_shim -c credential.helper= push --no-verify origin main; rc=$?
+    assert_equals "$rc" "128" "git の shim: main への push の 1 回目は、失敗する（終了コード 128）"
+    assert_file_exists "$MB/mark" "git の shim: 失敗させた印のファイルができる"
+    assert_file_contains "$MB/shim.out" "わざと失敗させました" "git の shim: 理由が表示される"
+    assert_file_not_exists "$MB/realgit.log" "git の shim: 失敗させたとき、本物の git は呼ばない"
+    _git_shim -c credential.helper= push --no-verify origin main; rc=$?
+    assert_exit_ok "$rc" "git の shim: 2 回目の push は、通る"
+    assert_file_contains "$MB/realgit.log" "REAL: -c credential.helper= push --no-verify origin main" "git の shim: 2 回目は、本物の git に、引数をそのまま渡す"
+
+    # --- main 以外の push・push 以外は、失敗させない ---
+    rm -f "$MB/mark" "$MB/realgit.log"
+    _git_shim push origin admin; rc=$?
+    assert_exit_ok "$rc" "git の shim: main 以外の push は、失敗させない"
+    assert_file_not_exists "$MB/mark" "git の shim: main 以外の push では、印を作らない"
+    _git_shim commit -m "main の変更"; rc=$?
+    assert_exit_ok "$rc" "git の shim: push 以外（commit）は、失敗させない"
+    _git_shim checkout main; rc=$?
+    assert_exit_ok "$rc" "git の shim: push 以外（checkout main）は、失敗させない"
+    assert_file_not_exists "$MB/mark" "git の shim: push 以外では、印を作らない"
+
+    # --- 印の指定がなければ、何も失敗させない / 本物の git の指定がなければ、失敗する ---
+    rm -f "$MB/mark" "$MB/realgit.log"
+    ( E2E_REAL_GIT="$MB/realgit" bash "$shim" push origin main ) > "$MB/shim.out" 2>&1; rc=$?
+    assert_exit_ok "$rc" "git の shim: 印の指定がなければ、main への push も失敗させない"
+    ( unset E2E_REAL_GIT; E2E_GIT_FAIL_MARK="$MB/mark" bash "$shim" push origin main ) > "$MB/shim.out" 2>&1; rc=$?
+    assert_exit_fail "$rc" "git の shim: 本物の git の指定がなければ、動かない"
+
+    # --- run.sh のオプション ---
+    : > "$MOCK_CALL_LOG"
+    ( cd "$HM" && export HOME="$HM" PATH="$MB:$PATH" E2E_FIXTURE="$FX"
+      printf 'Y' | bash "$E2E_DIR/run.sh" --interrupt --resume ) > "$MB/out.log" 2>&1; rc=$?
+    assert_exit_fail "$rc" "run.sh: --interrupt と --resume の同時指定は、中止する"
+    assert_file_contains "$MB/out.log" "新しくリポジトリを作るときだけ" "run.sh: --interrupt + --resume: 理由が表示される"
+    assert_equals "$(grep -c 'gh repo delete\|gh repo create' "$MOCK_CALL_LOG")" "0" "run.sh: オプションの検証で中止したとき、何も削除・作成しない"
+    bash "$E2E_DIR/run.sh" --help 2>&1 | grep -q -- "--interrupt" && pass "run.sh --help に、--interrupt の説明がある" || fail "run.sh --help に、--interrupt の説明がある"
+    assert_file_contains "$E2E_DIR/run.sh" "_interrupt_first_run" "run.sh: 1 回目（わざと失敗）の関数がある"
+    assert_file_contains "$E2E_DIR/run.sh" "shims/git" "run.sh: git の shim を使う"
+    assert_file_contains "$E2E_DIR/run.sh" "「続きをやる」を選ぶと" "run.sh: 失敗の画面の復旧の案内を、確認する"
+    unset MOCK_CALL_LOG MOCK_GH_REPOS MOCK_SF_ECAS
+    teardown "$CB"
+}
+
 test_e2e_names
 test_e2e_guard
 test_e2e_delete_guards
@@ -2373,5 +2434,6 @@ test_e2e_scenario_manual_delete
 test_e2e_scenario_validate_fail
 test_e2e_scenario_dist_main
 test_e2e_scenario_metasync_diff
+test_e2e_interrupt
 
 print_summary

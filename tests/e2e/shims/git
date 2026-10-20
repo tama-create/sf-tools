@@ -1,0 +1,26 @@
+#!/bin/bash
+# ==============================================================================
+# git（差し替え）- e2e の run.sh --interrupt が、sf-init の 1 回目だけ、PATH の先頭に置く
+# ==============================================================================
+# main への git push を、1 回だけ失敗させる（Phase 8 の初回コミットの push の失敗を、実環境で起こすため）。
+# それ以外のコマンド（clone・commit・main 以外の push など）と、2 回目以降の push は、本物の git にそのまま渡す。
+#
+# 環境変数（run.sh が設定する）:
+#   E2E_REAL_GIT        本物の git のパス（必須）
+#   E2E_GIT_FAIL_MARK   失敗させた印のファイル。なければ、まだ失敗させていない。設定されていなければ、何も失敗させない
+# ==============================================================================
+real="${E2E_REAL_GIT:?E2E_REAL_GIT が設定されていません}"
+if [[ -n "${E2E_GIT_FAIL_MARK:-}" && ! -e "$E2E_GIT_FAIL_MARK" ]]; then
+    _is_push=0
+    _has_main=0
+    for _a in "$@"; do
+        [[ "$_a" == "push" ]] && _is_push=1
+        [[ "$_a" == "main" ]] && _has_main=1
+    done
+    if [[ $_is_push -eq 1 && $_has_main -eq 1 ]]; then
+        : > "$E2E_GIT_FAIL_MARK"
+        echo "fatal: [e2e] main への push を、わざと失敗させました（中断→再開の確認）" >&2
+        exit 128
+    fi
+fi
+exec "$real" "$@"

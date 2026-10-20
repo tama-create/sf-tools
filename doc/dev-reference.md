@@ -972,6 +972,7 @@ sf-tools の `main` への反映は、全ユーザーへの配布と同義であ
 | Windows 11（Git Bash。`C:\Git\bin\bash.exe -l`） | 5.3.15 | OpenSSL 3.5.9 | 1aa67b3 | 2026-10-19 | e2e: 119 件成功 / 0 件失敗（1 層。`sf-push` の変更後の確認。`--add-tier` の確認を含む） |
 | Windows 11（Git Bash。`C:\Git\bin\bash.exe -l`） | 5.3.15 | OpenSSL 3.5.9 | fed6180 | 2026-10-19 | e2e: 119 件成功 / 0 件失敗（1 層。結合テスト L1 の追加分と、見つかった不具合 4 件の修正後の確認。`--add-tier` の確認を含む。43 分 41 秒） |
 | Windows・macOS・Linux（GitHub Actions の `windows-latest` / `macos-latest` / `ubuntu-latest`） | 5.x / 3.2 / 5.x | — | 1aa67b3 | 2026-10-19 | 全件テスト・shellcheck・結合テスト L1（`tests/test_integration.sh`）が、3 つの OS ですべて成功 |
+| Windows 11（Git Bash。`C:\Git\bin\bash.exe -l`） | 5.3.15 | OpenSSL 3.5.9 | a22fe4c | 2026-10-20 | e2e シナリオ（`tests/e2e/scenario.sh`）: `log-secrets` 13 件・`manual-delete` 15 件・`validate-fail` 13 件・`metasync-diff` 18 件が成功。`dist-main` 10 件は、rr の直後（`origin/main` と `origin/development` の配布物に差がない）の `a22fe4c` で成功（配布版で sf-tools の `main` が使われる）。すべて実環境（テスト用の組織・リポジトリ）で、終了時に元の状態へ戻したことを確認 |
 | Windows・macOS・Linux（GitHub Actions の `windows-latest` / `macos-latest` / `ubuntu-latest`） | 5.x / 3.2 / 5.x | — | fed6180 | 2026-10-19 | 全件テスト・shellcheck・結合テスト L1（残りの追加分を含む）が、3 つの OS ですべて成功（全 7 ジョブ） |
 | Windows（`windows-latest` の Git Bash） | 5.x | — | 1fe7ed7 | 2026-10-18 | 単体テスト全件成功（GitHub Actions） |
 | macOS（`macos-latest`） | 3.2（標準の `/bin/bash`） | — | 1fe7ed7 | 2026-10-18 | 単体テスト全件成功（GitHub Actions） |

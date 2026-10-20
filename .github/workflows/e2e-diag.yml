@@ -1,0 +1,88 @@
+name: e2e 診断（一時的）
+
+# e2e が、GitHub のサーバーの Windows で、`sf project deploy start` の `fetch failed` で止まる原因を、切り分けるための、一時的なワークフロー
+# （2026-10-20）。原因が分かったら、このファイルは、削除する。
+#   ・sf のバージョン（手元で通っている 2.152.14 と、最新）を比べる
+#   ・REST（sf data query）・Metadata API の読み取り（sf org list metadata）・検証のみのデプロイ（--dry-run）を、それぞれ試す
+#   ・Node の fetch が、ログイン先に届くか（失敗したときの原因コード）を見る
+# 組織は、読み取りと検証（--dry-run）だけで、何も変更しない。sf-tools は公開リポジトリのため、ログは、誰でも読める。
+# 組織の ID・ユーザー名・My Domain の URL は、出さない（出る可能性がある部分は、伏せる）。
+on:
+  push:
+    branches: [development]
+    paths:
+      - '.github/workflows/e2e-diag.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  diag:
+    name: 診断（Windows・sf ${{ matrix.sf }}）
+    runs-on: windows-latest
+    timeout-minutes: 30
+    environment: e2e
+    strategy:
+      fail-fast: false
+      matrix:
+        sf: ['2.152.14', 'latest']
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: sf をインストール
+        run: |
+          npm install -g @salesforce/cli@${{ matrix.sf }}
+          sf --version
+          node --version
+
+      - name: Node の fetch が、ログイン先に届くか
+        run: |
+          node -e "fetch('https://login.salesforce.com/services/oauth2/.well-known/openid-configuration').then(r=>console.log('login.salesforce.com: HTTP',r.status)).catch(e=>console.log('login.salesforce.com: 失敗',e.message,(e.cause&&(e.cause.code||e.cause.message))||''))"
+
+      - name: main の組織にログイン（認証 URL）
+        env:
+          E2E_SFDX_AUTH_URL: ${{ secrets.E2E_SFDX_AUTH_URL }}
+        run: |
+          f="$RUNNER_TEMP/diag-url.txt"
+          ( umask 077; printf '%s' "$E2E_SFDX_AUTH_URL" > "$f" )
+          if sf org login sfdx-url --sfdx-url-file "$f" --alias diag > "$RUNNER_TEMP/login.out" 2>&1; then
+              echo "ログイン: 成功"
+          else
+              echo "ログイン: 失敗"; sed -E 's/00D[A-Za-z0-9]{12,15}/00D***/g' "$RUNNER_TEMP/login.out" | head -5
+          fi
+          rm -f "$f"
+
+      - name: REST（sf data query）
+        run: |
+          if sf data query --query "SELECT Id FROM Organization LIMIT 1" --target-org diag > /dev/null 2> "$RUNNER_TEMP/err.out"; then
+              echo "REST: 成功"
+          else
+              echo "REST: 失敗"; sed -E 's/00D[A-Za-z0-9]{12,15}/00D***/g' "$RUNNER_TEMP/err.out" | head -5
+          fi
+
+      - name: Metadata API の読み取り（sf org list metadata）
+        run: |
+          if sf org list metadata --metadata-type ApexClass --target-org diag > /dev/null 2> "$RUNNER_TEMP/err.out"; then
+              echo "Metadata API（読み取り）: 成功"
+          else
+              echo "Metadata API（読み取り）: 失敗"; sed -E 's/00D[A-Za-z0-9]{12,15}/00D***/g' "$RUNNER_TEMP/err.out" | head -5
+          fi
+
+      - name: 検証のみのデプロイ（--dry-run。何も変更しない）
+        run: |
+          d="$RUNNER_TEMP/proj"
+          mkdir -p "$d/force-app/main/default/classes"
+          printf '{"packageDirectories":[{"path":"force-app","default":true}],"sourceApiVersion":"62.0"}' > "$d/sfdx-project.json"
+          printf 'public class E2eDiagProbe { }\n' > "$d/force-app/main/default/classes/E2eDiagProbe.cls"
+          printf '<?xml version="1.0" encoding="UTF-8"?>\n<ApexClass xmlns="http://soap.sforce.com/2006/04/metadata"><apiVersion>62.0</apiVersion><status>Active</status></ApexClass>\n' > "$d/force-app/main/default/classes/E2eDiagProbe.cls-meta.xml"
+          cd "$d"
+          if sf project deploy start --dry-run --source-dir force-app --target-org diag > "$RUNNER_TEMP/dep.out" 2>&1; then
+              echo "デプロイ（--dry-run）: 成功"
+          else
+              echo "デプロイ（--dry-run）: 失敗"; sed -E 's/00D[A-Za-z0-9]{12,15}/00D***/g' "$RUNNER_TEMP/dep.out" | head -8
+          fi
+
+      - name: 後始末（ログインを外す）
+        if: always()
+        run: sf org logout --target-org diag --no-prompt || true

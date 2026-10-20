@@ -404,6 +404,31 @@ e2e_delete_apex() {
     return $rc
 }
 
+# Hello World の Apex（SfToolsE2eHello と、そのテスト）を、組織に直接デプロイする（メタデータ API の形式）。
+#   sf-tools の経路（sf-push・wf-release）を通さずに、「組織側だけに差分がある」状態を作る（wf-metasync の反映の確認用。scenario.sh metasync-diff）。
+#   デプロイできるのは、許可された 2 つの名前だけ（e2e_is_target_apex）。管理用ログイン済みであること。削除は e2e_delete_apex
+e2e_deploy_hello() {
+    local work rc=0
+    e2e_require_guard
+    e2e_is_target_apex "$E2E_APEX_HELLO" && e2e_is_target_apex "$E2E_APEX_HELLO_TEST" || die "デプロイ対象外の Apex クラス名です。"
+    work=$(mktemp -d "${E2E_TMP:-${TMPDIR:-/tmp}}/e2e-run.XXXXXX") || die "一時ディレクトリを作成できません。"  # VAR=$(cmd) のため run 不使用（後掃除の対象になる名前）
+    mkdir -p "$work/classes"  # run 不使用: デプロイ用の一時フォルダの準備
+    {
+        printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' '<Package xmlns="http://soap.sforce.com/2006/04/metadata">' '  <types>'
+        printf '    <members>%s</members>\n' "$E2E_APEX_HELLO" "$E2E_APEX_HELLO_TEST"
+        printf '%s\n' '    <name>ApexClass</name>' '  </types>' '  <version>64.0</version>' '</Package>'
+    } > "$work/package.xml"
+    verify_hello_cls > "$work/classes/${E2E_APEX_HELLO}.cls"
+    verify_hello_test_cls > "$work/classes/${E2E_APEX_HELLO_TEST}.cls"
+    verify_apex_meta > "$work/classes/${E2E_APEX_HELLO}.cls-meta.xml"
+    verify_apex_meta > "$work/classes/${E2E_APEX_HELLO_TEST}.cls-meta.xml"
+    # 成否は終了コードで判定する。Apex のデプロイは、テストが要る（指定したテストだけを実行）
+    (cd "$work" && run sf project deploy start --metadata-dir . --target-org "$(_e2e_cur_alias)" \
+        --test-level RunSpecifiedTests --tests "$E2E_APEX_HELLO_TEST" --wait 15 --concise) || rc=$?
+    rm -rf "$work"  # run 不使用: デプロイ用の一時フォルダの後始末
+    return $rc
+}
+
 # Salesforce にある、テスト用 Apex クラスの件数を返す（標準出力）。取得に失敗したら、戻り値 1
 #   失敗したときは、sf のエラーの要点（先頭の数行。Token・認証 URL は伏せる）を警告として表示する（標準エラー）。
 #   これまで、エラーを捨てていたため、削除後の確認の失敗の原因が分からなかった

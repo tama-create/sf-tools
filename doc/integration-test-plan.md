@@ -387,17 +387,19 @@ Actions 上の実行は、コマンドによって扱いが違う。「全部拒
 | A13 sf-init の生成物 → 後続コマンド | ✅ | init（A13）。A13a は `tests/test_integration.sh`（テンプレート版） |
 | A14 URL からのプロジェクト判定（複数 clone） | ✅ | job（A14）。同じ XXXX が別のオーナーに複数あるとき、最初のものを黙って使っていた不具合を見つけて、直した（選ばせる） |
 | A15 pre-commit フック | ✅ | git |
-| A3・A8 | — | L2 のみ（未） |
+| A3 PR の wf-validate の失敗 → 直して再検証 | ✅ L2（Slack 以外） | `scenario.sh validate-fail`（壊れた Apex の PR → 失敗・PR に「検証失敗」のコメント → 直して push → 成功・「検証成功」）。Slack の通知は未 |
+| A8 sf-restart | — | L2 のみ（未。複数の組織が要る） |
 | B1 / X2-1 sf-init の中断と再開 | ✅ L1 | init（5 つの止め方）。L2 は未 |
 | B2 sf-update-secret | △ | secrets（L1）。L2 は未 |
 | B4 sf-sync-wf | △ | guards（X6-5。L1 のローカル部分）。L2 は未 |
-| B3 wf-metasync の実差分の反映 | △ | metasync（ローカルの同期の動作。フックのあるクローンでは、main への push が止められる現状を記録）。実環境の差分の反映は L2（未） |
-| B5〜B8・C1〜C7 | — | L2・手動（未） |
+| B3 wf-metasync の実差分の反映 | ✅ L1・L2 | metasync（ローカルの同期の動作）。L2: `scenario.sh metasync-diff`（組織にだけ Apex を作る → wf-metasync → main に反映 → 組織・main を実行前の状態に戻す） |
+| C1 配布版（main）の通し | △ L2 | `scenario.sh dist-main`（SF_TOOLS_BRANCH 未設定で、ワークフローが sf-tools の main を使う。rr の直後だけ）。配布版での `sf-init` の通しは未 |
+| B5〜B8・C2〜C7 | — | L2・手動（未） |
 | X1-1 GitHub の一時的な失敗 | △ | job（ブランチ作成の失敗 → 再実行）。ほかの API は未 |
 | X1-2 PAT の権限不足・失効 | ✅ | init2（権限不足・無効） |
 | X1-3 別ユーザー・名前の衝突 | ✅ | init2・job |
 | X1-4 認証 URL の失効・JWT の失敗 | ✅ L1 | secrets（sf-update-secret の接続テストの失敗）・init3（Phase 10 のログインの失敗 → 続きから）。L2 は未 |
-| X1-6 テスト失敗・コンパイルエラー | △ | misc（コンパイルエラー）。カバレッジ不足は L2 |
+| X1-6 テスト失敗・コンパイルエラー | △ | misc（コンパイルエラー）・L2: `scenario.sh validate-fail`（本物の Salesforce のコンパイルエラー）。カバレッジ不足は未 |
 | X1-8 ネットワークの断 | ✅ | job・init（clone の失敗）・misc（npm install の失敗・sf-tools の origin に、つながらない: 警告で続行） |
 | X1-5 組織のロック | — | L2 |
 | X1-7・X10-1・X10-2 Slack の失敗 | 対象外（L1） | `curl` を使うのはワークフロー（YAML）だけで、L1 では動かせない。L2 |
@@ -540,9 +542,9 @@ Actions 上の実行は、コマンドによって扱いが違う。「全部拒
 | 1 | ~~`push-guard`~~ | **作れなかった（2026-10-20）**。`main` への直接 push を、サーバー側が拒否することの確認だった。実際に確かめたところ、(a) テスト用の組織が**無料プラン**で、非公開リポジトリには Ruleset が使えない（`gh api repos/…/rulesets` が「Upgrade to GitHub Pro or make this repository public」で 403。`sf-init` も「無料プランでは利用不可」と警告する）。(b) 使えても、`protect-main` の迂回の許可（`bypass_actors`）に Admin が入っていて、e2e を実行する管理者は拒否されない。**この環境では、Ruleset の効きを、確認できない**（公開リポジトリか有料プランが要る。判断は 11.7） | X6-3・C7 | — | — | — |
 | 2 | `manual-delete`（**実装済み**） | テスト用リポジトリの Secret（SLACK_BOT_TOKEN）と Variable（SLACK_CHANNEL_ID）を、手で削除 → `sf-init --status` が、不足として終了し、直し方（`sf-init.sh --only 7`）を表示する → 元に戻す → 診断が、元に戻る。戻せるものだけを対象にする（Secret は、値が読めないため、鍵一式の値で戻せる SLACK_BOT_TOKEN。Variable は、削除の前に値を保存）。終了時（中断を含む）に、必ず戻す | X3-1 | 本物の `gh` の応答・権限 | 約 3 分 | 書き込みあり（テスト用リポジトリの Secret・Variable。すぐ戻す）
 | 3 | `log-secrets`（**実装済み**） | 直近の Actions の実行ログ（10 件）と PR の本文・コメントに、PAT・Slack の Token・認証 URL・秘密鍵が出ていない。検査できないとき（実行が 0 件・ログが空）は、成功にせず「実行できない」と報告する | X7-1・C6 | Actions のログは、本物にしかない | 約 1 分 | なし |
-| 4 | `dist-main` | **配布版（`SF_TOOLS_BRANCH` 未設定 → `main`）で、`main` のワークフロー・雛形が使われる**。生成物に、`development` 固有の変更が混ざらない。**前提: `origin/main` と `origin/development` の、配布物のパスの差分が空のとき**（rr の直後だけ。差分があると、確認の意味が変わるため、実行しない） | C1 | 実際の `main` を使うのは、本物の Actions だけ | 約 10 分 | なし（検証だけ） |
-| 5 | `metasync-diff` | 組織側で変更（**既存の許可された名前 `SfToolsE2eHello` の Apex だけ**）→ `wf-metasync` を起動 → `main` に反映される → 削除して元に戻す | B3 | 本物の組織との差分の取得 | 約 10 分 | あり（e2e の Apex のみ） |
-| 6 | `validate-fail` | 壊れた Apex の PR → `wf-validate` が失敗 → PR のコメント → 直して push → 再検証が成功。PR は、マージせずに閉じる | A3・X1-6 | 本物の Salesforce のコンパイル | 約 10 分 | なし（dry-run のみ） |
+| 4 | `dist-main`（**実装済み**） | **配布版（`SF_TOOLS_BRANCH` 未設定 → `main`）で、`main` のワークフロー・雛形が使われる**。生成物に、`development` 固有の変更が混ざらない。**前提: `origin/main` と `origin/development` の、配布物のパスの差分が空のとき**（rr の直後だけ。差分があると、確認の意味が変わるため、実行しない） | C1 | 実際の `main` を使うのは、本物の Actions だけ | 約 10 分 | なし（検証だけ） |
+| 5 | `metasync-diff`（**実装済み**） | 組織側で変更（**既存の許可された名前 `SfToolsE2eHello` の Apex だけ**）→ `wf-metasync` を起動 → `main` に反映される → 削除して元に戻す | B3 | 本物の組織との差分の取得 | 約 10 分 | あり（e2e の Apex のみ） |
+| 6 | `validate-fail`（**実装済み**） | 壊れた Apex の PR → `wf-validate` が失敗 → PR のコメント → 直して push → 再検証が成功。PR は、マージせずに閉じる | A3・X1-6 | 本物の Salesforce のコンパイル | 約 10 分 | なし（dry-run のみ） |
 | 7 | `resume-recovery` | `sf-init` を、実際に Phase 8 で止め（偽の Token などの故障注入）→ 失敗の画面が案内する手順で再開 → 完了 | B1・X8-2 | 本物の GitHub・Salesforce での再開 | 約 25 分 | あり（新しいテスト用リポジトリを作る。既存のガードと後掃除の下） |
 | 8 | `layout-fail` | `wf-propagate` の失敗の経路（別の変更があって取り込めない）・順序チェックの組み合わせ | X4-5 | 2 層以上の**別々の組織**が必要 | 約 15 分 | あり |
 | 9 | `restart-org` | `sf-restart`（接続先の切り替え）→ `sf-dryrun` が、新しい組織を使う | A8 | 2 つ以上の組織が必要 | 約 5 分 | なし |
@@ -577,7 +579,7 @@ Actions 上の実行は、コマンドによって扱いが違う。「全部拒
 
 1. **基盤（実装済み 2026-10-20）**: `tests/e2e/scenario.sh`（名前で選ぶ・前提の確認（前）・状態の確認（後）・結果の表・`--list`・開始の確認）と、`tests/test_e2e.sh` の単体テスト（モック。選び方・ガード・状態が変わったときに後続を止めること・読み取りのみであること）。最初のシナリオは、`push-guard` が作れなかったため、`log-secrets`（読み取りのみ）。実環境（残っているテスト用リポジトリ）で、13 件（実行 10 件・PR 3 件）が成功した。
 2. **書き込みの少ない系（実装済み 2026-10-20）**: `manual-delete`。実環境で 15 件が成功した（所要 155 秒。見込みの 3 分とほぼ同じ）。
-3. **Actions を使う系**: `validate-fail`・`metasync-diff`・`dist-main`。
+3. **Actions を使う系（実装済み 2026-10-20）**: `validate-fail`（実環境で 13 件・175 秒）・`dist-main`（10 件・108 秒。rr の直後だけ）・`metasync-diff`（18 件・277 秒）。`metasync-diff` で分かったこと: run.sh のあと、main には、リリースの履歴として Hello World のファイルが残っている。そのままでは「組織側だけの差分」にならないため、いったん外してから確認し、実行前の状態に戻す。また、`dist-main` は、`origin/main` と `origin/development` の配布物に差があるとき（rr の前）は、「実行できない」と報告する（成功に数えない）。
 4. **新しいリポジトリを作る系**: `resume-recovery`。
 5. **複数の組織が要る系**: `layout-fail`・`restart-org`（組織が用意できたとき）。
 

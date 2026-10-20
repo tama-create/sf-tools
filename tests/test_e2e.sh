@@ -2685,6 +2685,8 @@ test_e2e_ci() {
     assert_file_contains     "$wf" "branches: [development]" "e2e.yml: push は、development だけ（rr のときには、すでに緑にする）"
     assert_file_contains     "$wf" "- 'bin/**'"            "e2e.yml: 配布物（bin/）の変更で動く"
     assert_file_not_contains "$wf" "- 'doc/**'"            "e2e.yml: ドキュメントだけの変更では、動かさない"
+    assert_file_contains     "$wf" 'touch "$HOME/.sf-tools-last-update"' "e2e.yml: 更新済みの印を先に置く（e2e の実行中に、バックグラウンドの sf-upgrade.sh が、sf を入れ替えない）"
+    assert_equals "$(grep -c 'touch "$HOME/.sf-tools-last-update"' "$wf")" "2" "e2e.yml: 更新済みの印は、Windows・macOS の両方のジョブで置く"
     assert_file_not_contains "$wf" "pull_request"          "e2e.yml: pull_request では動かさない（Secrets を渡さない）"
     assert_file_not_contains "$wf" "pull_request_target"   "e2e.yml: pull_request_target では動かさない"
     assert_file_not_contains "$wf" "secrets: inherit"      "e2e.yml: Secrets を、ほかのワークフローに引き渡さない"

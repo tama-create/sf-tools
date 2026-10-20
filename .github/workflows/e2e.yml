@@ -76,6 +76,10 @@ jobs:
           gh auth setup-git
           # sf は npm 版が前提（Windows の Git Bash では、公式インストーラー版は非対応）
           npm install -g @salesforce/cli
+          # sf-init の Phase 4（sf-install.sh）は、24 時間以内に更新していなければ、sf-upgrade.sh（npm install -g など）を、バックグラウンドで起動する。
+          # 使い捨てのサーバーは、毎回「初回」になり、e2e の実行中に sf が入れ替わって、fetch failed や command not found が起きる。
+          # クライアント PC の 2 回目以降と同じく、更新済みの印（スタンプ）を、先に置く
+          touch "$HOME/.sf-tools-last-update"
           bash --version | head -1
           sf --version
 
@@ -134,6 +138,8 @@ jobs:
           git config --global user.email "${E2E_GH_USER}@users.noreply.github.com"
           gh auth setup-git
           npm install -g @salesforce/cli
+          # 更新済みの印（スタンプ）を先に置く（理由は、Windows のジョブの同じ手順を参照。バックグラウンドの更新で sf が入れ替わるのを防ぐ）
+          touch "$HOME/.sf-tools-last-update"
           # 以降の手順で、`bash` が、標準の /bin/bash（3.2）になるように、/bin を PATH の先頭に置く
           echo "/bin" >> "$GITHUB_PATH"
           /bin/bash --version | head -1

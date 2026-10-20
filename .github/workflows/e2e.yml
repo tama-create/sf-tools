@@ -10,9 +10,10 @@ name: e2e（実環境の通し検証）
 #   ・同じテスト用の組織を使うため、2 つのジョブは一列に動かす（Windows → macOS。ワークフローの実行どうしも、concurrency で一列）。
 #
 # 【いつ動くか】
-#   ・手動（workflow_dispatch）。
-#   ・（予定）配布物（bin/ lib/ phases/ hooks/ templates/ config/）が変わった development への push。
-#     最初の成功を確認してから、下の push を有効にする（doc/integration-test-plan.md 12）。
+#   ・配布物（bin/ lib/ phases/ hooks/ templates/ config/）または e2e 自体（tests/e2e/・このファイル）が変わった development への push。
+#     rr のときには、すでに緑になっている（ドキュメント・単体テストだけの変更では、動かさない）。
+#   ・手動（workflow_dispatch。main に取り込まれたあとで、Actions の画面・gh workflow run から。
+#     手動実行のワークフローは、既定のブランチ（main）にあるものだけが、起動できる）。
 #
 # 【必要な設定】（リポジトリの Settings → Environments → e2e。doc/integration-test-plan.md 12.5）
 #   ・Environment `e2e`（Deployment branches は、development と main だけ）
@@ -30,17 +31,17 @@ name: e2e（実環境の通し検証）
 # 伏せる（_e2e_mask_line）。組織の ID・ユーザー名・メールアドレスなどを、画面に出す処理を足さないこと。
 on:
   workflow_dispatch:
-  # push:                      # 最初の成功を確認してから有効にする
-  #   branches: [development]
-  #   paths:
-  #     - 'bin/**'
-  #     - 'lib/**'
-  #     - 'phases/**'
-  #     - 'hooks/**'
-  #     - 'templates/**'
-  #     - 'config/**'
-  #     - 'tests/e2e/**'
-  #     - '.github/workflows/e2e.yml'
+  push:
+    branches: [development]
+    paths:
+      - 'bin/**'
+      - 'lib/**'
+      - 'phases/**'
+      - 'hooks/**'
+      - 'templates/**'
+      - 'config/**'
+      - 'tests/e2e/**'
+      - '.github/workflows/e2e.yml'
 
 permissions:
   contents: read

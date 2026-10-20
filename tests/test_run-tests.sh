@@ -19,7 +19,8 @@ echo -e "${CLR_HEAD}=== run_tests.sh --shard ===${CLR_RST}"
 
 RT="$SF_TOOLS_DIR/tests/run_tests.sh"
 # 対象のファイル名を、1 行ずつ返す（実行はしない）。引数: run_tests.sh への引数
-_list() { SF_TEST_NO_WSL=1 SF_TEST_LIST_ONLY=1 bash "$RT" "$@" 2>/dev/null; }
+# 呼び出し元の環境（CI の Linux は SF_TEST_SKIP_INTEGRATION=1）に左右されないよう、既定では外す。外す指定を調べるときは LIST_SKIP=1
+_list() { SF_TEST_SKIP_INTEGRATION="${LIST_SKIP:-}" SF_TEST_NO_WSL=1 SF_TEST_LIST_ONLY=1 bash "$RT" "$@" 2>/dev/null; }
 
 test_shard_partition() {
     echo ""; echo -e "${CLR_HEAD}[TEST] 分け方（N=1 は同じ・全部合わせて、ちょうど 1 回ずつ・いつも同じ）${CLR_RST}"
@@ -65,7 +66,7 @@ test_shard_empty_and_skip() {
     out=$(_list --shard 100/100); rc=$?
     assert_exit_ok "$rc" "ファイルの数より多い組の、後ろの組（100/100）は、成功で終わる"
     assert_equals "$out" "" "空の組は、何も実行しない（一覧が空）"
-    out=$(SF_TEST_SKIP_INTEGRATION=1 _list --shard 1/1)
+    out=$(LIST_SKIP=1 _list --shard 1/1)
     if printf '%s\n' "$out" | grep -E '^test_integration' | grep -qv '^test_integration-coverage.sh$'; then
         fail "SF_TEST_SKIP_INTEGRATION=1 と --shard の組み合わせで、結合テスト L1 が、外れたまま"
     else

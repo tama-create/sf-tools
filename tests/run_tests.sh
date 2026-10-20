@@ -153,15 +153,29 @@ fi
 # 時間のかかるファイル（先に起動する。最後に長いものが残って、全体が伸びるのを避ける）
 HEAVY_FIRST=(test_integration-init.sh test_integration-init2.sh test_integration-init3.sh test_integration.sh test_integration-git.sh test_sf-init.sh test_e2e.sh test_verify.sh test_sf-release.sh test_sf-install.sh)
 
-# ファイルごとの所要時間の目安（秒。--shard が、組に分けるときの重み。実測: SF_TEST_TIMES=1 の [TIME] 行。未登録は、既定値）
+# ファイルごとの所要時間の目安（秒。--shard が、組に分けるときの重み。未登録は 10）。
+#   値は、GitHub Actions の Windows での実測（2026-10-20・コミット 5eb8c6f の SF_TEST_TIMES=1 の [TIME] 行。ジョブの中で並列に動かした値）
 #   厳密である必要はない（目安が少しずれても、全ファイルが、ちょうど 1 回ずつ動く）。大きくずれたら、実測で直す
 _weight() {   # 結果は、変数 _W に入れる（$(...) で呼ぶと、Windows の Git Bash では、ファイルごとにプロセスを起動して遅い）
     case "$1" in
-        test_integration-init.sh|test_integration-init3.sh) _W=200 ;;
-        test_integration-init2.sh) _W=150 ;;
-        test_integration.sh|test_integration-git.sh|test_integration-job.sh) _W=100 ;;
-        test_integration-misc.sh|test_integration-guards.sh|test_integration-secrets.sh|test_integration-metasync.sh|test_integration-next.sh|test_integration-rerun.sh) _W=50 ;;
-        test_sf-init.sh|test_e2e.sh|test_verify.sh|test_sf-release.sh|test_sf-install.sh) _W=100 ;;
+        test_sf-init.sh) _W=960 ;;
+        test_verify.sh) _W=640 ;;
+        test_e2e.sh) _W=510 ;;
+        test_integration-init.sh) _W=370 ;;
+        test_integration-init2.sh) _W=330 ;;
+        test_integration-init3.sh) _W=270 ;;
+        test_integration-misc.sh) _W=230 ;;
+        test_integration.sh) _W=220 ;;
+        test_sf-install.sh) _W=185 ;;
+        test_integration-git.sh) _W=140 ;;
+        test_integration-job.sh) _W=125 ;;
+        test_common.sh|test_integration-metasync.sh|test_sf-release.sh) _W=120 ;;
+        test_integration-next.sh|test_integration-guards.sh) _W=85 ;;
+        test_project-identity.sh|test_sf-metasync.sh|test_integration-coverage.sh) _W=75 ;;
+        test_integration-rerun.sh|test_init-common.sh|test_sf-deploy.sh) _W=62 ;;
+        test_sf-job.sh|test_sf-sync-wf.sh|test_sf-next.sh|test_sf-prepush.sh|test_sf-start.sh|test_wf-sequence.sh) _W=50 ;;
+        test_integration-secrets.sh|test_sf-hook.sh) _W=40 ;;
+        test_sf-typecheck.sh|test_sf-push.sh|test_sf-upgrade.sh|test_org.sh|test_diag.sh|test_run-tests.sh) _W=28 ;;
         *) _W=10 ;;
     esac
 }

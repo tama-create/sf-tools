@@ -120,7 +120,7 @@
 - **ツール更新の保護**: `sf-install` の 24 時間に 1 回のツール更新は、Windows で本物の `git update-git-for-windows` を動かすため、サンドボックスには、更新済みのスタンプ（`.sf-tools-last-update`）を置く。更新の経路を確かめるテストでは、先に `it_block_git_update` を呼ぶ。
 - **不変条件の部品**: `it_snap`（HEAD・コミット数・ブランチ・フック数・未コミット数）・`it_remote_snap`・`it_mutating_calls`（外部へ書き込む呼び出しの一覧）・`it_leak_count`（秘密の漏れ）。
 - **時間**: シナリオごとの所要時間を出す。`IT_SHOW_RUNS=1` で、遅い呼び出しの上位を出す。CI の実測（2026-10-19。結合テストの第 1 弾）は、Ubuntu 約 16 秒・macOS 約 40 秒・Windows 約 2 分。手元の Windows（Git Bash）は、プロセスの起動が遅く、10 倍ほどかかる。`IT_SCENARIOS`（実行するシナリオ。既定は全部）・`IT_X62_QUICK=1` で、短くできる。
-- **実行**: `run_tests.sh` の全件に含まれる（時間のかかるファイルとして先に起動）。CI の全件テストのジョブは、`SF_TEST_SKIP_INTEGRATION=1` で、結合テスト（`test_integration*.sh`。表のガード `test_integration-coverage.sh` は残す）を外し、別のジョブ `integration`（Ubuntu・macOS・Windows）で、`run_tests.sh` に名前を渡して並列に動かす。`--changed` は、`bin/sf-*.sh`・`hooks/*`・`tests/integration/*`・結合テストの変更で、結合テスト全部を含める。
+- **実行**: `run_tests.sh` の全件に含まれる（時間のかかるファイルとして先に起動）。CI の全件テストのジョブは、`SF_TEST_SKIP_INTEGRATION=1` で、結合テスト（`test_integration*.sh`。表のガード `test_integration-coverage.sh` は残す）を外し、別のジョブ `integration`（Ubuntu・macOS）で、`run_tests.sh` に名前を渡して並列に動かす（Windows は、結合テストを含む全件を、`--shard` で 6 つのジョブに分けて動かす）。`--changed` は、`bin/sf-*.sh`・`hooks/*`・`tests/integration/*`・結合テストの変更で、結合テスト全部を含める。
 - **結合テストで見つかり、直したもの**: `sf-push` は、変更がないと「コミット対象なし」で終わり、コミット後にプッシュが失敗した再実行で、未プッシュのコミットが取り残された。現在は、変更がなくても、追跡先（upstream）より進んだコミットがあれば、コミットせず、`git push` だけ行う（X2-3 が確認する）。 また、`sf-push` は、detached HEAD・保護ブランチ（main など）の上では、コミットする前に止める（R5）。そのほか、`sf-check` は、存在していても、リポジトリの外を指すパス（絶対パス・`..` を含むパス）を、エラーにするようにした（X6-4）。`sf-init` の「続きから」は、Phase 8 まで完了と記録されているのに、origin に `main` がないときは、続けずに拒否する（完了の直前の記録のときも、完了にしない。X3-6・X3-7）。
 
 ### 2.2 `test_helper.sh` の前提
@@ -764,7 +764,7 @@ sf-init.sh --add-tier develop    # main+staging → main+staging+develop
 ### 7.1 テスト
 
 ```bash
-bash tests/run_tests.sh                           # 全テスト実行（mm 前に必ず実行）
+bash tests/run_tests.sh                           # 全テスト実行（手元では通常は不要。mm 後に CI が全件を実行する）
 bash tests/run_tests.sh --changed                 # 変更ファイルに対応するテストのみ（開発中）
 bash tests/run_tests.sh --jobs 4                  # 同時に動かすテストファイルの数を指定（既定: CPU の数。環境変数 SF_TEST_JOBS でも指定できる）
 bash tests/run_tests.sh --serial                  # 1 つずつ実行（並列で、原因を切り分けにくいときの確認用）
@@ -864,7 +864,7 @@ sf-tools の `main` への反映は、全ユーザーへの配布と同義であ
 
 | 確認項目 | 方法 |
 |---|---|
-| テスト | `bash tests/run_tests.sh` が全件 PASS |
+| テスト | `development` の最新のコミットで、GitHub Actions の全件テスト・shellcheck・結合テスト L1 が、すべて緑（`gh run list --branch development` で確認する。手元で全件を回さない） |
 | `sf-init.sh` を変更した場合 | 検証環境の新規 force-* を作成し、最後まで通ること。`bash tests/e2e/run.sh` で自動化できる（9.6） |
 | ワークフロー・`sf-metasync.sh` を変更した場合 | `wf-metasync` を `workflow_dispatch` で手動実行して成功すること |
 | `sf-release.sh` / `wf-validate` / `wf-release` を変更した場合 | デプロイ対象を含む PR を作り、`wf-validate` が通ること（動作確認のみの PR はマージせずに閉じる。マージすると `wf-release` が実際にデプロイする） |
@@ -978,6 +978,7 @@ sf-tools の `main` への反映は、全ユーザーへの配布と同義であ
 | Windows 11（Git Bash。`C:\Git\bin\bash.exe -l`） | 5.x | OpenSSL 3.5（`/ucrt64/bin/openssl`） | 5344f40 | 2026-10-18 | e2e: 119 件成功 / 0 件失敗（1 層・既定。`--add-tier` の確認を含む） |
 | Windows 11（Git Bash。`C:\Git\bin\bash.exe -l`） | 5.3.15 | OpenSSL 3.5.9 | 1aa67b3 | 2026-10-19 | e2e: 119 件成功 / 0 件失敗（1 層。`sf-push` の変更後の確認。`--add-tier` の確認を含む） |
 | Windows 11（Git Bash。`C:\Git\bin\bash.exe -l`） | 5.3.15 | OpenSSL 3.5.9 | fed6180 | 2026-10-19 | e2e: 119 件成功 / 0 件失敗（1 層。結合テスト L1 の追加分と、見つかった不具合 4 件の修正後の確認。`--add-tier` の確認を含む。43 分 41 秒） |
+| Windows・macOS・Linux（GitHub Actions の `windows-latest` / `macos-latest` / `ubuntu-latest`） | 5.x / 3.2 / 5.x | — | 86670c8 | 2026-10-20 | 全件テスト・shellcheck・結合テスト L1 が、すべて成功（全 11 ジョブ）。Windows は `--shard` の 6 ジョブに分け、全体 11 分 24 秒（分ける前は約 21 分） |
 | Windows・macOS・Linux（GitHub Actions の `windows-latest` / `macos-latest` / `ubuntu-latest`） | 5.x / 3.2 / 5.x | — | 1aa67b3 | 2026-10-19 | 全件テスト・shellcheck・結合テスト L1（`tests/test_integration.sh`）が、3 つの OS ですべて成功 |
 | Windows 11（Git Bash。`C:\Git\bin\bash.exe -l`） | 5.3.15 | OpenSSL 3.5.9 | a22fe4c | 2026-10-20 | e2e シナリオ（`tests/e2e/scenario.sh`）: `log-secrets` 13 件・`manual-delete` 15 件・`validate-fail` 13 件・`metasync-diff` 18 件が成功。`dist-main` 10 件は、rr の直後（`origin/main` と `origin/development` の配布物に差がない）の `a22fe4c` で成功（配布版で sf-tools の `main` が使われる）。すべて実環境（テスト用の組織・リポジトリ）で、終了時に元の状態へ戻したことを確認 |
 | Windows 11（Git Bash。`C:\Git\bin\bash.exe -l`） | 5.3.15 | OpenSSL 3.5.9 | 33acf54 | 2026-10-20 | e2e: 119 件成功 / 0 件失敗（1 層。`sf-push` が、detached HEAD・保護ブランチの上では、コミットする前に止める変更の後の確認。`--add-tier` の確認を含む。37 分 54 秒）。あわせて、`run.sh --interrupt --no-add-tier`（`sf-init` を Phase 8 の push でわざと失敗させ、「続きをやる」で再開）: 121 件成功 / 0 件失敗（29 分 24 秒。`sf-push` の変更の前の実行） |

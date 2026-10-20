@@ -22,12 +22,13 @@
 |---|---|
 | 変更前 | 方針・内容を提示 → GO を待つ |
 | 変更中 | `run` ラッパー必須・日本語コメント・UTF-8/LF 維持 |
-| 変更後 | `bash tests/run_tests.sh` で全件 PASS → mm を依頼 |
-| 検証 | **Claude が `bash tests/e2e/run.sh` を実行して報告**（検証環境 = `SF_TOOLS_BRANCH=development`。約 30 分。起動のしかた・確認の内容は `doc/dev-reference.md` 9.6）。ユーザーに手動の確認を頼むのは、e2e で見えないことだけ |
-| リリース | 検証 OK の報告後に rr を依頼 |
+| 変更後 | 手元は `bash tests/run_tests.sh --changed`（変えたファイルのテスト）だけ → PASS したら mm を依頼。**全件は手元で回さない（CI が正）** |
+| mm 後 | push で、GitHub Actions が全件（Windows・macOS・Linux）と shellcheck を自動で動かす。**Claude が結果を確認して報告する。赤なら直して、もう一度 mm を依頼する**（約 12 分） |
+| 検証 | **Claude が `bash tests/e2e/run.sh` を実行して報告**（検証環境 = `SF_TOOLS_BRANCH=development`。約 30 分。起動のしかた・確認の内容は `doc/dev-reference.md` 9.6）。ユーザーに手動の確認を頼むのは、e2e で見えないことだけ。**e2e を Actions に移したら、Actions の結果が正になる**（`doc/integration-test-plan.md` 12） |
+| リリース | CI 全緑と検証 OK の報告後に rr を依頼 |
 
-> **mm の前にテスト全件 PASS は必須。PASS 確認なしの mm 依頼は禁止。**
-> **rr の前に、テスト全件 PASS（CI も成功）が必須。さらに、`main` との差分に配布物のパス（`bin/` `lib/` `phases/` `hooks/` `templates/` `config/`）が含まれるときは、e2e による実動作確認の結果も必須。** 配布物のパスの変更がなく、`tests/` `doc/` `.github/workflows/test.yml` などだけの変更なら、e2e は不要（確認: `git diff --stat origin/main...development -- bin lib phases hooks templates config` が空）。必須の項目が欠けた rr 依頼は断ること。
+> **mm の前に、`--changed` の PASS は必須。PASS 確認なしの mm 依頼は禁止。全件は、mm 後の CI の結果が正（手元の Windows は遅く、全件は 2 時間以上かかることもある。手元で全件が必要なときだけ、WSL で `run_tests.sh`）。CI が赤のまま、PR・rr を進めない。**
+> **rr の前に、CI の全件が緑（`development` の最新のコミットで）が必須。さらに、`main` との差分に配布物のパス（`bin/` `lib/` `phases/` `hooks/` `templates/` `config/`）が含まれるときは、e2e による実動作確認の結果も必須。** 配布物のパスの変更がなく、`tests/` `doc/` `.github/workflows/test.yml` などだけの変更なら、e2e は不要（確認: `git diff --stat origin/main...development -- bin lib phases hooks templates config` が空）。必須の項目が欠けた rr 依頼は断ること。
 > **変更に e2e の確認が足りないときは、e2e のほうを広げる**（手動の検証を、ユーザーに頼まない）。
 
 ### 1.3 mm / rr 実行手順
@@ -187,7 +188,8 @@ git pull origin main                     # main の最新を取り込む
 ### 3.1 実行方法
 
 ```bash
-bash tests/run_tests.sh                        # 全テスト実行（mm 前に必ず実行）
+bash tests/run_tests.sh                        # 全テスト実行（手元では通常は不要。mm 後に CI が全件を実行する。手元で必要なときは WSL で）
+bash tests/run_tests.sh --shard 2/6            # 全ファイルを 6 組に分けた 2 番目だけ実行（CI の Windows が、6 つのジョブで並列に動かす）
 bash tests/run_tests.sh test_sf-metasync.sh   # 単体実行
 bash tests/run_tests.sh --changed             # 変更ファイルに対応するテストのみ実行
 bash tests/run_tests.sh --jobs 4 / --serial   # 同時に動かすファイル数（既定: CPU の数。--serial は 1 つずつ）
@@ -197,7 +199,7 @@ bash tests/e2e/run.sh                          # 実環境の通し検証（検�
 bash tests/e2e/scenario.sh --list             # 実環境のシナリオ（run.sh が残したリポジトリに、名前で選んで実行。読み取りのみのものから）
 ```
 
-> **開発中は `--changed`、mm 前は全件** が基本ワークフロー。PR（main・development 向け）と development への push では、GitHub Actions（`.github/workflows/test.yml`）も、全件テストと shellcheck を実行する。
+> **開発中も mm 前も `--changed`、全件は CI が正** が基本ワークフロー。PR（main・development 向け）と development への push で、GitHub Actions（`.github/workflows/test.yml`）が、全件テストと shellcheck を実行する（Windows は 6 つのジョブに分けて並列。全体で約 12 分）。
 > `tests/e2e/` は実際の GitHub / Salesforce にテスト用のものを作って削除する。**削除の安全ガード（名前の形式・オーナーの一致）を緩めないこと**。詳細は `doc/dev-reference.md` 9.6。
 
 ### 3.2 デグレ防止チェックリスト

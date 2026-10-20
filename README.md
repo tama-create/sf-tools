@@ -1061,7 +1061,7 @@ sf-tools の `main` ブランチは、**そのまま全ユーザーに配布さ�
 
 | 手順 | 内容 |
 |---|---|
-| 1. 修正 | `development` ブランチで修正し、`bash tests/run_tests.sh` を全件 PASS させる（`mm`：`development` までコミット・push） |
+| 1. 修正 | `development` ブランチで修正し、変えたファイルのテスト（`bash tests/run_tests.sh --changed`）を PASS させる（`mm`：`development` までコミット・push）。push すると、GitHub Actions が、全件のテストを、Windows・macOS・Linux で自動で動かす（約 12 分）。赤なら直す |
 | 2. 検証 | 検証環境の `force-*` で実際に動作を確認する（下記） |
 | 3. リリース | 検証 OK を確認してから、`development` → `main` の PR をマージする（`rr`）。これが配布になる |
 

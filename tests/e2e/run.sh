@@ -64,6 +64,10 @@
 #   --with-args   : sf-init.sh / sf-job.sh に、引数 --owner / --project を付けて実行する（既定は、引数なしの対話・自動判定）
 #   --layout N    : 新しく作るリポジトリの層数（1 = main のみ（既定）/ 2 = main + staging / 3 = main + staging + develop）。
 #                   2・3 には、鍵一式に staging（3 は develop も）の組織が必要。--resume では、リポジトリの構成を、自動で判定する
+#   --interrupt   : sf-init を、わざと途中（Phase 8 の初回コミットの push）で失敗させ、「続きをやる」で再開してから、いつもの確認を行う（B1・X8-2 の実環境版）。
+#                   git の shim（tests/e2e/shims/git）が、main への push を 1 回だけ失敗させる（ほかは本物の git）。中断した時点で、リポジトリがあり、main がなく、
+#                   進捗が Phase 7 まで、失敗の画面が復旧の手順を案内し、秘密が出ていないこと、再開後に、main のコミットが 1 つ（重複しない）で、
+#                   ほかの確認（Secret・Variable・ブランチ・ワークフロー・Actions）が、再開した状態で通ることを確認する。--resume とは、同時に指定できない
 #   --no-actions  : GitHub Actions の実行確認（wf-metasync・Hello World のリリースと削除）を省略する（約 8〜12 分短くなる）
 #   -h, --help    : このヘルプを表示する
 # ==============================================================================
@@ -89,6 +93,7 @@ START_SEC=$SECONDS   # 経過時間の表示用
 KEEP=1   # 既定は、終了時に削除しない（あとから見返せるように。次回の前掃除で削除される）
 SKIP_ACTIONS=0
 RESUME=0
+INTERRUPT=0      # 1 = sf-init を Phase 8 の push で、わざと失敗させ、「続きをやる」で再開する（中断→再開の確認）
 ADD_TIER_CHECK=1 # 1 = 最後に、admin ブランチから --add-tier staging を実行して確認する（1 層で、staging の組織があるとき）
 WITH_ARGS=0      # 1 = sf-init / sf-job に、引数 --owner / --project を付ける（既定: 引数なし。対話と、クローンからの自動判定を確認する）
 LAYOUT=""        # 新しく作るリポジトリの層数（1 / 2 / 3）。--resume では、リポジトリの構成から判定する
@@ -98,6 +103,7 @@ while [[ $# -gt 0 ]]; do
         --cleanup)    KEEP=0 ;;
         --no-actions) SKIP_ACTIONS=1 ;;
         --resume)     RESUME=1 ;;
+        --interrupt)  INTERRUPT=1 ;;
         --with-args)  WITH_ARGS=1 ;;
         --no-add-tier) ADD_TIER_CHECK=0 ;;
         --layout)     [[ -n "${2:-}" ]] || die "--layout には、1・2・3 のいずれかを指定してください。"
@@ -110,6 +116,7 @@ if [[ -n "$LAYOUT" ]]; then
     [[ "$LAYOUT" =~ ^[123]$ ]] || die "--layout は、1・2・3 のいずれかです: ${LAYOUT}"
     [[ $RESUME -eq 0 ]] || die "--layout は、新しくリポジトリを作るときだけ指定できます（--resume では、リポジトリの構成を自動で判定します）。"
 fi
+[[ $INTERRUPT -eq 0 || $RESUME -eq 0 ]] || die "--interrupt は、新しくリポジトリを作るときだけ指定できます（--resume では、sf-init を実行しません）。"
 [[ -n "$LAYOUT" ]] || LAYOUT=1
 e2e_load_fixture
 e2e_guard_env
@@ -205,6 +212,32 @@ _set_project() {   # 引数: プロジェクト名。PROJECT / REPO_NAME / REPO_
     [[ $WITH_ARGS -eq 0 ]] || JOB_ARGS=(--owner "$E2E_OWNER" --project "$PROJECT")
 }
 
+# --interrupt の 1 回目: git の shim で、main への push を 1 回だけ失敗させて、sf-init を、Phase 8 で止める。
+#   止まった時点の状態（リポジトリ・main・進捗）を、MID_* に記録する（再開すると、変わるため。確認は、あとで chk で行う）
+#   引数: 先頭の入力（オーナーの選択など。空でもよい） [sf-init への引数...]
+MID_RC1=""; MID_OUT1=""; MID_PUSH_BLOCKED=0; MID_REPO_EXISTS=0; MID_MAIN_EXISTS=0; MID_PROGRESS=""
+_interrupt_first_run() {
+    local ident="$1"; shift
+    local gdir="${E2E_TMP}/gitfail" mark="${E2E_TMP}/git-push-failed" real_git
+    real_git=$(command -v git) || die "git が見つかりません。"  # VAR=$(cmd) のため run 不使用
+    mkdir -p "$gdir"  # run 不使用: 差し替え用コマンドの置き場（一時フォルダ内）
+    cp "${E2E_SCRIPT_DIR}/shims/git" "${gdir}/git"  # run 不使用: 差し替え用コマンドの配置（一時フォルダ内）
+    chmod +x "${gdir}/git" 2>/dev/null || true  # run 不使用: 実行権限の付与（Windows は効果なし・意図的エラー無視）
+    MID_OUT1="${E2E_TMP}/sf-init-1.out"
+    log "HEADER" "（中断→再開）1 回目: Phase 8 の push を、わざと失敗させます"
+    { [[ -z "$ident" ]] || printf '%s\n' "$ident"; e2e_make_input "$LAYOUT"; } \
+        | ( cd "$WORK" && E2E_REAL_GIT="$real_git" E2E_GIT_FAIL_MARK="$mark" PATH="${gdir}:${SHIM_DIR}:${PATH}" \
+            bash "${SF_TOOLS_ROOT}/bin/sf-init.sh" "$@" 2>&1 ) \
+        | tee "$MID_OUT1"
+    MID_RC1=${PIPESTATUS[1]}
+    [[ -e "$mark" ]] && MID_PUSH_BLOCKED=1
+    # 止まった時点の状態（再開すると変わるため、ここで記録する）
+    _e2e_gh repo view "$REPO_FULL" >/dev/null 2>&1 && MID_REPO_EXISTS=1  # 戻り値で判定するため run 不使用
+    _e2e_gh api "repos/${REPO_FULL}/branches/main" >/dev/null 2>&1 && MID_MAIN_EXISTS=1  # 戻り値で判定するため run 不使用
+    MID_PROGRESS=$(sed -n 's/^SF_INIT_DONE_PHASE=//p' "${WORK}/admin/.sf-init-${PROJECT}.progress" 2>/dev/null | head -1)  # VAR=$(cmd) のため run 不使用
+    _elapsed "sf-init（1 回目。わざと失敗）の終了"
+}
+
 _fresh_start() {
     e2e_cleanup_all delete || die "前回のテスト用リソースを削除できませんでした。"
     _set_project "$(e2e_new_project_name)"
@@ -219,6 +252,17 @@ _fresh_start() {
     else
         _ident_input=$(e2e_make_identity_input "$E2E_OWNER" "$PROJECT") \
             || die "対話の入力（オーナーの選択）を作れません: gh のログインの候補に、${E2E_OWNER} がありません。"  # VAR=$(cmd) のため run 不使用
+    fi
+    if [[ $INTERRUPT -eq 1 ]]; then
+        _interrupt_first_run "$_ident_input" "${_init_args[@]+"${_init_args[@]}"}"
+        log "HEADER" "sf-init を再開します（「続きをやる」を選びます）"
+        # 再開の入力: [オーナーの選択・XXXX・確認] → 管理者向けの警告の確認 Y → 「続きをやる」1 → Phase 10 のログイン先（段階の数だけ 1）
+        { [[ -z "$_ident_input" ]] || printf '%s\n' "$_ident_input"; printf '%s\n' "Y" "1"; local _i; for ((_i = 1; _i <= LAYOUT; _i++)); do printf '%s\n' "1"; done; } \
+            | ( cd "$WORK" && PATH="${SHIM_DIR}:${PATH}" bash "${SF_TOOLS_ROOT}/bin/sf-init.sh" ${_init_args[@]+"${_init_args[@]}"} 2>&1 ) \
+            | tee "$INIT_OUT"
+        INIT_RC=${PIPESTATUS[1]}
+        _elapsed "sf-init（再開）の終了"
+        return 0
     fi
     { [[ -z "$_ident_input" ]] || printf '%s\n' "$_ident_input"; e2e_make_input "$LAYOUT"; } \
         | ( cd "$WORK" && PATH="${SHIM_DIR}:${PATH}" bash "${SF_TOOLS_ROOT}/bin/sf-init.sh" ${_init_args[@]+"${_init_args[@]}"} 2>&1 ) \
@@ -586,6 +630,21 @@ _add_tier_check() {
 }
 
 log "HEADER" "確認"
+# 中断→再開（--interrupt）: 止まった時点の状態と、再開が正しかったこと
+if [[ $INTERRUPT -eq 1 ]]; then
+    chk "（中断→再開）1 回目の sf-init は、push の失敗で、失敗した（終了コード ${MID_RC1}）" test "${MID_RC1:-0}" -ne 0
+    chk "（中断→再開）git の shim が、main への push を 1 回だけ止めた" test "$MID_PUSH_BLOCKED" -eq 1
+    chk "（中断→再開）失敗の画面に、復旧の手順（「続きをやる」を選ぶ）が案内された" grep -qF "「続きをやる」を選ぶと" "$MID_OUT1"
+    chk "（中断→再開）中断した時点で、リポジトリは作成済み（作成後の失敗）" test "$MID_REPO_EXISTS" -eq 1
+    chk "（中断→再開）中断した時点で、GitHub に main がない（push は届いていない）" test "$MID_MAIN_EXISTS" -eq 0
+    chk "（中断→再開）進捗は、Phase 7 まで（Phase 8 は、記録されない）" test "$MID_PROGRESS" == "7"
+    chk "（中断→再開）1 回目の出力に、PAT が出ていない" _not_in_file "$E2E_PAT_TOKEN" "$MID_OUT1"
+    chk "（中断→再開）1 回目の出力に、Slack Token が出ていない" _not_in_file "$E2E_SLACK_BOT_TOKEN" "$MID_OUT1"
+    chk "（中断→再開）1 回目の出力に、認証 URL が出ていない" _not_in_file "$E2E_SFDX_AUTH_URL" "$MID_OUT1"
+    chk "（中断→再開）再開の画面に、前回の続きの案内が出た（前回のセットアップは）" grep -qF "前回のセットアップは" "$INIT_OUT"
+    # sf-init は、初回コミット（chore: sf-tools 初期セットアップ）のあと、最初の同期のコミット（定期更新）も作る。重複を疑うのは、初回コミットが 2 つ以上あるとき
+    chk "（中断→再開）再開で、初回コミットは 1 つ（重複しない）"         test "$(_e2e_gh api "repos/${REPO_FULL}/commits?sha=main&per_page=100" --jq '[.[] | select(.commit.message | startswith("chore: sf-tools 初期セットアップ"))] | length' 2>/dev/null | tr -d '[:space:]')" == "1"
+fi
 [[ $RESUME -eq 1 ]] || chk "sf-init が正常終了した（終了コード ${INIT_RC}）" test "$INIT_RC" -eq 0   # --resume では、sf-init を実行しない
 
 # リポジトリの構成（層数）を、ブランチから判定する。TIERS は、リリースの順（develop → staging → main）

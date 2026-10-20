@@ -24,7 +24,7 @@ case "\$cmd" in
         if [[ "\$next" == "--show-toplevel" ]]; then echo "$td"; exit 0; fi
         if [[ "\$next" == "--show-prefix" ]];   then echo "";    exit 0; fi
         exit 0 ;;
-    symbolic-ref) echo "feature/test"; exit 0 ;;
+    symbolic-ref) echo "\${MOCK_BRANCH:-feature/test}"; [[ "\${MOCK_DETACHED:-}" == "1" ]] && exit 1; exit 0 ;;
     fetch)  exit 0 ;;
     merge)
         [[ "$mode" == "conflict" ]] && exit 1 || exit 0 ;;
@@ -141,8 +141,52 @@ test_push_merge_conflict() {
     teardown "$td" "$mb"
 }
 
+# --- detached HEAD（ブランチの上にいない）→ コミットせずに、エラー終了 ---
+test_push_detached_head() {
+    local td mb mh
+    setup_std_env td mb mh
+    _create_mocks_push "$mb" "$td" "success"
+
+    local out; out=$(cd "$td" && MOCK_DETACHED=1 PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-push.sh" 2>&1)
+    local ec=$?
+    assert_exit_fail $ec "detached HEAD → エラー終了"
+    assert_output_contains "$out" "detached HEAD" "detached HEAD であることが表示される"
+    assert_file_not_contains "$mb/calls.log" "commit" "detached HEAD → git commit は呼ばれない"
+    assert_file_not_contains "$mb/calls.log" "push" "detached HEAD → git push は呼ばれない"
+    assert_file_not_contains "$mb/calls.log" "add" "detached HEAD → git add も呼ばれない"
+    teardown "$td" "$mb"
+}
+
+# --- 保護ブランチ（main）の上 → コミットせずに、エラー終了 ---
+test_push_protected_branch() {
+    local td mb mh
+    setup_std_env td mb mh
+    _create_mocks_push "$mb" "$td" "success"
+
+    local out; out=$(cd "$td" && MOCK_BRANCH=main PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-push.sh" 2>&1)
+    local ec=$?
+    assert_exit_fail $ec "main の上 → エラー終了"
+    assert_output_contains "$out" "保護ブランチ" "保護ブランチであることが表示される"
+    assert_file_not_contains "$mb/calls.log" "commit" "main の上 → git commit は呼ばれない"
+    assert_file_not_contains "$mb/calls.log" "push" "main の上 → git push は呼ばれない"
+    # branches.txt に定義された環境ブランチ（staging）も、同じ
+    mkdir -p "$td/sf-tools/config"; printf 'main\nstaging\n' > "$td/sf-tools/config/branches.txt"
+    : > "$mb/calls.log"
+    out=$(cd "$td" && MOCK_BRANCH=staging PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-push.sh" 2>&1)
+    assert_exit_fail $? "staging の上（branches.txt の環境ブランチ）→ エラー終了"
+    assert_file_not_contains "$mb/calls.log" "commit" "staging の上 → git commit は呼ばれない"
+    # 作業ブランチは、これまでどおり動く
+    : > "$mb/calls.log"
+    out=$(cd "$td" && MOCK_BRANCH=JOB-1 PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-push.sh" 2>&1)
+    assert_exit_ok $? "作業ブランチ（JOB-1）は、これまでどおり動く"
+    assert_file_contains "$mb/calls.log" "commit" "作業ブランチでは git commit が呼ばれる"
+    teardown "$td" "$mb"
+}
+
 test_push_no_changes
 test_push_unpushed_only
+test_push_detached_head
+test_push_protected_branch
 test_push_cancel
 test_push_check_fail
 test_push_merge_conflict

@@ -121,7 +121,7 @@
 - **不変条件の部品**: `it_snap`（HEAD・コミット数・ブランチ・フック数・未コミット数）・`it_remote_snap`・`it_mutating_calls`（外部へ書き込む呼び出しの一覧）・`it_leak_count`（秘密の漏れ）。
 - **時間**: シナリオごとの所要時間を出す。`IT_SHOW_RUNS=1` で、遅い呼び出しの上位を出す。CI の実測（2026-10-19。結合テストの第 1 弾）は、Ubuntu 約 16 秒・macOS 約 40 秒・Windows 約 2 分。手元の Windows（Git Bash）は、プロセスの起動が遅く、10 倍ほどかかる。`IT_SCENARIOS`（実行するシナリオ。既定は全部）・`IT_X62_QUICK=1` で、短くできる。
 - **実行**: `run_tests.sh` の全件に含まれる（時間のかかるファイルとして先に起動）。CI の全件テストのジョブは、`SF_TEST_SKIP_INTEGRATION=1` で、結合テスト（`test_integration*.sh`。表のガード `test_integration-coverage.sh` は残す）を外し、別のジョブ `integration`（Ubuntu・macOS・Windows）で、`run_tests.sh` に名前を渡して並列に動かす。`--changed` は、`bin/sf-*.sh`・`hooks/*`・`tests/integration/*`・結合テストの変更で、結合テスト全部を含める。
-- **結合テストで見つかり、直したもの**: `sf-push` は、変更がないと「コミット対象なし」で終わり、コミット後にプッシュが失敗した再実行で、未プッシュのコミットが取り残された。現在は、変更がなくても、追跡先（upstream）より進んだコミットがあれば、コミットせず、`git push` だけ行う（X2-3 が確認する）。 そのほか、`sf-check` は、存在していても、リポジトリの外を指すパス（絶対パス・`..` を含むパス）を、エラーにするようにした（X6-4）。`sf-init` の「続きから」は、Phase 8 まで完了と記録されているのに、origin に `main` がないときは、続けずに拒否する（完了の直前の記録のときも、完了にしない。X3-6・X3-7）。
+- **結合テストで見つかり、直したもの**: `sf-push` は、変更がないと「コミット対象なし」で終わり、コミット後にプッシュが失敗した再実行で、未プッシュのコミットが取り残された。現在は、変更がなくても、追跡先（upstream）より進んだコミットがあれば、コミットせず、`git push` だけ行う（X2-3 が確認する）。 また、`sf-push` は、detached HEAD・保護ブランチ（main など）の上では、コミットする前に止める（R5）。そのほか、`sf-check` は、存在していても、リポジトリの外を指すパス（絶対パス・`..` を含むパス）を、エラーにするようにした（X6-4）。`sf-init` の「続きから」は、Phase 8 まで完了と記録されているのに、origin に `main` がないときは、続けずに拒否する（完了の直前の記録のときも、完了にしない。X3-6・X3-7）。
 
 ### 2.2 `test_helper.sh` の前提
 
@@ -423,6 +423,7 @@ check_gh_owner "$GITHUB_OWNER"   # 認証ユーザーの一致確認
 1. origin/main を fetch して現在ブランチにマージ（main ブランチ自身はスキップ）
    - コンフリクト発生時は `merge --abort` してエラー中止
 2. カレント配下だけを `git add --all`
+2b. ブランチの上にいない（detached HEAD。`git symbolic-ref -q HEAD` が失敗）・保護ブランチ（`is_protected_branch`。`branches.txt` のブランチ。ファイルがなければ main）の上にいるときは、`git add` の前に `die`（コミットだけが手元に残り、プッシュが通らない状態を作らない。結合テスト R5 で見つけた。以前は、main の上で、プッシュ前のフックに止められるまで、コミットしていた）
 3. 変更なしのとき: 未プッシュのコミット（追跡先より進んだコミット）があれば、コミットせず `git push` だけ行って終了（コミット後にプッシュが失敗した再実行用）。なければ WARNING で正常終了
 4. `sf-check.sh` でターゲットファイルを検証（エラーなら中止）
 5. VS Code を別ウィンドウで開いてコミットメッセージを入力
@@ -896,7 +897,10 @@ sf-tools の `main` への反映は、全ユーザーへの配布と同義であ
 | `lib.sh` の `e2e_record_line` / `e2e_os_label` / `e2e_openssl_label` | 検証の記録（9.7）の表の 1 行を作る。`run.sh` が、終わりに表示する（列: OS / Bash / openssl / コミット / 日付 / 結果。未コミットの変更があれば、コミットの欄に付記する。`--no-actions` などで確認を省いたときは、結果の欄に書く） |
 | （層数対応: `run.sh` / `lib.sh`） | `--layout 1\|2\|3`: `e2e_make_input N`（Phase 5 の番号は、3 層 = 1・2 層 = 2・1 層 = 3。ログイン先の答えは段階の数だけ）。リポジトリの構成は、ブランチから判定（`TIERS`: develop → staging → main）し、`_hello_flow` が、段階の数だけ、`_hello_pr_flow`（同じブランチから、段階ごとの PR）を繰り返す。実行の取り違え防止: PR を作る前の最新の実行 ID（`e2e_latest_run_id`）を覚え、それより新しい実行だけを、その PR の実行とする（`e2e_wait_pr_run` の 4 番目の引数）。段階の指定: 環境変数 `E2E_TIER`（`e2e_sf_admin_login` / `e2e_apex_count` / `e2e_list_target_apex` / `e2e_delete_apex` などが、その段階の組織・エイリアス（`sf-tools-e2e-admin[-stg\|-dev]`）を使う）。`sf` の差し替えは、`--alias` の末尾（STG / DEV）で、段階の認証 URL を選ぶ。確認: 各段階のリリースで、その段階の組織にだけクラスができる（先の段階にはない）・`wf-propagate` で staging / develop に main が入る（`compare` の `ahead_by` = 0）・main の削除は、ほかの段階に及ばない。 |
 | `tests/e2e/shims/sf` | `sf org login web` だけを `sf org login sfdx-url`（認証 URL）に差し替える。他のコマンドは本物の `sf` に渡す |
+| `tests/e2e/shims/git` | `run.sh --interrupt` の 1 回目だけ PATH の先頭に置く。`git push` で、引数に `main` を含むものを、1 回だけ（印のファイル `E2E_GIT_FAIL_MARK` ができるまで）終了コード 128 で失敗させ、あとは本物の git（`E2E_REAL_GIT`）に渡す。Phase 8 の初回コミットの push の失敗を、実環境で起こす |
 | `tests/e2e/shims/browser` | `start` / `xdg-open` / `open` / `powershell.exe` / `wslview` の名前でコピーされ、ブラウザを開かない（WSL の `open_browser` は `powershell.exe` を使うため、WSL で e2e を動かすときに要る） |
+
+**中断→再開の確認（`run.sh --interrupt`）:** `sf-init` を、わざと Phase 8 で失敗させ、「続きをやる」で再開してから、いつもの確認（Secret・Variable・ブランチ・ワークフロー・Actions・Hello World）を行う。1 回目: `_interrupt_first_run`。git の shim（`shims/git`）で、main への push を 1 回だけ失敗させ、止まった時点の状態（リポジトリ・main・進捗）を `MID_*` に記録する（再開すると変わるため）。2 回目の入力: [オーナーの選択・XXXX・確認] → 管理者向けの警告の確認 `Y` → 「続きをやる」`1` → Phase 10 のログイン先（段階の数だけ `1`）。確認: 1 回目が失敗した・shim が push を止めた・失敗の画面が「続きをやる」を案内した・リポジトリはある・main はない・進捗は 7・PAT / Slack Token / 認証 URL が出ていない・再開の画面に「前回のセットアップは」が出た・初回コミットが 1 つ。`--resume` とは同時に指定できない。共通の確認は `read_key` が 1 文字ずつ読むことに注意（改行も 1 回の読み取りで、空なら再入力になる）。
 
 **テスト用の名前:** プロジェクト `e2e-YYYYMMDD-HHMMSS` → リポジトリ `force-e2e-YYYYMMDD-HHMMSS` → 外部クライアントアプリ `SF_TOOLS_force_e2e_YYYYMMDD_HHMMSS`。毎回別の名前なので、前回の削除を待たずに実行できる。
 
@@ -972,6 +976,7 @@ sf-tools の `main` への反映は、全ユーザーへの配布と同義であ
 | Windows 11（Git Bash。`C:\Git\bin\bash.exe -l`） | 5.3.15 | OpenSSL 3.5.9 | 1aa67b3 | 2026-10-19 | e2e: 119 件成功 / 0 件失敗（1 層。`sf-push` の変更後の確認。`--add-tier` の確認を含む） |
 | Windows 11（Git Bash。`C:\Git\bin\bash.exe -l`） | 5.3.15 | OpenSSL 3.5.9 | fed6180 | 2026-10-19 | e2e: 119 件成功 / 0 件失敗（1 層。結合テスト L1 の追加分と、見つかった不具合 4 件の修正後の確認。`--add-tier` の確認を含む。43 分 41 秒） |
 | Windows・macOS・Linux（GitHub Actions の `windows-latest` / `macos-latest` / `ubuntu-latest`） | 5.x / 3.2 / 5.x | — | 1aa67b3 | 2026-10-19 | 全件テスト・shellcheck・結合テスト L1（`tests/test_integration.sh`）が、3 つの OS ですべて成功 |
+| Windows 11（Git Bash。`C:\Git\bin\bash.exe -l`） | 5.3.15 | OpenSSL 3.5.9 | a22fe4c | 2026-10-20 | e2e シナリオ（`tests/e2e/scenario.sh`）: `log-secrets` 13 件・`manual-delete` 15 件・`validate-fail` 13 件・`metasync-diff` 18 件が成功。`dist-main` 10 件は、rr の直後（`origin/main` と `origin/development` の配布物に差がない）の `a22fe4c` で成功（配布版で sf-tools の `main` が使われる）。すべて実環境（テスト用の組織・リポジトリ）で、終了時に元の状態へ戻したことを確認 |
 | Windows・macOS・Linux（GitHub Actions の `windows-latest` / `macos-latest` / `ubuntu-latest`） | 5.x / 3.2 / 5.x | — | fed6180 | 2026-10-19 | 全件テスト・shellcheck・結合テスト L1（残りの追加分を含む）が、3 つの OS ですべて成功（全 7 ジョブ） |
 | Windows（`windows-latest` の Git Bash） | 5.x | — | 1fe7ed7 | 2026-10-18 | 単体テスト全件成功（GitHub Actions） |
 | macOS（`macos-latest`） | 3.2（標準の `/bin/bash`） | — | 1fe7ed7 | 2026-10-18 | 単体テスト全件成功（GitHub Actions） |

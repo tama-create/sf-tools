@@ -389,7 +389,7 @@ Actions 上の実行は、コマンドによって扱いが違う。「全部拒
 | A15 pre-commit フック | ✅ | git |
 | A3 PR の wf-validate の失敗 → 直して再検証 | ✅ L2（Slack 以外） | `scenario.sh validate-fail`（壊れた Apex の PR → 失敗・PR に「検証失敗」のコメント → 直して push → 成功・「検証成功」）。Slack の通知は未 |
 | A8 sf-restart | — | L2 のみ（未。複数の組織が要る） |
-| B1 / X2-1 sf-init の中断と再開 | ✅ L1 | init（5 つの止め方）。L2 は未 |
+| B1 / X2-1 sf-init の中断と再開 | ✅ L1・L2（Phase 8） | init（5 つの止め方）。L2: `run.sh --interrupt`（実環境で Phase 8 の push を止め、「続きをやる」で再開 → いつもの確認）。Phase 3・10 の実環境での中断は未 |
 | B2 sf-update-secret | △ | secrets（L1）。L2 は未 |
 | B4 sf-sync-wf | △ | guards（X6-5。L1 のローカル部分）。L2 は未 |
 | B3 wf-metasync の実差分の反映 | ✅ L1・L2 | metasync（ローカルの同期の動作）。L2: `scenario.sh metasync-diff`（組織にだけ Apex を作る → wf-metasync → main に反映 → 組織・main を実行前の状態に戻す） |
@@ -414,7 +414,7 @@ Actions 上の実行は、コマンドによって扱いが違う。「全部拒
 | X3-5 状態ファイルのリポジトリ名の食い違い | ✅ | init2 |
 | X3-6 進捗が先行 | ✅ | init2（不具合を見つけ、修正した） |
 | X3-7 完了の印と進捗の矛盾 | ✅ | init2（進捗 10 で main がない・印 1 で進捗が途中・印 0 の完了済み） |
-| X3-10 改変点ごとの拒否の表 | △ | init（A13 のクローンで: origin が別のリポジトリ・branches.txt がない（止まる。黙って作り直さない）・release/ がない（sf-install が復元））・rerun（フックの改変・削除 → sf-hook が戻す）・組織に未接続。ほかの改変点は未（sfdx-project.json の欠落は、fake の sf が、本物の sf のように、プロジェクトの外でのデプロイを拒否しないため、L1 では判定できない。L2） |
+| X3-10 改変点ごとの拒否の表 | △ | init（A13 のクローンで: origin が別のリポジトリ・branches.txt がない（止まる。黙って作り直さない）・release/ がない（sf-install が復元））・rerun（フックの改変・削除 → sf-hook が戻す。detached HEAD・main の上での sf-push は、コミットせずに止まる = R5。不具合を見つけて、直した）・組織に未接続。origin がない・release/ブランチ名/ がない・deploy-target.txt が空は、既存の挙動で安全に止まることを確認した（テストにはしていない）。ほかの改変点は未（sfdx-project.json の欠落は、fake の sf が、本物の sf のように、プロジェクトの外でのデプロイを拒否しないため、L1 では判定できない。L2） |
 | X3-8 admin の欠け・X3-9 欠けの検出 | ✅ | init3（admin ブランチが origin から消えた → 後片付けで戻る・--status の欠けの検出。`SF_TOOLS_BRANCH` を、配布版でも、不足にしていた不具合を見つけて、直した） |
 | X4-1 sf-init の同時起動 | ✅ | init2（見つけた競合を直した: 同じプロジェクトの sf-init は、ロックで排他する。2 つ目は拒否・強制終了で残った古いロックは引き継ぐ） |
 | X4-1a 同時 push | ✅ | git |
@@ -439,7 +439,7 @@ Actions 上の実行は、コマンドによって扱いが違う。「全部拒
 | X9-2 | — | L2（未） |
 | X10-3・X10-4 | — | L2・e2e（未） |
 
-**この段階で見つかり、直したもの**: `sf-push` の再実行（X2-3）・`sf-check` の外部パス（X6-4）・`sf-init` の進捗の先行（X3-6・X3-7）・`sf-init` の同時起動（X4-1。Windows で、Ruleset が重複した。ロックを入れた）・`sf-prepush` の `branches.txt`（origin にないブランチ名が、すべての push を止めた。X3-2）・`sf-job` の同名ブランチ（clone だけをやり直せなかった。X2-2。環境ブランチの名前も、ジョブ名に使えないようにした）・`sf-metasync`（フックのあるクローンで main への push が止められた・push できなかったコミットが取り残された。M0・M4）・`lib/project.sh`（同じ XXXX が別のオーナーに複数あるとき、最初のものを黙って使った。A14）・`sf-next`（origin が ssh:// のとき、開く URL が https にならなかった。A5）・`sf-start`（標準入力が閉じたとき、エイリアスの入力を無限に繰り返した。X5-3）・`lib/diag.sh`（`SF_TOOLS_BRANCH` は任意なのに、配布版のプロジェクトで、必ず「不足」と表示した。X3-9）。**意図した仕様（確認済み）**: `sf-unhook` は pre-push だけを外す（プッシュの検証だけを止めるのが狙い）。
+**この段階で見つかり、直したもの**: `sf-push` の再実行（X2-3）・`sf-check` の外部パス（X6-4）・`sf-init` の進捗の先行（X3-6・X3-7）・`sf-init` の同時起動（X4-1。Windows で、Ruleset が重複した。ロックを入れた）・`sf-prepush` の `branches.txt`（origin にないブランチ名が、すべての push を止めた。X3-2）・`sf-job` の同名ブランチ（clone だけをやり直せなかった。X2-2。環境ブランチの名前も、ジョブ名に使えないようにした）・`sf-metasync`（フックのあるクローンで main への push が止められた・push できなかったコミットが取り残された。M0・M4）・`lib/project.sh`（同じ XXXX が別のオーナーに複数あるとき、最初のものを黙って使った。A14）・`sf-next`（origin が ssh:// のとき、開く URL が https にならなかった。A5）・`sf-start`（標準入力が閉じたとき、エイリアスの入力を無限に繰り返した。X5-3）・`lib/diag.sh`（`SF_TOOLS_BRANCH` は任意なのに、配布版のプロジェクトで、必ず「不足」と表示した。X3-9）・`sf-push`（detached HEAD・main の上でも、先にコミットして、プッシュで失敗し、コミットだけが残った。X3-10 の R5）。**意図した仕様（確認済み）**: `sf-unhook` は pre-push だけを外す（プッシュの検証だけを止めるのが狙い）。
 
 ---
 
@@ -545,7 +545,7 @@ Actions 上の実行は、コマンドによって扱いが違う。「全部拒
 | 4 | `dist-main`（**実装済み**） | **配布版（`SF_TOOLS_BRANCH` 未設定 → `main`）で、`main` のワークフロー・雛形が使われる**。生成物に、`development` 固有の変更が混ざらない。**前提: `origin/main` と `origin/development` の、配布物のパスの差分が空のとき**（rr の直後だけ。差分があると、確認の意味が変わるため、実行しない） | C1 | 実際の `main` を使うのは、本物の Actions だけ | 約 10 分 | なし（検証だけ） |
 | 5 | `metasync-diff`（**実装済み**） | 組織側で変更（**既存の許可された名前 `SfToolsE2eHello` の Apex だけ**）→ `wf-metasync` を起動 → `main` に反映される → 削除して元に戻す | B3 | 本物の組織との差分の取得 | 約 10 分 | あり（e2e の Apex のみ） |
 | 6 | `validate-fail`（**実装済み**） | 壊れた Apex の PR → `wf-validate` が失敗 → PR のコメント → 直して push → 再検証が成功。PR は、マージせずに閉じる | A3・X1-6 | 本物の Salesforce のコンパイル | 約 10 分 | なし（dry-run のみ） |
-| 7 | `resume-recovery` | `sf-init` を、実際に Phase 8 で止め（偽の Token などの故障注入）→ 失敗の画面が案内する手順で再開 → 完了 | B1・X8-2 | 本物の GitHub・Salesforce での再開 | 約 25 分 | あり（新しいテスト用リポジトリを作る。既存のガードと後掃除の下） |
+| 7 | `resume-recovery`（**実装済み**。`scenario.sh` ではなく、`run.sh --interrupt`） | `sf-init` を、実際に Phase 8（初回コミットの push）で止め、失敗の画面が案内する手順（「続きをやる」）で再開する。git の shim（`tests/e2e/shims/git`）が、main への push を 1 回だけ失敗させる。中断した時点の状態（リポジトリがある・main がない・進捗は Phase 7 まで・秘密が出ていない）と、再開後の状態（初回コミットが 1 つ・Secret・Variable・ブランチ・ワークフロー・Actions・Hello World のリリースと削除）を、いつもの e2e の確認で、まとめて通す。新しいリポジトリを作るため、`scenario.sh` の「残っているリポジトリを使う」方式にせず、`run.sh` のオプションにした（`run.sh` の確認が、そのまま、再開した状態の確認になる） | B1・X8-2 | 本物の GitHub・Salesforce での再開 | 約 25 分 | あり（新しいテスト用リポジトリを作る。既存のガードと後掃除の下） |
 | 8 | `layout-fail` | `wf-propagate` の失敗の経路（別の変更があって取り込めない）・順序チェックの組み合わせ | X4-5 | 2 層以上の**別々の組織**が必要 | 約 15 分 | あり |
 | 9 | `restart-org` | `sf-restart`（接続先の切り替え）→ `sf-dryrun` が、新しい組織を使う | A8 | 2 つ以上の組織が必要 | 約 5 分 | なし |
 
@@ -580,7 +580,7 @@ Actions 上の実行は、コマンドによって扱いが違う。「全部拒
 1. **基盤（実装済み 2026-10-20）**: `tests/e2e/scenario.sh`（名前で選ぶ・前提の確認（前）・状態の確認（後）・結果の表・`--list`・開始の確認）と、`tests/test_e2e.sh` の単体テスト（モック。選び方・ガード・状態が変わったときに後続を止めること・読み取りのみであること）。最初のシナリオは、`push-guard` が作れなかったため、`log-secrets`（読み取りのみ）。実環境（残っているテスト用リポジトリ）で、13 件（実行 10 件・PR 3 件）が成功した。
 2. **書き込みの少ない系（実装済み 2026-10-20）**: `manual-delete`。実環境で 15 件が成功した（所要 155 秒。見込みの 3 分とほぼ同じ）。
 3. **Actions を使う系（実装済み 2026-10-20）**: `validate-fail`（実環境で 13 件・175 秒）・`dist-main`（10 件・108 秒。rr の直後だけ）・`metasync-diff`（18 件・277 秒）。`metasync-diff` で分かったこと: run.sh のあと、main には、リリースの履歴として Hello World のファイルが残っている。そのままでは「組織側だけの差分」にならないため、いったん外してから確認し、実行前の状態に戻す。また、`dist-main` は、`origin/main` と `origin/development` の配布物に差があるとき（rr の前）は、「実行できない」と報告する（成功に数えない）。
-4. **新しいリポジトリを作る系**: `resume-recovery`。
+4. **新しいリポジトリを作る系（実装済み 2026-10-20）**: `resume-recovery` は、`run.sh --interrupt` として実装した（実環境で通した。所要は、いつもの e2e（約 30 分）に、1 回目の約 3〜5 分を足したもの）。実装で分かったこと: (1) 再開後の `main` には、初回コミット（`chore: sf-tools 初期セットアップ`）のほかに、最初の同期のコミット（定期更新）も入る（`sf-init` が作る）。「コミットが 1 つ」ではなく、「初回コミットが 1 つ」を確認する。(2) 理由が空の `RefreshTokenAuthError`（認証 URL でのログインの一時的な失敗）が 1 度出たため、sf の shim に、待って 3 回までやり直す処理を足した。
 5. **複数の組織が要る系**: `layout-fail`・`restart-org`（組織が用意できたとき）。
 
 各段階は、**手元で、実際に動かして成功**を確認してから、次へ進む（実行の結果は、`doc/dev-reference.md` 9.7 の記録に、シナリオ名つきで残す）。

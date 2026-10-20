@@ -11,6 +11,7 @@
 #   E2E_SFDX_URL_FILE      main の組織の認証 URL を書いたファイル（値は環境変数に載せない）
 #   E2E_SFDX_URL_FILE_STG  staging の組織の認証 URL を書いたファイル（2 層・3 層のとき）
 #   E2E_SFDX_URL_FILE_DEV  develop の組織の認証 URL を書いたファイル（3 層のとき）
+#   E2E_SHIM_LOGIN_TRIES / E2E_SHIM_LOGIN_WAIT  ログインの試行回数（既定 3）と、やり直すまでの待ち（秒。既定 5）
 #
 # どの組織にログインするかは、--alias の末尾で決める（sf-init が、段階ごとに sf-tools-PROD / sf-tools-STG / sf-tools-DEV を付ける）:
 #   末尾が STG → staging の組織 / 末尾が DEV → develop の組織 / それ以外 → main の組織
@@ -31,8 +32,19 @@ if [[ "$1" == "org" && "$2" == "login" && "$3" == "web" ]]; then
         *DEV) _urlfile="${E2E_SFDX_URL_FILE_DEV:-}" ;;
     esac
     [[ -f "$_urlfile" ]] || { echo "sf shim: 認証 URL のファイルがありません（alias=${_alias:-なし}）" >&2; exit 1; }
-    "$_real_sf" org login sfdx-url --sfdx-url-file "$_urlfile" ${_alias:+--alias "$_alias"}
-    exit $?
+    # 一時的な失敗（Salesforce 側の応答の乱れ。理由が空の RefreshTokenAuthError など）に備え、待って、やり直す（e2e だけの差し替え）
+    _tries="${E2E_SHIM_LOGIN_TRIES:-3}"
+    _wait="${E2E_SHIM_LOGIN_WAIT:-5}"
+    _rc=1
+    for ((_i = 1; _i <= _tries; _i++)); do
+        "$_real_sf" org login sfdx-url --sfdx-url-file "$_urlfile" ${_alias:+--alias "$_alias"} && exit 0
+        _rc=$?
+        if (( _i < _tries )); then
+            echo "sf shim: 認証 URL でのログインに失敗しました（${_i}/${_tries}）。${_wait} 秒待って、やり直します。" >&2
+            sleep "$_wait"
+        fi
+    done
+    exit $_rc
 fi
 
 exec "$_real_sf" "$@"

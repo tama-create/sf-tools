@@ -11,6 +11,7 @@
 #   R2  X8-1  sf-dryrun を 2 回続けて実行 → どちらも成功し、組織へ書き込まない
 #   R3  X8-1  sf-update-secret（コンシューマーキー）を、同じ入力で 2 回 → 同じ値のまま（重複しない）
 #   R4  X3-10 フックの改変・削除 → sf-hook が、正規の内容に戻す
+#   R5  X3-10 ブランチの上にいない（detached HEAD）・保護ブランチ（main）の上で sf-push → コミットせずに止まる（コミットだけが残らない）
 # ==============================================================================
 source "$(dirname "${BASH_SOURCE[0]}")/test_helper.sh"
 source "$(dirname "${BASH_SOURCE[0]}")/integration/lib.sh"
@@ -88,10 +89,37 @@ test_R4() {
     assert_equals "$(_head "$CL")" "$h0" "R4: コミットは作らない"
 }
 
+test_R5() {
+    echo -e "\n${CLR_HEAD}--- R5: detached HEAD・main の上での sf-push ---${CLR_RST}"
+    local h0 r0
+    it_add_class "$CL" ItR5
+
+    # detached HEAD: コミットを作らず、止まる（作ると、どのブランチにも残らない）
+    _it_git -C "$CL" checkout -q --detach
+    h0=$(_head "$CL"); r0=$(it_remote_snap)
+    it_run "$CL" bash "$IT_HOME/sf-tools/bin/sf-push.sh"
+    assert_exit_fail "$IT_RC" "R5: detached HEAD では、sf-push が失敗で終わる"
+    it_out_has "detached HEAD" && pass "R5: detached HEAD であることが、表示される" || fail "R5: detached HEAD であることが、表示される" "$(it_out | tail -4)"
+    assert_equals "$(_head "$CL")" "$h0" "R5: detached HEAD で、コミットを作らない"
+    assert_equals "$(it_remote_snap)" "$r0" "R5: detached HEAD で、origin を変えない"
+    _it_git -C "$CL" checkout -q JOB-A
+
+    # main の上: コミットを作らず、止まる（作ると、main に、プッシュできないコミットだけが残る）
+    _it_git -C "$CL" checkout -q main
+    h0=$(_head "$CL"); r0=$(it_remote_snap)
+    it_run "$CL" bash "$IT_HOME/sf-tools/bin/sf-push.sh"
+    assert_exit_fail "$IT_RC" "R5: main の上では、sf-push が失敗で終わる"
+    it_out_has "保護ブランチ" && pass "R5: 保護ブランチであることが、表示される" || fail "R5: 保護ブランチであることが、表示される" "$(it_out | tail -4)"
+    assert_equals "$(_head "$CL")" "$h0" "R5: main の上で、コミットを作らない（手元の main が、origin と食い違わない）"
+    assert_equals "$(it_remote_snap)" "$r0" "R5: main の上で、origin を変えない"
+    assert_file_exists "$CL/force-app/main/default/classes/ItR5.cls" "R5: 作業中のファイルは、そのまま残る（失われない）"
+    _it_git -C "$CL" checkout -q JOB-A
+}
+
 _it_timed() { local t0=$SECONDS rc; "$@"; rc=$?; echo "  （所要時間: $1 = $((SECONDS - t0)) 秒）"; return $rc; }
 
 test_setup || { print_summary; exit 1; }
-for _sc in ${IT_SCENARIOS:-R1 R2 R3 R4}; do
+for _sc in ${IT_SCENARIOS:-R1 R2 R3 R4 R5}; do
     _it_timed "test_${_sc}" || break
 done
 

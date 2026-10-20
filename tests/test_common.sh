@@ -1084,7 +1084,57 @@ test_push_admin_branch() {
     teardown "$b"
 }
 
+# --- get_target_org: sf org display の一時的な失敗は、待って、やり直す。特定できなければ、原因を残す ---
+test_get_target_org() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] get_target_org（一時的な失敗のやり直し・原因の記録）${CLR_RST}"
+    local b rc; b=$(mktemp -d "${TMPDIR:-/tmp}/test-gto-XXXX")
+    create_mock_node "$b"
+    # sf org display: 1 回目から N 回までは、失敗の JSON（MOCK_DISPLAY_FAILS=N）。以後は、エイリアス itorg。呼び出し回数を数える
+    cat > "$b/sf" << 'EOF'
+#!/bin/bash
+d="${MOCK_DIR:?}"
+n=$(( $(cat "$d/count" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$d/count"
+if [[ $n -le ${MOCK_DISPLAY_FAILS:-0} ]]; then
+    echo '{"status":1,"name":"RefreshTokenAuthError","message":"Error authenticating with the refresh token"}'; exit 1
+fi
+echo '{"status":0,"result":{"alias":"itorg","id":"00D000000000001AAA"}}'
+EOF
+    chmod +x "$b/sf"
+    _gto() {   # 引数: MOCK_DISPLAY_FAILS [追加の環境変数...]。結果は $b/out.log
+        rm -f "$b/count"
+        (
+            export MOCK_DIR="$b" PATH="$b:$PATH" MOCK_DISPLAY_FAILS="$1" SF_TOOLS_ORG_DISPLAY_WAIT=0 SF_INIT_MODE=1
+            unset SF_TARGET_ORG
+            readonly SCRIPT_NAME=test; readonly LOG_FILE=/dev/null; readonly LOG_MODE=NEW
+            source "$SF_TOOLS_DIR/lib/common.sh"
+            out=$(get_target_org); echo "RC=$? OUT=${out}"
+        ) > "$b/out.log" 2>&1
+    }
+
+    _gto 0
+    assert_file_contains "$b/out.log" "RC=0 OUT=itorg" "get_target_org: 1 回目で取れれば、そのエイリアスを返す"
+    assert_equals "$(cat "$b/count")" "1" "get_target_org: 1 回目で取れたら、やり直さない"
+    _gto 2
+    assert_file_contains "$b/out.log" "RC=0 OUT=itorg" "get_target_org: 一時的に 2 回失敗しても、3 回目で取れる"
+    assert_equals "$(cat "$b/count")" "3" "get_target_org: 試行は 3 回"
+    _gto 9
+    assert_file_contains "$b/out.log" "RC=1" "get_target_org: 3 回とも失敗したら、戻り値 1"
+    assert_equals "$(cat "$b/count")" "3" "get_target_org: 失敗し続けても、試行は 3 回で止まる"
+    assert_file_contains "$b/out.log" "3 回試行" "get_target_org: 試行の回数が、警告に出る"
+    assert_file_contains "$b/out.log" "Error authenticating with the refresh token" "get_target_org: sf の応答の要点（message）が、警告に出る"
+    # 明示指定・環境変数は、sf を呼ばない
+    rm -f "$b/count"
+    ( export MOCK_DIR="$b" PATH="$b:$PATH" SF_INIT_MODE=1; unset SF_TARGET_ORG
+      readonly SCRIPT_NAME=test; readonly LOG_FILE=/dev/null; readonly LOG_MODE=NEW
+      source "$SF_TOOLS_DIR/lib/common.sh"
+      out=$(get_target_org explicit); echo "RC=$? OUT=${out}" ) > "$b/out.log" 2>&1
+    assert_file_contains "$b/out.log" "RC=0 OUT=explicit" "get_target_org: 引数で指定すれば、そのまま返す"
+    assert_file_not_exists "$b/count" "get_target_org: 引数で指定すれば、sf を呼ばない"
+    teardown "$b"
+}
+
 test_read_secret
+test_get_target_org
 test_mask_secrets
 test_is_gitbash
 test_is_reserved_org_alias

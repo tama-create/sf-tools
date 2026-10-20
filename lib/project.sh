@@ -84,6 +84,12 @@ merge_package_xml() {
 #   RET_OK (0) : エイリアスを echo して正常終了
 #   RET_NG (1) : どこからも特定できなかった場合
 #
+# 【sf org display の、一時的な失敗への備え】
+#   sf org display は、Salesforce に、アクセストークンの更新を、問い合わせることがある。一時的な失敗（理由が空の RefreshTokenAuthError など。
+#   実機で、1 度だけ、新しいジョブのクローンの sf-dryrun が、「特定できません」で止まった）に備え、特定できなかったときは、待って、やり直す。
+#   やり直しても、特定できなければ、sf の応答の要点（message）を、WARNING で、ログと画面に残す（原因を、あとから追えるように）。
+#   SF_TOOLS_ORG_DISPLAY_TRIES（試行回数。既定 3）・SF_TOOLS_ORG_DISPLAY_WAIT（やり直すまでの待ち。秒。既定 2）
+#
 # 【使用例】
 #   TARGET_ORG=$(get_target_org "$OPT_TARGET") || die "接続先を特定できません。"
 #   TARGET_ORG=$(get_target_org)               || die "接続先を特定できません。"
@@ -92,10 +98,17 @@ get_target_org() {
     local target="$1"
     [[ -z "$target" ]] && target="$SF_TARGET_ORG"
     if [[ -z "$target" ]]; then
-        local current_alias disp_json
-        disp_json=$(run sf org display --json || echo "")  # VAR=$(cmd) のため run 不使用（出力の取得）
-        current_alias=$(json_get "$disp_json" result.alias)  # VAR=$(cmd) のため run 不使用（値の抽出のみ）
-        [[ -n "$current_alias" && "$current_alias" != "null" ]] && target="$current_alias"
+        local current_alias disp_json="" cause i tries="${SF_TOOLS_ORG_DISPLAY_TRIES:-3}" wait_sec="${SF_TOOLS_ORG_DISPLAY_WAIT:-2}"
+        for (( i = 1; i <= tries; i++ )); do
+            disp_json=$(run sf org display --json || echo "")  # VAR=$(cmd) のため run 不使用（出力の取得）
+            current_alias=$(json_get "$disp_json" result.alias)  # VAR=$(cmd) のため run 不使用（値の抽出のみ）
+            if [[ -n "$current_alias" && "$current_alias" != "null" ]]; then target="$current_alias"; break; fi
+            (( i < tries )) && sleep "$wait_sec"  # run 不使用: 待機（一時的な失敗への備え）
+        done
+        if [[ -z "$target" ]]; then
+            cause=$(json_get "$disp_json" message 2>/dev/null | head -1 | cut -c1-200)  # VAR=$(cmd) のため run 不使用（応答の要点だけ）
+            log "WARNING" "sf org display で、接続先を取得できませんでした（${tries} 回試行）。sf の応答: ${cause:-（応答なし）}"
+        fi
     fi
     [[ -z "$target" ]] && return $RET_NG
     echo "$target"

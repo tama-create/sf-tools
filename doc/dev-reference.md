@@ -178,7 +178,7 @@
 | `set_var` | `set_var VARNAME VALUE`（`lib/platform.sh`） | 指定した名前の変数に、値を代入する（nameref の代わり。Bash 3.2 で動く）。変数名が、英数字と `_` でなければ `die`。値は、評価しない |
 | `run_with_timeout` | `run_with_timeout 秒 CMD [ARGS...]`（`lib/platform.sh`） | 時間の上限つきで実行する。`timeout` があれば使い、なければ（macOS）、背景で実行して監視する。時間切れは 124。標準入力は、そのまま渡す |
 | `json_get` | `VALS=$(json_get "$JSON" パス...) \|\| ...`（複数のパスは `mapfile -t V <<< "$VALS"`） | JSON から値を取り出す（sf CLI の出力など。GitHub の情報は `gh --jq`）。Node の標準機能のみ。パスは `.` 区切り（`result.records.0.Id`。先頭の `.` は許容）。パス 1 つにつき 1 行（値なし・null は空行。値の中の改行は空白 1 つ）。まず全体を厳密に読み、失敗したときだけ最初の `{` から最後の `}` までを読む（`run` は標準エラーも標準出力に混ぜるため、sf の警告が前後に付く）。読み取れない・node がないときは終了コード 1 |
-| `get_target_org` | `get_target_org [ALIAS]` | 対象組織エイリアスを解決して出力 |
+| `get_target_org` | `get_target_org [ALIAS]` | 対象組織エイリアスを解決して出力。優先順位: 引数 > 環境変数 `SF_TARGET_ORG` > `sf org display --json`。`sf org display` で取れないときは、待って、やり直す（`SF_TOOLS_ORG_DISPLAY_TRIES` 既定 3・`SF_TOOLS_ORG_DISPLAY_WAIT` 既定 2 秒）。それでも取れなければ、sf の応答の要点（message）を WARNING で残して、戻り値 1。一時的な失敗（理由が空の `RefreshTokenAuthError` など）で、e2e の新しいジョブのクローンの `sf-dryrun` が、1 度だけ「特定できません」で止まったことへの備え（原因は未確定。次に起きたとき、ログで分かる） |
 | `check_force_dir` | `check_force_dir` | `force-*` ディレクトリか検証 |
 | `resolve_init_identity` | `resolve_init_identity` | sf-init 用: オーナーと XXXX を、引数（`SF_INIT_OWNER` / `SF_INIT_PROJECT`）→ 対話で決め、`GITHUB_OWNER` / `COMPANY_NAME` をセット。決めた値は `SF_INIT_OWNER` / `SF_INIT_PROJECT` に export する |
 | `resolve_job_identity` | `resolve_job_identity OWNER XXXX` | sf-job 用: 引数 → カレントの下のクローンの git remote（`discover_clones`）→ 対話 |

@@ -95,9 +95,20 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.E2E_GH_TOKEN }}
           E2E_ALLOW_ACTIONS: "1"
+          SF_LOG_LEVEL: debug   # 失敗したとき、原因（fetch failed の cause など）を、sf のログから取れるようにする
         run: |
           # 「続行しますか？」の確認に Y を答える（管理者が実際に行う操作と同じ流れ）
           printf 'Y\n' | bash "$HOME/sf-tools/tests/e2e/run.sh"
+
+      # 失敗したときだけ、sf のログから、通信の失敗の原因の部分を抜き出す。
+      # ログは公開されるため、組織の ID・URL・トークン・メールアドレスは伏せ、1 行 240 文字までにする
+      - name: sf のログ（失敗の原因の抜粋）
+        if: failure()
+        run: |
+          cat "$HOME"/.sf/sf-*.log 2>/dev/null \
+              | grep -iE 'fetch failed|ECONN|ENOTFOUND|ETIMEDOUT|EAI_AGAIN|UND_ERR|socket|certificate|"cause"|SELF_SIGNED|ERR_' \
+              | sed -E 's/00D[A-Za-z0-9]{12,15}![A-Za-z0-9._-]+/<token>/g; s/00D[A-Za-z0-9]{12,15}/00D***/g; s#https?://[A-Za-z0-9.-]+\.salesforce\.com#https://<host>.salesforce.com#g; s/Bearer [A-Za-z0-9._!-]+/Bearer <token>/g; s/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+/<mail>/g' \
+              | cut -c1-240 | tail -40 || true
 
   macos:
     name: e2e（macOS・クライアント側のみ）

@@ -7,6 +7,8 @@
 #
 # 動作:
 #   1. 現在のブランチ名を表示
+#        ブランチの上にいない（detached HEAD）とき・保護ブランチ（sf-tools/config/branches.txt のブランチ。main など）の上にいるときは、
+#        コミットする前に、エラーで終了する（コミットだけが手元に残り、プッシュは通らない状態を、作らないため）
 #   2. origin/main を fetch して現在ブランチにマージ（コンフリクトはエラー中止）
 #   3. カレント配下だけを git add --all
 #   4. 変更の有無をチェック。なければ、未プッシュのコミットを確認する
@@ -55,6 +57,14 @@ REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" \
 
 BRANCH_NAME="$(git -C "$REPO_ROOT" symbolic-ref --quiet --short HEAD 2>/dev/null || git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null)" \
     || die "Git のブランチ名を取得できません。"
+
+# ブランチの上にいない（detached HEAD）と、コミットしても、どのブランチにも残らない。コミットの前に止める
+git -C "$REPO_ROOT" symbolic-ref --quiet HEAD >/dev/null 2>&1 \
+    || die "HEAD がブランチを指していません（detached HEAD: ${BRANCH_NAME}）。"
+# 保護ブランチ（main など）は、直接プッシュできない。コミットだけが手元に残るため、コミットの前に止める
+if is_protected_branch "$BRANCH_NAME"; then
+    die "${BRANCH_NAME} は保護ブランチです（ここでは、コミットもプッシュも行いません）。"
+fi
 
 REL_PREFIX="$(git rev-parse --show-prefix 2>/dev/null || true)"
 if [[ -n "$REL_PREFIX" ]]; then

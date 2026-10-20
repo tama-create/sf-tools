@@ -414,7 +414,7 @@ Actions 上の実行は、コマンドによって扱いが違う。「全部拒
 | X3-5 状態ファイルのリポジトリ名の食い違い | ✅ | init2 |
 | X3-6 進捗が先行 | ✅ | init2（不具合を見つけ、修正した） |
 | X3-7 完了の印と進捗の矛盾 | ✅ | init2（進捗 10 で main がない・印 1 で進捗が途中・印 0 の完了済み） |
-| X3-10 改変点ごとの拒否の表 | △ | init（A13 のクローンで: origin が別のリポジトリ・branches.txt がない（止まる。黙って作り直さない）・release/ がない（sf-install が復元））・rerun（フックの改変・削除 → sf-hook が戻す）・組織に未接続。ほかの改変点は未（sfdx-project.json の欠落は、fake の sf が、本物の sf のように、プロジェクトの外でのデプロイを拒否しないため、L1 では判定できない。L2） |
+| X3-10 改変点ごとの拒否の表 | △ | init（A13 のクローンで: origin が別のリポジトリ・branches.txt がない（止まる。黙って作り直さない）・release/ がない（sf-install が復元））・rerun（フックの改変・削除 → sf-hook が戻す。detached HEAD・main の上での sf-push は、コミットせずに止まる = R5。不具合を見つけて、直した）・組織に未接続。origin がない・release/ブランチ名/ がない・deploy-target.txt が空は、既存の挙動で安全に止まることを確認した（テストにはしていない）。ほかの改変点は未（sfdx-project.json の欠落は、fake の sf が、本物の sf のように、プロジェクトの外でのデプロイを拒否しないため、L1 では判定できない。L2） |
 | X3-8 admin の欠け・X3-9 欠けの検出 | ✅ | init3（admin ブランチが origin から消えた → 後片付けで戻る・--status の欠けの検出。`SF_TOOLS_BRANCH` を、配布版でも、不足にしていた不具合を見つけて、直した） |
 | X4-1 sf-init の同時起動 | ✅ | init2（見つけた競合を直した: 同じプロジェクトの sf-init は、ロックで排他する。2 つ目は拒否・強制終了で残った古いロックは引き継ぐ） |
 | X4-1a 同時 push | ✅ | git |
@@ -439,7 +439,7 @@ Actions 上の実行は、コマンドによって扱いが違う。「全部拒
 | X9-2 | — | L2（未） |
 | X10-3・X10-4 | — | L2・e2e（未） |
 
-**この段階で見つかり、直したもの**: `sf-push` の再実行（X2-3）・`sf-check` の外部パス（X6-4）・`sf-init` の進捗の先行（X3-6・X3-7）・`sf-init` の同時起動（X4-1。Windows で、Ruleset が重複した。ロックを入れた）・`sf-prepush` の `branches.txt`（origin にないブランチ名が、すべての push を止めた。X3-2）・`sf-job` の同名ブランチ（clone だけをやり直せなかった。X2-2。環境ブランチの名前も、ジョブ名に使えないようにした）・`sf-metasync`（フックのあるクローンで main への push が止められた・push できなかったコミットが取り残された。M0・M4）・`lib/project.sh`（同じ XXXX が別のオーナーに複数あるとき、最初のものを黙って使った。A14）・`sf-next`（origin が ssh:// のとき、開く URL が https にならなかった。A5）・`sf-start`（標準入力が閉じたとき、エイリアスの入力を無限に繰り返した。X5-3）・`lib/diag.sh`（`SF_TOOLS_BRANCH` は任意なのに、配布版のプロジェクトで、必ず「不足」と表示した。X3-9）。**意図した仕様（確認済み）**: `sf-unhook` は pre-push だけを外す（プッシュの検証だけを止めるのが狙い）。
+**この段階で見つかり、直したもの**: `sf-push` の再実行（X2-3）・`sf-check` の外部パス（X6-4）・`sf-init` の進捗の先行（X3-6・X3-7）・`sf-init` の同時起動（X4-1。Windows で、Ruleset が重複した。ロックを入れた）・`sf-prepush` の `branches.txt`（origin にないブランチ名が、すべての push を止めた。X3-2）・`sf-job` の同名ブランチ（clone だけをやり直せなかった。X2-2。環境ブランチの名前も、ジョブ名に使えないようにした）・`sf-metasync`（フックのあるクローンで main への push が止められた・push できなかったコミットが取り残された。M0・M4）・`lib/project.sh`（同じ XXXX が別のオーナーに複数あるとき、最初のものを黙って使った。A14）・`sf-next`（origin が ssh:// のとき、開く URL が https にならなかった。A5）・`sf-start`（標準入力が閉じたとき、エイリアスの入力を無限に繰り返した。X5-3）・`lib/diag.sh`（`SF_TOOLS_BRANCH` は任意なのに、配布版のプロジェクトで、必ず「不足」と表示した。X3-9）・`sf-push`（detached HEAD・main の上でも、先にコミットして、プッシュで失敗し、コミットだけが残った。X3-10 の R5）。**意図した仕様（確認済み）**: `sf-unhook` は pre-push だけを外す（プッシュの検証だけを止めるのが狙い）。
 
 ---
 

@@ -404,6 +404,31 @@ e2e_delete_apex() {
     return $rc
 }
 
+# Hello World の Apex（SfToolsE2eHello と、そのテスト）を、組織に直接デプロイする（メタデータ API の形式）。
+#   sf-tools の経路（sf-push・wf-release）を通さずに、「組織側だけに差分がある」状態を作る（wf-metasync の反映の確認用。scenario.sh metasync-diff）。
+#   デプロイできるのは、許可された 2 つの名前だけ（e2e_is_target_apex）。管理用ログイン済みであること。削除は e2e_delete_apex
+e2e_deploy_hello() {
+    local work rc=0
+    e2e_require_guard
+    e2e_is_target_apex "$E2E_APEX_HELLO" && e2e_is_target_apex "$E2E_APEX_HELLO_TEST" || die "デプロイ対象外の Apex クラス名です。"
+    work=$(mktemp -d "${E2E_TMP:-${TMPDIR:-/tmp}}/e2e-run.XXXXXX") || die "一時ディレクトリを作成できません。"  # VAR=$(cmd) のため run 不使用（後掃除の対象になる名前）
+    mkdir -p "$work/classes"  # run 不使用: デプロイ用の一時フォルダの準備
+    {
+        printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' '<Package xmlns="http://soap.sforce.com/2006/04/metadata">' '  <types>'
+        printf '    <members>%s</members>\n' "$E2E_APEX_HELLO" "$E2E_APEX_HELLO_TEST"
+        printf '%s\n' '    <name>ApexClass</name>' '  </types>' '  <version>64.0</version>' '</Package>'
+    } > "$work/package.xml"
+    verify_hello_cls > "$work/classes/${E2E_APEX_HELLO}.cls"
+    verify_hello_test_cls > "$work/classes/${E2E_APEX_HELLO_TEST}.cls"
+    verify_apex_meta > "$work/classes/${E2E_APEX_HELLO}.cls-meta.xml"
+    verify_apex_meta > "$work/classes/${E2E_APEX_HELLO_TEST}.cls-meta.xml"
+    # 成否は終了コードで判定する。Apex のデプロイは、テストが要る（指定したテストだけを実行）
+    (cd "$work" && run sf project deploy start --metadata-dir . --target-org "$(_e2e_cur_alias)" \
+        --test-level RunSpecifiedTests --tests "$E2E_APEX_HELLO_TEST" --wait 15 --concise) || rc=$?
+    rm -rf "$work"  # run 不使用: デプロイ用の一時フォルダの後始末
+    return $rc
+}
+
 # Salesforce にある、テスト用 Apex クラスの件数を返す（標準出力）。取得に失敗したら、戻り値 1
 #   失敗したときは、sf のエラーの要点（先頭の数行。Token・認証 URL は伏せる）を警告として表示する（標準エラー）。
 #   これまで、エラーを捨てていたため、削除後の確認の失敗の原因が分からなかった
@@ -916,4 +941,48 @@ e2e_record_line() {
     [[ -z "$(git -C "$root" status --porcelain --untracked-files=no 2>/dev/null)" ]] || dirty="（未コミットの変更あり）"  # 条件チェックのため run 不使用
     printf '| %s | Bash %s | %s | %s%s | %s | %s |\n' \
         "$(e2e_os_label)" "${BASH_VERSION%%(*}" "$(e2e_openssl_label)" "$commit" "$dirty" "$(date +%Y-%m-%d)" "$1"
+}
+
+# ------------------------------------------------------------------------------
+# シナリオ方式（scenario.sh）の部品
+# ------------------------------------------------------------------------------
+# e2e_find_latest_project - 前回残したテスト用の作業フォルダ（名前が決まった形式のもののうち、最新の 1 つ）の名前を、標準出力に返す。
+#   なければ、戻り値 1。名前は日時（e2e-YYYYMMDD-HHMMSS）なので、フォルダ名の並び順が、新しい順になる
+e2e_find_latest_project() {
+    local d name best=""
+    for d in "${E2E_HOME_ROOT}/${E2E_OWNER}"/e2e-*; do
+        [[ -d "$d" ]] || continue
+        name=$(basename "$d")  # VAR=$(cmd) のため run 不使用
+        e2e_is_target_project "$name" && best="$name"
+    done
+    [[ -n "$best" ]] || return 1
+    printf '%s' "$best"
+}
+
+# e2e_scan_secrets - 標準入力のテキストに、秘密情報が含まれていないかを確認する（Actions のログ・PR のコメントの検査用）
+#   含まれていた「種類の名前」を 1 行ずつ標準出力に返す（**値は、出さない**）。1 つでも含まれていれば、戻り値 1。
+#   検査するもの: ① 鍵一式の値（PAT・Slack Bot Token・認証 URL とそのトークン部分）の完全一致
+#                 ② 形式（秘密鍵の本文の開始行・Slack Bot Token・GitHub の Token・伏せられていない認証 URL）
+#   Actions は、Secret の値を *** に置き換えるため、①が見つかるのは、値が変形されずに出た（マスクが効かなかった）とき。②は、変形されて出たものの検出。
+e2e_scan_secrets() {
+    local text found=0 var v tok kind
+    text=$(cat)  # VAR=$(cmd) のため run 不使用
+    for var in E2E_PAT_TOKEN E2E_SLACK_BOT_TOKEN E2E_SFDX_AUTH_URL E2E_SFDX_AUTH_URL_STG E2E_SFDX_AUTH_URL_DEV; do
+        v="${!var:-}"
+        [[ -n "$v" ]] || continue
+        if [[ "$text" == *"$v"* ]]; then printf '%s の値\n' "$var"; found=1; fi
+        if [[ "$var" == E2E_SFDX_AUTH_URL* ]]; then   # 認証 URL は、トークン部分（force://PlatformCLI::TOKEN@host の TOKEN）だけでも、検査する
+            tok="${v#*::}"; tok="${tok%%@*}"
+            if [[ ${#tok} -ge 20 && "$text" == *"$tok"* ]]; then printf '%s のトークン部分\n' "$var"; found=1; fi
+        fi
+    done
+    for kind in \
+        '-----BEGIN [A-Z ]*PRIVATE KEY-----|秘密鍵の本文' \
+        'xox[abprs]-[0-9A-Za-z-]{20,}|Slack の Token の形式' \
+        'gh[pousr]_[A-Za-z0-9]{30,}|GitHub の Token の形式' \
+        'github_pat_[A-Za-z0-9_]{30,}|GitHub の Token の形式（fine-grained）' \
+        'force://[^[:space:]]*::[^*@[:space:]]{20,}@|伏せられていない認証 URL'; do
+        if printf '%s' "$text" | grep -Eq -- "${kind%%|*}"; then printf '%s\n' "${kind##*|}"; found=1; fi
+    done
+    [[ $found -eq 0 ]]
 }

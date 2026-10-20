@@ -194,6 +194,7 @@ bash tests/run_tests.sh --jobs 4 / --serial   # 同時に動かすファイル�
 bash tests/test_integration.sh                # 結合テスト L1（実 git ＋ fake。run_tests.sh の全件にも含まれる。手元の Windows は約 10 分、CI は 2 分ほど）
 bash tests/e2e/doctor.sh                       # e2e を動かせる環境かの確認（読み取りのみ。新しい環境で、run.sh の前に実行）
 bash tests/e2e/run.sh                          # 実環境の通し検証（検証のとき Claude が実行。通常のテストには含まれない）
+bash tests/e2e/scenario.sh --list             # 実環境のシナリオ（run.sh が残したリポジトリに、名前で選んで実行。読み取りのみのものから）
 ```
 
 > **開発中は `--changed`、mm 前は全件** が基本ワークフロー。PR（main・development 向け）と development への push では、GitHub Actions（`.github/workflows/test.yml`）も、全件テストと shellcheck を実行する。

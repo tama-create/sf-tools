@@ -899,9 +899,17 @@ sf-tools の `main` への反映は、全ユーザーへの配布と同義であ
 | `tests/e2e/doctor.sh` | e2e を動かせる環境かの確認（読み取りのみ。Windows・macOS・Linux・WSL 共通）。OS・Bash・openssl、コマンド（`git` / `gh` / `sf`（npm 版）/ `node` / `openssl`）、`gh` のログイン・`delete_repo`・`E2E_GH_USER` との一致、git の `credential helper`（無いと、https のクローンがパスワードを待って止まる。WSL・Linux）、git のユーザー名・メールアドレス（無いと、初回のコミットが `Author identity unknown` で失敗する）、鍵一式（有無・権限 600・必須の項目・認証 URL の形式・`E2E_HOME_ROOT`。**値は出さない**）、`generate_jwt_cert`（`sf-init` と同じ関数）で鍵（PKCS#1）と証明書（発行先が空でない）を作れるか、手元の sf-tools が `origin/development` と一致しているか。要対応があれば戻り値 1。新しい環境（Mac など）で `run.sh` の前に実行する |
 | `lib.sh` の `e2e_record_line` / `e2e_os_label` / `e2e_openssl_label` | 検証の記録（9.7）の表の 1 行を作る。`run.sh` が、終わりに表示する（列: OS / Bash / openssl / コミット / 日付 / 結果。未コミットの変更があれば、コミットの欄に付記する。`--no-actions` などで確認を省いたときは、結果の欄に書く） |
 | （層数対応: `run.sh` / `lib.sh`） | `--layout 1\|2\|3`: `e2e_make_input N`（Phase 5 の番号は、3 層 = 1・2 層 = 2・1 層 = 3。ログイン先の答えは段階の数だけ）。リポジトリの構成は、ブランチから判定（`TIERS`: develop → staging → main）し、`_hello_flow` が、段階の数だけ、`_hello_pr_flow`（同じブランチから、段階ごとの PR）を繰り返す。実行の取り違え防止: PR を作る前の最新の実行 ID（`e2e_latest_run_id`）を覚え、それより新しい実行だけを、その PR の実行とする（`e2e_wait_pr_run` の 4 番目の引数）。段階の指定: 環境変数 `E2E_TIER`（`e2e_sf_admin_login` / `e2e_apex_count` / `e2e_list_target_apex` / `e2e_delete_apex` などが、その段階の組織・エイリアス（`sf-tools-e2e-admin[-stg\|-dev]`）を使う）。`sf` の差し替えは、`--alias` の末尾（STG / DEV）で、段階の認証 URL を選ぶ。確認: 各段階のリリースで、その段階の組織にだけクラスができる（先の段階にはない）・`wf-propagate` で staging / develop に main が入る（`compare` の `ahead_by` = 0）・main の削除は、ほかの段階に及ばない。 |
+| `tests/e2e/ci-fixture.sh` | GitHub Actions 上だけで動く。Secrets / Variables（環境変数）から、鍵一式（`~/.sf-tools-e2e/fixture.env`）を作る（`%q` で、記号・空白を含む値も、そのまま。権限 600）。必須の値が空なら、変数名だけを表示して失敗する（値は出さない） |
 | `tests/e2e/shims/sf` | `sf org login web` だけを `sf org login sfdx-url`（認証 URL）に差し替える。他のコマンドは本物の `sf` に渡す |
 | `tests/e2e/shims/git` | `run.sh --interrupt` の 1 回目だけ PATH の先頭に置く。`git push` で、引数に `main` を含むものを、1 回だけ（印のファイル `E2E_GIT_FAIL_MARK` ができるまで）終了コード 128 で失敗させ、あとは本物の git（`E2E_REAL_GIT`）に渡す。Phase 8 の初回コミットの push の失敗を、実環境で起こす |
 | `tests/e2e/shims/browser` | `start` / `xdg-open` / `open` / `powershell.exe` / `wslview` の名前でコピーされ、ブラウザを開かない（WSL の `open_browser` は `powershell.exe` を使うため、WSL で e2e を動かすときに要る） |
+
+**GitHub Actions での実行（`.github/workflows/e2e.yml`。設計は `doc/integration-test-plan.md` 12.5）:**
+- Windows（Git Bash）で全部、続けて macOS（標準の Bash 3.2）でクライアント側だけ（`--no-actions --no-add-tier --cleanup`）。同じ 3 つのテスト用組織を使うため、`needs` と `concurrency`（`group: e2e`・実行中は止めない）で、一列に動かす。
+- **ガード（`lib.sh` の `e2e_actions_allowed`）:** `e2e_guard_env` は、Actions 上では、①`E2E_ALLOW_ACTIONS=1`、②`GITHUB_WORKFLOW_REF` が `tama-create/sf-tools/.github/workflows/e2e.yml@refs/heads/(development|main)`、③`GITHUB_EVENT_NAME` が push・workflow_dispatch・schedule、のすべてがそろうときだけ通す（`GITHUB_*` は、ワークフローの書き手が上書きできない）。名前の形式・オーナーの一致・gh ユーザーの一致・削除の対象は、Actions 上でも同じ。ガードを通ったあと、`GITHUB_ACTIONS` と `CI` を外す（sf-tools の各スクリプトが、警告・確認を飛ばし、クライアント PC と違う動きにならないように。`run_tests.sh` と同じ）。
+- **Secrets / Variables（Environment `e2e`。Deployment branches は development と main だけ）:** Secrets は `E2E_GH_TOKEN`（Classic PAT: repo / workflow / admin:org / delete_repo）・`E2E_PAT_TOKEN`・`E2E_SLACK_BOT_TOKEN`・`E2E_SFDX_AUTH_URL`・`E2E_SFDX_AUTH_URL_STG`・`E2E_SFDX_AUTH_URL_DEV`。Variables は `E2E_OWNER`・`E2E_GH_USER`・`E2E_SLACK_CHANNEL_ID`。
+- **注意:** sf-tools は公開リポジトリのため、ワークフローのログは誰でも読める。組織の ID・ユーザー名・メールなどを、画面に出す処理を足さないこと。手元で e2e を動かすと、Actions の実行と、同じ組織を取り合うため、Actions に移したあとは、手元では動かさない。
+- 最初は、手動実行（`workflow_dispatch`）だけ。最初の成功を確認してから、配布物が変わった `development` への push で、動くようにする。
 
 **中断→再開の確認（`run.sh --interrupt`）:** `sf-init` を、わざと Phase 8 で失敗させ、「続きをやる」で再開してから、いつもの確認（Secret・Variable・ブランチ・ワークフロー・Actions・Hello World）を行う。1 回目: `_interrupt_first_run`。git の shim（`shims/git`）で、main への push を 1 回だけ失敗させ、止まった時点の状態（リポジトリ・main・進捗）を `MID_*` に記録する（再開すると変わるため）。2 回目の入力: [オーナーの選択・XXXX・確認] → 管理者向けの警告の確認 `Y` → 「続きをやる」`1` → Phase 10 のログイン先（段階の数だけ `1`）。確認: 1 回目が失敗した・shim が push を止めた・失敗の画面が「続きをやる」を案内した・リポジトリはある・main はない・進捗は 7・PAT / Slack Token / 認証 URL が出ていない・再開の画面に「前回のセットアップは」が出た・初回コミットが 1 つ。`--resume` とは同時に指定できない。共通の確認は `read_key` が 1 文字ずつ読むことに注意（改行も 1 回の読み取りで、空なら再入力になる）。
 
@@ -937,7 +945,7 @@ sf-tools の `main` への反映は、全ユーザーへの配布と同義であ
 
 - 削除対象は、名前の形式（上記のタイムスタンプ付き）が一致するものだけ。`SF_TOOLS`、`force-test-win` などは対象外（`e2e_is_target_*`）
 - オーナーは、鍵一式の `E2E_OWNER` のみ。gh のログインユーザーが `E2E_GH_USER` と一致しないと動かない
-- `e2e_guard_env` を通らないと、削除系の関数は動かない（`E2E_GUARD_OK=1`）。GitHub Actions 上では動かない
+- `e2e_guard_env` を通らないと、削除系の関数は動かない（`E2E_GUARD_OK=1`）。GitHub Actions 上では、専用ワークフロー（e2e.yml）以外からは動かない（上の `e2e_actions_allowed`）
 - `cleanup.sh` は既定で何も消さない。`--yes` でも、一覧を見せたうえで `delete` の入力を求める
 - JWT 用の証明書フォルダ（`~/.sf-jwt/force-e2e-…`）は、中身が `server.key` / `server.crt` だけのときに限り削除する。ほかのファイルが入っていれば、消さずに失敗として返す（ほかの掃除は続ける）。シンボリックリンクは、対象外
 - `$TMPDIR` の一時ファイル・フォルダ（`e2e-run.*` など）は、名前の形式・30 分以上経過・所有者が自分・シンボリックリンクでない、のすべてを満たすものだけ（2026-10-05 に、Codex のレビューを受けて補強）

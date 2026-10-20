@@ -19,7 +19,8 @@
 #        一時ファイル・フォルダ（強制終了で残ったもの）: $TMPDIR の e2e-run.XXXXXX / e2e-eca-del.XXXXXX /
 #                          e2e-sfdx-url.XXXXXX（実行中の run.sh のものと、30 分以内のものは対象外）
 #   3. オーナーは、鍵一式のファイルで明示した E2E_OWNER だけ。gh のログインユーザーも E2E_GH_USER と一致が必須
-#   4. GitHub Actions 上では動かない
+#   4. GitHub Actions 上では、専用のワークフロー（.github/workflows/e2e.yml。sf-tools の development / main の上の
+#      push・手動・定期のみ。E2E_ALLOW_ACTIONS=1 が必要）以外からは動かない（e2e_actions_allowed）。上の 2・3 は、Actions 上でも同じ
 #
 # 【鍵一式のファイル】（リポジトリの外。~/.sf-tools-e2e/fixture.env。bootstrap.sh が作成する）
 #   E2E_OWNER             テスト用リポジトリのオーナー（組織名）
@@ -177,15 +178,34 @@ e2e_org_id() {
 # ------------------------------------------------------------------------------
 # ガード（削除系の関数は、これを通らないと動かない）
 # ------------------------------------------------------------------------------
+# GitHub Actions 上で、e2e を動かしてよいか。通すのは、次の条件が、すべて満たされるときだけ:
+#   ・E2E_ALLOW_ACTIONS=1（専用のワークフローが、明示して渡す印）
+#   ・GITHUB_WORKFLOW_REF が、sf-tools の .github/workflows/e2e.yml（development または main のブランチ上）
+#     （GITHUB_* は、GitHub が決める値で、ワークフローの書き手が上書きできない。ほかのワークフロー・リポジトリ・ブランチは、通さない）
+#   ・GITHUB_EVENT_NAME が、push・workflow_dispatch・schedule のどれか（pull_request は、通さない）
+e2e_actions_allowed() {
+    local re='^tama-create/sf-tools/\.github/workflows/e2e\.yml@refs/heads/(development|main)$'
+    [[ "${E2E_ALLOW_ACTIONS:-}" == "1" ]] || return 1
+    [[ "${GITHUB_WORKFLOW_REF:-}" =~ $re ]] || return 1
+    case "${GITHUB_EVENT_NAME:-}" in push|workflow_dispatch|schedule) return 0 ;; *) return 1 ;; esac
+}
+
 e2e_guard_env() {
     local login
-    [[ "${GITHUB_ACTIONS:-}" == "true" ]] && die "GitHub Actions 上では e2e を実行できません。"
+    if [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
+        e2e_actions_allowed \
+            || die "GitHub Actions 上では、専用のワークフロー（e2e.yml）以外から、e2e を実行できません。"
+    fi
     [[ "${E2E_OWNER:-}" =~ ^[a-zA-Z0-9]([a-zA-Z0-9-]{0,37}[a-zA-Z0-9])?$ ]] \
         || die "E2E_OWNER が不正です: ${E2E_OWNER:-}"
     login=$(gh api user --jq .login 2>/dev/null) || die "gh のログインユーザーを取得できません。"  # VAR=$(cmd) のため run 不使用
     [[ "$login" == "${E2E_GH_USER:-}" ]] \
         || die "gh のログインユーザー（${login}）が E2E_GH_USER（${E2E_GH_USER:-}）と一致しません。"
     export E2E_GUARD_OK=1
+    # ガードを通ったあとは、GITHUB_ACTIONS / CI を外す。sf-tools の各スクリプトは、GITHUB_ACTIONS=true だと、
+    # 警告・確認を飛ばし、予約名の確認などを変える。クライアント PC と同じ動きを確かめる e2e では、そのままにしない
+    # （tests/run_tests.sh も同じ理由で外している）。このガードは、1 回だけ通る（以降の判定は、E2E_GUARD_OK を見る）
+    unset GITHUB_ACTIONS CI
 }
 
 e2e_require_guard() {

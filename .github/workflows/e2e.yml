@@ -1,0 +1,148 @@
+name: e2e（実環境の通し検証）
+
+# 実際の GitHub / Salesforce で sf-init の通し検証（tests/e2e/run.sh）を動かす。テスト用の組織・リポジトリを使い、作ったものは、名前の形式と
+# オーナーが一致するものだけを削除する（tests/e2e/lib.sh の安全ガード。Actions 上でも、同じ）。
+#
+# 【動かし方】
+#   ・Windows（Git Bash）で、全部（sf-init・wf-metasync・Hello World のリリースと削除・--add-tier）を確認する。
+#     サーバー側（Actions のワークフロー）は、クライアントの OS に関係なく、いつも GitHub の Linux 上で動くため、この 1 回で足りる。
+#   ・続けて、macOS（標準の Bash 3.2）で、クライアント側だけ（--no-actions --no-add-tier）を確認する。
+#   ・同じテスト用の組織を使うため、2 つのジョブは一列に動かす（Windows → macOS。ワークフローの実行どうしも、concurrency で一列）。
+#
+# 【いつ動くか】
+#   ・手動（workflow_dispatch）。
+#   ・（予定）配布物（bin/ lib/ phases/ hooks/ templates/ config/）が変わった development への push。
+#     最初の成功を確認してから、下の push を有効にする（doc/integration-test-plan.md 12）。
+#
+# 【必要な設定】（リポジトリの Settings → Environments → e2e。doc/integration-test-plan.md 12.5）
+#   ・Environment `e2e`（Deployment branches は、development と main だけ）
+#   ・Secrets（e2e の Environment に登録）
+#       E2E_GH_TOKEN         テスト用の組織の管理者の Classic PAT（スコープ: repo / workflow / admin:org / delete_repo）。gh が使う
+#       E2E_PAT_TOKEN        テスト用リポジトリの PAT_TOKEN に登録する Classic PAT
+#       E2E_SLACK_BOT_TOKEN  Slack の Bot Token
+#       E2E_SFDX_AUTH_URL / E2E_SFDX_AUTH_URL_STG / E2E_SFDX_AUTH_URL_DEV   main / staging / develop のテスト用組織の認証 URL
+#   ・Variables（e2e の Environment に登録。秘密ではない）
+#       E2E_OWNER            テスト用リポジトリのオーナー（組織名）
+#       E2E_GH_USER          E2E_GH_TOKEN のユーザー名（gh のログインユーザー）
+#       E2E_SLACK_CHANNEL_ID 通知先のチャンネル ID
+#
+# 【注意】 sf-tools は公開リポジトリのため、このワークフローのログは誰でも読める。Secret の値は、GitHub が伏せ、e2e も、画面とログに出す前に
+# 伏せる（_e2e_mask_line）。組織の ID・ユーザー名・メールアドレスなどを、画面に出す処理を足さないこと。
+on:
+  workflow_dispatch:
+  # push:                      # 最初の成功を確認してから有効にする
+  #   branches: [development]
+  #   paths:
+  #     - 'bin/**'
+  #     - 'lib/**'
+  #     - 'phases/**'
+  #     - 'hooks/**'
+  #     - 'templates/**'
+  #     - 'config/**'
+  #     - 'tests/e2e/**'
+  #     - '.github/workflows/e2e.yml'
+
+permissions:
+  contents: read
+
+# 同じテスト用の組織を使うため、ワークフローの実行どうしも、一列に動かす（実行中のものは、止めない）
+concurrency:
+  group: e2e
+  cancel-in-progress: false
+
+jobs:
+  windows:
+    name: e2e（Windows・全部）
+    runs-on: windows-latest
+    timeout-minutes: 120
+    environment: e2e
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: ソースコードを取得
+        uses: actions/checkout@v4
+
+      - name: 開発者の環境に近づける（~/sf-tools・git の名前・gh の認証・sf）
+        env:
+          GH_TOKEN: ${{ secrets.E2E_GH_TOKEN }}
+          E2E_GH_USER: ${{ vars.E2E_GH_USER }}
+        run: |
+          # クライアント PC と同じく、~/sf-tools に sf-tools を置く（git の履歴つき。e2e が、origin/development との一致を確認する）
+          cp -a "$(pwd)" "$HOME/sf-tools"
+          git config --global user.name "$E2E_GH_USER"
+          git config --global user.email "${E2E_GH_USER}@users.noreply.github.com"
+          gh auth setup-git
+          # sf は npm 版が前提（Windows の Git Bash では、公式インストーラー版は非対応）
+          npm install -g @salesforce/cli
+          bash --version | head -1
+          sf --version
+
+      - name: 鍵一式（fixture.env）を作る
+        env:
+          E2E_OWNER: ${{ vars.E2E_OWNER }}
+          E2E_GH_USER: ${{ vars.E2E_GH_USER }}
+          E2E_SLACK_CHANNEL_ID: ${{ vars.E2E_SLACK_CHANNEL_ID }}
+          E2E_PAT_TOKEN: ${{ secrets.E2E_PAT_TOKEN }}
+          E2E_SLACK_BOT_TOKEN: ${{ secrets.E2E_SLACK_BOT_TOKEN }}
+          E2E_SFDX_AUTH_URL: ${{ secrets.E2E_SFDX_AUTH_URL }}
+          E2E_SFDX_AUTH_URL_STG: ${{ secrets.E2E_SFDX_AUTH_URL_STG }}
+          E2E_SFDX_AUTH_URL_DEV: ${{ secrets.E2E_SFDX_AUTH_URL_DEV }}
+        run: bash "$HOME/sf-tools/tests/e2e/ci-fixture.sh"
+
+      - name: e2e を実行（全部）
+        env:
+          GH_TOKEN: ${{ secrets.E2E_GH_TOKEN }}
+          E2E_ALLOW_ACTIONS: "1"
+        run: |
+          # 「続行しますか？」の確認に Y を答える（管理者が実際に行う操作と同じ流れ）
+          printf 'Y\n' | bash "$HOME/sf-tools/tests/e2e/run.sh"
+
+  macos:
+    name: e2e（macOS・クライアント側のみ）
+    needs: windows
+    runs-on: macos-latest
+    timeout-minutes: 90
+    environment: e2e
+    # macOS 標準の Bash 3.2 で動かす（Homebrew の Bash 5 ではなく）
+    defaults:
+      run:
+        shell: /bin/bash -e {0}
+    steps:
+      - name: ソースコードを取得
+        uses: actions/checkout@v4
+
+      - name: 開発者の環境に近づける（~/sf-tools・git の名前・gh の認証・sf・Bash 3.2）
+        env:
+          GH_TOKEN: ${{ secrets.E2E_GH_TOKEN }}
+          E2E_GH_USER: ${{ vars.E2E_GH_USER }}
+        run: |
+          cp -a "$(pwd)" "$HOME/sf-tools"
+          git config --global user.name "$E2E_GH_USER"
+          git config --global user.email "${E2E_GH_USER}@users.noreply.github.com"
+          gh auth setup-git
+          npm install -g @salesforce/cli
+          # 以降の手順で、`bash` が、標準の /bin/bash（3.2）になるように、/bin を PATH の先頭に置く
+          echo "/bin" >> "$GITHUB_PATH"
+          /bin/bash --version | head -1
+          sf --version
+
+      - name: 鍵一式（fixture.env）を作る
+        env:
+          E2E_OWNER: ${{ vars.E2E_OWNER }}
+          E2E_GH_USER: ${{ vars.E2E_GH_USER }}
+          E2E_SLACK_CHANNEL_ID: ${{ vars.E2E_SLACK_CHANNEL_ID }}
+          E2E_PAT_TOKEN: ${{ secrets.E2E_PAT_TOKEN }}
+          E2E_SLACK_BOT_TOKEN: ${{ secrets.E2E_SLACK_BOT_TOKEN }}
+          E2E_SFDX_AUTH_URL: ${{ secrets.E2E_SFDX_AUTH_URL }}
+          E2E_SFDX_AUTH_URL_STG: ${{ secrets.E2E_SFDX_AUTH_URL_STG }}
+          E2E_SFDX_AUTH_URL_DEV: ${{ secrets.E2E_SFDX_AUTH_URL_DEV }}
+        run: /bin/bash "$HOME/sf-tools/tests/e2e/ci-fixture.sh"
+
+      # クライアント側だけ（サーバー側は、Windows の 1 回で確認済み）。終わりに、作ったものを削除する
+      - name: e2e を実行（クライアント側のみ）
+        env:
+          GH_TOKEN: ${{ secrets.E2E_GH_TOKEN }}
+          E2E_ALLOW_ACTIONS: "1"
+        run: |
+          printf 'Y\n' | /bin/bash "$HOME/sf-tools/tests/e2e/run.sh" --no-actions --no-add-tier --cleanup

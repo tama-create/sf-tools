@@ -1164,7 +1164,7 @@ bash tests/e2e/cleanup.sh --yes    # 一覧を見せたうえで、delete と入
 
 **認証 URL について:** 新しい `sf` は、`sf org display --verbose` で認証 URL を隠します。`bootstrap.sh` は、`sf org auth show-sfdx-auth-url` で取得し、形式が正しくない値は保存しません。
 
-**安全のために:** 削除できるのは、`force-e2e-YYYYMMDD-HHMMSS` のようなテスト用の名前のものだけです。`SF_TOOLS`（元からあるアプリ）や、ふだん使っているリポジトリは、削除の対象になりません。オーナーも、鍵一式で指定したものだけです。GitHub Actions 上では動きません。
+**安全のために:** 削除できるのは、`force-e2e-YYYYMMDD-HHMMSS` のようなテスト用の名前のものだけです。`SF_TOOLS`（元からあるアプリ）や、ふだん使っているリポジトリは、削除の対象になりません。オーナーも、鍵一式で指定したものだけです。GitHub Actions 上では、専用のワークフロー（`e2e.yml`）以外からは動きません。
 
 **できないこと:** Token の作成と、テスト用組織への最初のログインは自動化できません（最初の 1 回だけ手動です）。また、`sf-init.sh` の質問の順番を変えたときは、`tests/e2e/lib.sh` の入力の台本（`e2e_make_input`）も直す必要があります（直し忘れは、通常のテストで検知されます）。
 

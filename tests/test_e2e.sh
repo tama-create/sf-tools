@@ -8,7 +8,7 @@
 #
 # 【テストケース】
 #   1. 名前の判定（削除対象かどうか）
-#   2. ガード（GitHub Actions 上・gh ユーザー不一致では動かない）
+#   2. ガード（GitHub Actions 上は、専用ワークフロー e2e.yml だけ通る。gh ユーザー不一致では動かない）
 #   3. 削除関数は、ガードを通らない・対象外の名前なら動かない
 #   4. 鍵一式の読み込み（未設定・権限）
 #   5. cleanup.sh の既定（一覧のみ。何も削除しない）
@@ -35,6 +35,7 @@
 #  29. 中断→再開（run.sh --interrupt）と、git の shim（main への push を 1 回だけ失敗させる）
 #  30. シナリオ propagate-fail（main → staging の伝播のコンフリクト。失敗し、通知され、staging は変わらない）
 #  31. シナリオ restart-org（sf-restart で接続先を staging の組織に切り替え → dry-run → 元に戻す）
+#  32. GitHub Actions で動かす準備（ci-fixture.sh が鍵一式を作る・e2e.yml とガードの整合。ガードは 2 で、Actions 上でも専用ワークフローだけ通る）
 # ==============================================================================
 source "$(dirname "${BASH_SOURCE[0]}")/test_helper.sh"
 echo -e "${CLR_HEAD}=== tests/e2e（安全ガードと部品）===${CLR_RST}"
@@ -377,6 +378,29 @@ test_e2e_guard() {
     GITHUB_ACTIONS=true _e2e_call 'e2e_load_fixture; e2e_guard_env; echo "GUARD=${E2E_GUARD_OK}"'
     assert_file_not_contains "$mb/out.log" "GUARD=1" "GitHub Actions 上では、ガードを通らない"
     assert_file_contains     "$mb/out.log" "GitHub Actions 上では" "その旨が表示される"
+
+    # GitHub Actions 上でも、専用のワークフロー（e2e.yml）の条件が、すべてそろえば通る。1 つでも欠けると通らない
+    local _wf="tama-create/sf-tools/.github/workflows/e2e.yml@refs/heads/development"
+    local _body='e2e_load_fixture; e2e_guard_env; echo "GUARD=${E2E_GUARD_OK}"; echo "GA=${GITHUB_ACTIONS:-unset} CI=${CI:-unset}"'
+    GITHUB_ACTIONS=true CI=true E2E_ALLOW_ACTIONS=1 GITHUB_WORKFLOW_REF="$_wf" GITHUB_EVENT_NAME=push _e2e_call "$_body"
+    assert_file_contains "$mb/out.log" "GUARD=1" "専用のワークフロー（e2e.yml・development・push）なら、Actions 上でも、ガードを通る"
+    assert_file_contains "$mb/out.log" "GA=unset CI=unset" "通ったあとは、GITHUB_ACTIONS・CI を外す（クライアント PC と同じ動きを確かめるため）"
+    GITHUB_ACTIONS=true E2E_ALLOW_ACTIONS=1 GITHUB_WORKFLOW_REF="${_wf/development/main}" GITHUB_EVENT_NAME=workflow_dispatch _e2e_call "$_body"
+    assert_file_contains "$mb/out.log" "GUARD=1" "main の上の手動実行（workflow_dispatch）も通る"
+    GITHUB_ACTIONS=true E2E_ALLOW_ACTIONS=1 GITHUB_WORKFLOW_REF="$_wf" GITHUB_EVENT_NAME=schedule _e2e_call "$_body"
+    assert_file_contains "$mb/out.log" "GUARD=1" "定期実行（schedule）も通る"
+    GITHUB_ACTIONS=true GITHUB_WORKFLOW_REF="$_wf" GITHUB_EVENT_NAME=push _e2e_call "$_body"
+    assert_file_not_contains "$mb/out.log" "GUARD=1" "E2E_ALLOW_ACTIONS=1 の印がないと、通らない"
+    GITHUB_ACTIONS=true E2E_ALLOW_ACTIONS=1 GITHUB_WORKFLOW_REF="tama-create/sf-tools/.github/workflows/test.yml@refs/heads/development" GITHUB_EVENT_NAME=push _e2e_call "$_body"
+    assert_file_not_contains "$mb/out.log" "GUARD=1" "ほかのワークフロー（test.yml）からは、通らない"
+    GITHUB_ACTIONS=true E2E_ALLOW_ACTIONS=1 GITHUB_WORKFLOW_REF="someone/sf-tools/.github/workflows/e2e.yml@refs/heads/development" GITHUB_EVENT_NAME=push _e2e_call "$_body"
+    assert_file_not_contains "$mb/out.log" "GUARD=1" "ほかのリポジトリの e2e.yml（フォークなど）からは、通らない"
+    GITHUB_ACTIONS=true E2E_ALLOW_ACTIONS=1 GITHUB_WORKFLOW_REF="${_wf/development/feature-x}" GITHUB_EVENT_NAME=push _e2e_call "$_body"
+    assert_file_not_contains "$mb/out.log" "GUARD=1" "development・main 以外のブランチの上では、通らない"
+    GITHUB_ACTIONS=true E2E_ALLOW_ACTIONS=1 GITHUB_WORKFLOW_REF="$_wf" GITHUB_EVENT_NAME=pull_request _e2e_call "$_body"
+    assert_file_not_contains "$mb/out.log" "GUARD=1" "pull_request のイベントでは、通らない"
+    GITHUB_ACTIONS=true E2E_ALLOW_ACTIONS=1 GITHUB_WORKFLOW_REF="$_wf" GITHUB_EVENT_NAME=push MOCK_GH_API_USER=someone-else _e2e_call "$_body"
+    assert_file_not_contains "$mb/out.log" "GUARD=1" "Actions 上でも、gh のユーザーが E2E_GH_USER と違うと、通らない（既存のガードは、そのまま）"
 
     MOCK_GH_API_USER=someone-else _e2e_call 'e2e_load_fixture; e2e_guard_env; echo "GUARD=${E2E_GUARD_OK}"'
     assert_file_not_contains "$mb/out.log" "GUARD=1" "gh のユーザーが E2E_GH_USER と違うと、ガードを通らない"
@@ -2610,8 +2634,66 @@ test_e2e_scenario_restart_org() {
     teardown "$CB"
 }
 
+# ------------------------------------------------------------------------------
+# 32. GitHub Actions で動かす準備（ci-fixture.sh と、専用ワークフロー e2e.yml の整合）
+# ------------------------------------------------------------------------------
+test_e2e_ci() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] Actions で動かす準備（ci-fixture.sh・e2e.yml）${CLR_RST}"
+    local mb; mb=$(setup_mock_bin); MB="$mb"; HM="$mb/home"; mkdir -p "$HM"
+    local CF="$E2E_DIR/ci-fixture.sh" rc
+    local _env=(E2E_OWNER=acme-org E2E_GH_USER=bot-user E2E_SLACK_CHANNEL_ID=C0123456789
+                E2E_PAT_TOKEN='ghp_pat$x y' E2E_SLACK_BOT_TOKEN=xoxb-slack
+                E2E_SFDX_AUTH_URL='force://PlatformCLI::tok@example.my.salesforce.com')
+
+    # Actions 上でなければ、動かない（手元の鍵一式を、上書きしない）
+    ( export HOME="$HM"; env "${_env[@]}" bash "$CF" ) > "$mb/out.log" 2>&1; rc=$?
+    assert_exit_fail "$rc" "GitHub Actions 上でなければ、動かない（手元の鍵一式を上書きしない）"
+    [[ ! -e "$HM/.sf-tools-e2e/fixture.env" ]] && pass "手元では、鍵一式を作らない" || fail "手元では、鍵一式を作らない"
+
+    # 必須の値が空なら、値は出さず、変数名だけを表示して終わる
+    ( export HOME="$HM" GITHUB_ACTIONS=true; env "${_env[@]}" E2E_PAT_TOKEN= bash "$CF" ) > "$mb/out.log" 2>&1; rc=$?
+    assert_exit_fail "$rc" "必須の値が空なら、失敗する"
+    assert_file_contains     "$mb/out.log" "E2E_PAT_TOKEN" "未登録の変数名が表示される"
+    assert_file_not_contains "$mb/out.log" "xoxb-slack"    "ほかの値は、表示されない"
+
+    # 作った鍵一式を、e2e の読み込み（e2e_load_fixture）が、そのまま読める（空白・記号を含む値も、そのまま）
+    ( export HOME="$HM" GITHUB_ACTIONS=true; env "${_env[@]}" bash "$CF" ) > "$mb/out.log" 2>&1; rc=$?
+    assert_exit_ok "$rc" "必須の値がそろえば、鍵一式を作る"
+    assert_file_not_contains "$mb/out.log" "xoxb-slack" "作るときに、値を表示しない"
+    ( export HOME="$HM" SF_INIT_MODE=1; unset E2E_FIXTURE
+      bash -c "
+          readonly SCRIPT_NAME=test; readonly LOG_FILE=/dev/null; readonly LOG_MODE=NEW
+          source '$SF_TOOLS_DIR/lib/common.sh'; source '$E2E_DIR/lib.sh'
+          e2e_load_fixture
+          echo \"OWNER=\$E2E_OWNER|PAT=\$E2E_PAT_TOKEN|ROOT=\$E2E_HOME_ROOT|STG=\${E2E_SFDX_AUTH_URL_STG:-none}\"
+      " ) > "$mb/out.log" 2>&1
+    assert_file_contains "$mb/out.log" 'OWNER=acme-org|PAT=ghp_pat$x y|ROOT='"$HM"'/e2e-home|STG=none' "e2e_load_fixture が読める（記号・空白を含む値もそのまま。staging の組織は、なければ空）"
+    if [[ "$OSTYPE" != msys* && "$OSTYPE" != mingw* && "$OSTYPE" != cygwin* ]]; then  # Windows（Git Bash）は、権限が効かない
+        assert_equals "$(stat -c %a "$HM/.sf-tools-e2e/fixture.env" 2>/dev/null || stat -f %Lp "$HM/.sf-tools-e2e/fixture.env")" "600" "鍵一式の権限は、本人のみ（600）"
+    fi
+    ( export HOME="$HM" GITHUB_ACTIONS=true; env "${_env[@]}" E2E_SFDX_AUTH_URL_STG='force://PlatformCLI::stg@example.my.salesforce.com' bash "$CF" ) > /dev/null 2>&1
+    assert_file_contains "$HM/.sf-tools-e2e/fixture.env" "E2E_SFDX_AUTH_URL_STG=" "staging の組織が渡されたら、鍵一式に入れる"
+
+    # 専用ワークフロー e2e.yml が、ガード（lib.sh の e2e_actions_allowed）と食い違っていない
+    local wf="$SF_TOOLS_DIR/.github/workflows/e2e.yml"
+    assert_file_contains     "$wf" "environment: e2e"      "e2e.yml: Secrets を置く Environment（e2e）を使う"
+    assert_file_contains     "$wf" "group: e2e"            "e2e.yml: 同じ組織を使うため、実行どうしを一列にする（concurrency）"
+    assert_file_contains     "$wf" 'cancel-in-progress: false' "e2e.yml: 実行中のものを、止めない"
+    assert_file_contains     "$wf" 'E2E_ALLOW_ACTIONS: "1"' "e2e.yml: ガードを通す印を、渡す"
+    assert_file_contains     "$wf" "needs: windows"        "e2e.yml: macOS は、Windows のあとに動かす（同じ組織を、同時に使わない）"
+    assert_file_contains     "$wf" "--no-actions --no-add-tier" "e2e.yml: macOS は、クライアント側だけ"
+    assert_file_not_contains "$wf" "pull_request"          "e2e.yml: pull_request では動かさない（Secrets を渡さない）"
+    assert_file_not_contains "$wf" "pull_request_target"   "e2e.yml: pull_request_target では動かさない"
+    assert_file_not_contains "$wf" "secrets: inherit"      "e2e.yml: Secrets を、ほかのワークフローに引き渡さない"
+    # ガードが許すファイル名と、実際のファイル名が同じ
+    assert_file_contains "$E2E_DIR/lib.sh" 'workflows/e2e\.yml@refs/heads/' "lib.sh: ガードが見るワークフローは、e2e.yml"
+    [[ -f "$wf" ]] && pass "e2e.yml がある（ガードが許すファイル名と同じ）" || fail "e2e.yml がある"
+    teardown "$mb"
+}
+
 test_e2e_names
 test_e2e_guard
+test_e2e_ci
 test_e2e_delete_guards
 test_e2e_fixture
 test_e2e_cleanup_list

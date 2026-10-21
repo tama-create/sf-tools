@@ -12,25 +12,31 @@ name: e2e（実環境の通し検証）
 # 【いつ動くか】
 #   ・配布物（bin/ lib/ phases/ hooks/ templates/ config/）または e2e 自体（tests/e2e/・このファイル）が変わった development への push。
 #     rr のときには、すでに緑になっている（ドキュメント・単体テストだけの変更では、動かさない）。
+#   ・週 1 回（月曜 03:00 日本時間。schedule。main に対して）。
 #   ・手動（workflow_dispatch。main に取り込まれたあとで、Actions の画面・gh workflow run から。
 #     手動実行のワークフローは、既定のブランチ（main）にあるものだけが、起動できる）。
 #
 # 【必要な設定】（リポジトリの Settings → Environments → e2e。doc/integration-test-plan.md 12.5）
 #   ・Environment `e2e`（Deployment branches は、development と main だけ）
-#   ・Secrets（e2e の Environment に登録）
+#   ・Secrets（e2e の Environment に登録。値は、ログで伏せられる。sf-tools は公開リポジトリのため、すべて Secrets にする）
 #       E2E_GH_TOKEN         テスト用の組織の管理者の Classic PAT（スコープ: repo / workflow / admin:org / delete_repo）。gh が使う
 #       E2E_PAT_TOKEN        テスト用リポジトリの PAT_TOKEN に登録する Classic PAT
 #       E2E_SLACK_BOT_TOKEN  Slack の Bot Token
 #       E2E_SFDX_AUTH_URL / E2E_SFDX_AUTH_URL_STG / E2E_SFDX_AUTH_URL_DEV   main / staging / develop のテスト用組織の認証 URL
-#   ・Variables（e2e の Environment に登録。秘密ではない）
 #       E2E_OWNER            テスト用リポジトリのオーナー（組織名）
 #       E2E_GH_USER          E2E_GH_TOKEN のユーザー名（gh のログインユーザー）
 #       E2E_SLACK_CHANNEL_ID 通知先のチャンネル ID
 #
 # 【注意】 sf-tools は公開リポジトリのため、このワークフローのログは誰でも読める。Secret の値は、GitHub が伏せ、e2e も、画面とログに出す前に
-# 伏せる（_e2e_mask_line）。組織の ID・ユーザー名・メールアドレスなどを、画面に出す処理を足さないこと。
+# 伏せる（_e2e_mask_line）。組織の ID・ユーザー名・My Domain の URL は、Secret に登録した値ではないため、tests/e2e/ci-mask.sh が、
+# e2e の実行の前に調べて、「::add-mask::」で伏せる。組織の ID・ユーザー名・メールアドレスなどを、画面に出す処理を足すときは、これが効くか確認すること。
 on:
   workflow_dispatch:
+  # 週 1 回、main（利用者が実際に受け取るもの）に対して動かす。コードを変えていない間の、外側の変化
+  # （sf の新しい版・Salesforce のリリース・Actions のイメージの更新・認証の期限切れ）の見張り。
+  # 毎週月曜 03:00（日本時間）。schedule は、既定のブランチ（main）のワークフローで動く。失敗したら Slack に通知する（下の notify）
+  schedule:
+    - cron: '0 18 * * 0'
   push:
     branches: [development]
     paths:
@@ -67,7 +73,7 @@ jobs:
       - name: 開発者の環境に近づける（~/sf-tools・git の名前・gh の認証・sf）
         env:
           GH_TOKEN: ${{ secrets.E2E_GH_TOKEN }}
-          E2E_GH_USER: ${{ vars.E2E_GH_USER }}
+          E2E_GH_USER: ${{ secrets.E2E_GH_USER || vars.E2E_GH_USER }}
         run: |
           # クライアント PC と同じく、~/sf-tools に sf-tools を置く（git の履歴つき。e2e が、origin/development との一致を確認する）
           cp -a "$(pwd)" "$HOME/sf-tools"
@@ -85,15 +91,23 @@ jobs:
 
       - name: 鍵一式（fixture.env）を作る
         env:
-          E2E_OWNER: ${{ vars.E2E_OWNER }}
-          E2E_GH_USER: ${{ vars.E2E_GH_USER }}
-          E2E_SLACK_CHANNEL_ID: ${{ vars.E2E_SLACK_CHANNEL_ID }}
+          E2E_OWNER: ${{ secrets.E2E_OWNER || vars.E2E_OWNER }}
+          E2E_GH_USER: ${{ secrets.E2E_GH_USER || vars.E2E_GH_USER }}
+          E2E_SLACK_CHANNEL_ID: ${{ secrets.E2E_SLACK_CHANNEL_ID || vars.E2E_SLACK_CHANNEL_ID }}
           E2E_PAT_TOKEN: ${{ secrets.E2E_PAT_TOKEN }}
           E2E_SLACK_BOT_TOKEN: ${{ secrets.E2E_SLACK_BOT_TOKEN }}
           E2E_SFDX_AUTH_URL: ${{ secrets.E2E_SFDX_AUTH_URL }}
           E2E_SFDX_AUTH_URL_STG: ${{ secrets.E2E_SFDX_AUTH_URL_STG }}
           E2E_SFDX_AUTH_URL_DEV: ${{ secrets.E2E_SFDX_AUTH_URL_DEV }}
         run: bash "$HOME/sf-tools/tests/e2e/ci-fixture.sh"
+
+      # 組織の ID・ユーザー名・My Domain の URL を、公開ログに出さないよう、先に伏せる（以降のログで ***）
+      - name: ログに出さない値を伏せる（組織の ID・ユーザー名・URL）
+        env:
+          E2E_SFDX_AUTH_URL: ${{ secrets.E2E_SFDX_AUTH_URL }}
+          E2E_SFDX_AUTH_URL_STG: ${{ secrets.E2E_SFDX_AUTH_URL_STG }}
+          E2E_SFDX_AUTH_URL_DEV: ${{ secrets.E2E_SFDX_AUTH_URL_DEV }}
+        run: bash "$HOME/sf-tools/tests/e2e/ci-mask.sh"
 
       - name: e2e を実行（全部）
         env:
@@ -131,7 +145,7 @@ jobs:
       - name: 開発者の環境に近づける（~/sf-tools・git の名前・gh の認証・sf・Bash 3.2）
         env:
           GH_TOKEN: ${{ secrets.E2E_GH_TOKEN }}
-          E2E_GH_USER: ${{ vars.E2E_GH_USER }}
+          E2E_GH_USER: ${{ secrets.E2E_GH_USER || vars.E2E_GH_USER }}
         run: |
           cp -a "$(pwd)" "$HOME/sf-tools"
           git config --global user.name "$E2E_GH_USER"
@@ -147,15 +161,22 @@ jobs:
 
       - name: 鍵一式（fixture.env）を作る
         env:
-          E2E_OWNER: ${{ vars.E2E_OWNER }}
-          E2E_GH_USER: ${{ vars.E2E_GH_USER }}
-          E2E_SLACK_CHANNEL_ID: ${{ vars.E2E_SLACK_CHANNEL_ID }}
+          E2E_OWNER: ${{ secrets.E2E_OWNER || vars.E2E_OWNER }}
+          E2E_GH_USER: ${{ secrets.E2E_GH_USER || vars.E2E_GH_USER }}
+          E2E_SLACK_CHANNEL_ID: ${{ secrets.E2E_SLACK_CHANNEL_ID || vars.E2E_SLACK_CHANNEL_ID }}
           E2E_PAT_TOKEN: ${{ secrets.E2E_PAT_TOKEN }}
           E2E_SLACK_BOT_TOKEN: ${{ secrets.E2E_SLACK_BOT_TOKEN }}
           E2E_SFDX_AUTH_URL: ${{ secrets.E2E_SFDX_AUTH_URL }}
           E2E_SFDX_AUTH_URL_STG: ${{ secrets.E2E_SFDX_AUTH_URL_STG }}
           E2E_SFDX_AUTH_URL_DEV: ${{ secrets.E2E_SFDX_AUTH_URL_DEV }}
         run: /bin/bash "$HOME/sf-tools/tests/e2e/ci-fixture.sh"
+
+      - name: ログに出さない値を伏せる（組織の ID・ユーザー名・URL）
+        env:
+          E2E_SFDX_AUTH_URL: ${{ secrets.E2E_SFDX_AUTH_URL }}
+          E2E_SFDX_AUTH_URL_STG: ${{ secrets.E2E_SFDX_AUTH_URL_STG }}
+          E2E_SFDX_AUTH_URL_DEV: ${{ secrets.E2E_SFDX_AUTH_URL_DEV }}
+        run: /bin/bash "$HOME/sf-tools/tests/e2e/ci-mask.sh"
 
       # クライアント側だけ（サーバー側は、Windows の 1 回で確認済み）。終わりに、作ったものを削除する
       - name: e2e を実行（クライアント側のみ）
@@ -164,3 +185,25 @@ jobs:
           E2E_ALLOW_ACTIONS: "1"
         run: |
           printf 'Y\n' | /bin/bash "$HOME/sf-tools/tests/e2e/run.sh" --no-actions --no-add-tier --cleanup
+
+  # どちらかのジョブが失敗したら、Slack に通知する（push・定期・手動のどれでも）。値は、実行の URL・ブランチ・コミットだけ
+  notify:
+    name: 失敗の通知（Slack）
+    needs: [windows, macos]
+    if: ${{ always() && (needs.windows.result == 'failure' || needs.macos.result == 'failure') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: e2e
+    steps:
+      - name: ソースコードを取得
+        uses: actions/checkout@v4
+
+      - name: Slack に通知
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.E2E_SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL_ID: ${{ secrets.E2E_SLACK_CHANNEL_ID || vars.E2E_SLACK_CHANNEL_ID }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
+        run: bash tests/e2e/ci-notify.sh

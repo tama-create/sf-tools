@@ -3008,6 +3008,7 @@ XSEOF
     assert_file_contains "$MB/out.log" "同じ内容である" "cross-os: フックが、sf-tools のものと同じ内容かを確認する"
     assert_file_contains "$MB/out.log" "sf-sync-wf.sh --check が成功した" "cross-os: ワークフローが、雛形と同じかを確認する"
     assert_file_contains "$MOCK_CALL_LOG" "gh repo clone tamashimon-org/$repo" "cross-os: 指定されたリポジトリを clone する"
+    assert_file_contains "$MOCK_CALL_LOG" "core.longpaths=true" "cross-os: Windows のパス長の上限対策（core.longpaths=true）を付けて clone する（通常の運用と同じ）"
     assert_equals "$(_xos_left)" "0" "cross-os: 終了後、clone した一時フォルダは、残らない"
     assert_file_not_contains "$MOCK_CALL_LOG" "repo delete" "cross-os: リポジトリは、削除しない"
     assert_file_not_contains "$MOCK_CALL_LOG" "secret set" "cross-os: GitHub に、書き込まない（Secret）"

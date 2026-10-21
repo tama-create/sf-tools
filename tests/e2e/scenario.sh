@@ -833,8 +833,12 @@ scn_cross_os() {
     RESTORE_XOS_DIR="$tmp"   # clone する前に登録する（途中で止まっても、終了時に削除する）
     clone="${tmp}/${REPO_NAME}"
     _scn_shims_prepare || { SCN_SKIP="一時フォルダの準備に失敗しました"; return; }   # e2e_run_sf_cmd が使う一時フォルダ（E2E_TMP）を用意する
-    _e2e_gh repo clone "$REPO_FULL" "$clone" -- --quiet >/dev/null 2>&1 \
-        || { SCN_SKIP="リポジトリを clone できません（${REPO_FULL}）"; return; }  # 戻り値で判定するため run 不使用
+    # core.longpaths=true: 通常の運用（sf-job.sh・sf-init）と同じ。Windows のパスの長さの上限（260 文字）対策（組織に長い名前のレイアウトなどがあると、チェックアウトで失敗する）。
+    #   失敗したときの原因は、出力のファイルに残し、末尾を表示する（以前は捨てていて、原因が見えなかった）
+    if ! _e2e_gh repo clone "$REPO_FULL" "$clone" -- -c core.longpaths=true --quiet > "${E2E_TMP}/xos-clone.out" 2>&1; then  # 戻り値で判定するため run 不使用
+        e2e_show_file_tail "${E2E_TMP}/xos-clone.out" "xos-clone"
+        SCN_SKIP="リポジトリを clone できません（${REPO_FULL}）"; return
+    fi
     branch="e2e-xos-$(date +%H%M%S)"
     git -C "$clone" checkout -q -b "$branch" >/dev/null 2>&1 \
         || { SCN_SKIP="作業用のブランチを作れません（clone したリポジトリが、空かもしれません）"; return; }  # 手元だけのブランチ（push しない）。環境ブランチの上では、sf-sync-wf が動かないため

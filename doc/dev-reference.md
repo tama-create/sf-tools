@@ -65,7 +65,7 @@
 | `test_wizard.sh` | lib/wizard.sh（ウィザード形式の画面の部品: 現在地・チェックリスト・確認・失敗・完了） |
 | `test_sf-unhook.sh` | sf-unhook.sh |
 | `test_sf-hook.sh` | sf-hook.sh |
-| `test_sf-init.sh` | sf-init.sh |
+| `test_sf-init.sh`・`test_sf-init2.sh`・`test_sf-init3.sh` | sf-init.sh（テスト関数 48 個・524 件を、3 つのファイルに、所要時間で均等に分けた。時間のかかる 1 ファイル（Actions の Windows で 約 10 分）を、並列に動かすため。共通の部品は `tests/init-test-lib.sh`。各ファイルの冒頭に、そのファイルのテスト関数の一覧がある。新しいテスト関数は、いちばん軽いファイルに足す。`--changed` は、`bin/sf-init.sh`・`phases/init/*`・`tests/init-test-lib.sh` の変更で、3 つとも動かす） |
 | `test_sf-upgrade.sh` | sf-upgrade.sh |
 | `test_sf-install.sh` | sf-install.sh |
 | `test_sf-start.sh` | sf-start.sh |

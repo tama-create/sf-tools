@@ -35,6 +35,10 @@
 #   update-secret  : 管理者用のクローンで、sf-update-secret.sh の「1) 秘密鍵」を、同じ秘密鍵（~/.sf-jwt/force-XXXX/server.key）で実行 → Secret SF_PRIVATE_KEY の
 #                    更新日時が進む・ほかの Secret は変わらない・出力に秘密鍵が出ない・誤ったパスは拒否され、更新されない（B2）。値は変わらない（同じ鍵で上書き）。
 #                    このあとの validate-fail などが、上書きした鍵で、JWT ログインできることを、実際のワークフローで確かめる（順番を、その前にしている）
+#   cross-os       : リポジトリを clone し（GitHub から。手元の作業フォルダを使わない）、OS 混在の問題（C2）を確認する: 記録されたテキストファイルに CRLF が
+#                    ない・sf-hook.sh で入れたフック（pre-commit・pre-push）が、sf-tools の hooks/ と同じ内容で、CR がなく、実行できる・作業用ブランチで
+#                    sf-sync-wf.sh --check が成功する（雛形と同じ）。リポジトリを作った OS とは別の OS で動かすと、OS 混在の確認になる
+#                    （e2e.yml の macOS のジョブが、Windows が作ったリポジトリに対して動かす）。GitHub・組織へは書き込まない（一時フォルダの中だけ）
 #   sync-wf        : 管理者用のクローン（admin ブランチ）で、ワークフローを改変 → sf-sync-wf.sh --check が見つける → sf-sync-wf.sh が雛形の内容に直す
 #                    （コミット・push はしない）→ 雛形にあるファイルの --remove は拒否される・雛形にない不要なファイルは --remove で消せる（B4）。
 #                    クローンの中だけ（GitHub・組織へは、書き込まない）。終了時に、クローンの .github/workflows を、元（HEAD）に戻す
@@ -50,6 +54,8 @@
 # 【オプション】
 #   --list        : シナリオの一覧を表示して終わる
 #   -y, --yes     : 開始の確認を省略する
+#   --repo NAME   : 対象のリポジトリを指定する（force-e2e-日時。名前の形式とオーナーの確認は、同じ）。省略すると、run.sh が前回残した最新のもの。
+#                   手元に作業フォルダがない OS（別の OS が作ったリポジトリを使う cross-os）で使う。作業フォルダを使うほかのシナリオは、実行できない
 #   -h, --help    : このヘルプを表示する
 # ==============================================================================
 
@@ -73,7 +79,7 @@ source "${E2E_SCRIPT_DIR}/lib.sh"
 # ------------------------------------------------------------------------------
 # 1. シナリオの一覧
 # ------------------------------------------------------------------------------
-SCENARIO_NAMES="log-secrets manual-delete update-secret sync-wf validate-fail dist-main metasync-diff propagate-fail restart-org"   # 実行の順番どおり
+SCENARIO_NAMES="log-secrets manual-delete update-secret sync-wf cross-os validate-fail dist-main metasync-diff propagate-fail restart-org"   # 実行の順番どおり
 _scn_desc() {
     case "$1" in
         log-secrets)   echo "Actions のログ・PR のコメントに、秘密情報が出ていない（読み取りのみ）" ;;
@@ -83,6 +89,7 @@ _scn_desc() {
         metasync-diff) echo "組織側だけの Apex が、wf-metasync で main に反映される（組織と main に書き込み、必ず戻す）" ;;
         propagate-fail) echo "main → staging の伝播がコンフリクトで失敗し、通知され、staging は変わらない（main・staging にファイルを置き、削除する）" ;;
         update-secret) echo "sf-update-secret で秘密鍵を同じ鍵で上書き → 更新日時が進む・ほかは変わらない・誤ったパスは拒否される（同じ値で上書き。あとのシナリオが、JWT ログインを確かめる）" ;;
+        cross-os)      echo "リポジトリを clone して、OS 混在の問題を確認する: CRLF がない・フックが同じ内容で実行できる・sf-sync-wf --check が成功する（読み取りのみ）" ;;
         sync-wf)       echo "sf-sync-wf が、改変したワークフローを見つけて、雛形に戻す。--remove は、雛形にあるファイルを拒否し、不要なファイルだけ消す（クローンの中だけ）" ;;
         restart-org)   echo "sf-restart で接続先を staging の組織に切り替え、sf-dryrun が新しい組織を使う → 元に戻す（ジョブのクローンの接続設定を、一時的に変える）" ;;
         *) echo "" ;;
@@ -111,10 +118,13 @@ _scn_list() {
 SELECTED=()
 ASSUME_YES=0
 LIST_ONLY=0
+SCN_REPO_ARG=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --list)    LIST_ONLY=1 ;;
         -y|--yes)  ASSUME_YES=1 ;;
+        --repo)    [[ -n "${2:-}" && "${2}" != -* ]] || die "--repo には、リポジトリ名（force-e2e-日時）を指定してください。"
+                   SCN_REPO_ARG="$2"; shift ;;
         -*)        die "不明なオプションです: $1" ;;
         *)         _scn_known "$1" || die "不明なシナリオです: $1（--list で一覧を表示できます）"
                    SELECTED+=("$1") ;;
@@ -140,8 +150,14 @@ e2e_load_fixture
 e2e_guard_env
 
 log "HEADER" "e2e のシナリオを開始します (${SCRIPT_NAME}.sh): ${SELECTED[*]}"
+if [[ -n "$SCN_REPO_ARG" ]]; then
+    # 指定されたリポジトリ（名前の形式が、テスト用のものだけ。オーナーは、鍵一式のものだけ: 下の _e2e_check_repo）
+    e2e_is_target_repo "$SCN_REPO_ARG" || die "--repo に指定できるのは、テスト用のリポジトリ名（force-e2e-YYYYMMDD-HHMMSS）だけです: ${SCN_REPO_ARG}"
+    PROJECT="${SCN_REPO_ARG#force-}"
+else
 PROJECT=$(e2e_find_latest_project) \
     || die "シナリオを実行できるテスト用の作業フォルダがありません（${E2E_HOME_ROOT}/${E2E_OWNER}/e2e-日時）。先に、bash tests/e2e/run.sh --no-add-tier で、テスト用リポジトリを作ってください。"  # VAR=$(cmd) のため run 不使用
+fi
 REPO_NAME="force-${PROJECT}"
 REPO_FULL="${E2E_OWNER}/${REPO_NAME}"
 _e2e_check_repo "$REPO_FULL"
@@ -174,6 +190,7 @@ RESTORE_APEX=0         # 1: 組織に Hello World の Apex を作った（終了
 RESTORE_MAIN_FILES=0   # 1: main の Hello World のファイルを、いじる（終了時に、削除して、実行前に有ったものを、戻す）
 RESTORE_RESTART_CLONE=""   # 接続先を切り替えたジョブのクローン（終了時に、元の組織へ戻す）
 RESTORE_RESTART_ALIAS=""   # 元の接続先のエイリアス
+RESTORE_XOS_DIR=""     # cross-os が clone した一時フォルダ（終了時に、削除する。名前は e2e-xos.XXXXXX の形式だけ）
 RESTORE_SYNCWF_CLONE=""   # ワークフローを改変した管理者用のクローン（終了時に、.github/workflows を HEAD の状態へ戻し、不要なファイルを消す）
 RESTORE_PROP_FILE=0    # 1: main・staging に、propagate-fail のファイルを置いた（終了時に、両方から削除する）
 RESTORE_MAIN_KEEP=""   # 実行前に main に有った Hello World のファイル（スペース区切り。終了時に、元の本文で戻す）
@@ -248,6 +265,15 @@ _scn_restore() {
             log "INFO" "  元に戻しました: ジョブのクローンの接続先を、${RESTORE_RESTART_ALIAS} に戻しました"; RESTORE_RESTART_CLONE=""
         else
             log "ERROR" "  ジョブのクローンの接続先を、元（${RESTORE_RESTART_ALIAS}）に戻せませんでした（${RESTORE_RESTART_CLONE}）。そのフォルダで、bash ~/sf-tools/bin/sf-restart.sh を実行して、${RESTORE_RESTART_ALIAS} を選んでください。"; rc=1
+        fi
+    fi
+    if [[ -n "$RESTORE_XOS_DIR" ]]; then
+        # clone した一時フォルダを削除する（このシナリオが作る名前の形式だけ）
+        if [[ "$(basename "$RESTORE_XOS_DIR")" =~ ^e2e-xos\.[A-Za-z0-9]{6}$ && "$(dirname "$RESTORE_XOS_DIR")" == "${E2E_HOME_ROOT}/${E2E_OWNER}" ]]; then
+            rm -rf "$RESTORE_XOS_DIR"  # run 不使用: 後始末（このシナリオが作る、決まった名前の一時フォルダだけ）
+            log "INFO" "  元に戻しました: clone した一時フォルダを削除しました"; RESTORE_XOS_DIR=""
+        else
+            log "ERROR" "  削除対象外のフォルダ名です: ${RESTORE_XOS_DIR}"; rc=1
         fi
     fi
     if [[ -n "$RESTORE_SYNCWF_CLONE" ]]; then
@@ -785,6 +811,61 @@ Y
     else
         _chk "出力に、秘密鍵の中身（PEM の見出し）が出ていない" 0
     fi
+}
+
+# cross-os: OS 混在の問題（C2）を確認する。リポジトリを、GitHub から、一時フォルダに clone して、読み取りと、手元の確認だけを行う
+#   確認: 記録された（git のインデックスの）テキストファイルに、CRLF がない（Windows で作ったファイルの改行が、別の OS で壊れない）→
+#         sf-hook.sh で入れたフック（pre-commit・pre-push）が、sf-tools の hooks/ と同じ内容で、CR がなく、実行できる →
+#         作業用のブランチ（手元だけ）で、sf-sync-wf.sh --check が成功する（ワークフローが、雛形と同じ）
+#   書き込み: 一時フォルダの中だけ（終了時に削除する）。GitHub・組織へは、書き込まない。作業用のブランチは、push しない
+#   使い方: リポジトリを作った OS とは別の OS で動かすと、OS 混在の確認になる（--repo で、別の OS が作ったリポジトリを指定する）
+#   E2E_SF_HOOK / E2E_SF_SYNC_WF: 実行する sf-hook.sh / sf-sync-wf.sh を差し替える（テスト用）。E2E_SF_HOOKS_DIR: フックの元のフォルダ（既定は ~/sf-tools/hooks）
+scn_cross_os() {
+    local tmp base clone branch h os n eol_bad
+    local hook_cmd="${E2E_SF_HOOK:-${SF_TOOLS_ROOT}/bin/sf-hook.sh}" syncwf="${E2E_SF_SYNC_WF:-${SF_TOOLS_ROOT}/bin/sf-sync-wf.sh}"
+    local hooks_src="${E2E_SF_HOOKS_DIR:-${HOME}/sf-tools/hooks}"
+    os=$(uname -s)  # VAR=$(cmd) のため run 不使用
+    log "INFO" "  この確認を動かす OS: ${os}（リポジトリを作った OS とは別の OS で動かすと、OS 混在の確認になります）"
+    # e2e_run_sf_cmd は、{E2E_HOME_ROOT}/{オーナー}/e2e-* の下でしか動かないため、その下に作る（名前は e2e-xos.XXXXXX。最新の作業フォルダの検索には、ひっかからない）
+    base="${E2E_HOME_ROOT}/${E2E_OWNER}"
+    mkdir -p "$base" || { SCN_SKIP="作業フォルダの置き場を作成できません"; return; }  # run 不使用: テスト用の置き場（固定の場所）
+    tmp=$(mktemp -d "${base}/e2e-xos.XXXXXX") || { SCN_SKIP="一時フォルダを作成できません"; return; }  # VAR=$(cmd) のため run 不使用
+    RESTORE_XOS_DIR="$tmp"   # clone する前に登録する（途中で止まっても、終了時に削除する）
+    clone="${tmp}/${REPO_NAME}"
+    _scn_shims_prepare || { SCN_SKIP="一時フォルダの準備に失敗しました"; return; }   # e2e_run_sf_cmd が使う一時フォルダ（E2E_TMP）を用意する
+    _e2e_gh repo clone "$REPO_FULL" "$clone" -- --quiet >/dev/null 2>&1 \
+        || { SCN_SKIP="リポジトリを clone できません（${REPO_FULL}）"; return; }  # 戻り値で判定するため run 不使用
+    branch="e2e-xos-$(date +%H%M%S)"
+    git -C "$clone" checkout -q -b "$branch" >/dev/null 2>&1 \
+        || { SCN_SKIP="作業用のブランチを作れません（clone したリポジトリが、空かもしれません）"; return; }  # 手元だけのブランチ（push しない）。環境ブランチの上では、sf-sync-wf が動かないため
+
+    # --- 1. 記録されたテキストファイルに、CRLF がない（インデックスの改行。作業ツリーは、OS・設定で変わるため、見ない）---
+    n=$(git -C "$clone" ls-files --eol 2>/dev/null | awk -F'\t' '{ split($1, a, " "); if (a[1] == "i/lf") c++ } END { print c + 0 }')  # VAR=$(cmd) のため run 不使用
+    eol_bad=$(git -C "$clone" ls-files --eol 2>/dev/null | awk -F'\t' '{ split($1, a, " "); if (a[1] ~ /^i\/(crlf|mixed)$/) print $2 }')  # VAR=$(cmd) のため run 不使用
+    _chk "記録されたテキストファイル（${n} 件）に、CRLF（または、混在）がない" "$([[ -z "$eol_bad" ]] && echo 0 || echo 1)" "CRLF のファイル: $(printf '%s\n' "$eol_bad" | head -5 | tr '\n' ' ')"
+    _chk "確認できるテキストファイルがある（0 件ではない）" "$([[ "$n" -gt 0 ]] && echo 0 || echo 1)"
+
+    # --- 2. フック: sf-hook.sh で入れる → 同じ内容・CR がない・実行できる ---
+    e2e_run_sf_cmd "xos-hook" "$clone" "" "$hook_cmd"; _chk "sf-hook.sh で、フックを入れた" $?
+    for h in pre-commit pre-push; do
+        cmp -s "${hooks_src}/${h}" "${clone}/.git/hooks/${h}"; _chk "フック ${h} が、sf-tools の hooks/${h} と同じ内容である" $?
+        if grep -q $'\r' "${clone}/.git/hooks/${h}" 2>/dev/null; then
+            _chk "フック ${h} に、CR がない" 1
+        else
+            _chk "フック ${h} に、CR がない" 0
+        fi
+        if e2e_is_windows; then
+            :   # Windows（Git Bash）は、ファイルの実行権限を、同じようには判定できないため、確認しない
+        else
+            [[ -x "${clone}/.git/hooks/${h}" ]]; _chk "フック ${h} が、実行できる" $?
+        fi
+    done
+
+    # --- 3. ワークフローが、雛形と同じ（作業用のブランチの上で）---
+    e2e_run_sf_cmd "xos-sync" "$clone" "" "$syncwf" --check; _chk "sf-sync-wf.sh --check が成功した（ワークフローが、雛形と同じ）" $?
+
+    rm -rf "$tmp"  # run 不使用: 一時フォルダの後始末（この関数が作る、決まった名前のフォルダだけ）
+    RESTORE_XOS_DIR=""
 }
 
 # ------------------------------------------------------------------------------

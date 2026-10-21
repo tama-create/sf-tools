@@ -37,6 +37,7 @@
 #  31. シナリオ restart-org（sf-restart で接続先を staging の組織に切り替え → dry-run → 元に戻す）
 #  33. シナリオ sync-wf（改変したワークフローを sf-sync-wf が見つけて直す・--remove は雛形にあるファイルを拒否・クローンの中だけ）
 #  34. シナリオ update-secret（sf-update-secret で秘密鍵を同じ鍵で上書き・更新日時が進む・誤ったパスは拒否される）
+#  35. シナリオ cross-os（別の OS が作ったリポジトリの確認: CRLF がない・フックが同じ内容で実行できる・sf-sync-wf --check が成功する。読み取りのみ）
 #  32. GitHub Actions で動かす準備（ci-fixture.sh が鍵一式を作る・e2e.yml とガードの整合。ガードは 2 で、Actions 上でも専用ワークフローだけ通る）
 # ==============================================================================
 source "$(dirname "${BASH_SOURCE[0]}")/test_helper.sh"
@@ -184,6 +185,8 @@ case "$1 $2" in
         fi
         for n in ${MOCK_GH_REPOS:-}; do echo "$n"; done ;;
     "repo view")   exit "${MOCK_GH_REPO_VIEW_EXIT:-0}" ;;
+    # clone（cross-os）: MOCK_GH_CLONE_SRC のリポジトリを、指定の場所（3 つ目の引数）に clone する。未設定なら、何もしない（clone できない再現）
+    "repo clone")  [[ -n "${MOCK_GH_CLONE_SRC:-}" ]] && git clone -q "$MOCK_GH_CLONE_SRC" "$4"; exit 0 ;;
     "repo delete") exit 0 ;;
     *)             exit 0 ;;
 esac
@@ -2771,8 +2774,13 @@ CEOF
     done
     assert_file_not_contains "$wf" 'vars.' "e2e.yml: Variables を使わない（公開ログに値が出るため、すべて Secrets）"
     assert_file_contains "$wf" "cron: '0 18 * * 0'"        "e2e.yml: 週 1 回（月曜 03:00 日本時間）、定期実行する"
-    assert_file_contains "$wf" "scenario.sh\" -y log-secrets manual-delete update-secret sync-wf validate-fail metasync-diff propagate-fail restart-org" "e2e.yml: Windows の最後に、実環境のシナリオを動かす（dist-main は、rr の直後だけなので、除く）"
+    assert_file_contains "$wf" "scenario.sh\" -y log-secrets manual-delete update-secret sync-wf cross-os validate-fail metasync-diff propagate-fail restart-org" "e2e.yml: Windows の最後に、実環境のシナリオを動かす（dist-main は、rr の直後だけなので、除く）"
     assert_file_not_contains "$wf" "scenario.sh\" -y .*dist-main" "e2e.yml: dist-main は、動かさない（origin/main と origin/development に差がないときだけ動くため）"
+    # OS 混在の確認（C2）: Windows が作ったリポジトリの名前を渡し、macOS が、自分の run.sh（開始時に、残りを全部削除する）より前に、確認する
+    assert_file_contains "$wf" 'repo: ${{ steps.repo.outputs.name }}' "e2e.yml: Windows のジョブが、テスト用リポジトリの名前を、macOS のジョブへ渡す"
+    assert_file_contains "$wf" 'REPO: ${{ needs.windows.outputs.repo }}' "e2e.yml: macOS のジョブが、渡された名前を使う"
+    assert_file_contains "$wf" 'scenario.sh" -y --repo "$REPO" cross-os' "e2e.yml: macOS が、Windows の作ったリポジトリに対して、OS 混在の確認（cross-os）を行う"
+    assert_equals "$(grep -n 'scenario.sh" -y --repo "$REPO" cross-os' "$wf" | cut -d: -f1 | head -1 | awk '{ print ($1 > 0 && $1 < '"$(grep -n -- '--no-actions --no-add-tier --cleanup' "$wf" | cut -d: -f1 | head -1)"') ? "before" : "after" }')" "before" "e2e.yml: cross-os は、macOS の run.sh（残ったリポジトリを、すべて削除する）より前に動かす"
     assert_file_contains "$wf" "needs: [windows, macos]"   "e2e.yml: 通知は、Windows・macOS の両方の結果を見る"
     assert_file_contains "$wf" "ci-notify.sh"              "e2e.yml: 失敗したとき、Slack に通知する"
     assert_equals "$(grep -c 'ci-mask.sh"$' "$wf" | tr -d ' ')" "2"  "e2e.yml: 組織の ID・ユーザー名・URL を伏せる手順を、Windows・macOS の両方に置く"
@@ -2945,6 +2953,130 @@ USEOF
     teardown "$CB"
 }
 
+# ------------------------------------------------------------------------------
+# 35. シナリオ cross-os（別の OS が作ったリポジトリを clone して、改行・フック・ワークフローを確認する。読み取りのみ・--repo で指定）
+# ------------------------------------------------------------------------------
+test_e2e_scenario_cross_os() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] scenario.sh cross-os（C2。別の OS が作ったリポジトリを、clone して確認する）${CLR_RST}"
+    _mk_cleanup_env
+    # git の改行の自動変換を切る（CRLF のファイルを、そのまま記録する。Windows の標準の設定でも、同じ結果にする）
+    export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.autocrlf GIT_CONFIG_VALUE_0=false
+    local rc repo="force-e2e-20260101-000000" src="$MB/xos-src" hsrc="$MB/xos-hooks" tpl="$MB/xos-tpl"
+    local base="$CB/root/home/tamashimon-org"
+    mkdir -p "$hsrc" "$tpl" "$src"
+    printf '#!/bin/bash\necho pre-commit\n' > "$hsrc/pre-commit"; printf '#!/bin/bash\necho pre-push\n' > "$hsrc/pre-push"
+    printf 'name: wf-validate\non: pull_request\n' > "$tpl/wf-validate.yml"
+    # 代役の sf-hook.sh（XOS_HOOK_MODE: ok = 同じ内容・実行できる / crlf = 行末が CRLF / diff = 内容が違う / none = 入れない / noexec = 実行権限なし）
+    cat > "$MB/xos-hook.sh" <<'XHEOF'
+#!/bin/bash
+src="${XOS_HOOKS_SRC:?}"; mkdir -p .git/hooks
+case "${XOS_HOOK_MODE:-ok}" in
+    none) exit 0 ;;
+    crlf) for h in pre-commit pre-push; do printf '#!/bin/bash\r\necho %s\r\n' "$h" > ".git/hooks/$h"; chmod +x ".git/hooks/$h"; done ;;
+    diff) for h in pre-commit pre-push; do printf '#!/bin/bash\necho other\n' > ".git/hooks/$h"; chmod +x ".git/hooks/$h"; done ;;
+    noexec) cp "$src/pre-commit" "$src/pre-push" .git/hooks/; chmod -x .git/hooks/pre-commit .git/hooks/pre-push ;;
+    *) cp "$src/pre-commit" "$src/pre-push" .git/hooks/; chmod +x .git/hooks/pre-commit .git/hooks/pre-push ;;
+esac
+exit 0
+XHEOF
+    # 代役の sf-sync-wf.sh（--check: 雛形と同じなら 0、違えば 1）
+    cat > "$MB/xos-sync.sh" <<'XSEOF'
+#!/bin/bash
+[[ "${1:-}" == "--check" ]] || exit 2
+cmp -s "${SYNCWF_TPL:?}/wf-validate.yml" .github/workflows/wf-validate.yml || { echo "差分: wf-validate.yml"; exit 1; }
+XSEOF
+    chmod +x "$MB/xos-hook.sh" "$MB/xos-sync.sh"
+    export E2E_SF_HOOK="$MB/xos-hook.sh" E2E_SF_SYNC_WF="$MB/xos-sync.sh" E2E_SF_HOOKS_DIR="$hsrc" XOS_HOOKS_SRC="$hsrc" SYNCWF_TPL="$tpl" \
+           MOCK_GH_CLONE_SRC="$src" E2E_CMD_POLL_SEC=1 E2E_HEARTBEAT_SEC=100
+    _reset_xos() {   # 本物の git で、clone 元のリポジトリ（main・LF のファイル）を作る。macOS のように、手元の作業フォルダは、ない
+        rm -rf "$src"; mkdir -p "$src/.github/workflows" "$src/config"
+        cp "$tpl/wf-validate.yml" "$src/.github/workflows/wf-validate.yml"
+        printf 'main\nstaging\n' > "$src/config/branches.txt"
+        ( cd "$src" && git init -q -b main . && git -c user.name=t -c user.email=t@example.com add -A && git -c user.name=t -c user.email=t@example.com commit -q -m init )
+        rm -rf "$base"/e2e-20260101-000000 "$base"/e2e-xos.*
+        : > "$MOCK_CALL_LOG"
+    }
+    _xos_left() { ls -d "$base"/e2e-xos.* 2>/dev/null | wc -l | tr -d ' '; }
+
+    # --- 成功: --repo で指定（手元の作業フォルダがなくても動く）。一時フォルダは、残らない。GitHub には、書き込まない ---
+    _reset_xos
+    _run_scenario -y --repo "$repo" cross-os; rc=$?
+    [[ $rc -eq 0 ]] || sed 's/\x1b\[[0-9;]*m//g' "$MB/out.log" | tail -25
+    assert_exit_ok "$rc" "cross-os: 成功する（--repo で指定。手元の作業フォルダはない）"
+    assert_file_contains "$MB/out.log" "成功（" "cross-os: 結果が成功と表示される"
+    assert_file_contains "$MB/out.log" "CRLF（または、混在）がない" "cross-os: 改行（CRLF がない）を確認する"
+    assert_file_contains "$MB/out.log" "同じ内容である" "cross-os: フックが、sf-tools のものと同じ内容かを確認する"
+    assert_file_contains "$MB/out.log" "sf-sync-wf.sh --check が成功した" "cross-os: ワークフローが、雛形と同じかを確認する"
+    assert_file_contains "$MOCK_CALL_LOG" "gh repo clone tamashimon-org/$repo" "cross-os: 指定されたリポジトリを clone する"
+    assert_equals "$(_xos_left)" "0" "cross-os: 終了後、clone した一時フォルダは、残らない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "repo delete" "cross-os: リポジトリは、削除しない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "secret set" "cross-os: GitHub に、書き込まない（Secret）"
+    assert_file_not_contains "$MOCK_CALL_LOG" "git push" "cross-os: push しない"
+
+    # --- 記録されたテキストファイルに CRLF がある（Windows が作ったファイルの改行が、そのまま入った）→ 失敗する ---
+    _reset_xos
+    printf 'a: 1\r\nb: 2\r\n' > "$src/crlf.yml"; ( cd "$src" && git -c user.name=t -c user.email=t@example.com add -A && git -c user.name=t -c user.email=t@example.com commit -q -m crlf )
+    _run_scenario -y --repo "$repo" cross-os; rc=$?
+    assert_exit_fail "$rc" "cross-os: 記録されたファイルに CRLF があれば、失敗する"
+    assert_file_contains "$MB/out.log" "crlf.yml" "cross-os: CRLF のファイル名を表示する"
+    assert_equals "$(_xos_left)" "0" "cross-os: 失敗しても、一時フォルダは、残らない"
+
+    # --- フック: CR が入っている / 内容が違う / 入らない / 実行できない → 失敗する ---
+    _reset_xos
+    XOS_HOOK_MODE=crlf _run_scenario -y --repo "$repo" cross-os; rc=$?
+    assert_exit_fail "$rc" "cross-os: フックに CR があれば、失敗する"
+    _reset_xos
+    XOS_HOOK_MODE=diff _run_scenario -y --repo "$repo" cross-os; rc=$?
+    assert_exit_fail "$rc" "cross-os: フックの内容が、sf-tools のものと違えば、失敗する"
+    _reset_xos
+    XOS_HOOK_MODE=none _run_scenario -y --repo "$repo" cross-os; rc=$?
+    assert_exit_fail "$rc" "cross-os: フックが入らなければ、失敗する"
+    if [[ "$OSTYPE" != msys* && "$OSTYPE" != cygwin* ]]; then   # Windows（Git Bash）は、実行権限を同じようには判定できないため、確認しない
+        _reset_xos
+        XOS_HOOK_MODE=noexec _run_scenario -y --repo "$repo" cross-os; rc=$?
+        assert_exit_fail "$rc" "cross-os: フックが実行できなければ、失敗する"
+    fi
+
+    # --- ワークフローが、雛形と違う → 失敗する ---
+    _reset_xos
+    printf 'name: drift\n' > "$src/.github/workflows/wf-validate.yml"; ( cd "$src" && git -c user.name=t -c user.email=t@example.com add -A && git -c user.name=t -c user.email=t@example.com commit -q -m drift )
+    _run_scenario -y --repo "$repo" cross-os; rc=$?
+    assert_exit_fail "$rc" "cross-os: ワークフローが雛形と違えば、失敗する"
+
+    # --- clone できない → 実行できない（失敗にはするが、何も残さない）---
+    _reset_xos
+    MOCK_GH_CLONE_SRC="" _run_scenario -y --repo "$repo" cross-os; rc=$?
+    assert_exit_fail "$rc" "cross-os: clone できなければ、実行できない"
+    assert_file_contains "$MB/out.log" "実行できない" "cross-os: 「実行できない」と報告する"
+    assert_equals "$(_xos_left)" "0" "cross-os: clone できなくても、一時フォルダは、残らない"
+
+    # --- --repo のガード: 名前の形式・値の欠落・指定なし（作業フォルダもない）---
+    _reset_xos
+    _run_scenario -y --repo force-test-win cross-os; rc=$?
+    assert_exit_fail "$rc" "--repo: テスト用の名前の形式でなければ、拒否する"
+    assert_file_contains "$MB/out.log" "テスト用のリポジトリ名" "--repo: 拒否の理由（名前の形式）を表示する"
+    assert_file_not_contains "$MOCK_CALL_LOG" "repo clone" "--repo: 拒否したら、clone しない"
+    _run_scenario -y cross-os --repo; rc=$?
+    assert_exit_fail "$rc" "--repo: 値がなければ、拒否する"
+    _run_scenario -y --repo cross-os; rc=$?
+    assert_file_contains "$MB/out.log" "シナリオ名を指定してください" "--repo: 次の語は、値として扱う（シナリオ名がなくなるため、何も実行しない）"
+    assert_file_not_contains "$MOCK_CALL_LOG" "repo clone" "--repo: 何も実行しないときは、clone しない"
+    _run_scenario -y cross-os; rc=$?
+    assert_exit_fail "$rc" "--repo なし: 手元の作業フォルダがなければ、実行できない（macOS の CI では、--repo を指定する）"
+    MOCK_GH_REPO_VIEW_EXIT=1 _run_scenario -y --repo "$repo" cross-os; rc=$?
+    assert_exit_fail "$rc" "--repo: GitHub にないリポジトリは、実行できない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "repo clone" "--repo: GitHub にないときは、clone しない"
+
+    # --- 開始の警告（読み取りのみ）---
+    _reset_xos
+    _run_scenario --repo "$repo" cross-os < <(printf 'N\n'); rc=$?
+    assert_exit_fail "$rc" "cross-os: 開始の確認で N → 中止する"
+    assert_file_contains "$MB/out.log" "読み取りのみ" "cross-os: 警告に、読み取りのみと表示される"
+    assert_file_not_contains "$MOCK_CALL_LOG" "repo clone" "cross-os: N のとき、clone しない"
+    unset E2E_SF_HOOK E2E_SF_SYNC_WF E2E_SF_HOOKS_DIR XOS_HOOKS_SRC SYNCWF_TPL MOCK_GH_CLONE_SRC E2E_CMD_POLL_SEC E2E_HEARTBEAT_SEC GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
+    teardown "$CB"
+}
+
 test_e2e_names
 test_e2e_guard
 test_e2e_ci
@@ -2985,5 +3117,6 @@ test_e2e_scenario_propagate_fail
 test_e2e_scenario_restart_org
 test_e2e_scenario_sync_wf
 test_e2e_scenario_update_secret
+test_e2e_scenario_cross_os
 
 print_summary

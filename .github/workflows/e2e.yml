@@ -7,7 +7,8 @@ name: e2e（実環境の通し検証）
 #   ・Windows（Git Bash）で、全部（sf-init・wf-metasync・Hello World のリリースと削除・--add-tier）を確認する。
 #     サーバー側（Actions のワークフロー）は、クライアントの OS に関係なく、いつも GitHub の Linux 上で動くため、この 1 回で足りる。
 #     Windows の最後に、残ったテスト用リポジトリに対して、実環境のシナリオ（tests/e2e/scenario.sh。dist-main を除く）も動かす。
-#   ・続けて、macOS（標準の Bash 3.2）で、クライアント側だけ（--no-actions --no-add-tier）を確認する。
+#   ・続けて、macOS（標準の Bash 3.2）で、まず、Windows が作ったテスト用リポジトリを clone して、OS 混在の確認（シナリオ cross-os: 改行・フック・
+#     ワークフローの一致。読み取りのみ）を行い、そのあと、クライアント側だけ（--no-actions --no-add-tier）を確認する。
 #   ・同じテスト用の組織を使うため、2 つのジョブは一列に動かす（Windows → macOS。ワークフローの実行どうしも、concurrency で一列）。
 #
 # 【いつ動くか】
@@ -64,6 +65,9 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 120
     environment: e2e
+    # macOS のジョブへ渡す: Windows が作って、残したテスト用リポジトリの名前（force-e2e-日時。秘密ではない）
+    outputs:
+      repo: ${{ steps.repo.outputs.name }}
     defaults:
       run:
         shell: bash
@@ -126,7 +130,18 @@ jobs:
           GH_TOKEN: ${{ secrets.E2E_GH_TOKEN }}
           E2E_ALLOW_ACTIONS: "1"
         run: |
-          bash "$HOME/sf-tools/tests/e2e/scenario.sh" -y log-secrets manual-delete update-secret sync-wf validate-fail metasync-diff propagate-fail restart-org
+          bash "$HOME/sf-tools/tests/e2e/scenario.sh" -y log-secrets manual-delete update-secret sync-wf cross-os validate-fail metasync-diff propagate-fail restart-org
+
+      # 残ったテスト用リポジトリの名前（名前の形式が合う中で、最新の 1 つ）を、macOS のジョブへ渡す。名前の形式の確認は、macOS 側の scenario.sh もする
+      - name: テスト用リポジトリの名前を、macOS のジョブへ渡す
+        id: repo
+        env:
+          GH_TOKEN: ${{ secrets.E2E_GH_TOKEN }}
+          E2E_OWNER: ${{ secrets.E2E_OWNER }}
+        run: |
+          name=$(gh repo list "$E2E_OWNER" --limit 200 --json name --jq '[.[].name | select(test("^force-e2e-[0-9]{8}-[0-9]{6}$"))] | sort | last // ""')
+          echo "渡すリポジトリ: ${name:-（なし）}"
+          echo "name=${name}" >> "$GITHUB_OUTPUT"
 
       # 失敗したときだけ、sf のログから、通信の失敗の原因の部分を抜き出す。
       # ログは公開されるため、組織の ID・URL・トークン・メールアドレスは伏せ、1 行 240 文字までにする
@@ -187,6 +202,18 @@ jobs:
           E2E_SFDX_AUTH_URL_STG: ${{ secrets.E2E_SFDX_AUTH_URL_STG }}
           E2E_SFDX_AUTH_URL_DEV: ${{ secrets.E2E_SFDX_AUTH_URL_DEV }}
         run: /bin/bash "$HOME/sf-tools/tests/e2e/ci-mask.sh"
+
+      # OS 混在の確認（C2）: Windows が作ったテスト用リポジトリを、macOS で clone し、改行（CRLF がない）・フック（同じ内容・実行できる）・
+      # ワークフロー（sf-sync-wf --check）を確認する。読み取りのみ（一時フォルダの中だけ）。
+      # 次の run.sh は、開始時に、残っているテスト用リポジトリをすべて削除するため、必ず、その前に動かす
+      - name: OS 混在の確認（Windows が作ったリポジトリを、macOS で確認）
+        env:
+          GH_TOKEN: ${{ secrets.E2E_GH_TOKEN }}
+          E2E_ALLOW_ACTIONS: "1"
+          REPO: ${{ needs.windows.outputs.repo }}
+        run: |
+          [ -n "$REPO" ] || { echo "Windows のジョブが、テスト用リポジトリの名前を渡しませんでした" >&2; exit 1; }
+          /bin/bash "$HOME/sf-tools/tests/e2e/scenario.sh" -y --repo "$REPO" cross-os
 
       # クライアント側だけ（サーバー側は、Windows の 1 回で確認済み）。終わりに、作ったものを削除する
       - name: e2e を実行（クライアント側のみ）

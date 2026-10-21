@@ -7,6 +7,11 @@
 #   引数あり → 指定したテストのみ実行（例: bash run_tests.sh test_sf-hook.sh）
 #   --jobs N / --serial : 同時に動かすテストファイルの数（既定: CPU の数。環境変数 SF_TEST_JOBS でも指定できる。
 #                         --serial は 1 = 1 つずつ）。時間のかかるファイルから先に起動する（全体の時間を短くするため）
+#   --shard I/N         : テストファイルを N 組に分け、I 番目（1 始まり）の組だけを実行する（GitHub Actions で、複数のジョブに分けて、並列に動かすため。
+#                         Windows の全件が約 21 分かかるのを、短くする）。分け方は、ファイルごとの目安の時間（_weight）で、重いものから、いちばん軽い組へ、
+#                         順に割り当てる（どの環境でも、同じ分け方になる）。N 組を全部動かすと、全ファイルが、ちょうど 1 回ずつ動く
+#   環境変数 SF_TEST_LIST_ONLY=1 : 実行せずに、対象のテストファイル名を表示して終わる（--shard の分け方の確認用）
+#   環境変数 SF_TEST_TIMES=1 : 各ファイルの所要時間（[TIME] 行）を、最後に、長い順に表示する（_weight の目安を、実測で直すため）
 # ==============================================================================
 
 # Windows Git Bash の場合は WSL で自動リダイレクト（高速化）
@@ -44,6 +49,7 @@ LOG_FILE="$LOG_DIR/run_tests.log"
 TOTAL_PASSED=0
 TOTAL_FAILED=0
 FAIL_LINES=""  # 失敗したテスト行を蓄積
+TIME_LINES=""  # ファイルごとの所要時間（[TIME] 行）を蓄積（SF_TEST_TIMES=1 のとき、最後に表示する）
 
 CLR_PASS='\033[32m'
 CLR_FAIL='\033[31m'
@@ -105,7 +111,8 @@ EOF
     fi
     printf '%s' "$d"
 }
-if [[ -z "${SF_TEST_GUARD_BIN:-}" || ! -d "${SF_TEST_GUARD_BIN:-}" ]]; then
+# SF_TEST_LIST_ONLY=1（一覧を表示するだけ。テストは動かさない）のときは、保護用のフォルダは不要（動作の遅い環境で、作成に数秒かかるため）
+if [[ "${SF_TEST_LIST_ONLY:-}" != "1" ]] && [[ -z "${SF_TEST_GUARD_BIN:-}" || ! -d "${SF_TEST_GUARD_BIN:-}" ]]; then
     SF_TEST_GUARD_BIN=$(_make_guard_bin) || SF_TEST_GUARD_BIN=""
     if [[ -n "$SF_TEST_GUARD_BIN" ]]; then
         export SF_TEST_GUARD_BIN
@@ -128,8 +135,50 @@ if ! [[ "$JOBS" =~ ^[1-9][0-9]*$ ]]; then
     exit 2
 fi
 
+# --shard I/N（先頭の --jobs などと同じ並びで、読み取る）
+SHARD=""
+while [[ "${1:-}" == "--shard" || "${1:-}" == --shard=* ]]; do
+    case "$1" in
+        --shard)   SHARD="${2:-}"; shift 2 || shift ;;
+        --shard=*) SHARD="${1#--shard=}"; shift ;;
+    esac
+done
+if [[ -n "$SHARD" ]]; then
+    if ! [[ "$SHARD" =~ ^[1-9][0-9]*/[1-9][0-9]*$ ]] || (( ${SHARD%/*} > ${SHARD#*/} )); then
+        echo "--shard には、I/N（1 <= I <= N）の形で指定してください: ${SHARD}" >&2
+        exit 2
+    fi
+fi
+
 # 時間のかかるファイル（先に起動する。最後に長いものが残って、全体が伸びるのを避ける）
 HEAVY_FIRST=(test_integration-init.sh test_integration-init2.sh test_integration-init3.sh test_integration.sh test_integration-git.sh test_sf-init.sh test_e2e.sh test_verify.sh test_sf-release.sh test_sf-install.sh)
+
+# ファイルごとの所要時間の目安（秒。--shard が、組に分けるときの重み。未登録は 10）。
+#   値は、GitHub Actions の Windows での実測（2026-10-20・コミット 5eb8c6f の SF_TEST_TIMES=1 の [TIME] 行。ジョブの中で並列に動かした値）
+#   厳密である必要はない（目安が少しずれても、全ファイルが、ちょうど 1 回ずつ動く）。大きくずれたら、実測で直す
+_weight() {   # 結果は、変数 _W に入れる（$(...) で呼ぶと、Windows の Git Bash では、ファイルごとにプロセスを起動して遅い）
+    case "$1" in
+        test_sf-init.sh) _W=960 ;;
+        test_verify.sh) _W=640 ;;
+        test_e2e.sh) _W=510 ;;
+        test_integration-init.sh) _W=370 ;;
+        test_integration-init2.sh) _W=330 ;;
+        test_integration-init3.sh) _W=270 ;;
+        test_integration-misc.sh) _W=230 ;;
+        test_integration.sh) _W=220 ;;
+        test_sf-install.sh) _W=185 ;;
+        test_integration-git.sh) _W=140 ;;
+        test_integration-job.sh) _W=125 ;;
+        test_common.sh|test_integration-metasync.sh|test_sf-release.sh) _W=120 ;;
+        test_integration-next.sh|test_integration-guards.sh) _W=85 ;;
+        test_project-identity.sh|test_sf-metasync.sh|test_integration-coverage.sh) _W=75 ;;
+        test_integration-rerun.sh|test_init-common.sh|test_sf-deploy.sh) _W=62 ;;
+        test_sf-job.sh|test_sf-sync-wf.sh|test_sf-next.sh|test_sf-prepush.sh|test_sf-start.sh|test_wf-sequence.sh) _W=50 ;;
+        test_integration-secrets.sh|test_sf-hook.sh) _W=40 ;;
+        test_sf-typecheck.sh|test_sf-push.sh|test_sf-upgrade.sh|test_org.sh|test_diag.sh|test_run-tests.sh) _W=28 ;;
+        *) _W=10 ;;
+    esac
+}
 
 # 実行するテストファイルを順番に定義
 TEST_FILES=(
@@ -177,6 +226,7 @@ TEST_FILES=(
     test_integration-next.sh
     test_integration-init3.sh
     test_integration-rerun.sh
+    test_run-tests.sh
 )
 
 # ------------------------------------------------------------------------------
@@ -273,6 +323,9 @@ if [[ "${1:-}" == "--changed" ]]; then
             tests/e2e/*)
                 _changed_tests+=("test_e2e.sh")
                 ;;
+            tests/run_tests.sh|tests/test_run-tests.sh)
+                _changed_tests+=("test_run-tests.sh")
+                ;;
             tests/test_helper.sh)
                 # 共通ヘルパー変更は全テストに影響するため全件実行
                 _run_all=1
@@ -306,6 +359,29 @@ if [[ "${SF_TEST_SKIP_INTEGRATION:-}" == "1" && $# -eq 0 ]]; then
         [[ "$_tf" == test_integration*.sh && "$_tf" != "test_integration-coverage.sh" ]] || _kept+=("$_tf")
     done
     TEST_FILES=("${_kept[@]}")
+fi
+
+# --shard I/N: N 組に分けて、I 番目の組だけを実行する。重い順に並べ、いちばん軽い組へ、順に割り当てる（貪欲法。同じ重さなら、番号の小さい組）。
+#   並べ方は、重み（大きい順）→ ファイル名（辞書順）。どの環境でも、同じ分け方になる
+if [[ -n "$SHARD" ]]; then
+    _si=${SHARD%/*}; _sn=${SHARD#*/}
+    _loads=(); for (( _k = 0; _k < _sn; _k++ )); do _loads[_k]=0; done
+    _mine=()
+    while IFS= read -r _line; do
+        _w="${_line%% *}"; _f="${_line#* }"
+        _best=0
+        for (( _k = 1; _k < _sn; _k++ )); do (( _loads[_k] < _loads[_best] )) && _best=$_k; done
+        _loads[_best]=$(( _loads[_best] + _w ))
+        (( _best == _si - 1 )) && _mine+=("$_f")
+    done < <(for _f in "${TEST_FILES[@]}"; do _weight "$_f"; printf '%s %s\n' "$_W" "$_f"; done | sort -k1,1nr -k2,2)
+    echo "  [--shard ${SHARD}] 対象テスト（${#_mine[@]} 件）: ${_mine[*]:-なし}" >&2
+    if [[ ${#_mine[@]} -eq 0 ]]; then echo "  この組には、実行するテストがありません。" >&2; exit 0; fi
+    TEST_FILES=("${_mine[@]}")
+fi
+# SF_TEST_LIST_ONLY=1: 実行せずに、対象のテストファイル名を、1 行ずつ表示して終わる（--shard の分け方の確認用）
+if [[ "${SF_TEST_LIST_ONLY:-}" == "1" ]]; then
+    printf '%s\n' "${TEST_FILES[@]}"
+    exit 0
 fi
 
 # 画面とログファイルの両方に出力する関数
@@ -369,7 +445,8 @@ else
         #   途中で異常終了したときに、どのファイルで止まったかを、分かるようにする。GitHub Actions の Windows 用）
         [[ "${SF_TEST_PROGRESS:-}" == "1" ]] && echo "  [START] ${TEST_FILES[$i]} ($(date '+%H:%M:%S'))" >&2
         tmp=$(mktemp /tmp/sftest-XXXX)
-        bash "$test_path" > "$tmp" 2>&1 < /dev/null &   # 標準入力は閉じる（入力待ちで、止まらないため）
+        # 標準入力は閉じる（入力待ちで、止まらないため）。ファイルごとの所要時間（[TIME] 行）を、出力の最後に足す
+        ( _t0=$SECONDS; bash "$test_path"; _rc=$?; echo "  [TIME] ${TEST_FILES[$i]} $(( SECONDS - _t0 )) 秒"; exit $_rc ) > "$tmp" 2>&1 < /dev/null &
         _pids[$i]=$!
         _tmps[$i]="$tmp"
     done
@@ -392,8 +469,16 @@ else
         TOTAL_PASSED=$(( TOTAL_PASSED + $(echo "$output" | grep -c '\[PASS\]' || true) ))
         TOTAL_FAILED=$(( TOTAL_FAILED + $(echo "$output" | grep -c '\[FAIL\]'  || true) ))
         FAIL_LINES+="$(echo "$output" | grep '\[FAIL\]' || true)"$'\n'
+        TIME_LINES+="$(echo "$output" | grep '\[TIME\]' || true)"$'\n'
         rm -f "$tmp"
     done
+fi
+
+# 所要時間（SF_TEST_TIMES=1 のとき。長い順。_weight の目安を、実測で直すための表示）
+if [[ "${SF_TEST_TIMES:-}" == "1" && -n "${TIME_LINES//[[:space:]]/}" ]]; then
+    echo "" | tee_log
+    echo "  所要時間（長い順。並列で動かしているため、単独で動かすより、長めに出る）:" | tee_log
+    printf '%s\n' "$TIME_LINES" | grep '\[TIME\]' | sort -k3,3nr | head -25 | tee_log
 fi
 
 # 総合サマリー

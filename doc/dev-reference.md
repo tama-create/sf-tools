@@ -102,7 +102,7 @@
 
 - **並列実行**: `run_tests.sh` は、複数ファイルを、同時に（既定は CPU の数まで）動かす。時間のかかるファイル（`HEAVY_FIRST`: `test_sf-init.sh` など）を先に起動し、標準入力は閉じる（入力待ちで止まらないため）。出力は、ファイルごとに溜めて、`TEST_FILES` の順に表示・集計する。実測（8 コア・WSL）: 直列 約 400 秒 → 並列 約 170〜230 秒。並列数を 4〜100 で変えても、大きな差は、出なかった。
 - **WSL**: Git Bash から実行すると、自動で WSL に移り、ext4 にコピーして実行する（`/mnt/c` の 9P は、遅いため）。WSL には `node` がなく `node.exe` だけがある場合があり、`test_helper.sh` の node のモックは、`node -e` を、本物（`node` または `node.exe`）に渡す（`json_get` のテストのため）。
-- **クロスプラットフォームの CI**: 同じワークフローに、`test-macos`（`macos-latest`。macOS 標準の `/bin/bash`（3.2）と、BSD の `sed` などを、そのまま使う。何も追加で入れない）と `test-windows`（`windows-latest` の Git Bash。`SF_TEST_NO_WSL=1`・`core.autocrlf=false`）がある。**2026-10-14 から、失敗扱い**（`continue-on-error` なし。以前は、導入の初期として、結果の表示のみだった）。Windows は、並列で実行する（約 15 分）。再び異常終了するときは、`--serial` に戻す。**BSD / GNU の差**として、`sed -i`（BSD は、`-i` の直後に拡張子が必要 → `sed_inplace`）・sed の `\x` / `\t`（BSD は解釈しない → Bash の `$'..'` で展開）・`date -d`・`touch -d`・`stat -c`・`nproc`・`timeout`（macOS にない → `run_with_timeout`）・`base64 -w 0`（macOS にない → `base64_oneline`）・`wc -l`（BSD は、数字の前に空白が付く → 文字列として使うときは `tr -d ' '`）に注意する。`openssl req -subj`（先頭の `//` は Git Bash 専用。macOS・Linux に渡すと、発行先が空の証明書ができ、Salesforce が「証明書ではありません」と拒否する → `_jwt_cert_subject_arg` が OS で切り替え、`generate_jwt_cert` が生成後に空でないことを確認する。既存の空の証明書は、`ensure_jwt_cert_subject` が、秘密鍵そのままで作り直す）。macOS の `TMPDIR` は、`/` で終わる（`"${TMPDIR:-/tmp}/x"` が `T//x` になり、bash の `cd` が作る PWD（`T/x`）と、テストの期待値が食い違う）ため、`tests/test_helper.sh` が、末尾の `/` を除く。macOS の `tar` は、日本語のファイル名を NFD に変えて展開するため、テストで、HOME を差し替えて git を使うときは、`core.precomposeunicode` をリポジトリに設定する。
+- **クロスプラットフォームの CI**: 同じワークフローに、`test-macos`（`macos-latest`。macOS 標準の `/bin/bash`（3.2）と、BSD の `sed` などを、そのまま使う。何も追加で入れない）と `test-windows`（`windows-latest` の Git Bash。`SF_TEST_NO_WSL=1`・`core.autocrlf=false`。**2026-10-20 から、全件（結合テスト L1 を含む）を `--shard` で 6 つのジョブに分けて並列に動かす**。実測は、計画書 12）がある。**2026-10-14 から、失敗扱い**（`continue-on-error` なし。以前は、導入の初期として、結果の表示のみだった）。Windows は、並列で実行する（約 15 分）。再び異常終了するときは、`--serial` に戻す。**BSD / GNU の差**として、`sed -i`（BSD は、`-i` の直後に拡張子が必要 → `sed_inplace`）・sed の `\x` / `\t`（BSD は解釈しない → Bash の `$'..'` で展開）・`date -d`・`touch -d`・`stat -c`・`nproc`・`timeout`（macOS にない → `run_with_timeout`）・`base64 -w 0`（macOS にない → `base64_oneline`）・`wc -l`（BSD は、数字の前に空白が付く → 文字列として使うときは `tr -d ' '`）に注意する。`openssl req -subj`（先頭の `//` は Git Bash 専用。macOS・Linux に渡すと、発行先が空の証明書ができ、Salesforce が「証明書ではありません」と拒否する → `_jwt_cert_subject_arg` が OS で切り替え、`generate_jwt_cert` が生成後に空でないことを確認する。既存の空の証明書は、`ensure_jwt_cert_subject` が、秘密鍵そのままで作り直す）。macOS の `TMPDIR` は、`/` で終わる（`"${TMPDIR:-/tmp}/x"` が `T//x` になり、bash の `cd` が作る PWD（`T/x`）と、テストの期待値が食い違う）ため、`tests/test_helper.sh` が、末尾の `/` を除く。macOS の `tar` は、日本語のファイル名を NFD に変えて展開するため、テストで、HOME を差し替えて git を使うときは、`core.precomposeunicode` をリポジトリに設定する。
 - **CI**: `.github/workflows/test.yml`（Ubuntu のランナー）。PR（main・development 向け）と development への push で、全件テスト（`bash tests/run_tests.sh`）と shellcheck（`-S warning`。バージョン固定 `shellcheck-py==0.11.0.1`）を実行し、どちらも失敗扱いになる。Secrets は使わない。shellcheck の設定は、リポジトリ直下の `.shellcheckrc`（`SC1090` / `SC1091`・`SC2034`・`SC2155` を、理由つきで無効化）。個別の誤検知は、該当行の直前に `# shellcheck disable=SCxxxx  # 理由` で除外する。手元での実行: `shellcheck -S warning $(git ls-files 'bin/*.sh' 'lib/*.sh' 'phases/*.sh' 'hooks/*' 'templates/*.sh')`（`pip install shellcheck-py` など）。
 
 ### 2.1.2 結合テスト L1（`tests/test_integration*.sh`・`tests/integration/lib.sh`・`init-lib.sh`）
@@ -120,7 +120,7 @@
 - **ツール更新の保護**: `sf-install` の 24 時間に 1 回のツール更新は、Windows で本物の `git update-git-for-windows` を動かすため、サンドボックスには、更新済みのスタンプ（`.sf-tools-last-update`）を置く。更新の経路を確かめるテストでは、先に `it_block_git_update` を呼ぶ。
 - **不変条件の部品**: `it_snap`（HEAD・コミット数・ブランチ・フック数・未コミット数）・`it_remote_snap`・`it_mutating_calls`（外部へ書き込む呼び出しの一覧）・`it_leak_count`（秘密の漏れ）。
 - **時間**: シナリオごとの所要時間を出す。`IT_SHOW_RUNS=1` で、遅い呼び出しの上位を出す。CI の実測（2026-10-19。結合テストの第 1 弾）は、Ubuntu 約 16 秒・macOS 約 40 秒・Windows 約 2 分。手元の Windows（Git Bash）は、プロセスの起動が遅く、10 倍ほどかかる。`IT_SCENARIOS`（実行するシナリオ。既定は全部）・`IT_X62_QUICK=1` で、短くできる。
-- **実行**: `run_tests.sh` の全件に含まれる（時間のかかるファイルとして先に起動）。CI の全件テストのジョブは、`SF_TEST_SKIP_INTEGRATION=1` で、結合テスト（`test_integration*.sh`。表のガード `test_integration-coverage.sh` は残す）を外し、別のジョブ `integration`（Ubuntu・macOS・Windows）で、`run_tests.sh` に名前を渡して並列に動かす。`--changed` は、`bin/sf-*.sh`・`hooks/*`・`tests/integration/*`・結合テストの変更で、結合テスト全部を含める。
+- **実行**: `run_tests.sh` の全件に含まれる（時間のかかるファイルとして先に起動）。CI の全件テストのジョブは、`SF_TEST_SKIP_INTEGRATION=1` で、結合テスト（`test_integration*.sh`。表のガード `test_integration-coverage.sh` は残す）を外し、別のジョブ `integration`（Ubuntu・macOS）で、`run_tests.sh` に名前を渡して並列に動かす（Windows は、結合テストを含む全件を、`--shard` で 6 つのジョブに分けて動かす）。`--changed` は、`bin/sf-*.sh`・`hooks/*`・`tests/integration/*`・結合テストの変更で、結合テスト全部を含める。
 - **結合テストで見つかり、直したもの**: `sf-push` は、変更がないと「コミット対象なし」で終わり、コミット後にプッシュが失敗した再実行で、未プッシュのコミットが取り残された。現在は、変更がなくても、追跡先（upstream）より進んだコミットがあれば、コミットせず、`git push` だけ行う（X2-3 が確認する）。 また、`sf-push` は、detached HEAD・保護ブランチ（main など）の上では、コミットする前に止める（R5）。そのほか、`sf-check` は、存在していても、リポジトリの外を指すパス（絶対パス・`..` を含むパス）を、エラーにするようにした（X6-4）。`sf-init` の「続きから」は、Phase 8 まで完了と記録されているのに、origin に `main` がないときは、続けずに拒否する（完了の直前の記録のときも、完了にしない。X3-6・X3-7）。
 
 ### 2.2 `test_helper.sh` の前提
@@ -764,10 +764,13 @@ sf-init.sh --add-tier develop    # main+staging → main+staging+develop
 ### 7.1 テスト
 
 ```bash
-bash tests/run_tests.sh                           # 全テスト実行（mm 前に必ず実行）
+bash tests/run_tests.sh                           # 全テスト実行（手元では通常は不要。mm 後に CI が全件を実行する）
 bash tests/run_tests.sh --changed                 # 変更ファイルに対応するテストのみ（開発中）
 bash tests/run_tests.sh --jobs 4                  # 同時に動かすテストファイルの数を指定（既定: CPU の数。環境変数 SF_TEST_JOBS でも指定できる）
 bash tests/run_tests.sh --serial                  # 1 つずつ実行（並列で、原因を切り分けにくいときの確認用）
+bash tests/run_tests.sh --shard 2/6               # テストファイルを 6 組に分け、2 番目の組だけを実行する（GitHub Actions の Windows が、6 つのジョブに分けて並列に動かす。重いファイルから、いちばん軽い組へ割り当てる。目安は run_tests.sh の _weight）
+SF_TEST_TIMES=1 bash tests/run_tests.sh           # 各ファイルの所要時間（[TIME] 行）を、最後に、長い順に表示する（_weight を、実測で直すため）
+SF_TEST_LIST_ONLY=1 bash tests/run_tests.sh --shard 2/6   # 実行せずに、その組のファイル名だけを表示する（分け方の確認。tests/test_run-tests.sh が使う）
 bash tests/run_tests.sh test_sf-start.sh          # 単体実行
 cat logs/run_tests.log | grep '\[FAIL\]'          # 失敗行のみ抽出
 cat logs/error.log                                # run 失敗コマンドのログ
@@ -861,8 +864,8 @@ sf-tools の `main` への反映は、全ユーザーへの配布と同義であ
 
 | 確認項目 | 方法 |
 |---|---|
-| テスト | `bash tests/run_tests.sh` が全件 PASS |
-| `sf-init.sh` を変更した場合 | 検証環境の新規 force-* を作成し、最後まで通ること。`bash tests/e2e/run.sh` で自動化できる（9.6） |
+| テスト | `development` の最新のコミットで、GitHub Actions の全件テスト・shellcheck・結合テスト L1 が、すべて緑（`gh run list --branch development` で確認する。手元で全件を回さない） |
+| `sf-init.sh` を変更した場合 | 検証環境の新規 force-* を作成し、最後まで通ること。GitHub Actions の `e2e.yml`（`development` への push で自動。9.6）が成功していること。確認: `gh run list --workflow e2e.yml --branch development` で、配布物を変えた最新のコミット以降の実行が success（手元の `bash tests/e2e/run.sh` は、Actions を使えないときだけ） |
 | ワークフロー・`sf-metasync.sh` を変更した場合 | `wf-metasync` を `workflow_dispatch` で手動実行して成功すること |
 | `sf-release.sh` / `wf-validate` / `wf-release` を変更した場合 | デプロイ対象を含む PR を作り、`wf-validate` が通ること（動作確認のみの PR はマージせずに閉じる。マージすると `wf-release` が実際にデプロイする） |
 
@@ -870,7 +873,7 @@ sf-tools の `main` への反映は、全ユーザーへの配布と同義であ
 
 ### 9.4 リリース（rr）
 
-1. 9.3 の確認が完了している（配布物のパスの変更がないときは、全件テストと CI の成功だけでよい）
+1. 9.3 の確認が完了している（配布物のパスの変更がないときは、全件テストと CI の成功だけでよい。配布物のパスの変更があるときは、`e2e.yml` の成功も必要）
 2. 「rr」の指示で、`development` → `main` の PR を作成してマージする（手順は `CLAUDE.md` 1.3.2）
 3. マージ後、`main` の内容を検証環境の force-* でもう一度確認する
 
@@ -896,9 +899,17 @@ sf-tools の `main` への反映は、全ユーザーへの配布と同義であ
 | `tests/e2e/doctor.sh` | e2e を動かせる環境かの確認（読み取りのみ。Windows・macOS・Linux・WSL 共通）。OS・Bash・openssl、コマンド（`git` / `gh` / `sf`（npm 版）/ `node` / `openssl`）、`gh` のログイン・`delete_repo`・`E2E_GH_USER` との一致、git の `credential helper`（無いと、https のクローンがパスワードを待って止まる。WSL・Linux）、git のユーザー名・メールアドレス（無いと、初回のコミットが `Author identity unknown` で失敗する）、鍵一式（有無・権限 600・必須の項目・認証 URL の形式・`E2E_HOME_ROOT`。**値は出さない**）、`generate_jwt_cert`（`sf-init` と同じ関数）で鍵（PKCS#1）と証明書（発行先が空でない）を作れるか、手元の sf-tools が `origin/development` と一致しているか。要対応があれば戻り値 1。新しい環境（Mac など）で `run.sh` の前に実行する |
 | `lib.sh` の `e2e_record_line` / `e2e_os_label` / `e2e_openssl_label` | 検証の記録（9.7）の表の 1 行を作る。`run.sh` が、終わりに表示する（列: OS / Bash / openssl / コミット / 日付 / 結果。未コミットの変更があれば、コミットの欄に付記する。`--no-actions` などで確認を省いたときは、結果の欄に書く） |
 | （層数対応: `run.sh` / `lib.sh`） | `--layout 1\|2\|3`: `e2e_make_input N`（Phase 5 の番号は、3 層 = 1・2 層 = 2・1 層 = 3。ログイン先の答えは段階の数だけ）。リポジトリの構成は、ブランチから判定（`TIERS`: develop → staging → main）し、`_hello_flow` が、段階の数だけ、`_hello_pr_flow`（同じブランチから、段階ごとの PR）を繰り返す。実行の取り違え防止: PR を作る前の最新の実行 ID（`e2e_latest_run_id`）を覚え、それより新しい実行だけを、その PR の実行とする（`e2e_wait_pr_run` の 4 番目の引数）。段階の指定: 環境変数 `E2E_TIER`（`e2e_sf_admin_login` / `e2e_apex_count` / `e2e_list_target_apex` / `e2e_delete_apex` などが、その段階の組織・エイリアス（`sf-tools-e2e-admin[-stg\|-dev]`）を使う）。`sf` の差し替えは、`--alias` の末尾（STG / DEV）で、段階の認証 URL を選ぶ。確認: 各段階のリリースで、その段階の組織にだけクラスができる（先の段階にはない）・`wf-propagate` で staging / develop に main が入る（`compare` の `ahead_by` = 0）・main の削除は、ほかの段階に及ばない。 |
+| `tests/e2e/ci-fixture.sh` | GitHub Actions 上だけで動く。Secrets / Variables（環境変数）から、鍵一式（`~/.sf-tools-e2e/fixture.env`）を作る（`%q` で、記号・空白を含む値も、そのまま。権限 600）。必須の値が空なら、変数名だけを表示して失敗する（値は出さない） |
 | `tests/e2e/shims/sf` | `sf org login web` だけを `sf org login sfdx-url`（認証 URL）に差し替える。他のコマンドは本物の `sf` に渡す |
 | `tests/e2e/shims/git` | `run.sh --interrupt` の 1 回目だけ PATH の先頭に置く。`git push` で、引数に `main` を含むものを、1 回だけ（印のファイル `E2E_GIT_FAIL_MARK` ができるまで）終了コード 128 で失敗させ、あとは本物の git（`E2E_REAL_GIT`）に渡す。Phase 8 の初回コミットの push の失敗を、実環境で起こす |
 | `tests/e2e/shims/browser` | `start` / `xdg-open` / `open` / `powershell.exe` / `wslview` の名前でコピーされ、ブラウザを開かない（WSL の `open_browser` は `powershell.exe` を使うため、WSL で e2e を動かすときに要る） |
+
+**GitHub Actions での実行（`.github/workflows/e2e.yml`。設計は `doc/integration-test-plan.md` 12.5）:**
+- Windows（Git Bash）で全部、続けて macOS（標準の Bash 3.2）でクライアント側だけ（`--no-actions --no-add-tier --cleanup`）。同じ 3 つのテスト用組織を使うため、`needs` と `concurrency`（`group: e2e`・実行中は止めない）で、一列に動かす。
+- **ガード（`lib.sh` の `e2e_actions_allowed`）:** `e2e_guard_env` は、Actions 上では、①`E2E_ALLOW_ACTIONS=1`、②`GITHUB_WORKFLOW_REF` が `tama-create/sf-tools/.github/workflows/e2e.yml@refs/heads/(development|main)`、③`GITHUB_EVENT_NAME` が push・workflow_dispatch・schedule、のすべてがそろうときだけ通す（`GITHUB_*` は、ワークフローの書き手が上書きできない）。名前の形式・オーナーの一致・gh ユーザーの一致・削除の対象は、Actions 上でも同じ。ガードを通ったあと、`GITHUB_ACTIONS` と `CI` を外す（sf-tools の各スクリプトが、警告・確認を飛ばし、クライアント PC と違う動きにならないように。`run_tests.sh` と同じ）。
+- **Secrets / Variables（Environment `e2e`。Deployment branches は development と main だけ）:** Secrets は `E2E_GH_TOKEN`（Classic PAT: repo / workflow / admin:org / delete_repo）・`E2E_PAT_TOKEN`・`E2E_SLACK_BOT_TOKEN`・`E2E_SFDX_AUTH_URL`・`E2E_SFDX_AUTH_URL_STG`・`E2E_SFDX_AUTH_URL_DEV`。Variables は `E2E_OWNER`・`E2E_GH_USER`・`E2E_SLACK_CHANNEL_ID`。
+- **注意:** sf-tools は公開リポジトリのため、ワークフローのログは誰でも読める。組織の ID・ユーザー名・メールなどを、画面に出す処理を足さないこと。手元で e2e を動かすと、Actions の実行と、同じ組織を取り合うため、Actions に移したあとは、手元では動かさない。
+- **起動:** 配布物（`bin/` `lib/` `phases/` `hooks/` `templates/` `config/`）・`tests/e2e/`・`e2e.yml` が変わった `development` への push。手動（`workflow_dispatch`）は、`e2e.yml` が既定のブランチ（`main`）に入ってから使える（手動実行だけのワークフローは、既定のブランチにあるものしか、起動できない。push の起動は、どのブランチでも使える）。
 
 **中断→再開の確認（`run.sh --interrupt`）:** `sf-init` を、わざと Phase 8 で失敗させ、「続きをやる」で再開してから、いつもの確認（Secret・Variable・ブランチ・ワークフロー・Actions・Hello World）を行う。1 回目: `_interrupt_first_run`。git の shim（`shims/git`）で、main への push を 1 回だけ失敗させ、止まった時点の状態（リポジトリ・main・進捗）を `MID_*` に記録する（再開すると変わるため）。2 回目の入力: [オーナーの選択・XXXX・確認] → 管理者向けの警告の確認 `Y` → 「続きをやる」`1` → Phase 10 のログイン先（段階の数だけ `1`）。確認: 1 回目が失敗した・shim が push を止めた・失敗の画面が「続きをやる」を案内した・リポジトリはある・main はない・進捗は 7・PAT / Slack Token / 認証 URL が出ていない・再開の画面に「前回のセットアップは」が出た・初回コミットが 1 つ。`--resume` とは同時に指定できない。共通の確認は `read_key` が 1 文字ずつ読むことに注意（改行も 1 回の読み取りで、空なら再入力になる）。
 
@@ -934,7 +945,7 @@ sf-tools の `main` への反映は、全ユーザーへの配布と同義であ
 
 - 削除対象は、名前の形式（上記のタイムスタンプ付き）が一致するものだけ。`SF_TOOLS`、`force-test-win` などは対象外（`e2e_is_target_*`）
 - オーナーは、鍵一式の `E2E_OWNER` のみ。gh のログインユーザーが `E2E_GH_USER` と一致しないと動かない
-- `e2e_guard_env` を通らないと、削除系の関数は動かない（`E2E_GUARD_OK=1`）。GitHub Actions 上では動かない
+- `e2e_guard_env` を通らないと、削除系の関数は動かない（`E2E_GUARD_OK=1`）。GitHub Actions 上では、専用ワークフロー（e2e.yml）以外からは動かない（上の `e2e_actions_allowed`）
 - `cleanup.sh` は既定で何も消さない。`--yes` でも、一覧を見せたうえで `delete` の入力を求める
 - JWT 用の証明書フォルダ（`~/.sf-jwt/force-e2e-…`）は、中身が `server.key` / `server.crt` だけのときに限り削除する。ほかのファイルが入っていれば、消さずに失敗として返す（ほかの掃除は続ける）。シンボリックリンクは、対象外
 - `$TMPDIR` の一時ファイル・フォルダ（`e2e-run.*` など）は、名前の形式・30 分以上経過・所有者が自分・シンボリックリンクでない、のすべてを満たすものだけ（2026-10-05 に、Codex のレビューを受けて補強）
@@ -975,6 +986,9 @@ sf-tools の `main` への反映は、全ユーザーへの配布と同義であ
 | Windows 11（Git Bash。`C:\Git\bin\bash.exe -l`） | 5.x | OpenSSL 3.5（`/ucrt64/bin/openssl`） | 5344f40 | 2026-10-18 | e2e: 119 件成功 / 0 件失敗（1 層・既定。`--add-tier` の確認を含む） |
 | Windows 11（Git Bash。`C:\Git\bin\bash.exe -l`） | 5.3.15 | OpenSSL 3.5.9 | 1aa67b3 | 2026-10-19 | e2e: 119 件成功 / 0 件失敗（1 層。`sf-push` の変更後の確認。`--add-tier` の確認を含む） |
 | Windows 11（Git Bash。`C:\Git\bin\bash.exe -l`） | 5.3.15 | OpenSSL 3.5.9 | fed6180 | 2026-10-19 | e2e: 119 件成功 / 0 件失敗（1 層。結合テスト L1 の追加分と、見つかった不具合 4 件の修正後の確認。`--add-tier` の確認を含む。43 分 41 秒） |
+| Windows（GitHub Actions の `windows-latest`。`e2e.yml`） | 5.3.15 | OpenSSL 3.5.9 | 4ec3c92 | 2026-10-21 | e2e: 119 件成功 / 0 件失敗（1 層。`--add-tier` の確認と、サーバー側のワークフローの確認を含む。21 分 23 秒） |
+| macOS（GitHub Actions の `macos-latest`・arm64。`e2e.yml`） | 3.2.57 | OpenSSL 3.6.5 | 4ec3c92 | 2026-10-21 | e2e: 56 件成功 / 0 件失敗（1 層。`--no-actions --no-add-tier`。クライアント側のみ。4 分 39 秒） |
+| Windows・macOS・Linux（GitHub Actions の `windows-latest` / `macos-latest` / `ubuntu-latest`） | 5.x / 3.2 / 5.x | — | 86670c8 | 2026-10-20 | 全件テスト・shellcheck・結合テスト L1 が、すべて成功（全 11 ジョブ）。Windows は `--shard` の 6 ジョブに分け、全体 11 分 24 秒（分ける前は約 21 分） |
 | Windows・macOS・Linux（GitHub Actions の `windows-latest` / `macos-latest` / `ubuntu-latest`） | 5.x / 3.2 / 5.x | — | 1aa67b3 | 2026-10-19 | 全件テスト・shellcheck・結合テスト L1（`tests/test_integration.sh`）が、3 つの OS ですべて成功 |
 | Windows 11（Git Bash。`C:\Git\bin\bash.exe -l`） | 5.3.15 | OpenSSL 3.5.9 | a22fe4c | 2026-10-20 | e2e シナリオ（`tests/e2e/scenario.sh`）: `log-secrets` 13 件・`manual-delete` 15 件・`validate-fail` 13 件・`metasync-diff` 18 件が成功。`dist-main` 10 件は、rr の直後（`origin/main` と `origin/development` の配布物に差がない）の `a22fe4c` で成功（配布版で sf-tools の `main` が使われる）。すべて実環境（テスト用の組織・リポジトリ）で、終了時に元の状態へ戻したことを確認 |
 | Windows 11（Git Bash。`C:\Git\bin\bash.exe -l`） | 5.3.15 | OpenSSL 3.5.9 | 33acf54 | 2026-10-20 | e2e: 119 件成功 / 0 件失敗（1 層。`sf-push` が、detached HEAD・保護ブランチの上では、コミットする前に止める変更の後の確認。`--add-tier` の確認を含む。37 分 54 秒）。あわせて、`run.sh --interrupt --no-add-tier`（`sf-init` を Phase 8 の push でわざと失敗させ、「続きをやる」で再開）: 121 件成功 / 0 件失敗（29 分 24 秒。`sf-push` の変更の前の実行） |

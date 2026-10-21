@@ -78,19 +78,28 @@ jobs:
           sed --version 2>&1 | head -1 || true
           /bin/bash tests/run_tests.sh
 
+  # Windows（Git Bash）は、テストの 1 つ 1 つが、プロセスの起動が多く、遅い（2026-10-20 の実測: 全件が約 21 分、結合テスト L1 が約 10 分）。
+  # そこで、全件（結合テスト L1 を含む）を、6 つのジョブに分けて、並列に動かす（tests/run_tests.sh --shard I/N。重いファイルから、
+  # いちばん軽い組へ、順に割り当てる）。6 組を全部動かすと、全ファイルが、ちょうど 1 回ずつ動く（tests/test_run-tests.sh が確認）。
+  # 組の数は、matrix.shard の数で決まる（strategy.job-total）。増減しても、分け方は、自動で追従する。
   test-windows:
-    name: 全件テスト（Windows・Git Bash）
+    name: 全件テスト（Windows・Git Bash ${{ matrix.shard }}/${{ strategy.job-total }}）
     runs-on: windows-latest
     timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6]
     defaults:
       run:
         shell: bash
     env:
       # Git Bash のまま実行する（run_tests.sh は、WSL を使えるとき、WSL に移るが、ランナーには WSL のディストリビューションがない）
       SF_TEST_NO_WSL: "1"
-      SF_TEST_SKIP_INTEGRATION: "1"   # 結合テストは、別のジョブ（integration）で動かす
       # 起動するテストファイルを順に表示する（異常終了したとき、どのファイルで止まったかを分かるようにする）
       SF_TEST_PROGRESS: "1"
+      # 各ファイルの所要時間を、最後に表示する（分け方の目安 _weight を、実測で直すため）
+      SF_TEST_TIMES: "1"
     steps:
       # Windows では、チェックアウト時に、改行が CRLF に変換されることがある。シェルスクリプトは LF のままにする
       - name: 改行の自動変換を止める
@@ -101,17 +110,18 @@ jobs:
 
       # 並列（既定は CPU の数）で実行する。以前は、終了コード 2304 で異常終了していたが、原因は、並列ではなく、
       # テストが本物の `git update-git-for-windows`（Git の更新）を実行し、Git Bash 自体を壊していたことだった
-      # （tests/run_tests.sh の保護用の代理コマンドで解消）。1 ファイルずつ（--serial）だと、約 30 分かかる。
-      # 再び異常終了するときは、--serial に戻す（SF_TEST_PROGRESS の [START] 行で、止まったファイルが分かる）
-      - name: テストを実行
+      # （tests/run_tests.sh の保護用の代理コマンドで解消）。再び異常終了するときは、--serial に戻す
+      # （SF_TEST_PROGRESS の [START] 行で、止まったファイルが分かる）
+      - name: テストを実行（組 ${{ matrix.shard }}/${{ strategy.job-total }}）
         run: |
           bash --version | head -1
-          bash tests/run_tests.sh
+          bash tests/run_tests.sh --shard ${{ matrix.shard }}/${{ strategy.job-total }}
 
   # --------------------------------------------------------------------------
   # 結合テスト L1（ローカル結合）: 実際の git ＋ ローカルの bare リポジトリ ＋ gh・sf・npm の fake で、
   # 複数のコマンドを連動させる（tests/test_integration.sh。計画: doc/integration-test-plan.md）。
-  # 全件テストとは別のジョブにして、3 つの OS で並行して動かす（2026-10-19 の実測: Ubuntu 約 40 秒・macOS 約 1 分・Windows 約 2 分）。
+  # 全件テストとは別のジョブにして、並行して動かす（2026-10-19 の実測: Ubuntu 約 40 秒・macOS 約 1 分）。
+  # Windows の結合テストは、重いため、上の test-windows の組（--shard）に含めて、並列に動かす。
   # --------------------------------------------------------------------------
   integration:
     name: 結合テスト L1（${{ matrix.os }}）
@@ -120,25 +130,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, macos-latest]
     defaults:
       run:
         shell: bash
     steps:
-      - name: 改行の自動変換を止める
-        run: git config --global core.autocrlf false
-
       - name: ソースコードを取得
         uses: actions/checkout@v4
 
       # 結合テストのファイル（tests/test_integration*.sh。表のガード test_integration-coverage.sh は、全件テストで動くため除く）を、
       # run_tests.sh で、並列に実行する。macOS は、標準の Bash 3.2（/bin/bash）のまま実行する。Windows は Git Bash（WSL には移らない）
-      - name: 結合テストを実行（Windows 以外）
-        if: runner.os != 'Windows'
+      - name: 結合テストを実行
         run: /bin/bash tests/run_tests.sh $(cd tests && ls test_integration*.sh | grep -v coverage)
-
-      - name: 結合テストを実行（Windows・Git Bash）
-        if: runner.os == 'Windows'
-        env:
-          SF_TEST_NO_WSL: "1"
-        run: bash tests/run_tests.sh $(cd tests && ls test_integration*.sh | grep -v coverage)

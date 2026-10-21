@@ -54,6 +54,7 @@ git push origin development
 git checkout development
 git fetch origin                         # origin/development・origin/main が手元より進んでいないか確認
 gh pr create --base main
+gh pr checks <PR番号> --watch             # PR の CI（必須チェック 11 個）の完了を待つ。Ruleset が、緑になるまで、マージを止める
 gh pr merge <PR番号> --merge             # --delete-branch は付けない
 git checkout development                 # マージ後も development に戻る
 git pull origin main                     # main の最新を取り込む
@@ -258,7 +259,7 @@ Salesforce 開発の環境構築と日々の作業を自動化するシェルス
 - mm = commit → push（`development` まで。`main` には入らない）
 - rr = PR 作成 → `main` へマージ（配布）。実施前に検証環境の force-* で確認すること
 - 検証環境 = Variable `SF_TOOLS_BRANCH=development` の force-*（Actions が sf-tools の `development` を使う）。詳細は `doc/dev-reference.md` セクション 9
-- `main` のブランチ保護は、`sf-tools` が公開リポジトリのため設定済み（Ruleset `protect-main`: 削除禁止・強制プッシュ禁止・PR 必須）。直接 push は拒否される。上記の運用ルールを守る
+- `main` のブランチ保護は、`sf-tools` が公開リポジトリのため設定済み（Ruleset `protect-main`: 削除禁止・強制プッシュ禁止・PR 必須・**必須チェック 11 個（通常の CI。e2e は含めない）**）。直接 push は拒否され、CI が緑でない PR はマージできない。ジョブ名を変えるときは、Ruleset も更新する（`doc/dev-reference.md` 9.5）。上記の運用ルールを守る
 
 ---
 

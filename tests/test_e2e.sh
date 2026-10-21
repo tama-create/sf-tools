@@ -2674,6 +2674,68 @@ test_e2e_ci() {
     ( export HOME="$HM" GITHUB_ACTIONS=true; env "${_env[@]}" E2E_SFDX_AUTH_URL_STG='force://PlatformCLI::stg@example.my.salesforce.com' bash "$CF" ) > /dev/null 2>&1
     assert_file_contains "$HM/.sf-tools-e2e/fixture.env" "E2E_SFDX_AUTH_URL_STG=" "staging の組織が渡されたら、鍵一式に入れる"
 
+    # ci-mask.sh: 組織の ID・ユーザー名・URL・アクセストークンを、「::add-mask::」で伏せる（偽の sf で確認）
+    local CM="$E2E_DIR/ci-mask.sh"
+    cat > "$mb/sf" <<'SFEOF'
+#!/bin/bash
+case "$1 $2 $3" in
+    "org login sfdx-url") [[ -n "${MOCK_SF_LOGIN_FAIL:-}" ]] && exit 1; exit 0 ;;
+    "org display "*)
+        printf '{"status":0,"result":{"id":"00D5g00000FDr1YEAT","username":"mask.user@example.com","accessToken":"00D5g00000FDr1Y!AQEAQtoken123","instanceUrl":"https://orgfarm-abc123.my.salesforce.com","alias":"e2e-mask-probe"}}
+' ;;
+    "org logout "*) exit 0 ;;
+esac
+exit 0
+SFEOF
+    chmod +x "$mb/sf"
+    ( export HOME="$HM" PATH="$mb:$PATH" E2E_SFDX_AUTH_URL='force://PlatformCLI::tok@example.my.salesforce.com'; bash "$CM" ) > "$mb/out.log" 2>&1; rc=$?
+    assert_exit_fail "$rc" "ci-mask.sh は、GitHub Actions 上でなければ、動かない"
+    ( export HOME="$HM" PATH="$mb:$PATH" GITHUB_ACTIONS=true E2E_SFDX_AUTH_URL='force://PlatformCLI::tok@example.my.salesforce.com'; bash "$CM" ) > "$mb/out.log" 2>&1; rc=$?
+    assert_exit_ok "$rc" "ci-mask.sh: 組織にログインして、値を調べる"
+    assert_file_contains "$mb/out.log" "::add-mask::00D5g00000FDr1YEAT"   "ci-mask.sh: 組織 ID（18 桁）を伏せる"
+    assert_file_contains "$mb/out.log" "::add-mask::00D5g00000FDr1Y"      "ci-mask.sh: 組織 ID（15 桁）を伏せる"
+    assert_file_contains "$mb/out.log" "::add-mask::mask.user@example.com" "ci-mask.sh: ユーザー名を伏せる"
+    assert_file_contains "$mb/out.log" "::add-mask::00D5g00000FDr1Y!AQEAQtoken123" "ci-mask.sh: アクセストークンを伏せる"
+    assert_file_contains "$mb/out.log" "::add-mask::https://orgfarm-abc123.my.salesforce.com" "ci-mask.sh: My Domain の URL を伏せる"
+    assert_file_contains "$mb/out.log" "::add-mask::orgfarm-abc123.my.salesforce.com"         "ci-mask.sh: My Domain のホスト名を伏せる"
+    assert_file_not_contains "$mb/out.log" "force://" "ci-mask.sh: 認証 URL を表示しない"
+    ( export HOME="$HM" PATH="$mb:$PATH" GITHUB_ACTIONS=true MOCK_SF_LOGIN_FAIL=1 E2E_SFDX_AUTH_URL='force://PlatformCLI::tok@example.my.salesforce.com'; bash "$CM" ) > "$mb/out.log" 2>&1; rc=$?
+    assert_exit_ok "$rc" "ci-mask.sh: ログインできなくても、失敗にしない（e2e の本体が、原因を表示する）"
+    assert_file_contains "$mb/out.log" "ログインできなかった" "ci-mask.sh: ログインできなかったことを表示する"
+    rm -f "$mb/sf"
+
+    # ci-notify.sh: 失敗を Slack に通知する（偽の curl で確認）。入力の形式が不正なら、通知しない
+    local CN="$E2E_DIR/ci-notify.sh"
+    cat > "$mb/curl" <<'CEOF'
+#!/bin/bash
+printf '%s
+' "$@" > "${MOCK_CURL_ARGS:?}"
+if [[ -n "${MOCK_CURL_FAIL:-}" ]]; then printf '{"ok":false,"error":"channel_not_found"}'; else printf '{"ok":true}'; fi
+CEOF
+    chmod +x "$mb/curl"
+    local _nenv=(SLACK_BOT_TOKEN=xoxb-secret-token SLACK_CHANNEL_ID=C0ABCDEFGHI
+                 RUN_URL=https://github.com/tama-create/sf-tools/actions/runs/123456 EVENT=schedule REF=main SHA=0123456789abcdef0123456789abcdef01234567)
+    ( export PATH="$mb:$PATH" MOCK_CURL_ARGS="$mb/curl.args"; env "${_nenv[@]}" bash "$CN" ) > "$mb/out.log" 2>&1; rc=$?
+    assert_exit_fail "$rc" "ci-notify.sh は、GitHub Actions 上でなければ、動かない"
+    ( export PATH="$mb:$PATH" GITHUB_ACTIONS=true MOCK_CURL_ARGS="$mb/curl.args"; env "${_nenv[@]}" bash "$CN" ) > "$mb/out.log" 2>&1; rc=$?
+    assert_exit_ok "$rc" "ci-notify.sh: Slack に通知する"
+    assert_file_contains "$mb/curl.args" "chat.postMessage"             "ci-notify.sh: Slack の chat.postMessage に送る"
+    assert_file_contains "$mb/curl.args" '"channel":"C0ABCDEFGHI"'      "ci-notify.sh: 通知先のチャンネルに送る"
+    assert_file_contains "$mb/curl.args" "schedule / main / 0123456"    "ci-notify.sh: イベント・ブランチ・コミット（7 桁）を入れる"
+    assert_file_contains "$mb/curl.args" "actions/runs/123456"          "ci-notify.sh: 実行の URL を入れる"
+    assert_file_not_contains "$mb/out.log" "xoxb-secret-token"          "ci-notify.sh: Token を表示しない"
+    ( export PATH="$mb:$PATH" GITHUB_ACTIONS=true MOCK_CURL_ARGS="$mb/curl.args" MOCK_CURL_FAIL=1; env "${_nenv[@]}" bash "$CN" ) > "$mb/out.log" 2>&1; rc=$?
+    assert_exit_fail "$rc" "ci-notify.sh: Slack が拒否したら、失敗にする"
+    assert_file_contains "$mb/out.log" "channel_not_found" "ci-notify.sh: 失敗の理由（error のコード）を表示する"
+    rm -f "$mb/curl.args"
+    ( export PATH="$mb:$PATH" GITHUB_ACTIONS=true MOCK_CURL_ARGS="$mb/curl.args"; env "${_nenv[@]}" 'REF=main"},{"x":"' bash "$CN" ) > "$mb/out.log" 2>&1; rc=$?
+    assert_exit_fail "$rc" "ci-notify.sh: 引用符を含む入力は、通知しない（JSON を壊さない）"
+    [[ ! -e "$mb/curl.args" ]] && pass "ci-notify.sh: 不正な入力では、curl を呼ばない" || fail "ci-notify.sh: 不正な入力では、curl を呼ばない"
+    ( export PATH="$mb:$PATH" GITHUB_ACTIONS=true MOCK_CURL_ARGS="$mb/curl.args"; env "${_nenv[@]}" SLACK_BOT_TOKEN= bash "$CN" ) > "$mb/out.log" 2>&1; rc=$?
+    assert_exit_fail "$rc" "ci-notify.sh: 必須の値が空なら、失敗する"
+    assert_file_contains "$mb/out.log" "SLACK_BOT_TOKEN" "ci-notify.sh: 空の変数名を表示する"
+    rm -f "$mb/curl"
+
     # 専用ワークフロー e2e.yml が、ガード（lib.sh の e2e_actions_allowed）と食い違っていない
     local wf="$SF_TOOLS_DIR/.github/workflows/e2e.yml"
     assert_file_contains     "$wf" "environment: e2e"      "e2e.yml: Secrets を置く Environment（e2e）を使う"
@@ -2687,6 +2749,14 @@ test_e2e_ci() {
     assert_file_not_contains "$wf" "- 'doc/**'"            "e2e.yml: ドキュメントだけの変更では、動かさない"
     assert_file_contains     "$wf" 'touch "$HOME/.sf-tools-last-update"' "e2e.yml: 更新済みの印を先に置く（e2e の実行中に、バックグラウンドの sf-upgrade.sh が、sf を入れ替えない）"
     assert_equals "$(grep -c 'touch "$HOME/.sf-tools-last-update"' "$wf")" "2" "e2e.yml: 更新済みの印は、Windows・macOS の両方のジョブで置く"
+    # 組織名・ユーザー名・チャンネル ID は、公開ログに出さないため、Secrets を優先する（移行中は、なければ Variables）
+    for _n in E2E_OWNER E2E_GH_USER E2E_SLACK_CHANNEL_ID; do
+        assert_file_contains "$wf" "secrets.${_n} || vars.${_n}" "e2e.yml: ${_n} は、Secrets を優先する（なければ Variables。移行中）"
+    done
+    assert_file_contains "$wf" "cron: '0 18 * * 0'"        "e2e.yml: 週 1 回（月曜 03:00 日本時間）、定期実行する"
+    assert_file_contains "$wf" "needs: [windows, macos]"   "e2e.yml: 通知は、Windows・macOS の両方の結果を見る"
+    assert_file_contains "$wf" "ci-notify.sh"              "e2e.yml: 失敗したとき、Slack に通知する"
+    assert_equals "$(grep -c 'ci-mask.sh"$' "$wf" | tr -d ' ')" "2"  "e2e.yml: 組織の ID・ユーザー名・URL を伏せる手順を、Windows・macOS の両方に置く"
     assert_file_not_contains "$wf" "pull_request"          "e2e.yml: pull_request では動かさない（Secrets を渡さない）"
     assert_file_not_contains "$wf" "pull_request_target"   "e2e.yml: pull_request_target では動かさない"
     assert_file_not_contains "$wf" "secrets: inherit"      "e2e.yml: Secrets を、ほかのワークフローに引き渡さない"

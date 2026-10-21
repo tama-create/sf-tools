@@ -73,7 +73,7 @@ jobs:
       - name: 開発者の環境に近づける（~/sf-tools・git の名前・gh の認証・sf）
         env:
           GH_TOKEN: ${{ secrets.E2E_GH_TOKEN }}
-          E2E_GH_USER: ${{ secrets.E2E_GH_USER || vars.E2E_GH_USER }}
+          E2E_GH_USER: ${{ secrets.E2E_GH_USER }}
         run: |
           # クライアント PC と同じく、~/sf-tools に sf-tools を置く（git の履歴つき。e2e が、origin/development との一致を確認する）
           cp -a "$(pwd)" "$HOME/sf-tools"
@@ -91,9 +91,9 @@ jobs:
 
       - name: 鍵一式（fixture.env）を作る
         env:
-          E2E_OWNER: ${{ secrets.E2E_OWNER || vars.E2E_OWNER }}
-          E2E_GH_USER: ${{ secrets.E2E_GH_USER || vars.E2E_GH_USER }}
-          E2E_SLACK_CHANNEL_ID: ${{ secrets.E2E_SLACK_CHANNEL_ID || vars.E2E_SLACK_CHANNEL_ID }}
+          E2E_OWNER: ${{ secrets.E2E_OWNER }}
+          E2E_GH_USER: ${{ secrets.E2E_GH_USER }}
+          E2E_SLACK_CHANNEL_ID: ${{ secrets.E2E_SLACK_CHANNEL_ID }}
           E2E_PAT_TOKEN: ${{ secrets.E2E_PAT_TOKEN }}
           E2E_SLACK_BOT_TOKEN: ${{ secrets.E2E_SLACK_BOT_TOKEN }}
           E2E_SFDX_AUTH_URL: ${{ secrets.E2E_SFDX_AUTH_URL }}
@@ -145,7 +145,7 @@ jobs:
       - name: 開発者の環境に近づける（~/sf-tools・git の名前・gh の認証・sf・Bash 3.2）
         env:
           GH_TOKEN: ${{ secrets.E2E_GH_TOKEN }}
-          E2E_GH_USER: ${{ secrets.E2E_GH_USER || vars.E2E_GH_USER }}
+          E2E_GH_USER: ${{ secrets.E2E_GH_USER }}
         run: |
           cp -a "$(pwd)" "$HOME/sf-tools"
           git config --global user.name "$E2E_GH_USER"
@@ -161,9 +161,9 @@ jobs:
 
       - name: 鍵一式（fixture.env）を作る
         env:
-          E2E_OWNER: ${{ secrets.E2E_OWNER || vars.E2E_OWNER }}
-          E2E_GH_USER: ${{ secrets.E2E_GH_USER || vars.E2E_GH_USER }}
-          E2E_SLACK_CHANNEL_ID: ${{ secrets.E2E_SLACK_CHANNEL_ID || vars.E2E_SLACK_CHANNEL_ID }}
+          E2E_OWNER: ${{ secrets.E2E_OWNER }}
+          E2E_GH_USER: ${{ secrets.E2E_GH_USER }}
+          E2E_SLACK_CHANNEL_ID: ${{ secrets.E2E_SLACK_CHANNEL_ID }}
           E2E_PAT_TOKEN: ${{ secrets.E2E_PAT_TOKEN }}
           E2E_SLACK_BOT_TOKEN: ${{ secrets.E2E_SLACK_BOT_TOKEN }}
           E2E_SFDX_AUTH_URL: ${{ secrets.E2E_SFDX_AUTH_URL }}
@@ -201,7 +201,7 @@ jobs:
       - name: Slack に通知
         env:
           SLACK_BOT_TOKEN: ${{ secrets.E2E_SLACK_BOT_TOKEN }}
-          SLACK_CHANNEL_ID: ${{ secrets.E2E_SLACK_CHANNEL_ID || vars.E2E_SLACK_CHANNEL_ID }}
+          SLACK_CHANNEL_ID: ${{ secrets.E2E_SLACK_CHANNEL_ID }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           EVENT: ${{ github.event_name }}
           REF: ${{ github.ref_name }}

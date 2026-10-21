@@ -2749,10 +2749,11 @@ CEOF
     assert_file_not_contains "$wf" "- 'doc/**'"            "e2e.yml: ドキュメントだけの変更では、動かさない"
     assert_file_contains     "$wf" 'touch "$HOME/.sf-tools-last-update"' "e2e.yml: 更新済みの印を先に置く（e2e の実行中に、バックグラウンドの sf-upgrade.sh が、sf を入れ替えない）"
     assert_equals "$(grep -c 'touch "$HOME/.sf-tools-last-update"' "$wf")" "2" "e2e.yml: 更新済みの印は、Windows・macOS の両方のジョブで置く"
-    # 組織名・ユーザー名・チャンネル ID は、公開ログに出さないため、Secrets を優先する（移行中は、なければ Variables）
+    # 組織名・ユーザー名・チャンネル ID は、公開ログに出さないため、Secrets から読む（Variables は使わない）
     for _n in E2E_OWNER E2E_GH_USER E2E_SLACK_CHANNEL_ID; do
-        assert_file_contains "$wf" "secrets.${_n} || vars.${_n}" "e2e.yml: ${_n} は、Secrets を優先する（なければ Variables。移行中）"
+        assert_file_contains "$wf" 'secrets.'"${_n}"' }}' "e2e.yml: ${_n} は、Secrets から読む"
     done
+    assert_file_not_contains "$wf" 'vars.' "e2e.yml: Variables を使わない（公開ログに値が出るため、すべて Secrets）"
     assert_file_contains "$wf" "cron: '0 18 * * 0'"        "e2e.yml: 週 1 回（月曜 03:00 日本時間）、定期実行する"
     assert_file_contains "$wf" "needs: [windows, macos]"   "e2e.yml: 通知は、Windows・macOS の両方の結果を見る"
     assert_file_contains "$wf" "ci-notify.sh"              "e2e.yml: 失敗したとき、Slack に通知する"

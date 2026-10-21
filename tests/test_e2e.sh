@@ -2791,6 +2791,9 @@ CEOF
 test_e2e_scenario_sync_wf() {
     echo ""; echo -e "${CLR_HEAD}[TEST] scenario.sh sync-wf（B4。管理者用のクローンの中だけ）${CLR_RST}"
     _mk_cleanup_env
+    # git の改行の自動変換（core.autocrlf）を、テストの中で、そろえる。シナリオは、HOME を一時フォルダに差し替えて動くため、Windows の標準の
+    #   設定（true）で git を動かし、テストの確認（git status）は、CI の設定（false）で動くと、LF と CRLF の違いが、変更に見える（Windows の CI だけで失敗した）
+    export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.autocrlf GIT_CONFIG_VALUE_0=false
     local rc proj="e2e-20260101-000000" repo="force-e2e-20260101-000000"
     local clone="$CB/root/home/tamashimon-org/$proj/admin/$repo" tpl="$MB/tpl"
     mkdir -p "$tpl"; printf 'name: wf-validate
@@ -2844,10 +2847,6 @@ exec "%s" "$@"
 ' "$MB/syncwf-stub.sh" > "$MB/syncwf-broken.sh"; chmod +x "$MB/syncwf-broken.sh"
     E2E_SF_SYNC_WF="$MB/syncwf-broken.sh" _run_scenario -y sync-wf; rc=$?
     assert_exit_fail "$rc" "sync-wf: 雛形に戻らなければ、失敗する"
-    if [[ -n "$(git -C "$clone" status --porcelain)" ]]; then   # 戻っていないとき: 原因を調べるために、出力を表示する
-        sed 's/\x1b\[[0-9;]*m//g' "$MB/out.log" | grep -E "元に戻し|戻せません|ERROR|NG|checkout|fatal|error" | tail -15
-        git -C "$clone" status --short; git -C "$clone" diff | head -12; git -C "$clone" config --list | grep -iE "autocrlf|safecrlf|eol" || true
-    fi
     assert_equals "$(git -C "$clone" status --porcelain)" "" "sync-wf: 失敗しても、終了時に、クローンを元に戻す"
 
     # --- 前提: クローンがない / 環境ブランチの上 / 未コミットの変更 → 実行できない ---
@@ -2870,7 +2869,7 @@ exec "%s" "$@"
 '); rc=$?
     assert_exit_fail "$rc" "sync-wf: 開始の確認で N → 中止する"
     assert_file_contains "$MB/out.log" "書き込み（sync-wf）" "sync-wf: 警告に、書き込む内容が表示される"
-    unset E2E_SF_SYNC_WF SYNCWF_TPL E2E_CMD_POLL_SEC E2E_HEARTBEAT_SEC
+    unset E2E_SF_SYNC_WF SYNCWF_TPL E2E_CMD_POLL_SEC E2E_HEARTBEAT_SEC GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
     teardown "$CB"
 }
 

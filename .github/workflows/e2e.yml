@@ -6,6 +6,7 @@ name: e2e（実環境の通し検証）
 # 【動かし方】
 #   ・Windows（Git Bash）で、全部（sf-init・wf-metasync・Hello World のリリースと削除・--add-tier）を確認する。
 #     サーバー側（Actions のワークフロー）は、クライアントの OS に関係なく、いつも GitHub の Linux 上で動くため、この 1 回で足りる。
+#     Windows の最後に、残ったテスト用リポジトリに対して、実環境のシナリオ（tests/e2e/scenario.sh。dist-main を除く）も動かす。
 #   ・続けて、macOS（標準の Bash 3.2）で、クライアント側だけ（--no-actions --no-add-tier）を確認する。
 #   ・同じテスト用の組織を使うため、2 つのジョブは一列に動かす（Windows → macOS。ワークフローの実行どうしも、concurrency で一列）。
 #
@@ -117,6 +118,15 @@ jobs:
         run: |
           # 「続行しますか？」の確認に Y を答える（管理者が実際に行う操作と同じ流れ）
           printf 'Y\n' | bash "$HOME/sf-tools/tests/e2e/run.sh"
+
+      # run.sh が残したテスト用リポジトリ（--add-tier で staging まである）に対して、実環境のシナリオ（L2）を動かす。
+      # dist-main（配布版の確認）は、「rr の直後だけ」の条件があるため、ここでは動かさない
+      - name: e2e のシナリオを実行（実環境の L2）
+        env:
+          GH_TOKEN: ${{ secrets.E2E_GH_TOKEN }}
+          E2E_ALLOW_ACTIONS: "1"
+        run: |
+          bash "$HOME/sf-tools/tests/e2e/scenario.sh" -y log-secrets manual-delete update-secret sync-wf validate-fail metasync-diff propagate-fail restart-org
 
       # 失敗したときだけ、sf のログから、通信の失敗の原因の部分を抜き出す。
       # ログは公開されるため、組織の ID・URL・トークン・メールアドレスは伏せ、1 行 240 文字までにする

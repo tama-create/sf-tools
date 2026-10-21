@@ -151,14 +151,14 @@ if [[ -n "$SHARD" ]]; then
 fi
 
 # 時間のかかるファイル（先に起動する。最後に長いものが残って、全体が伸びるのを避ける）
-HEAVY_FIRST=(test_integration-init.sh test_integration-init2.sh test_integration-init3.sh test_integration.sh test_integration-git.sh test_sf-init.sh test_e2e.sh test_verify.sh test_sf-release.sh test_sf-install.sh)
+HEAVY_FIRST=(test_integration-init.sh test_integration-init2.sh test_integration-init3.sh test_integration.sh test_integration-git.sh test_sf-init.sh test_sf-init2.sh test_sf-init3.sh test_e2e.sh test_verify.sh test_sf-release.sh test_sf-install.sh)
 
 # ファイルごとの所要時間の目安（秒。--shard が、組に分けるときの重み。未登録は 10）。
 #   値は、GitHub Actions の Windows での実測（2026-10-20・コミット 5eb8c6f の SF_TEST_TIMES=1 の [TIME] 行。ジョブの中で並列に動かした値）
 #   厳密である必要はない（目安が少しずれても、全ファイルが、ちょうど 1 回ずつ動く）。大きくずれたら、実測で直す
 _weight() {   # 結果は、変数 _W に入れる（$(...) で呼ぶと、Windows の Git Bash では、ファイルごとにプロセスを起動して遅い）
     case "$1" in
-        test_sf-init.sh) _W=960 ;;
+        test_sf-init.sh|test_sf-init2.sh|test_sf-init3.sh) _W=320 ;;   # 元は 1 ファイルで 960 秒（Actions の Windows）。3 つに均等に分けた
         test_verify.sh) _W=640 ;;
         test_e2e.sh) _W=510 ;;
         test_integration-init.sh) _W=370 ;;
@@ -191,6 +191,8 @@ TEST_FILES=(
     test_sf-unhook.sh
     test_sf-hook.sh
     test_sf-init.sh
+    test_sf-init2.sh
+    test_sf-init3.sh
     test_sf-upgrade.sh
     test_sf-install.sh
     test_sf-start.sh
@@ -279,6 +281,7 @@ if [[ "${1:-}" == "--changed" ]]; then
                 # bin/sf-foo.sh → test_sf-foo.sh
                 _t="test_$(basename "$_file")"
                 _changed_tests+=("$_t")
+                [[ "$_t" == "test_sf-init.sh" ]] && _changed_tests+=("test_sf-init2.sh" "test_sf-init3.sh")   # sf-init のテストは、3 つのファイルに分けてある
                 ;;
             lib/common.sh|lib/input.sh|lib/platform.sh)
                 # common.sh は、input.sh / platform.sh / project.sh を source する（どれを変えても、test_common.sh）
@@ -314,8 +317,8 @@ if [[ "${1:-}" == "--changed" ]]; then
             phases/init/verify.sh)
                 _changed_tests+=("test_verify.sh")
                 ;;
-            phases/init/*)
-                _changed_tests+=("test_sf-init.sh")
+            phases/init/*|tests/init-test-lib.sh)
+                _changed_tests+=("test_sf-init.sh" "test_sf-init2.sh" "test_sf-init3.sh")   # sf-init のテストは、3 つのファイルに分けてある（共通の部品: tests/init-test-lib.sh）
                 ;;
             hooks/pre-push)
                 _changed_tests+=("test_sf-prepush.sh")

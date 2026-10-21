@@ -390,8 +390,8 @@ Actions 上の実行は、コマンドによって扱いが違う。「全部拒
 | A3 PR の wf-validate の失敗 → 直して再検証 | ✅ L2（Slack 以外） | `scenario.sh validate-fail`（壊れた Apex の PR → 失敗・PR に「検証失敗」のコメント → 直して push → 成功・「検証成功」）。Slack の通知は未 |
 | A8 sf-restart | ✅ L2 | `scenario.sh restart-org`（接続先を staging の組織に切り替え → dry-run が新しい組織を使う → 元に戻す） |
 | B1 / X2-1 sf-init の中断と再開 | ✅ L1・L2（Phase 8） | init（5 つの止め方）。L2: `run.sh --interrupt`（実環境で Phase 8 の push を止め、「続きをやる」で再開 → いつもの確認）。Phase 3・10 の実環境での中断は未 |
-| B2 sf-update-secret | △ | secrets（L1）。L2 は未 |
-| B4 sf-sync-wf | △ | guards（X6-5。L1 のローカル部分）。L2 は未 |
+| B2 sf-update-secret | ✅ L1・L2 | secrets（L1）。L2: `scenario.sh update-secret`（同じ秘密鍵で上書き → `SF_PRIVATE_KEY` の更新日時が進む・誤ったパスは拒否される。あとのシナリオで、JWT ログインを確かめる） |
+| B4 sf-sync-wf | ✅ L1・L2 | guards（X6-5。L1 のローカル部分）。L2: `scenario.sh sync-wf`（管理者用のクローンの中だけ。改変 → 検出 → 雛形に直す・`--remove` の拒否と削除） |
 | B3 wf-metasync の実差分の反映 | ✅ L1・L2 | metasync（ローカルの同期の動作）。L2: `scenario.sh metasync-diff`（組織にだけ Apex を作る → wf-metasync → main に反映 → 組織・main を実行前の状態に戻す） |
 | C1 配布版（main）の通し | △ L2 | `scenario.sh dist-main`（SF_TOOLS_BRANCH 未設定で、ワークフローが sf-tools の main を使う。rr の直後だけ）。配布版での `sf-init` の通しは未 |
 | B5〜B8・C2〜C7 | — | L2・手動（未） |
@@ -627,7 +627,7 @@ Actions 上の実行は、コマンドによって扱いが違う。「全部拒
 | 3 | **e2e を GitHub Actions で動かす**: ガード（今は Actions 上では動かない）に、専用ワークフローだけの「実行してよい」印を足す（名前の形式・オーナーの一致は、そのまま）。認証情報（Secret）の登録（あなたが行う）。Windows → macOS の順。 | 実施済み（2026-10-21）。`development` への push で、Windows（全部 21 分 23 秒・119 件）→ macOS（クライアント側のみ 4 分 39 秒・56 件）が成功。原因の切り分けは 12.8 |
 | 4 | **Ruleset**: `main` に、「CI が緑」を必須のチェックとして入れる。**e2e は、必須にしない**（配布物が変わったときだけ動くため、必須にすると、動かない PR が永久に止まる。rr の前に、Claude が確認するルールで守る）。 | 実施済み（2026-10-21。`protect-main` に、必須チェック 11 個を追加。dev-reference 9.5） |
 | 5 | **定期実行（週 1 回・通知つき）**: `main`（利用者が受け取るもの）に対して、e2e を週 1 回、自動で動かし、失敗したら Slack に通知する。目的は、コードを変えていない間の外側の変化（`sf` の新しい版・Salesforce のリリース・Actions のイメージの更新・認証の期限切れ）の見張り。毎夜にはしない（外側の変化は週・月の単位で起きる。通知がないと意味がない）。e2e.yml が `main` に入ってから（schedule は既定のブランチのワークフローで動く） | 実装済み（2026-10-21。`e2e.yml` に schedule と、失敗時の Slack 通知 `notify`・`ci-notify.sh`。`main` に入ってから動く） |
-| 6 | **テストの穴（任意）**: `B4`・`B2`・`B6` など（8.1）。 | 未 |
+| 6 | **テストの穴（任意）**: B2・B4 の L2（`scenario.sh update-secret`・`sync-wf`）は実装済み（2026-10-21）。シナリオ 8 つを、Actions の Windows のジョブの最後で、自動で動かす。残り: B5〜B8・C2〜C7（OS 混在・手動が中心） | 一部実施済み（B2・B4。実環境の確認は、Actions の実行で行う） |
 
 ### 12.4 1 の設計（Windows の並列化）
 
@@ -679,3 +679,17 @@ Actions 上の実行は、コマンドによって扱いが違う。「全部拒
   - **原因**: sf-init の Phase 4（`sf-install.sh`）が、24 時間以内に更新していなければ、`sf-upgrade.sh`（`npm install -g @salesforce/cli@latest` など）を、**バックグラウンドで起動**する。使い捨ての Actions のサーバーは、毎回「初回」になり、e2e の実行中に `sf` が入れ替わった（macOS のログで、起動の約 20 秒後に失敗）。
   - **対策**: `e2e.yml` の準備の手順で、更新済みの印（`~/.sf-tools-last-update`）を先に置く（クライアント PC の 2 回目以降と同じ状態）。以降、2 回連続で成功。
 - **ログの公開対策（2026-10-21）**: ワークフローのログは公開される。Variables（`E2E_OWNER`・`E2E_GH_USER`・`E2E_SLACK_CHANNEL_ID`）は、伏せられず、ログの先頭の `env:` に出る。また、`sf` のログイン時の表示に、組織のユーザー名・組織 ID・My Domain の URL が出る（Secret ではないため、GitHub は伏せない）。対策として、Variables を Secrets に移し、`tests/e2e/ci-mask.sh`（e2e の実行の前に、組織の ID・ユーザー名・アクセストークン・URL を調べて `::add-mask::` で伏せる）を足した。対策より前の実行（コミット a5d4653〜4ec3c92）のログには、値が残っている（削除するなら `gh run delete`）。**移行の完了（2026-10-21）**: 3 つを Secrets に登録し、`e2e.yml` から `vars.` を外した（`|| vars.X` の移行用の書き方も不要になった）。古い Variables 3 つは、新しい e2e が成功してから削除する。
+
+### 12.9 シナリオ 8 つを、Actions で初めて動かした結果と、見つかった不具合（2026-10-21・コミット 644aa16）
+
+- **結果**: `log-secrets` 13・`manual-delete` 15・**`update-secret` 6（新規）**・**`sync-wf` 13（新規）**・`validate-fail` 13・`metasync-diff` 18 が成功。`update-secret` で上書きした秘密鍵で、あとの `validate-fail`・`metasync-diff` が、JWT ログインで成功した（鍵の形式は壊れていない）。`propagate-fail`（Slack の確認 1 件）と `restart-org`（状態の比較）が失敗した。
+- **不具合 1（`manual-delete` の元に戻す処理）**: `_e2e_gh` は、標準入力を `/dev/null` にする（`</dev/null`）。`printf ... | _e2e_gh secret set` は、トークンを渡せず、**空の Secret ができていた**（手元でも、シナリオを 1 つずつ動かしていたため、気づかなかった）。続く `propagate-fail` の Slack 通知が `not_authed` になって、見つけた。標準入力を捨てない `_e2e_gh_stdin` を足して、直した。単体テストに、「戻した Secret の値が、鍵一式の Token と同じ」を追加（修正なしだと失敗することを確認）。
+- **不具合 2（状態の比較の基準）**: `scenario.sh` は、実行の前後で、`main` の SHA・ブランチ・PR の数を比べる。基準は、最初の 1 回だけ取るため、`main` にコミットしてよいシナリオ（`metasync-diff`・`propagate-fail`）のあとの、次のシナリオが、「`main` が変わった」と誤判定されていた（続けて動かすのが初めてだったため、表に出た）。`main` にコミットしてよいシナリオのあとは、基準を更新する。単体テストに、続けて動かすケースを追加（修正なしだと失敗することを確認）。
+- **未解決（通常の CI）**: Windows の 3/6 だけで、`sync-wf` の単体テスト「失敗しても、終了時に、クローンを元に戻す」が、再現して失敗する（手元の Windows では、CI と同じ条件でも通る）。原因を調べるため、失敗したときに、シナリオの出力・`git status`・`git diff`・改行の設定を表示するようにした。
+
+### 12.10 `test_sf-init.sh` を 3 つに分割（2026-10-21）
+
+- **目的**: Windows の CI の下限が、1 ファイルの `test_sf-init.sh`（約 10 分）だったため、並列に動かせる単位に分ける（12.7）。
+- **やったこと**: 48 個のテスト関数（524 件）を、WSL での実測（関数ごとの所要時間）で、3 つのファイル（`test_sf-init.sh`・`test_sf-init2.sh`・`test_sf-init3.sh`。各 約 66 秒の目安）に均等に分けた。共通の準備（環境変数・作業フォルダ・gh のモック・サブスクリプトの差し替え・入力の台本）は、`tests/init-test-lib.sh` に移した。件数の合計は、分割の前後で同じ（199 + 148 + 177 = 524・失敗 0）。`run_tests.sh` の一覧・重み（各 320 秒）・`--changed` の対応も更新した。
+- **効果**: GitHub 上の実測は、次の CI で記録する。残る下限は、`test_verify.sh`（約 640 秒）・`test_e2e.sh`（約 510 秒）。
+

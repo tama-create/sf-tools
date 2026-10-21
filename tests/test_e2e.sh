@@ -35,6 +35,8 @@
 #  29. 中断→再開（run.sh --interrupt）と、git の shim（main への push を 1 回だけ失敗させる）
 #  30. シナリオ propagate-fail（main → staging の伝播のコンフリクト。失敗し、通知され、staging は変わらない）
 #  31. シナリオ restart-org（sf-restart で接続先を staging の組織に切り替え → dry-run → 元に戻す）
+#  33. シナリオ sync-wf（改変したワークフローを sf-sync-wf が見つけて直す・--remove は雛形にあるファイルを拒否・クローンの中だけ）
+#  34. シナリオ update-secret（sf-update-secret で秘密鍵を同じ鍵で上書き・更新日時が進む・誤ったパスは拒否される）
 #  32. GitHub Actions で動かす準備（ci-fixture.sh が鍵一式を作る・e2e.yml とガードの整合。ガードは 2 で、Actions 上でも専用ワークフローだけ通る）
 # ==============================================================================
 source "$(dirname "${BASH_SOURCE[0]}")/test_helper.sh"
@@ -65,14 +67,19 @@ case "$*" in
         _n=$(( $(cat "$_d/mainsha.cnt" 2>/dev/null || echo 0) + 1 )); echo "$_n" > "$_d/mainsha.cnt"
         if [[ "${MOCK_GH_MAIN_SHA_CHANGE:-}" == "1" && $_n -ge 2 ]]; then echo "changedsha"; else echo "${MOCK_GH_MAIN_SHA:-abc123}"; fi
         exit 0 ;;
+    # update-secret の再現: SF_PRIVATE_KEY の更新日時は、secret set SF_PRIVATE_KEY のたびに、1 秒ずつ進む（$MB/pk.ver。MOCK_GH_NO_PK=1: Secret がない）
+    "api repos/"*"/actions/secrets/SF_PRIVATE_KEY"*)
+        [[ "${MOCK_GH_NO_PK:-}" == "1" ]] && exit 1
+        echo "2026-10-21T00:00:0$(cat "${MOCK_CALL_LOG%/*}/pk.ver" 2>/dev/null || echo 0)Z"; exit 0 ;;
     "api repos/"*"/branches"*)           printf 'main\nadmin\n'; exit 0 ;;
     # Secret・Variable の状態（manual-delete の再現）: $MB/secrets.txt（名前の行）・$MB/vars.txt（「名前=値」の行）。ファイルがなければ、空
     #   MOCK_GH_SECRET_SET_FAIL_FIRST=1: secret set の 1 回目が失敗する（元に戻す処理の失敗と、終了時の再試行の再現）
     "secret list"*"--jq .[].name")       cat "${MOCK_CALL_LOG%/*}/secrets.txt" 2>/dev/null; exit 0 ;;
     "secret delete "*)                   _d="${MOCK_CALL_LOG%/*}"; grep -vx "$3" "$_d/secrets.txt" > "$_d/secrets.new" 2>/dev/null; mv "$_d/secrets.new" "$_d/secrets.txt"; exit 0 ;;
     "secret set "*)
-        _d="${MOCK_CALL_LOG%/*}"; cat > /dev/null
+        _d="${MOCK_CALL_LOG%/*}"; cat > "$_d/secretval.$3"   # 標準入力で渡された値を記録する（空で設定されたかを、確かめるため）
         if [[ "${MOCK_GH_SECRET_SET_FAIL_FIRST:-}" == "1" && ! -f "$_d/secretset.failed" ]]; then : > "$_d/secretset.failed"; echo "HTTP 502" >&2; exit 1; fi
+        if [[ "$3" == "SF_PRIVATE_KEY" ]]; then echo $(( $(cat "$_d/pk.ver" 2>/dev/null || echo 0) + 1 )) > "$_d/pk.ver"; grep -qx "$3" "$_d/secrets.txt" 2>/dev/null || echo "$3" >> "$_d/secrets.txt"; exit 0; fi
         echo "$3" >> "$_d/secrets.txt"; exit 0 ;;
     "variable list"*"--jq .[].name")     cut -d= -f1 "${MOCK_CALL_LOG%/*}/vars.txt" 2>/dev/null; exit 0 ;;
     "variable get "*)                    grep "^$3=" "${MOCK_CALL_LOG%/*}/vars.txt" 2>/dev/null | head -1 | cut -d= -f2-; exit 0 ;;
@@ -2120,6 +2127,7 @@ test_e2e_scenario_manual_delete() {
     assert_file_contains "$MB/out.log" "成功（15 件）" "manual-delete: 15 件の確認が成功する"
     assert_file_contains "$MB/out.log" "sf-init.sh --only 7" "manual-delete: 直し方が、確認されている"
     assert_equals "$(sort "$MB/secrets.txt" | tr '\n' ',')" "PAT_TOKEN,SLACK_BOT_TOKEN," "manual-delete: Secret が、元の一覧に戻る"
+    assert_equals "$(cat "$MB/secretval.SLACK_BOT_TOKEN" 2>/dev/null)" "xoxb-fakeslack" "manual-delete: 戻した Secret の値が、鍵一式の Token と同じ（空で戻さない）"
     assert_equals "$(grep '^SLACK_CHANNEL_ID=' "$MB/vars.txt")" "SLACK_CHANNEL_ID=C01ABCDEFGH" "manual-delete: Variable が、元の値で戻る"
     assert_equals "$(sort "$MB/vars.txt" | tr '\n' ',')" "SF_USERNAME_PROD=a@example.com,SLACK_CHANNEL_ID=C01ABCDEFGH," "manual-delete: 触っていない Variable は、そのまま"
     assert_equals "$(grep -c 'secret delete SLACK_BOT_TOKEN' "$MOCK_CALL_LOG")" "1" "manual-delete: 削除するのは、SLACK_BOT_TOKEN だけ（1 回）"
@@ -2491,6 +2499,14 @@ test_e2e_scenario_propagate_fail() {
     assert_file_not_contains "$MOCK_CALL_LOG" "pr merge" "propagate-fail: PR は、扱わない"
 
     # --- 伝播が成功してしまった（衝突を検出できない）→ 失敗（それでも、削除する）---
+    # --- 続けて動かす: main にコミットしてよいシナリオのあとも、次のシナリオが、「main が変わった」と誤判定されない（基準を更新する）---
+    _reset_pf; rm -f "$MB/mainsha.cnt"   # main の SHA の呼び出し回数を、0 に戻す（1 回目は、元の SHA・2 回目以降は、変わった SHA を返すため）
+    MOCK_GH_MAIN_SHA_CHANGE=1 MOCK_GH_RUN_IDS="11" MOCK_GH_CONCL_LIST="failure" MOCK_GH_RUN_LOG="$ok_log" _run_scenario -y propagate-fail log-secrets; rc=$?
+    [[ $rc -eq 0 ]] || sed 's/\x1b\[[0-9;]*m//g' "$MB/out.log" | tail -15
+    assert_exit_ok "$rc" "propagate-fail → log-secrets: 続けて動かしても、成功する（main の基準を更新する）"
+    assert_file_contains "$MB/out.log" "log-secrets: 成功" "propagate-fail → log-secrets: あとのシナリオも、実行される（状態が変わったと誤判定しない）"
+    assert_file_not_contains "$MB/out.log" "状態（main の SHA" "propagate-fail → log-secrets: 状態の変化として、報告されない"
+
     _reset_pf
     MOCK_GH_CONCL_LIST="success" MOCK_GH_RUN_LOG="$ok_log" _run_scenario -y propagate-fail; rc=$?
     assert_exit_fail "$rc" "propagate-fail: wf-propagate が成功してしまったら、失敗する"
@@ -2755,6 +2771,8 @@ CEOF
     done
     assert_file_not_contains "$wf" 'vars.' "e2e.yml: Variables を使わない（公開ログに値が出るため、すべて Secrets）"
     assert_file_contains "$wf" "cron: '0 18 * * 0'"        "e2e.yml: 週 1 回（月曜 03:00 日本時間）、定期実行する"
+    assert_file_contains "$wf" "scenario.sh\" -y log-secrets manual-delete update-secret sync-wf validate-fail metasync-diff propagate-fail restart-org" "e2e.yml: Windows の最後に、実環境のシナリオを動かす（dist-main は、rr の直後だけなので、除く）"
+    assert_file_not_contains "$wf" "scenario.sh\" -y .*dist-main" "e2e.yml: dist-main は、動かさない（origin/main と origin/development に差がないときだけ動くため）"
     assert_file_contains "$wf" "needs: [windows, macos]"   "e2e.yml: 通知は、Windows・macOS の両方の結果を見る"
     assert_file_contains "$wf" "ci-notify.sh"              "e2e.yml: 失敗したとき、Slack に通知する"
     assert_equals "$(grep -c 'ci-mask.sh"$' "$wf" | tr -d ' ')" "2"  "e2e.yml: 組織の ID・ユーザー名・URL を伏せる手順を、Windows・macOS の両方に置く"
@@ -2765,6 +2783,166 @@ CEOF
     assert_file_contains "$E2E_DIR/lib.sh" 'workflows/e2e\.yml@refs/heads/' "lib.sh: ガードが見るワークフローは、e2e.yml"
     [[ -f "$wf" ]] && pass "e2e.yml がある（ガードが許すファイル名と同じ）" || fail "e2e.yml がある"
     teardown "$mb"
+}
+
+# ------------------------------------------------------------------------------
+# 33. シナリオ sync-wf（改変したワークフローを sf-sync-wf が見つけて直す。--remove は、雛形にあるファイルを拒否する）
+# ------------------------------------------------------------------------------
+test_e2e_scenario_sync_wf() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] scenario.sh sync-wf（B4。管理者用のクローンの中だけ）${CLR_RST}"
+    _mk_cleanup_env
+    # git の改行の自動変換（core.autocrlf）を、テストの中で、そろえる。シナリオは、HOME を一時フォルダに差し替えて動くため、Windows の標準の
+    #   設定（true）で git を動かし、テストの確認（git status）は、CI の設定（false）で動くと、LF と CRLF の違いが、変更に見える（Windows の CI だけで失敗した）
+    export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.autocrlf GIT_CONFIG_VALUE_0=false
+    local rc proj="e2e-20260101-000000" repo="force-e2e-20260101-000000"
+    local clone="$CB/root/home/tamashimon-org/$proj/admin/$repo" tpl="$MB/tpl"
+    mkdir -p "$tpl"; printf 'name: wf-validate
+on: pull_request
+' > "$tpl/wf-validate.yml"
+    # 代役の sf-sync-wf.sh（雛形は $tpl。--check: 差分があれば終了コード 1・雛形にないファイルは案内だけ / 引数なし: 雛形で上書き / --remove: 雛形にあれば拒否）
+    cat > "$MB/syncwf-stub.sh" <<'SWEOF'
+#!/bin/bash
+tpl="${SYNCWF_TPL:?}"; dst=".github/workflows"
+case "${1:-}" in
+    --check)
+        rc=0
+        for f in "$tpl"/*; do n=$(basename "$f"); cmp -s "$f" "$dst/$n" || { echo "差分: $n"; rc=1; }; done
+        for f in "$dst"/*; do n=$(basename "$f"); [[ -e "$tpl/$n" ]] || echo "雛形にないワークフロー（変更しません）: $n"; done
+        exit $rc ;;
+    --remove)
+        [[ ! -e "$tpl/$2" ]] || { echo "$2 は、雛形にあるため、削除できません"; exit 1; }
+        [[ -f "$dst/$2" ]] || { echo "削除対象が見つかりません"; exit 1; }
+        rm -f "$dst/$2"; exit 0 ;;
+    "")
+        cp "$tpl"/* "$dst"/; exit 0 ;;
+esac
+exit 2
+SWEOF
+    chmod +x "$MB/syncwf-stub.sh"
+    export E2E_SF_SYNC_WF="$MB/syncwf-stub.sh" SYNCWF_TPL="$tpl" E2E_CMD_POLL_SEC=1 E2E_HEARTBEAT_SEC=100
+    _reset_sw() {   # 本物の git で、管理者用のクローン（admin ブランチ・雛形と同じ内容をコミット済み）を作る
+        rm -rf "$clone"; mkdir -p "$clone/.github/workflows"
+        cp "$tpl/wf-validate.yml" "$clone/.github/workflows/wf-validate.yml"
+        ( cd "$clone" && git init -q -b admin . && git -c user.name=t -c user.email=t@example.com add -A && git -c user.name=t -c user.email=t@example.com commit -q -m init )
+        : > "$MOCK_CALL_LOG"
+    }
+
+    # --- 成功: 改変 → 見つかる → 雛形に戻る → --remove の拒否と、不要なファイルの削除 → きれいに戻る ---
+    _reset_sw
+    _run_scenario -y sync-wf; rc=$?
+    [[ $rc -eq 0 ]] || sed 's/\[[0-9;]*m//g' "$MB/out.log" | tail -25
+    assert_exit_ok "$rc" "sync-wf: 成功する"
+    assert_file_contains "$MB/out.log" "成功（" "sync-wf: 結果が成功と表示される"
+    assert_equals "$(git -C "$clone" status --porcelain)" "" "sync-wf: 終了後、クローンの作業ツリーは、きれい（改変も、不要なファイルも、残らない）"
+    assert_equals "$(git -C "$clone" rev-list --count HEAD)" "1" "sync-wf: コミットを増やさない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "repo delete" "sync-wf: リポジトリは、削除しない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "secret set" "sync-wf: GitHub に、書き込まない（Secret）"
+
+    # --- sf-sync-wf が、雛形に戻せない（上書きが効かない）→ 失敗する。それでも、終了時に、クローンを元に戻す ---
+    _reset_sw
+    # 上書き（引数なし）だけを、何もせずに成功させる代役（壊れた sf-sync-wf.sh）。ほかは、元の代役に渡す
+    printf '#!/bin/bash
+[[ -n "${1:-}" ]] || exit 0
+exec "%s" "$@"
+' "$MB/syncwf-stub.sh" > "$MB/syncwf-broken.sh"; chmod +x "$MB/syncwf-broken.sh"
+    E2E_SF_SYNC_WF="$MB/syncwf-broken.sh" _run_scenario -y sync-wf; rc=$?
+    assert_exit_fail "$rc" "sync-wf: 雛形に戻らなければ、失敗する"
+    assert_equals "$(git -C "$clone" status --porcelain)" "" "sync-wf: 失敗しても、終了時に、クローンを元に戻す"
+
+    # --- 前提: クローンがない / 環境ブランチの上 / 未コミットの変更 → 実行できない ---
+    _reset_sw; rm -rf "$clone"
+    _run_scenario -y sync-wf; rc=$?
+    assert_exit_fail "$rc" "sync-wf: 管理者用のクローンがなければ、実行できない"
+    assert_file_contains "$MB/out.log" "実行できない" "sync-wf: 「実行できない」と報告する"
+    _reset_sw; ( cd "$clone" && git branch -q -m main )
+    _run_scenario -y sync-wf; rc=$?
+    assert_exit_fail "$rc" "sync-wf: 環境ブランチ（main）の上では、実行できない"
+    _reset_sw; printf 'x
+' >> "$clone/.github/workflows/wf-validate.yml"
+    _run_scenario -y sync-wf; rc=$?
+    assert_exit_fail "$rc" "sync-wf: 未コミットの変更があれば、実行できない（元に戻せなくなるため）"
+    assert_equals "$(tail -n 1 "$clone/.github/workflows/wf-validate.yml")" "x" "sync-wf: 実行できないときは、あった変更に、触らない"
+
+    # --- 開始の警告 ---
+    _reset_sw
+    _run_scenario sync-wf < <(printf 'N
+'); rc=$?
+    assert_exit_fail "$rc" "sync-wf: 開始の確認で N → 中止する"
+    assert_file_contains "$MB/out.log" "書き込み（sync-wf）" "sync-wf: 警告に、書き込む内容が表示される"
+    unset E2E_SF_SYNC_WF SYNCWF_TPL E2E_CMD_POLL_SEC E2E_HEARTBEAT_SEC GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
+    teardown "$CB"
+}
+
+# ------------------------------------------------------------------------------
+# 34. シナリオ update-secret（sf-update-secret で秘密鍵を同じ鍵で上書き。更新日時が進む・誤ったパスは拒否される）
+# ------------------------------------------------------------------------------
+test_e2e_scenario_update_secret() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] scenario.sh update-secret（B2。同じ秘密鍵で上書き）${CLR_RST}"
+    _mk_cleanup_env
+    local rc proj="e2e-20260101-000000" repo="force-e2e-20260101-000000"
+    local clone="$CB/root/home/tamashimon-org/$proj/admin/$repo" key="$HM/.sf-jwt/$repo/server.key"
+    # 代役の sf-update-secret.sh（入力: 続行 Y・メニュー 1・鍵のパス・更新 Y。鍵がなければ、拒否。あれば、gh secret set SF_PRIVATE_KEY）
+    cat > "$MB/updsecret-stub.sh" <<'USEOF'
+#!/bin/bash
+read -r _a; read -r _b; read -r path
+[[ -f "$path" ]] || { echo "ファイルが存在しません: $path"; exit 1; }
+read -r _c
+echo "更新します（秘密鍵の中身は表示しません）"
+printf 'SECRET-VALUE' | gh secret set SF_PRIVATE_KEY -R tamashimon-org/force-e2e-20260101-000000
+USEOF
+    chmod +x "$MB/updsecret-stub.sh"
+    export E2E_SF_UPDATE_SECRET="$MB/updsecret-stub.sh" E2E_SECRET_WAIT=0 E2E_CMD_POLL_SEC=1 E2E_HEARTBEAT_SEC=100
+    _reset_us() {
+        rm -rf "$clone" "$HM/.sf-jwt"; mkdir -p "$clone/.git" "$HM/.sf-jwt/$repo"
+        printf -- '-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----\n' > "$key"
+        printf 'SF_PRIVATE_KEY\nSLACK_BOT_TOKEN\nPAT_TOKEN\n' > "$MB/secrets.txt"; rm -f "$MB/pk.ver"
+        : > "$MOCK_CALL_LOG"
+    }
+
+    # --- 成功: 誤ったパスは拒否（更新されない）→ 同じ鍵で上書き（更新日時が進む・一覧は変わらない・鍵の中身は出ない）---
+    _reset_us
+    _run_scenario -y update-secret; rc=$?
+    [[ $rc -eq 0 ]] || sed 's/\x1b\[[0-9;]*m//g' "$MB/out.log" | tail -25
+    assert_exit_ok "$rc" "update-secret: 成功する"
+    assert_file_contains "$MB/out.log" "成功（" "update-secret: 結果が成功と表示される"
+    assert_equals "$(cat "$MB/pk.ver")" "1" "update-secret: SF_PRIVATE_KEY の更新は、1 回だけ（誤ったパスでは、更新しない）"
+    assert_file_not_contains "$MB/out.log" "BEGIN PRIVATE KEY" "update-secret: 秘密鍵の中身を表示しない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "repo delete" "update-secret: リポジトリは、削除しない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "secret delete" "update-secret: Secret は、削除しない"
+
+    # --- sf-update-secret が、実際には更新しない（更新日時が進まない）→ 失敗する ---
+    _reset_us
+    printf '#!/bin/bash\nread -r a; read -r b; read -r p; [[ -f "$p" ]] || exit 1\nexit 0\n' > "$MB/updsecret-noop.sh"; chmod +x "$MB/updsecret-noop.sh"
+    E2E_SF_UPDATE_SECRET="$MB/updsecret-noop.sh" _run_scenario -y update-secret; rc=$?
+    assert_exit_fail "$rc" "update-secret: 更新日時が進まなければ、失敗する"
+
+    # --- 誤ったパスでも、更新してしまう（拒否しない）→ 失敗する ---
+    _reset_us
+    printf '#!/bin/bash\nread -r a; read -r b; read -r p; read -r c\nprintf x | gh secret set SF_PRIVATE_KEY -R tamashimon-org/force-e2e-20260101-000000\n' > "$MB/updsecret-bad.sh"; chmod +x "$MB/updsecret-bad.sh"
+    E2E_SF_UPDATE_SECRET="$MB/updsecret-bad.sh" _run_scenario -y update-secret; rc=$?
+    assert_exit_fail "$rc" "update-secret: 誤ったパスでも更新してしまうなら、失敗する"
+
+    # --- 前提: 管理者用のクローンがない / 秘密鍵がない / Secret がない → 実行できない ---
+    _reset_us; rm -rf "$clone"
+    _run_scenario -y update-secret; rc=$?
+    assert_exit_fail "$rc" "update-secret: 管理者用のクローンがなければ、実行できない"
+    assert_file_contains "$MB/out.log" "実行できない" "update-secret: 「実行できない」と報告する"
+    _reset_us; rm -f "$key"
+    _run_scenario -y update-secret; rc=$?
+    assert_exit_fail "$rc" "update-secret: 秘密鍵がなければ、実行できない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "secret set" "update-secret: 実行できないときは、Secret を更新しない"
+    _reset_us
+    MOCK_GH_NO_PK=1 _run_scenario -y update-secret; rc=$?
+    assert_exit_fail "$rc" "update-secret: Secret SF_PRIVATE_KEY がなければ、実行できない"
+
+    # --- 開始の警告 ---
+    _reset_us
+    _run_scenario update-secret < <(printf 'N\n'); rc=$?
+    assert_exit_fail "$rc" "update-secret: 開始の確認で N → 中止する"
+    assert_file_contains "$MB/out.log" "書き込み（update-secret）" "update-secret: 警告に、書き込む内容が表示される"
+    assert_file_not_contains "$MOCK_CALL_LOG" "secret set" "update-secret: N のとき、Secret を更新しない"
+    unset E2E_SF_UPDATE_SECRET E2E_SECRET_WAIT E2E_CMD_POLL_SEC E2E_HEARTBEAT_SEC
+    teardown "$CB"
 }
 
 test_e2e_names
@@ -2805,5 +2983,7 @@ test_e2e_scenario_metasync_diff
 test_e2e_interrupt
 test_e2e_scenario_propagate_fail
 test_e2e_scenario_restart_org
+test_e2e_scenario_sync_wf
+test_e2e_scenario_update_secret
 
 print_summary

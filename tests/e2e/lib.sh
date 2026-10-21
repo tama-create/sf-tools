@@ -482,6 +482,12 @@ _e2e_gh() {
     run_with_timeout "${E2E_GH_TIMEOUT:-120}" gh "$@" </dev/null
 }
 
+# 標準入力から値を渡す gh（gh secret set NAME は、値を標準入力から読む）。_e2e_gh は、標準入力を捨てる（</dev/null）ため、
+# 値を渡す呼び出しに使うと、空の Secret ができる（manual-delete の元に戻す処理が、SLACK_BOT_TOKEN を空で戻していた）
+_e2e_gh_stdin() {
+    run_with_timeout "${E2E_GH_TIMEOUT:-120}" gh "$@"
+}
+
 _e2e_check_repo() {
     e2e_require_guard
     [[ "${1%%/*}" == "${E2E_OWNER:-}" ]] && e2e_is_target_repo "${1#*/}" \

@@ -390,8 +390,8 @@ Actions 上の実行は、コマンドによって扱いが違う。「全部拒
 | A3 PR の wf-validate の失敗 → 直して再検証 | ✅ L2（Slack 以外） | `scenario.sh validate-fail`（壊れた Apex の PR → 失敗・PR に「検証失敗」のコメント → 直して push → 成功・「検証成功」）。Slack の通知は未 |
 | A8 sf-restart | ✅ L2 | `scenario.sh restart-org`（接続先を staging の組織に切り替え → dry-run が新しい組織を使う → 元に戻す） |
 | B1 / X2-1 sf-init の中断と再開 | ✅ L1・L2（Phase 8） | init（5 つの止め方）。L2: `run.sh --interrupt`（実環境で Phase 8 の push を止め、「続きをやる」で再開 → いつもの確認）。Phase 3・10 の実環境での中断は未 |
-| B2 sf-update-secret | △ | secrets（L1）。L2 は未 |
-| B4 sf-sync-wf | △ | guards（X6-5。L1 のローカル部分）。L2 は未 |
+| B2 sf-update-secret | ✅ L1・L2 | secrets（L1）。L2: `scenario.sh update-secret`（同じ秘密鍵で上書き → `SF_PRIVATE_KEY` の更新日時が進む・誤ったパスは拒否される。あとのシナリオで、JWT ログインを確かめる） |
+| B4 sf-sync-wf | ✅ L1・L2 | guards（X6-5。L1 のローカル部分）。L2: `scenario.sh sync-wf`（管理者用のクローンの中だけ。改変 → 検出 → 雛形に直す・`--remove` の拒否と削除） |
 | B3 wf-metasync の実差分の反映 | ✅ L1・L2 | metasync（ローカルの同期の動作）。L2: `scenario.sh metasync-diff`（組織にだけ Apex を作る → wf-metasync → main に反映 → 組織・main を実行前の状態に戻す） |
 | C1 配布版（main）の通し | △ L2 | `scenario.sh dist-main`（SF_TOOLS_BRANCH 未設定で、ワークフローが sf-tools の main を使う。rr の直後だけ）。配布版での `sf-init` の通しは未 |
 | B5〜B8・C2〜C7 | — | L2・手動（未） |
@@ -627,7 +627,7 @@ Actions 上の実行は、コマンドによって扱いが違う。「全部拒
 | 3 | **e2e を GitHub Actions で動かす**: ガード（今は Actions 上では動かない）に、専用ワークフローだけの「実行してよい」印を足す（名前の形式・オーナーの一致は、そのまま）。認証情報（Secret）の登録（あなたが行う）。Windows → macOS の順。 | 実施済み（2026-10-21）。`development` への push で、Windows（全部 21 分 23 秒・119 件）→ macOS（クライアント側のみ 4 分 39 秒・56 件）が成功。原因の切り分けは 12.8 |
 | 4 | **Ruleset**: `main` に、「CI が緑」を必須のチェックとして入れる。**e2e は、必須にしない**（配布物が変わったときだけ動くため、必須にすると、動かない PR が永久に止まる。rr の前に、Claude が確認するルールで守る）。 | 実施済み（2026-10-21。`protect-main` に、必須チェック 11 個を追加。dev-reference 9.5） |
 | 5 | **定期実行（週 1 回・通知つき）**: `main`（利用者が受け取るもの）に対して、e2e を週 1 回、自動で動かし、失敗したら Slack に通知する。目的は、コードを変えていない間の外側の変化（`sf` の新しい版・Salesforce のリリース・Actions のイメージの更新・認証の期限切れ）の見張り。毎夜にはしない（外側の変化は週・月の単位で起きる。通知がないと意味がない）。e2e.yml が `main` に入ってから（schedule は既定のブランチのワークフローで動く） | 実装済み（2026-10-21。`e2e.yml` に schedule と、失敗時の Slack 通知 `notify`・`ci-notify.sh`。`main` に入ってから動く） |
-| 6 | **テストの穴（任意）**: `B4`・`B2`・`B6` など（8.1）。 | 未 |
+| 6 | **テストの穴（任意）**: B2・B4 の L2（`scenario.sh update-secret`・`sync-wf`）は実装済み（2026-10-21）。シナリオ 8 つを、Actions の Windows のジョブの最後で、自動で動かす。残り: B5〜B8・C2〜C7（OS 混在・手動が中心） | 一部実施済み（B2・B4。実環境の確認は、Actions の実行で行う） |
 
 ### 12.4 1 の設計（Windows の並列化）
 

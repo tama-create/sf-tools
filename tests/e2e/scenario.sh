@@ -32,6 +32,12 @@
 #                    staging は変わらない（X4-5）。main・staging に、コミットする（終了時に、そのファイルを削除する。2 層以上のリポジトリが要る）
 #   restart-org    : sf-restart.sh で、ジョブのクローンの接続先を、別の組織（staging の組織）に切り替える → 接続先が変わり、sf-dryrun が新しい組織を使う → 元の組織に戻す（A8。
 #                    鍵一式に staging の組織があるときだけ。ログインは、認証 URL への差し替え。終了時に、必ず、元の組織へ戻す）
+#   update-secret  : 管理者用のクローンで、sf-update-secret.sh の「1) 秘密鍵」を、同じ秘密鍵（~/.sf-jwt/force-XXXX/server.key）で実行 → Secret SF_PRIVATE_KEY の
+#                    更新日時が進む・ほかの Secret は変わらない・出力に秘密鍵が出ない・誤ったパスは拒否され、更新されない（B2）。値は変わらない（同じ鍵で上書き）。
+#                    このあとの validate-fail などが、上書きした鍵で、JWT ログインできることを、実際のワークフローで確かめる（順番を、その前にしている）
+#   sync-wf        : 管理者用のクローン（admin ブランチ）で、ワークフローを改変 → sf-sync-wf.sh --check が見つける → sf-sync-wf.sh が雛形の内容に直す
+#                    （コミット・push はしない）→ 雛形にあるファイルの --remove は拒否される・雛形にない不要なファイルは --remove で消せる（B4）。
+#                    クローンの中だけ（GitHub・組織へは、書き込まない）。終了時に、クローンの .github/workflows を、元（HEAD）に戻す
 #   manual-delete  : テスト用リポジトリの Secret（SLACK_BOT_TOKEN）と Variable（SLACK_CHANNEL_ID）を、手で削除 → sf-init.sh --status が
 #                    不足を見つけ、直し方を示す → 元に戻す → 診断が、元に戻る（書き込みあり。終了時に、必ず元に戻す）
 #
@@ -67,7 +73,7 @@ source "${E2E_SCRIPT_DIR}/lib.sh"
 # ------------------------------------------------------------------------------
 # 1. シナリオの一覧
 # ------------------------------------------------------------------------------
-SCENARIO_NAMES="log-secrets manual-delete validate-fail dist-main metasync-diff propagate-fail restart-org"   # 実行の順番どおり
+SCENARIO_NAMES="log-secrets manual-delete update-secret sync-wf validate-fail dist-main metasync-diff propagate-fail restart-org"   # 実行の順番どおり
 _scn_desc() {
     case "$1" in
         log-secrets)   echo "Actions のログ・PR のコメントに、秘密情報が出ていない（読み取りのみ）" ;;
@@ -76,6 +82,8 @@ _scn_desc() {
         dist-main)     echo "配布版（SF_TOOLS_BRANCH 未設定）で、sf-tools の main が使われる。rr の直後だけ（Variable を一時的に削除し、戻す）" ;;
         metasync-diff) echo "組織側だけの Apex が、wf-metasync で main に反映される（組織と main に書き込み、必ず戻す）" ;;
         propagate-fail) echo "main → staging の伝播がコンフリクトで失敗し、通知され、staging は変わらない（main・staging にファイルを置き、削除する）" ;;
+        update-secret) echo "sf-update-secret で秘密鍵を同じ鍵で上書き → 更新日時が進む・ほかは変わらない・誤ったパスは拒否される（同じ値で上書き。あとのシナリオが、JWT ログインを確かめる）" ;;
+        sync-wf)       echo "sf-sync-wf が、改変したワークフローを見つけて、雛形に戻す。--remove は、雛形にあるファイルを拒否し、不要なファイルだけ消す（クローンの中だけ）" ;;
         restart-org)   echo "sf-restart で接続先を staging の組織に切り替え、sf-dryrun が新しい組織を使う → 元に戻す（ジョブのクローンの接続設定を、一時的に変える）" ;;
         *) echo "" ;;
     esac
@@ -87,6 +95,8 @@ _scn_writes() {
         validate-fail) echo "テスト用ブランチ（e2e-vf-時刻）と PR を作り、wf-validate を動かします（組織へは dry-run のみ。マージしない）。終了時に、PR を閉じ、ブランチを削除します" ;;
         dist-main)     echo "Variable SF_TOOLS_BRANCH を一時的に削除し、テスト用ブランチ（e2e-dm-時刻）と PR で wf-validate を動かします（dry-run のみ）。終了時に、Variable を戻し、PR を閉じ、ブランチを削除します" ;;
         propagate-fail) echo "main と staging に、同じファイル（e2e-propagate-conflict.txt）の、違う内容をコミットし、wf-propagate を起動します（コンフリクトで失敗する想定）。終了時に、両方から、そのファイルを削除します" ;;
+        update-secret) echo "Secret SF_PRIVATE_KEY を、同じ秘密鍵（~/.sf-jwt/${REPO_NAME}/server.key）で上書きします（値は変わりません。更新日時だけが進みます）" ;;
+        sync-wf)       echo "管理者用のクローンの .github/workflows を、一時的に改変し（wf-validate.yml に 1 行・不要なファイル e2e-obsolete.yml）、sf-sync-wf.sh で直します。GitHub・組織へは書き込みません。終了時に、HEAD の状態へ戻します" ;;
         restart-org)   echo "ジョブのクローンの接続先を、sf-restart.sh で、staging の組織に切り替え（sf のエイリアス sf-tools-e2e-restart-STG を、一時的に作る）、dry-run を行います。終了時に、元の組織へ戻し、エイリアスを元の状態にします" ;;
         metasync-diff) echo "テスト用の組織に Apex（SfToolsE2eHello・SfToolsE2eHelloTest）を直接デプロイし、wf-metasync を起動します。main に、その Apex のファイルが、コミットされます（main にすでにあるものは、いったん外します）。終了時に、組織の Apex を削除し、main を実行前の状態に戻します" ;;
         *) echo "" ;;
@@ -164,9 +174,11 @@ RESTORE_APEX=0         # 1: 組織に Hello World の Apex を作った（終了
 RESTORE_MAIN_FILES=0   # 1: main の Hello World のファイルを、いじる（終了時に、削除して、実行前に有ったものを、戻す）
 RESTORE_RESTART_CLONE=""   # 接続先を切り替えたジョブのクローン（終了時に、元の組織へ戻す）
 RESTORE_RESTART_ALIAS=""   # 元の接続先のエイリアス
+RESTORE_SYNCWF_CLONE=""   # ワークフローを改変した管理者用のクローン（終了時に、.github/workflows を HEAD の状態へ戻し、不要なファイルを消す）
 RESTORE_PROP_FILE=0    # 1: main・staging に、propagate-fail のファイルを置いた（終了時に、両方から削除する）
 RESTORE_MAIN_KEEP=""   # 実行前に main に有った Hello World のファイル（スペース区切り。終了時に、元の本文で戻す）
 SCN_SF_TMP=""          # sf を使うシナリオの一時フォルダ（エイリアスの保存先を含む。終了時に、エイリアスを戻し、削除する）
+SCN_OBSOLETE_WF="e2e-obsolete.yml"   # sync-wf が、クローンに置く、雛形にないワークフロー（終了時に消す）
 SCN_PROP_FILE="e2e-propagate-conflict.txt"   # propagate-fail が、main・staging に置くファイル
 SCN_ALLOW_MAIN_COMMITS=0   # 1: このシナリオは、main にコミットが増えてよい（wf-metasync が反映するため）。main の SHA の比較から外す
 _scn_restore() {
@@ -236,6 +248,14 @@ _scn_restore() {
             log "INFO" "  元に戻しました: ジョブのクローンの接続先を、${RESTORE_RESTART_ALIAS} に戻しました"; RESTORE_RESTART_CLONE=""
         else
             log "ERROR" "  ジョブのクローンの接続先を、元（${RESTORE_RESTART_ALIAS}）に戻せませんでした（${RESTORE_RESTART_CLONE}）。そのフォルダで、bash ~/sf-tools/bin/sf-restart.sh を実行して、${RESTORE_RESTART_ALIAS} を選んでください。"; rc=1
+        fi
+    fi
+    if [[ -n "$RESTORE_SYNCWF_CLONE" ]]; then
+        # 改変したワークフローを、HEAD の状態へ戻す。作った不要なファイル（e2e-obsolete.yml）を消す（この 2 つだけ）
+        if git -C "$RESTORE_SYNCWF_CLONE" checkout -- .github/workflows 2>/dev/null             && rm -f "${RESTORE_SYNCWF_CLONE}/.github/workflows/${SCN_OBSOLETE_WF}"; then  # run 不使用: 後始末（このシナリオが作る決まった名前のファイルだけ）
+            log "INFO" "  元に戻しました: 管理者用のクローンの .github/workflows を、HEAD の状態にしました"; RESTORE_SYNCWF_CLONE=""
+        else
+            log "ERROR" "  管理者用のクローンの .github/workflows を、戻せませんでした（${RESTORE_SYNCWF_CLONE}）。git checkout -- .github/workflows を実行し、${SCN_OBSOLETE_WF} を削除してください。"; rc=1
         fi
     fi
     if [[ "$RESTORE_PROP_FILE" == "1" ]]; then
@@ -657,6 +677,114 @@ scn_restart_org() {
     _chk "接続先（target-org）が、元の ${alias0} に戻った" "$([[ "$(json_get "$cfg" target-org)" == "$alias0" ]] && echo 0 || echo 1)"
     user1=$(_scn_org_user "$clone" "$alias0") || user1=""  # VAR=$(cmd) のため run 不使用
     _chk "元の組織のユーザーに、戻った" "$([[ "$user1" == "$user0" ]] && echo 0 || echo 1)"
+}
+
+# sync-wf: sf-sync-wf.sh（B4）。管理者用のクローン（{作業フォルダ}/admin/force-XXXX。run.sh が作る。admin ブランチ）の中だけで確認する
+#   確認: 改変なしで、--check が成功する → wf-validate.yml に 1 行足すと、--check が失敗する（終了コード 1）・差分にそのファイル名が出る →
+#         sf-sync-wf.sh（確認に Y）が、雛形の内容で上書きする（--check が成功・コミット済みの内容と同じ・HEAD は変わらない = コミット・push しない）→
+#         雛形にあるファイルの --remove は、拒否される → 雛形にない不要なファイル（e2e-obsolete.yml）は、案内に出て、--remove で消せる
+#   書き込み: クローンの .github/workflows だけ（終了時に、HEAD の状態へ戻す）。GitHub・組織へは、書き込まない
+#   前提: 管理者用のクローンがある・環境ブランチ（main / staging / develop）の上ではない・作業ツリーがきれい
+#   E2E_SF_SYNC_WF: 実行する sf-sync-wf.sh を差し替える（テスト用）
+scn_sync_wf() {
+    local work="${E2E_HOME_ROOT}/${E2E_OWNER}/${PROJECT}" clone head0 branch0 wfdir=".github/workflows" target="wf-validate.yml"
+    local syncwf="${E2E_SF_SYNC_WF:-${SF_TOOLS_ROOT}/bin/sf-sync-wf.sh}"
+    clone="${work}/admin/${REPO_NAME}"
+    [[ -d "${clone}/.git" ]] || { SCN_SKIP="管理者用のクローン（${clone}）がありません（run.sh が作ります）"; return; }
+    [[ -f "${clone}/${wfdir}/${target}" ]] || { SCN_SKIP="${wfdir}/${target} が、クローンにありません"; return; }
+    branch0=$(git -C "$clone" symbolic-ref --short HEAD 2>/dev/null) || branch0=""  # VAR=$(cmd) のため run 不使用
+    case "$branch0" in
+        ""|main|staging|develop) SCN_SKIP="クローンのブランチが、環境ブランチ（または、ブランチの上ではない）です（${branch0:-なし}）。sf-sync-wf.sh は、環境ブランチでは動きません"; return ;;
+    esac
+    [[ -z "$(git -C "$clone" status --porcelain 2>/dev/null)" ]] || { SCN_SKIP="管理者用のクローンに、未コミットの変更があります（元に戻せなくなるため、実行しません）"; return; }  # VAR=$(cmd) のため run 不使用
+    _scn_shims_prepare || { SCN_SKIP="一時フォルダの準備に失敗しました"; return; }   # e2e_run_sf_cmd が使う一時フォルダ（E2E_TMP）を用意する
+    head0=$(git -C "$clone" rev-parse HEAD)  # VAR=$(cmd) のため run 不使用
+
+    RESTORE_SYNCWF_CLONE="$clone"   # 改変する前に登録する（途中で止まっても、終了時に戻す）
+
+    # --- 1. 改変なし: 差分なし ---
+    e2e_run_sf_cmd "sf-sync-wf-base" "$clone" "" "$syncwf" --check; _chk "改変なしで、sf-sync-wf.sh --check が成功した（差分なし）" $?
+
+    # --- 2. 改変 → --check が見つける ---
+    printf '
+# e2e: sync-wf の改変（雛形と違う）
+' >> "${clone}/${wfdir}/${target}"  # run 不使用: 検証用の改変（クローンの中だけ。終了時に戻す）
+    e2e_run_sf_cmd_refused "sf-sync-wf-drift" "$clone" "" "$syncwf" --check; _chk "改変したワークフローを、--check が見つけた（終了コード 0 以外）" $?
+    grep -qF "$target" "${E2E_TMP}/sf-sync-wf-drift.out"; _chk "差分の表示に、改変したファイル名（${target}）が出た" $?
+
+    # --- 3. 雛形の内容に直す（確認に Y。コミット・push はしない）---
+    e2e_run_sf_cmd "sf-sync-wf-fix" "$clone" "Y
+Y
+" "$syncwf"; _chk "sf-sync-wf.sh が、雛形の内容で上書きした" $?
+    e2e_run_sf_cmd "sf-sync-wf-recheck" "$clone" "" "$syncwf" --check; _chk "上書きのあと、--check が成功した（差分なし）" $?
+    git -C "$clone" diff --quiet -- "${wfdir}/${target}"; _chk "改変が消え、コミット済みの内容と同じに戻った" $?
+    _chk "コミットしていない（HEAD が変わらない）" "$([[ "$(git -C "$clone" rev-parse HEAD)" == "$head0" ]] && echo 0 || echo 1)"
+
+    # --- 4. --remove: 雛形にあるファイルは拒否され、雛形にないファイルだけ消せる ---
+    e2e_run_sf_cmd_refused "sf-sync-wf-remove-tpl" "$clone" "Y
+Y
+Y
+" "$syncwf" --remove "$target"; _chk "雛形にあるワークフローの --remove は、拒否された" $?
+    _chk "拒否されたファイルは、残っている" "$([[ -f "${clone}/${wfdir}/${target}" ]] && echo 0 || echo 1)"
+    printf 'name: e2e obsolete
+on: workflow_dispatch
+jobs: {}
+' > "${clone}/${wfdir}/${SCN_OBSOLETE_WF}"  # run 不使用: 検証用の不要なファイル（雛形にない。終了時に消す）
+    e2e_run_sf_cmd "sf-sync-wf-extra" "$clone" "" "$syncwf" --check
+    grep -qF "$SCN_OBSOLETE_WF" "${E2E_TMP}/sf-sync-wf-extra.out"; _chk "雛形にないワークフロー（${SCN_OBSOLETE_WF}）が、案内に出た" $?
+    e2e_run_sf_cmd "sf-sync-wf-remove-extra" "$clone" "Y
+Y
+Y
+" "$syncwf" --remove "$SCN_OBSOLETE_WF"; _chk "雛形にないワークフローを、--remove で削除した" $?
+    _chk "削除されて、ファイルがない" "$([[ ! -e "${clone}/${wfdir}/${SCN_OBSOLETE_WF}" ]] && echo 0 || echo 1)"
+    _chk "作業ツリーが、きれいに戻っている（コミット・push はしていない）" "$([[ -z "$(git -C "$clone" status --porcelain)" ]] && echo 0 || echo 1)"
+}
+
+# update-secret: sf-update-secret.sh（B2）。管理者用のクローンから、「1) 秘密鍵」を、sf-init が作った同じ秘密鍵で実行する
+#   確認: Secret SF_PRIVATE_KEY の更新日時（updated_at）が進む・Secret の名前の一覧は変わらない・出力に、秘密鍵の中身（PEM の見出し）が出ない・
+#         存在しない鍵のパスを渡すと、拒否され（終了コード 0 以外）、更新日時は変わらない
+#   書き込み: Secret SF_PRIVATE_KEY を、同じ値で上書きする（値は変わらない。元に戻す必要がない）
+#   前提: 管理者用のクローンがある・秘密鍵（~/.sf-jwt/force-XXXX/server.key）がある・Secret SF_PRIVATE_KEY がある
+#   E2E_SF_UPDATE_SECRET: 実行する sf-update-secret.sh を差し替える（テスト用）
+_scn_secret_updated_at() {   # 引数: Secret の名前。更新日時（ISO 8601）を返す。取得できなければ、戻り値 1
+    _e2e_gh api "repos/${REPO_FULL}/actions/secrets/$1" --jq .updated_at 2>/dev/null | tr -d '[:space:]'  # パイプのみのため run 不使用
+    return "${PIPESTATUS[0]}"
+}
+scn_update_secret() {
+    local work="${E2E_HOME_ROOT}/${E2E_OWNER}/${PROJECT}" clone key before after names_before names_after
+    local upd="${E2E_SF_UPDATE_SECRET:-${SF_TOOLS_ROOT}/bin/sf-update-secret.sh}"
+    clone="${work}/admin/${REPO_NAME}"
+    key="${HOME}/.sf-jwt/${REPO_NAME}/server.key"
+    [[ -d "${clone}/.git" ]] || { SCN_SKIP="管理者用のクローン（${clone}）がありません（run.sh が作ります）"; return; }
+    [[ -f "$key" ]] || { SCN_SKIP="秘密鍵（${key}）がありません（sf-init が作るものです）"; return; }
+    before=$(_scn_secret_updated_at SF_PRIVATE_KEY) && [[ -n "$before" ]] || { SCN_SKIP="Secret SF_PRIVATE_KEY の更新日時を取得できません（Secret がありません）"; return; }  # VAR=$(cmd) のため run 不使用
+    names_before=$(_scn_names secret) || { SCN_SKIP="Secret の一覧を取得できません"; return; }  # VAR=$(cmd) のため run 不使用
+    _scn_shims_prepare || { SCN_SKIP="一時フォルダの準備に失敗しました"; return; }   # e2e_run_sf_cmd が使う一時フォルダ（E2E_TMP）を用意する
+
+    # --- 存在しないパス: 拒否され、更新されない ---
+    e2e_run_sf_cmd_refused "sf-update-secret-badpath" "$clone" "Y
+1
+${work}/no-such-dir/server.key
+" "$upd"; _chk "存在しない鍵のパスは、拒否された（終了コード 0 以外）" $?
+    after=$(_scn_secret_updated_at SF_PRIVATE_KEY) || after=""  # VAR=$(cmd) のため run 不使用
+    _chk "拒否されたとき、SF_PRIVATE_KEY は更新されていない" "$([[ "$after" == "$before" ]] && echo 0 || echo 1)"
+
+    # --- 同じ秘密鍵で上書き: 更新日時が進む（更新日時は、秒の単位のため、少し待ってから行う）---
+    sleep "${E2E_SECRET_WAIT:-2}"  # run 不使用: 待機（更新日時が、同じ秒にならないように）
+    e2e_run_sf_cmd "sf-update-secret-key" "$clone" "Y
+1
+${key}
+Y
+" "$upd"; _chk "sf-update-secret.sh で、秘密鍵を、同じ鍵で上書きした" $?
+    after=$(_scn_secret_updated_at SF_PRIVATE_KEY) || after=""  # VAR=$(cmd) のため run 不使用
+    _chk "SF_PRIVATE_KEY の更新日時が、進んだ（${before} → ${after:-取得できません}）" "$([[ -n "$after" && "$after" > "$before" ]] && echo 0 || echo 1)"
+    names_after=$(_scn_names secret) || names_after=""  # VAR=$(cmd) のため run 不使用
+    _chk "Secret の名前の一覧は、変わらない（ほかの Secret を、触っていない）" "$([[ "$names_after" == "$names_before" ]] && echo 0 || echo 1)"
+    if grep -q "BEGIN" "${E2E_TMP}/sf-update-secret-key.out"; then
+        _chk "出力に、秘密鍵の中身（PEM の見出し）が出ていない" 1
+    else
+        _chk "出力に、秘密鍵の中身（PEM の見出し）が出ていない" 0
+    fi
 }
 
 # ------------------------------------------------------------------------------

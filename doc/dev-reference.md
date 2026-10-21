@@ -865,7 +865,7 @@ sf-tools の `main` への反映は、全ユーザーへの配布と同義であ
 | 確認項目 | 方法 |
 |---|---|
 | テスト | `development` の最新のコミットで、GitHub Actions の全件テスト・shellcheck・結合テスト L1 が、すべて緑（`gh run list --branch development` で確認する。手元で全件を回さない） |
-| `sf-init.sh` を変更した場合 | 検証環境の新規 force-* を作成し、最後まで通ること。`bash tests/e2e/run.sh` で自動化できる（9.6） |
+| `sf-init.sh` を変更した場合 | 検証環境の新規 force-* を作成し、最後まで通ること。GitHub Actions の `e2e.yml`（`development` への push で自動。9.6）が成功していること。確認: `gh run list --workflow e2e.yml --branch development` で、配布物を変えた最新のコミット以降の実行が success（手元の `bash tests/e2e/run.sh` は、Actions を使えないときだけ） |
 | ワークフロー・`sf-metasync.sh` を変更した場合 | `wf-metasync` を `workflow_dispatch` で手動実行して成功すること |
 | `sf-release.sh` / `wf-validate` / `wf-release` を変更した場合 | デプロイ対象を含む PR を作り、`wf-validate` が通ること（動作確認のみの PR はマージせずに閉じる。マージすると `wf-release` が実際にデプロイする） |
 
@@ -873,7 +873,7 @@ sf-tools の `main` への反映は、全ユーザーへの配布と同義であ
 
 ### 9.4 リリース（rr）
 
-1. 9.3 の確認が完了している（配布物のパスの変更がないときは、全件テストと CI の成功だけでよい）
+1. 9.3 の確認が完了している（配布物のパスの変更がないときは、全件テストと CI の成功だけでよい。配布物のパスの変更があるときは、`e2e.yml` の成功も必要）
 2. 「rr」の指示で、`development` → `main` の PR を作成してマージする（手順は `CLAUDE.md` 1.3.2）
 3. マージ後、`main` の内容を検証環境の force-* でもう一度確認する
 
@@ -986,6 +986,8 @@ sf-tools の `main` への反映は、全ユーザーへの配布と同義であ
 | Windows 11（Git Bash。`C:\Git\bin\bash.exe -l`） | 5.x | OpenSSL 3.5（`/ucrt64/bin/openssl`） | 5344f40 | 2026-10-18 | e2e: 119 件成功 / 0 件失敗（1 層・既定。`--add-tier` の確認を含む） |
 | Windows 11（Git Bash。`C:\Git\bin\bash.exe -l`） | 5.3.15 | OpenSSL 3.5.9 | 1aa67b3 | 2026-10-19 | e2e: 119 件成功 / 0 件失敗（1 層。`sf-push` の変更後の確認。`--add-tier` の確認を含む） |
 | Windows 11（Git Bash。`C:\Git\bin\bash.exe -l`） | 5.3.15 | OpenSSL 3.5.9 | fed6180 | 2026-10-19 | e2e: 119 件成功 / 0 件失敗（1 層。結合テスト L1 の追加分と、見つかった不具合 4 件の修正後の確認。`--add-tier` の確認を含む。43 分 41 秒） |
+| Windows（GitHub Actions の `windows-latest`。`e2e.yml`） | 5.3.15 | OpenSSL 3.5.9 | 4ec3c92 | 2026-10-21 | e2e: 119 件成功 / 0 件失敗（1 層。`--add-tier` の確認と、サーバー側のワークフローの確認を含む。21 分 23 秒） |
+| macOS（GitHub Actions の `macos-latest`・arm64。`e2e.yml`） | 3.2.57 | OpenSSL 3.6.5 | 4ec3c92 | 2026-10-21 | e2e: 56 件成功 / 0 件失敗（1 層。`--no-actions --no-add-tier`。クライアント側のみ。4 分 39 秒） |
 | Windows・macOS・Linux（GitHub Actions の `windows-latest` / `macos-latest` / `ubuntu-latest`） | 5.x / 3.2 / 5.x | — | 86670c8 | 2026-10-20 | 全件テスト・shellcheck・結合テスト L1 が、すべて成功（全 11 ジョブ）。Windows は `--shard` の 6 ジョブに分け、全体 11 分 24 秒（分ける前は約 21 分） |
 | Windows・macOS・Linux（GitHub Actions の `windows-latest` / `macos-latest` / `ubuntu-latest`） | 5.x / 3.2 / 5.x | — | 1aa67b3 | 2026-10-19 | 全件テスト・shellcheck・結合テスト L1（`tests/test_integration.sh`）が、3 つの OS ですべて成功 |
 | Windows 11（Git Bash。`C:\Git\bin\bash.exe -l`） | 5.3.15 | OpenSSL 3.5.9 | a22fe4c | 2026-10-20 | e2e シナリオ（`tests/e2e/scenario.sh`）: `log-secrets` 13 件・`manual-delete` 15 件・`validate-fail` 13 件・`metasync-diff` 18 件が成功。`dist-main` 10 件は、rr の直後（`origin/main` と `origin/development` の配布物に差がない）の `a22fe4c` で成功（配布版で sf-tools の `main` が使われる）。すべて実環境（テスト用の組織・リポジトリ）で、終了時に元の状態へ戻したことを確認 |

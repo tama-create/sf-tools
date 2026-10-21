@@ -24,11 +24,11 @@
 | 変更中 | `run` ラッパー必須・日本語コメント・UTF-8/LF 維持 |
 | 変更後 | 手元は `bash tests/run_tests.sh --changed`（変えたファイルのテスト）だけ → PASS したら mm を依頼。**全件は手元で回さない（CI が正）** |
 | mm 後 | push で、GitHub Actions が全件（Windows・macOS・Linux）と shellcheck を自動で動かす。**Claude が結果を確認して報告する。赤なら直して、もう一度 mm を依頼する**（約 12 分） |
-| 検証 | **Claude が `bash tests/e2e/run.sh` を実行して報告**（検証環境 = `SF_TOOLS_BRANCH=development`。約 30 分。起動のしかた・確認の内容は `doc/dev-reference.md` 9.6）。ユーザーに手動の確認を頼むのは、e2e で見えないことだけ。**e2e を Actions に移したら、Actions の結果が正になる**（`doc/integration-test-plan.md` 12） |
+| 検証 | **e2e は GitHub Actions（`e2e.yml`）の結果が正。** 配布物（下記）・`tests/e2e/` が変わった `development` への push で、自動で動く（Windows の全部 約 25 分 → macOS のクライアント側 約 5 分）。**Claude が結果を確認して報告する。手元では動かさない**（同じ 3 つの組織を取り合う。確認の内容は `doc/dev-reference.md` 9.6）。ユーザーに手動の確認を頼むのは、e2e で見えないことだけ |
 | リリース | CI 全緑と検証 OK の報告後に rr を依頼 |
 
 > **mm の前に、`--changed` の PASS は必須。PASS 確認なしの mm 依頼は禁止。全件は、mm 後の CI の結果が正（手元の Windows は遅く、全件は 2 時間以上かかることもある。手元で全件が必要なときだけ、WSL で `run_tests.sh`）。CI が赤のまま、PR・rr を進めない。**
-> **rr の前に、CI の全件が緑（`development` の最新のコミットで）が必須。さらに、`main` との差分に配布物のパス（`bin/` `lib/` `phases/` `hooks/` `templates/` `config/`）が含まれるときは、e2e による実動作確認の結果も必須。** 配布物のパスの変更がなく、`tests/` `doc/` `.github/workflows/test.yml` などだけの変更なら、e2e は不要（確認: `git diff --stat origin/main...development -- bin lib phases hooks templates config` が空）。必須の項目が欠けた rr 依頼は断ること。
+> **rr の前に、CI の全件が緑（`development` の最新のコミットで）が必須。さらに、`main` との差分に配布物のパス（`bin/` `lib/` `phases/` `hooks/` `templates/` `config/`）が含まれるときは、e2e（Actions の `e2e.yml`）が、配布物を変えた最新のコミット以降で成功していることも必須**（確認: `gh run list --workflow e2e.yml --branch development`）。** 配布物のパスの変更がなく、`tests/` `doc/` `.github/workflows/test.yml` などだけの変更なら、e2e は不要（確認: `git diff --stat origin/main...development -- bin lib phases hooks templates config` が空）。必須の項目が欠けた rr 依頼は断ること。
 > **変更に e2e の確認が足りないときは、e2e のほうを広げる**（手動の検証を、ユーザーに頼まない）。
 
 ### 1.3 mm / rr 実行手順

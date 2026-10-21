@@ -77,7 +77,7 @@ case "$*" in
     "secret list"*"--jq .[].name")       cat "${MOCK_CALL_LOG%/*}/secrets.txt" 2>/dev/null; exit 0 ;;
     "secret delete "*)                   _d="${MOCK_CALL_LOG%/*}"; grep -vx "$3" "$_d/secrets.txt" > "$_d/secrets.new" 2>/dev/null; mv "$_d/secrets.new" "$_d/secrets.txt"; exit 0 ;;
     "secret set "*)
-        _d="${MOCK_CALL_LOG%/*}"; cat > /dev/null
+        _d="${MOCK_CALL_LOG%/*}"; cat > "$_d/secretval.$3"   # 標準入力で渡された値を記録する（空で設定されたかを、確かめるため）
         if [[ "${MOCK_GH_SECRET_SET_FAIL_FIRST:-}" == "1" && ! -f "$_d/secretset.failed" ]]; then : > "$_d/secretset.failed"; echo "HTTP 502" >&2; exit 1; fi
         if [[ "$3" == "SF_PRIVATE_KEY" ]]; then echo $(( $(cat "$_d/pk.ver" 2>/dev/null || echo 0) + 1 )) > "$_d/pk.ver"; grep -qx "$3" "$_d/secrets.txt" 2>/dev/null || echo "$3" >> "$_d/secrets.txt"; exit 0; fi
         echo "$3" >> "$_d/secrets.txt"; exit 0 ;;
@@ -2127,6 +2127,7 @@ test_e2e_scenario_manual_delete() {
     assert_file_contains "$MB/out.log" "成功（15 件）" "manual-delete: 15 件の確認が成功する"
     assert_file_contains "$MB/out.log" "sf-init.sh --only 7" "manual-delete: 直し方が、確認されている"
     assert_equals "$(sort "$MB/secrets.txt" | tr '\n' ',')" "PAT_TOKEN,SLACK_BOT_TOKEN," "manual-delete: Secret が、元の一覧に戻る"
+    assert_equals "$(cat "$MB/secretval.SLACK_BOT_TOKEN" 2>/dev/null)" "xoxb-fakeslack" "manual-delete: 戻した Secret の値が、鍵一式の Token と同じ（空で戻さない）"
     assert_equals "$(grep '^SLACK_CHANNEL_ID=' "$MB/vars.txt")" "SLACK_CHANNEL_ID=C01ABCDEFGH" "manual-delete: Variable が、元の値で戻る"
     assert_equals "$(sort "$MB/vars.txt" | tr '\n' ',')" "SF_USERNAME_PROD=a@example.com,SLACK_CHANNEL_ID=C01ABCDEFGH," "manual-delete: 触っていない Variable は、そのまま"
     assert_equals "$(grep -c 'secret delete SLACK_BOT_TOKEN' "$MOCK_CALL_LOG")" "1" "manual-delete: 削除するのは、SLACK_BOT_TOKEN だけ（1 回）"
@@ -2498,6 +2499,14 @@ test_e2e_scenario_propagate_fail() {
     assert_file_not_contains "$MOCK_CALL_LOG" "pr merge" "propagate-fail: PR は、扱わない"
 
     # --- 伝播が成功してしまった（衝突を検出できない）→ 失敗（それでも、削除する）---
+    # --- 続けて動かす: main にコミットしてよいシナリオのあとも、次のシナリオが、「main が変わった」と誤判定されない（基準を更新する）---
+    _reset_pf; rm -f "$MB/mainsha.cnt"   # main の SHA の呼び出し回数を、0 に戻す（1 回目は、元の SHA・2 回目以降は、変わった SHA を返すため）
+    MOCK_GH_MAIN_SHA_CHANGE=1 MOCK_GH_RUN_IDS="11" MOCK_GH_CONCL_LIST="failure" MOCK_GH_RUN_LOG="$ok_log" _run_scenario -y propagate-fail log-secrets; rc=$?
+    [[ $rc -eq 0 ]] || sed 's/\x1b\[[0-9;]*m//g' "$MB/out.log" | tail -15
+    assert_exit_ok "$rc" "propagate-fail → log-secrets: 続けて動かしても、成功する（main の基準を更新する）"
+    assert_file_contains "$MB/out.log" "log-secrets: 成功" "propagate-fail → log-secrets: あとのシナリオも、実行される（状態が変わったと誤判定しない）"
+    assert_file_not_contains "$MB/out.log" "状態（main の SHA" "propagate-fail → log-secrets: 状態の変化として、報告されない"
+
     _reset_pf
     MOCK_GH_CONCL_LIST="success" MOCK_GH_RUN_LOG="$ok_log" _run_scenario -y propagate-fail; rc=$?
     assert_exit_fail "$rc" "propagate-fail: wf-propagate が成功してしまったら、失敗する"
@@ -2835,6 +2844,10 @@ exec "%s" "$@"
 ' "$MB/syncwf-stub.sh" > "$MB/syncwf-broken.sh"; chmod +x "$MB/syncwf-broken.sh"
     E2E_SF_SYNC_WF="$MB/syncwf-broken.sh" _run_scenario -y sync-wf; rc=$?
     assert_exit_fail "$rc" "sync-wf: 雛形に戻らなければ、失敗する"
+    if [[ -n "$(git -C "$clone" status --porcelain)" ]]; then   # 戻っていないとき: 原因を調べるために、出力を表示する
+        sed 's/\x1b\[[0-9;]*m//g' "$MB/out.log" | grep -E "元に戻し|戻せません|ERROR|NG|checkout|fatal|error" | tail -15
+        git -C "$clone" status --short; git -C "$clone" diff | head -12; git -C "$clone" config --list | grep -iE "autocrlf|safecrlf|eol" || true
+    fi
     assert_equals "$(git -C "$clone" status --porcelain)" "" "sync-wf: 失敗しても、終了時に、クローンを元に戻す"
 
     # --- 前提: クローンがない / 環境ブランチの上 / 未コミットの変更 → 実行できない ---

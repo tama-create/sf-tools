@@ -185,7 +185,7 @@ _scn_restore() {
     local rc=0
     if [[ -n "$RESTORE_SECRET" ]]; then
         # Secret の値は、読めない。鍵一式の値で戻せる SLACK_BOT_TOKEN だけを、削除の対象にしている
-        if printf '%s' "$E2E_SLACK_BOT_TOKEN" | _e2e_gh secret set "$RESTORE_SECRET" -R "$REPO_FULL" >/dev/null 2>&1; then
+        if printf '%s' "$E2E_SLACK_BOT_TOKEN" | _e2e_gh_stdin secret set "$RESTORE_SECRET" -R "$REPO_FULL" >/dev/null 2>&1; then
             log "INFO" "  元に戻しました: Secret ${RESTORE_SECRET}"; RESTORE_SECRET=""
         else
             log "ERROR" "  Secret ${RESTORE_SECRET} を、元に戻せませんでした（${REPO_FULL}）。手で、gh secret set ${RESTORE_SECRET} -R ${REPO_FULL} を実行してください。"; rc=1
@@ -825,6 +825,9 @@ for name in "${SELECTED[@]}"; do
         SUMMARY+=("（状態が変わったため、以降のシナリオは実行していません）")
         break
     fi
+    # main にコミットしてよいシナリオのあとは、main の基準を、いまの状態に更新する（続くシナリオが、前のシナリオのコミットを、変化と見なさないため。
+    #   ブランチ・PR は、上で比べて、同じと確かめ済み）
+    [[ $SCN_ALLOW_MAIN_COMMITS -eq 1 ]] && STATE_BEFORE="$STATE_AFTER"
 done
 
 # ------------------------------------------------------------------------------

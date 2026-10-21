@@ -679,3 +679,11 @@ Actions 上の実行は、コマンドによって扱いが違う。「全部拒
   - **原因**: sf-init の Phase 4（`sf-install.sh`）が、24 時間以内に更新していなければ、`sf-upgrade.sh`（`npm install -g @salesforce/cli@latest` など）を、**バックグラウンドで起動**する。使い捨ての Actions のサーバーは、毎回「初回」になり、e2e の実行中に `sf` が入れ替わった（macOS のログで、起動の約 20 秒後に失敗）。
   - **対策**: `e2e.yml` の準備の手順で、更新済みの印（`~/.sf-tools-last-update`）を先に置く（クライアント PC の 2 回目以降と同じ状態）。以降、2 回連続で成功。
 - **ログの公開対策（2026-10-21）**: ワークフローのログは公開される。Variables（`E2E_OWNER`・`E2E_GH_USER`・`E2E_SLACK_CHANNEL_ID`）は、伏せられず、ログの先頭の `env:` に出る。また、`sf` のログイン時の表示に、組織のユーザー名・組織 ID・My Domain の URL が出る（Secret ではないため、GitHub は伏せない）。対策として、Variables を Secrets に移し、`tests/e2e/ci-mask.sh`（e2e の実行の前に、組織の ID・ユーザー名・アクセストークン・URL を調べて `::add-mask::` で伏せる）を足した。対策より前の実行（コミット a5d4653〜4ec3c92）のログには、値が残っている（削除するなら `gh run delete`）。**移行の完了（2026-10-21）**: 3 つを Secrets に登録し、`e2e.yml` から `vars.` を外した（`|| vars.X` の移行用の書き方も不要になった）。古い Variables 3 つは、新しい e2e が成功してから削除する。
+
+### 12.9 シナリオ 8 つを、Actions で初めて動かした結果と、見つかった不具合（2026-10-21・コミット 644aa16）
+
+- **結果**: `log-secrets` 13・`manual-delete` 15・**`update-secret` 6（新規）**・**`sync-wf` 13（新規）**・`validate-fail` 13・`metasync-diff` 18 が成功。`update-secret` で上書きした秘密鍵で、あとの `validate-fail`・`metasync-diff` が、JWT ログインで成功した（鍵の形式は壊れていない）。`propagate-fail`（Slack の確認 1 件）と `restart-org`（状態の比較）が失敗した。
+- **不具合 1（`manual-delete` の元に戻す処理）**: `_e2e_gh` は、標準入力を `/dev/null` にする（`</dev/null`）。`printf ... | _e2e_gh secret set` は、トークンを渡せず、**空の Secret ができていた**（手元でも、シナリオを 1 つずつ動かしていたため、気づかなかった）。続く `propagate-fail` の Slack 通知が `not_authed` になって、見つけた。標準入力を捨てない `_e2e_gh_stdin` を足して、直した。単体テストに、「戻した Secret の値が、鍵一式の Token と同じ」を追加（修正なしだと失敗することを確認）。
+- **不具合 2（状態の比較の基準）**: `scenario.sh` は、実行の前後で、`main` の SHA・ブランチ・PR の数を比べる。基準は、最初の 1 回だけ取るため、`main` にコミットしてよいシナリオ（`metasync-diff`・`propagate-fail`）のあとの、次のシナリオが、「`main` が変わった」と誤判定されていた（続けて動かすのが初めてだったため、表に出た）。`main` にコミットしてよいシナリオのあとは、基準を更新する。単体テストに、続けて動かすケースを追加（修正なしだと失敗することを確認）。
+- **未解決（通常の CI）**: Windows の 3/6 だけで、`sync-wf` の単体テスト「失敗しても、終了時に、クローンを元に戻す」が、再現して失敗する（手元の Windows では、CI と同じ条件でも通る）。原因を調べるため、失敗したときに、シナリオの出力・`git status`・`git diff`・改行の設定を表示するようにした。
+

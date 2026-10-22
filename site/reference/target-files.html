@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ターゲットファイルの書き方 | sf-tools ドキュメント</title>
+<meta name="description" content="deploy-target.txt と remove-target.txt の書き方。">
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body data-root="../">
+<header id="top"></header>
+<div class="layout">
+<nav id="side" aria-label="目次"></nav>
+<main id="doc" class="doc">
+
+<h1>ターゲットファイルの書き方</h1>
+<p class="lead">デプロイする対象と、削除する対象を、2 つのファイルに書きます。<code>release/&lt;ブランチ名&gt;/</code> の下に置きます。</p>
+
+<table>
+  <thead><tr><th>ファイル</th><th>役割</th></tr></thead>
+  <tbody>
+    <tr><td><code>deploy-target.txt</code></td><td>デプロイするメタデータを列挙する</td></tr>
+    <tr><td><code>remove-target.txt</code></td><td>削除するメタデータを列挙する</td></tr>
+  </tbody>
+</table>
+
+<h2 id="deploy">1. <code>deploy-target.txt</code></h2>
+<pre><code>[files]
+# ファイルパスで指定
+force-app/main/default/classes/MyController.cls
+force-app/main/default/classes/MyControllerTest.cls
+force-app/main/default/lwc/myComponent
+
+[members]
+# メタデータ種別:メンバー名
+# CustomLabel:MyLabel
+# Profile:Admin</code></pre>
+
+<h3>1.1 ルール</h3>
+<ul>
+  <li><code>[files]</code> と <code>[members]</code> の 2 つのセクションで構成します。</li>
+  <li>行頭の <code>#</code> はコメントです。</li>
+  <li>空行は無視されます。</li>
+  <li><code>@isTest</code> を持つ <code>.cls</code> ファイルを書くと、<code>sf-release.sh</code> が <code>--test-level RunSpecifiedTests --tests &lt;クラス名&gt;</code>（クラスごとに繰り返す）を、自動で設定します。</li>
+  <li>テストクラスを書くかどうかは、利用者の責任です。ローカルにあるテストクラスの書き忘れは、<code>sf-check.sh</code> が警告で知らせます。</li>
+</ul>
+
+<h2 id="remove">2. <code>remove-target.txt</code></h2>
+<pre><code># 削除対象のパスを列挙
+force-app/main/default/classes/OldClass.cls</code></pre>
+
+<div class="box">
+  <div class="title">書いたあとは</div>
+  <p>構文は、<code>git commit</code> のときに自動で確認されます（<a href="commands-auto.html#sf-precommit">pre-commit フック</a>）。手動で確認するなら <a href="commands-dev.html#sf-check"><code>sf-check.sh</code></a> です。確認の内容（パスの存在・書式・種類の可否・テストクラスの不足）は、そちらにあります。</p>
+</div>
+
+</main>
+<aside id="toc"></aside>
+</div>
+<footer id="foot"></footer>
+<script src="../assets/site.js"></script>
+</body>
+</html>

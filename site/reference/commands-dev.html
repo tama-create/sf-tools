@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>開発者向けコマンド | sf-tools ドキュメント</title>
+<meta name="description" content="sf-job・sf-start・sf-push・sf-next・sf-release など、開発者が使うコマンドの詳細。">
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body data-root="../">
+<header id="top"></header>
+<div class="layout">
+<nav id="side" aria-label="目次"></nav>
+<main id="doc" class="doc">
+
+<h1>開発者向けコマンド</h1>
+<p class="lead">開発者が日々使うコマンドの、詳しい説明です。全体の一覧は <a href="commands.html">コマンド一覧</a> にあります。</p>
+
+<h2 id="sf-job"><code>sf-job.sh</code></h2>
+<pre><code>sf-job.sh</code></pre>
+<p>新しい作業（ブランチ）を始めるときの、オールインワンのスクリプトです。作業フォルダ（作業単位のフォルダを置く場所）で実行します。</p>
+<h4>主な処理</h4>
+<ul>
+  <li>ジョブ名（例: <code>JOB-20260323</code>）を入力して、ブランチを作る</li>
+  <li><code>git worktree</code> または <code>git clone</code> で、作業ディレクトリを作る</li>
+  <li><code>sf-start.sh</code> を自動で起動する（ログイン・フック設定・VS Code の起動）</li>
+</ul>
+<h4>補足</h4>
+<ul>
+  <li>ブランチの作成から VS Code の起動まで、すべて自動です。<strong>新しい作業は、必ずここから始めます。</strong></li>
+  <li>環境ブランチと管理者用のブランチの名前（<code>main</code> / <code>staging</code> / <code>develop</code> / <code>admin</code>）は、ジョブ名に使えません。</li>
+  <li>GitHub 上に同じ名前のブランチがすでにあるときは、最後のコミットの作者と日時を表示して、確認します。
+    <ul>
+      <li><code>Y</code>: そのブランチを使って続ける（ブランチを作ったあとに clone が失敗した、前回のジョブの続き）</li>
+      <li><code>N</code>: 別のジョブ名にする。ほかの人のジョブのブランチなら、<code>N</code> にしてください</li>
+    </ul>
+  </li>
+  <li><code>--project</code> だけを指定して、同じプロジェクト名のクローンが複数のオーナーにあるときは、最初のものを黙って使わず、オーナーを選ばせます。</li>
+  <li><code>force-*</code> フォルダの内側では実行できません。</li>
+</ul>
+
+<h2 id="sf-start"><code>sf-start.sh</code></h2>
+<pre><code>sf-start.sh</code></pre>
+<p>既存のブランチで、開発環境を起動し直します。<code>force-*</code> フォルダの中で実行します。</p>
+<h4>役割</h4>
+<ul>
+  <li>組織への接続を確認し、必要なときだけログインする</li>
+  <li><code>.sf/config.json</code> と <code>.sfdx/sfdx-config.json</code> を更新する</li>
+  <li><code>code .</code> を実行する</li>
+  <li><code>sf-install.sh</code> を、バックグラウンドで実行する</li>
+</ul>
+<h4>補足</h4>
+<ul>
+  <li><code>sf-job.sh</code> が内部で自動で呼ぶので、<strong>新しい作業のときは、直接実行する必要はありません。</strong></li>
+  <li>前日の続きなど、既存のブランチに戻るときに使います。</li>
+</ul>
+
+<h2 id="sf-launcher"><code>sf-launcher.sh</code>（ランチャー）</h2>
+<pre><code>sfl          # メニュー形式で選択
+sflf         # fzf でインクリメンタル検索
+sfl 4        # 番号を直接指定して、すぐ実行</code></pre>
+<p>sf-tools の主なコマンドを、メニューから選んで実行できます。<code>force-*</code> フォルダの中で使います。</p>
+<pre><code>  ──────────────────────────────────────────────────
+  >> Launcher <<
+  ──────────────────────────────────────────────────
+  [1] Check      ターゲットファイルの構文チェック
+  [2] Push       変更をコミット & プッシュ
+  [3] Next       次の PR 先ブランチを確認
+  [4] Dryrun     現在接続中の組織へリリース検証
+  [5] Deploy     現在接続中の組織へリリース
+  [6] Start      開発環境を起動（Salesforce ログイン・VSCode 起動）
+  [7] Restart    接続組織を切り替えて Start 実行
+  ──────────────────────────────────────────────────
+  番号を入力 (1-7 / q で終了):</code></pre>
+<p>VS Code の中では、<code>start</code> と <code>restart</code> は表示されません（二重に起動しないため）。</p>
+
+<h2 id="sf-check"><code>sf-check.sh</code></h2>
+<pre><code>sf-check.sh [deploy-target.txt] [remove-target.txt]</code></pre>
+<p>ターゲットファイルの構文を確認します。通常は、<code>sf-release.sh</code> や <code>sf-prepush.sh</code> から自動で実行されます。</p>
+<h4>確認する内容</h4>
+<ul>
+  <li><strong><code>[files]</code> セクション:</strong> 書いたパスが、リポジトリの中にあるか。絶対パスや <code>..</code> を含むパスなど、リポジトリの外を指すパスは、存在していてもエラーです。</li>
+  <li><strong><code>[members]</code> セクション:</strong> <code>種別名:メンバー名</code> の書式になっているか。</li>
+  <li><strong>種類の可否:</strong> <code>config/metadata-capability.txt</code>（<code>sf-typecheck.sh</code> が、実際の組織で確かめた表）で、API ではリリース・削除できないと確認済み（<code>ng</code>）の種類を書くと、エラーにします。条件によってできないことがある種類（<code>limited</code>。権限・使用中・標準のものなど）は、警告にします。組織の権限でできる場合は、環境変数 <code>SF_CHECK_IGNORE_CAPABILITY=1</code> で、この確認を省略できます。</li>
+  <li><strong>テストクラスの不足:</strong> Apex クラス（通常のクラス）に対応するテストクラスがローカルにあるのに、<code>deploy-target.txt</code> に含まれていないときは、警告を出します（エラーにはなりません）。
+    <ul>
+      <li>手順 A: 命名規則（<code>MyClassTest.cls</code> / <code>MyClass_Test.cls</code>）で、同じフォルダを探す</li>
+      <li>手順 B: A で見つからなければ、<code>@isTest</code> を含む <code>.cls</code> ファイルを、内容で探す</li>
+      <li>本番や Sandbox にすでにあるテストクラスは、含めなくてよいため、警告にとどめています。</li>
+    </ul>
+  </li>
+</ul>
+<h4>補足</h4>
+<ul>
+  <li>引数を省略すると、現在のブランチの <code>release/&lt;ブランチ名&gt;/</code> の下を、自動で探します。</li>
+  <li>終了コードは、<code>0</code> が正常（警告があっても 0）、<code>1</code> が構文エラーです。</li>
+</ul>
+
+<h2 id="sf-dryrun"><code>sf-dryrun.sh</code></h2>
+<pre><code>sf-dryrun.sh</code></pre>
+<p><code>sf-release.sh</code> のラッパーで、dry-run（検証だけ）専用のコマンドです。ランチャーの <code>[4] Dryrun</code> から呼ばれます。</p>
+<ul>
+  <li><code>sf-release.sh</code> の既定が dry-run なので、オプションなしで呼ぶだけで、検証が実行されます。</li>
+  <li>直接 <code>sf-release.sh</code> を実行しても、同じ動作になります。</li>
+</ul>
+
+<h2 id="sf-release"><code>sf-release.sh</code></h2>
+<pre><code>sf-release.sh [オプション]</code></pre>
+<p>ターゲットファイルの内容を、接続中の組織へ検証またはリリースします。<strong>既定は dry-run です。</strong></p>
+<table>
+  <thead><tr><th>オプション</th><th>内容</th></tr></thead>
+  <tbody>
+    <tr><td><code>--release</code>, <code>-r</code></td><td>デプロイを実行する（dry-run を解除）</td></tr>
+    <tr><td><code>--no-open</code>, <code>-n</code></td><td>ブラウザを開かない</td></tr>
+    <tr><td><code>--force</code>, <code>-f</code></td><td><code>--ignore-conflicts</code> を付ける</td></tr>
+    <tr><td><code>--target</code>, <code>-t</code></td><td>対象の組織のエイリアスを指定する</td></tr>
+    <tr><td><code>--json</code>, <code>-j</code></td><td><code>sf</code> コマンドの出力を、JSON 形式で表示する</td></tr>
+    <tr><td><code>--verbose</code>, <code>-v</code></td><td>コマンドの出力を、コンソールにも表示する</td></tr>
+  </tbody>
+</table>
+<div class="box">
+  <div class="title">テストクラスは自動で指定されます</div>
+  <p><code>deploy-target.txt</code> に書いた <code>.cls</code> ファイルに <code>@isTest</code> があれば、自動で検出し、<code>--test-level RunSpecifiedTests --tests &lt;クラス名&gt;</code> を設定します。手動で指定する必要はありません。</p>
+</div>
+
+<h2 id="sf-deploy"><code>sf-deploy.sh</code></h2>
+<pre><code>sf-deploy.sh [オプション]</code></pre>
+<p><code>sf-release.sh --release --force</code> を簡単に呼ぶラッパーです。Sandbox の乗り換えなどで、現在の開発物を、接続中の組織へ強制的にリリースする用途で使います。追加で使えるオプションは、<code>--no-open</code>（<code>-n</code>）・<code>--target</code>（<code>-t</code>）・<code>--verbose</code>（<code>-v</code>）です。</p>
+<div class="box danger">
+  <div class="title">個人用の Sandbox / Developer Edition / Scratch Org 専用です</div>
+  <p>共有環境（本番・staging・develop）には、ローカルの PC からリリースできません。GitHub にコミットして、レビューを通し、GitHub Actions で行います。</p>
+  <p>sf-tools は、組織のエイリアスの名前 <strong><code>prod</code> / <code>staging</code> / <code>develop</code></strong>（と、互換のための <code>main</code>）を、共有環境として予約しています。この名前の組織を接続先にすると、確認（Y/N/q）の前に、拒否されます。<code>sf-init</code> は、この名前で組織を登録します（<code>sf-start.sh</code> も、<code>prod</code> を本番として扱います）。</p>
+  <p><strong>予約名以外の名前に付け替えた場合は、動作を保証しません。</strong>名前で判断しているため、共有環境の組織を別の名前で接続すると、この保護は働きません。共有環境の組織は、予約名のまま使ってください。</p>
+</div>
+<p>実行の前に、<code>--force</code> の警告と確認（Y/N/q）が表示されます。<code>N</code> または <code>q</code> で中断できます。</p>
+
+<h2 id="sf-push"><code>sf-push.sh</code></h2>
+<pre><code>sf-push.sh</code></pre>
+<p>カレントフォルダの下の変更を、コミットしてプッシュします。</p>
+<h4>主な処理</h4>
+<ol>
+  <li><code>origin/main</code> を fetch して、現在のブランチにマージする（コンフリクトしたら、エラーで中止）</li>
+  <li>カレントの下を <code>git add --all</code> する</li>
+  <li><code>sf-check.sh</code> で、構文を確認する</li>
+  <li>VS Code を別のウィンドウで開いて、コミットメッセージを入力する</li>
+  <li><code>git commit</code> → <code>git push</code></li>
+</ol>
+<h4>補足</h4>
+<ul>
+  <li>コミットメッセージが未入力なら、何もせずに終了します。</li>
+  <li>変更がなくても、未プッシュのコミットがあれば、コミットせず、プッシュだけ行います。コミットは成功してプッシュが失敗したあとに、もう一度 <code>sf-push.sh</code> を実行すれば、取り残されません。</li>
+  <li>ブランチの上にいないとき（detached HEAD）と、保護ブランチの上にいるときは、何もコミットせずに、エラーで終了します。</li>
+</ul>
+
+<h2 id="sf-next"><code>sf-next.sh</code></h2>
+<pre><code>sf-next.sh</code></pre>
+<p>現在の feature ブランチが、<code>develop</code> / <code>staging</code> / <code>main</code> のどこまでマージ済みかを確認し、次に出すべき PR 先のブランチを案内します。</p>
+
+<h3>表示されるステータス</h3>
+<table>
+  <thead><tr><th>記号</th><th>ステータス</th><th>説明</th></tr></thead>
+  <tbody>
+    <tr><td><code>✓</code></td><td>マージ済み</td><td>直接 PR をマージ済み（デプロイのワークフローも実行済み）</td></tr>
+    <tr><td><code>✓</code></td><td>マージ済み（ブランチ同期）</td><td>直接の PR はないが、上位のブランチ経由でコードが伝わっている。<strong>デプロイのワークフローは未実行</strong></td></tr>
+    <tr><td><code>⚠</code></td><td>マージ済み（順序外）</td><td>前のブランチの直接 PR が完了する前に、マージ済み。<strong>前のブランチのデプロイは未実行</strong></td></tr>
+    <tr><td><code>→</code></td><td>PR 発行中</td><td>PR を出してあり、マージを待っている</td></tr>
+    <tr><td><code>▶</code></td><td>次の PR 先</td><td>次に PR を出すべきブランチ</td></tr>
+    <tr><td><code>✗</code></td><td>未着手</td><td>まだ PR を出していない</td></tr>
+  </tbody>
+</table>
+
+<h3>判定の方法</h3>
+<ol>
+  <li><code>gh pr list --state merged</code> で、現在のブランチ → 対象ブランチの<strong>直接 PR</strong> を確認する → 「マージ済み」</li>
+  <li><code>git merge-base --is-ancestor</code> で、上位ブランチ経由の伝わり方（間接）を確認する → 「マージ済み（ブランチ同期）」</li>
+  <li><code>gh pr list --state open</code> で、PR 発行中かを確認する → 「PR 発行中」</li>
+  <li>どれにも当てはまらなければ → 「次の PR 先」または「未着手」</li>
+</ol>
+
+<h3>順序外のマージの制約</h3>
+<div class="box warn">
+  <div class="title"><code>develop → staging → main</code> の順番を守らずにマージすると、飛ばしたブランチへのデプロイは、できなくなります</div>
+  <ul>
+    <li>上位のブランチ（例: <code>main</code>）にマージすると、コードが下位のブランチ（例: <code>staging</code>）に伝わります。</li>
+    <li>伝わったあとは「差分なし」になり、feature → staging の直接 PR を作れなくなります。</li>
+    <li>デプロイのワークフローは、直接 PR のマージで起動するため、伝わっただけでは動きません。</li>
+  </ul>
+  <p><strong>飛ばしたブランチにデプロイしたいときは、新しいブランチを切って、順序どおりに PR を出し直します。</strong></p>
+</div>
+<h4>順序外の PR を、レビュアーが見つける仕組み（<code>wf-sequence</code>）</h4>
+<p><code>sf-next.sh</code> を使う限り、PR の先は「次の段階」だけです。ランチャーを使わず、GitHub 上で直接 PR を作って段階を飛び越したときは、PR を作った時点で、次のようにレビュアーに知らせます。</p>
+<table>
+  <thead><tr><th>通知先</th><th>内容</th></tr></thead>
+  <tbody>
+    <tr><td>PR の会話欄</td><td>「⚠️ マージ順序の確認が必要です。意図的でなければ、この PR は却下してください」というコメント（同じ PR では、既存のコメントを更新します）</td></tr>
+    <tr><td>Slack</td><td>通知</td></tr>
+  </tbody>
+</table>
+<p>マージは止めません（緊急の Hotfix を妨げないため。Free プランの Private リポジトリでは、GitHub がそもそも止められません）。<strong>気づいたレビュアーが、PR を却下します。</strong></p>
+<h4>補足</h4>
+<ul>
+  <li>保護ブランチ（<code>main</code> / <code>staging</code> / <code>develop</code>）の上では、実行できません。</li>
+  <li>案内された先のブランチの、PR 作成画面を、ブラウザで開けます。</li>
+</ul>
+
+<h2 id="sf-restart"><code>sf-restart.sh</code></h2>
+<pre><code>sf-restart.sh</code></pre>
+<p>接続先の組織を切り替えたいときに使います。</p>
+
+<h2 id="sf-hook"><code>sf-hook.sh</code> / <code>sf-unhook.sh</code></h2>
+<pre><code>sf-hook.sh
+sf-unhook.sh</code></pre>
+<ul>
+  <li><strong><code>sf-hook.sh</code>:</strong> <code>.git/hooks/pre-commit</code> と <code>.git/hooks/pre-push</code> に、フックをインストールします（強制的に上書き）。</li>
+  <li><strong><code>sf-unhook.sh</code>:</strong> <code>.git/hooks/pre-push</code> を削除します。</li>
+</ul>
+<p>フックの動きは、<a href="commands-auto.html#sf-prepush"><code>sf-prepush.sh</code></a> と <a href="commands-auto.html#sf-precommit"><code>sf-precommit.sh</code></a> にあります。</p>
+
+</main>
+<aside id="toc"></aside>
+</div>
+<footer id="foot"></footer>
+<script src="../assets/site.js"></script>
+</body>
+</html>

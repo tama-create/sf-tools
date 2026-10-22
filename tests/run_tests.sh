@@ -229,6 +229,7 @@ TEST_FILES=(
     test_integration-init3.sh
     test_integration-rerun.sh
     test_run-tests.sh
+    test_site.sh
 )
 
 # ------------------------------------------------------------------------------
@@ -325,6 +326,9 @@ if [[ "${1:-}" == "--changed" ]]; then
                 ;;
             tests/e2e/*)
                 _changed_tests+=("test_e2e.sh")
+                ;;
+            site/*|.github/workflows/pages.yml|tests/test_site.sh)
+                _changed_tests+=("test_site.sh")
                 ;;
             tests/run_tests.sh|tests/test_run-tests.sh)
                 _changed_tests+=("test_run-tests.sh")

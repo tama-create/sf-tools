@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ログとリポジトリ構成 | sf-tools ドキュメント</title>
+<meta name="description" content="ログの場所と、force-* プロジェクト・sf-tools リポジトリのフォルダ構成。">
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body data-root="../">
+<header id="top"></header>
+<div class="layout">
+<nav id="side" aria-label="目次"></nav>
+<main id="doc" class="doc">
+
+<h1>ログとリポジトリ構成</h1>
+<p class="lead">ログの出力先と、2 種類のリポジトリ（利用者のプロジェクト <code>force-*</code> と、sf-tools 本体）のフォルダ構成です。</p>
+
+<h2 id="logs">1. ログの確認</h2>
+<table>
+  <thead><tr><th>コマンド</th><th>ログの場所</th></tr></thead>
+  <tbody>
+    <tr><td><code>sf-init.sh</code></td><td><code>~/sf-tools/logs/sf-init.log</code>（sf-tools 側）</td></tr>
+    <tr><td>それ以外のコマンド</td><td>実行した <code>force-*</code> フォルダの中の <code>sf-tools/logs/&lt;コマンド名&gt;.log</code></td></tr>
+  </tbody>
+</table>
+
+<h2 id="force">2. force-* プロジェクトの構成</h2>
+<p><code>sf project generate</code> が作る標準のファイルと、<code>sf-init.sh</code> が追加するものを、区別して示します（★ が、sf-tools が追加するものです）。</p>
+<pre><code>force-xxx/
+├── .forceignore
+├── .gitattributes                       ★ sf-tools 追加
+├── .gitignore
+├── .prettierrc / .prettierignore
+├── .github/
+│   └── workflows/                       ★ sf-tools 追加（CI/CD 5種）
+│       ├── wf-release.yml               ★   デプロイ
+│       ├── wf-validate.yml              ★   デプロイ前検証
+│       ├── wf-sequence.yml              ★   マージ順序チェック
+│       ├── wf-propagate.yml             ★   ブランチ伝播
+│       └── wf-metasync.yml              ★   メタデータ自動同期
+├── .vscode/                             ★ sf-tools 追加（推奨設定・拡張機能）
+├── config/
+│   └── project-scratch-def.json
+├── eslint.config.js
+├── force-app/                           ← Salesforce メタデータ本体
+├── package.json
+├── scripts/
+├── sfdx-project.json
+├── sf-start.sh / sf-restart.sh          ★ sf-tools 追加（呼び出しラッパー）
+└── sf-tools/                            ★ sf-tools 追加
+    ├── config/
+    │   ├── branches.txt                 ★   ブランチ↔組織エイリアスのマッピング
+    │   └── metadata.txt                 ★   メタデータ同期対象の定義
+    └── release/&lt;branch&gt;/
+        ├── deploy-target.txt            ★   デプロイ対象メタデータ一覧
+        └── remove-target.txt            ★   削除対象メタデータ一覧</code></pre>
+
+<h2 id="tools">3. sf-tools リポジトリの構成</h2>
+<pre><code>sf-tools/
+├── bin/                        ← スクリプト本体
+│   ├── sf-job.sh
+│   ├── sf-start.sh
+│   ├── sf-launcher.sh
+│   ├── sf-push.sh
+│   ├── sf-next.sh
+│   ├── sf-release.sh
+│   ├── sf-deploy.sh
+│   ├── sf-check.sh
+│   ├── sf-typecheck.sh
+│   ├── sf-restart.sh
+│   ├── sf-init.sh
+│   ├── sf-hook.sh
+│   ├── sf-unhook.sh
+│   ├── sf-sync-wf.sh
+│   ├── sf-update-secret.sh
+│   ├── sf-install.sh
+│   ├── sf-upgrade.sh
+│   ├── sf-prepush.sh
+│   ├── sf-precommit.sh
+│   └── sf-metasync.sh
+├── lib/
+│   ├── common.sh               ← 全スクリプト共通ライブラリの窓口（ログ・実行・終了・JSON の読み取り。下の 3 つを source する）
+│   ├── input.sh                ← 対話入力（read_input / read_key / press_enter / read_or_quit / read_secret / ask_yn）
+│   ├── platform.sh             ← OS・外部コマンド（is_gitbash / run_isolated_home / check_sf_cli / open_browser）
+│   ├── project.sh              ← プロジェクト（force-* の確認・gh のオーナー確認・ブランチ一覧・組織エイリアス）
+│   ├── wizard.sh               ← ウィザード形式の画面の共通部品（sf-init で使用）
+│   ├── org.sh                  ← Salesforce 組織の接続情報の共通部品（ログイン先の選択・種類の判定・本番は main のみのガード）
+│   ├── diag.sh                 ← セットアップの診断（sf-init.sh --status で使用。読み取りのみ）
+│   └── verify-common.sh        ← Hello World の本文・PR とワークフローの実行の部品（phases/init/verify.sh と e2e で共有）
+├── phases/
+│   └── init/                   ← sf-init.sh のフェーズスクリプト
+│       ├── init-common.sh
+│       ├── add_tier.sh          ← --add-tier オプションで呼ばれる tier 追加スクリプト
+│       ├── verify.sh            ← --verify オプションで呼ばれる動作の確認（Hello World のリリースと削除）
+│       ├── 01_check_env.sh
+│       ├── 02_project_info.sh
+│       ├── 03_repo_create.sh
+│       ├── 04_gen_files.sh
+│       ├── 05_setup_branches.sh
+│       ├── 06_pat_token.sh
+│       ├── 07_slack.sh
+│       ├── 08_initial_commit.sh
+│       ├── 09_repo_rules.sh
+│       └── 10_sf_auth.sh
+├── hooks/
+│   ├── pre-push                ← sf-hook.sh がプロジェクト側へコピー
+│   └── pre-commit
+├── templates/                  ← force-* プロジェクトの雛形（sf-tools/templates/ が唯一の正本）
+│   ├── .forceignore
+│   ├── .gitattributes
+│   ├── .gitignore
+│   ├── .prettierignore / .prettierrc
+│   ├── .github/
+│   │   └── workflows/          ← 自己完結型 CI/CD ワークフロー
+│   ├── .vscode/
+│   ├── config/
+│   ├── eslint.config.js
+│   ├── force-app/
+│   ├── package.json
+│   ├── scripts/
+│   ├── sfdx-project.json       ← __REPO_NAME__ プレースホルダーあり
+│   ├── sf-start.sh / sf-restart.sh
+│   └── sf-tools/
+│       ├── config/             ← metadata.txt / branches.txt 雛形
+│       └── release/__BRANCH__/ ← deploy-target.txt / remove-target.txt 雛形
+├── config/                     ← sf-tools 自身の設定・データ（force-* には配布されない）
+│   ├── metadata-capability.txt ← メタデータの種類ごとの、リリース・削除の可否の表（sf-typecheck.sh が確認。sf-check.sh が参照）
+│   └── changeset-types.txt     ← 変更セットで扱える種類の一覧（公式の Metadata Coverage Report。sf-typecheck.sh --coverage が参照）
+├── site/                       ← この文書サイト（HTML。GitHub Pages で公開）
+├── doc/                        ← 設計・手順・開発者向けの文書（Markdown）
+├── tests/                      ← 単体テスト一式
+│   └── e2e/                    ← 実環境での通し検証（sf-init の自動実行）
+├── .github/workflows/          ← sf-tools 自身の CI（test.yml・e2e.yml）と、文書サイトの公開（pages.yml）
+├── CLAUDE.md
+└── README.md</code></pre>
+
+</main>
+<aside id="toc"></aside>
+</div>
+<footer id="foot"></footer>
+<script src="../assets/site.js"></script>
+</body>
+</html>

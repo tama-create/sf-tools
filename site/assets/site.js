@@ -19,9 +19,11 @@
       { t: "動作の確認（--verify）" }
     ]},
     { title: "リファレンス", items: [
-      { t: "コマンド一覧" },
-      { t: "ターゲットファイルの書き方" },
-      { t: "ログとリポジトリ構成" }
+      { t: "コマンド一覧", h: "reference/commands.html" },
+      { t: "開発者向けコマンド", h: "reference/commands-dev.html" },
+      { t: "自動実行コマンド", h: "reference/commands-auto.html" },
+      { t: "ターゲットファイルの書き方", h: "reference/target-files.html" },
+      { t: "ログとリポジトリ構成", h: "reference/structure.html" }
     ]},
     { title: "設計と背景", items: [
       { t: "設計の考え方" },

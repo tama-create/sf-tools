@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>自動実行コマンド | sf-tools ドキュメント</title>
+<meta name="description" content="sf-install・sf-upgrade・sf-prepush・sf-precommit・sf-metasync など、自動で動くコマンドの詳細。">
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body data-root="../">
+<header id="top"></header>
+<div class="layout">
+<nav id="side" aria-label="目次"></nav>
+<main id="doc" class="doc">
+
+<h1>自動実行コマンド</h1>
+<p class="lead">ほかのコマンドや、git のフック、GitHub Actions から自動で呼ばれるコマンドです。人が直接実行することは、ほとんどありません。全体の一覧は <a href="commands.html">コマンド一覧</a> にあります。</p>
+
+<h2 id="sf-install"><code>sf-install.sh</code></h2>
+<pre><code>sf-install.sh</code></pre>
+<p><code>sf-tools</code> 自体の更新と、プロジェクト側の初期ファイルの整備を行います。通常は、<code>sf-start.sh</code> から自動で実行されます。</p>
+<h4>主な処理（この順序）</h4>
+<ol>
+  <li><code>~/sf-tools</code> を最新にする</li>
+  <li>設定ファイルの雛形を作る</li>
+  <li>pre-push フックをインストールする</li>
+  <li><code>release/&lt;ブランチ名&gt;/</code> を準備する</li>
+  <li><code>npm install</code>（<code>package.json</code> があるとき）</li>
+  <li>必要に応じて、<code>sf-upgrade.sh</code> をバックグラウンドで実行する（24 時間おき）</li>
+</ol>
+
+<h2 id="sf-upgrade"><code>sf-upgrade.sh</code></h2>
+<pre><code>sf-upgrade.sh</code></pre>
+<p>npm・Salesforce CLI・Git を更新します。<code>sf-install.sh</code> から、24 時間おきに自動で実行されます。</p>
+
+<h2 id="sf-prepush"><code>sf-prepush.sh</code></h2>
+<p><code>git push</code> の前に自動で実行される、チェックのスクリプトです（pre-push フックの本体）。</p>
+<h4>主な処理</h4>
+<ul>
+  <li><code>main</code> への直接のプッシュを禁止する</li>
+  <li>自分のブランチの、リモートとの差分を、先に同期する</li>
+  <li><code>main</code> の未取り込みの更新を確認し、必要なら自動で rebase する</li>
+  <li><code>sf-check.sh</code> で、ターゲットファイルの構文を検証する</li>
+  <li><code>branches.txt</code> に、origin にまだないブランチ名があっても、プッシュは止めない（その名前だけ取得せず、警告する）</li>
+</ul>
+
+<h2 id="sf-precommit"><code>sf-precommit.sh</code></h2>
+<p><code>git commit</code> のときに自動で実行される、pre-commit フックの本体です。直接実行することはありません。</p>
+<h4>主な処理</h4>
+<ul>
+  <li><code>sf-check.sh</code> で、ターゲットファイルの構文を確認する</li>
+  <li>エラーがあれば、コミットを中止する</li>
+</ul>
+
+<h2 id="sf-metasync"><code>sf-metasync.sh</code></h2>
+<pre><code>sf-metasync.sh</code></pre>
+<p>組織の最新のメタデータを取得して、Git に反映します。主に、GitHub Actions からの定期実行を想定しています。</p>
+<div class="box warn">
+  <div class="title">管理者専用</div>
+  <p>実行の前に、赤い警告ボックスと確認が表示されます。<code>GITHUB_ACTIONS=true</code> のときは、確認をスキップして自動で実行します。</p>
+</div>
+<h4>役割</h4>
+<ul>
+  <li>組織の最新のメタデータを取得する</li>
+  <li>Git へ反映する</li>
+  <li>変更があるときだけ、コミットしてプッシュする</li>
+  <li>変更がなくても、前回の同期のコミットのプッシュが失敗して、未プッシュのコミットが残っているときは、確認のうえ、プッシュだけ行う</li>
+  <li><code>main</code> へのプッシュは、pre-push フックを通さない（<code>--no-verify</code>。このコマンド専用です。GitHub の保護の設定は、そのまま効きます）</li>
+</ul>
+
+<h3>取得するメタデータの種類（<code>sf-tools/config/metadata.txt</code>）</h3>
+<p>取得する種類は、各プロジェクトの <code>sf-tools/config/metadata.txt</code> で決まります（<code>sf-init</code> が、雛形から作ります）。設定ファイルだけで調整でき、コードの変更は要りません。</p>
+<div class="box warn">
+  <div class="title">前提</div>
+  <p>雛形の標準セットは、<strong>Developer Edition（Sales・Service の標準機能つき）でのみ、リリースと削除を確認</strong>しています。ほかのエディション・製品（Service Cloud・Experience Cloud・業種クラウドなど）で使う場合は、必要な種類を足してください。</p>
+</div>
+<table>
+  <thead><tr><th>区分</th><th>既定</th><th>内容</th></tr></thead>
+  <tbody>
+    <tr><td>1. 標準セット</td><td>有効</td><td>Developer Edition で、リリース・削除を確認済み（Apex・LWC・オブジェクト・項目・Layout・権限・レポート・ワークフローなど）</td></tr>
+    <tr><td>2. 標準だが制限あり</td><td>有効</td><td>更新のみ・権限による・一部未確認（StandardValueSet・Flow・Settings など。理由は、ファイル内のコメント）</td></tr>
+    <tr><td>3. 機能が必要なもの</td><td>コメントアウト</td><td>Service Cloud 系（Entitlement・Omni-Channel・Knowledge）・Experience Cloud 系。使う組織だけ、コメントを外す</td></tr>
+    <tr><td>4. 未確認</td><td>コメントアウト</td><td>確認できていない種類。使う場合は、外して、リリースを確かめる</td></tr>
+    <tr><td>5. 参考</td><td>コメントアウト</td><td>そのほかの種類の候補（業種クラウド・AI・分析など）</td></tr>
+  </tbody>
+</table>
+<ul>
+  <li>取得の対象に、その組織にない種類があっても、<strong>警告になるだけ</strong>で、取得は続きます。</li>
+  <li>種類ごとの確認の状況は、<code>sf-typecheck.sh --coverage</code> で見られます（変更セットで扱える種類のうち、確認済み・未確認の数）。</li>
+  <li>リリース・削除できないと確認済みの種類は、ターゲットファイルに書くと、<code>sf-check.sh</code> が止めます（警告だけの種類もあります）。</li>
+  <li>すでに作成済みのプロジェクトの <code>metadata.txt</code> は、雛形が更新されても、<strong>変わりません</strong>。</li>
+</ul>
+
+</main>
+<aside id="toc"></aside>
+</div>
+<footer id="foot"></footer>
+<script src="../assets/site.js"></script>
+</body>
+</html>

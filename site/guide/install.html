@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>前提条件とインストール | sf-tools ドキュメント</title>
+<meta name="description" content="sf-tools を使うために必要なツールと、インストールの手順。">
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body data-root="../">
+<header id="top"></header>
+<div class="layout">
+<nav id="side" aria-label="目次"></nav>
+<main id="doc" class="doc">
+
+<h1>前提条件とインストール</h1>
+<p class="lead">sf-tools を使い始めるために、必要なツールを用意して、sf-tools を置くまでの手順です。</p>
+
+<h2 id="env">1. 動作環境</h2>
+<p>実際に動かして確かめた環境だけを書いています。</p>
+<table>
+  <thead><tr><th>環境</th><th>使う場面</th><th>確認した内容</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Windows</strong>（Git Bash）</td><td>手元のパソコン（開発者・管理者）</td><td>自動テストに合格。さらに、実際の GitHub と Salesforce を使って、初期セットアップから、Salesforce へのリリース・削除まで、最初から最後まで動かして確認しました</td></tr>
+    <tr><td><strong>Mac</strong>（macOS）</td><td>手元のパソコン</td><td>同じ確認を、Mac mini の実機で行いました</td></tr>
+    <tr><td><strong>WSL</strong>（Windows の中の Ubuntu）</td><td>手元のパソコン</td><td>同じ確認を行いました</td></tr>
+    <tr><td><strong>Linux</strong>（GitHub Actions のサーバー）</td><td>自動で動く部分（人は触りません）: 変更の検証・Salesforce へのリリース・メタデータの同期</td><td>実際の Salesforce に対して、検証・リリース・同期が成功することを確認しました</td></tr>
+  </tbody>
+</table>
+<ul>
+  <li>確認に使った Salesforce は、<strong>Developer Edition</strong>（開発者向けの無料の組織）です。ほかのエディション（Enterprise など）や Sandbox では、確認していません。</li>
+  <li><strong>自動テスト</strong>とは、プログラムの各部分が正しく動くかを、機械が確かめるものです。GitHub 上で、変更のたびに自動で実行され、Linux・Mac・Windows の 3 つの環境で、合格しています。</li>
+  <li>Linux を、手元のパソコンとして使うことは、想定していません（Linux は、自動で動くサーバーとしてだけ使います）。</li>
+  <li>Mac は、標準のターミナル（zsh）と標準の Bash のままで動きます。Homebrew などで、Bash を入れ直す必要はありません。</li>
+</ul>
+
+<h2 id="tools">2. 必要なツール</h2>
+<p>次のコマンドが使えることを、確認してください。</p>
+<table>
+  <thead><tr><th>ツール</th><th>確認コマンド</th><th>用途</th><th>Windows での入れ方</th></tr></thead>
+  <tbody>
+    <tr><td>Git（Git Bash）</td><td><code>git --version</code></td><td>バージョン管理・フック</td><td><a href="https://git-scm.com/download/win">公式サイト</a>のインストーラを実行</td></tr>
+    <tr><td>Salesforce CLI（<strong>npm 版</strong>）</td><td><code>sf --version</code></td><td>組織への接続・デプロイ・取得</td><td><code>npm install -g @salesforce/cli</code>（Node.js が必要。<strong>公式インストーラー版は非対応</strong>。<a href="#npm">次の節</a>を参照）</td></tr>
+    <tr><td>GitHub CLI</td><td><code>gh --version</code></td><td>PR の作成・Secrets の登録・リポジトリの操作</td><td><code>winget install --id GitHub.cli</code></td></tr>
+    <tr><td>Visual Studio Code</td><td><code>code --version</code></td><td>エディタの起動</td><td><code>winget install --id Microsoft.VisualStudioCode</code></td></tr>
+    <tr><td>Slack</td><td>—</td><td>デプロイ通知の受信</td><td><a href="https://slack.com/downloads/windows">公式サイト</a>のインストーラを実行</td></tr>
+  </tbody>
+</table>
+<div class="box">
+  <div class="title">シェルについて</div>
+  <ul>
+    <li>Bash 3.2 以上で動きます。Windows は Git for Windows の Git Bash、Mac は標準の <code>/bin/bash</code> のままで動きます。</li>
+    <li>Windows は、<strong>Git Bash で実行してください</strong>（PowerShell・コマンドプロンプトは非対応です）。Mac は、標準のターミナル（zsh）から、そのまま実行できます。</li>
+  </ul>
+</div>
+
+<h2 id="npm">3. Salesforce CLI は npm 版を使う</h2>
+<p>sf-tools は、<strong>Salesforce CLI（<code>sf</code>）の npm 版</strong>（<code>npm install -g @salesforce/cli</code>）を前提としています。npm 版も、Salesforce が案内しているインストール方法の一つです。</p>
+
+<h3>3.1 理由</h3>
+<p>Windows の Git Bash で、Salesforce CLI の<strong>公式インストーラー版</strong>（<code>winget</code> 版を含む可能性があります）を使い、自動更新が入った状態になると、<code>sf</code> が<strong>成功しても、終了コード 1 を返し続ける</strong>ことがあります（同じバージョンの npm 版は、正しく返します。Salesforce の起動用ファイルの問題と考えられます）。</p>
+<p>sf-tools は、コマンドの成否を終了コードで判定するため、この環境では、成功した処理も失敗扱いになります。</p>
+
+<h3>3.2 確認方法</h3>
+<p>次のコマンドで、<code>終了コード=0</code> と表示されれば問題ありません。</p>
+<pre><code>command -v sf; sf --version; echo "終了コード=$?"</code></pre>
+<p>sf-tools も、起動時に同じ確認をします。</p>
+<table>
+  <thead><tr><th>コマンド</th><th>終了コードが 0 でないとき</th></tr></thead>
+  <tbody>
+    <tr><td><code>sf-init.sh</code></td><td>案内を表示して<strong>中断</strong></td></tr>
+    <tr><td>日常のコマンド（<code>sf-start.sh</code>・<code>sf-release.sh</code>・<code>sf-metasync.sh</code>・<code>sf-update-secret.sh</code>）</td><td>案内を表示して<strong>中断</strong>。途中で中途半端に止まるより、最初に止めるほうが安全だからです</td></tr>
+    <tr><td><code>sf-install.sh</code></td><td>警告を表示するだけで続行。中断すると、sf-tools 自身の最新化が止まってしまうためです</td></tr>
+  </tbody>
+</table>
+<p>確認に成功した場合は、24 時間は、確認を省略します。</p>
+
+<h3>3.3 インストーラー版から npm 版への入れ替え（Windows）</h3>
+<ol class="steps">
+  <li>
+    <p>npm 版を入れます。<code>C:\Program Files\nodejs</code> に書き込むため、管理者権限の Git Bash が必要な場合があります。</p>
+    <pre><code>npm install -g @salesforce/cli</code></pre>
+  </li>
+  <li><p>公式インストーラー版をアンインストールします（「設定 → アプリ」の「Salesforce CLI」、または <code>C:\sf\Uninstall.exe</code>）。</p></li>
+  <li><p>自動更新で増えた <code>%LOCALAPPDATA%\sf\client</code> を削除します。</p></li>
+  <li><p><strong>新しい</strong> Git Bash を開いて、上の確認コマンドを実行します。あわせて <code>sf org list</code> で、既存の組織が表示されることを確認してください。</p></li>
+</ol>
+<div class="box warn">
+  <div class="title">削除してはいけないフォルダ</div>
+  <p><code>~/.sf</code> と <code>~/.sfdx</code> は、組織のログイン情報が入っているため、<strong>削除しないでください</strong>。入れ替えても、ログイン情報は残ります。VS Code を使っている場合は、入れ替え後に VS Code を再起動してください。</p>
+</div>
+<p><strong>更新:</strong> <code>sf-upgrade.sh</code> が、npm 版は <code>npm install -g @salesforce/cli@latest</code> で更新します（手動で行う場合も同じコマンドです）。</p>
+<p><strong>Mac・Linux:</strong> 同じく npm 版をおすすめします。ほかの方法（pkg・Homebrew など）で入れた場合も、上の確認コマンドで終了コード 0 になれば、そのまま使えます。</p>
+
+<h2 id="install">4. sf-tools をインストールする</h2>
+
+<h3>4.1 sf-tools を置く</h3>
+<pre><code>git clone https://github.com/tama-create/sf-tools.git ~/sf-tools</code></pre>
+
+<h3>4.2 PATH を設定する（おすすめ）</h3>
+<p>シェルの設定ファイルに次の 1 行を追加すると、どこからでもスクリプト名だけで呼び出せます。</p>
+<table>
+  <thead><tr><th>環境</th><th>設定ファイル</th></tr></thead>
+  <tbody>
+    <tr><td>Windows（Git Bash）・Linux</td><td><code>~/.bashrc</code></td></tr>
+    <tr><td>Mac（標準のターミナル = zsh）</td><td><code>~/.zshrc</code></td></tr>
+  </tbody>
+</table>
+<pre><code># sf-tools
+export PATH="$HOME/sf-tools/bin:$PATH"</code></pre>
+<p>追加したあとで、<code>source ~/.bashrc</code>（Mac は <code>source ~/.zshrc</code>）を実行して反映します。</p>
+
+<div class="box ok">
+  <div class="title">次へ</div>
+  <p>用意ができたら、<a href="basics.html">基本の使い方</a> に進んでください。</p>
+</div>
+
+</main>
+<aside id="toc"></aside>
+</div>
+<footer id="foot"></footer>
+<script src="../assets/site.js"></script>
+</body>
+</html>

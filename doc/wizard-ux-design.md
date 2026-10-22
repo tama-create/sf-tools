@@ -238,7 +238,7 @@
     2. リポジトリを見る:
          https://github.com/tamashimon-org/force-yamada
 
-  詳しい使い方: README.md の 4. を見てください
+  詳しい使い方: 文書サイトを見てください
 ```
 
 ### 4.5 失敗の画面（R9・R11）

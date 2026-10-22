@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>コマンド一覧 | sf-tools ドキュメント</title>
+<meta name="description" content="sf-tools の全コマンドの一覧と、管理者専用コマンドの安全ガード。">
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body data-root="../">
+<header id="top"></header>
+<div class="layout">
+<nav id="side" aria-label="目次"></nav>
+<main id="doc" class="doc">
+
+<h1>コマンド一覧</h1>
+<p class="lead">sf-tools のコマンドは、すべて <code>~/sf-tools/bin/</code> にあります。どれも <code>--help</code> / <code>-h</code> で、概要・オプション・処理の流れを表示できます。</p>
+
+<h2 id="list">1. 一覧</h2>
+<p>「ランチャー」は、<code>sfl</code> のメニューから選べるコマンドです（<a href="commands-dev.html#sf-launcher">ランチャー</a>）。⚠️ は<strong>管理者専用</strong>です（<a href="#admin">次の節</a>）。</p>
+
+<h3>1.1 開発者が使うコマンド</h3>
+<table>
+  <thead><tr><th>コマンド</th><th>用途</th><th>種別</th></tr></thead>
+  <tbody>
+    <tr><td><a href="commands-dev.html#sf-job"><code>sf-job.sh</code></a></td><td>新しい作業を始める（ブランチ作成〜VS Code の起動）</td><td>ランチャー外</td></tr>
+    <tr><td><a href="commands-dev.html#sf-start"><code>sf-start.sh</code></a></td><td>開発環境を起動する（作業の再開）</td><td>ランチャー</td></tr>
+    <tr><td><a href="commands-dev.html#sf-launcher"><code>sf-launcher.sh</code></a>（<code>sfl</code>）</td><td>ランチャー本体（メニューから選んで実行）</td><td>ランチャー外</td></tr>
+    <tr><td><a href="commands-dev.html#sf-check"><code>sf-check.sh</code></a></td><td>ターゲットファイルの構文を確認する</td><td>ランチャー</td></tr>
+    <tr><td><a href="commands-dev.html#sf-dryrun"><code>sf-dryrun.sh</code></a></td><td>dry-run で検証する</td><td>ランチャー</td></tr>
+    <tr><td><a href="commands-dev.html#sf-release"><code>sf-release.sh</code></a></td><td>検証（既定は dry-run）・リリース</td><td>—</td></tr>
+    <tr><td><a href="commands-dev.html#sf-deploy"><code>sf-deploy.sh</code></a></td><td>⚠️ 接続中の組織への強制リリース（確認あり。個人用の組織だけ）</td><td>ランチャー</td></tr>
+    <tr><td><a href="commands-dev.html#sf-push"><code>sf-push.sh</code></a></td><td>カレント配下をコミットしてプッシュする</td><td>ランチャー</td></tr>
+    <tr><td><a href="commands-dev.html#sf-next"><code>sf-next.sh</code></a></td><td>次の PR 先を確認する</td><td>ランチャー</td></tr>
+    <tr><td><a href="commands-dev.html#sf-restart"><code>sf-restart.sh</code></a></td><td>接続先の組織を切り替える</td><td>ランチャー</td></tr>
+    <tr><td><a href="commands-dev.html#sf-hook"><code>sf-hook.sh</code> / <code>sf-unhook.sh</code></a></td><td>手元のクローンの検証フックを、有効にする / 削除する</td><td>ランチャー外</td></tr>
+  </tbody>
+</table>
+
+<h3>1.2 管理者が使うコマンド</h3>
+<p>詳しい説明は、管理者ガイドにあります。</p>
+<table>
+  <thead><tr><th>コマンド</th><th>用途</th></tr></thead>
+  <tbody>
+    <tr><td><a href="../admin/setup.html"><code>sf-init.sh</code></a></td><td>新規プロジェクトの初期セットアップ</td></tr>
+    <tr><td><a href="../admin/maintenance.html#add-tier"><code>sf-init.sh --add-tier</code></a></td><td>既存のプロジェクトに、段階（staging・develop）を足す</td></tr>
+    <tr><td><a href="../admin/maintenance.html#status"><code>sf-init.sh --status</code></a></td><td>セットアップの診断と、接続先の一覧（読み取りのみ）</td></tr>
+    <tr><td><a href="../admin/maintenance.html#reconnect"><code>sf-init.sh --reconnect</code></a></td><td>1 つの段階の、接続先の Salesforce 組織を付け替える</td></tr>
+    <tr><td><a href="../admin/verify.html"><code>sf-init.sh --verify</code></a></td><td>⚠️ 実際のリポジトリ・組織で、リリースと削除が動くことを確認する（Hello World）</td></tr>
+    <tr><td><a href="../admin/secrets.html#update"><code>sf-update-secret.sh</code></a></td><td>⚠️ GitHub の Secrets / Variables を再登録する</td></tr>
+    <tr><td><a href="../admin/workflows.html#sync"><code>sf-sync-wf.sh</code></a></td><td>⚠️ 作成済みのワークフローを、雛形に合わせて更新する</td></tr>
+    <tr><td><a href="../admin/verify.html#typecheck"><code>sf-typecheck.sh</code></a></td><td>⚠️ 個人用の組織で、メタデータの種類ごとに、リリースと削除ができるかを確かめ、可否の表を作る（<code>--coverage</code> は、組織に接続せず、確認の進み具合を表示）</td></tr>
+  </tbody>
+</table>
+
+<h3>1.3 自動で実行されるコマンド</h3>
+<p>人が直接実行することは、ほとんどありません。<a href="commands-auto.html">自動実行コマンド</a> に説明があります。</p>
+<table>
+  <thead><tr><th>コマンド</th><th>いつ動くか</th></tr></thead>
+  <tbody>
+    <tr><td><a href="commands-auto.html#sf-install"><code>sf-install.sh</code></a></td><td><code>sf-start.sh</code> から自動で</td></tr>
+    <tr><td><a href="commands-auto.html#sf-upgrade"><code>sf-upgrade.sh</code></a></td><td><code>sf-install.sh</code> から自動で（24 時間おき）</td></tr>
+    <tr><td><a href="commands-auto.html#sf-prepush"><code>sf-prepush.sh</code></a></td><td><code>git push</code> のとき（pre-push フック）</td></tr>
+    <tr><td><a href="commands-auto.html#sf-precommit"><code>sf-precommit.sh</code></a></td><td><code>git commit</code> のとき（pre-commit フック）</td></tr>
+    <tr><td><a href="commands-auto.html#sf-metasync"><code>sf-metasync.sh</code></a></td><td>⚠️ GitHub Actions から（ローカルで実行できるのは管理者だけ）</td></tr>
+  </tbody>
+</table>
+
+<h2 id="admin">2. 管理者専用コマンドの安全ガード</h2>
+<p>⚠️ のついたコマンドは<strong>管理者専用</strong>です。実行すると、赤い警告ボックスが表示され、続行の確認（Y / N / q）を求められます。一般の開発者が誤って実行したときは、<code>N</code> または <code>q</code> で中断できます。</p>
+<ul>
+  <li><code>GITHUB_ACTIONS=true</code> が設定されている環境（GitHub Actions 上）では、確認をスキップして自動で実行します。</li>
+  <li><code>gh</code> コマンドを使うコマンドは、起動時に、gh の認証ユーザーとリポジトリのオーナーが一致するかを確認します。不一致なら中断します。
+    <br>ただし、オーナーが GitHub 組織（例: <code>tamashimon-org</code>）で、認証ユーザーがその組織の有効な管理者（admin）なら、そのまま続行します。組織の一般メンバーや、組織の情報を取得できない場合は中断します（<code>gh auth switch</code> で正しいアカウントに切り替えてから、もう一度実行してください）。</li>
+</ul>
+
+</main>
+<aside id="toc"></aside>
+</div>
+<footer id="foot"></footer>
+<script src="../assets/site.js"></script>
+</body>
+</html>

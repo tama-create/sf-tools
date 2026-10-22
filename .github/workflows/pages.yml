@@ -1,0 +1,47 @@
+name: 文書サイトの公開（GitHub Pages）
+
+# site/ の中身（HTML の文書サイト）を、GitHub Pages に公開する。
+# 動く条件: main に site/ の変更が入ったとき（rr のあと）。手動でも動かせる（workflow_dispatch）。
+# 必要な設定（リポジトリの Settings → Pages → Source を「GitHub Actions」にする。最初の 1 回だけ）。
+# 公開は main の内容だけ（development の途中経過は出ない）。
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'site/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 同時に 2 つ公開しない（古いものを止めず、順に動かす）
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: 文書サイトを公開
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: ソースコードを取得
+        uses: actions/checkout@v4
+
+      - name: Pages を設定
+        uses: actions/configure-pages@v5
+
+      - name: site/ をアップロード
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - name: 公開
+        id: deployment
+        uses: actions/deploy-pages@v4

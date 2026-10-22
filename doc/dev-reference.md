@@ -44,7 +44,7 @@
 - **クライアント PC: Windows + Git Bash / macOS / WSL（Ubuntu）**: 単体テスト（CI または手元）と、実環境の通し検証（e2e）を、実際に動かして確認済み
 - **サーバー: Linux（GitHub Actions の Ubuntu ランナー）**: 検証・リリース・メタデータ同期のワークフローが、`sf-release.sh` / `sf-metasync.sh` を実行する。単体テストと shellcheck を CI で毎回確認し、ワークフローは e2e で実際の Salesforce に対して実行して確認済み。**Linux をクライアント PC として使うことは、想定しない**（WSL の Ubuntu は、確認済み）
 - 新しい環境や、未検証の環境で動かすときは、先に `bash tests/e2e/doctor.sh` で、環境を確認する（9.6）
-- 環境ごとの「検証済み」は、実際に動かした範囲だけを書く（README の表と 9.7 の記録を、実際の確認と一致させる）
+- 環境ごとの「検証済み」は、実際に動かした範囲だけを書く（README・文書サイト（`site/guide/install.html`）の表と、9.7 の記録を、実際の確認と一致させる）
 
 - プラットフォーム固有コマンド（`powershell.exe` / `open` / `xdg-open` 等）は `command -v` で存在確認してから使うこと
 - `/proc/version` / `/proc/` 配下のファイルは macOS / GitBash に存在しないため `2>/dev/null` を付けること
@@ -95,6 +95,7 @@
 | `test_sf-prepush.sh` | hooks/pre-push |
 | `test_sf-push.sh` | sf-push.sh |
 | `test_sf-update-secret.sh` | sf-update-secret.sh |
+| `test_site.sh` | HTML の文書サイト `site/`（書き出しの決まり・相対リンクと見出しの実在・目次（`assets/site.js` の NAV）への登録漏れ・LF・コードのブロックのエスケープ・`pages.yml`。見た目は、確認しない） |
 | `test_sf-sync-wf.sh` | sf-sync-wf.sh |
 | `test_wf-sequence.sh` | templates/.github/workflows/wf-sequence.yml（YAML の判定スクリプトを取り出して、実際の git リポジトリで、順序どおり・順序外・最下位・環境ブランチからの PR を確認） |
 
@@ -727,13 +728,14 @@ sf-init.sh --add-tier develop    # main+staging → main+staging+develop
 
 | 変更内容 | 確認先 |
 |---|---|
-| `sf-init.sh` のフロー・入力項目 | `doc/setup-guide.md` セクション3 |
-| ファイルパス・ディレクトリ構造 | `doc/setup-guide.md` セクション6、`README.md` セクション 4（スクリプト一覧）・セクション 7（ディレクトリ構成）|
-| PAT の種類・取得方法 | `doc/setup-guide.md` セクション3.1、`doc/sf-cicd-strategy.md` セクション7.1・8 |
-| WF ファイル名・ジョブ名 | `doc/setup-guide.md` セクション5、`doc/sf-cicd-strategy.md` セクション4.2 |
-| `templates/.github/workflows/` の `name:` | `doc/setup-guide.md` のワークフロー一覧 |
+| `sf-init.sh` のフロー・入力項目 | `site/admin/setup.html` |
+| ファイルパス・ディレクトリ構造 | `site/reference/structure.html`・`site/reference/commands.html`、`README.md` セクション 5（コマンド早見表）|
+| PAT の種類・取得方法 | `site/admin/setup.html`（4.3）、`doc/sf-cicd-strategy.md` セクション7.1・8 |
+| WF ファイル名・ジョブ名 | `site/admin/workflows.html`、`doc/sf-cicd-strategy.md` セクション4.2 |
+| `templates/.github/workflows/` の `name:` | `site/admin/workflows.html` のワークフロー一覧 |
 | `templates/.github/workflows/` の内容 | `phases/init/09_repo_rules.sh` の `required_status_checks.context` との整合 |
-| mm / rr の運用・リリース手順 | `CLAUDE.md` 1.3・4.3、`README.md` セクション 9、本書セクション 9 |
+| コマンドの使い方・オプション・画面の文言 | `site/`（使い方ガイド・リファレンス。9.8）。README は、概要だけ（詳細は、サイトへ） |
+| mm / rr の運用・リリース手順 | `CLAUDE.md` 1.3・4.3、`doc/dev-guide.md`、本書セクション 9 |
 
 > ドキュメントの詳細（フロー・パス等）はコードを確認してから記載すること。推測で書かないこと。
 
@@ -985,7 +987,7 @@ sf-tools の `main` への反映は、全ユーザーへの配布と同義であ
 
 ### 9.7 検証済み環境の記録
 
-**原則: 「検証済み」と書くのは、実際に動かした環境だけ。** README の「検証済み動作環境」の表は、ここの記録と一致させる。動かしていない環境は「未検証」と書く（目標は、すべての OS で動くこと。未検証の環境は、検証して、この表に足していく）。
+**原則: 「検証済み」と書くのは、実際に動かした環境だけ。** README（3.1 動作環境）と文書サイト（`site/guide/install.html`）の「動作環境」の表は、ここの記録と一致させる。動かしていない環境は「未検証」と書く（目標は、すべての OS で動くこと。未検証の環境は、検証して、この表に足していく）。
 
 **記録のしかた:** e2e（`tests/e2e/run.sh`）は、終わりに、表の 1 行（`e2e_record_line`）を表示する。**成功したら**、その行を、下の表に追記し、README の表を更新する。新しい環境（Mac など）では、先に `bash tests/e2e/doctor.sh` で環境を確認する。単体テストの結果は、GitHub Actions（`test.yml`）の実行結果が根拠になる（`gh run list --workflow test.yml`）。
 
@@ -1016,3 +1018,14 @@ sf-tools の `main` への反映は、全ユーザーへの配布と同義であ
 > **WSL（Ubuntu）の検証で分かったこと（初回の 3 回は失敗。4 回目に全件成功）:** ①`git` に GitHub の認証の仕組み（credential helper）が無く、https のクローンが、パスワードを待って 22 分止まった（→ `doctor.sh` が検出。e2e には `GIT_CONFIG_*` の環境変数で渡す。`GIT_TERMINAL_PROMPT=0` で、待たずに失敗させる）。②`git` のユーザー名・メールアドレスが無く、初回のコミットが失敗した（→ `doctor.sh` が検出。e2e には `GIT_AUTHOR_*` / `GIT_COMMITTER_*` で渡す）。③WSL の `open_browser` は `powershell.exe` を使うため、e2e の差し替えに加えた（`shims/browser`）。④1 回だけ、Hello World の `sf-dryrun.sh` が、メッセージなしの `Error (1)` で失敗したが、同じ条件で手動で 3 回実行して、すべて成功し、4 回目の通しも成功した（原因は特定できていない。Salesforce 側の一時的な失敗の可能性）。WSL では、`sf` と `gh` が Windows 側のものを使えないため、WSL 用を、`sudo` なしで、ホームに入れた（`gh` は、チェックサムを確認して `~/.local/gh`、`sf` は nvm の `npm -g`）。
 
 > Windows の Git Bash は、標準の Git Bash（`C:\Git\bin\bash.exe`。`openssl` が `/ucrt64/bin`）で動かす。`C:\Git\usr\bin\bash.exe`（MSYS 版の `openssl`）では、証明書の発行先が空になり、Phase 10 が失敗する（`doctor.sh` が検出する）。
+
+### 9.8 文書サイト（`site/`）
+
+利用者向けの文書（使い方・管理者向けの手順・リファレンス・設計）は、HTML の文書サイトに置く。`README.md` は、概要と、サイトへの入口だけにする（以前の README の 9 章、sf-tools の開発者向けの手順は、`doc/dev-guide.md`）（段階的に移行中: いまは、使い方ガイドとリファレンス（開発者向け・自動実行・ターゲットファイル・構成）。管理者向けと設計は、順次）。AI 向け（`CLAUDE.md`・本書）と、テストが読み込む文書（`doc/integration-test-plan.md`）は、Markdown のまま。**実装・AI への指示に使う設計書（`doc/` の `jwt-auth-spec.md`・`wf-distribution-strategy.md`・`wizard-ux-design.md`・`sf-logwatch-design.md`・`sf-cicd-strategy.md`）も、Markdown のまま**（無理に HTML にしない。公開して価値のあるものだけを、サイトに載せる）。`sf-cicd-strategy.md` の要点は、読み物として `site/design/cicd.html` にある（設計を変えたときは、両方を直す）。
+
+- **構成**: `site/index.html`（トップ）・`site/guide/`（使い方ガイド）・`site/reference/`（リファレンス）。共通の部分は、`site/assets/style.css`（スタイル。ダークモード・スマホ対応）と `site/assets/site.js`。ビルドの手順は、ない（手書きの静的な HTML）。
+- **ページの足し方**: ① `<head>` と骨組み（`<header id="top">`・`<nav id="side">`・`<main id="doc" class="doc">`・`<aside id="toc">`・`<footer id="foot">`・`site.js` の読み込み）を、既存のページと同じにする。② `<body data-root="...">` は、`site/` からの深さに合わせる（直下は `""`・1 階層下は `"../"`）。③ **`assets/site.js` の `NAV` に 1 行足す**（左の目次・前後のリンクは、ここだけで決まる。`h` がない項目は「準備中」と表示される）。コード中の `<` は、`&lt;` にする。
+- **テスト**: `bash tests/run_tests.sh test_site.sh`（`--changed` は、`site/*`・`pages.yml` の変更で選ぶ）。
+- **公開**: `.github/workflows/pages.yml` が、`main` に `site/` の変更が入ったとき、`site/` を GitHub Pages に公開する（`development` の途中経過は出ない）。リポジトリの Settings → Pages → Source を「GitHub Actions」にする設定が、最初の 1 回だけ必要。公開先は、`https://tama-create.github.io/sf-tools/`。
+- **手元で見る**: `site/index.html` を、ブラウザで直接開く（サーバーは不要）。
+

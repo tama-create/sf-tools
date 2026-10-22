@@ -63,7 +63,7 @@ git pull origin main                     # main の最新を取り込む
 ### 1.4 メモリ・ドキュメント管理
 
 - 「記憶して」と言われた場合は、`memory/` と `CLAUDE.md` の両方に保存すること
-- 「ドキュメントを最新化して」と言われた場合は、リポジトリ内のすべての `*.md` をアップデートすること
+- 「ドキュメントを最新化して」と言われた場合は、リポジトリ内のすべての `*.md` と、文書サイト（`site/`）をアップデートすること
 - `*.md` ファイルには必ず項目番号を付けること（大項目 `1`、中項目 `1.1`、小項目 `1.1.1`）
 - 対話・解説・要約はすべて日本語で行うこと
 - **`CLAUDE.md` を更新したときは、その都度ブラッシュアップすること。** 増築（追記）を繰り返すと重複・番号ズレが生じるため、更新のたびに構成・重複・番号を見直すこと
@@ -80,7 +80,9 @@ git pull origin main                     # main の最新を取り込む
 |---|---|---|
 | `CLAUDE.md` | AI（Claude）向けのルール・指示 | **極力軽くすること**。重要事項のみ記載し、詳細は dev-reference に逃がす |
 | `doc/dev-reference.md` | AI（Claude）向けの詳細実装リファレンス | 処理フロー・関数仕様・判定ロジックなど実装詳細を書く |
-| `README.md` | 人間向けのプロジェクトドキュメント | **わかりやすく詳しく書く**。使い方・挙動・設計意図をユーザーが理解できるよう記述する |
+| `README.md` | 人間向けの入口（概要） | **短く**（概要・最短の使い方・コマンド早見表・文書へのリンク）。詳細は書かず、文書サイトへのリンクにする |
+| `site/`（HTML の文書サイト） | 人間向けの詳細（使い方ガイド・管理者ガイド・リファレンス） | **わかりやすく詳しく書く**。使い方・挙動・設計意図をユーザーが理解できるよう記述する。ページの足し方・テストは `doc/dev-reference.md` 9.8 |
+| `doc/dev-guide.md` | sf-tools の開発者向けの手順書 | 開発・リリースの流れ（mm・rr）と e2e の使い方 |
 
 > CLAUDE.md が重くなると Claude のパフォーマンスと回答精度が低下する。ルールや判断基準は簡潔に、詳細は必ず dev-reference に書くこと。
 
@@ -226,12 +228,12 @@ Salesforce 開発の環境構築と日々の作業を自動化するシェルス
 - 実行場所は各 Salesforce プロジェクト (`force-*`) 側
 - `sf-hook.sh` は `hooks/pre-push` をコピーする設計
 - husky が設定されている場合は `core.hooksPath` を削除する設計
-- **動作環境（Windows の Git Bash・macOS・Linux・WSL）の「検証済み」は、実際に動かした環境だけを書く**（README の表と `doc/dev-reference.md` 9.7 の記録を、実際の確認と一致させる。未検証は「未検証」と書く。目標は、すべての OS で動くこと）。新しい環境は、`bash tests/e2e/doctor.sh` で確認してから `bash tests/e2e/run.sh`
+- **動作環境（Windows の Git Bash・macOS・Linux・WSL）の「検証済み」は、実際に動かした環境だけを書く**（README・文書サイト（`site/guide/install.html`）の表と、`doc/dev-reference.md` 9.7 の記録を、実際の確認と一致させる。未検証は「未検証」と書く。目標は、すべての OS で動くこと）。新しい環境は、`bash tests/e2e/doctor.sh` で確認してから `bash tests/e2e/run.sh`
 - Salesforce CLI（`sf`）は **npm 版が前提**（`check_sf_cli`）。Windows の Git Bash で公式インストーラー版を使うと、成功しても終了コード 1 になるため非対応（`run` は終了コードのみで判定する。詳細は `doc/dev-reference.md` 3.3）
 
 ### 4.2 ディレクトリ構成
 
-> スクリプト一覧は `README.md` セクション 4、ディレクトリ構成は `README.md` セクション 7 を参照。
+> コマンド一覧・ディレクトリ構成は、文書サイト（`site/reference/commands.html`・`site/reference/structure.html`）を参照。`README.md` セクション 5 は、早見表。
 
 | パス | 役割 |
 |---|---|
@@ -244,6 +246,7 @@ Salesforce 開発の環境構築と日々の作業を自動化するシェルス
 | `templates/` | force-* へ配布する雛形。**参照は sf-init 専用**（`phase_setup_release_dir` のみ日常運用でも参照可） |
 | `tests/` | モックベースの単体テスト一式 |
 | `tests/e2e/` | 実環境での `sf-init` の通し検証（自動実行・自動削除）。通常のテストには含めない |
+| `site/` | 利用者向けの文書サイト（HTML。GitHub Pages で公開。`doc/dev-reference.md` 9.8） |
 | `doc/` | 設計思想・戦略・開発リファレンス |
 
 **サブスクリプトのフォルダ構成ルール:** メインスクリプトからフェーズ単位で呼ばれるサブスクリプトは **`phases/<script名>/`** に配置すること（`lib/` はライブラリ専用）。

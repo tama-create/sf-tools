@@ -16,6 +16,8 @@
   --danger-line: #d95b5b;
   --ok: #e8f6ec;
   --ok-line: #4cae6a;
+  --admin: #f1ecfa;
+  --admin-line: #9a82d6;
   --side-w: 17rem;
   --toc-w: 14rem;
   --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
@@ -39,6 +41,8 @@
     --danger-line: #b04a4a;
     --ok: #1b2d22;
     --ok-line: #3c8b55;
+    --admin: #261f38;
+    --admin-line: #7b64b8;
   }
 }
 :root[data-theme="dark"] {
@@ -58,6 +62,8 @@
   --danger-line: #b04a4a;
   --ok: #1b2d22;
   --ok-line: #3c8b55;
+  --admin: #261f38;
+  --admin-line: #7b64b8;
 }
 
 * { box-sizing: border-box; }
@@ -171,6 +177,22 @@ a:hover { text-decoration: none; }
 .box.danger { border-color: var(--danger-line); background: var(--danger); }
 .box.ok { border-color: var(--ok-line); background: var(--ok); }
 .box .title { font-weight: 700; margin-bottom: .2rem; }
+/* 囲みの種類ごとに、決まったアイコンを、自動で付ける（本文には書かない。ページを足しても、そろう）
+ *   通常 = 💡 ヒント / warn = ⚠️ 注意 / danger = 🛑 してはいけないこと / ok = ✅ できた・次へ / next = 👉 次へ / admin = 🔑 管理者専用 */
+.box .title::before { content: "💡"; margin-right: .45em; font-weight: 400; }
+.box.warn .title::before { content: "⚠️"; }
+.box.danger .title::before { content: "🛑"; }
+.box.ok .title::before { content: "✅"; }
+.box.next .title::before { content: "👉"; }
+.box.admin .title::before { content: "🔑"; }
+.box.admin { border-color: var(--admin-line); background: var(--admin); }
+.box.next { border-color: var(--ok-line); background: var(--ok); }
+/* 小さな印（「読み取りのみ」「所要時間」など。文の中に置く）*/
+.badge {
+  display: inline-block; font-size: .78rem; line-height: 1.5; padding: 0 .6rem; margin: 0 .2rem;
+  border: 1px solid var(--line); border-radius: 1rem; background: var(--bg-soft); color: var(--fg-soft); white-space: nowrap;
+}
+.badge.safe { border-color: var(--ok-line); background: var(--ok); color: var(--fg); }
 
 /* ---- 手順（番号つきの大きな丸）---- */
 ol.steps { list-style: none; padding-left: 0; counter-reset: step; }

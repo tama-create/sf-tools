@@ -13,8 +13,8 @@
 <nav id="side" aria-label="目次"></nav>
 <main id="doc" class="doc">
 
-<h1>開発者向けコマンド</h1>
-<p class="lead">開発者が日々使うコマンドの、詳しい説明です。全体の一覧は <a href="commands.html">コマンド一覧</a> にあります。</p>
+<h1>💻 開発者向けコマンド</h1>
+<p class="lead">開発者が毎日使うコマンドの、詳しい説明です。全体の一覧は、<a href="commands.html">コマンド一覧</a>にあります。使い方の流れを知りたいときは、先に<a href="../guide/daily.html">日々の開発の流れ</a>を読むと、分かりやすくなります。</p>
 
 <h2 id="sf-job"><code>sf-job.sh</code></h2>
 <pre><code>sf-job.sh</code></pre>
@@ -38,6 +38,14 @@
   <li><code>--project</code> だけを指定して、同じプロジェクト名のクローンが複数のオーナーにあるときは、最初のものを黙って使わず、オーナーを選ばせます。</li>
   <li><code>force-*</code> フォルダの内側では実行できません。</li>
 </ul>
+
+<h3 id="sf-job-project">プロジェクトの決まり方</h3>
+<p>どのプロジェクト（オーナーと XXXX）を使うかは、<strong>フォルダの名前では決まりません</strong>。次の順で決めます（上にあるものが優先です）。</p>
+<ol>
+  <li>引数の <code>--owner</code> / <code>--project</code></li>
+  <li>作業フォルダの下にあるクローンの <strong><code>git remote</code></strong>。クローンしたときに、Git が記録した住所から、オーナーとリポジトリの名前を読み取ります（1 種類だけなら自動、複数なら番号で選びます）</li>
+  <li>対話で入力</li>
+</ol>
 
 <h2 id="sf-start"><code>sf-start.sh</code></h2>
 <pre><code>sf-start.sh</code></pre>

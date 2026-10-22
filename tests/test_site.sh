@@ -12,6 +12,7 @@
 #   4. 改行が LF だけ（CR が混ざっていない）
 #   5. コードのブロックの中に、エスケープしていない「<」がない（ブラウザで、タグとして消えてしまうため）
 #   6. 公開用のワークフロー（pages.yml）が、site/ を公開する
+#   8. 囲み（<div class="box ...">）に、必ず題（<div class="title">）がある（アイコンは、題の前に、スタイルが自動で付ける）
 #   7. 見出し: 番号を手で書かない（大項目 1. / 中項目 1.1 / 小項目 1.1.1 は、assets/site.js が自動で付ける）・階層を飛ばさない（h2 → h3 → h4）
 # ==============================================================================
 source "$(dirname "${BASH_SOURCE[0]}")/test_helper.sh"
@@ -146,11 +147,30 @@ test_site_headings() {
     assert_file_contains "$NAVJS" 'cnt[lv] += 1' "assets/site.js: 見出しの番号を、自動で付ける"
 }
 
+test_site_boxes() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] 囲み（題がある・種類が決まっている）${CLR_RST}"
+    local p nb nt r bad="" kinds=""
+    while IFS= read -r p; do
+        nb=$(grep -c '<div class="box' "$SITE/$p")  # VAR=$(cmd) のため run 不使用
+        nt=$(grep -c '<div class="title">' "$SITE/$p")  # VAR=$(cmd) のため run 不使用
+        [[ "$nb" == "$nt" ]] || bad="$bad
+  $p: 囲み ${nb} 個に対して、題が ${nt} 個"
+        # 種類は、warn・danger・ok・next・admin だけ（アイコンが決まっているもの。ほかの名前は、アイコンが付かない）
+        r=$(grep -o '<div class="box[^"]*"' "$SITE/$p" | grep -vE '<div class="box( (warn|danger|ok|next|admin))?"' | awk -v f="$p" '{ print "  " f ": " $0 }')  # VAR=$(cmd) のため run 不使用
+        [[ -z "$r" ]] || kinds="$kinds
+$r"
+    done < <(_pages)
+    [[ -z "$bad" ]] && pass "すべての囲みに、題がある（アイコンは、題の前に付く）" || fail "題のない囲みがある" "$bad"
+    [[ -z "$kinds" ]] && pass "囲みの種類は、決まったもの（通常・warn・danger・ok・next・admin）だけ" || fail "決まっていない種類の囲みがある（アイコンが付かない）" "$kinds"
+    assert_file_contains "$SITE/assets/style.css" '.box.admin .title::before' "style.css: 囲みの種類ごとに、アイコンを自動で付ける"
+}
+
 test_site_head
 test_site_links
 test_site_nav
 test_site_format
 test_site_pages_workflow
 test_site_headings
+test_site_boxes
 
 print_summary

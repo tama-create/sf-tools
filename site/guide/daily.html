@@ -13,61 +13,78 @@
 <nav id="side" aria-label="目次"></nav>
 <main id="doc" class="doc">
 
-<h1>日々の開発の流れ</h1>
-<p class="lead">変更を書いて、検証して、デプロイして、送る。毎日くり返す一連の操作です。すべて <code>force-*</code> フォルダの中で実行します。</p>
+<h1>🔁 日々の開発の流れ</h1>
+<p class="lead">変更を書いて、確かめて、送る。毎日くり返す一連の操作です。すべて、<code>force-*</code> フォルダの中で実行します。</p>
 
 <div class="box">
   <div class="title">全体の流れ</div>
-  <p>ターゲットファイルを書く → <code>sf-release.sh</code>（検証）→ <code>sf-deploy.sh</code>（デプロイ）→ <code>sf-push.sh</code>（送る）→ <code>sf-next.sh</code>（次の PR 先を確認）</p>
+  <p>① ターゲットファイルを書く → ② <code>sf-dryrun.sh</code>（反映できるか確かめる）→ ③ <code>sf-push.sh</code>（変更を送る）→ ④ <code>sf-next.sh</code>（次の PR の出し先を確認）</p>
+  <p>自分専用の組織で、実際に試したいときだけ、②のあとに <code>sf-deploy.sh</code> を使います（<a href="#deploy">3 章</a>）。共有の環境（本番など）への反映は、PR をマージすると、自動で行われます。</p>
 </div>
 
-<h2 id="target">ターゲットファイルを記述する</h2>
-<p>ターゲットファイルとは、デプロイ対象・削除対象のメタデータを列挙するファイルです。<code>release/&lt;ブランチ名&gt;/</code> の下に置きます。</p>
+<h2 id="target">ターゲットファイルを書く</h2>
+<p>ターゲットファイルは、「何を反映するか」「何を削除するか」を書いておくファイルです。<code>release/&lt;ブランチ名&gt;/</code> の下にあります（<code>force-XXXX</code> フォルダの中の <code>sf-tools</code> フォルダです。パソコンに置いた <code>~/sf-tools</code> とは、別のものです）。</p>
 <table>
   <thead><tr><th>ファイル</th><th>役割</th></tr></thead>
   <tbody>
-    <tr><td><code>deploy-target.txt</code></td><td>デプロイするメタデータを列挙する</td></tr>
-    <tr><td><code>remove-target.txt</code></td><td>削除するメタデータを列挙する</td></tr>
+    <tr><td><code>deploy-target.txt</code></td><td>反映するメタデータを、並べて書く</td></tr>
+    <tr><td><code>remove-target.txt</code></td><td>削除するメタデータを、並べて書く</td></tr>
   </tbody>
 </table>
-<p>書き方は、<a href="../reference/target-files.html">ターゲットファイルの書き方</a> を見てください。</p>
+<p>書き方は、<a href="../reference/target-files.html">ターゲットファイルの書き方</a>を見てください。</p>
 
-<h2 id="dryrun">dry-run で検証する</h2>
-<pre><code>sf-release.sh</code></pre>
-<p>実際には変更せずに、接続中の組織へ、リリースできるかを確かめます。</p>
+<h2 id="dryrun">反映できるか確かめる（dry-run）</h2>
+<pre><code>sf-dryrun.sh</code></pre>
+<p>実際には反映せずに、接続中の組織で「反映できるか」だけを確かめます。本番を変えずに、安心して試せます。</p>
+<ul>
+  <li><strong>結果の見方:</strong> 成功か失敗かが、ターミナルに表示されます。</li>
+  <li><strong>失敗したとき:</strong> エラーの内容が表示されます。ターゲットファイルや、変更の内容を直して、もう一度実行してください。ログは、<code>force-*</code> フォルダの中の <code>sf-tools/logs/</code> にも残ります。</li>
+</ul>
+<p><code>sf-release.sh</code> を、オプションなしで実行しても、同じ dry-run になります。</p>
 
-<h2 id="deploy">デプロイを実行する</h2>
+<h2 id="deploy">自分の組織で、実際に反映する（sf-deploy）</h2>
 <pre><code>sf-deploy.sh</code></pre>
+<p>接続中の、<strong>自分専用の組織</strong>（Sandbox・Developer Edition・Scratch Org）に、変更を実際に反映します。自分の環境で動きを確かめたいときに使います。</p>
+<div class="box warn">
+  <div class="title">共有の環境には、反映できません</div>
+  <p>本番・staging・develop といった共有の環境には、パソコンから反映できない仕組みです（実行すると、確認の前に止まります）。共有の環境へは、GitHub に変更を送り、レビューを通して、PR をマージします。そうすると、自動で反映されます。</p>
+</div>
 
-<h2 id="push">変更をコミットして送る（sf-push）</h2>
+<h2 id="push">変更を送る（sf-push）</h2>
 <pre><code>sf-push.sh</code></pre>
-<p>カレントフォルダの下の変更を、まとめてコミットしてプッシュします。</p>
+<p>カレントフォルダの下の変更を、まとめてコミットして、GitHub に送ります。</p>
 <ul>
   <li>コミットメッセージは、VS Code で入力します。</li>
-  <li><code>main</code> との差分も、自動で取り込みます。</li>
-  <li>プッシュだけ失敗したときは、もう一度実行すれば、未プッシュのコミットが送られます。</li>
+  <li><code>main</code> に新しく入った変更も、自動で取り込みます。</li>
+  <li>送るのだけが失敗したときは、もう一度実行してください。まだ送れていないコミットが、送られます。</li>
 </ul>
 <div class="box warn">
   <div class="title">コミットする前に止まる場合</div>
-  <p>ブランチの上にいないとき（detached HEAD）と、保護ブランチ（<code>branches.txt</code> のブランチ。<code>main</code> など）の上にいるときは、コミットする前にエラーで終了します。コミットだけが手元に残り、プッシュは通らない状態を作らないためです。</p>
+  <p>次の 2 つのときは、コミットする前に、エラーで止まります。コミットだけが手元に残って、送れない状態を作らないための仕組みです。</p>
+  <ul>
+    <li>ブランチの上にいないとき（detached HEAD）</li>
+    <li>保護ブランチ（<code>branches.txt</code> のブランチ。<code>main</code> など）の上にいるとき</li>
+  </ul>
+  <p>そのときは、<code>sf-job.sh</code> で作った、作業用のブランチに移ってから、もう一度実行してください。</p>
 </div>
 
 <h2 id="next">PR の状況を確認する（sf-next）</h2>
 <pre><code>sf-next.sh</code></pre>
-<p>現在のブランチが、<code>develop</code> / <code>staging</code> / <code>main</code> のどこまでマージ済みかを一覧で表示し、次に出すべき PR の先を案内します。</p>
+<p>いまのブランチが、<code>develop</code> / <code>staging</code> / <code>main</code> のどこまで取り込まれたかを、一覧で表示します。次に PR（取り込みの依頼）を出す先も、案内します。</p>
 
-<h2 id="hooks">git フックによる自動チェック</h2>
-<p>コミットとプッシュのときに、次のチェックが自動で動きます。</p>
+<h2 id="hooks">自動で動くチェック（git フック）</h2>
+<p>コミットとプッシュのときに、次のチェックが、自動で動きます。何もしなくて大丈夫です。</p>
 <table>
   <thead><tr><th>フック</th><th>いつ</th><th>内容</th></tr></thead>
   <tbody>
-    <tr><td><strong>pre-commit</strong></td><td><code>git commit</code> のとき</td><td>ターゲットファイルの構文を確認します。エラーがあれば、コミットを中止します</td></tr>
-    <tr><td><strong>pre-push</strong></td><td><code>git push</code> のとき</td><td><code>main</code> との同期を確認します。<code>main</code> / <code>staging</code> / <code>develop</code> への直接のプッシュは、ブロックされます</td></tr>
+    <tr><td><strong>pre-commit</strong></td><td><code>git commit</code> のとき</td><td>ターゲットファイルの書き方を確認します。エラーがあれば、コミットを止めます</td></tr>
+    <tr><td><strong>pre-push</strong></td><td><code>git push</code> のとき</td><td><code>main</code> との同期を確認します。<code>main</code> / <code>staging</code> / <code>develop</code> へは、直接送れません（PR を通します）</td></tr>
   </tbody>
 </table>
 
-<h2 id="launcher">ランチャーから実行する</h2>
-<p>ここまでのコマンドは、すべて <code>sfl</code>（<code>sf-launcher.sh</code>）から、メニュー形式でも実行できます。<code>sf-job</code> / <code>sf-start</code> を実行すると自動で起動するので、個別に呼び出す必要はありません。</p>
+<h2 id="launcher">メニューから実行する（ランチャー）</h2>
+<p>ここまでのコマンドは、<code>sfl</code>（<code>sf-launcher.sh</code>）を実行すると、メニューから選んで使えます。コマンド名を覚えていなくても大丈夫です。</p>
+<p><code>sf-job</code> や <code>sf-start</code> を実行すると、このメニューが自動で開くので、自分で <code>sfl</code> を打つ必要は、ほとんどありません。</p>
 <pre><code>sfl</code></pre>
 <pre><code>  ──────────────────────────────────────────────────
   >> Launcher <<

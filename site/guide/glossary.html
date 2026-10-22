@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>用語集 | sf-tools ドキュメント</title>
+<meta name="description" content="sf-tools の文書に出てくる言葉の、やさしい説明。">
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body data-root="../">
+<header id="top"></header>
+<div class="layout">
+<nav id="side" aria-label="目次"></nav>
+<main id="doc" class="doc">
+
+<h1>📖 用語集</h1>
+<p class="lead">この文書に出てくる言葉を、やさしく説明します。「これは何だろう？」と思ったら、ここを見てください。すべてを覚える必要はありません。</p>
+
+<div class="box">
+  <div class="title">この文書での言葉の使い方</div>
+  <ul>
+    <li><strong>管理者</strong>は、「プロジェクト管理者」のことです（<a href="#people">次の節</a>）。Salesforce のシステム管理者と同じ人のこともありますが、役割は別です。</li>
+    <li><strong>リリース</strong>と<strong>デプロイ</strong>は、同じ意味です（変更を Salesforce の組織に反映すること）。コマンドの名前に合わせて、どちらも出てきます。</li>
+  </ul>
+</div>
+
+<h2 id="people">人と役割</h2>
+<table>
+  <thead><tr><th>言葉</th><th>意味</th></tr></thead>
+  <tbody>
+    <tr><td><strong>プロジェクト管理者</strong>（管理者）</td><td>新しいプロジェクトを作り、接続や設定を整える担当の方です。最初に 1 回の準備をして、そのあとは、ときどき見直します。Salesforce のシステム管理者と同じ人のこともありますが、GitHub の設定など、別の作業も受け持ちます</td></tr>
+    <tr><td><strong>開発者</strong></td><td>Apex や LWC、項目、画面などを作って、変更を出す方です。日々の作業で、sf-tools のコマンドをいちばん使います</td></tr>
+    <tr><td><strong>レビュアー</strong></td><td>PR（変更を取り込む依頼）の内容を見て、取り込んでよいかを決める方です</td></tr>
+  </tbody>
+</table>
+
+<h2 id="folders">プロジェクトとフォルダ</h2>
+<table>
+  <thead><tr><th>言葉</th><th>意味</th></tr></thead>
+  <tbody>
+    <tr><td><strong>プロジェクト</strong>（<code>force-XXXX</code>）</td><td>1 つの Salesforce 開発の単位です。GitHub 上のリポジトリ 1 つに対応します。名前は <code>force-</code> で始まり、<code>XXXX</code> の部分は管理者が決めます（例: <code>force-acme</code>）</td></tr>
+    <tr><td><strong>リポジトリ</strong></td><td>ファイルと、その変更の履歴を、しまっておく場所です（GitHub 上にあります）</td></tr>
+    <tr><td><strong>クローン</strong>（clone）</td><td>リポジトリを、自分のパソコンにコピーすることです。コピーしたものも、クローンと呼びます</td></tr>
+    <tr><td><strong>作業フォルダ</strong></td><td>作業用のフォルダを、まとめて置く場所です。どこでも構いません（おすすめは <code>~/sf</code> のような短い名前）</td></tr>
+    <tr><td><strong>作業単位</strong></td><td>1 つの作業のためのフォルダです（<code>JOB-日付</code> など）。同じプロジェクトを、別々の作業として、同時に開くための入れ物です</td></tr>
+  </tbody>
+</table>
+
+<h2 id="git">Git と GitHub</h2>
+<table>
+  <thead><tr><th>言葉</th><th>意味</th></tr></thead>
+  <tbody>
+    <tr><td><strong>ブランチ</strong></td><td>変更を、本線から分けて進めるための「枝」です。作業ごとに 1 本作ります。本線を汚さずに、安心して試せます</td></tr>
+    <tr><td><strong>コミット</strong></td><td>変更を、履歴に 1 つ記録することです</td></tr>
+    <tr><td><strong>プッシュ</strong>（push）</td><td>手元の変更を、GitHub に送ることです</td></tr>
+    <tr><td><strong>PR</strong>（プルリクエスト）</td><td>「この変更を取り込んでください」という依頼です。取り込む前に、自動の検証と、レビュアーの確認が入ります</td></tr>
+    <tr><td><strong>マージ</strong></td><td>PR の変更を、取り込み先のブランチに合わせることです</td></tr>
+    <tr><td><strong>ワークフロー</strong>（GitHub Actions）</td><td>GitHub の上で、自動で動く処理です。この文書では、検証・リリース・同期などを行う仕組みを、ワークフローと呼びます。人が操作しなくても、PR を作ると動き出します</td></tr>
+    <tr><td><strong>フック</strong></td><td>コミットやプッシュの直前に、自動で動くチェックです。まちがった内容を、送る前に止めてくれます</td></tr>
+    <tr><td><strong>ブランチ保護</strong>（Ruleset）</td><td><code>main</code> などの大切なブランチに、直接、変更を送れないようにする GitHub の設定です。必ず PR を通すので、検証を飛ばせません</td></tr>
+  </tbody>
+</table>
+
+<h2 id="stages">段階（環境）と組織</h2>
+<table>
+  <thead><tr><th>言葉</th><th>意味</th></tr></thead>
+  <tbody>
+    <tr><td><strong>組織</strong>（org）</td><td>Salesforce の環境 1 つのことです。本番・Sandbox・Developer Edition などがあります</td></tr>
+    <tr><td><strong>段階</strong></td><td>変更を、順番に確かめながら本番へ進めるための、段のことです。<code>develop</code>（開発）→ <code>staging</code>（検証）→ <code>main</code>（本番）の 3 段が標準です。段ごとに、ブランチと Salesforce の組織が、1 つずつ対応します。小さなプロジェクトは、<code>main</code> だけの 1 段でも使えます</td></tr>
+    <tr><td><strong>環境</strong></td><td>段階と同じ意味で使います（本番環境・検証環境・開発環境）</td></tr>
+  </tbody>
+</table>
+
+<h2 id="release">リリースの言葉</h2>
+<table>
+  <thead><tr><th>言葉</th><th>意味</th></tr></thead>
+  <tbody>
+    <tr><td><strong>リリース</strong>（デプロイ）</td><td>変更を、Salesforce の組織に反映することです</td></tr>
+    <tr><td><strong>dry-run</strong>（検証）</td><td>実際には反映せずに、「反映できるか」だけを確かめることです。本番を変えずに、安心して試せます。sf-tools のリリースは、<strong>まず dry-run</strong> が基本です</td></tr>
+    <tr><td><strong>メタデータ</strong></td><td>Apex クラス・項目・画面レイアウトなど、Salesforce の設定や部品のことです</td></tr>
+    <tr><td><strong>ターゲットファイル</strong></td><td>「何を反映するか」「何を削除するか」を書いておくファイルです（<code>deploy-target.txt</code> と <code>remove-target.txt</code>）</td></tr>
+    <tr><td><strong>メタデータの同期</strong></td><td>組織の最新の状態を、Git に取り込む処理です。手元の変更とは関係なく、組織で直接加えられた変更も、Git に残せます</td></tr>
+  </tbody>
+</table>
+
+<h2 id="auth">認証と秘密の情報</h2>
+<table>
+  <thead><tr><th>言葉</th><th>意味</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Secret</strong></td><td>GitHub に登録して、人にも見えないように隠しておく情報です（秘密鍵や Token など）</td></tr>
+    <tr><td><strong>Variable</strong></td><td>GitHub に登録する情報のうち、見えても問題のないものです（ユーザー名や URL など）</td></tr>
+    <tr><td><strong>Token</strong>（トークン）</td><td>長い英数字の文字列で、「合言葉」のように使います。パスワードの代わりに、ツールどうしが、おたがいを確かめます</td></tr>
+    <tr><td><strong>PAT</strong></td><td>GitHub の Personal Access Token のことで、GitHub の「合鍵」のようなものです。ワークフローが、リポジトリを更新するために使います</td></tr>
+    <tr><td><strong>JWT 認証</strong></td><td>パスワードの入力なしで、秘密鍵を使って、Salesforce にログインする方法です。GitHub 上のワークフローが、自動でログインするために使います</td></tr>
+    <tr><td><strong>外部クライアントアプリ</strong></td><td>Salesforce の側に作る、「このツールからのログインを許可する」という登録です。セットアップのときに、自動で作られます</td></tr>
+  </tbody>
+</table>
+
+</main>
+<aside id="toc"></aside>
+</div>
+<footer id="foot"></footer>
+<script src="../assets/site.js"></script>
+</body>
+</html>

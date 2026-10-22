@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>sf-tools ドキュメント</title>
-<meta name="description" content="sf-tools は、Salesforce 開発の環境構築・デプロイ・事前チェック・メタデータ同期を自動化するシェルスクリプト集です。">
+<meta name="description" content="sf-tools は、Salesforce の変更を、安全に、決まった手順で本番に届けるための道具です。">
 <link rel="stylesheet" href="assets/style.css">
 </head>
 <body data-root="">
@@ -14,56 +14,70 @@
 <main id="doc" class="doc">
 
 <div class="hero">
-  <h1>sf-tools</h1>
-  <p class="lead">Salesforce 開発の「毎日の手間」を、コマンド一本にするツールキットです。</p>
-  <p>環境構築、デプロイ、事前チェック、メタデータの同期。Salesforce の開発で毎回発生する作業を、シェルスクリプトでまとめて自動化します。
-  <code>~/sf-tools</code> に置き、各 Salesforce プロジェクト（<code>force-*</code> フォルダ）から呼び出して使います。
-  変更の検証とリリースは、GitHub Actions が自動で行います。</p>
+  <h1>🚀 sf-tools</h1>
+  <p class="lead">Salesforce の変更を、安全に、決まった手順で、本番に届けるための道具です。</p>
+  <p>「変更を作る → 確かめる → 本番に反映する」という毎日のくり返しを、コマンドと自動の仕組みに任せられます。変更は、本番に出る前に、自動でチェックされます。うっかりミスや、反映のし忘れを防げます。</p>
+  <ul>
+    <li>🔑 <strong>最初の準備</strong>は、プロジェクト管理者が、1 回だけ行います。</li>
+    <li>💻 <strong>毎日の作業</strong>で使うのは、おもに開発者です。</li>
+    <li>👀 業務担当の方が、コマンドを使う必要は、ほとんどありません。Slack に届く結果の通知を見る形で、関わります。</li>
+  </ul>
+  <p>しくみは、シェルスクリプト（コマンド）の集まりです。パソコンの <code>~/sf-tools</code> に置いて、各プロジェクトのフォルダから呼び出します。変更の検証とリリースは、GitHub Actions（GitHub 上の自動処理）が行います。</p>
 </div>
 
 <h2>あなたはどれですか？</h2>
 <div class="cards">
   <a class="card" href="guide/install.html">
-    <span class="tag">開発者の方</span>
+    <span class="tag">💻 開発者の方</span>
     <h3>使い方ガイド</h3>
-    <p>必要なツールの用意から、日々の開発の流れまで。まずはここから始めてください。</p>
+    <p>必要なツールの用意から、毎日の開発の流れまで。まずは、ここから始めてください。</p>
   </a>
   <a class="card" href="admin/setup.html">
-    <span class="tag">管理者の方</span>
+    <span class="tag">🔑 プロジェクト管理者の方</span>
     <h3>管理者ガイド</h3>
-    <p>新しいプロジェクトの作成、秘密鍵やワークフローの更新、動作の確認、困ったとき。</p>
+    <p>新しいプロジェクトの作り方、秘密鍵やワークフローの更新、動作の確認、困ったときの対処。</p>
   </a>
   <a class="card" href="reference/commands.html">
-    <span class="tag">調べたい方</span>
+    <span class="tag">📖 調べたい方</span>
     <h3>リファレンス</h3>
-    <p>全コマンドの説明、ターゲットファイルの書き方、ログの場所とフォルダ構成。</p>
+    <p>全コマンドの説明、ターゲットファイルの書き方、ログの場所とフォルダの構成。</p>
   </a>
   <a class="card" href="design/cicd.html">
-    <span class="tag">仕組みを知りたい方</span>
+    <span class="tag">🧭 仕組みを知りたい方</span>
     <h3>設計と背景</h3>
-    <p>なぜこの作りなのか。ブランチ戦略と、CI/CD の全体像。</p>
+    <p>なぜこの作りなのか。ブランチと組織の対応、自動処理の全体像。</p>
+  </a>
+  <a class="card" href="guide/glossary.html">
+    <span class="tag">🔤 言葉が分からないとき</span>
+    <h3>用語集</h3>
+    <p>PR・ブランチ・dry-run など、文書に出てくる言葉を、やさしく説明します。</p>
   </a>
 </div>
 
 <h2>最短で試す</h2>
-<p>前提のツール（Git・Salesforce CLI・GitHub CLI など）が入っている場合の流れです。詳しくは <a href="guide/install.html">前提条件とインストール</a> を見てください。</p>
+<div class="box">
+  <div class="title">先に、プロジェクトが必要です</div>
+  <p>プロジェクト（<code>force-XXXX</code>）が、まだないときは、先に管理者が作ります（<a href="admin/setup.html">管理者ガイド</a>）。必要なツール（Git・Salesforce CLI など）も、あらかじめ入れておきます（<a href="guide/install.html">前提条件とインストール</a>）。</p>
+</div>
 <ol class="steps">
   <li>
-    <p>sf-tools を配置します。</p>
-    <pre><code>git clone https://github.com/tama-create/sf-tools.git ~/sf-tools</code></pre>
+    <p>sf-tools をパソコンに置いて、どこからでも使えるようにします（最初の 1 回だけです）。</p>
+    <pre><code>git clone https://github.com/tama-create/sf-tools.git ~/sf-tools
+echo 'export PATH="$HOME/sf-tools/bin:$PATH"' &gt;&gt; ~/.bashrc    # Mac は ~/.zshrc</code></pre>
+    <p>そのあと、ターミナルを開き直します。</p>
   </li>
   <li>
-    <p>プロジェクトの作業フォルダで、新しい作業を始めます。ブランチ名を入力するだけで、作業用のクローンの準備から VS Code の起動までが進みます。</p>
-    <pre><code>~/sf-tools/bin/sf-job.sh</code></pre>
+    <p>プロジェクトの作業フォルダで、新しい作業を始めます。ブランチの名前を入力すると、作業用のコピーの準備から、VS Code の起動までが進みます。</p>
+    <pre><code>sf-job.sh</code></pre>
   </li>
   <li>
-    <p>作業が済んだら、変更をまとめてコミットして送ります。</p>
+    <p>変更を書いたら、VS Code が開いているフォルダ（<code>force-XXXX</code>）の中で、変更を送ります。</p>
     <pre><code>sf-push.sh</code></pre>
   </li>
 </ol>
-<div class="box">
+<div class="box ok">
   <div class="title">Windows と Mac で動きます</div>
-  <p>Windows は Git Bash、Mac は標準のターミナルのまま使えます。確認した環境の一覧は <a href="guide/install.html#env">動作環境</a> にあります。</p>
+  <p>Windows は Git Bash、Mac は標準のターミナルで使えます。確かめた環境の一覧は、<a href="guide/install.html#env">動作環境</a>にあります。</p>
 </div>
 
 </main>

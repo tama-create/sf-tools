@@ -100,6 +100,18 @@
   /* ---- 本文: コードのコピーボタン ---- */
   var doc = document.getElementById("doc");
   if (doc) {
+    /* ---- 見出しの番号（大項目 1. / 中項目 1.1 / 小項目 1.1.1）。h2・h3・h4 に、自動で付ける。
+     *  各ページの見出しには、番号を手で書かない（ここで付ける。ページを足しても、番号がずれない）。
+     *  階層は、飛ばさない（h2 の次は h3、h3 の次は h4。tests/test_site.sh が確認する）。 */
+    var cnt = [0, 0, 0];
+    Array.prototype.forEach.call(doc.querySelectorAll("h2, h3, h4"), function (h) {
+      var lv = parseInt(h.tagName.charAt(1), 10) - 2;
+      cnt[lv] += 1;
+      for (var j = lv + 1; j < 3; j++) { cnt[j] = 0; }
+      var num = cnt.slice(0, lv + 1).join(".") + (lv === 0 ? "." : "");
+      h.insertBefore(el("span", { "class": "num" }, num + " "), h.firstChild);
+    });
+
     Array.prototype.forEach.call(doc.querySelectorAll("pre"), function (pre) {
       var b = el("button", { "class": "copy", type: "button" }, "コピー");
       b.addEventListener("click", function () {

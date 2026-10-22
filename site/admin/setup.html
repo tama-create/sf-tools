@@ -21,7 +21,7 @@
   <p>実行すると、赤い警告ボックスが表示され、続行の確認が求められます。Windows は <strong>Git Bash</strong> で実行してください（PowerShell・コマンドプロンプトは非対応です）。</p>
 </div>
 
-<h2 id="prepare">1. 先に用意するもの</h2>
+<h2 id="prepare">先に用意するもの</h2>
 <p>実行すると、はじめの画面にも同じ一覧が出ます。</p>
 <table>
   <thead><tr><th>用意するもの</th><th>内容</th></tr></thead>
@@ -33,7 +33,7 @@
   </tbody>
 </table>
 
-<h2 id="run">2. 実行する</h2>
+<h2 id="run">実行する</h2>
 <p>リポジトリ名は <strong><code>force-XXXX</code></strong> です（<code>force-</code> は固定、<code>XXXX</code> は管理者が決める名前）。フォルダの構成には、決まりがありません。<strong>作業フォルダ</strong>（どこでもよい。おすすめは <code>~/sf</code> のような短い名前）で実行します。</p>
 <pre><code>cd {作業フォルダ}
 sf-init.sh                                          # 対話: オーナーを選び、XXXX を入力
@@ -57,7 +57,7 @@ sf-init.sh --owner my-org --project acme            # 引数で指定（対話�
   <li>管理者用の作業フォルダは、<code>{作業フォルダ}/admin/force-XXXX</code> になります（<code>admin</code> は固定。複数のプロジェクトを、同じ <code>admin</code> に作ってもよく、途中経過のファイルは、プロジェクトごとに分かれます）。</li>
 </ul>
 
-<h2 id="flow">3. 画面の流れ</h2>
+<h2 id="flow">画面の流れ</h2>
 <p>実行すると、はじめに、<strong>作るもの・かかる時間の目安・先に用意するもの・全 9 ステップの一覧</strong>が表示されます。用意ができたら Enter を押します（<code>q</code> で中断）。各ステップの先頭には、「ステップ n / 9」と、完了したステップ・そのステップの目的が表示されます。</p>
 <p>終わると、<strong>できたことと、次にやること</strong>（<code>sf-job.sh</code> の実行など）と、<strong>管理者用フォルダ</strong>（<code>admin</code>）の場所が表示されます。</p>
 <div class="box">
@@ -80,19 +80,19 @@ sf-init.sh --owner my-org --project acme            # 引数で指定（対話�
   <li><p><strong>最初のメタデータの同期:</strong> <a href="#metasync">下の説明</a>のとおりです。</p></li>
 </ol>
 
-<h2 id="inputs">4. 入力する項目</h2>
+<h2 id="inputs">入力する項目</h2>
 
-<h3 id="in-env">4.1 環境種別（通常は「1. 本番環境」）</h3>
+<h3 id="in-env">環境種別（通常は「1. 本番環境」）</h3>
 <ul>
   <li><strong>1. 本番環境:</strong> GitHub Actions は、sf-tools の <code>main</code>（リリース済みの配布版）を使います。</li>
   <li><strong>2. 検証環境:</strong> <strong>sf-tools の開発者専用</strong>です。リリース前の未検証のコード（<code>development</code>）が使われます。選ぶと、確認（Y/N/q）が出ます。</li>
   <li>選んだ環境に合わせて、<code>~/sf-tools</code> が最新かも確認します。遅れていれば更新して中断するので、もう一度 <code>sf-init.sh</code> を実行してください。</li>
 </ul>
 
-<h3 id="in-branch">4.2 ブランチ構成（3 / 2 / 1 階層）</h3>
+<h3 id="in-branch">ブランチ構成（3 / 2 / 1 階層）</h3>
 <p>最初は <code>main</code> だけの構成にして、あとから段階を足すこともできます（<a href="maintenance.html#add-tier">段階の追加</a>）。</p>
 
-<h3 id="in-pat">4.3 GitHub の Classic PAT</h3>
+<h3 id="in-pat">GitHub の Classic PAT</h3>
 <ul>
   <li><strong>作るアカウント:</strong> force-* のリポジトリの<strong>オーナー</strong>（組織のリポジトリなら、その組織の<strong>管理者</strong>）のアカウントです（実行の最初に表示されます）。ブラウザでログインしているアカウントが違うときは、切り替えてください。sf-tools の開発者のアカウントは、関係ありません。</li>
   <li>ブラウザで、Token の作成ページが自動で開きます（Note と Scopes は入力済みです）。ページの一番下の「Generate token」を押し、表示された Token をコピーして、ターミナルに貼り付けます。</li>
@@ -102,7 +102,7 @@ sf-init.sh --owner my-org --project acme            # 引数で指定（対話�
   <li>スコープ（<code>repo</code>・<code>workflow</code>）と、リポジトリの管理者であることを、GitHub に問い合わせて確認します。違えば、理由が表示され、3 回まで貼り直せます（Fine-grained の Token は、スコープを確認できないため、使えません）。</li>
 </ul>
 
-<h3 id="in-slack">4.4 Slack</h3>
+<h3 id="in-slack">Slack</h3>
 <ol>
   <li><strong>Slack Bot Token の取得</strong>（ブラウザで操作して、Token を貼り付けます）</li>
   <li><strong>チャンネル ID の入力</strong>（<code>C</code> で始まる文字列）。DM（<code>D…</code>）やユーザー（<code>U…</code>）の ID は、本人にしか通知が届かないため、受け付けられず、入力し直しになります。</li>
@@ -111,7 +111,7 @@ sf-init.sh --owner my-org --project acme            # 引数で指定（対話�
   </li>
 </ol>
 
-<h3 id="in-sf">4.5 Salesforce の接続（JWT 認証）</h3>
+<h3 id="in-sf">Salesforce の接続（JWT 認証）</h3>
 <p>既定は、<strong>外部クライアントアプリケーション</strong>（Salesforce の推奨）です。アプリの作成は、<code>sf-init</code> が自動で行います（アプリの種類は、聞きません）。</p>
 <ul>
   <li>段階（main / staging / develop）ごとに、<strong>ログイン先</strong>を選び、<strong>ブラウザで Salesforce にログイン</strong>します（接続ユーザーは、管理者権限のユーザー）。それだけです。</li>
@@ -122,14 +122,14 @@ sf-init.sh --owner my-org --project acme            # 引数で指定（対話�
 </ul>
 <p>ログイン先の選び方と、段階と組織の種類の関係は、<a href="maintenance.html#org">構成の変更と診断</a>で説明しています。</p>
 
-<h3 id="metasync">4.6 最初のメタデータの同期（自動）</h3>
+<h3 id="metasync">最初のメタデータの同期（自動）</h3>
 <p>手順 10 のあとに、<code>wf-metasync</code> を実行して完了を待ち、同期した内容を、管理者用のクローン（<code>admin/force-XXXX</code>）に <code>git pull</code> します（数分。組織の大きさで伸びます）。</p>
 <ul>
   <li><strong>セットアップが終わった瞬間に、Salesforce のメタデータが、GitHub の <code>main</code> にも、手元のクローンにも、全部入っています</strong>（初期コミットの <code>force-app</code> は、空のひな型です）。</li>
   <li>同期に失敗しても、セットアップは成功のままです。完了画面に、すぐ同期する方法が出ます（定期実行は、平日 3 時間おきです）。</li>
 </ul>
 
-<h2 id="resume">5. 途中で止まったとき（続きから）</h2>
+<h2 id="resume">途中で止まったとき（続きから）</h2>
 <p>どの Phase まで進んだかを、覚えておく必要はありません。止まったら、<strong>同じフォルダで、もう一度 <code>sf-init.sh</code> を実行</strong>してください。前回の状態が残っていれば、次の選択肢が表示されます。</p>
 <pre><code>前回のセットアップは、「ブランチの構成」まで完了しています（2026-10-11 14:32）。（owner/force-xxx）
 
@@ -146,9 +146,9 @@ sf-init.sh --owner my-org --project acme            # 引数で指定（対話�
   <li>リポジトリそのものを作り直したいときは、GitHub 上のリポジトリと <code>admin</code> フォルダを、手動で削除してから実行します。</li>
 </ul>
 
-<h2 id="after">6. 終わったあと</h2>
+<h2 id="after">終わったあと</h2>
 
-<h3 id="admin-folder">6.1 admin フォルダと admin ブランチ</h3>
+<h3 id="admin-folder">admin フォルダと admin ブランチ</h3>
 <ul>
   <li><strong><code>admin</code> フォルダは、削除せず、残します。</strong>ワークフローの更新（<a href="workflows.html">sf-sync-wf</a>）・接続の確認（<a href="maintenance.html#status">--status</a>）・接続先の付け替え（<a href="maintenance.html#reconnect">--reconnect</a>）など、管理者のメンテナンスに使います。日常の開発には使いません（開発は、<code>sf-job.sh</code> の作業フォルダで行います）。</li>
   <li><strong>管理者用のクローンは、セットアップの最後に、<code>admin</code> ブランチになります。</strong><code>main</code> から作り、GitHub にも <code>git push -u origin admin</code> で作ります（強制 push はしません）。<code>main</code> は保護ブランチのため、その上で作業しないようにするためです（<code>sf-sync-wf.sh</code> も、保護ブランチでは実行を断ります）。</li>
@@ -156,7 +156,7 @@ sf-init.sh --owner my-org --project acme            # 引数で指定（対話�
   <li><code>admin</code> ブランチがすでにあるときは、作り直さず、そこへ切り替えます（作業を消しません）。作れなかったとき・push できなかったときは、完了画面の案内どおり、管理者用フォルダで <code>git switch -c admin</code>（作れなかったとき）・<code>git push -u origin admin</code>（push できなかったとき）を実行してください（セットアップ自体は、成功のままです）。</li>
 </ul>
 
-<h3 id="check">6.2 動作を確認する</h3>
+<h3 id="check">動作を確認する</h3>
 <p>セットアップが正しく終わったかは、次の 2 つで確かめられます。</p>
 <ol class="steps">
   <li>
@@ -176,7 +176,7 @@ sf-next.sh      # 次の PR 先を確認 → ブラウザで PR を作成 → �
 </ol>
 <p>もっと確実に確認したいときは、<strong><a href="verify.html">動作の確認（<code>--verify</code>）</a></strong>が、実際のリポジトリと組織で、リリースと削除まで、通しで確かめます。セットアップの最後（ステップ 9）に、「動作を確認しますか？」と聞かれます（任意）。</p>
 
-<h2 id="options">7. オプションの一覧</h2>
+<h2 id="options">オプションの一覧</h2>
 <table>
   <thead><tr><th>オプション</th><th>内容</th></tr></thead>
   <tbody>

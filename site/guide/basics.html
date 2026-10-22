@@ -16,7 +16,7 @@
 <h1>基本の使い方</h1>
 <p class="lead">フォルダの考え方を押さえてから、新しい作業の始め方と、作業の再開のしかたを覚えましょう。</p>
 
-<h2 id="words">1. 言葉とフォルダの構成</h2>
+<h2 id="words">言葉とフォルダの構成</h2>
 <table>
   <thead><tr><th>呼び方</th><th>内容</th></tr></thead>
   <tbody>
@@ -31,7 +31,7 @@
 ├── JOB-20261016\force-acme\       ← ジョブごとのクローン（sf-job.sh が作る）。同じ force-acme を、同時に複数開ける
 └── JOB-20261017\force-beta\       ← 別のプロジェクトを、同じ作業フォルダに置いてもよい</code></pre>
 
-<h3>1.1 どのプロジェクトか、どう決まるか</h3>
+<h3>どのプロジェクトか、どう決まるか</h3>
 <p><strong>どのプロジェクトか（オーナーと XXXX）は、フォルダの名前では決まりません。</strong>開発者が使う <code>sf-job.sh</code> は、次の順で決めます（上にあるものが優先です）。</p>
 <ol>
   <li>引数 <code>--owner</code> / <code>--project</code></li>
@@ -43,12 +43,12 @@
   <p><code>sf-job.sh</code> は、管理者用の作業フォルダ（<code>admin</code>）と、<code>force-*</code> の中では、実行できません。作業フォルダで実行してください。</p>
 </div>
 
-<h2 id="help">2. ヘルプを表示する</h2>
+<h2 id="help">ヘルプを表示する</h2>
 <p>すべての <code>sf-*.sh</code> スクリプトは <code>--help</code> / <code>-h</code> に対応しています。概要・オプション・処理の流れが表示されます。</p>
 <pre><code>sf-release.sh --help
 sf-check.sh -h</code></pre>
 
-<h2 id="job">3. 新しい作業を始める（sf-job）</h2>
+<h2 id="job">新しい作業を始める（sf-job）</h2>
 <p>作業フォルダで実行します。</p>
 <pre><code>sf-job.sh                          # 作業フォルダの下のクローンから、プロジェクトが決まる（複数なら、番号で選ぶ）
 sf-job.sh --project acme           # プロジェクトを指定する（force-acme）</code></pre>
@@ -63,7 +63,7 @@ sf-job.sh --project acme           # プロジェクトを指定する（force-a
   <p>クローンは <code>core.longpaths=true</code> を付けて行います（Windows のパスの長さの上限、260 文字への対策）。組織に長い名前のメタデータ（例: DevOps Center の <code>objectTranslations</code>）があっても、チェックアウトに失敗しません。この設定はクローン先に残るので、以降の <code>git add</code>・<code>commit</code>・<code>push</code> にも効きます。</p>
 </div>
 
-<h2 id="start">4. 作業を再開する（sf-start）</h2>
+<h2 id="start">作業を再開する（sf-start）</h2>
 <p>前日の続きなど、既存のブランチで再開するときは、<code>force-*</code> フォルダの中で実行します。</p>
 <pre><code>sf-start.sh</code></pre>
 <table>

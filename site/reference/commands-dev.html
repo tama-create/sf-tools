@@ -19,13 +19,13 @@
 <h2 id="sf-job"><code>sf-job.sh</code></h2>
 <pre><code>sf-job.sh</code></pre>
 <p>新しい作業（ブランチ）を始めるときの、オールインワンのスクリプトです。作業フォルダ（作業単位のフォルダを置く場所）で実行します。</p>
-<h4>主な処理</h4>
+<h3>主な処理</h3>
 <ul>
   <li>ジョブ名（例: <code>JOB-20260323</code>）を入力して、ブランチを作る</li>
   <li><code>git worktree</code> または <code>git clone</code> で、作業ディレクトリを作る</li>
   <li><code>sf-start.sh</code> を自動で起動する（ログイン・フック設定・VS Code の起動）</li>
 </ul>
-<h4>補足</h4>
+<h3>補足</h3>
 <ul>
   <li>ブランチの作成から VS Code の起動まで、すべて自動です。<strong>新しい作業は、必ずここから始めます。</strong></li>
   <li>環境ブランチと管理者用のブランチの名前（<code>main</code> / <code>staging</code> / <code>develop</code> / <code>admin</code>）は、ジョブ名に使えません。</li>
@@ -42,14 +42,14 @@
 <h2 id="sf-start"><code>sf-start.sh</code></h2>
 <pre><code>sf-start.sh</code></pre>
 <p>既存のブランチで、開発環境を起動し直します。<code>force-*</code> フォルダの中で実行します。</p>
-<h4>役割</h4>
+<h3>役割</h3>
 <ul>
   <li>組織への接続を確認し、必要なときだけログインする</li>
   <li><code>.sf/config.json</code> と <code>.sfdx/sfdx-config.json</code> を更新する</li>
   <li><code>code .</code> を実行する</li>
   <li><code>sf-install.sh</code> を、バックグラウンドで実行する</li>
 </ul>
-<h4>補足</h4>
+<h3>補足</h3>
 <ul>
   <li><code>sf-job.sh</code> が内部で自動で呼ぶので、<strong>新しい作業のときは、直接実行する必要はありません。</strong></li>
   <li>前日の続きなど、既存のブランチに戻るときに使います。</li>
@@ -77,7 +77,7 @@ sfl 4        # 番号を直接指定して、すぐ実行</code></pre>
 <h2 id="sf-check"><code>sf-check.sh</code></h2>
 <pre><code>sf-check.sh [deploy-target.txt] [remove-target.txt]</code></pre>
 <p>ターゲットファイルの構文を確認します。通常は、<code>sf-release.sh</code> や <code>sf-prepush.sh</code> から自動で実行されます。</p>
-<h4>確認する内容</h4>
+<h3>確認する内容</h3>
 <ul>
   <li><strong><code>[files]</code> セクション:</strong> 書いたパスが、リポジトリの中にあるか。絶対パスや <code>..</code> を含むパスなど、リポジトリの外を指すパスは、存在していてもエラーです。</li>
   <li><strong><code>[members]</code> セクション:</strong> <code>種別名:メンバー名</code> の書式になっているか。</li>
@@ -90,7 +90,7 @@ sfl 4        # 番号を直接指定して、すぐ実行</code></pre>
     </ul>
   </li>
 </ul>
-<h4>補足</h4>
+<h3>補足</h3>
 <ul>
   <li>引数を省略すると、現在のブランチの <code>release/&lt;ブランチ名&gt;/</code> の下を、自動で探します。</li>
   <li>終了コードは、<code>0</code> が正常（警告があっても 0）、<code>1</code> が構文エラーです。</li>
@@ -137,7 +137,7 @@ sfl 4        # 番号を直接指定して、すぐ実行</code></pre>
 <h2 id="sf-push"><code>sf-push.sh</code></h2>
 <pre><code>sf-push.sh</code></pre>
 <p>カレントフォルダの下の変更を、コミットしてプッシュします。</p>
-<h4>主な処理</h4>
+<h3>主な処理</h3>
 <ol>
   <li><code>origin/main</code> を fetch して、現在のブランチにマージする（コンフリクトしたら、エラーで中止）</li>
   <li>カレントの下を <code>git add --all</code> する</li>
@@ -145,7 +145,7 @@ sfl 4        # 番号を直接指定して、すぐ実行</code></pre>
   <li>VS Code を別のウィンドウで開いて、コミットメッセージを入力する</li>
   <li><code>git commit</code> → <code>git push</code></li>
 </ol>
-<h4>補足</h4>
+<h3>補足</h3>
 <ul>
   <li>コミットメッセージが未入力なら、何もせずに終了します。</li>
   <li>変更がなくても、未プッシュのコミットがあれば、コミットせず、プッシュだけ行います。コミットは成功してプッシュが失敗したあとに、もう一度 <code>sf-push.sh</code> を実行すれば、取り残されません。</li>
@@ -197,7 +197,7 @@ sfl 4        # 番号を直接指定して、すぐ実行</code></pre>
   </tbody>
 </table>
 <p>マージは止めません（緊急の Hotfix を妨げないため。Free プランの Private リポジトリでは、GitHub がそもそも止められません）。<strong>気づいたレビュアーが、PR を却下します。</strong></p>
-<h4>補足</h4>
+<h3>補足</h3>
 <ul>
   <li>保護ブランチ（<code>main</code> / <code>staging</code> / <code>develop</code>）の上では、実行できません。</li>
   <li>案内された先のブランチの、PR 作成画面を、ブラウザで開けます。</li>

@@ -16,7 +16,7 @@
 <h1>前提条件とインストール</h1>
 <p class="lead">sf-tools を使い始めるために、必要なツールを用意して、sf-tools を置くまでの手順です。</p>
 
-<h2 id="env">1. 動作環境</h2>
+<h2 id="env">動作環境</h2>
 <p>実際に動かして確かめた環境だけを書いています。</p>
 <table>
   <thead><tr><th>環境</th><th>使う場面</th><th>確認した内容</th></tr></thead>
@@ -34,7 +34,7 @@
   <li>Mac は、標準のターミナル（zsh）と標準の Bash のままで動きます。Homebrew などで、Bash を入れ直す必要はありません。</li>
 </ul>
 
-<h2 id="tools">2. 必要なツール</h2>
+<h2 id="tools">必要なツール</h2>
 <p>次のコマンドが使えることを、確認してください。</p>
 <table>
   <thead><tr><th>ツール</th><th>確認コマンド</th><th>用途</th><th>Windows での入れ方</th></tr></thead>
@@ -54,14 +54,14 @@
   </ul>
 </div>
 
-<h2 id="npm">3. Salesforce CLI は npm 版を使う</h2>
+<h2 id="npm">Salesforce CLI は npm 版を使う</h2>
 <p>sf-tools は、<strong>Salesforce CLI（<code>sf</code>）の npm 版</strong>（<code>npm install -g @salesforce/cli</code>）を前提としています。npm 版も、Salesforce が案内しているインストール方法の一つです。</p>
 
-<h3>3.1 理由</h3>
+<h3>理由</h3>
 <p>Windows の Git Bash で、Salesforce CLI の<strong>公式インストーラー版</strong>（<code>winget</code> 版を含む可能性があります）を使い、自動更新が入った状態になると、<code>sf</code> が<strong>成功しても、終了コード 1 を返し続ける</strong>ことがあります（同じバージョンの npm 版は、正しく返します。Salesforce の起動用ファイルの問題と考えられます）。</p>
 <p>sf-tools は、コマンドの成否を終了コードで判定するため、この環境では、成功した処理も失敗扱いになります。</p>
 
-<h3>3.2 確認方法</h3>
+<h3>確認方法</h3>
 <p>次のコマンドで、<code>終了コード=0</code> と表示されれば問題ありません。</p>
 <pre><code>command -v sf; sf --version; echo "終了コード=$?"</code></pre>
 <p>sf-tools も、起動時に同じ確認をします。</p>
@@ -75,7 +75,7 @@
 </table>
 <p>確認に成功した場合は、24 時間は、確認を省略します。</p>
 
-<h3>3.3 インストーラー版から npm 版への入れ替え（Windows）</h3>
+<h3>インストーラー版から npm 版への入れ替え（Windows）</h3>
 <ol class="steps">
   <li>
     <p>npm 版を入れます。<code>C:\Program Files\nodejs</code> に書き込むため、管理者権限の Git Bash が必要な場合があります。</p>
@@ -92,12 +92,12 @@
 <p><strong>更新:</strong> <code>sf-upgrade.sh</code> が、npm 版は <code>npm install -g @salesforce/cli@latest</code> で更新します（手動で行う場合も同じコマンドです）。</p>
 <p><strong>Mac・Linux:</strong> 同じく npm 版をおすすめします。ほかの方法（pkg・Homebrew など）で入れた場合も、上の確認コマンドで終了コード 0 になれば、そのまま使えます。</p>
 
-<h2 id="install">4. sf-tools をインストールする</h2>
+<h2 id="install">sf-tools をインストールする</h2>
 
-<h3>4.1 sf-tools を置く</h3>
+<h3>sf-tools を置く</h3>
 <pre><code>git clone https://github.com/tama-create/sf-tools.git ~/sf-tools</code></pre>
 
-<h3>4.2 PATH を設定する（おすすめ）</h3>
+<h3>PATH を設定する（おすすめ）</h3>
 <p>シェルの設定ファイルに次の 1 行を追加すると、どこからでもスクリプト名だけで呼び出せます。</p>
 <table>
   <thead><tr><th>環境</th><th>設定ファイル</th></tr></thead>

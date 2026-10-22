@@ -16,10 +16,10 @@
 <h1>コマンド一覧</h1>
 <p class="lead">sf-tools のコマンドは、すべて <code>~/sf-tools/bin/</code> にあります。どれも <code>--help</code> / <code>-h</code> で、概要・オプション・処理の流れを表示できます。</p>
 
-<h2 id="list">1. 一覧</h2>
+<h2 id="list">一覧</h2>
 <p>「ランチャー」は、<code>sfl</code> のメニューから選べるコマンドです（<a href="commands-dev.html#sf-launcher">ランチャー</a>）。⚠️ は<strong>管理者専用</strong>です（<a href="#admin">次の節</a>）。</p>
 
-<h3>1.1 開発者が使うコマンド</h3>
+<h3>開発者が使うコマンド</h3>
 <table>
   <thead><tr><th>コマンド</th><th>用途</th><th>種別</th></tr></thead>
   <tbody>
@@ -37,7 +37,7 @@
   </tbody>
 </table>
 
-<h3>1.2 管理者が使うコマンド</h3>
+<h3>管理者が使うコマンド</h3>
 <p>詳しい説明は、管理者ガイドにあります。</p>
 <table>
   <thead><tr><th>コマンド</th><th>用途</th></tr></thead>
@@ -53,7 +53,7 @@
   </tbody>
 </table>
 
-<h3>1.3 自動で実行されるコマンド</h3>
+<h3>自動で実行されるコマンド</h3>
 <p>人が直接実行することは、ほとんどありません。<a href="commands-auto.html">自動実行コマンド</a> に説明があります。</p>
 <table>
   <thead><tr><th>コマンド</th><th>いつ動くか</th></tr></thead>
@@ -66,7 +66,7 @@
   </tbody>
 </table>
 
-<h2 id="admin">2. 管理者専用コマンドの安全ガード</h2>
+<h2 id="admin">管理者専用コマンドの安全ガード</h2>
 <p>⚠️ のついたコマンドは<strong>管理者専用</strong>です。実行すると、赤い警告ボックスが表示され、続行の確認（Y / N / q）を求められます。一般の開発者が誤って実行したときは、<code>N</code> または <code>q</code> で中断できます。</p>
 <ul>
   <li><code>GITHUB_ACTIONS=true</code> が設定されている環境（GitHub Actions 上）では、確認をスキップして自動で実行します。</li>

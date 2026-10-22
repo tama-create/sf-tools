@@ -29,9 +29,7 @@
       { t: "ログとリポジトリ構成", h: "reference/structure.html" }
     ]},
     { title: "設計と背景", items: [
-      { t: "設計の考え方" },
-      { t: "CI/CD の全体像" },
-      { t: "JWT 認証" }
+      { t: "CI/CD の仕組み（設計の考え方）", h: "design/cicd.html" }
     ]}
   ];
 

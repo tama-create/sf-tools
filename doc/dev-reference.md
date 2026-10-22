@@ -1021,7 +1021,7 @@ sf-tools の `main` への反映は、全ユーザーへの配布と同義であ
 
 ### 9.8 文書サイト（`site/`）
 
-利用者向けの文書（使い方・管理者向けの手順・リファレンス・設計）は、HTML の文書サイトに置く。`README.md` は、概要と、サイトへの入口だけにする（以前の README の 9 章、sf-tools の開発者向けの手順は、`doc/dev-guide.md`）（段階的に移行中: いまは、使い方ガイドとリファレンス（開発者向け・自動実行・ターゲットファイル・構成）。管理者向けと設計は、順次）。AI 向け（`CLAUDE.md`・本書）と、テストが読み込む文書（`doc/integration-test-plan.md`）は、Markdown のまま。
+利用者向けの文書（使い方・管理者向けの手順・リファレンス・設計）は、HTML の文書サイトに置く。`README.md` は、概要と、サイトへの入口だけにする（以前の README の 9 章、sf-tools の開発者向けの手順は、`doc/dev-guide.md`）（段階的に移行中: いまは、使い方ガイドとリファレンス（開発者向け・自動実行・ターゲットファイル・構成）。管理者向けと設計は、順次）。AI 向け（`CLAUDE.md`・本書）と、テストが読み込む文書（`doc/integration-test-plan.md`）は、Markdown のまま。**実装・AI への指示に使う設計書（`doc/` の `jwt-auth-spec.md`・`wf-distribution-strategy.md`・`wizard-ux-design.md`・`sf-logwatch-design.md`・`sf-cicd-strategy.md`）も、Markdown のまま**（無理に HTML にしない。公開して価値のあるものだけを、サイトに載せる）。`sf-cicd-strategy.md` の要点は、読み物として `site/design/cicd.html` にある（設計を変えたときは、両方を直す）。
 
 - **構成**: `site/index.html`（トップ）・`site/guide/`（使い方ガイド）・`site/reference/`（リファレンス）。共通の部分は、`site/assets/style.css`（スタイル。ダークモード・スマホ対応）と `site/assets/site.js`。ビルドの手順は、ない（手書きの静的な HTML）。
 - **ページの足し方**: ① `<head>` と骨組み（`<header id="top">`・`<nav id="side">`・`<main id="doc" class="doc">`・`<aside id="toc">`・`<footer id="foot">`・`site.js` の読み込み）を、既存のページと同じにする。② `<body data-root="...">` は、`site/` からの深さに合わせる（直下は `""`・1 階層下は `"../"`）。③ **`assets/site.js` の `NAV` に 1 行足す**（左の目次・前後のリンクは、ここだけで決まる。`h` がない項目は「準備中」と表示される）。コード中の `<` は、`&lt;` にする。

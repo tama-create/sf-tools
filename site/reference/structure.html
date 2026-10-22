@@ -16,7 +16,7 @@
 <h1>ログとリポジトリ構成</h1>
 <p class="lead">ログの出力先と、2 種類のリポジトリ（利用者のプロジェクト <code>force-*</code> と、sf-tools 本体）のフォルダ構成です。</p>
 
-<h2 id="logs">1. ログの確認</h2>
+<h2 id="logs">ログの確認</h2>
 <table>
   <thead><tr><th>コマンド</th><th>ログの場所</th></tr></thead>
   <tbody>
@@ -25,7 +25,7 @@
   </tbody>
 </table>
 
-<h2 id="force">2. force-* プロジェクトの構成</h2>
+<h2 id="force">force-* プロジェクトの構成</h2>
 <p><code>sf project generate</code> が作る標準のファイルと、<code>sf-init.sh</code> が追加するものを、区別して示します（★ が、sf-tools が追加するものです）。</p>
 <pre><code>force-xxx/
 ├── .forceignore
@@ -56,7 +56,7 @@
         ├── deploy-target.txt            ★   デプロイ対象メタデータ一覧
         └── remove-target.txt            ★   削除対象メタデータ一覧</code></pre>
 
-<h2 id="tools">3. sf-tools リポジトリの構成</h2>
+<h2 id="tools">sf-tools リポジトリの構成</h2>
 <pre><code>sf-tools/
 ├── bin/                        ← スクリプト本体
 │   ├── sf-job.sh

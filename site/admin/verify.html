@@ -21,7 +21,7 @@
   <p>実際のリポジトリに、PR とコミットが残り、実際の組織にデプロイします。実行の内容を表示したうえで、<strong>Enter を 1 回押して</strong>確認します（<code>q</code> で中断。何も変更しません）。本番（または、種類を判定できない）組織があるときは、質問の文面で、本番を含むことを明示します。</p>
 </div>
 
-<h2 id="usage">1. 使い方</h2>
+<h2 id="usage">使い方</h2>
 <p><code>force-*</code> フォルダの中で実行します。</p>
 <pre><code>sf-init.sh --verify               # 診断 → 実行内容の表示 → 確認 → リリース → 削除 → 結果
 sf-init.sh --verify --plan        # 診断と、実行内容の表示だけ（何も変更しない）
@@ -29,7 +29,7 @@ sf-init.sh --verify --no-metasync # wf-metasync（Salesforce → Git の同期�
 sf-init.sh --verify --cleanup     # 削除のみ（リリースの途中で止まって、組織に Hello World が残ったとき）</code></pre>
 <p>セットアップの最後（ステップ 9）でも、「動作を確認しますか？ [Enter = 確認する / s = あとで]」と聞かれます。Enter なら、環境全体の確認から、リリースと削除までを、続けて実行します（約 20 分。3 層の場合）。確認で失敗があっても、セットアップは、完了扱いです（結果と直し方が表示されます）。</p>
 
-<h2 id="flow">2. 流れ</h2>
+<h2 id="flow">流れ</h2>
 <ol class="steps">
   <li><p><strong>診断:</strong> <a href="maintenance.html#status"><code>--status</code></a> と同じ診断です。不足があれば、ここで中断します（直し方が表示されます）。</p></li>
   <li><p><strong>実行内容の表示:</strong> リポジトリ・段階ごとの組織の名前と種類（本番は、赤く表示）・PR の数・目安の時間。</p></li>
@@ -46,7 +46,7 @@ sf-init.sh --verify --cleanup     # 削除のみ（リリースの途中で止�
   <li><p><strong>削除:</strong> 削除用のブランチ（<code>remove-target.txt</code> と、リポジトリのクラスのファイルの削除）から、同じ順に、各段階へ。組織のクラスと、リポジトリのファイルの両方が、消えます。</p></li>
   <li><p><strong>結果:</strong> 段階ごとの成功・失敗を表示します。</p></li>
 </ol>
-<h3>2.1 段階ごとに確認すること</h3>
+<h3>段階ごとに確認すること</h3>
 <ul>
   <li>その段階の組織への JWT ログインが、成功した。</li>
   <li>ほかの段階のログインのステップが、実行されていない（別の組織に入っていない）。</li>
@@ -55,7 +55,7 @@ sf-init.sh --verify --cleanup     # 削除のみ（リリースの途中で止�
 </ul>
 <p>組織へのログインは、不要です（ワークフローの実行結果で確認します）。文言の中立化（2026-10）より前に作られたリポジトリの、古いステップ名（本番組織・ステージング組織・開発組織）も、読めます。</p>
 
-<h2 id="notes">3. 注意</h2>
+<h2 id="notes">注意</h2>
 <ul>
   <li>リポジトリに、PR とコミット（追加と削除）の履歴が残ります。作業用ブランチ <code>verify-hello-*</code> は、検証の最後に、自動で削除します（PR の履歴は、PR の番号で残ります。途中で止まったときは、調査のために、ブランチを残します）。Slack に、段階ごとに、数通の通知が届きます。</li>
   <li>リリースの間、組織が、短時間、占有されます。作業の少ない時間帯に、実行してください。</li>
@@ -65,7 +65,7 @@ sf-init.sh --verify --cleanup     # 削除のみ（リリースの途中で止�
   <li>gh のアカウントは、リポジトリのオーナー（組織の管理者）にしてください。</li>
 </ul>
 
-<h2 id="components">4. パターン別のサンプルの確認（<code>--components</code>）</h2>
+<h2 id="components">パターン別のサンプルの確認（<code>--components</code>）</h2>
 <pre><code>sf-init.sh --verify --components                  # パターン別のサンプルを、develop の組織だけに、リリースして、削除する
 sf-init.sh --verify --components --validate-only  # 検証（dry-run）だけ。マージせず、組織には、何も反映しない（オブジェクト系も含む）
 sf-init.sh --verify --components --with-objects   # オブジェクト系（トリガー・Layout・オブジェクト・項目）も、リリースして、削除する</code></pre>
@@ -97,10 +97,10 @@ sf-init.sh --verify --components --with-objects   # オブジェクト系（ト�
   <li>途中で止まって、組織に残ったときは、<code>sf-init.sh --verify --components --cleanup</code>（削除のみ。<code>--with-objects</code> でリリースしたときは、<code>--with-objects</code> も付けます）で消します。失敗したときの案内にも、付けるべきコマンドが表示されます。<code>--cleanup</code> は、何度実行しても通ります（組織にすでにないものがあっても、エラーにしません）。前回の検証が残した labels のファイル（サンプルのラベルだけのもの）も、サンプルのものとして、削除します。</li>
 </ul>
 
-<h2 id="e2e">5. e2e との違い</h2>
+<h2 id="e2e">e2e との違い</h2>
 <p>sf-tools の開発者向けの通し検証（<code>tests/e2e/run.sh</code>）は、新しく作ったテスト用のリポジトリ・組織で、<strong>sf-tools 自体</strong>を確認する回帰テストです。<code>sf-init.sh --verify</code> は、管理者が、<strong>実際のリポジトリ・組織</strong>を確認するためのものです。PR と実行の待ちの部品は、共通です（<code>lib/verify-common.sh</code>）。</p>
 
-<h2 id="typecheck">6. メタデータの種類ごとの可否の確認（<code>sf-typecheck.sh</code>）</h2>
+<h2 id="typecheck">メタデータの種類ごとの可否の確認（<code>sf-typecheck.sh</code>）</h2>
 <div class="box warn">
   <div class="title">管理者専用（個人用の組織）</div>
   <p>実行の前に、警告と確認が表示されます（<code>-y</code> で省略できます）。GitHub Actions 上では実行できません。</p>

@@ -16,13 +16,13 @@
 <h1>構成の変更と診断</h1>
 <p class="lead">セットアップが済んだあとの、管理者のメンテナンスです。段階（ブランチの階層）の追加、接続先の組織の付け替え、いまの状態の診断を扱います。どれも <code>force-*</code> フォルダの中（管理者用の <code>admin/force-XXXX</code>）で実行します。</p>
 
-<h2 id="org">1. Salesforce 組織の接続の考え方</h2>
+<h2 id="org">Salesforce 組織の接続の考え方</h2>
 <p>段階（main / staging / develop）と組織の種類は、<strong>結びつけません</strong>。どの段階にも、本番・Sandbox・Developer Edition などを、自由につなげます（main に Sandbox や Developer Edition でも構いません）。</p>
 <div class="box warn">
   <div class="title">本番の組織は、main にしかつなげません</div>
   <p>staging や develop に、本番をつなごうとすると、ログインのあとに、組織の種類を読み取って、中断します。</p>
 </div>
-<h3>1.1 ログイン先の選び方</h3>
+<h3>ログイン先の選び方</h3>
 <p>段階ごとに、ログイン先を、次の 3 つから選びます（Enter は 2）。種類ではなく、URL で選びます。</p>
 <ol>
   <li><code>https://login.salesforce.com</code> — 本番・Developer Edition・Trial など</li>
@@ -31,7 +31,7 @@
 </ol>
 <p>ログインのあとに、組織の ID・名前・種類（本番 / Sandbox / Developer Edition / Trial）を、<strong>組織から読み取って</strong>、表示し、保存します。</p>
 
-<h2 id="add-tier">2. 段階を足す（<code>--add-tier</code>）</h2>
+<h2 id="add-tier">段階を足す（<code>--add-tier</code>）</h2>
 <p>セットアップのあとで、<code>main</code> だけの構成を、<code>staging</code>・<code>develop</code> へ広げられます。</p>
 <pre><code># force-* フォルダの中で実行
 sf-init.sh --add-tier staging    # main のみ → main + staging
@@ -54,7 +54,7 @@ sf-init.sh --add-tier develop    # main + staging → main + staging + develop</
   <li>終わると、実行前のブランチ（<code>admin</code>）に戻ります。</li>
 </ul>
 
-<h3 id="scale-down">2.1 段階を減らすとき（手動）</h3>
+<h3 id="scale-down">段階を減らすとき（手動）</h3>
 <div class="box danger">
   <div class="title">段階の削除（スケールダウン）は、自動化していません</div>
   <ul>
@@ -71,11 +71,11 @@ sf-init.sh --add-tier develop    # main + staging → main + staging + develop</
   <li><p>GitHub の Repository Ruleset を更新する（削除した段階のブランチを、対象から外す）。</p></li>
 </ol>
 
-<h2 id="reconnect">3. 接続先の付け替え（<code>--reconnect</code>）</h2>
+<h2 id="reconnect">接続先の付け替え（<code>--reconnect</code>）</h2>
 <pre><code>sf-init.sh --reconnect &lt;段階&gt;      # 段階: main / staging / develop</code></pre>
 <p>1 つの段階の、接続先の Salesforce 組織を、付け替えます。ログイン先の選び方と、本番は main だけというルールは、<a href="#org">1 章</a>のとおりです。</p>
 
-<h2 id="status">4. セットアップの診断（<code>--status</code>）</h2>
+<h2 id="status">セットアップの診断（<code>--status</code>）</h2>
 <pre><code>sf-init.sh --status</code></pre>
 <p>「どこで間違えたか分からない」ときの、最初の手がかりです。<strong>読み取りのみ</strong>で、何も変更しません。</p>
 <ul>

@@ -19,7 +19,7 @@
 <h2 id="sf-install"><code>sf-install.sh</code></h2>
 <pre><code>sf-install.sh</code></pre>
 <p><code>sf-tools</code> 自体の更新と、プロジェクト側の初期ファイルの整備を行います。通常は、<code>sf-start.sh</code> から自動で実行されます。</p>
-<h4>主な処理（この順序）</h4>
+<h3>主な処理（この順序）</h3>
 <ol>
   <li><code>~/sf-tools</code> を最新にする</li>
   <li>設定ファイルの雛形を作る</li>
@@ -35,7 +35,7 @@
 
 <h2 id="sf-prepush"><code>sf-prepush.sh</code></h2>
 <p><code>git push</code> の前に自動で実行される、チェックのスクリプトです（pre-push フックの本体）。</p>
-<h4>主な処理</h4>
+<h3>主な処理</h3>
 <ul>
   <li><code>main</code> への直接のプッシュを禁止する</li>
   <li>自分のブランチの、リモートとの差分を、先に同期する</li>
@@ -46,7 +46,7 @@
 
 <h2 id="sf-precommit"><code>sf-precommit.sh</code></h2>
 <p><code>git commit</code> のときに自動で実行される、pre-commit フックの本体です。直接実行することはありません。</p>
-<h4>主な処理</h4>
+<h3>主な処理</h3>
 <ul>
   <li><code>sf-check.sh</code> で、ターゲットファイルの構文を確認する</li>
   <li>エラーがあれば、コミットを中止する</li>
@@ -59,7 +59,7 @@
   <div class="title">管理者専用</div>
   <p>実行の前に、赤い警告ボックスと確認が表示されます。<code>GITHUB_ACTIONS=true</code> のときは、確認をスキップして自動で実行します。</p>
 </div>
-<h4>役割</h4>
+<h3>役割</h3>
 <ul>
   <li>組織の最新のメタデータを取得する</li>
   <li>Git へ反映する</li>

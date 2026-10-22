@@ -12,6 +12,7 @@
 #   4. 改行が LF だけ（CR が混ざっていない）
 #   5. コードのブロックの中に、エスケープしていない「<」がない（ブラウザで、タグとして消えてしまうため）
 #   6. 公開用のワークフロー（pages.yml）が、site/ を公開する
+#   7. 見出し: 番号を手で書かない（大項目 1. / 中項目 1.1 / 小項目 1.1.1 は、assets/site.js が自動で付ける）・階層を飛ばさない（h2 → h3 → h4）
 # ==============================================================================
 source "$(dirname "${BASH_SOURCE[0]}")/test_helper.sh"
 echo -e "${CLR_HEAD}=== site/（HTML の文書サイト）===${CLR_RST}"
@@ -121,10 +122,35 @@ test_site_pages_workflow() {
     assert_file_not_contains "$wf" "pull_request"        "pages.yml: pull_request では動かさない（権限を渡さない）"
 }
 
+test_site_headings() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] 見出し（番号は自動・階層を飛ばさない）${CLR_RST}"
+    local p line lv text prev manual="" skipped="" total=0
+    while IFS= read -r p; do
+        prev=1
+        # 各見出しを「レベル 本文」の 1 行にする（h2・h3・h4 だけ。<main> の中だけ）
+        while IFS= read -r line; do
+            [[ -z "$line" ]] && continue
+            lv="${line%% *}"; text="${line#* }"
+            [[ "$lv" =~ ^[234]$ ]] || continue
+            total=$((total + 1))
+            if [[ "$text" =~ ^[0-9]+(\.[0-9]+)*\.?[[:space:]] ]]; then manual="$manual
+  $p: $text"; fi
+            if [[ $lv -gt $((prev + 1)) ]]; then skipped="$skipped
+  $p: h${prev} の次が h${lv}（${text}）"; fi
+            prev=$lv
+        done < <(sed -n '/<main/,/<\/main>/p' "$SITE/$p" | grep -oE '<h[234]( [^>]*)?>[^<]*' | sed -E 's/<h([234])( [^>]*)?>/\1 /')
+    done < <(_pages)
+    [[ $total -gt 0 ]] && pass "見出し ${total} 件を確認した" || fail "見出しが 1 件以上ある"
+    [[ -z "$manual" ]] && pass "見出しに、手書きの番号がない（番号は、assets/site.js が自動で付ける）" || fail "見出しに、手書きの番号がある（消す。自動で付くため、二重になる）" "$manual"
+    [[ -z "$skipped" ]] && pass "見出しの階層を、飛ばしていない（h2 → h3 → h4）" || fail "見出しの階層を飛ばしている（h2 の次は h3、h3 の次は h4）" "$skipped"
+    assert_file_contains "$NAVJS" 'cnt[lv] += 1' "assets/site.js: 見出しの番号を、自動で付ける"
+}
+
 test_site_head
 test_site_links
 test_site_nav
 test_site_format
 test_site_pages_workflow
+test_site_headings
 
 print_summary

@@ -95,18 +95,19 @@
 | `test_sf-prepush.sh` | hooks/pre-push |
 | `test_sf-push.sh` | sf-push.sh |
 | `test_sf-update-secret.sh` | sf-update-secret.sh |
+| `test_docs.sh` | Markdown 文書の見出しの番号（番号がある・深さが階層と合う・連番・LF。`CLAUDE.md` 1.4 の決まり） |
 | `test_site.sh` | HTML の文書サイト `site/`（書き出しの決まり・相対リンクと見出しの実在・目次（`assets/site.js` の NAV）への登録漏れ・LF・コードのブロックのエスケープ・`pages.yml`。見た目は、確認しない） |
 | `test_sf-sync-wf.sh` | sf-sync-wf.sh |
 | `test_wf-sequence.sh` | templates/.github/workflows/wf-sequence.yml（YAML の判定スクリプトを取り出して、実際の git リポジトリで、順序どおり・順序外・最下位・環境ブランチからの PR を確認） |
 
-### 2.1.1 テストの実行方式と CI
+#### 2.1.1 テストの実行方式と CI
 
 - **並列実行**: `run_tests.sh` は、複数ファイルを、同時に（既定は CPU の数まで）動かす。時間のかかるファイル（`HEAVY_FIRST`: `test_sf-init.sh` など）を先に起動し、標準入力は閉じる（入力待ちで止まらないため）。出力は、ファイルごとに溜めて、`TEST_FILES` の順に表示・集計する。実測（8 コア・WSL）: 直列 約 400 秒 → 並列 約 170〜230 秒。並列数を 4〜100 で変えても、大きな差は、出なかった。
 - **WSL**: Git Bash から実行すると、自動で WSL に移り、ext4 にコピーして実行する（`/mnt/c` の 9P は、遅いため）。WSL には `node` がなく `node.exe` だけがある場合があり、`test_helper.sh` の node のモックは、`node -e` を、本物（`node` または `node.exe`）に渡す（`json_get` のテストのため）。
 - **クロスプラットフォームの CI**: 同じワークフローに、`test-macos`（`macos-latest`。macOS 標準の `/bin/bash`（3.2）と、BSD の `sed` などを、そのまま使う。何も追加で入れない）と `test-windows`（`windows-latest` の Git Bash。`SF_TEST_NO_WSL=1`・`core.autocrlf=false`。**2026-10-20 から、全件（結合テスト L1 を含む）を `--shard` で 6 つのジョブに分けて並列に動かす**。実測は、計画書 12）がある。**2026-10-14 から、失敗扱い**（`continue-on-error` なし。以前は、導入の初期として、結果の表示のみだった）。Windows は、並列で実行する（約 15 分）。再び異常終了するときは、`--serial` に戻す。**BSD / GNU の差**として、`sed -i`（BSD は、`-i` の直後に拡張子が必要 → `sed_inplace`）・sed の `\x` / `\t`（BSD は解釈しない → Bash の `$'..'` で展開）・`date -d`・`touch -d`・`stat -c`・`nproc`・`timeout`（macOS にない → `run_with_timeout`）・`base64 -w 0`（macOS にない → `base64_oneline`）・`wc -l`（BSD は、数字の前に空白が付く → 文字列として使うときは `tr -d ' '`）に注意する。`openssl req -subj`（先頭の `//` は Git Bash 専用。macOS・Linux に渡すと、発行先が空の証明書ができ、Salesforce が「証明書ではありません」と拒否する → `_jwt_cert_subject_arg` が OS で切り替え、`generate_jwt_cert` が生成後に空でないことを確認する。既存の空の証明書は、`ensure_jwt_cert_subject` が、秘密鍵そのままで作り直す）。macOS の `TMPDIR` は、`/` で終わる（`"${TMPDIR:-/tmp}/x"` が `T//x` になり、bash の `cd` が作る PWD（`T/x`）と、テストの期待値が食い違う）ため、`tests/test_helper.sh` が、末尾の `/` を除く。macOS の `tar` は、日本語のファイル名を NFD に変えて展開するため、テストで、HOME を差し替えて git を使うときは、`core.precomposeunicode` をリポジトリに設定する。
 - **CI**: `.github/workflows/test.yml`（Ubuntu のランナー）。PR（main・development 向け）と development への push で、全件テスト（`bash tests/run_tests.sh`）と shellcheck（`-S warning`。バージョン固定 `shellcheck-py==0.11.0.1`）を実行し、どちらも失敗扱いになる。Secrets は使わない。shellcheck の設定は、リポジトリ直下の `.shellcheckrc`（`SC1090` / `SC1091`・`SC2034`・`SC2155` を、理由つきで無効化）。個別の誤検知は、該当行の直前に `# shellcheck disable=SCxxxx  # 理由` で除外する。手元での実行: `shellcheck -S warning $(git ls-files 'bin/*.sh' 'lib/*.sh' 'phases/*.sh' 'hooks/*' 'templates/*.sh')`（`pip install shellcheck-py` など）。
 
-### 2.1.2 結合テスト L1（`tests/test_integration*.sh`・`tests/integration/lib.sh`・`init-lib.sh`）
+#### 2.1.2 結合テスト L1（`tests/test_integration*.sh`・`tests/integration/lib.sh`・`init-lib.sh`）
 
 実際の `git` で、複数のコマンドを、続けて動かす（単体テストは、コマンドごとに、`git` などをモックにする。結合テストは、モックにしない）。
 
@@ -482,7 +483,7 @@ tr -d '\r' < "$key_file" | base64 -w 0 | gh secret set "SF_PRIVATE_KEY" -R "$REP
 - `sf-hook.sh`: `.git/hooks/pre-push` と `.git/hooks/pre-commit` を上書き生成し、`~/sf-tools/hooks/` からコピーする
 - `sf-unhook.sh`: `.git/hooks/pre-push` を削除する（pre-commit は残す。プッシュの検証だけを止めるのが狙い。意図した仕様として確認済み）
 
-### 4.12.1 sf-job.sh・sf-prepush.sh の、結合テストで見つかった変更
+#### 4.12.1 sf-job.sh・sf-prepush.sh の、結合テストで見つかった変更
 
 - **`sf-job.sh`（X2-2）**: ジョブ名に、環境ブランチ・管理者用のブランチの名前（`main` / `staging` / `develop` / `admin`）は使えない。GitHub 上に同名のブランチがすでにあるときは、最後のコミットの作者・日時（`gh api ... --jq`）を表示して、`ask_yn` で確認する。Y なら `USE_EXISTING_BRANCH=1`（`phase_create_branch` は、作成の API を呼ばずに、戻る。ブランチ作成のあとに、clone が失敗した前回のジョブの、続き）。N なら、別のジョブ名を聞く。
 - **`sf-prepush.sh`（X3-2）**: `phase_fetch` は、`branches.txt` のブランチが、origin に（`git ls-remote --exit-code origin <名前>`）まだないとき、取得せず、警告を出して続ける（以前は、`git fetch` が「見つからない」で失敗し、すべての push が止まった）。
@@ -582,12 +583,12 @@ sf-init.sh --add-tier develop    # main+staging → main+staging+develop
 - スケールダウンは影響範囲が大きく（ブランチ削除・WF 停止・Secrets 削除・Ruleset 更新）、誤操作リスクが高いため**手動運用とする**
 - 必要な場合は GitHub リポジトリ設定・`branches.txt` 編集・ローカルブランチ削除を手動で実施すること
 
-### 4.13.1 sf-init の状態（保存ファイルと環境変数）
+#### 4.13.2 sf-init の状態（保存ファイルと環境変数）
 
 `sf-init.sh` の Phase 間の受け渡しと、再開（続きをやる）は、管理者用フォルダ（`{作業フォルダ}/admin/`）の 2 つのファイルと、環境変数で行う。
 変更するときは、この表と、書く側・読む側の両方を、確認する。
 
-#### 保存ファイル
+**保存ファイル**
 
 | ファイル | 内容 | 形式 | 備考 |
 |---|---|---|---|
@@ -596,7 +597,7 @@ sf-init.sh --add-tier develop    # main+staging → main+staging+develop
 
 `phases/init/add_tier.sh` だけは、`force-*/sf-tools/config/.sf-init.env` を読む（別の場所。admin フォルダのものではない）。
 
-#### `.sf-init-XXXX.env` のキー
+**`.sf-init-XXXX.env` のキー**
 
 | キー | 意味 | 書く | 読む |
 |---|---|---|---|
@@ -610,7 +611,7 @@ sf-init.sh --add-tier develop    # main+staging → main+staging+develop
 | `PAT_TOKEN_VALUE` | PAT（**秘密情報。一時的**） | Phase 6（追記） | Phase 8（push に使い、直後に、この行を消す） |
 | `APP_TYPE` | Salesforce の接続の種別（`1` = 接続アプリ（従来）/ `2` = 外部クライアントアプリ） | Phase 10（追記） | Phase 10（再開時に再利用。指定と食い違うと中断） |
 
-#### `.sf-init-XXXX.progress` のキー
+**`.sf-init-XXXX.progress` のキー**
 
 | キー | 意味 | 書く | 読む |
 |---|---|---|---|
@@ -618,7 +619,7 @@ sf-init.sh --add-tier develop    # main+staging → main+staging+develop
 | `SF_INIT_DONE_AT` | 上の日時（表示用） | 同上 | 続きの選択肢の表示 |
 | `SF_INIT_DONE_TIER_PROD` / `_STG` / `_DEV` | Phase 10 で、その段階の接続まで完了した（`1`） | Phase 10（`_register_org` が、追記） | Phase 10（再実行でスキップ。Secret が、いまもあるときだけ）。Phase 10 が成功すると、`sf-init.sh` がファイルを書き直すため、消える |
 
-#### 環境変数（保存しない）
+**環境変数（保存しない）**
 
 | 変数 | 意味 | 設定する | 使う |
 |---|---|---|---|
@@ -654,7 +655,7 @@ sf-init.sh --add-tier develop    # main+staging → main+staging+develop
 - 設計思想: 本番/Sandbox に既存のテストクラスは含めなくてよい → WARNING 扱い（エラーにはしない）
 
 
-### 4.14.1 sf-typecheck.sh（種類ごとの可否の確認）と config/metadata-capability.txt
+#### 4.14.1 sf-typecheck.sh（種類ごとの可否の確認）と config/metadata-capability.txt
 
 管理者・開発者向け。個人用の組織（Developer Edition / Sandbox / Scratch / Trial）で、メタデータの種類ごとに、最小のサンプルを実際にリリース → 削除し、結果を TSV（`種類 / release / delete / 備考`、値は `ok` / `ng` / `limited` / `unknown`）にする。本体は `lib/typecheck.js`（Node 標準ライブラリのみ。シェルから呼ぶ境界は `bin/sf-typecheck.sh` の 1 か所）。
 
@@ -686,7 +687,7 @@ sf-init.sh --add-tier develop    # main+staging → main+staging+develop
 テスト: `tests/test_sf-sync-wf.sh`（モックの HOME に雛形を置き、ガード・差分・N/q/Y・CRLF・`--check`・`--remove` を確認。実際の雛形のコピーが `--check` で差分なしであることも確認）、`tests/test_common.sh` の `test_ensure_sf_tools_latest`（本物の git で、最新・遅れ・未コミット・未プッシュ・更新を断る・`--no-update` などを確認。bare の origin は `--initial-branch=main` で作る。環境によって既定のブランチ名が違うため）
 ---
 
-### 4.15.1 verify.sh（sf-init.sh --verify）
+#### 4.15.1 verify.sh（sf-init.sh --verify）
 
 管理者が、実際のリポジトリ・実際の組織で、リリースと削除が動くことを確認する（`phases/init/verify.sh`。部品は `lib/verify-common.sh`）。
 
@@ -1024,7 +1025,7 @@ sf-tools の `main` への反映は、全ユーザーへの配布と同義であ
 利用者向けの文書（使い方・管理者向けの手順・リファレンス・設計）は、HTML の文書サイトに置く。`README.md` は、概要と、サイトへの入口だけにする（以前の README の 9 章、sf-tools の開発者向けの手順は、`doc/dev-guide.md`）（段階的に移行中: いまは、使い方ガイドとリファレンス（開発者向け・自動実行・ターゲットファイル・構成）。管理者向けと設計は、順次）。AI 向け（`CLAUDE.md`・本書）と、テストが読み込む文書（`doc/integration-test-plan.md`）は、Markdown のまま。**実装・AI への指示に使う設計書（`doc/` の `jwt-auth-spec.md`・`wf-distribution-strategy.md`・`wizard-ux-design.md`・`sf-logwatch-design.md`・`sf-cicd-strategy.md`）も、Markdown のまま**（無理に HTML にしない。公開して価値のあるものだけを、サイトに載せる）。`sf-cicd-strategy.md` の要点は、読み物として `site/design/cicd.html` にある（設計を変えたときは、両方を直す）。
 
 - **構成**: `site/index.html`（トップ）・`site/guide/`（使い方ガイド）・`site/reference/`（リファレンス）。共通の部分は、`site/assets/style.css`（スタイル。ダークモード・スマホ対応）と `site/assets/site.js`。ビルドの手順は、ない（手書きの静的な HTML）。
-- **ページの足し方**: ① `<head>` と骨組み（`<header id="top">`・`<nav id="side">`・`<main id="doc" class="doc">`・`<aside id="toc">`・`<footer id="foot">`・`site.js` の読み込み）を、既存のページと同じにする。② `<body data-root="...">` は、`site/` からの深さに合わせる（直下は `""`・1 階層下は `"../"`）。③ **`assets/site.js` の `NAV` に 1 行足す**（左の目次・前後のリンクは、ここだけで決まる。`h` がない項目は「準備中」と表示される）。コード中の `<` は、`&lt;` にする。
+- **ページの足し方**: ① `<head>` と骨組み（`<header id="top">`・`<nav id="side">`・`<main id="doc" class="doc">`・`<aside id="toc">`・`<footer id="foot">`・`site.js` の読み込み）を、既存のページと同じにする。② `<body data-root="...">` は、`site/` からの深さに合わせる（直下は `""`・1 階層下は `"../"`）。③ **`assets/site.js` の `NAV` に 1 行足す**（左の目次・前後のリンクは、ここだけで決まる。`h` がない項目は「準備中」と表示される）。コード中の `<` は、`&lt;` にする。④ **見出しの番号（大項目 `1.`・中項目 `1.1`・小項目 `1.1.1`）は、手で書かない**（`site.js` が h2・h3・h4 に自動で付ける）。階層は飛ばさない（h2 の次は h3、h3 の次は h4）。
 - **テスト**: `bash tests/run_tests.sh test_site.sh`（`--changed` は、`site/*`・`pages.yml` の変更で選ぶ）。
 - **公開**: `.github/workflows/pages.yml` が、`main` に `site/` の変更が入ったとき、`site/` を GitHub Pages に公開する（`development` の途中経過は出ない）。リポジトリの Settings → Pages → Source を「GitHub Actions」にする設定が、最初の 1 回だけ必要。公開先は、`https://tama-create.github.io/sf-tools/`。
 - **手元で見る**: `site/index.html` を、ブラウザで直接開く（サーバーは不要）。

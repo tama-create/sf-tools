@@ -21,7 +21,7 @@
   <p>ターゲットファイルを書く → <code>sf-release.sh</code>（検証）→ <code>sf-deploy.sh</code>（デプロイ）→ <code>sf-push.sh</code>（送る）→ <code>sf-next.sh</code>（次の PR 先を確認）</p>
 </div>
 
-<h2 id="target">1. ターゲットファイルを記述する</h2>
+<h2 id="target">ターゲットファイルを記述する</h2>
 <p>ターゲットファイルとは、デプロイ対象・削除対象のメタデータを列挙するファイルです。<code>release/&lt;ブランチ名&gt;/</code> の下に置きます。</p>
 <table>
   <thead><tr><th>ファイル</th><th>役割</th></tr></thead>
@@ -32,14 +32,14 @@
 </table>
 <p>書き方は、<a href="../reference/target-files.html">ターゲットファイルの書き方</a> を見てください。</p>
 
-<h2 id="dryrun">2. dry-run で検証する</h2>
+<h2 id="dryrun">dry-run で検証する</h2>
 <pre><code>sf-release.sh</code></pre>
 <p>実際には変更せずに、接続中の組織へ、リリースできるかを確かめます。</p>
 
-<h2 id="deploy">3. デプロイを実行する</h2>
+<h2 id="deploy">デプロイを実行する</h2>
 <pre><code>sf-deploy.sh</code></pre>
 
-<h2 id="push">4. 変更をコミットして送る（sf-push）</h2>
+<h2 id="push">変更をコミットして送る（sf-push）</h2>
 <pre><code>sf-push.sh</code></pre>
 <p>カレントフォルダの下の変更を、まとめてコミットしてプッシュします。</p>
 <ul>
@@ -52,11 +52,11 @@
   <p>ブランチの上にいないとき（detached HEAD）と、保護ブランチ（<code>branches.txt</code> のブランチ。<code>main</code> など）の上にいるときは、コミットする前にエラーで終了します。コミットだけが手元に残り、プッシュは通らない状態を作らないためです。</p>
 </div>
 
-<h2 id="next">5. PR の状況を確認する（sf-next）</h2>
+<h2 id="next">PR の状況を確認する（sf-next）</h2>
 <pre><code>sf-next.sh</code></pre>
 <p>現在のブランチが、<code>develop</code> / <code>staging</code> / <code>main</code> のどこまでマージ済みかを一覧で表示し、次に出すべき PR の先を案内します。</p>
 
-<h2 id="hooks">6. git フックによる自動チェック</h2>
+<h2 id="hooks">git フックによる自動チェック</h2>
 <p>コミットとプッシュのときに、次のチェックが自動で動きます。</p>
 <table>
   <thead><tr><th>フック</th><th>いつ</th><th>内容</th></tr></thead>
@@ -66,7 +66,7 @@
   </tbody>
 </table>
 
-<h2 id="launcher">7. ランチャーから実行する</h2>
+<h2 id="launcher">ランチャーから実行する</h2>
 <p>ここまでのコマンドは、すべて <code>sfl</code>（<code>sf-launcher.sh</code>）から、メニュー形式でも実行できます。<code>sf-job</code> / <code>sf-start</code> を実行すると自動で起動するので、個別に呼び出す必要はありません。</p>
 <pre><code>sfl</code></pre>
 <pre><code>  ──────────────────────────────────────────────────

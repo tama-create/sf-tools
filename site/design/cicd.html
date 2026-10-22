@@ -16,7 +16,7 @@
 <h1>CI/CD の仕組み（設計の考え方）</h1>
 <p class="lead">sf-tools は、Git のブランチと Salesforce の組織を結びつけて、リリースを自動で行います。ここでは、その<strong>全体像と、なぜこの作りなのか</strong>を説明します。個々のコマンドの使い方は、<a href="../reference/commands.html">コマンド一覧</a>にあります。</p>
 
-<h2 id="pillars">1. 設計の 3 つの柱</h2>
+<h2 id="pillars">設計の 3 つの柱</h2>
 <p>Salesforce のメタデータは「パッチ形式」で扱えます。その特性を活かして、Git と各組織（本番・ステージング・開発）の内容を、常にそろえます。</p>
 <ol class="steps">
   <li><p><strong>本番が正（Source of Truth）</strong> — 本番の組織の変更を、自動で検知して、すべての環境へ、すぐに広げます（自己修復型の同期）。</p></li>
@@ -24,7 +24,7 @@
   <li><p><strong>自己完結型のワークフロー</strong> — CI/CD の処理を、各プロジェクト（<code>force-*</code>）の <code>.github/workflows/</code> に、すべて含めます。雛形は sf-tools が持ち、まとめて配布します。</p></li>
 </ol>
 
-<h2 id="branches">2. 環境とブランチ</h2>
+<h2 id="branches">環境とブランチ</h2>
 <p>ブランチの階層は、<code>sf-tools/config/branches.txt</code> で、<strong>プロジェクトごとに</strong>決めます。</p>
 <table>
   <thead><tr><th>パターン</th><th>ブランチ</th><th>使いどころ</th></tr></thead>
@@ -46,7 +46,7 @@
 </table>
 <p>段階は、あとから足せます（<a href="../admin/maintenance.html#add-tier">構成の変更と診断</a>）。</p>
 
-<h2 id="release">3. リリースの流れ（スター型のプロモート）</h2>
+<h2 id="release">リリースの流れ（スター型のプロモート）</h2>
 <p>すべてのリリースは、<code>feature/*</code> のブランチを起点にして、各ターゲットのブランチへ、<strong>個別に PR</strong> を出して行います。</p>
 <pre><code>feature/xxx ──→ develop   （開発組織へリリース）
 feature/xxx ──→ staging   （ステージング組織へリリース）
@@ -57,7 +57,7 @@ feature/xxx ──→ main      （本番組織へリリース）</code></pre>
   <p>環境ブランチの間でマージすると、意図しない変更が混ざるおそれがあります。必ず feature ブランチを経由させることで、「各環境に、何がデプロイされたか」を、はっきり追えます。</p>
 </div>
 
-<h3 id="order">3.1 マージの順序</h3>
+<h3 id="order">マージの順序</h3>
 <p>おすすめの順序は、<code>branches.txt</code> の逆順（下位 → 上位）です。3 階層なら <code>develop → staging → main</code> の順です。</p>
 <ul>
   <li><strong>開発者が <code>sf-next.sh</code> を使う限り、順序は守られます</strong>（<a href="../reference/commands-dev.html#sf-next">sf-next の説明</a>）。</li>
@@ -70,10 +70,10 @@ feature/xxx ──→ main      （本番組織へリリース）</code></pre>
   <p>飛ばしたブランチにデプロイしたいときは、新しいブランチを切って、順序どおりに PR を出し直します。</p>
 </div>
 
-<h3 id="prepush">3.2 手元での main の同期</h3>
+<h3 id="prepush">手元での main の同期</h3>
 <p><code>git push</code> の前に、リモートの最新の <code>main</code>（自動で更新された、本番の状態）を取り込んでいるかを、確認します。未取り込みなら、<code>main</code> を自動でマージして、最新にします（pre-push フック）。</p>
 
-<h2 id="workflows">4. ワークフローの全体像</h2>
+<h2 id="workflows">ワークフローの全体像</h2>
 <p>CI/CD の処理は、各プロジェクトの <code>.github/workflows/</code> に、すべて含まれます。雛形は <code>sf-tools/templates/.github/workflows/</code> にあり、<code>sf-init</code> がコピーします。</p>
 <pre><code>sf-tools（雛形の正本）                       force-* リポジトリ（完全内包版）
 templates/.github/workflows/  ─ sf-init →   .github/workflows/
@@ -96,7 +96,7 @@ templates/.github/workflows/  ─ sf-init →   .github/workflows/
 </table>
 <p>いつ動くかの一覧は、<a href="../admin/workflows.html#list">ワークフローの更新</a>にあります。</p>
 
-<h3 id="slack">4.1 Slack の通知</h3>
+<h3 id="slack">Slack の通知</h3>
 <table>
   <thead><tr><th>できごと</th><th>通知の内容</th></tr></thead>
   <tbody>
@@ -106,9 +106,9 @@ templates/.github/workflows/  ─ sf-init →   .github/workflows/
   </tbody>
 </table>
 
-<h2 id="each">5. 各ワークフローの動き</h2>
+<h2 id="each">各ワークフローの動き</h2>
 
-<h3 id="validate">5.1 wf-validate（PR の検証）</h3>
+<h3 id="validate">wf-validate（PR の検証）</h3>
 <p>PR を作る・更新するたびに、<code>sf-release.sh</code> を<strong>検証モード（dry-run）</strong>で実行します。</p>
 <ol>
   <li>マージ先のブランチに応じて、接続する Salesforce 組織を選ぶ</li>
@@ -126,7 +126,7 @@ templates/.github/workflows/  ─ sf-init →   .github/workflows/
 </table>
 <p>全組織で共通の <code>SF_PRIVATE_KEY</code>（JWT 用の秘密鍵）を使います（<a href="../admin/secrets.html">認証情報</a>）。</p>
 
-<h3 id="sequence">5.2 wf-sequence（マージ順序の確認）</h3>
+<h3 id="sequence">wf-sequence（マージ順序の確認）</h3>
 <p><code>branches.txt</code> に書かれたブランチへの PR のときに、順序を確かめます。<code>branches.txt</code> は、いつも <code>origin/main</code> から読みます（PR のマージコミットには、含まれないことがあるため）。</p>
 <ul>
   <li>マージ元が環境ブランチ → <strong>エラーでブロック</strong></li>
@@ -135,7 +135,7 @@ templates/.github/workflows/  ─ sf-init →   .github/workflows/
   <li><code>branches.txt</code> が見つからない → 確認を省略</li>
 </ul>
 
-<h3 id="release-wf">5.3 wf-release（リリース）</h3>
+<h3 id="release-wf">wf-release（リリース）</h3>
 <p>PR をマージしたあとに、マージ先に対応する組織へ、リリースします。</p>
 <ol>
   <li>リリース先を、Actions の Summary に記録する</li>
@@ -144,7 +144,7 @@ templates/.github/workflows/  ─ sf-init →   .github/workflows/
   <li>成功でも失敗でも、<strong>Slack に結果を通知</strong>する</li>
 </ol>
 
-<h3 id="propagate">5.4 wf-propagate（下位ブランチへの伝播）</h3>
+<h3 id="propagate">wf-propagate（下位ブランチへの伝播）</h3>
 <p><code>main</code> への PR をマージしたあとに、変更を、下位のブランチへ、自動で伝えます（<code>main → staging</code>、<code>main → develop</code>。git の merge と push）。</p>
 <ul>
   <li><strong>Git の上の同期だけ</strong>です。Sandbox の組織への自動デプロイは、行いません。</li>
@@ -152,7 +152,7 @@ templates/.github/workflows/  ─ sf-init →   .github/workflows/
   <li><strong>コンフリクトしたときは、マージを中止して Slack に通知し、手動の対応を求めます。</strong>自動では解決しません（人間が判断すべき状況のためです）。</li>
 </ul>
 
-<h3 id="metasync">5.5 wf-metasync（本番の自動同期）</h3>
+<h3 id="metasync">wf-metasync（本番の自動同期）</h3>
 <p>平日の日本時間 9:00 / 12:00 / 15:00 / 18:00 に、本番の組織の最新の状態を、<code>main</code> に反映します。</p>
 <ol>
   <li><code>main</code> を、全履歴つきでチェックアウトする（差分の計算に、全履歴が必要なため）</li>
@@ -162,7 +162,7 @@ templates/.github/workflows/  ─ sf-init →   .github/workflows/
   <li>変更があれば、コミットして、<code>main</code> へ直接 push し、staging・develop へ伝える。変更がなければ、何もせず、正常に終わる</li>
 </ol>
 
-<h2 id="decisions">6. 設計上の判断</h2>
+<h2 id="decisions">設計上の判断</h2>
 <table>
   <thead><tr><th>判断</th><th>理由</th></tr></thead>
   <tbody>

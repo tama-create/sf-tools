@@ -137,7 +137,10 @@ a:hover { text-decoration: none; }
   border-bottom: 2px solid var(--line); line-height: 1.5; scroll-margin-top: 4.5rem;
 }
 .doc h3 { font-size: 1.12rem; margin: 2rem 0 .6rem; scroll-margin-top: 4.5rem; }
-.doc h4 { font-size: 1rem; margin: 1.5rem 0 .4rem; }
+.doc h4 { font-size: 1rem; margin: 1.5rem 0 .4rem; scroll-margin-top: 4.5rem; }
+/* 見出しの番号（site.js が付ける。大項目 1. / 中項目 1.1 / 小項目 1.1.1）*/
+.doc .num { color: var(--accent); font-variant-numeric: tabular-nums; margin-right: .15em; }
+.doc h4 .num { color: var(--fg-soft); }
 .doc p, .doc ul, .doc ol, .doc table, .doc pre { margin: 0 0 1.1rem; }
 .doc ul, .doc ol { padding-left: 1.5rem; }
 .doc li { margin: .25rem 0; }

@@ -16,7 +16,7 @@
 <h1>ワークフローの更新（sf-sync-wf）</h1>
 <p class="lead"><code>sf-init</code> が作るワークフローの一覧と、作成済みのプロジェクトのワークフローを、sf-tools の最新の雛形に合わせて更新する <code>sf-sync-wf.sh</code> の使い方です。</p>
 
-<h2 id="list">1. 自動で作られるワークフロー</h2>
+<h2 id="list">自動で作られるワークフロー</h2>
 <p><code>sf-init.sh</code> は、<code>.github/workflows/</code> に、次の 5 つを作ります（雛形は <code>sf-tools/templates/.github/workflows/</code>）。</p>
 <table>
   <thead><tr><th>ファイル</th><th>名前（<code>name:</code>）</th><th>いつ動くか</th></tr></thead>
@@ -30,7 +30,7 @@
 </table>
 <p>順序外の PR を知らせる <code>wf-sequence</code> の仕組みは、<a href="../reference/commands-dev.html#sf-next"><code>sf-next.sh</code> の説明</a>にあります。</p>
 
-<h2 id="sync">2. 雛形に合わせて更新する（<code>sf-sync-wf.sh</code>）</h2>
+<h2 id="sync">雛形に合わせて更新する（<code>sf-sync-wf.sh</code>）</h2>
 <pre><code>sf-sync-wf.sh            # 雛形との差分を表示し、確認のうえ、上書きする
 sf-sync-wf.sh --check    # 差分があるかだけを調べる（何も変更しない）
 sf-sync-wf.sh --remove wf-old.yml   # 雛形から廃止されたワークフローを削除する</code></pre>
@@ -40,7 +40,7 @@ sf-sync-wf.sh --remove wf-old.yml   # 雛形から廃止されたワークフロ
   <p>CI/CD（リリース・検証）の動作が変わるため、実行の冒頭に、赤い警告ボックスと確認が表示されます（<code>--check</code> を除く）。<code>sf-install.sh</code> などから、自動では実行されません（利用者の意思なく、ワークフローが書き換わるのを防ぐためです）。</p>
 </div>
 
-<h3 id="steps">2.1 更新の手順（おすすめ）</h3>
+<h3 id="steps">更新の手順（おすすめ）</h3>
 <ol class="steps">
   <li><p><code>sf-job.sh</code> で、ジョブ名 <code>system-日付</code>（例: <code>system-20261006</code>）の作業用ブランチを作ります。<code>main</code> から作られ、古くなりません。ワークフローの更新の PR だと、名前で分かります。</p></li>
   <li><p>そのフォルダで <code>sf-sync-wf.sh</code> を実行し、差分を確認して Y を答えます。</p></li>
@@ -49,7 +49,7 @@ sf-sync-wf.sh --remove wf-old.yml   # 雛形から廃止されたワークフロ
   <li><p>PR を出して、マージします。<code>develop</code> / <code>staging</code> がある構成では、通常の変更と同じ順序（<code>develop</code> → <code>staging</code> → <code>main</code>）で、PR を出します（次の PR 先は、<code>sf-next.sh</code> が案内します）。</p></li>
 </ol>
 
-<h3 id="behavior">2.2 動作</h3>
+<h3 id="behavior">動作</h3>
 <ul>
   <li><code>force-*</code> フォルダの中で、環境ブランチ（<code>branches.txt</code> のブランチ。<code>main</code> / <code>staging</code> / <code>develop</code> など）<strong>以外</strong>でしか、実行できません。</li>
   <li><strong>sf-tools（<code>~/sf-tools</code>）が最新であることが必須です。</strong>実行の初めに、origin と比べ、遅れていれば、確認のうえ、sf-tools を更新し、更新した sf-tools で、自動的に、もう一度実行します（古い雛形で、プロジェクトのワークフローを書き換えないためです）。

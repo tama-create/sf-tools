@@ -13,15 +13,21 @@
 <nav id="side" aria-label="目次"></nav>
 <main id="doc" class="doc">
 
-<h1>CI/CD の仕組み（設計の考え方）</h1>
-<p class="lead">sf-tools は、Git のブランチと Salesforce の組織を結びつけて、リリースを自動で行います。ここでは、その<strong>全体像と、なぜこの作りなのか</strong>を説明します。個々のコマンドの使い方は、<a href="../reference/commands.html">コマンド一覧</a>にあります。</p>
+<h1>🧭 CI/CD の仕組み（設計の考え方）</h1>
+<p class="lead">sf-tools は、変更を 1 段ずつ確かめながら、本番に届ける仕組みを、自動で動かします。このページでは、その<strong>全体像と、なぜこの作りなのか</strong>を説明します。コマンドの使い方は、<a href="../reference/commands.html">コマンド一覧</a>にあります。</p>
+
+<div class="box">
+  <div class="title">ひとことで言うと</div>
+  <p>変更は、開発用 → 検証用 → 本番の順に、1 段ずつ進みます。各段で、自動のチェックが入るので、確かめないまま、本番に出ることはありません。本番で起きた変更は、自動で、ほかの段にも広がります。</p>
+  <p>（CI/CD は、変更の確認と反映を自動で行う仕組みのことです。）</p>
+</div>
 
 <h2 id="pillars">設計の 3 つの柱</h2>
-<p>Salesforce のメタデータは「パッチ形式」で扱えます。その特性を活かして、Git と各組織（本番・ステージング・開発）の内容を、常にそろえます。</p>
+<p>Salesforce のメタデータは、変更した部分だけを、差分として扱えます。この特性を活かして、Git（変更の履歴）と各組織（本番・ステージング・開発）の内容を、いつもそろえます。</p>
 <ol class="steps">
-  <li><p><strong>本番が正（Source of Truth）</strong> — 本番の組織の変更を、自動で検知して、すべての環境へ、すぐに広げます（自己修復型の同期）。</p></li>
-  <li><p><strong>スター型のプロモート</strong> — 作業用のブランチ（feature）から、各環境へ、<strong>個別に PR</strong> を出します。環境ブランチどうしの直接のマージは、禁止です。</p></li>
-  <li><p><strong>自己完結型のワークフロー</strong> — CI/CD の処理を、各プロジェクト（<code>force-*</code>）の <code>.github/workflows/</code> に、すべて含めます。雛形は sf-tools が持ち、まとめて配布します。</p></li>
+  <li><p><strong>本番が正（原本）</strong> — 本番の組織を、いつも「原本」として扱います。本番で起きた変更は、自動で見つけて、Git 上のすべてのブランチへ、すばやく広げます。ずれたら、自動でそろい直す仕組みです。</p></li>
+  <li><p><strong>作業ブランチから、各環境へ、1 本ずつ届ける</strong>（スター型のプロモート） — 作業用のブランチ（feature）から、各環境へ向けて、<strong>それぞれ別に PR</strong>（取り込みの依頼）を出します。環境のブランチどうしを、直接つなぐことは、禁止です。</p></li>
+  <li><p><strong>自己完結型のワークフロー</strong> — 自動で動く処理（ワークフロー）を、各プロジェクト（<code>force-*</code>）の中に、すべて含めます。雛形は sf-tools が持っていて、プロジェクトを作るときに、コピーします。</p></li>
 </ol>
 
 <h2 id="branches">環境とブランチ</h2>
@@ -61,7 +67,7 @@ feature/xxx ──→ main      （本番組織へリリース）</code></pre>
 <p>おすすめの順序は、<code>branches.txt</code> の逆順（下位 → 上位）です。3 階層なら <code>develop → staging → main</code> の順です。</p>
 <ul>
   <li><strong>開発者が <code>sf-next.sh</code> を使う限り、順序は守られます</strong>（<a href="../reference/commands-dev.html#sf-next">sf-next の説明</a>）。</li>
-  <li>GitHub 上で、直接 PR を作って、順序を飛ばしたときは、<code>wf-sequence</code> が、PR の会話欄に警告のコメントを書き、Slack に通知します。<strong>マージは止めません</strong>（緊急のリリースを妨げないため）。気づいたレビュアーが、却下します。</li>
+  <li>GitHub 上で直接 PR を作り、順序を飛ばしたときは、<code>wf-sequence</code> が警告します。PR の会話欄にコメントを書いて、Slack にも通知します。<strong>マージは止めません</strong>（緊急のリリースを妨げないため）。気づいたレビュアーが、却下します。</li>
   <li><strong>環境ブランチどうしの直接の PR</strong>（例: develop → staging）は、<strong>エラーでブロック</strong>します。</li>
 </ul>
 <div class="box warn">
@@ -82,7 +88,7 @@ templates/.github/workflows/  ─ sf-init →   .github/workflows/
 ├── wf-release.yml                           ├── wf-release.yml
 ├── wf-propagate.yml                         ├── wf-propagate.yml
 └── wf-metasync.yml                          └── wf-metasync.yml</code></pre>
-<p><strong>なぜ自己完結にするのか:</strong> 各プロジェクトが、sf-tools の状態に左右されず、独立して動くようにするためです。ワークフローを直すときは、雛形を更新し、管理者が <a href="../admin/workflows.html#sync"><code>sf-sync-wf.sh</code></a> で、各プロジェクトに反映します（自動では、書き換わりません）。</p>
+<p><strong>なぜ自己完結にするのか:</strong> 各プロジェクトが、sf-tools の状態に左右されず、独立して動くようにするためです。ワークフローを直すときは、まず雛形を更新します。そのあと、管理者が <a href="../admin/workflows.html#sync"><code>sf-sync-wf.sh</code></a> で、各プロジェクトに反映します（自動では書き換わりません）。</p>
 
 <table>
   <thead><tr><th>ワークフロー</th><th>目的</th><th>ブロックするか</th></tr></thead>
@@ -145,7 +151,7 @@ templates/.github/workflows/  ─ sf-init →   .github/workflows/
 </ol>
 
 <h3 id="propagate">wf-propagate（下位ブランチへの伝播）</h3>
-<p><code>main</code> への PR をマージしたあとに、変更を、下位のブランチへ、自動で伝えます（<code>main → staging</code>、<code>main → develop</code>。git の merge と push）。</p>
+<p><code>main</code> への PR をマージすると、その変更を、下位のブランチへ自動で伝えます（<code>main → staging</code>、<code>main → develop</code>。git の merge と push）。</p>
 <ul>
   <li><strong>Git の上の同期だけ</strong>です。Sandbox の組織への自動デプロイは、行いません。</li>
   <li>メタデータの同期（<code>wf-metasync</code>）のボットの push では、このワークフローは動きません。同期のあとの下位への伝播は、同期のコマンド自身が担います。</li>

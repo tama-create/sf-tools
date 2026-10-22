@@ -6,7 +6,8 @@
 
   var NAV = [
     { title: "はじめに", items: [
-      { t: "ホーム", h: "index.html" }
+      { t: "ホーム", h: "index.html" },
+      { t: "用語集", h: "guide/glossary.html" }
     ]},
     { title: "使い方ガイド（開発者向け）", items: [
       { t: "前提条件とインストール", h: "guide/install.html" },
@@ -105,6 +106,7 @@
      *  階層は、飛ばさない（h2 の次は h3、h3 の次は h4。tests/test_site.sh が確認する）。 */
     var cnt = [0, 0, 0];
     Array.prototype.forEach.call(doc.querySelectorAll("h2, h3, h4"), function (h) {
+      if (h.closest(".card")) { return; }   /* トップページのカードの題は、本文の見出しではない（番号を付けない）*/
       var lv = parseInt(h.tagName.charAt(1), 10) - 2;
       cnt[lv] += 1;
       for (var j = lv + 1; j < 3; j++) { cnt[j] = 0; }
@@ -124,7 +126,7 @@
 
     /* ---- 右の見出し（このページの目次）---- */
     var toc = document.getElementById("toc");
-    var heads = doc.querySelectorAll("h2, h3");
+    var heads = Array.prototype.filter.call(doc.querySelectorAll("h2, h3"), function (h) { return !h.closest(".card"); });
     if (toc && heads.length > 2) {
       toc.className = "toc";
       var t = "<h2>このページの内容</h2><ul>";

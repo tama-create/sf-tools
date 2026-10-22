@@ -13,16 +13,26 @@
 <nav id="side" aria-label="目次"></nav>
 <main id="doc" class="doc">
 
-<h1>基本の使い方</h1>
-<p class="lead">フォルダの考え方を押さえてから、新しい作業の始め方と、作業の再開のしかたを覚えましょう。</p>
+<h1>🌱 基本の使い方</h1>
+<p class="lead">フォルダの考え方を、先に押さえましょう。そのあと、新しい作業の始め方と、作業の再開のしかたを覚えます。覚えるコマンドは、2 つだけです。</p>
+
+<div class="box">
+  <div class="title">この章のあらすじ</div>
+  <ul>
+    <li><strong>新しい作業を始めるとき</strong>は、<code>sf-job.sh</code> を使います。</li>
+    <li><strong>前の続きを再開するとき</strong>は、<code>sf-start.sh</code> を使います。</li>
+    <li>どちらも、最後に VS Code が開きます。</li>
+  </ul>
+</div>
 
 <h2 id="words">言葉とフォルダの構成</h2>
+<p>フォルダに、3 つの呼び名があります。言葉の意味は、<a href="glossary.html">用語集</a>にもあります。</p>
 <table>
   <thead><tr><th>呼び方</th><th>内容</th></tr></thead>
   <tbody>
-    <tr><td><strong>プロジェクト</strong></td><td><code>force-XXXX</code>（リポジトリのクローン。VS Code で開く単位）。<strong><code>force-</code> は固定、<code>XXXX</code> は管理者が決める名前</strong>です（例: <code>acme</code> → <code>force-acme</code>）</td></tr>
-    <tr><td><strong>作業単位</strong></td><td>プロジェクトの<strong>直上のフォルダ</strong>（<code>JOB-xxx</code>・<code>admin</code> など）。同じ <code>force-XXXX</code> を、同時に複数、別々の作業として開くための入れ物です</td></tr>
-    <tr><td><strong>作業フォルダ</strong></td><td>作業単位のフォルダを置く場所。<strong>どこでもよい</strong>です（<code>sf-init.sh</code> や <code>sf-job.sh</code> は、ここで実行します）</td></tr>
+    <tr><td><strong>プロジェクト</strong></td><td><code>force-XXXX</code>（リポジトリのクローン。VS Code で開く単位）。<strong><code>force-</code> は固定で、<code>XXXX</code> は管理者が決める名前</strong>です（例: <code>acme</code> → <code>force-acme</code>）</td></tr>
+    <tr><td><strong>作業単位</strong></td><td>プロジェクトの<strong>すぐ上のフォルダ</strong>です（<code>JOB-xxx</code> や <code>admin</code> など）。同じ <code>force-XXXX</code> を、別々の作業として、同時に複数開くための入れ物です</td></tr>
+    <tr><td><strong>作業フォルダ</strong></td><td>作業単位のフォルダを、まとめて置く場所です。<strong>どこでも構いません</strong>（<code>sf-init.sh</code> や <code>sf-job.sh</code> は、ここで実行します）</td></tr>
   </tbody>
 </table>
 <pre><code>{作業フォルダ}\                    ← 好きな場所・好きな名前（おすすめ: C:\sf や ~/sf のような、短い名前）
@@ -30,55 +40,54 @@
 ├── admin\force-beta\              ← 別のプロジェクトも、同じ admin に置く
 ├── JOB-20261016\force-acme\       ← ジョブごとのクローン（sf-job.sh が作る）。同じ force-acme を、同時に複数開ける
 └── JOB-20261017\force-beta\       ← 別のプロジェクトを、同じ作業フォルダに置いてもよい</code></pre>
-
-<h3>どのプロジェクトか、どう決まるか</h3>
-<p><strong>どのプロジェクトか（オーナーと XXXX）は、フォルダの名前では決まりません。</strong>開発者が使う <code>sf-job.sh</code> は、次の順で決めます（上にあるものが優先です）。</p>
-<ol>
-  <li>引数 <code>--owner</code> / <code>--project</code></li>
-  <li>作業フォルダの下にあるクローンの <strong><code>git remote</code></strong>。クローンした時点で Git が記録した住所から、オーナーとリポジトリ名を読みます（1 種類なら自動、複数なら番号で選びます）</li>
-  <li>対話で入力</li>
-</ol>
-<div class="box warn">
-  <div class="title">実行できない場所</div>
-  <p><code>sf-job.sh</code> は、管理者用の作業フォルダ（<code>admin</code>）と、<code>force-*</code> の中では、実行できません。作業フォルダで実行してください。</p>
+<div class="box">
+  <div class="title">どのプロジェクトを使うかは、自動で決まります</div>
+  <p>フォルダの名前を、気にする必要はありません。<code>sf-job.sh</code> は、作業フォルダの中にある、クローンの情報から、プロジェクトを自動で見つけます。複数あるときは、番号で選びます。決まり方の詳しい説明は、<a href="../reference/commands-dev.html#sf-job"><code>sf-job.sh</code> のリファレンス</a>にあります。</p>
 </div>
 
-<h2 id="help">ヘルプを表示する</h2>
-<p>すべての <code>sf-*.sh</code> スクリプトは <code>--help</code> / <code>-h</code> に対応しています。概要・オプション・処理の流れが表示されます。</p>
+<h2 id="help">困ったら、まず <code>--help</code></h2>
+<p>すべての <code>sf-*.sh</code> コマンドは、<code>--help</code>（または <code>-h</code>）を付けると、概要・オプション・処理の流れを表示します。</p>
 <pre><code>sf-release.sh --help
 sf-check.sh -h</code></pre>
 
 <h2 id="job">新しい作業を始める（sf-job）</h2>
-<p>作業フォルダで実行します。</p>
+<p>作業フォルダで、次のコマンドを実行します。</p>
 <pre><code>sf-job.sh                          # 作業フォルダの下のクローンから、プロジェクトが決まる（複数なら、番号で選ぶ）
 sf-job.sh --project acme           # プロジェクトを指定する（force-acme）</code></pre>
-<p>ブランチ名の入力だけで、次をすべて自動で行います。</p>
+<p>ジョブ名（ブランチの名前になります）を入力するだけで、次のことが、自動で進みます。</p>
 <ol class="steps">
-  <li><p>ジョブ名（例: <code>JOB-20260323</code>）でブランチを作成</p></li>
-  <li><p>作業ディレクトリを準備（worktree または clone）</p></li>
-  <li><p><code>sf-start.sh</code> を自動で起動（ログイン・フック設定・VS Code の起動）</p></li>
+  <li><p>ジョブ名（例: <code>JOB-20260323</code>）で、ブランチを作ります。</p></li>
+  <li><p>作業用のフォルダを、準備します（<code>git worktree</code> または <code>git clone</code>）。</p></li>
+  <li><p><code>sf-start.sh</code> が、自動で動きます（ログイン・フックの設定・VS Code の起動）。</p></li>
 </ol>
 <div class="box">
+  <div class="title">うまくいかないとき</div>
+  <ul>
+    <li><code>sf-job.sh</code> は、管理者用のフォルダ（<code>admin</code>）や、<code>force-*</code> の中では動きません。<strong>作業フォルダ</strong>で実行してください。</li>
+    <li>ほかのコマンドの困りごとは、<a href="../admin/troubleshooting.html">トラブルシューティング</a>を見てください。</li>
+  </ul>
+</div>
+<div class="box">
   <div class="title">Windows のパスの長さについて</div>
-  <p>クローンは <code>core.longpaths=true</code> を付けて行います（Windows のパスの長さの上限、260 文字への対策）。組織に長い名前のメタデータ（例: DevOps Center の <code>objectTranslations</code>）があっても、チェックアウトに失敗しません。この設定はクローン先に残るので、以降の <code>git add</code>・<code>commit</code>・<code>push</code> にも効きます。</p>
+  <p>クローンは、<code>core.longpaths=true</code> を付けて行います。Windows には、パスの長さが 260 文字までという上限があり、それを超えないようにするための設定です。組織に長い名前のメタデータ（例: DevOps Center の <code>objectTranslations</code>）があっても、クローンに失敗しません。この設定は、クローンの中に残るので、そのあとの <code>git add</code>・<code>commit</code>・<code>push</code> にも効きます。</p>
 </div>
 
 <h2 id="start">作業を再開する（sf-start）</h2>
-<p>前日の続きなど、既存のブランチで再開するときは、<code>force-*</code> フォルダの中で実行します。</p>
+<p>前日の続きなど、すでにあるブランチで再開するときは、<code>force-*</code> フォルダの中で実行します。</p>
 <pre><code>sf-start.sh</code></pre>
 <table>
   <thead><tr><th></th><th>sf-job</th><th>sf-start</th></tr></thead>
   <tbody>
     <tr><td>実行する場所</td><td>作業フォルダ（作業単位を置く場所）</td><td><code>force-*</code> フォルダの中</td></tr>
-    <tr><td>ブランチの作成</td><td>自動で作る</td><td>作らない（既存のブランチを使う）</td></tr>
+    <tr><td>ブランチの作成</td><td>自動で作る</td><td>作らない（すでにあるブランチを使う）</td></tr>
     <tr><td>VS Code の起動</td><td>する</td><td>する</td></tr>
     <tr><td>使うタイミング</td><td>新しい作業を始めるとき</td><td>2 回目以降に、作業を再開するとき</td></tr>
   </tbody>
 </table>
 
-<div class="box ok">
+<div class="box next">
   <div class="title">次へ</div>
-  <p>作業の準備ができたら、<a href="daily.html">日々の開発の流れ</a> に進んでください。</p>
+  <p>作業の準備ができたら、<a href="daily.html">日々の開発の流れ</a>に進んでください。</p>
 </div>
 
 </main>

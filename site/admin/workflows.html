@@ -13,8 +13,8 @@
 <nav id="side" aria-label="目次"></nav>
 <main id="doc" class="doc">
 
-<h1>ワークフローの更新（sf-sync-wf）</h1>
-<p class="lead"><code>sf-init</code> が作るワークフローの一覧と、作成済みのプロジェクトのワークフローを、sf-tools の最新の雛形に合わせて更新する <code>sf-sync-wf.sh</code> の使い方です。</p>
+<h1>⚙️ ワークフローの更新（sf-sync-wf）</h1>
+<p class="lead">ワークフローは、GitHub の上で自動で動く処理です（検証・リリース・同期など）。このページでは、<code>sf-init</code> が作るワークフローの一覧と、作成済みのプロジェクトのワークフローを、sf-tools の最新の雛形に合わせて更新する <code>sf-sync-wf.sh</code> の使い方を説明します。</p>
 
 <h2 id="list">自動で作られるワークフロー</h2>
 <p><code>sf-init.sh</code> は、<code>.github/workflows/</code> に、次の 5 つを作ります（雛形は <code>sf-tools/templates/.github/workflows/</code>）。</p>
@@ -34,8 +34,8 @@
 <pre><code>sf-sync-wf.sh            # 雛形との差分を表示し、確認のうえ、上書きする
 sf-sync-wf.sh --check    # 差分があるかだけを調べる（何も変更しない）
 sf-sync-wf.sh --remove wf-old.yml   # 雛形から廃止されたワークフローを削除する</code></pre>
-<p><code>sf-init.sh</code> で作成済みの <code>force-*</code> に、あとから、ワークフローの修正（不具合の修正・安全対策など）を反映するコマンドです。sf-tools の雛形と、プロジェクトのワークフローを比べ、差分を表示して、確認のうえ、雛形の内容で上書きします。</p>
-<div class="box warn">
+<p><code>sf-init.sh</code> で作成済みの <code>force-*</code> に、あとから、ワークフローの修正（不具合の修正・安全対策など）を反映するコマンドです。sf-tools の雛形と、プロジェクトのワークフローを比べて、違いを表示します。確認のうえで、雛形の内容に上書きします。</p>
+<div class="box admin">
   <div class="title">管理者専用</div>
   <p>CI/CD（リリース・検証）の動作が変わるため、実行の冒頭に、赤い警告ボックスと確認が表示されます（<code>--check</code> を除く）。<code>sf-install.sh</code> などから、自動では実行されません（利用者の意思なく、ワークフローが書き換わるのを防ぐためです）。</p>
 </div>
@@ -52,7 +52,7 @@ sf-sync-wf.sh --remove wf-old.yml   # 雛形から廃止されたワークフロ
 <h3 id="behavior">動作</h3>
 <ul>
   <li><code>force-*</code> フォルダの中で、環境ブランチ（<code>branches.txt</code> のブランチ。<code>main</code> / <code>staging</code> / <code>develop</code> など）<strong>以外</strong>でしか、実行できません。</li>
-  <li><strong>sf-tools（<code>~/sf-tools</code>）が最新であることが必須です。</strong>実行の初めに、origin と比べ、遅れていれば、確認のうえ、sf-tools を更新し、更新した sf-tools で、自動的に、もう一度実行します（古い雛形で、プロジェクトのワークフローを書き換えないためです）。
+  <li><strong>sf-tools（<code>~/sf-tools</code>）が最新であることが必須です。</strong>実行すると、まず、origin と比べて、遅れていないかを確かめます。遅れていれば、確認のうえで sf-tools を更新して、更新した sf-tools で、もう一度、自動で実行します（古い雛形で、プロジェクトのワークフローを書き換えないためです）。
     <ul>
       <li>origin に接続できない・更新を断った・sf-tools に未コミットの変更や未プッシュのコミットがある場合は、中断します。</li>
       <li><code>--check</code> は、何も変更しない（読み取り専用の）ため、sf-tools を更新せず、遅れていれば中断します。</li>

@@ -13,8 +13,8 @@
 <nav id="side" aria-label="目次"></nav>
 <main id="doc" class="doc">
 
-<h1>自動実行コマンド</h1>
-<p class="lead">ほかのコマンドや、git のフック、GitHub Actions から自動で呼ばれるコマンドです。人が直接実行することは、ほとんどありません。全体の一覧は <a href="commands.html">コマンド一覧</a> にあります。</p>
+<h1>🤖 自動実行コマンド</h1>
+<p class="lead">ほかのコマンドや、git のフック、GitHub Actions が、自動で呼び出すコマンドです。自分で実行することは、ほとんどありません。「裏で何が動いているのか」を知りたいときに、読んでください。全体の一覧は、<a href="commands.html">コマンド一覧</a>にあります。</p>
 
 <h2 id="sf-install"><code>sf-install.sh</code></h2>
 <pre><code>sf-install.sh</code></pre>
@@ -55,7 +55,7 @@
 <h2 id="sf-metasync"><code>sf-metasync.sh</code></h2>
 <pre><code>sf-metasync.sh</code></pre>
 <p>組織の最新のメタデータを取得して、Git に反映します。主に、GitHub Actions からの定期実行を想定しています。</p>
-<div class="box warn">
+<div class="box admin">
   <div class="title">管理者専用</div>
   <p>実行の前に、赤い警告ボックスと確認が表示されます。<code>GITHUB_ACTIONS=true</code> のときは、確認をスキップして自動で実行します。</p>
 </div>
@@ -64,7 +64,7 @@
   <li>組織の最新のメタデータを取得する</li>
   <li>Git へ反映する</li>
   <li>変更があるときだけ、コミットしてプッシュする</li>
-  <li>変更がなくても、前回の同期のコミットのプッシュが失敗して、未プッシュのコミットが残っているときは、確認のうえ、プッシュだけ行う</li>
+  <li>変更がなくても、前回のプッシュが失敗して、送れていないコミットが残っているときは、確認のうえで、プッシュだけ行う</li>
   <li><code>main</code> へのプッシュは、pre-push フックを通さない（<code>--no-verify</code>。このコマンド専用です。GitHub の保護の設定は、そのまま効きます）</li>
 </ul>
 

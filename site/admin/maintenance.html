@@ -13,76 +13,90 @@
 <nav id="side" aria-label="目次"></nav>
 <main id="doc" class="doc">
 
-<h1>構成の変更と診断</h1>
-<p class="lead">セットアップが済んだあとの、管理者のメンテナンスです。段階（ブランチの階層）の追加、接続先の組織の付け替え、いまの状態の診断を扱います。どれも <code>force-*</code> フォルダの中（管理者用の <code>admin/force-XXXX</code>）で実行します。</p>
+<h1>🔧 構成の変更と診断</h1>
+<p class="lead">セットアップが済んだあとの、管理者のメンテナンスです。段階（ブランチの階層）を足す、接続先の組織を付け替える、いまの状態を診断する、の 3 つを説明します。どれも、<code>force-*</code> フォルダの中（管理者用の <code>admin/force-XXXX</code>）で実行します。</p>
+
+<div class="box">
+  <div class="title">まず困ったら、診断から</div>
+  <p>「どこで間違えたか分からない」というときは、<a href="#status"><code>sf-init.sh --status</code></a> から始めてください。何も変更せずに、足りないものと、直し方を教えてくれます。</p>
+</div>
 
 <h2 id="org">Salesforce 組織の接続の考え方</h2>
-<p>段階（main / staging / develop）と組織の種類は、<strong>結びつけません</strong>。どの段階にも、本番・Sandbox・Developer Edition などを、自由につなげます（main に Sandbox や Developer Edition でも構いません）。</p>
+<p>段階（main / staging / develop）と、組織の種類は、<strong>結びつけていません</strong>。どの段階にも、本番・Sandbox・Developer Edition などを、自由につなげられます（<code>main</code> に Sandbox や Developer Edition をつないでも構いません）。</p>
 <div class="box warn">
-  <div class="title">本番の組織は、main にしかつなげません</div>
-  <p>staging や develop に、本番をつなごうとすると、ログインのあとに、組織の種類を読み取って、中断します。</p>
+  <div class="title">本番の組織は、main にだけつなげます</div>
+  <p>staging や develop に、本番の組織をつなごうとすると、ログインのあとで組織の種類を確かめて、そこで止まります。本番を、うっかり、開発用の段階につなげないための仕組みです。</p>
 </div>
-<h3>ログイン先の選び方</h3>
-<p>段階ごとに、ログイン先を、次の 3 つから選びます（Enter は 2）。種類ではなく、URL で選びます。</p>
+
+<h3 id="org-login">ログイン先の選び方</h3>
+<p>段階ごとに、ログイン先を、次の 3 つから選びます（Enter だけなら 2 番です）。組織の種類ではなく、URL で選びます。</p>
 <ol>
   <li><code>https://login.salesforce.com</code> — 本番・Developer Edition・Trial など</li>
   <li><code>https://test.salesforce.com</code> — Sandbox（<strong>安全なおすすめ</strong>。本番に影響しません）</li>
   <li>組織の URL を入力（My Domain。例: <code>https://会社名.my.salesforce.com</code>）</li>
 </ol>
-<p>ログインのあとに、組織の ID・名前・種類（本番 / Sandbox / Developer Edition / Trial）を、<strong>組織から読み取って</strong>、表示し、保存します。</p>
+<p>ログインすると、組織の ID・名前・種類（本番 / Sandbox / Developer Edition / Trial）を、<strong>組織から読み取って</strong>表示します。読み取った内容は、保存されます。</p>
 
 <h2 id="add-tier">段階を足す（<code>--add-tier</code>）</h2>
-<p>セットアップのあとで、<code>main</code> だけの構成を、<code>staging</code>・<code>develop</code> へ広げられます。</p>
+<p>セットアップのあとで、<code>main</code> だけの構成から、<code>staging</code>・<code>develop</code> へ、段階を足せます。</p>
 <pre><code># force-* フォルダの中で実行
 sf-init.sh --add-tier staging    # main のみ → main + staging
 sf-init.sh --add-tier develop    # main + staging → main + staging + develop</code></pre>
-<pre><code>[初期]    main のみ
+<pre><code>[最初]    main のみ
     ↓  sf-init.sh --add-tier staging
-[2段階]   main + staging
+[2 段階]  main + staging
     ↓  sf-init.sh --add-tier develop
-[3段階]   main + staging + develop</code></pre>
-<p>追加のときに、自動で行われる内容は、次のとおりです。</p>
+[3 段階]  main + staging + develop</code></pre>
+<p>足すときに、次のことが、自動で行われます。</p>
 <ul>
   <li><code>branches.txt</code> の更新</li>
-  <li>リモートのブランチの作成（GitHub）</li>
-  <li>追加した段階の、JWT 認証情報（Secret / Variable）の登録</li>
-  <li><code>branches.txt</code> のコミットとプッシュ（<code>develop</code> を追加するときは、<code>main</code> へは直接プッシュせず、PR を作ります）</li>
+  <li>GitHub に、新しいブランチを作る</li>
+  <li>足した段階の、認証情報（Secret / Variable）の登録</li>
+  <li><code>branches.txt</code> のコミットとプッシュ（<code>develop</code> を足すときは、<code>main</code> に直接プッシュせず、PR を作ります）</li>
 </ul>
 <ul>
-  <li><code>main → develop</code> のように、<code>staging</code> を飛ばした追加は、エラーになります。</li>
-  <li>初回のセットアップとは、処理の順序が逆です。段階の追加では、<strong>先に Salesforce に接続し、成功してから、ブランチと PR を作ります</strong>（接続に失敗したときに、GitHub 側を、変更しないためです）。</li>
-  <li>終わると、実行前のブランチ（<code>admin</code>）に戻ります。</li>
+  <li><code>staging</code> を飛ばして、<code>main</code> から <code>develop</code> を足すことは、できません（エラーになります）。</li>
+  <li>最初のセットアップとは、順序が逆です。段階を足すときは、<strong>先に Salesforce に接続して、成功してから、ブランチと PR を作ります</strong>。接続に失敗したときに、GitHub 側を、変更しないためです。</li>
+  <li>終わると、実行する前のブランチ（<code>admin</code>）に戻ります。</li>
 </ul>
 
 <h3 id="scale-down">段階を減らすとき（手動）</h3>
 <div class="box danger">
-  <div class="title">段階の削除（スケールダウン）は、自動化していません</div>
+  <div class="title">段階を減らす操作は、自動化していません</div>
   <ul>
-    <li>ブランチの削除・Ruleset の変更・Secrets / Variables の削除など、影響の範囲が広いためです。</li>
-    <li>誤って削除すると、元に戻せないおそれがあります。</li>
-    <li>需要が少なく、1 回で済む手動の操作と判断しました。</li>
+    <li>ブランチの削除・Ruleset の変更・Secrets / Variables の削除など、影響が広い操作だからです。</li>
+    <li>まちがえて削除すると、元に戻せないおそれがあります。</li>
+    <li>必要になる機会が少なく、1 回で済む手作業と判断しました。</li>
   </ul>
 </div>
-<p>手動で必要な作業は、次のとおりです。</p>
+<p>次の順番で、手作業で行います。</p>
 <ol class="steps">
-  <li><p>GitHub でブランチを削除する（<code>staging</code> / <code>develop</code>）。</p></li>
-  <li><p><code>branches.txt</code> から、該当の段階を削除して、コミットしてプッシュする。</p></li>
-  <li><p>GitHub の Secrets / Variables から、<code>SF_CONSUMER_KEY_*</code> / <code>SF_USERNAME_*</code> / <code>SF_INSTANCE_URL_*</code> を削除する。</p></li>
-  <li><p>GitHub の Repository Ruleset を更新する（削除した段階のブランチを、対象から外す）。</p></li>
+  <li><p>GitHub の Repository Ruleset を更新します（減らす段階のブランチを、対象から外します）。Ruleset の設定によっては、先に外さないと、ブランチを削除できません。</p></li>
+  <li><p><code>branches.txt</code> から、減らす段階を削除して、コミットしてプッシュします。</p></li>
+  <li><p>GitHub で、ブランチ（<code>staging</code> / <code>develop</code>）を削除します。</p></li>
+  <li><p>GitHub の Secrets / Variables から、その段階の <code>SF_CONSUMER_KEY_*</code> / <code>SF_USERNAME_*</code> / <code>SF_INSTANCE_URL_*</code> を削除します。</p></li>
 </ol>
 
-<h2 id="reconnect">接続先の付け替え（<code>--reconnect</code>）</h2>
+<h2 id="reconnect">接続先を付け替える（<code>--reconnect</code>）</h2>
 <pre><code>sf-init.sh --reconnect &lt;段階&gt;      # 段階: main / staging / develop</code></pre>
-<p>1 つの段階の、接続先の Salesforce 組織を、付け替えます。ログイン先の選び方と、本番は main だけというルールは、<a href="#org">1 章</a>のとおりです。</p>
+<p>1 つの段階について、接続先の Salesforce 組織を、別の組織に付け替えます。ログイン先の選び方と、本番は main にだけつなげるというルールは、<a href="#org">最初の章</a>のとおりです。</p>
 
-<h2 id="status">セットアップの診断（<code>--status</code>）</h2>
+<h2 id="status">セットアップを診断する（<code>--status</code>）</h2>
 <pre><code>sf-init.sh --status</code></pre>
-<p>「どこで間違えたか分からない」ときの、最初の手がかりです。<strong>読み取りのみ</strong>で、何も変更しません。</p>
+<p><span class="badge safe">🔍 読み取りのみ</span> 何も変更せずに、いまの状態を調べます。「どこで間違えたか分からない」ときの、最初の手がかりです。</p>
 <ul>
-  <li>リポジトリ・ブランチ・ワークフロー・Secrets・Variables が、そろっているかを診断します。不足は、直し方つきで表示します。</li>
-  <li>段階ごとの接続先（ログイン先・組織の種類・ユーザー・組織の ID・最終確認の日時）の一覧も表示します。</li>
-  <li>項目ごとに、✓（できている）・✗（不足。直し方を表示）・！（注意）・？（確認できず）で示します。不足があれば、終了コード 1 です。</li>
-  <li>Salesforce 側（外部クライアントアプリ・JWT 接続）は、ログインが必要なため、確認しません。直近の <code>wf-metasync</code> / <code>wf-release</code> が成功していれば、接続はできています。</li>
+  <li>リポジトリ・ブランチ・ワークフロー・Secrets・Variables が、そろっているかを調べます。足りないものは、直し方もいっしょに表示します。</li>
+  <li>段階ごとの接続先（ログイン先・組織の種類・ユーザー・組織の ID・最後に確かめた日時）の一覧も、表示します。</li>
+  <li>項目ごとに、次の記号で示します。
+    <ul>
+      <li>✓ できている</li>
+      <li>✗ 足りない（直し方を表示）</li>
+      <li>！ 注意</li>
+      <li>？ 確認できなかった</li>
+    </ul>
+    足りないものがあると、終了コードは 1 になります。
+  </li>
+  <li>Salesforce 側（外部クライアントアプリ・JWT 接続）は、ログインが必要なので、調べません。直近の <code>wf-metasync</code> や <code>wf-release</code> が成功していれば、接続はできています。</li>
 </ul>
 
 </main>

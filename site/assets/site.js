@@ -14,9 +14,12 @@
       { t: "日々の開発の流れ", h: "guide/daily.html" }
     ]},
     { title: "管理者ガイド", items: [
-      { t: "新規プロジェクトの作成（sf-init）" },
-      { t: "秘密鍵・ワークフローの更新" },
-      { t: "動作の確認（--verify）" }
+      { t: "新規プロジェクトの作成（sf-init）", h: "admin/setup.html" },
+      { t: "構成の変更と診断", h: "admin/maintenance.html" },
+      { t: "認証情報（Secrets / Variables）", h: "admin/secrets.html" },
+      { t: "ワークフローの更新（sf-sync-wf）", h: "admin/workflows.html" },
+      { t: "動作の確認（--verify）", h: "admin/verify.html" },
+      { t: "トラブルシューティング", h: "admin/troubleshooting.html" }
     ]},
     { title: "リファレンス", items: [
       { t: "コマンド一覧", h: "reference/commands.html" },

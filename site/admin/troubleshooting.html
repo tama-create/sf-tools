@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>トラブルシューティング（管理者向け） | sf-tools ドキュメント</title>
+<meta name="description" content="セットアップや GitHub Actions がうまく動かないときの、原因と直し方。">
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body data-root="../">
+<header id="top"></header>
+<div class="layout">
+<nav id="side" aria-label="目次"></nav>
+<main id="doc" class="doc">
+
+<h1>トラブルシューティング（管理者向け）</h1>
+<p class="lead">セットアップや GitHub Actions が、うまく動かないときの、原因と直し方です。</p>
+
+<h2 id="init">1. <code>sf-init.sh</code> が途中でエラー終了した</h2>
+<p>ログを確認します。</p>
+<pre><code>cat ~/sf-tools/logs/sf-init.log</code></pre>
+<p>「どこで間違えたか分からない」ときは、管理者用の <code>admin</code> フォルダの中の <code>force-*</code> で、<code>sf-init.sh --status</code> を実行します。リポジトリ・ブランチ・ワークフロー・Secrets・Variables が、そろっているかを、✓（できている）・✗（不足。直し方も表示）で確認できます（何も変更しません。<a href="maintenance.html#status">診断の説明</a>）。</p>
+<p>エラーの内容を確認して対処したら、<strong>同じフォルダで、<code>sf-init.sh</code> をもう一度実行</strong>します。途中まで進んでいた場合は、続きから再開する選択肢が出ます（<a href="setup.html#resume">途中で止まったとき</a>）。</p>
+
+<h2 id="pat">2. <code>wf-metasync</code> が「push declined due to repository rule violations」で失敗する</h2>
+<p><code>PAT_TOKEN</code> が未設定か、権限が足りません。<code>sf-init.sh</code> は、登録のときに、スコープとリポジトリの管理者であることを確認しますが、登録したあとで、Token を無効にしたり、有効期限が切れたりすると、この状態になります。</p>
+<p>新しい Token を発行して、リポジトリの Secrets の <code>PAT_TOKEN</code> を、登録し直してください。<code>sf-update-secret.sh</code> は JWT 用で、<code>PAT_TOKEN</code> は更新できません。</p>
+
+<h2 id="wf-missing">3. <code>wf-validate</code> / <code>wf-sequence</code> が動かない</h2>
+<p>ワークフローのファイルが、<code>.github/workflows/</code> にあるかを確認します。ファイルがないときは、<code>~/sf-tools/templates/.github/workflows/</code> から、<code>wf-*.yml</code> を、手動でコピーしてください（<a href="workflows.html">ワークフローの更新</a>）。</p>
+
+<h2 id="crlf">4. CRLF の警告が出る</h2>
+<p>Windows での、改行コードの違いです。動作には影響しません。<code>git checkout -- &lt;ファイル&gt;</code> で、リセットできます。</p>
+
+<h2 id="prepush">5. pre-push フックが、プッシュをブロックする</h2>
+<p><code>main</code> ブランチへの直接のプッシュは、禁止です。PR 経由でマージしてください。テストなどで、どうしても迂回が必要なときは、<code>git push --no-verify</code> を使います。</p>
+
+<h2 id="clone-token">6. <code>wf-metasync</code> / <code>wf-validate</code> / <code>wf-release</code> が「自動化ツール（sf-tools）を取得」で失敗する</h2>
+<p><code>sf-tools</code> は公開リポジトリのため、新しい <code>wf-*.yml</code> は、Token なしで clone します。このエラーは、<strong>以前のバージョンの雛形で作ったプロジェクト</strong>で、ワークフローが <code>SF_TOOLS_TOKEN</code> 付きで clone していて、その Token が、未設定・期限切れ・無効のときに起きます。</p>
+<p>force-* 側の <code>wf-metasync.yml</code> / <code>wf-validate.yml</code> / <code>wf-release.yml</code> の clone の行を、新しい雛形と同じ、Token なしの形に直してください。</p>
+<pre><code>git clone -b ${{ vars.SF_TOOLS_BRANCH || 'main' }} https://github.com/tama-create/sf-tools.git ...</code></pre>
+<p>配布済みの force-* には、自動では反映されません。<a href="workflows.html#sync"><code>sf-sync-wf.sh</code></a> で、雛形に合わせて更新できます。</p>
+
+<h2 id="node">7. 「差分抽出ツール（Salesforce Git Delta）をインストール」で TypeError が出て失敗する</h2>
+<p>エラーの例: <code>TypeError: webidl.util.markAsUncloneable is not a function</code></p>
+<p>ワークフローの Node.js が古いためです（<code>@salesforce/cli</code> の最新版は、Node 22 以上が必要です）。各 <code>wf-*.yml</code> の <code>node-version</code> を、<code>22</code> 以上にしてください。<code>sf-tools/templates/</code> を直しても、配布済みの force-* には、自動では反映されないため、force-* 側の <code>wf-*.yml</code> も、直す必要があります（<a href="workflows.html#sync"><code>sf-sync-wf.sh</code></a>）。</p>
+
+</main>
+<aside id="toc"></aside>
+</div>
+<footer id="foot"></footer>
+<script src="../assets/site.js"></script>
+</body>
+</html>

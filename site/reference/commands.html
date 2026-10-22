@@ -38,15 +38,18 @@
 </table>
 
 <h3>1.2 管理者が使うコマンド</h3>
-<p>詳しい説明は、管理者ガイドに載せる予定です（準備中）。それまでは、<a href="https://github.com/tama-create/sf-tools/blob/main/README.md#4-スクリプトリファレンス">README</a> を見てください。</p>
+<p>詳しい説明は、管理者ガイドにあります。</p>
 <table>
   <thead><tr><th>コマンド</th><th>用途</th></tr></thead>
   <tbody>
-    <tr><td><code>sf-init.sh</code></td><td>新規プロジェクトの初期セットアップ。段階の追加（<code>--add-tier</code>）・診断（<code>--status</code>）・接続先の付け替え（<code>--reconnect</code>）も</td></tr>
-    <tr><td><code>sf-init.sh --verify</code></td><td>⚠️ 実際のリポジトリ・組織で、リリースと削除が動くことを確認する（Hello World）</td></tr>
-    <tr><td><code>sf-update-secret.sh</code></td><td>⚠️ GitHub の Secrets / Variables を再登録する</td></tr>
-    <tr><td><code>sf-sync-wf.sh</code></td><td>⚠️ 作成済みのワークフローを、雛形に合わせて更新する</td></tr>
-    <tr><td><code>sf-typecheck.sh</code></td><td>⚠️ 個人用の組織で、メタデータの種類ごとに、リリースと削除ができるかを確かめ、可否の表を作る（<code>--coverage</code> は、組織に接続せず、確認の進み具合を表示）</td></tr>
+    <tr><td><a href="../admin/setup.html"><code>sf-init.sh</code></a></td><td>新規プロジェクトの初期セットアップ</td></tr>
+    <tr><td><a href="../admin/maintenance.html#add-tier"><code>sf-init.sh --add-tier</code></a></td><td>既存のプロジェクトに、段階（staging・develop）を足す</td></tr>
+    <tr><td><a href="../admin/maintenance.html#status"><code>sf-init.sh --status</code></a></td><td>セットアップの診断と、接続先の一覧（読み取りのみ）</td></tr>
+    <tr><td><a href="../admin/maintenance.html#reconnect"><code>sf-init.sh --reconnect</code></a></td><td>1 つの段階の、接続先の Salesforce 組織を付け替える</td></tr>
+    <tr><td><a href="../admin/verify.html"><code>sf-init.sh --verify</code></a></td><td>⚠️ 実際のリポジトリ・組織で、リリースと削除が動くことを確認する（Hello World）</td></tr>
+    <tr><td><a href="../admin/secrets.html#update"><code>sf-update-secret.sh</code></a></td><td>⚠️ GitHub の Secrets / Variables を再登録する</td></tr>
+    <tr><td><a href="../admin/workflows.html#sync"><code>sf-sync-wf.sh</code></a></td><td>⚠️ 作成済みのワークフローを、雛形に合わせて更新する</td></tr>
+    <tr><td><a href="../admin/verify.html#typecheck"><code>sf-typecheck.sh</code></a></td><td>⚠️ 個人用の組織で、メタデータの種類ごとに、リリースと削除ができるかを確かめ、可否の表を作る（<code>--coverage</code> は、組織に接続せず、確認の進み具合を表示）</td></tr>
   </tbody>
 </table>
 

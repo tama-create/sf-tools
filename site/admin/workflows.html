@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ワークフローの更新（sf-sync-wf） | sf-tools ドキュメント</title>
+<meta name="description" content="自動生成されるワークフローの一覧と、sf-sync-wf.sh で雛形に合わせて更新する手順。">
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body data-root="../">
+<header id="top"></header>
+<div class="layout">
+<nav id="side" aria-label="目次"></nav>
+<main id="doc" class="doc">
+
+<h1>ワークフローの更新（sf-sync-wf）</h1>
+<p class="lead"><code>sf-init</code> が作るワークフローの一覧と、作成済みのプロジェクトのワークフローを、sf-tools の最新の雛形に合わせて更新する <code>sf-sync-wf.sh</code> の使い方です。</p>
+
+<h2 id="list">1. 自動で作られるワークフロー</h2>
+<p><code>sf-init.sh</code> は、<code>.github/workflows/</code> に、次の 5 つを作ります（雛形は <code>sf-tools/templates/.github/workflows/</code>）。</p>
+<table>
+  <thead><tr><th>ファイル</th><th>名前（<code>name:</code>）</th><th>いつ動くか</th></tr></thead>
+  <tbody>
+    <tr><td><code>wf-validate.yml</code></td><td>[validate] デプロイ前検証</td><td>すべてのブランチへの PR の作成・更新・再オープンのとき</td></tr>
+    <tr><td><code>wf-sequence.yml</code></td><td>[sequence] マージ順序チェック</td><td><code>main</code> / <code>staging</code> への PR の作成・更新のとき</td></tr>
+    <tr><td><code>wf-release.yml</code></td><td>[release] デプロイ</td><td><code>main</code> / <code>staging</code> / <code>develop</code> への PR をマージしたあと</td></tr>
+    <tr><td><code>wf-propagate.yml</code></td><td>[propagate] ブランチ伝播</td><td><code>main</code> への PR をマージしたあと</td></tr>
+    <tr><td><code>wf-metasync.yml</code></td><td>[metasync] メタ同期</td><td>平日の日本時間 9:00 / 12:00 / 15:00 / 18:00（3 時間おき）に自動で</td></tr>
+  </tbody>
+</table>
+<p>順序外の PR を知らせる <code>wf-sequence</code> の仕組みは、<a href="../reference/commands-dev.html#sf-next"><code>sf-next.sh</code> の説明</a>にあります。</p>
+
+<h2 id="sync">2. 雛形に合わせて更新する（<code>sf-sync-wf.sh</code>）</h2>
+<pre><code>sf-sync-wf.sh            # 雛形との差分を表示し、確認のうえ、上書きする
+sf-sync-wf.sh --check    # 差分があるかだけを調べる（何も変更しない）
+sf-sync-wf.sh --remove wf-old.yml   # 雛形から廃止されたワークフローを削除する</code></pre>
+<p><code>sf-init.sh</code> で作成済みの <code>force-*</code> に、あとから、ワークフローの修正（不具合の修正・安全対策など）を反映するコマンドです。sf-tools の雛形と、プロジェクトのワークフローを比べ、差分を表示して、確認のうえ、雛形の内容で上書きします。</p>
+<div class="box warn">
+  <div class="title">管理者専用</div>
+  <p>CI/CD（リリース・検証）の動作が変わるため、実行の冒頭に、赤い警告ボックスと確認が表示されます（<code>--check</code> を除く）。<code>sf-install.sh</code> などから、自動では実行されません（利用者の意思なく、ワークフローが書き換わるのを防ぐためです）。</p>
+</div>
+
+<h3 id="steps">2.1 更新の手順（おすすめ）</h3>
+<ol class="steps">
+  <li><p><code>sf-job.sh</code> で、ジョブ名 <code>system-日付</code>（例: <code>system-20261006</code>）の作業用ブランチを作ります。<code>main</code> から作られ、古くなりません。ワークフローの更新の PR だと、名前で分かります。</p></li>
+  <li><p>そのフォルダで <code>sf-sync-wf.sh</code> を実行し、差分を確認して Y を答えます。</p></li>
+  <li><p><code>git diff .github/workflows/</code> で、内容を確認します。</p></li>
+  <li><p><code>sf-push.sh</code> で、コミットしてプッシュします（ワークフローをプッシュするには、<code>workflow</code> スコープのある権限が必要です）。</p></li>
+  <li><p>PR を出して、マージします。<code>develop</code> / <code>staging</code> がある構成では、通常の変更と同じ順序（<code>develop</code> → <code>staging</code> → <code>main</code>）で、PR を出します（次の PR 先は、<code>sf-next.sh</code> が案内します）。</p></li>
+</ol>
+
+<h3 id="behavior">2.2 動作</h3>
+<ul>
+  <li><code>force-*</code> フォルダの中で、環境ブランチ（<code>branches.txt</code> のブランチ。<code>main</code> / <code>staging</code> / <code>develop</code> など）<strong>以外</strong>でしか、実行できません。</li>
+  <li><strong>sf-tools（<code>~/sf-tools</code>）が最新であることが必須です。</strong>実行の初めに、origin と比べ、遅れていれば、確認のうえ、sf-tools を更新し、更新した sf-tools で、自動的に、もう一度実行します（古い雛形で、プロジェクトのワークフローを書き換えないためです）。
+    <ul>
+      <li>origin に接続できない・更新を断った・sf-tools に未コミットの変更や未プッシュのコミットがある場合は、中断します。</li>
+      <li><code>--check</code> は、何も変更しない（読み取り専用の）ため、sf-tools を更新せず、遅れていれば中断します。</li>
+    </ul>
+  </li>
+  <li>改行コード（CRLF / LF）だけの違いは、差分とみなしません。</li>
+  <li>自動でコミット・プッシュはしません。</li>
+  <li>雛形にないワークフローは、変更せず、表示するだけです。<code>--remove</code> で、雛形から廃止されたものだけを、二重に確認して削除できます（雛形にあるものは、削除できません）。</li>
+  <li><code>--check</code> は、差分なしで終了コード 0、あれば 1 を返します。複数のリポジトリを見回るときに使えます。</li>
+</ul>
+
+</main>
+<aside id="toc"></aside>
+</div>
+<footer id="foot"></footer>
+<script src="../assets/site.js"></script>
+</body>
+</html>

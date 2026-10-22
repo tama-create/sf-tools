@@ -138,7 +138,7 @@ templates/.github/workflows/  ─sf-init→   .github/workflows/
 
 ### 4.2 ワークフロー一覧
 
-ファイル名・WF 名・トリガーの詳細は `doc/setup-guide.md` のセクション 5 を参照。
+ファイル名・WF 名・トリガーの詳細は、文書サイトの `site/admin/workflows.html` を参照。
 
 | ワークフロー | 目的 | ブロック |
 | :--- | :--- | :--- |
@@ -257,7 +257,7 @@ sf-tools/release/<branch>/
 
 ### 6.2 deploy-target.txt の形式
 
-書き方の詳細は `README.md` のセクション 5 を参照。
+書き方の詳細は、文書サイトの `site/reference/target-files.html` を参照。
 
 内部動作:
 - `[files]` セクション → `sf project deploy start --source-dir` 引数に変換

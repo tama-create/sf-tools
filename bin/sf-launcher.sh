@@ -170,7 +170,7 @@ main() {
             run_command "$cmd"
             exit $?
         else
-            echo -e "${YELLOW}  ⚠ 引数には番号を指定してください（例: sfl 1）${RESET}"
+            echo -e "${YELLOW}  ⚠ 引数には番号を指定してください（例: sf-launcher.sh 1）${RESET}"
             exit 1
         fi
     fi
@@ -214,7 +214,7 @@ main() {
 }
 
 # ------------------------------------------------------------------------------
-# fzf モード（sflf から呼ばれる）
+# fzf モード（sf-launcher.sh --fzf）
 # ------------------------------------------------------------------------------
 fzf_mode() {
     if ! command -v fzf &>/dev/null; then

@@ -395,11 +395,11 @@ check_gh_owner "$GITHUB_OWNER"   # 認証ユーザーの一致確認
 
 ### 4.7 sf-launcher.sh
 
-- `sfl` コマンドで起動するメニュー形式ランチャー
+- `sf-launcher.sh` で起動するメニュー形式ランチャー（`sf-job.sh` / `sf-start.sh` の最後に自動で起動する。別名（`sfl` など）は作らない。直接 `sf-launcher.sh` を打つ。2026-10-23 の決定）
 - `lib/common.sh` を source しない standalone 設計（ログ不要・カラー定義を独自に持つ）
 - VSCode 内では `sf-start` / `sf-restart` をメニューから除外（`$TERM_PROGRAM == "vscode"` で判定）
 - `SF_LAUNCHER_ACTIVE=1` をエクスポートして `sf-start.sh` からの二重起動を防止
-- `sflf` エイリアスで fzf モードも利用可能
+- `sf-launcher.sh --fzf` で fzf モードも利用可能
 
 ### 4.8 sf-deploy.sh
 
@@ -1029,6 +1029,7 @@ sf-tools の `main` への反映は、全ユーザーへの配布と同義であ
 
 - **構成**: `site/index.html`（トップ）・`site/guide/`（使い方ガイド）・`site/reference/`（リファレンス）。共通の部分は、`site/assets/style.css`（スタイル。ダークモード・スマホ対応）と `site/assets/site.js`。ビルドの手順は、ない（手書きの静的な HTML）。
 - **ページの足し方**: ① `<head>` と骨組み（`<header id="top">`・`<nav id="side">`・`<main id="doc" class="doc">`・`<aside id="toc">`・`<footer id="foot">`・`site.js` の読み込み）を、既存のページと同じにする。② `<body data-root="...">` は、`site/` からの深さに合わせる（直下は `""`・1 階層下は `"../"`）。③ **`assets/site.js` の `NAV` に 1 行足す**（左の目次・前後のリンクは、ここだけで決まる。`h` がない項目は「準備中」と表示される）。コード中の `<` は、`&lt;` にする。⑤ **囲み**（`<div class="box 種類">` + `<div class="title">題</div>`）は、種類で、アイコンが自動で付く（通常 = 💡、`warn` = ⚠️、`danger` = 🛑、`ok` = ✅、`next` = 👉、`admin` = 🔑 管理者専用）。題は、必ず付ける（`tests/test_site.sh` が確認する）。小さな印は `<span class="badge safe">🔍 読み取りのみ</span>`。言葉は、`site/guide/glossary.html`（用語集）にそろえる（管理者 = プロジェクト管理者・リリース = デプロイ・段階 = 環境）。④ **見出しの番号（大項目 `1.`・中項目 `1.1`・小項目 `1.1.1`）は、手で書かない**（`site.js` が h2・h3・h4 に自動で付ける）。階層は飛ばさない（h2 の次は h3、h3 の次は h4）。
+- **図の足し方**: 画像ファイルは使わず、HTML と CSS だけで描く（ダークモード・スマホ幅に合う）。`<figure class="diagram">` の中に、①流れ図 `.flow`（`.node` と `.arrow` を交互に並べる。箱の色は `admin`・`dev`・`auto`・`ok`・`warn`。スマホ幅では縦に並ぶ）、②扇形 `.fan`（1 つの元から複数の行き先）、③区分け `.phases`（`.phase.p1`〜`p3`。人の操作がある手順は `li.you`）、④入れ子の箱 `.nest`（フォルダの構成）、⑤ターミナルの画面の見本 `.term` を置く。**`<figcaption>` で、何の図かを必ず書く**。定義は `site/assets/style.css`。`tests/test_site.sh` が、説明文の有無と、箱の色の種類を確認する。**開発者向けのページは、ランチャー（`sf-launcher.sh`）を中心に書く**（コマンドは、直接打つ場合として併記する）。
 - **テスト**: `bash tests/run_tests.sh test_site.sh`（`--changed` は、`site/*`・`pages.yml` の変更で選ぶ）。
 - **食い違いの検出（`doc/doc-style.md` の 3 階層。コード → 技術文書 → 一般向け文書の順に正しさを伝える）**: ① `tests/test_docs_facts.sh` が、文書の中のコマンド名・オプション・パス・環境変数が、実在するかを調べる（仕様どおりに存在しない例の書き方は、`tests/docs-facts-allow.txt`）。② `tests/test_docs_stamps.sh` が、冒頭コメントが変わったのに文書が見直されていないものを検出する（`doc/doc-stamps.txt`。新しい `bin/sf-*.sh` は、どれかの文書の基にしないと失敗する）。CI は検出だけで、文書を自動では書き換えない。
 - **公開**: `.github/workflows/pages.yml` が、`main` に `site/` の変更が入ったとき、`site/` を GitHub Pages に公開する（`development` の途中経過は出ない）。リポジトリの Settings → Pages → Source を「GitHub Actions」にする設定が、最初の 1 回だけ必要。公開先は、`https://tama-create.github.io/sf-tools/`。

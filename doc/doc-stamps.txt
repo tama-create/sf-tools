@@ -4,18 +4,18 @@
 #   コマンド（bin/sf-*.sh）は、どれかの文書の基になっていること（tests/docs-stamp.sh --check が確認する）。
 # 文書を足したら、その文書の基になるコードを、ここに足す（- のままで足し、文書を読み直してから --update する）。
 
-site/reference/commands-dev.html | bin/sf-job.sh | 2464617636-5628 | d8fef9f
-site/reference/commands-dev.html | bin/sf-start.sh | 1512283495-4648 | d8fef9f
-site/reference/commands-dev.html | bin/sf-launcher.sh | 3218658773-2750 | d8fef9f
-site/reference/commands-dev.html | bin/sf-check.sh | 2811213405-5441 | d8fef9f
-site/reference/commands-dev.html | bin/sf-dryrun.sh | 2090079619-1804 | d8fef9f
-site/reference/commands-dev.html | bin/sf-release.sh | 668921209-7143 | d8fef9f
-site/reference/commands-dev.html | bin/sf-deploy.sh | 4139377917-3568 | d8fef9f
-site/reference/commands-dev.html | bin/sf-push.sh | 3296632298-3295 | d8fef9f
-site/reference/commands-dev.html | bin/sf-next.sh | 4034769213-4228 | d8fef9f
-site/reference/commands-dev.html | bin/sf-restart.sh | 909704296-1982 | d8fef9f
-site/reference/commands-dev.html | bin/sf-hook.sh | 490604334-2713 | d8fef9f
-site/reference/commands-dev.html | bin/sf-unhook.sh | 1120235648-1709 | d8fef9f
+site/reference/commands-dev.html | bin/sf-job.sh | 2464617636-5628 | aadab83
+site/reference/commands-dev.html | bin/sf-start.sh | 1512283495-4648 | aadab83
+site/reference/commands-dev.html | bin/sf-launcher.sh | 3218658773-2750 | aadab83
+site/reference/commands-dev.html | bin/sf-check.sh | 2811213405-5441 | aadab83
+site/reference/commands-dev.html | bin/sf-dryrun.sh | 2090079619-1804 | aadab83
+site/reference/commands-dev.html | bin/sf-release.sh | 3576458073-7452 | aadab83
+site/reference/commands-dev.html | bin/sf-deploy.sh | 4139377917-3568 | aadab83
+site/reference/commands-dev.html | bin/sf-push.sh | 3296632298-3295 | aadab83
+site/reference/commands-dev.html | bin/sf-next.sh | 4034769213-4228 | aadab83
+site/reference/commands-dev.html | bin/sf-restart.sh | 909704296-1982 | aadab83
+site/reference/commands-dev.html | bin/sf-hook.sh | 490604334-2713 | aadab83
+site/reference/commands-dev.html | bin/sf-unhook.sh | 1120235648-1709 | aadab83
 
 site/reference/commands-auto.html | bin/sf-install.sh | 2819602361-5077 | d8fef9f
 site/reference/commands-auto.html | bin/sf-upgrade.sh | 223369507-2045 | d8fef9f
@@ -23,8 +23,8 @@ site/reference/commands-auto.html | bin/sf-prepush.sh | 2185657029-3873 | d8fef9
 site/reference/commands-auto.html | bin/sf-precommit.sh | 2458480846-1487 | d8fef9f
 site/reference/commands-auto.html | bin/sf-metasync.sh | 2033149871-6675 | d8fef9f
 
-site/reference/target-files.html | bin/sf-check.sh | 2811213405-5441 | d8fef9f
-site/reference/target-files.html | bin/sf-release.sh | 668921209-7143 | d8fef9f
+site/reference/target-files.html | bin/sf-check.sh | 2811213405-5441 | aadab83
+site/reference/target-files.html | bin/sf-release.sh | 3576458073-7452 | aadab83
 
 site/guide/basics.html | bin/sf-job.sh | 2464617636-5628 | b2974dd
 site/guide/basics.html | bin/sf-start.sh | 1512283495-4648 | b2974dd
@@ -74,3 +74,22 @@ site/reference/commands.html | bin/sf-metasync.sh | 2033149871-6675 | d8fef9f
 site/reference/commands.html | phases/init/verify.sh | 618974087-9729 | d8fef9f
 site/reference/commands.html | phases/init/add_tier.sh | 3930918282-4144 | d8fef9f
 site/reference/commands.html | phases/init/reconnect.sh | 786270870-3234 | d8fef9f
+site/index.html | bin/sf-job.sh | 2464617636-5628 | aadab83
+site/index.html | bin/sf-launcher.sh | 3218658773-2750 | aadab83
+site/index.html | bin/sf-init.sh | 3160184782-20242 | aadab83
+site/guide/glossary.html | bin/sf-launcher.sh | 3218658773-2750 | aadab83
+site/guide/glossary.html | bin/sf-job.sh | 2464617636-5628 | aadab83
+site/guide/glossary.html | bin/sf-release.sh | 3576458073-7452 | aadab83
+site/design/cicd.html | bin/sf-metasync.sh | 2033149871-6675 | aadab83
+site/design/cicd.html | bin/sf-release.sh | 3576458073-7452 | aadab83
+site/design/cicd.html | bin/sf-next.sh | 4034769213-4228 | aadab83
+site/design/cicd.html | bin/sf-prepush.sh | 2185657029-3873 | aadab83
+site/design/cicd.html | bin/sf-sync-wf.sh | 2249883559-5781 | aadab83
+site/design/cicd.html | bin/sf-upgrade.sh | 223369507-2045 | aadab83
+site/reference/structure.html | bin/sf-init.sh | 3160184782-20242 | aadab83
+site/reference/structure.html | bin/sf-job.sh | 2464617636-5628 | aadab83
+site/reference/structure.html | bin/sf-typecheck.sh | 1832944975-6608 | aadab83
+site/reference/structure.html | bin/sf-check.sh | 2811213405-5441 | aadab83
+site/reference/structure.html | bin/sf-prepush.sh | 2185657029-3873 | aadab83
+site/reference/structure.html | bin/sf-hook.sh | 490604334-2713 | aadab83
+site/reference/structure.html | bin/sf-install.sh | 2819602361-5077 | aadab83

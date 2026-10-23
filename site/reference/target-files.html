@@ -16,6 +16,14 @@
 <h1>📝 ターゲットファイルの書き方</h1>
 <p class="lead">「何を反映するか」と「何を削除するか」を、2 つのファイルに書いておきます。ファイルは、<code>force-XXXX</code> フォルダの中の <code>sf-tools/release/&lt;ブランチ名&gt;/</code> に置きます（パソコンに置いた <code>~/sf-tools</code> とは、別のフォルダです）。ブランチ名は、<code>sf-job.sh</code> で作った作業の名前です。</p>
 
+<div class="box">
+  <div class="title">このページの要点</div>
+  <ul>
+    <li>書くのは、<code>deploy-target.txt</code>（反映するもの）と <code>remove-target.txt</code>（削除するもの）の 2 つです。</li>
+    <li>書き終わったら、ランチャーの <strong>[1] Check</strong>（<code>sf-check.sh</code>）で、書き方を確かめられます。<code>git commit</code> と <code>git push</code> のときにも、自動で確かめます。</li>
+  </ul>
+</div>
+
 <table>
   <thead><tr><th>ファイル</th><th>役割</th></tr></thead>
   <tbody>
@@ -45,6 +53,7 @@ force-app/main/default/lwc/myComponent
   <li><code>[members]</code> には、<code>種別名:メンバー名</code> の形で書きます（<code>:</code> の前後が空ではいけません）。</li>
   <li>最初の <code>[files]</code> / <code>[members]</code> の行より前に書いた行は、<code>[files]</code> として扱われます。</li>
   <li><code>@isTest</code> を持つ <code>.cls</code> ファイルを書くと、<code>sf-release.sh</code> が <code>--test-level RunSpecifiedTests --tests &lt;クラス名&gt;</code>（クラスごとに繰り返す）を、自動で設定します。</li>
+  <li><code>deploy-target.txt</code> と <code>remove-target.txt</code> の両方に、対象が 1 件もない（コメントと空行だけ）ときは、「デプロイ対象なし」と表示して、何もせず、正常に終わります。</li>
   <li>テストクラスを書くかどうかは、利用者の責任です。ローカルにあるテストクラスの書き忘れは、<code>sf-check.sh</code> が警告で知らせます。</li>
 </ul>
 

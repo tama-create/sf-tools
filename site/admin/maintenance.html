@@ -42,11 +42,20 @@
 <pre><code># force-* フォルダの中で実行
 sf-init.sh --add-tier staging    # main のみ → main + staging
 sf-init.sh --add-tier develop    # main + staging → main + staging + develop</code></pre>
-<pre><code>[最初]    main のみ
-    ↓  sf-init.sh --add-tier staging
-[2 段階]  main + staging
-    ↓  sf-init.sh --add-tier develop
-[3 段階]  main + staging + develop</code></pre>
+<figure class="diagram">
+  <div class="flow">
+    <div class="node dev"><span class="who">最初</span><strong>main のみ</strong><small>1 段階</small></div>
+    <div class="arrow">→</div>
+    <div class="node auto"><span class="who">実行</span><strong>--add-tier staging</strong></div>
+    <div class="arrow">→</div>
+    <div class="node dev"><span class="who">2 段階</span><strong>main + staging</strong></div>
+    <div class="arrow">→</div>
+    <div class="node auto"><span class="who">実行</span><strong>--add-tier develop</strong></div>
+    <div class="arrow">→</div>
+    <div class="node ok"><span class="who">3 段階</span><strong>main + staging + develop</strong></div>
+  </div>
+  <figcaption>段階は、1 つずつ、順番にしか足せません（staging を飛ばして develop は足せません）。</figcaption>
+</figure>
 <p>足すときに、次のことが、この順に、自動で行われます。</p>
 <ol>
   <li>足す段階の組織に接続して、認証情報（Secret / Variable）を登録する</li>

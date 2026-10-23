@@ -95,7 +95,7 @@ export PATH="$HOME/sf-tools/bin:$PATH"
 | 開発者 | `sf-dryrun.sh` / `sf-release.sh` | 反映できるかを確かめる（dry-run）/ 確かめて、反映する |
 | 開発者 | `sf-deploy.sh` | ⚠️ 自分用の組織へ、強制的に反映する（共有環境には、使えません） |
 | 開発者 | `sf-restart.sh` | 接続先の組織を切り替える |
-| 開発者 | `sfl`（`sf-launcher.sh`） | 上のコマンドを、メニューから選んで実行する |
+| 開発者 | `sf-launcher.sh` | 上のコマンドを、メニューの番号で選んで実行する（**おすすめ**。`sf-job.sh` / `sf-start.sh` のあとに、自動で開く） |
 | 開発者 | `sf-hook.sh` / `sf-unhook.sh` | 手元のクローンの検証フックを、有効にする / 削除する |
 | 管理者 | 🔑 `sf-init.sh` | 新しいプロジェクトを作る。段階の追加（`--add-tier`）・診断（`--status`）・接続先の付け替え（`--reconnect`）・動作の確認（`--verify`）も |
 | 管理者 | 🔑 `sf-update-secret.sh` | GitHub の認証情報（Secrets / Variables）を登録し直す |

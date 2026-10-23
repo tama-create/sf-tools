@@ -16,12 +16,17 @@
 <h1>🌱 基本の使い方</h1>
 <p class="lead">フォルダの考え方を、先に押さえましょう。そのあと、新しい作業の始め方と、作業の再開のしかたを覚えます。覚えるコマンドは、2 つだけです。</p>
 
+<div class="box warn">
+  <div class="title">始める前に: プロジェクトは、管理者が先に作ります</div>
+  <p>sf-tools は、管理者が、sf-tools の雛形で作った、決まった形のリポジトリ（<code>force-XXXX</code>）の上でしか動きません。<strong>管理者が先にリポジトリを作り、「できました」と連絡をくれてから、開発者は始めます。</strong>同時には進められません。<code>XXXX</code> の部分（プロジェクトの名前）は、管理者に聞いてください。まだ作られていないと、<code>sf-job.sh</code> は、何も見つけられずに止まります。</p>
+</div>
+
 <div class="box">
   <div class="title">この章のあらすじ</div>
   <ul>
     <li><strong>新しい作業を始めるとき</strong>は、<code>sf-job.sh</code> を使います。</li>
     <li><strong>前の続きを再開するとき</strong>は、<code>sf-start.sh</code> を使います。</li>
-    <li>どちらも、最後に VS Code が開きます。</li>
+    <li>どちらも、最後に VS Code が開き、ターミナルには<strong>ランチャー（メニュー）</strong>が自動で開きます。始めたあとは、ランチャーの番号を押すだけで進められます（<a href="daily.html#launcher">ランチャーの使い方</a>）。</li>
   </ul>
 </div>
 
@@ -35,11 +40,25 @@
     <tr><td><strong>作業フォルダ</strong></td><td>作業単位のフォルダを、まとめて置く場所です。<strong>どこでも構いません</strong>（<code>sf-init.sh</code> や <code>sf-job.sh</code> は、ここで実行します）</td></tr>
   </tbody>
 </table>
-<pre><code>{作業フォルダ}\                    ← 好きな場所・好きな名前（おすすめ: C:\sf や ~/sf のような、短い名前）
-├── admin\force-acme\              ← 管理者用（sf-init.sh が作る。メンテナンス用として残す）
-├── admin\force-beta\              ← 別のプロジェクトも、同じ admin に置く
-├── JOB-20261016\force-acme\       ← ジョブごとのクローン（sf-job.sh が作る）。同じ force-acme を、同時に複数開ける
-└── JOB-20261017\force-beta\       ← 別のプロジェクトを、同じ作業フォルダに置いてもよい</code></pre>
+<figure class="diagram">
+  <div class="nest">
+    <p class="label">📁 作業フォルダ<small>好きな場所・好きな名前（おすすめ: C:\sf や ~/sf のような、短い名前）。sf-job.sh は、ここで実行します</small></p>
+    <div class="nest admin">
+      <p class="label">📂 admin<small>管理者用の作業単位（sf-init.sh が作る。メンテナンス用として残す）</small></p>
+      <div class="nest"><p class="label">🗂️ force-acme<small>プロジェクト（リポジトリのクローン）</small></p></div>
+      <div class="nest"><p class="label">🗂️ force-beta<small>別のプロジェクトも、同じ admin に置く</small></p></div>
+    </div>
+    <div class="nest">
+      <p class="label">📂 JOB-20261016<small>作業単位（sf-job.sh が作る）</small></p>
+      <div class="nest"><p class="label">🗂️ force-acme<small>ジョブごとのクローン。同じ force-acme を、同時に複数開ける</small></p></div>
+    </div>
+    <div class="nest">
+      <p class="label">📂 JOB-20261017<small>作業単位</small></p>
+      <div class="nest"><p class="label">🗂️ force-beta<small>別のプロジェクトを、同じ作業フォルダに置いてもよい</small></p></div>
+    </div>
+  </div>
+  <figcaption>外側から、作業フォルダ → 作業単位 → プロジェクトの順に、入れ子になっています。</figcaption>
+</figure>
 <div class="box">
   <div class="title">どのプロジェクトを使うかは、自動で決まります</div>
   <p>フォルダの名前を、気にする必要はありません。<code>sf-job.sh</code> は、作業フォルダの中にある、クローンの情報から、プロジェクトを自動で見つけます。複数あるときは、番号で選びます。決まり方の詳しい説明は、<a href="../reference/commands-dev.html#sf-job"><code>sf-job.sh</code> のリファレンス</a>にあります。</p>
@@ -55,6 +74,20 @@ sf-check.sh -h</code></pre>
 <pre><code>sf-job.sh                          # 作業フォルダの下のクローンから、プロジェクトが決まる（複数なら、番号で選ぶ）
 sf-job.sh --project acme           # プロジェクトを指定する（force-acme）</code></pre>
 <p>ジョブ名（ブランチの名前になります）を入力するだけで、次のことが、自動で進みます。</p>
+<figure class="diagram">
+  <div class="flow">
+    <div class="node dev"><span class="who">💻 あなた</span><strong>sf-job.sh</strong><small>ジョブ名を入力する</small></div>
+    <div class="arrow">→</div>
+    <div class="node auto"><span class="who">🤖 自動</span><strong>ブランチを作る</strong><small>GitHub 上に、main の最新から</small></div>
+    <div class="arrow">→</div>
+    <div class="node auto"><span class="who">🤖 自動</span><strong>コピーを作る</strong><small>./ジョブ名/force-XXXX に clone</small></div>
+    <div class="arrow">→</div>
+    <div class="node auto"><span class="who">🤖 自動</span><strong>sf-start.sh</strong><small>ログイン・VS Code の起動</small></div>
+    <div class="arrow">→</div>
+    <div class="node ok"><span class="who">✅ できあがり</span><strong>ランチャーが開く</strong><small>番号を押して進める</small></div>
+  </div>
+  <figcaption>入力するのは、ジョブ名だけです。点線の箱は、自動で進みます。</figcaption>
+</figure>
 <ol class="steps">
   <li><p>ジョブ名（例: <code>JOB-20260323</code>）で、GitHub 上に、<code>main</code> の最新から、作業用のブランチを作ります。</p></li>
   <li><p>作業用のフォルダ（<code>./ジョブ名/force-XXXX</code>）に、そのブランチをコピーします（<code>git clone</code>）。</p></li>

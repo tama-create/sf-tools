@@ -165,6 +165,26 @@ $r"
     assert_file_contains "$SITE/assets/style.css" '.box.admin .title::before' "style.css: 囲みの種類ごとに、アイコンを自動で付ける"
 }
 
+test_site_figures() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] 図（説明文がある・色の種類が決まっている）${CLR_RST}"
+    local p nf nc r bad="" kinds="" total=0
+    while IFS= read -r p; do
+        nf=$(grep -c '<figure class="diagram"' "$SITE/$p")  # VAR=$(cmd) のため run 不使用
+        nc=$(grep -c '<figcaption>' "$SITE/$p")  # VAR=$(cmd) のため run 不使用
+        total=$((total + nf))
+        [[ "$nf" == "$nc" ]] || bad="$bad
+  $p: 図 ${nf} 個に対して、説明文（figcaption）が ${nc} 個"
+        # 流れ図の箱の色は、admin・dev・auto・ok・warn だけ（style.css に定義がある）
+        r=$(grep -o '<div class="node[^"]*"' "$SITE/$p" | grep -vE '<div class="node (admin|dev|auto|ok|warn)"' | awk -v f="$p" '{ print "  " f ": " $0 }')  # VAR=$(cmd) のため run 不使用
+        [[ -z "$r" ]] || kinds="$kinds
+$r"
+    done < <(_pages)
+    [[ $total -gt 0 ]] && pass "図が ${total} 個ある" || fail "図が 1 個以上ある"
+    [[ -z "$bad" ]] && pass "すべての図に、説明文（figcaption）がある" || fail "説明文のない図がある" "$bad"
+    [[ -z "$kinds" ]] && pass "流れ図の箱の色は、決まったもの（admin・dev・auto・ok・warn）だけ" || fail "決まっていない色の箱がある" "$kinds"
+    assert_file_contains "$SITE/assets/style.css" 'figure.diagram' "style.css: 図のスタイルがある"
+}
+
 test_site_head
 test_site_links
 test_site_nav
@@ -172,5 +192,6 @@ test_site_format
 test_site_pages_workflow
 test_site_headings
 test_site_boxes
+test_site_figures
 
 print_summary

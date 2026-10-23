@@ -18,6 +18,20 @@
 
 <h2 id="logs">ログの確認</h2>
 <p>ログの場所は、コマンドによって、2 通りあります。</p>
+<figure class="diagram">
+  <div class="nest">
+    <p class="label">💻 あなたのパソコン</p>
+    <div class="nest admin">
+      <p class="label">📁 ~/sf-tools/logs/<small>sf-tools 側（プロジェクトの外）</small></p>
+      <p><code>sf-init.sh</code>（<code>--add-tier</code>・<code>--reconnect</code>・<code>--verify</code>・<code>--status</code> を含む）・<code>sf-job.sh</code>・<code>sf-typecheck.sh</code></p>
+    </div>
+    <div class="nest">
+      <p class="label">📁 force-XXXX/sf-tools/logs/<small>実行したプロジェクトの中</small></p>
+      <p>上以外の、すべてのコマンド（<code>sf-push.sh</code>・<code>sf-check.sh</code>・<code>sf-dryrun.sh</code> など）</p>
+    </div>
+  </div>
+  <figcaption>ログの場所は、コマンドによって 2 通りあります。迷ったら、下の表で、コマンド名から探せます。</figcaption>
+</figure>
 <table>
   <thead><tr><th>ログの場所</th><th>コマンド</th></tr></thead>
   <tbody>

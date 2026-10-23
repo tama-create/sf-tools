@@ -14,13 +14,69 @@
 <main id="doc" class="doc">
 
 <h1>🔁 日々の開発の流れ</h1>
-<p class="lead">変更を書いて、確かめて、送る。毎日くり返す一連の操作です。すべて、<code>force-*</code> フォルダの中で実行します。</p>
+<p class="lead">変更を書いて、確かめて、送る。毎日くり返す一連の操作です。すべて、<code>force-*</code> フォルダの中で実行します。<strong>ふだんは、ランチャー（メニュー）の番号を押すだけで進められます。</strong>コマンドを直接打つことも、もちろんできます。</p>
 
 <div class="box">
   <div class="title">全体の流れ</div>
-  <p>① ターゲットファイルを書く → ② <code>sf-dryrun.sh</code>（反映できるか確かめる）→ ③ <code>sf-push.sh</code>（変更を送る）→ ④ <code>sf-next.sh</code>（次の PR の出し先を確認）</p>
-  <p>自分専用の組織で、実際に試したいときだけ、②のあとに <code>sf-deploy.sh</code> を使います（<a href="#deploy">3 章</a>）。共有の環境（本番など）への反映は、PR をマージすると、自動で行われます。</p>
+  <p>自分専用の組織で、実際に試したいときだけ、②のあとに「自分の組織に反映」を使います（<a href="#deploy">自分の組織で、実際に反映する</a>）。共有の環境（本番など）への反映は、PR をマージすると、自動で行われます。</p>
 </div>
+<figure class="diagram">
+  <div class="flow">
+    <div class="node dev"><span class="who">① 書く</span><strong>ターゲットファイル</strong><small>何を反映・削除するか</small></div>
+    <div class="arrow">→</div>
+    <div class="node dev"><span class="who">② ランチャー [4]</span><strong>Dryrun</strong><small>反映できるか確かめる</small></div>
+    <div class="arrow">→</div>
+    <div class="node dev"><span class="who">③ ランチャー [2]</span><strong>Push</strong><small>変更を GitHub に送る</small></div>
+    <div class="arrow">→</div>
+    <div class="node dev"><span class="who">④ ランチャー [3]</span><strong>Next</strong><small>次の PR の出し先を確認</small></div>
+    <div class="arrow">→</div>
+    <div class="node auto"><span class="who">🤖 自動</span><strong>検証・反映</strong><small>PR をマージすると、自動で</small></div>
+  </div>
+  <figcaption>実線の箱は、あなたが行うことです。点線の箱は、自動で行われます。</figcaption>
+</figure>
+
+<h2 id="launcher">ランチャーで進める（おすすめ）</h2>
+<p>毎日の操作は、ランチャーのメニューから、<strong>番号を 1 つ押すだけ</strong>で実行できます。コマンドの名前を覚える必要は、ありません。コマンドを直接打つこともできます（慣れている方は、そちらでも構いません）。便利なので、ランチャーをおすすめしています。</p>
+<div class="box ok">
+  <div class="title">ランチャーは、自動で開きます</div>
+  <p><code>sf-job.sh</code> や <code>sf-start.sh</code> を実行すると、最後に、ターミナルでランチャーが自動で開きます。閉じてしまったときや、<strong>VS Code のターミナルで使いたいとき</strong>は、<code>force-*</code> フォルダの中で、次のように打ちます（<code>sf-l</code> まで打って Tab キーを押すと、補完されます）。</p>
+  <pre><code>sf-launcher.sh</code></pre>
+</div>
+<figure class="diagram">
+<div class="term"><span class="dim">  ──────────────────────────────────────────────────</span>
+  <span class="hl">&gt;&gt; Launcher &lt;&lt;</span>
+<span class="dim">  ──────────────────────────────────────────────────</span>
+  [<span class="num">1</span>] Check      ターゲットファイルの構文チェック
+  [<span class="num">2</span>] Push       変更をコミット &amp; プッシュ
+  [<span class="num">3</span>] Next       次の PR 先ブランチを確認
+  [<span class="num">4</span>] Dryrun     現在接続中の組織へリリース検証
+  [<span class="num">5</span>] Deploy     現在接続中の組織へリリース
+  [<span class="num">6</span>] Start      開発環境を起動（Salesforce ログイン・VSCode 起動）
+  [<span class="num">7</span>] Restart    接続組織を切り替えて Start 実行
+<span class="dim">  ──────────────────────────────────────────────────</span>
+  番号を入力 (1-7 / q で終了):</div>
+  <figcaption>ランチャーの画面です。番号のキーを 1 つ押すと（Enter は不要）、そのコマンドが動きます。</figcaption>
+</figure>
+<p>やりたいことから、押す番号を引けます。</p>
+<table>
+  <thead><tr><th>やりたいこと</th><th>押す番号</th><th>コマンドで打つなら</th></tr></thead>
+  <tbody>
+    <tr><td>ターゲットファイルの書き方を確かめる</td><td><strong>1</strong> Check</td><td><code>sf-check.sh</code></td></tr>
+    <tr><td>変更を GitHub に送る</td><td><strong>2</strong> Push</td><td><code>sf-push.sh</code></td></tr>
+    <tr><td>次の PR の出し先を知る</td><td><strong>3</strong> Next</td><td><code>sf-next.sh</code></td></tr>
+    <tr><td>反映できるか確かめる（dry-run）</td><td><strong>4</strong> Dryrun</td><td><code>sf-dryrun.sh</code></td></tr>
+    <tr><td>自分専用の組織に、実際に反映する</td><td><strong>5</strong> Deploy</td><td><code>sf-deploy.sh</code></td></tr>
+    <tr><td>前日の続きなど、作業を再開する</td><td><strong>6</strong> Start</td><td><code>sf-start.sh</code></td></tr>
+    <tr><td>接続先の組織を切り替える</td><td><strong>7</strong> Restart</td><td><code>sf-restart.sh</code></td></tr>
+  </tbody>
+</table>
+<ul>
+  <li>終わると、メニューに戻ります。<code>q</code> で終了します。コマンドが失敗しても、ランチャーは終わりません（エラーを読んで、直して、もう一度押せます）。</li>
+  <li><strong>VS Code のターミナルでは、6 と 7 は表示されません</strong>（VS Code が、二重に開かないようにするためです）。1〜5 を使います。</li>
+  <li><code>sf-job.sh</code>（新しい作業を始める）は、メニューにありません。<code>force-*</code> フォルダの外の、<strong>作業フォルダ</strong>で実行するためです（<a href="basics.html#job">基本の使い方</a>）。始めたあとは、ランチャーが自動で開きます。</li>
+  <li>ランチャーは、<code>force-*</code> フォルダの中でだけ使えます。</li>
+  <li>番号を指定して、1 回だけ実行することもできます（例: <code>sf-launcher.sh 4</code>）。検索して選びたいときは、<code>sf-launcher.sh --fzf</code>（<code>fzf</code> が必要です）。</li>
+</ul>
 
 <h2 id="target">ターゲットファイルを書く</h2>
 <p>ターゲットファイルは、「何を反映するか」「何を削除するか」を書いておくファイルです。<code>release/&lt;ブランチ名&gt;/</code> の下にあります（<code>force-XXXX</code> フォルダの中の <code>sf-tools</code> フォルダです。パソコンに置いた <code>~/sf-tools</code> とは、別のものです）。</p>
@@ -34,6 +90,7 @@
 <p>書き方は、<a href="../reference/target-files.html">ターゲットファイルの書き方</a>を見てください。</p>
 
 <h2 id="dryrun">反映できるか確かめる（dry-run）</h2>
+<p><span class="badge">🎛️ ランチャーの [4] Dryrun</span> コマンドで打つなら:</p>
 <pre><code>sf-dryrun.sh</code></pre>
 <p>実際には反映せずに、接続中の組織で「反映できるか」だけを確かめます。本番を変えずに、安心して試せます。</p>
 <ul>
@@ -43,6 +100,7 @@
 <p><code>sf-release.sh</code> を、オプションなしで実行しても、同じ dry-run になります。</p>
 
 <h2 id="deploy">自分の組織で、実際に反映する（sf-deploy）</h2>
+<p><span class="badge">🎛️ ランチャーの [5] Deploy</span> コマンドで打つなら:</p>
 <pre><code>sf-deploy.sh</code></pre>
 <p>接続中の、<strong>自分専用の組織</strong>（Sandbox・Developer Edition・Scratch Org）に、変更を実際に反映します。自分の環境で動きを確かめたいときに使います。</p>
 <div class="box warn">
@@ -51,6 +109,7 @@
 </div>
 
 <h2 id="push">変更を送る（sf-push）</h2>
+<p><span class="badge">🎛️ ランチャーの [2] Push</span> コマンドで打つなら:</p>
 <pre><code>sf-push.sh</code></pre>
 <p>カレントフォルダの下の変更を、まとめてコミットして、GitHub に送ります。</p>
 <ul>
@@ -69,6 +128,7 @@
 </div>
 
 <h2 id="next">PR の状況を確認する（sf-next）</h2>
+<p><span class="badge">🎛️ ランチャーの [3] Next</span> コマンドで打つなら:</p>
 <pre><code>sf-next.sh</code></pre>
 <p>いまのブランチが、<code>develop</code> / <code>staging</code> / <code>main</code> のどこまで取り込まれたかを、一覧で表示します。次に PR（取り込みの依頼）を出す先も、案内します。</p>
 
@@ -81,23 +141,6 @@
     <tr><td><strong>pre-push</strong></td><td><code>git push</code> のとき</td><td>ターゲットファイルの書き方を確認し、<code>main</code> などの新しい変更を取り込みます。<code>main</code> / <code>staging</code> / <code>develop</code> の上からも、これらへも、直接は送れません（PR を通します）。新しい変更を取り込んだときは、そのプッシュは止まります（もう一度プッシュすると、通ります）</td></tr>
   </tbody>
 </table>
-
-<h2 id="launcher">メニューから実行する（ランチャー）</h2>
-<p>ここまでのコマンドは、<code>sfl</code>（<code>sf-launcher.sh</code>）を実行すると、メニューから選んで使えます。コマンド名を覚えていなくても大丈夫です。</p>
-<p><code>sf-job</code> や <code>sf-start</code> を実行すると、このメニューが自動で開くので、自分で <code>sfl</code> を打つ必要は、ほとんどありません。</p>
-<pre><code>sfl</code></pre>
-<pre><code>  ──────────────────────────────────────────────────
-  >> Launcher <<
-  ──────────────────────────────────────────────────
-  [1] Check      ターゲットファイルの構文チェック
-  [2] Push       変更をコミット & プッシュ
-  [3] Next       次の PR 先ブランチを確認
-  [4] Dryrun     現在接続中の組織へリリース検証
-  [5] Deploy     現在接続中の組織へリリース
-  [6] Start      開発環境を起動（Salesforce ログイン・VSCode 起動）
-  [7] Restart    接続組織を切り替えて Start 実行
-  ──────────────────────────────────────────────────
-  番号を入力 (1-7 / q で終了):</code></pre>
 
 </main>
 <aside id="toc"></aside>

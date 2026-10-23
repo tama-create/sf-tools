@@ -16,6 +16,21 @@
 <h1>🏗️ 新規プロジェクトの作成（sf-init）</h1>
 <p class="lead">新しい Salesforce プロジェクトを、一から立ち上げます。<code>sf-init.sh</code> が、画面の案内に沿って、必要な準備をまとめて行います。GitHub のリポジトリの作成、Salesforce 組織への接続、ブランチの構成、認証情報の登録、ブランチ保護の設定です。あなたが行うのは、画面に出る質問に答えることと、ブラウザでの数回の操作だけです。</p>
 
+<div class="box warn">
+  <div class="title">この作業が、全員の出発点です。開発者は、これが終わるまで、何もできません</div>
+  <p>sf-tools は、<strong>この手順で作る、決まった形のリポジトリ（<code>force-XXXX</code>）</strong>の上でしか動きません。開発者は、リポジトリができて、あなたから連絡を受けるまで、始められません。<strong>管理者の作業と、開発者の作業は、同時には進められません。</strong>終わったら、開発者に、<strong>リポジトリの名前（<code>force-XXXX</code>）と、「使い始めてよい」</strong>ことを知らせてください。</p>
+</div>
+<figure class="diagram">
+  <div class="flow">
+    <div class="node admin"><span class="who">🔑 あなた（管理者）</span><strong>sf-init.sh</strong><small>リポジトリ・組織の接続・設定を、まとめて作る（30〜60 分）</small></div>
+    <div class="arrow">→</div>
+    <div class="node ok"><span class="who">✅ できあがり</span><strong>開発者に連絡</strong><small>force-XXXX の名前を知らせる</small></div>
+    <div class="arrow">→</div>
+    <div class="node dev"><span class="who">💻 開発者</span><strong>使い始める</strong><small>sf-job.sh で作業を始める</small></div>
+  </div>
+  <figcaption>左から右へ、順番に進みます。左が終わるまで、右には進めません。</figcaption>
+</figure>
+
 <div class="box admin">
   <div class="title">管理者専用です</div>
   <p>実行すると、赤い警告ボックスが表示され、続けてよいかを確認されます。Windows では、<strong>Git Bash</strong> で実行してください（PowerShell やコマンドプロンプトでは動きません）。</p>
@@ -67,6 +82,23 @@ sf-init.sh --owner my-org --project acme            # 引数で指定（対話�
 
 <h2 id="flow">画面の流れ（全 9 ステップ）</h2>
 <p>実行すると、はじめに、<strong>作るもの・かかる時間の目安・先に用意するもの・全 9 ステップの一覧</strong>が表示されます。用意ができたら、Enter を押します（<code>q</code> で中断できます）。各ステップの先頭には、「ステップ n / 9」と、これまでに終わったステップ、そのステップの目的が表示されます。終わると、<strong>できたことと、次にやること</strong>（<code>sf-job.sh</code> の実行など）、そして<strong>管理者用フォルダ</strong>の場所が表示されます。</p>
+<figure class="diagram">
+  <div class="phases">
+    <div class="phase p1"><p class="ph-title">① 準備</p><ol>
+      <li><span class="n">1</span>準備の確認</li>
+      <li class="you"><span class="n">2</span>プロジェクトの確認</li></ol></div>
+    <div class="phase p2"><p class="ph-title">② リポジトリと通知</p><ol>
+      <li><span class="n">3</span>リポジトリの作成</li>
+      <li class="you"><span class="n">4</span>ブランチの構成</li>
+      <li class="you"><span class="n">5</span>GitHub の Token</li>
+      <li class="you"><span class="n">6</span>Slack の通知</li>
+      <li><span class="n">7</span>リポジトリの設定</li></ol></div>
+    <div class="phase p3"><p class="ph-title">③ Salesforce と確認</p><ol>
+      <li class="you"><span class="n">8</span>Salesforce の接続</li>
+      <li class="you"><span class="n">9</span>動作の確認（任意）</li></ol></div>
+  </div>
+  <figcaption>全 9 ステップを、3 つに分けた図です。👆 の付いたステップは、あなたの操作（選ぶ・貼り付ける・ブラウザで操作する）があります。付いていないステップは、自動で進みます。</figcaption>
+</figure>
 <table>
   <thead><tr><th>ステップ</th><th>何をするか</th><th>あなたの操作</th></tr></thead>
   <tbody>

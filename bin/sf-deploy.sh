@@ -2,25 +2,45 @@
 # ==============================================================================
 # sf-deploy.sh - 強制リリーススクリプト（sf-release.sh のラッパー）
 # ==============================================================================
-# Sandbox 乗り換え時などに現在の開発物を接続中の組織へ強制リリースします。
-# sf-release.sh を --release --force オプション付きで呼び出します。
-# 追加オプションはそのまま sf-release.sh へ引き渡されます。
+# Sandbox 乗り換え時などに、現在の開発物を接続先の組織へ強制リリースする。
+# sf-release.sh を --release --force 付きで呼び出す。受け取った引数は、すべてその後ろに付けて sf-release.sh へ渡す。
+# 個人用の Sandbox / Developer Edition / Scratch Org への強制リリース用。
 #
-# 【用途と制限】
-#   個人用の Sandbox / Developer Edition / Scratch Org への強制リリース用です。
-#   共有環境（エイリアスが予約名 prod / staging / develop / main の組織）には、
-#   ローカルからリリースできません。GitHub にコミットし、レビューを通して、GitHub Actions で行います。
-#   予約名の判定は、確認（Y/N/q）より前に行います。予約名以外の名前に付け替えた場合は、動作を保証しません。
-#   確認（Y/N/q）で N または q なら、中断します。
+# 【使い方】
+#   sf-deploy.sh [オプション]
 #
-# 【固定オプション】
-#   --release           : リリースモードで実行（dry-run しない）
-#   --force             : コンフリクト検知を無効化して強制上書きする（--ignore-conflicts 相当）
+# 【オプション】
+#   （固定）--release   : リリースモードで実行する（dry-run しない）。常に付く。
+#   （固定）--force     : コンフリクト検知を無効にして上書きする（--ignore-conflicts 相当）。常に付く。
+#   -n, --no-open       : ブラウザを開かずに実行する
+#   -t, --target ALIAS  : 接続先組織のエイリアスを指定する。値がない、または値が「-」で始まる場合は、確認の前に中断する。
+#                         --target=ALIAS の形式は、確認の前に中断する（-t ALIAS / --target ALIAS で指定すること）。
+#   -v, --verbose       : コマンドの応答（出力）をコンソールにも表示する
+#   -h, --help          : このヘルプを表示して終了する（1 番目の引数のときだけ）
+#   上記以外も、すべて sf-release.sh へそのまま渡す（-j なども有効。詳細は sf-release.sh --help）。
 #
-# 【追加オプション（sf-release.sh に転送）】
-#   -n, --no-open       : ブラウザを開かずに実行します
-#   -t, --target ALIAS  : 接続先組織のエイリアスを明示的に指定します
-#   -v, --verbose       : コマンドの応答（出力）をコンソールにも表示します
+# 【処理の流れ】
+#   1. 同じディレクトリの sf-release.sh の存在を確認する。なければ中断する。
+#   2. 現在のブランチ（git symbolic-ref --short HEAD）が、sf-tools/config/branches.txt に書かれたブランチ
+#      （# の行・空行は除く。ファイルがない、または空なら main のみ）なら、中断する。
+#   3. 接続先組織を決める。優先順位: -t の値 > 環境変数 SF_TARGET_ORG > sf org display の alias。決まらなければ中断する。
+#   4. GitHub Actions 外（GITHUB_ACTIONS が true 以外）で、接続先が予約名（prod / staging / develop / main）なら、
+#      中断する（共有環境。確認（Y/N/q）より前に判定する）。
+#   5. 上書きの警告を表示し、確認（Y/N/q）を表示する。N / q なら中断する。
+#   6. SF_DEPLOY_CONFIRMED=1 を export し（sf-release.sh 側の確認を省く）、
+#      exec bash sf-release.sh --release --force "$@" で置き換える（終了コードは sf-release.sh のもの）。
+#
+# 【前提条件】
+#   - force-* ディレクトリ（プロジェクトのルート）で実行すること。その他の前提は sf-release.sh と同じ。
+#   - branches.txt に書かれていないブランチ（作業用ブランチ）にいること。
+#
+# 【補足】
+#   - 共有環境（エイリアスが予約名 prod / staging / develop / main の組織）には、ローカルからリリースできない。
+#     GitHub にコミットし、レビューを通して、GitHub Actions で行う。予約名以外の名前に付け替えた場合は、
+#     動作を保証しない。
+#   - 2 番目以降の -h / --help は sf-release.sh へ渡る。その場合、手順 2〜5（確認を含む）の後に、
+#     sf-release.sh のヘルプが表示される。
+#   - 終了コード: 中断は 1。それ以外は sf-release.sh の終了コード。
 # ==============================================================================
 
 # ------------------------------------------------------------------------------

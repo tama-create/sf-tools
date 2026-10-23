@@ -2,18 +2,35 @@
 # ==============================================================================
 # 08_initial_commit.sh - Phase 8: 初回コミット＆プッシュ
 # ==============================================================================
-# リポジトリに変更があれば初回コミットし、PAT_TOKEN_VALUE を使って push する。
-# push 後に sf-hook.sh で pre-push フックをインストールする。
+# クローンの変更を初回コミットし、PAT（PAT_TOKEN_VALUE）で main と、branches.txt の main 以外のブランチを push する。
+# 最後に sf-hook.sh で pre-commit / pre-push フックを入れなおす。
 #
-# 【PAT 使用理由】
-#   gh の OAuth 認証は workflow スコープを持たないため、
-#   ワークフロー YML を含む push には PAT（repo + workflow スコープ）を使用する。
+# 【使い方】
+#   sf-init.sh が、管理者用の作業フォルダ（admin）をカレントにして、bash で呼び出す。
 #
-# 【PAT の渡し方】
-#   Token は URL やコマンドの引数に含めない（コマンドのログ・.git/config・プロセス一覧に残さないため）。
-#   GIT_ASKPASS（一時スクリプト。終了時に削除）と環境変数 SF_INIT_PUSH_TOKEN で git に渡し、
-#   -c credential.helper= で gh 等の認証ヘルパーを無効化して PAT を確実に使う。origin の URL は書き換えない。
-#   push が完了したら、.sf-init.env から PAT_TOKEN_VALUE の行を削除する。
+# 【処理の流れ】
+#   1. 状態ファイルの REPO_DIR / REPO_FULL_NAME / PAT_TOKEN_VALUE のいずれかが空なら die
+#   2. REPO_DIR で git add -A。ステージに差分があれば git commit -m "chore: sf-tools 初期セットアップ"（失敗は die）。
+#      差分がなければ、コミットしない。--no-verify を付けないため、Phase 4 で入れた pre-commit フックが実行される
+#   3. git -c credential.helper= push --no-verify origin main（失敗は die）
+#   4. sf-tools/config/branches.txt の、コメント・空行・main 以外の各ブランチについて:
+#        origin にあれば、何もしない。なければ、現在の main から git checkout -B <ブランチ> → push --no-verify -u →
+#        git checkout main（いずれも失敗は die）
+#   5. 状態ファイルから PAT_TOKEN_VALUE の行を削除する（sed_inplace）
+#   6. bash sf-hook.sh を実行し、pre-commit / pre-push フックを上書きで入れなおす（失敗は die）
+#
+# 【前提条件】
+#   - Phase 3〜5 で用意したクローン（REPO_DIR）と branches.txt
+#   - Phase 6 が状態ファイルに書き出した PAT_TOKEN_VALUE（repo + workflow スコープ）
+#   - 環境変数 SF_TOOLS_DIR（sf-tools のルート。sf-init.sh が export する）
+#
+# 【補足】
+#   - PAT を使う理由: gh の OAuth 認証は workflow スコープを持たないため、ワークフロー（.github/workflows/）を含む
+#     push には PAT を使う
+#   - PAT の渡し方: Token は URL やコマンドの引数に含めない（コマンドのログ・.git/config・プロセス一覧に残さないため）。
+#     GIT_ASKPASS（一時スクリプト。終了時に trap で削除）と環境変数 SF_INIT_PUSH_TOKEN で git に渡し、
+#     -c credential.helper= で gh などの認証ヘルパーを無効にする。origin の URL は書き換えない
+#   - 手順 3・4 で die したときは、PAT_TOKEN_VALUE の行は状態ファイルに残る（手順 5 に進まないため）
 # ==============================================================================
 
 # SF_TOOLS_DIR は sf-init.sh（司令塔）から export される
@@ -114,8 +131,8 @@ run sed_inplace '/^PAT_TOKEN_VALUE=/d' "$SF_INIT_ENV_FILE"
 
 log "SUCCESS" "初回コミット＆プッシュ完了。"
 
-# 初回コミット後に pre-push フックをインストール
-# （main への直接 push をブロックするため先に入れない）
+# pre-commit / pre-push フックを、上書きで入れなおす
+# （フックは Phase 4 の sf-install.sh でも入れている。この Phase の push は --no-verify のため、フックを実行しない）
 log "INFO" "pre-push フックをインストール中..."
 run bash "${SF_TOOLS_DIR}/bin/sf-hook.sh" \
     || die "sf-hook.sh の実行に失敗しました。"

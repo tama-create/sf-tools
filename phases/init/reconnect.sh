@@ -6,21 +6,35 @@
 # 接続先だけを、同じ画面の流れで、やり直す。外部クライアントアプリの自動作成まで含む。
 # 段階（ブランチ）は、増やさない（増やすときは --add-tier）。鍵・ユーザー名の部分的な更新は sf-update-secret.sh。
 #
+# 【使い方】
+#   force-* ディレクトリの中で sf-init.sh --reconnect <main|staging|develop> を実行する。sf-init.sh が、
+#   環境変数 RECONNECT_TIER を export して、このスクリプトを呼び出す。
+#
 # 【処理の流れ】（doc/wizard-ux-design.md 4.7.7）
-#   1. force-* ディレクトリか、段階の指定が正しいか（staging / develop は branches.txt にあること）を確認
-#   2. いまの接続（ログイン先・種類・ユーザー・組織 ID・組織名）を表示し、付け替えるかを確認する
-#   3. ログイン先を選ぶ → ブラウザでログイン → 組織の種類を読み取る → 本番は main のみのガード（F8）
-#   4. 外部クライアントアプリを自動作成 → JWT 接続テスト → GitHub の Secrets / Variables を、まとめて更新
-#   5. 古い組織が、別の組織だった場合は、そこに残るもの（外部クライアントアプリ）と、片付け方を表示する
-#      （自動では削除しない。削除は、利用者が、その組織の設定で行う）
+#   1. RECONNECT_TIER が空なら die。カレントのフォルダ名が force- で始まらなければ die。origin の URL から
+#      リポジトリ名を求める。段階は main（prod も main として扱う）/ staging / develop 以外なら die。
+#      staging / develop は、sf-tools/config/branches.txt にその行がなければ die
+#   2. いまの接続（Variables のログイン先・種類・ユーザー・組織名・組織 ID）を表示する。
+#      管理者向けの警告（print_admin_warning）→ check_gh_owner → ask_yn「付け替えますか」（N / q は die）
+#   3. ~/.sf-jwt/<REPO_NAME>/server.key・server.crt のどちらかがなければ die
+#   4. 既定: register_jwt_secret_eca（init-common.sh）で、ログイン先の選択 → ブラウザでログイン → 組織の種類の読み取り →
+#      本番は main のみのガード（F8）→ 外部クライアントアプリの deploy → JWT 接続テスト → Secrets / Variables の更新。
+#      SF_INIT_LEGACY_CONNECTED_APP=1: register_jwt_secret（init-common.sh。コンシューマー鍵・ユーザー名を手動で入力）
+#   5. 以前の組織 ID（SF_ORG_ID_<接尾辞>）と、新しい組織 ID が両方あって違うときは、以前の組織に外部クライアントアプリ
+#      SF_TOOLS_<REPO_NAME の英数字以外を _ にした名前> が残っていることと、削除の方法を表示する（自動では削除しない）。
+#      以前の組織 ID が保存されていなかったときは、確認を促す INFO を表示する
 #
-# 【前提】
-#   ~/.sf-jwt/<リポジトリ名>/server.key・server.crt（sf-init.sh を実行した管理者の PC にある、JWT 用の鍵と証明書）
+# 【前提条件】
+#   - ~/.sf-jwt/<REPO_NAME>/server.key・server.crt（sf-init.sh を実行した管理者の PC にある、JWT 用の鍵と証明書。
+#     SF_INIT_LEGACY_CONNECTED_APP=1 のときも、両方が必要）
+#   - gh の認証ユーザーが、リポジトリのオーナー（組織では、その組織の有効な管理者）であること（check_gh_owner）
 #
-# 【環境変数】
-#   RECONNECT_TIER                 : 段階（main | staging | develop。sf-init.sh が export する）
-#   SF_INIT_LEGACY_CONNECTED_APP=1 : 従来の接続アプリケーション（手動の入力）を使う
-#   SF_INIT_LOGIN_URL_<PROD|STG|DEV> : ログイン先を、質問せずに指定する（login | test | URL）
+# 【補足】
+#   - 環境変数:
+#       RECONNECT_TIER                   : 段階（main | prod | staging | develop。sf-init.sh が export する）
+#       SF_INIT_LEGACY_CONNECTED_APP=1   : 従来の接続アプリケーション（手動の入力）を使う
+#       SF_INIT_LOGIN_URL_<PROD|STG|DEV> : ログイン先を、質問せずに指定する（login | test | URL）
+#   - ログは ~/sf-tools/logs/sf-init.log に、実行ごとに新しく書く（LOG_MODE=NEW。前回の内容は消える）
 # ==============================================================================
 
 PHASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

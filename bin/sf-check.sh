@@ -2,29 +2,51 @@
 # ==============================================================================
 # sf-check.sh - デプロイターゲットファイル構文チェッカー
 # ==============================================================================
-# ターゲットファイル（deploy-target.txt / remove-target.txt）の構文を検証します。
-# sf-release.sh から自動呼び出しされますが、単体実行も可能です。
+# ターゲットファイル（deploy-target.txt / remove-target.txt）の内容を検証する。
+# sf-release.sh・sf-push.sh・sf-precommit.sh・sf-prepush.sh から呼ばれる。単体でも実行できる。
 #
 # 【使い方】
-#   sf-check.sh [deploy-target.txt] [remove-target.txt]
-#   引数省略時は sf-tools/release/<branch>/ 配下を自動解決します。
+#   sf-check.sh [deploy-target.txt のパス] [remove-target.txt のパス]
+#     引数 2 つ以上: 1 つ目を deploy-target.txt、2 つ目を remove-target.txt として検証する（3 つ目以降は無視）
+#     引数 1 つ    : deploy-target.txt だけを検証する
+#     引数なし     : sf-tools/release/branch_name.txt（sf-start.sh / sf-install.sh が保存する）に書かれたブランチ名で、
+#                    sf-tools/release/<ブランチ名>/deploy-target.txt と remove-target.txt を検証する。
+#                    branch_name.txt がないときは、何も検証せず、終了コード 0 で終了する
+#                    （ブランチ名は、今の Git のブランチではなく、branch_name.txt の内容を使う）
 #
-# 【チェック内容】
-#   - [files]   セクション: パスがリポジトリ内に存在するか（絶対パス・.. を含むパスなど、リポジトリの外を指すパスは、存在してもエラー）
-#   - [members] セクション: 「種別名:メンバー名」形式になっているか
-#   - 種類の可否: config/metadata-capability.txt（sf-typecheck.sh が、実際の組織で確かめた表）で、リリース・削除できないと
-#     確認済み（ng）の種類を、deploy-target.txt（リリース）・remove-target.txt（削除）に書くと、エラーにする。
-#     条件によって、できない種類（limited）は、警告にする（止めない）。確認していない種類（unknown）・
-#     表にない種類は、何もしない。組織の権限で、できる場合は、
-#     環境変数 SF_CHECK_IGNORE_CAPABILITY=1 で、この確認を省略できる
-#   - テストクラス不足: Apex クラスに対応するテストクラスが含まれていない場合に警告
-#       Step A: 命名規則（MyClassTest.cls / MyClass_Test.cls）で検索
-#       Step B: A で見つからない場合 @isTest を含む .cls を内容検索
-#       ※ 本番/Sandbox に既に存在するテストクラスは含めなくてよいため WARNING 扱い（エラーにならない）
+# 【オプション】
+#   -h, --help : このヘルプを表示して終了する（1 つ目の引数のときだけ。ほかの引数は、すべてファイルのパスとして扱う）
 #
-# 【終了コード】
-#   0: エラーなし
-#   1: 構文エラーあり
+# 【処理の流れ】
+#   1. 各ターゲットファイルを 1 行ずつ検証する。CR と前後の空白を除き、空行と # で始まる行は読み飛ばす。
+#      セクションは [files] / [members]。最初のマーカーより前の行は [files] として扱う
+#        - [files]  : 次のときはエラー
+#                       ・リポジトリの外を指すパス（/ ・C:/ ・C:\ で始まる絶対パス、.. を含むパス）。存在してもエラー
+#                       ・カレントディレクトリからの相対パスで、通常のファイルとして存在しない（ディレクトリもエラー）
+#        - [members]: 「種別名:メンバー名」の形でない（: がない・: の前か後ろが空）ときはエラー
+#   2. 1 でエラーにならなかった行について、種類の可否を確認する
+#      （config/metadata-capability.txt。sf-typecheck.sh が実際の組織で確かめた表）
+#        deploy-target.txt は release 列、remove-target.txt は delete 列を見る
+#        ng: エラー / limited: 警告（止めない） / ok・unknown・表にない種類: 何もしない
+#        種類は、[members] では最初の「:」より前。[files] では、パスから推定できる次の種類だけ（ほかは確認しない）:
+#          */flows/*.flow-meta.xml → Flow / */classes/*.cls → ApexClass / */triggers/*.trigger → ApexTrigger /
+#          */lwc/* → LightningComponentBundle / */aura/* → AuraDefinitionBundle /
+#          */servicePresenceStatuses/* → ServicePresenceStatus / */standardValueSets/* → StandardValueSet
+#        組織の権限で、できる場合は、環境変数 SF_CHECK_IGNORE_CAPABILITY=1 で、この確認を省略できる
+#   3. テストクラス不足を確認する（警告のみ。エラーにしない）
+#        対象: deploy-target.txt の [files] の .cls のうち、存在し、@isTest（大文字・小文字を区別しない）を含まないもの
+#        Step A: 同じディレクトリの <クラス名>Test.cls / <クラス名>_Test.cls を探す
+#        Step B: A で見つからなければ、カレントディレクトリ以下の、@isTest（大文字・小文字を区別する）を含む .cls のうち、
+#                クラス名を単語として含む最初のファイルを探す
+#        見つかったテストクラスのパスが、deploy-target.txt の [files] の行と、文字列として一致しなければ、警告する
+#        （本番/Sandbox に既にあるテストクラスは、含めなくてよいため）。テストクラスが見つからないときは、何も表示しない
+#
+# 【補足】
+#   - ターゲットファイルが存在しないときは、そのファイルの検証を飛ばす（エラーにしない）。何も書かれていないときは、警告だけ
+#   - Step B で見つかったパスは ./ で始まる形（例: ./force-app/...）のまま、deploy-target.txt の行と比べる
+#   - 可否の表のパスは、環境変数 SF_CHECK_CAPABILITY_FILE で変えられる（既定: sf-tools の config/metadata-capability.txt）。
+#     表のファイルがないときは、可否の確認をしない
+#   - 終了コード: 0 = エラーなし（警告のみ・検証を飛ばした場合を含む） / 1 = エラーあり（書式・パス・可否の ng）
 # ==============================================================================
 
 # ------------------------------------------------------------------------------
@@ -81,7 +103,7 @@ fi
 # ------------------------------------------------------------------------------
 CAPABILITY_FILE="${SF_CHECK_CAPABILITY_FILE:-${SCRIPT_DIR}/../config/metadata-capability.txt}"
 
-# 種類の可否を返す。引数: 種類 release|delete → ok / ng / （空 = 表にない・確認していない）
+# 種類の可否を返す。引数: 種類 release|delete → 表の値（ok / ng / limited / unknown）。表にない・表のファイルがないときは、空
 capability_status() {
     [[ -f "$CAPABILITY_FILE" ]] || return 0
     awk -F'\t' -v t="$1" -v c="$2" '$0 !~ /^#/ && $1 == t { v = (c == "release") ? $2 : $3; gsub(/\r/, "", v); print v; exit }' "$CAPABILITY_FILE"

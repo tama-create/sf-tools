@@ -2,32 +2,55 @@
 # ==============================================================================
 # sf-install.sh - sf-tools の最新化・プロジェクト初期セットアップスクリプト
 # ==============================================================================
-# sf-start.sh のバックグラウンドから自動呼び出しされますが、単独実行も有効です。
-# ※ 時間のかかるツールアップデートは sf-upgrade.sh に委譲し、バックグラウンドで最後に実行。
+# ~/sf-tools を最新化し、カレントの force-* プロジェクトに、Git フック・リリース管理ディレクトリなどを準備する。
+# sf-start.sh がバックグラウンドで、sf-init.sh が Phase 4 で、自動で呼び出す。単独でも実行できる。
+# 時間のかかる開発ツールのアップデートは、sf-upgrade.sh に任せ、最後にバックグラウンドで起動する。
 #
-# 【処理の流れ】
-#   1. ~/sf-tools を git pull で最新化
-#   2. sf-tools/config/ 配下の設定ファイルを生成（未存在時のみ）
-#   3. Git フック (pre-push) をインストール
-#   4. リリース管理ディレクトリの準備 & branch_name.txt を更新
-#   5. コミットメッセージテンプレートを設置（.gitmessage）
-#   6. package.json があれば npm install を実行（時間がかかる場合あり。sf-init.sh から呼ばれた場合は、一時フォルダのためスキップ）
-#   7. 開発ツールのアップデート（sf-upgrade.sh をバックグラウンドで起動）※24 時間に 1 回のみ
-#
-# 【WF について】
-#   GitHub Actions ワークフローは sf-init.sh（Phase 3）が sf-tools/templates/ からコピーするため、
-#   sf-install.sh では管理しない。WF はセルフコンテインド（ロジック内包）設計であり、
-#   sf-tools リポジトリへの実行時依存はない。
-#
-# 【前提】
-#   Salesforce CLI（sf）は npm 版（npm install -g @salesforce/cli）であること。
-#   起動時に sf --version の終了コードを確認し、0 以外なら警告を表示する（中断はしない。
-#   中断すると sf-tools 自身の最新化まで止まってしまうため）。
-#   ~/sf-tools は初回インストール済みであること。
-#   初回インストール: git clone https://github.com/tama-create/sf-tools.git ~/sf-tools
+# 【使い方】
+#   bash ~/sf-tools/bin/sf-install.sh [オプション]     # force-* ディレクトリで実行する
 #
 # 【オプション】
-#   -v, --verbose       : コマンドの応答（出力）をコンソールにも表示します
+#   -v, --verbose : コマンドの応答（出力）をコンソールにも表示する（sf-hook.sh にも引き渡す。sf-upgrade.sh には引き渡さない）
+#   -h, --help    : このヘルプを表示して終了する（第 1 引数に指定したときのみ）
+#   ※ そのほかの引数は検査しない（すべての引数を、そのまま sf-hook.sh に渡す）
+#
+# 【処理の流れ】
+#   1. sf の確認: sf --version の終了コードが 0 以外なら、ERROR で案内を表示する。中断はしない
+#      （中断すると、sf-tools 自身の最新化まで止まるため）。sf が未インストールのとき・GitHub Actions 上では、確認しない
+#   2. ~/sf-tools の現在のブランチ（取得できなければ main）を git pull origin <ブランチ> で最新化する。
+#      失敗しても WARNING を表示して続行する。sf-init.sh から呼ばれたとき（SF_INIT_RUNNING が空でない）は、スキップする
+#   3. 設定ファイル ./sf-tools/config/metadata.txt・branches.txt を確認する
+#      - sf-init.sh から呼ばれたとき: 存在しないものだけ、~/sf-tools/templates/sf-tools/config/ からコピーする。失敗したら中断する
+#      - それ以外: どちらかが存在しなければ、中断する（プロジェクトの破損として扱う。生成はしない）
+#   4. Git フック（pre-commit / pre-push）を sf-hook.sh でインストールする。失敗しても WARNING を表示して続行する
+#   5. リリース管理ディレクトリを準備する。失敗しても WARNING を表示して続行する
+#      - 現在のブランチ名を取得できない（detached HEAD など）ときは、WARNING を表示して、何もしない
+#      - ./sf-tools/release/ と ./sf-tools/release/.gitkeep を作成する
+#      - main ブランチのときは、ここで終わる（release/<ブランチ>/ と branch_name.txt は、作成・更新しない）
+#      - それ以外のブランチ: release/<ブランチ>/ を作成し、deploy-target.txt・remove-target.txt が無ければ
+#        ~/sf-tools/templates/sf-tools/release/__BRANCH__/ からコピーし、release/branch_name.txt にブランチ名を書き込む
+#   6. （sf-init.sh から呼ばれたときのみ）~/sf-tools/templates/gitmessage を ./.gitmessage にコピーし、
+#      git config commit.template .gitmessage を設定する。テンプレートが無い・コピーに失敗したときは、WARNING を表示して続行する
+#   7. ./package.json があれば、npm install を実行する。失敗しても WARNING を表示して続行する。次のときは、スキップする:
+#      - sf-init.sh から呼ばれたとき（初期セットアップ用の一時フォルダのため）
+#      - node_modules/.package-lock.json の更新時刻が、package-lock.json の更新時刻以上のとき
+#        （package-lock.json が無いときは、スキップしない）
+#   8. ~/.sf-tools-last-update が無い、またはその更新時刻から 24 時間以上たっていれば、sf-upgrade.sh をバックグラウンドで
+#      起動する（引数なし。標準出力は捨て、標準エラーは ./sf-tools/logs/sf-install.log に追記する）。
+#      起動を確認できたら、~/.sf-tools-last-update の更新時刻を更新する（完了の時点ではなく、起動の時点）
+#
+# 【前提条件】
+#   - force-* ディレクトリ（フォルダ名が force- で始まる）で実行すること。それ以外では lib/common.sh が終了する
+#     （終了コード 1。SF_INIT_MODE=1 のときは、確認しない）
+#   - ~/sf-tools は初回インストール済みであること
+#     初回インストール: git clone https://github.com/tama-create/sf-tools.git ~/sf-tools
+#   - Salesforce CLI（sf）は npm 版（npm install -g @salesforce/cli）であること（手順 1 の確認は、警告のみ）
+#
+# 【補足】
+#   - 終了コード: 0。手順 3 で中断したときは 1。手順 3 以外の失敗は、WARNING を表示して続行する
+#   - GitHub Actions のワークフロー（.github/workflows/）は扱わない。新規作成時は sf-init.sh（Phase 3）が
+#     ~/sf-tools/templates/ からコピーし、作成済みのプロジェクトへの反映は sf-sync-wf.sh（管理者が手動で実行）が行う
+#   - ログ: ./sf-tools/logs/sf-install.log（実行ごとに作り直す）
 # ==============================================================================
 
 # ------------------------------------------------------------------------------
@@ -130,7 +153,7 @@ phase_init_config() {
 }
 
 
-# 【NPM INSTALL】依存パッケージのインストール（毎回実行）
+# 【NPM INSTALL】依存パッケージのインストール（package.json があり、sf-init 外で、node_modules が古いときのみ）
 phase_npm_install() {
     if [[ ! -f "./package.json" ]]; then
         log "INFO" "package.json が見つかりません。npm install をスキップします。"
@@ -158,7 +181,7 @@ phase_npm_install() {
     return $RET_OK
 }
 
-# 【HOOK】Git フック (pre-push) のインストール
+# 【HOOK】Git フック (pre-commit / pre-push) のインストール（sf-hook.sh に引数をそのまま渡す）
 phase_setup_hook() {
     log "INFO" "Git フックをインストールします..."
     run bash "$SCRIPT_DIR/sf-hook.sh" "$@" || return $RET_NG
@@ -205,7 +228,7 @@ phase_setup_gitmessage() {
 }
 
 # 【UPGRADE】開発ツールのアップデート（バックグラウンド実行）
-# shellcheck disable=SC2120  # 引数は、呼び出し側が渡すことがある（"$@" を、そのまま sf-upgrade.sh に渡す）
+# shellcheck disable=SC2120  # 受け取った "$@" を、そのまま sf-upgrade.sh に渡す（現在のメインフローは、引数を渡さない）
 phase_upgrade_tools_bg() {
     if _is_tool_update_needed; then
         log "INFO" "開発ツールのアップデートをバックグラウンドで開始します（sf-upgrade.sh）..."

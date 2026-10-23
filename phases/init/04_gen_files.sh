@@ -2,8 +2,28 @@
 # ==============================================================================
 # 04_gen_files.sh - Phase 4: ファイル生成
 # ==============================================================================
-# sf-install.sh を実行してワークフロー・設定ファイル・フックを生成する。
-# SF_INIT_RUNNING=1 を export して sf-install.sh に初期化モードを通知する。
+# クローン（REPO_DIR）で sf-install.sh を初期化モード（SF_INIT_RUNNING=1）で実行し、sf-tools の設定ファイル・
+# Git フック・リリース管理フォルダ・コミットメッセージのテンプレートを用意する。
+#
+# 【使い方】
+#   sf-init.sh が、管理者用の作業フォルダ（admin）をカレントにして、bash で呼び出す。
+#
+# 【処理の流れ】
+#   1. 状態ファイルの REPO_DIR が空なら die
+#   2. SF_INIT_RUNNING=1 を export し、REPO_DIR に移動して、bash sf-install.sh を実行する（失敗は die）
+#
+# 【前提条件】
+#   - Phase 3 で作ったクローン（REPO_DIR）
+#   - 環境変数 SF_TOOLS_DIR（sf-tools のルート。sf-init.sh が export する）
+#
+# 【補足】
+#   - SF_INIT_RUNNING=1 のとき、sf-install.sh は、通常の起動と次の点が違う
+#       - ~/sf-tools の git pull をしない
+#       - sf-tools/config/ の metadata.txt・branches.txt を、ないときだけテンプレートからコピーする（通常は、ないと die）
+#       - .gitmessage を置き、commit.template に設定する
+#       - npm install をしない
+#   - pre-commit / pre-push フックのインストール（sf-hook.sh）と、sf-tools/release/ の準備は、通常どおり行う
+#   - ワークフロー（.github/workflows/）は、この Phase ではなく、Phase 3 がテンプレートからコピーする
 # ==============================================================================
 
 # SF_TOOLS_DIR は sf-init.sh（司令塔）から export される
@@ -32,7 +52,7 @@ log "HEADER" "ファイル生成"
 
 log "INFO" "sf-tools の初期設定ファイルを生成中..."
 
-# sf-install.sh に初期化モードを通知する（フック・ブランチ設定のスキップ制御に使用）
+# sf-install.sh に初期化モードを通知する（git pull・npm install の省略、設定ファイルの生成、.gitmessage の設置に使用）
 export SF_INIT_RUNNING=1
 
 cd "$REPO_DIR" || die "ディレクトリに移動できません: $REPO_DIR"

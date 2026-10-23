@@ -2,16 +2,34 @@
 # ==============================================================================
 # 03_repo_create.sh - Phase 3: リポジトリ作成
 # ==============================================================================
-# GitHub リポジトリを作成し、ローカルにクローンする。
-# リポジトリ・クローン先が既に存在する場合はスキップ（冪等）。
+# GitHub リポジトリ（Private）を作成してクローンし、sf-tools/templates/ の内容をクローンにコピーする。
+# リポジトリ・クローンがすでにあるときは、作成・クローンをせずに使う（再実行できる）。
 #
-# 【可視性ルール】
-#   常に Private で作成する。
+# 【使い方】
+#   sf-init.sh が、管理者用の作業フォルダ（admin）をカレントにして、bash で呼び出す。
 #
-# 【テンプレートファイルの配布】
-#   クローン後に sf-tools/templates/ の全ファイルを REPO_DIR/ にコピーする。
-#   force-template リポジトリは廃止済み。sf-tools/templates/ が唯一の正本。
-#   sfdx-project.json の __REPO_NAME__ プレースホルダーを実際のリポジトリ名に置換する。
+# 【処理の流れ】
+#   1. 状態ファイルの REPO_FULL_NAME / REPO_DIR / REPO_NAME のいずれかが空なら die
+#   2. gh repo view で確認できれば、作成しない（WARNING）。確認できなければ gh repo create --private で作成し、
+#      もう一度 gh repo view で確認できなければ die
+#   3. クローン
+#        - REPO_DIR/.git がある: origin が {GITHUB_OWNER}/{REPO_NAME} でなければ die（大文字と小文字は区別しない）。
+#          現在のブランチが main でなければ git checkout main（失敗は die）。origin に main があれば
+#          git pull --ff-only origin main（失敗は die）
+#        - REPO_DIR はあるが、.git がない: die
+#        - REPO_DIR がない: git clone -c core.longpaths=true https://github.com/{REPO_FULL_NAME}.git（失敗は die）
+#   4. ${SF_TOOLS_DIR}/templates/ の全ファイル・全フォルダを、cp -r で REPO_DIR にコピーする（失敗は die）。
+#      同名のファイルは上書きする。再実行でも同じで、クローンで変更した同名のファイルは、テンプレートの内容に戻る
+#   5. REPO_DIR/sfdx-project.json があれば、__REPO_NAME__ を REPO_NAME に置換する（sed_inplace。失敗は die）
+#
+# 【前提条件】
+#   - Phase 2 が書き出した状態ファイル（SF_INIT_ENV_FILE）
+#   - 環境変数 SF_TOOLS_DIR（sf-tools のルート。sf-init.sh が export する）
+#
+# 【補足】
+#   - 可視性は、常に Private
+#   - sf-tools/templates/ が、雛形の唯一の正本（force-template リポジトリは廃止済み）
+#   - core.longpaths=true は、クローンの設定に残る（Windows のパスの長さの上限対策。ほかの OS では無視される）
 # ==============================================================================
 
 # SF_TOOLS_DIR は sf-init.sh（司令塔）から export される

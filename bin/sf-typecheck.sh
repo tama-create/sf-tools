@@ -2,36 +2,69 @@
 # ==============================================================================
 # sf-typecheck.sh - メタデータの種類ごとに、リリースと削除ができるかを、実際の組織で確かめる（管理者向け）
 # ==============================================================================
-# 種類ごとの最小のサンプル（lib/typecheck.js）を、使い捨てのプロジェクトに作り、指定した組織に、実際にリリースして、
-# 削除し、結果を表（種類 / release / delete / 備考）にする。この表は、config/metadata-capability.txt の元になる。
-# sf-check.sh が、この表を読んで、リリース・削除できない種類を、ターゲットファイルに書いた時点で、止める。
-#
-# 【安全】
-#   ・個人用の組織だけ（Developer Edition・Sandbox・Scratch・Trial）。本番の組織・種類を判定できない組織は、拒否する
-#   ・共有環境の予約名のエイリアス（prod / staging / develop / main）は、拒否する（共有環境は、GitHub Actions だけ）
-#   ・作成・削除するのは、名前に SfToolsE2eMin を含むものだけ
-#   ・既存のものには、触れない（Account などの標準のものには、追加するだけ）
-#   ・GitHub Actions 上では、実行しない
-#   ・管理者向けのコマンドのため、起動したら、最初に、警告を表示する（--list・--coverage も）。警告のあとに、確認（Y/N。-y で省略）をして、はじめて実行する。警告だけを出して、先へ進まない
+# 種類ごとの最小のサンプル（lib/typecheck.js に定義）を、一時フォルダの使い捨てのプロジェクトに作り、指定した組織に、
+# 実際にリリースして、削除し、結果を表（種類 / release / delete / 備考）にする。この表は、config/metadata-capability.txt の元になる。
+# sf-check.sh が、その表を読んで、リリース・削除できないと確認済みの種類を、ターゲットファイルの検証で止める。
 #
 # 【使い方】
-#   sf-typecheck.sh --org ALIAS                       # リリースして、削除する（確認あり）
-#   sf-typecheck.sh --org ALIAS --validate-only       # 検証だけ（組織には、何も反映しない。削除は、確認できない）
+#   sf-typecheck.sh --org ALIAS                       # リリースして、削除する
+#   sf-typecheck.sh --org ALIAS --validate-only       # 検証だけ（組織には、何も反映しない。削除は、確認しない）
 #   sf-typecheck.sh --org ALIAS --only ApexPage,Queue # 種類を絞る
-#   sf-typecheck.sh --list                            # 確認する種類の一覧だけ
-#   sf-typecheck.sh --coverage                        # 変更セット対応の種類のうち、確認済み・未確認の数と一覧（組織には、接続しない）
+#   sf-typecheck.sh --list                            # 確認する種類の一覧だけ（組織には、接続しない）
+#   sf-typecheck.sh --coverage                        # 変更セット対応の種類の、確認の進み具合（組織には、接続しない）
 #
 # 【オプション】
-#   --org ALIAS        : 接続先の組織のエイリアス（必須。予約名・本番は、拒否）
-#   --validate-only    : 検証（deploy validate）だけ行う
-#   --only A,B         : 指定した種類だけ確認する
-#   --out FILE         : 結果の表（TSV）の出力先（既定: ./sf-typecheck-result.txt）
-#   --list             : 確認する種類の一覧を出して終了する
+#   --org ALIAS        : 接続先の組織のエイリアス（--list・--coverage 以外では必須）
+#   --validate-only    : 検証（sf project deploy validate）だけ行う。delete の列は unknown のまま
+#   --only A,B         : 指定した種類だけ確認する（--list に出る名前と完全一致。一致しない名前は無視し、
+#                        1 つも一致しなければ 0 種類で正常終了する）
+#   --out FILE         : 結果の表（TSV・見出し行なし）の出力先。既定: ./sf-typecheck-result.txt（カレントディレクトリ）。
+#                        すべての種類を処理し終えたときだけ書く（上書き）
+#   --list             : 確認する種類の一覧（lib/typecheck.js のサンプルの種類）を出して終了する
 #   --coverage         : config/changeset-types.txt（変更セットで扱える種類。公式の一覧）と、
-#                        config/metadata-capability.txt（実機で確認した結果）を突き合わせて、確認済み・未確認の数と一覧を出す。
-#                        組織には、接続しない（安全の確認・警告は、不要）
-#   -y, --yes          : 確認（Y/N）を省略する（自動実行用。警告は、表示する）
-#   -h, --help         : このヘルプを表示する
+#                        config/metadata-capability.txt（実機で確認した結果）を突き合わせ、次の区分ごとの数を出す:
+#                        リリースも削除も ok / リリースのみ ok / ng または limited を含む / 判定できない / 表にない。
+#                        種類の一覧は、ok 以外の 4 区分だけ出す。組織には、接続しない
+#   -y, --yes          : 冒頭の確認（Y/N）を省略する（警告ボックスは、表示する）
+#   -h, --help         : このヘルプを表示する（第 1 引数のときだけ有効）
+#   上記以外の引数は「不明なオプションです」で中断する。
+#
+# 【処理の流れ】
+#   1. 赤い警告ボックスを表示し、[Y/N/q] で確認する（N / q なら中断。-y で確認だけを省略）。--list・--coverage も同じ
+#   2. --coverage のときは、表の突き合わせ（awk のみ）の結果を出して終了する
+#   3. lib/typecheck.js と node があることを確認する。--list のときは、一覧を出して終了する
+#   4. 安全の確認（どれかに当たれば、何もせずに中断する）
+#        GITHUB_ACTIONS=true / --org がない / --org が予約名（prod・staging・develop・main）/
+#        sf --version の終了コードが 0 以外（npm 版の sf が前提。24 時間以内に成功を確認済みなら、省略）/
+#        組織の情報（Organization の IsSandbox・OrganizationType・TrialExpirationDate）を読み取れない /
+#        組織の種類が本番、または判定できない
+#      組織の種類: IsSandbox=true → Sandbox、OrganizationType に Developer を含む → Developer Edition、
+#      TrialExpirationDate がある → Trial、OrganizationType が空 → 判定できない、それ以外 → 本番
+#   5. 一時フォルダ（${TMPDIR:-/tmp}/sf-typecheck-XXXXXX。終了時に削除）で、lib/typecheck.js を実行する。
+#      種類ごとに、sf project deploy start でリリースし、成功したら、destructiveChanges.xml で削除する。
+#      --validate-only のときは、sf project deploy validate だけを行い、削除はしない（詳細は lib/typecheck.js の冒頭）
+#   6. lib/typecheck.js の終了コードが 0 なら SUCCESS、3（ng の種類がある）なら WARNING を表示して、終了コード 0 で終わる。
+#      それ以外は、中断する
+#
+# 【前提条件】
+#   - force-* の外でも実行できる（組織だけを対象にする）
+#   - 接続先の組織に、sf でログイン済みであること（予約名以外のエイリアス）
+#   - node と、npm 版の sf（Salesforce CLI）
+#
+# 【補足】
+#   - 拒否するのは、上の 4. の条件だけ。Sandbox が個人用か共有かは、判定しない
+#   - --list・--coverage は、GitHub Actions 上でも実行できる（4. の確認より前に終了するため）
+#   - 作成・削除するのは、名前（ファイルのパス・削除するメンバー名）に SfToolsE2eMin を含むものだけ
+#     （大文字・小文字を区別する）。Account には、この名前のもの（ワークフロールール・項目自動更新・メールアラート・
+#     承認プロセス・カスタムボタン・トリガー）を追加し、削除するときも、その名前だけを指定する。
+#     冒頭の警告の文面は「SfToolsE2eMin で始まるもの」だが、判定は「含む」（例: Account.SfToolsE2eMinWr）
+#   - 現在、LightningComponentBundle のサンプルの名前は sfToolsE2eMinLwc（先頭が小文字）のため、この判定に当たり、
+#     lib/typecheck.js が中断する（終了コード 1）。--only でこの種類を除かない限り、6 番目の種類で中断し、
+#     それまでの 5 種類のリリース・削除（--validate-only なら検証）は、実行済みになる。結果の表（--out）は、書かれない
+#   - 終了コード: 0 = 完了（release / delete に ng の種類があっても 0。WARNING を表示する）・--list・--coverage /
+#     1 = 中断（N / q の回答、4. の拒否、必要なファイル・node がない、lib/typecheck.js の失敗）
+#   - ログ: ~/sf-tools/logs/sf-typecheck.log（実行ごとに作り直す）
+#   - 環境変数: SF_TYPECHECK_CHANGESET_FILE・SF_CHECK_CAPABILITY_FILE で、--coverage が読む 2 つの表を差し替えられる
 # ==============================================================================
 
 # ------------------------------------------------------------------------------
@@ -182,7 +215,7 @@ esac
 log "INFO" "  接続先: ${ORG_ALIAS} / ${ORG_NAME:-（名前なし）} / $(org_kind_label "$ORG_KIND")"
 
 # ------------------------------------------------------------------------------
-# 5. 接続先の表示（警告と確認は、冒頭で、済んでいる）
+# 5. （接続先の表示は、4. の最後で行う。警告と確認は、冒頭の 3b. で、済んでいる）
 # ------------------------------------------------------------------------------
 
 # ------------------------------------------------------------------------------

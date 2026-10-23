@@ -2,25 +2,67 @@
 # ==============================================================================
 # sf-metasync.sh - Salesforce メタデータ Git 自動同期スクリプト
 # ==============================================================================
-# sf-init で設定した prod エイリアスの組織（本番または Sandbox）から最新メタデータを取得し、
-# main ブランチへ自動反映します。
-# ※ sf-init の設定により、本番組織・Sandbox どちらにも対応します。
-# ※ どのブランチから実行しても main へ自動切替して処理します。
-# ※ Salesforce 組織の変更を正とする。main のローカル未コミット変更がある場合は中止。
-#   1. main ブランチへ自動切替（他ブランチから実行した場合は stash して切替）
-#   2. Git の最新状態をプル (Rebase)
-#   3. SGD (Salesforce Git Delta) による差分抽出
-#   4. 組織からのメタデータ取得 (Retrieve)
-#   5. 変更がある場合のみ Git Commit & Push（pre-push フックは、このコマンドの push では通さない: --no-verify。サーバー側の保護は、そのまま効く）
-#      変更がなくても、前回の同期のコミットの push が失敗して、未プッシュのコミットが残っているときは、push だけ行う
+# sf-init で登録した prod エイリアスの組織（本番・Sandbox どちらでもよい）から、メタデータを取得し、
+# main ブランチにコミットして push する。push したときは、branches.txt の main 以外のブランチへ、main をマージして push する。
+# Salesforce 組織の内容を正とする。どのブランチから実行しても、main に切り替えて処理し、終了時に元のブランチへ戻る。
 #
-# 【前提】
-#   Salesforce CLI（sf）は npm 版であること。起動時に check_sf_cli（sf --version の終了コード）で確認し、
-#   0 以外なら、案内を表示して中断する。成功は 24 時間は確認を省略する（GitHub Actions 上では省略）。
+# 【使い方】
+#   bash ~/sf-tools/bin/sf-metasync.sh [オプション]     # force-* ディレクトリで実行する（管理者向け）
 #
 # 【オプション】
-#   -j, --json          : sf コマンドの出力を JSON 形式で表示します
-#   -v, --verbose       : コマンドの応答（出力）をコンソールにも表示します
+#   -j, --json    : 手順 7 の sf project retrieve start に --json を付ける（sf の出力を JSON 形式にする）
+#   -v, --verbose : コマンドの応答（出力）をコンソールにも表示する
+#   -h, --help    : このヘルプを表示して終了する
+#   ※ 上記以外のオプション・引数を指定すると、中断する（終了コード 1）
+#
+# 【処理の流れ】
+#   1. sf の確認: sf --version の終了コードが 0 以外なら、案内を表示して中断する（check_sf_cli --cache）
+#   2. 事前の確認（どれかが満たされなければ、中断する）
+#      - sf org display --target-org prod が成功すること（prod エイリアスの組織が登録済み）
+#      - ./sf-tools/config/metadata.txt が存在すること（コメント行・空行を除いた各行を、取得するメタデータの種類とする）
+#   3. 管理者向けの警告を表示し、続行の確認（Y/N）を取る。N・q なら中断する（GitHub Actions 上では、表示・確認しない）
+#   4. main ブランチへ切り替える（実行時のブランチが main 以外のとき）
+#      - 追跡中のファイルに未コミットの変更があれば、git stash で退避してから git checkout main する
+#   5. リモートの最新を取り込む
+#      - main で、追跡中のファイルに未コミットの変更があれば、中断する（ローカルの変更は、同期に含めない）
+#      - git fetch origin（失敗しても WARNING を表示して続行）→ git pull origin main --rebase
+#        （失敗したら git rebase --abort して中断する）
+#   6. 差分の解析: sf sgd source delta --from origin/main --to HEAD --output-dir ./sf-tools/temp_delta_<PID>
+#      （失敗したら中断する）
+#   7. 組織からメタデータを取得する（どちらも --target-org prod --ignore-conflicts）
+#      - 手順 6 の package/package.xml があれば、それで取得する（この取得の成否は、判定しない）
+#      - metadata.txt の全種類を --metadata で指定して取得する（失敗したら中断する）
+#   8. git add -A でステージし、HEAD との差分で分岐する
+#      - 差分あり: 変更の一覧（git status --short）を表示して確認を取り、
+#        「定期更新: Salesforce変更の自動反映 (YYYY-MM-DD)」でコミットし、git push --no-verify origin main する
+#      - 差分なし・origin/main より先のコミットあり（前回の同期の push の失敗など）: そのコミットの一覧（git log --oneline）を
+#        表示して確認を取り、git push --no-verify origin main だけ行う
+#      - 差分なし・先のコミットなし: 「組織側に変更はありませんでした」と表示して終了する（手順 9 は行わない）
+#      確認は Y/N で、N・q なら中断する（GitHub Actions 上では、表示・確認しない）。コミット・push の失敗は、中断する
+#   9. （手順 8 で push したときのみ）branches.txt の main 以外の各ブランチへ、main を伝播する
+#      - リモートに無いブランチは、WARNING を表示してスキップする
+#      - git checkout <ブランチ> → git pull origin <ブランチ> --rebase → git merge main --no-edit → git push origin <ブランチ>
+#        （この push には --no-verify を付けない）。失敗したら、WARNING を表示して、そのブランチをスキップする
+#        （pull の失敗: git rebase --abort → git checkout main。merge の失敗: git merge --abort → git checkout main。
+#         push の失敗: git checkout main。checkout の失敗: そのままスキップ）
+#      - 最後に git checkout main する（失敗したら中断する）
+#   10. 終了時（中断したときも）: 元のブランチへ git checkout し、手順 4 で退避していれば git stash pop する。
+#       ./sf-tools/temp_delta_<PID> を削除する
+#
+# 【前提条件】
+#   - force-* ディレクトリ（フォルダ名が force- で始まる）で実行すること。それ以外では lib/common.sh が終了する（終了コード 1）
+#   - sf-init で prod エイリアスの組織が登録済みであること
+#   - Salesforce CLI（sf）は npm 版であること。手順 1 の確認は、成功したら 24 時間は省略する（GitHub Actions 上では、確認しない）
+#   - sf のプラグイン sfdx-git-delta（sf sgd）がインストール済みであること（無ければ、手順 6 で中断する）
+#
+# 【補足】
+#   - 終了コード: 0（同期した・変更がなかった）／ 1（中断した）
+#   - 手順 4・5 の「未コミットの変更」の判定（git diff-index HEAD）と git stash は、追跡中のファイルだけが対象。
+#     未追跡のファイルは、中断の対象にも退避の対象にもならず、手順 8 の git add -A でコミットに含まれる
+#     （ローカル実行では、コミット前の git status --short に表示される）
+#   - main への push は --no-verify（pre-push フックを通さない）。サーバー側の保護（Ruleset）は、そのまま効く
+#   - branches.txt が無い・ブランチの定義が無いときは、WARNING を表示し、main のみとして扱う（手順 9 の対象なし）
+#   - 手順 9 の完了のメッセージは、branches.txt の内容にかかわらず「(main → staging、main → develop)」と表示する
 # ==============================================================================
 
 # ------------------------------------------------------------------------------
@@ -109,7 +151,7 @@ readonly METADATA_TYPES
 log "INFO" "対象メタデータ (${#METADATA_TYPES[@]} 件): ${METADATA_TYPES[*]}"
 
 # ------------------------------------------------------------------------------
-# 5. フェーズ定義
+# 6. フェーズ定義
 # ------------------------------------------------------------------------------
 
 # 【SWITCH】main ブランチへ切替（他ブランチから実行した場合は stash して切替）
@@ -214,7 +256,7 @@ phase_git_sync() {
     run git push --no-verify origin "$BRANCH_NAME" || return $RET_NG
 }
 
-# 【PROPAGATE】main の変更を下流ブランチへ直接伝播 (main → staging、main → develop)
+# 【PROPAGATE】main の変更を、branches.txt の main 以外の各ブランチへ、マージして push する（例: main → staging、main → develop）
 phase_propagate_downstream() {
     local downstream_branches
     downstream_branches=$(get_branch_list | grep -v '^main$')
@@ -260,7 +302,7 @@ phase_propagate_downstream() {
 }
 
 # ------------------------------------------------------------------------------
-# 6. メインフロー
+# 7. メインフロー
 # ------------------------------------------------------------------------------
 if [[ "${GITHUB_ACTIONS:-false}" != "true" ]]; then
     print_admin_warning --standard "main の Salesforce 組織からメタデータを取得し" "main ブランチへ push します。"

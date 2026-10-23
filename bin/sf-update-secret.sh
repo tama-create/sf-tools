@@ -2,28 +2,61 @@
 # ==============================================================================
 # sf-update-secret.sh - GitHub Secrets の JWT 認証情報を更新する
 # ==============================================================================
-# JWT 認証に使用する GitHub Secrets を対話形式で更新する。
+# GitHub Actions の JWT 認証に使う GitHub Secrets / Variables を、対話形式で更新する（管理者向け）。
+# 対象のリポジトリは、git remote（origin）から決める。
 #
-# 動作:
-#   1. force-* ディレクトリかチェック
-#   2. git remote から対象リポジトリを自動取得
-#   3. 更新する項目を選択（秘密鍵 / コンシューマーキー / ユーザー名 / すべて）
-#   4. 入力値で JWT 接続テストを実施（テスト成功後のみ登録）
-#   5. gh secret set / gh variable set で GitHub Secrets / Variables を更新
+# 【使い方】
+#   bash ~/sf-tools/bin/sf-update-secret.sh     # force-* ディレクトリで実行する
 #
-# 【前提・動作】
-#   Salesforce CLI（sf）は npm 版であること。起動時に check_sf_cli（sf --version の終了コード）で確認し、
-#   0 以外なら、案内を表示して中断する。成功は 24 時間は確認を省略する。
-#   JWT 接続テスト（sf org login jwt）は、一時的なホームフォルダの中で実行する（run_isolated_home）。
-#   そのため、ユーザーの sf に、エイリアスが増えず、同じユーザーの既存の認証も置き換わらない。
+# 【オプション】
+#   -v, --verbose : コマンドの応答（出力）をコンソールにも表示する
+#   -h, --help    : このヘルプを表示して終了する（第 1 引数に指定したときのみ）
+#   ※ そのほかの引数は検査しない（無視する）
 #
-# 【更新対象】
-#   GitHub Secrets（機密）:
-#     SF_PRIVATE_KEY                      （全組織共通）
-#     SF_CONSUMER_KEY_PROD / _STG / _DEV  （組織別）
-#   GitHub Variables（平文）:
-#     SF_USERNAME_PROD     / _STG / _DEV  （組織別）
-#     SF_INSTANCE_URL_PROD / _STG / _DEV  （組織別・変更は稀）
+# 【処理の流れ】
+#   1. sf・gh・git・openssl のどれかが見つからなければ、中断する
+#   2. 管理者向けの警告を表示し、続行の確認（Y/N）を取る。N・q なら中断する（GitHub Actions 上では、表示・確認しない）
+#   3. git remote get-url origin の URL から「オーナー/リポジトリ名」を取り出す（取得できなければ、中断する）
+#   4. gh の認証ユーザーが、リポジトリのオーナーと一致しなければ、中断する（check_gh_owner）
+#      （オーナーが組織で、認証ユーザーがその組織の有効な管理者（admin）なら、続行する。gh から認証ユーザーを取得できないときは、確認しない）
+#   5. sf の確認: sf --version の終了コードが 0 以外なら、案内を表示して中断する（check_sf_cli --cache）
+#   6. 更新する項目をメニューで選ぶ（1〜4 / q）
+#      1) 秘密鍵: 秘密鍵ファイルのパスを入力し、確認（Y/N）のあと、SF_PRIVATE_KEY を登録する（接続テストは行わない）
+#      2) コンシューマーキー: 組織を選び、コンシューマーキーを入力し、接続ユーザー名（SF_USERNAME_<組織> があれば、
+#         それを使うかを確認）・ログイン先を決めて、接続テストに成功したら、SF_CONSUMER_KEY_<組織> を登録する
+#      3) ユーザー名: 組織を選び、コンシューマーキー（接続テスト用。登録しない）と新しい接続ユーザー名を入力し、
+#         ログイン先を決めて、接続テストに成功したら、SF_USERNAME_<組織> を登録する
+#      4) すべて: 確認（Y/N）で Y なら、まず SF_PRIVATE_KEY を登録する（接続テストより前）。続けて、組織ごとに、
+#         コンシューマーキー・接続ユーザー名を入力し、ログイン先を決めて、接続テストに成功したら、
+#         SF_CONSUMER_KEY_<組織>・SF_USERNAME_<組織>・SF_INSTANCE_URL_<組織> を登録する
+#   7. 「JWT Secrets の更新が完了しました。」を表示して終了する（手順 6 の確認で N と答えて、登録しなかったときも表示する）
+#
+# 【前提条件】
+#   - force-* ディレクトリ（フォルダ名が force- で始まる）で実行すること。それ以外では lib/common.sh が終了する（終了コード 1）
+#   - origin が GitHub のリポジトリであること。gh で、そのリポジトリの Secrets / Variables を更新できる権限があること
+#   - Salesforce CLI（sf）は npm 版であること。手順 5 の確認は、成功したら 24 時間は省略する
+#
+# 【補足】
+#   - 組織の選択肢: ./sf-tools/config/branches.txt の有効な行数（コメント行・空行を除く。ファイルが無ければ 1）で決まる
+#       1 行: PROD（main の組織）/ 2 行: + STG（ステージング組織）/ 3 行以上: + DEV（開発組織）
+#   - 秘密鍵ファイル: メニュー 2〜4 は ~/.sf-jwt/<リポジトリ名>/server.key があれば、それを使う（無ければ、パスを入力する）。
+#     メニュー 1 は、常にパスを入力する。先頭の ~ はホームフォルダに展開する。ファイルが無ければ、中断する
+#   - SF_PRIVATE_KEY には、秘密鍵ファイルから CR を除き、1 行の Base64 にした値を登録する
+#   - ログイン先（接続テストと SF_INSTANCE_URL_<組織> に使う URL）: https://login.salesforce.com・
+#     https://test.salesforce.com（Enter の既定）・組織の URL（My Domain）の 3 択。環境変数 SF_INIT_LOGIN_URL_<組織>
+#     （login / test / URL）があれば、質問しない。メニュー 2・3 では、選んだ URL を接続テストにだけ使い、登録しない
+#   - 接続テスト: sf org login jwt と、組織の情報（Organization）の読み取りを、一時的なホームフォルダの中で実行する
+#     （run_isolated_home）。ユーザーの sf に、エイリアスは増えず、同じユーザーの既存の認証も置き換わらない。
+#     失敗したら、中断する（それより前に登録した値は、そのまま残る）
+#   - 本番組織のガード: 接続テストのあと、STG・DEV に、本番組織、または種類を判定できない組織をつなごうとしたら、
+#     登録する前に中断する（PROD で種類を判定できないときは、WARNING を表示して続行する）
+#   - 接続テストで組織の ID を読み取れたら、GitHub Variables の SF_ORG_ID_<組織>・SF_ORG_NAME_<組織>・
+#     SF_ORG_KIND_<組織>・SF_ORG_CHECKED_<組織> も保存する（SF_CONSUMER_KEY などの登録より前。失敗しても WARNING で続行）
+#   - 更新する GitHub Secrets（機密）: SF_PRIVATE_KEY（全組織共通）・SF_CONSUMER_KEY_PROD / _STG / _DEV（組織別）
+#     更新する GitHub Variables（平文）: SF_USERNAME_PROD / _STG / _DEV・SF_INSTANCE_URL_PROD / _STG / _DEV（メニュー 4 のみ）・
+#     SF_ORG_ID / NAME / KIND / CHECKED_<組織>（上記）
+#   - 登録（gh secret set / gh variable set）に失敗したら、中断する
+#   - 入力中に q を押すと、中断する
 # ==============================================================================
 
 # ------------------------------------------------------------------------------
@@ -60,6 +93,7 @@ command -v openssl >/dev/null 2>&1 || die "コマンドが見つかりません:
 
 # ------------------------------------------------------------------------------
 # 4. force-* ディレクトリかチェック + 管理者向け警告
+#    ※ force-* 以外での実行は、lib/common.sh が source の時点で終了させる。下の check_force_dir の戻り値は、使っていない
 # ------------------------------------------------------------------------------
 check_force_dir
 if [[ "${GITHUB_ACTIONS:-false}" != "true" ]]; then

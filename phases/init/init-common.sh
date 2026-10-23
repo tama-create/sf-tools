@@ -2,22 +2,41 @@
 # ==============================================================================
 # init-common.sh - sf-init.sh 専用ヘルパー関数ライブラリ
 # ==============================================================================
-# sf-init.sh の各フェーズスクリプトが source して使用する共通ヘルパー関数集。
-# このファイルは lib/common.sh の source 後に読み込むこと。
+# sf-init.sh・各フェーズのスクリプト（phases/init/）・add_tier.sh・reconnect.sh が source して使う、共通のヘルパー関数集。
+#
+# 【使い方】
+#   source "${SF_TOOLS_DIR}/lib/common.sh"
+#   source "${SF_TOOLS_DIR}/phases/init/init-common.sh"   # lib/common.sh の source 後に読み込むこと
+#   読み込むと、lib/org.sh も source する（このファイルの場所から ../../lib/org.sh）
 #
 # 【提供する関数】
-#   open_browser URL          ... OS を判定してブラウザを開く（lib/common.sh に同名関数あり）
-#   initial_metadata_sync     ... セットアップの最後に、wf-metasync を実行して完了を待ち、同期した内容を、管理者用のクローンに取り込む
-#   generate_jwt_cert         ... JWT 用秘密鍵・証明書を openssl で生成する（生成後に、発行先が空でないことを確認する）
-#   ensure_jwt_cert_subject   ... 既存の証明書の発行先が空なら、秘密鍵はそのままで、証明書だけを作り直す
-#   register_jwt_secret       ... JWT 認証情報を取得・テストして GitHub Secret に登録する
-#                                 テスト失敗時はスキップして続行するか確認する（DE 組織対応）
-#   ensure_sf_tools_branch BR ... 選択した環境（main / development）に合わせて ~/sf-tools の最新化を確認する
-#                                 （ブランチ違い・遅れ・ローカル変更を検出。更新したら die で中断）
+#   open_browser URL          ... OS を判定してブラウザを開く（lib/common.sh で定義済みなら、定義しない）
+#   generate_jwt_cert DIR REPO_NAME
+#                             ... JWT 用の秘密鍵・証明書を openssl で生成する（生成後に、発行先が空でないことを確認する）。
+#                                 両方がすでにあれば、生成せずに ensure_jwt_cert_subject だけを行う
+#   ensure_jwt_cert_subject DIR REPO_NAME
+#                             ... 既存の証明書の発行先が空なら、秘密鍵はそのままで、証明書だけを作り直す
+#   register_jwt_secret ALIAS SUFFIX LABEL KEY_FILE [Y|N]
+#                             ... 従来の接続アプリケーション用。コンシューマー鍵・ユーザー名を手動で入力し、JWT 接続テストのあと、
+#                                 GitHub に登録する。テストに失敗したときは、スキップして登録だけ行うかを確認する
+#   register_jwt_secret_eca ALIAS SUFFIX LABEL KEY_FILE CERT_FILE
+#                             ... 外部クライアントアプリを deploy で作成し、コンシューマー鍵を retrieve で取得して、
+#                                 JWT 接続テストのあと、GitHub に登録する
+#   generate_eca_metadata DIR APP_NAME CONTACT_EMAIL PROFILE_NAME CERT_FILE
+#                             ... 外部クライアントアプリのメタデータ（ソース形式・5 ファイル）を生成する
+#   ensure_sf_tools_branch BR ... ~/sf-tools（SF_TOOLS_DIR）のブランチ違い・遅れ・ローカル変更を確認する。
+#                                 更新したら戻り値 2（呼び出し側が、更新した sf-tools で実行しなおす）
+#   delete_existing_ruleset REPO NAME
+#                             ... 同名の Ruleset があれば削除する（常に戻り値 0）
+#   initial_metadata_sync REPO DIR
+#                             ... セットアップの最後に、wf-metasync を実行して完了を待ち、同期した内容を、管理者用のクローンに取り込む
 #
-# 【lib/common.sh から利用可能な関数】
-#   press_enter [MSG]         ... Enter 待ち（q で中断）
-#   read_or_quit VAR PROMPT   ... 入力受付（q で中断）
+# 【前提条件】
+#   - lib/common.sh を source 済みであること（log / run / die / ask_yn / read_or_quit / press_enter など）
+#   - initial_metadata_sync は、lib/verify-common.sh の関数（verify_dispatch_workflow / verify_gh / verify_run_conclusion /
+#     _sfv_poll）を使う。このファイルは lib/verify-common.sh を source しないため、呼び出し側が source しておくこと
+#   - register_jwt_secret / register_jwt_secret_eca は、登録先のリポジトリとして、変数 REPO_FULL_NAME を使う
+#     （register_jwt_secret_eca は、アプリ名 SF_TOOLS_<REPO_NAME の英数字以外を _> のために、REPO_NAME も使う）
 # ==============================================================================
 
 # Salesforce 組織の接続情報の共通部品（ログイン先の選択・組織の種類の読み取り・本番は main のみ）
@@ -154,13 +173,18 @@ generate_jwt_cert() {
 # 引数:
 #   $1 - org_alias        : Salesforce 組織エイリアス（例: prod, staging, develop）
 #   $2 - suffix           : Secret 名のサフィックス（例: PROD, STG, DEV）
-#   $3 - label            : 表示用ラベル（例: 本番組織）
+#   $3 - label            : 表示用ラベル（例: メイン組織）
 #   $4 - key_file         : 秘密鍵ファイルパス
-#   $5 - is_sandbox_override: "Y"/"N" で対話をスキップ（省略時は対話で確認）
+#   $5 - is_sandbox_override: "Y" = test.salesforce.com / "N" = login.salesforce.com で、ログイン先の選択を省く
+#                           （省略時は org_choose_login_url で選ぶ）
+# 処理: ログイン先の決定 → コンシューマー鍵・ユーザー名の入力 → JWT 接続テスト（失敗時は、スキップして登録だけ行うかを
+#       ask_yn で確認。N / q は die）→ 本番は main のみのガード（org_guard。違反は die）→ 登録
 # 登録する Secrets / Variables:
 #   SF_CONSUMER_KEY_<suffix>  （Secret）
 #   SF_USERNAME_<suffix>      （Variable）
 #   SF_INSTANCE_URL_<suffix>  （Variable）
+#   SF_ORG_ID_<suffix> / SF_ORG_NAME_<suffix> / SF_ORG_KIND_<suffix> / SF_ORG_CHECKED_<suffix>
+#                             （Variable。org_save。組織の情報を読み取れたときだけ）
 # ------------------------------------------------------------------------------
 register_jwt_secret() {
     local org_alias="$1"
@@ -243,8 +267,10 @@ register_jwt_secret() {
 # ensure_sf_tools_branch - 選択した環境に合わせて sf-tools（~/sf-tools）の最新化を確認する
 # ------------------------------------------------------------------------------
 # 【使い方】
-#   ensure_sf_tools_branch main          # 本番環境を選択した場合
-#   ensure_sf_tools_branch development   # 検証環境を選択した場合
+#   ensure_sf_tools_branch main          # 配布版（main）を選択した場合
+#   ensure_sf_tools_branch development   # 開発版（development）を選択した場合
+#   戻り値: 0 = 続行（最新・確認をスキップ・更新しなかった）/ 2 = sf-tools を更新した。
+#           ブランチ違いの確認で N / q のとき、git pull --ff-only が失敗したときは die
 #
 # 【動作】（SF_TOOLS_DIR の Git リポジトリを対象にする）
 #   - Git リポジトリでない / HEAD が分離状態 / origin に接続できない → WARNING で確認をスキップして続行
@@ -452,14 +478,19 @@ ECAEOF
 #   register_jwt_secret_eca ORG_ALIAS SUFFIX LABEL KEY_FILE CERT_FILE
 #
 # 【処理フロー】
-#   1. 本番 / Sandbox を確認して接続 URL を決める
+#   1. ログイン先の URL を選ぶ（org_choose_login_url。3 択: login.salesforce.com / test.salesforce.com / 組織の URL。
+#      Enter は test.salesforce.com。SF_INIT_LOGIN_URL_<suffix> があれば質問しない）
 #   2. sf org login web（ブラウザでログイン。接続ユーザーは管理者権限のユーザー）
-#      成否は sf の終了コードで判定する（失敗・時間切れ・ブラウザを閉じた場合は、非 0 になり中断する。一時エイリアスは sf-tools-<suffix>）
-#   3. ログインしたユーザー名と、そのプロファイル名（表示名）を取得する
-#   4. generate_eca_metadata でメタデータを生成し、sf project deploy でアプリを作成する
-#   5. sf project retrieve でコンシューマー鍵を自動取得する（値はログに出さない）
-#   6. JWT 接続テスト（反映待ちのため、成功するまでリトライする）
-#   7. SF_CONSUMER_KEY_<suffix>（Secret）/ SF_USERNAME_<suffix> / SF_INSTANCE_URL_<suffix>（Variable）を登録
+#      成否は sf の終了コードで判定する（失敗・時間切れ・ブラウザを閉じた場合は、非 0 になり die。一時エイリアスは sf-tools-<suffix>）
+#   3. ログインしたユーザー名を取得する（取得できなければ die）。続けて、組織の種類を読み取り（org_read_info）、
+#      本番は main のみのガード（org_guard）を行う（違反・種類を判定できない組織を main 以外につなぐときは die。
+#      アプリを作る deploy の前に行う）。最後に、接続ユーザーのプロファイル名（表示名）を取得する（取得できなければ die）
+#   4. generate_eca_metadata でメタデータを生成し、sf project deploy でアプリを作成する（失敗は die）
+#   5. sf project retrieve でコンシューマー鍵を自動取得する（値はログに出さない。取得できなければ die）
+#   6. JWT 接続テスト（反映待ちのため、成功するまでリトライする）。最後まで失敗したときは、スキップして登録だけ行うかを
+#      ask_yn で確認する（N / q は die）。アプリは、手順 4 で作成済みのまま残る
+#   7. SF_CONSUMER_KEY_<suffix>（Secret）/ SF_USERNAME_<suffix> / SF_INSTANCE_URL_<suffix>（Variable）を登録し、
+#      org_save で SF_ORG_ID_* / SF_ORG_NAME_* / SF_ORG_KIND_* / SF_ORG_CHECKED_*（Variable。読み取れたときだけ）を登録
 #
 # 【備考】
 #   ・sf の認証はユーザー名単位で、エイリアスは別名にすぎない。ログイン用の一時エイリアスは

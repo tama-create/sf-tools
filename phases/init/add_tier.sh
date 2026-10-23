@@ -2,22 +2,48 @@
 # ==============================================================================
 # add_tier.sh - ブランチ tier の追加（staging / develop）
 # ==============================================================================
-# 既存プロジェクトに staging または develop 階層を追加する。
-# sf-init.sh --add-tier から呼び出される。
+# 既存のプロジェクト（force-*）に、段階 staging または develop を追加する。
+# Salesforce 組織への接続（Secrets / Variables の登録）を先に行い、そのあとブランチを作り、branches.txt の変更を PR にする。
 #
-# 【処理フロー】
-#   1. .sf-init.env を読み込んでプロジェクト情報を取得
-#   2. 追加 tier のバリデーション（すでに存在する場合はエラー）
-#   3. Salesforce 組織に接続する（先に行う）: ログイン先の選択 → ログイン → 種類の読み取り → 本番は main のみのガード
-#      → 外部クライアントアプリの自動作成 → JWT 認証情報（SF_CONSUMER_KEY_xxx / SF_USERNAME_xxx / SF_INSTANCE_URL_xxx）を登録
-#      （--legacy-connected-app のときは、コンシューマー鍵・ユーザー名を手動で入力）。接続できなければ、何も変更しない
-#   4. GitHub にブランチを作成
-#   5. 作業用ブランチで branches.txt を更新し、PR を作成する（main へは、直接 push しない）。
-#      終わったら、実行前のブランチ（管理者用のクローンでは admin）に戻る
+# 【使い方】
+#   force-* ディレクトリの中で sf-init.sh --add-tier <staging|develop> を実行する。sf-init.sh が、環境変数 ADD_TIER を
+#   export して、このスクリプトを呼び出す。
 #
-# 【登録する Secrets / Variables】
-#   staging 追加時: SF_CONSUMER_KEY_STG（Secret）/ SF_USERNAME_STG / SF_INSTANCE_URL_STG（Variable）
-#   develop 追加時: SF_CONSUMER_KEY_DEV（Secret）/ SF_USERNAME_DEV / SF_INSTANCE_URL_DEV（Variable）
+# 【処理の流れ】
+#   1. ADD_TIER が空なら die。カレントのフォルダ名が force- で始まらなければ die
+#   2. sf-tools/config/.sf-init.env があれば source する。なければ origin の URL から REPO_FULL_NAME・REPO_NAME を求める
+#   3. ADD_TIER を確認する（staging / develop 以外は die）。branches.txt に同じ名前の行があれば die。
+#      develop は、branches.txt に staging の行がなければ die
+#   4. 管理者向けの警告（print_admin_warning）→ check_gh_owner → ask_yn（N / q は die）。GITHUB_ACTIONS=true でも省略しない
+#   5. git status --porcelain が空でなければ（未コミットの変更があれば）die
+#   6. Salesforce 組織に接続する。~/.sf-jwt/<REPO_NAME>/server.key がなければ die
+#        - 既定: server.crt がなければ die。register_jwt_secret_eca（init-common.sh）で、ログイン先の選択 → ブラウザで
+#          ログイン → 組織の種類の読み取り → 本番は main のみのガード → 外部クライアントアプリの deploy →
+#          コンシューマー鍵の retrieve → JWT 接続テスト → 登録
+#        - SF_INIT_LEGACY_CONNECTED_APP=1（--legacy-connected-app）: register_jwt_secret（init-common.sh。
+#          コンシューマー鍵・ユーザー名を手動で入力）
+#   7. 実行前のブランチを記録し（取得できなければ main）、git checkout main。origin に ADD_TIER のブランチがあれば
+#      作らない。なければ、ローカルの main から作って push --no-verify -u する（ローカルの main は pull しない）
+#   8. 作業用ブランチ system-add-tier-<ADD_TIER>-<YYYYMMDDHHMMSS> を作り、branches.txt の末尾に ADD_TIER を追記して、
+#      commit --no-verify → push --no-verify -u → gh pr create --base main（main へは、直接 push しない）
+#   9. 実行前のブランチ（管理者用のクローンでは admin）に戻る
+#   手順 7〜9 の各操作は、失敗したら die
+#
+# 【前提条件】
+#   - force-* ディレクトリ（リポジトリのクローン）の中で実行すること
+#   - ~/.sf-jwt/<REPO_NAME>/server.key（既定では server.crt も）。sf-init Phase 10 が作る
+#   - gh の認証ユーザーが、リポジトリのオーナー（組織では、その組織の有効な管理者）であること（check_gh_owner）
+#
+# 【補足】
+#   - 登録する Secrets / Variables（ADD_TIER が staging なら接尾辞 STG、develop なら DEV）:
+#       SF_CONSUMER_KEY_<接尾辞>（Secret）/ SF_USERNAME_<接尾辞>・SF_INSTANCE_URL_<接尾辞>（Variable）/
+#       SF_ORG_ID_<接尾辞>・SF_ORG_NAME_<接尾辞>・SF_ORG_KIND_<接尾辞>・SF_ORG_CHECKED_<接尾辞>
+#       （Variable。組織の情報を読み取れたときだけ）
+#   - 手順 6 で die したときは、ブランチと branches.txt は変更しない。ただし、外部クライアントアプリは JWT 接続テストの
+#     前に組織へ deploy するため、組織に残る。JWT 接続テストに失敗しても、ask_yn でスキップ（Y）を選ぶと、
+#     Secrets / Variables を登録する。いずれも、自動では元に戻さない
+#   - branches.txt の変更は、PR をマージすると main に入る（段階として有効になる）
+#   - ログは ~/sf-tools/logs/sf-init.log に、実行ごとに新しく書く（LOG_MODE=NEW。前回の内容は消える）
 # ==============================================================================
 
 # SF_TOOLS_DIR は sf-init.sh（司令塔）から export される
@@ -163,7 +189,7 @@ run git checkout -b "$PR_BRANCH" || die "作業用ブランチの作成に失敗
 TMP_BRANCH_FILE="${BRANCHES_FILE}.tmp"
 {
     if [[ -f "$BRANCHES_FILE" ]]; then
-        # 既存コメント行を保持
+        # 既存の行（コメント・ブランチ）を、すべてそのまま保持する
         while IFS= read -r line || [[ -n "$line" ]]; do
             line="${line%$'\r'}"
             echo "$line"

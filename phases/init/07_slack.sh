@@ -2,12 +2,25 @@
 # ==============================================================================
 # 07_slack.sh - Phase 7: Slack 連携の設定
 # ==============================================================================
-# Slack App を作成して Bot Token と チャンネル ID を GitHub に登録する。
+# Slack App の作成手順を案内し、Bot Token とチャンネル ID を GitHub に登録する。
 #
-#   7-1. Slack App 作成・Bot Token 取得・SLACK_BOT_TOKEN 登録（Secret）
-#   7-2. SLACK_CHANNEL_ID 登録（Variable）
-#        通知先は全員が参加する共有チャンネル（C… / G…）。DM（D…）・ユーザー（U…）は拒否して再入力
-#   7-3. Bot をチャンネルに招待
+# 【使い方】
+#   sf-init.sh が、管理者用の作業フォルダ（admin）をカレントにして、bash で呼び出す。
+#
+# 【処理の流れ】
+#   7-1. ブラウザで https://api.slack.com/apps を開き、App の作成手順（App Name: sf-notify-<PROJECT_NAME>・
+#        Bot Token のスコープ: chat:write）を表示して、Enter を待つ（q は die）。
+#        Bot User OAuth Token を入力させ（read_or_quit: 入力は画面に表示される。空 Enter は再入力。q は die。
+#        形式は確認しない）、Secret SLACK_BOT_TOKEN に登録する（失敗は die）
+#   7-2. チャンネル ID を入力させる。^[CG][A-Z0-9]{8,}$ に合わなければ WARNING を表示して再入力
+#        （通知先は全員が参加する共有チャンネル（C… / G…）。DM（D…）・ユーザー（U…）は受け付けない）。
+#        Variable SLACK_CHANNEL_ID に登録する（失敗は die）
+#   7-3. 通知先のチャンネルで /invite @sf-notify-<PROJECT_NAME> を実行するよう案内し、Enter を待つ（q は die）。
+#        招待は利用者が行う（このスクリプトは、招待も、招待の確認もしない）
+#
+# 【前提条件】
+#   - Phase 2 が書き出した状態ファイル（REPO_FULL_NAME・PROJECT_NAME。空なら die）
+#   - 環境変数 SF_TOOLS_DIR（sf-tools のルート。sf-init.sh が export する）
 # ==============================================================================
 
 # SF_TOOLS_DIR は sf-init.sh（司令塔）から export される
@@ -35,7 +48,7 @@ SF_INIT_ENV_FILE="${SF_INIT_ENV_FILE:-${PWD}/.sf-init.env}"
 # ------------------------------------------------------------------------------
 log "HEADER" "Slack 連携の設定"
 
-# 8-1. Bot Token 取得
+# 7-1. Bot Token 取得・SLACK_BOT_TOKEN 登録
 echo ""
 echo "  ブラウザで Slack API ページを開きます。"
 echo "  以下の手順で Bot Token を取得してください:"
@@ -63,7 +76,7 @@ echo "$slack_token" | run gh secret set SLACK_BOT_TOKEN -R "$REPO_FULL_NAME" \
     || die "SLACK_BOT_TOKEN の登録に失敗しました。"
 log "SUCCESS" "SLACK_BOT_TOKEN を登録しました。"
 
-# 8-2. チャンネル ID 登録
+# 7-2. チャンネル ID 登録
 echo ""
 echo "  通知先 Slack チャンネルの ID を入力します。"
 echo ""
@@ -88,7 +101,7 @@ echo "$channel_id" | run gh variable set SLACK_CHANNEL_ID -R "$REPO_FULL_NAME" \
     || die "SLACK_CHANNEL_ID の登録に失敗しました。"
 log "SUCCESS" "SLACK_CHANNEL_ID を登録しました。"
 
-# 8-3. Bot 招待案内
+# 7-3. Bot 招待の案内（招待は利用者が行う）
 echo ""
 log "WARNING" "【重要】Slack チャンネルへの Bot 招待が必要です"
 echo "  通知先チャンネルで以下のコマンドを実行してください:"

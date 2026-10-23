@@ -2,39 +2,75 @@
 # ==============================================================================
 # sf-release.sh - デプロイ/検証スクリプト
 # ==============================================================================
-# ターゲットファイルからマニフェスト(XML)を自動生成し、
-# Salesforce 組織へのリリース（または検証）を実行します。
+# ターゲットファイル（deploy-target.txt / remove-target.txt）からマニフェスト（package.xml /
+# destructiveChanges.xml）を生成し、sf project deploy start で Salesforce 組織へ検証（既定）またはリリースする。
 #
-# 【前提】
-#   Salesforce CLI（sf）は npm 版であること。起動時に check_sf_cli（sf --version の終了コード）で確認し、
-#   0 以外なら、案内を表示して中断する。成功は 24 時間は確認を省略する（GitHub Actions 上では省略）。
-#
-# 【マニフェストの生成】
-#   [files]（パス指定）と [members]（種別名:メンバー名）は、別々に sf project generate manifest で生成し、1 つの
-#   package.xml に統合する（両方を同時に渡すと、sf CLI は、共通部分だけ（重なりがなければ空）を返すため）。
-#   統合後にメンバーが 1 つもなければ、エラーで中断する（「変更なし」の成功扱いで、見落とさないため）。
-#
-# 【存在しない削除対象を許す指示（# @ignore-missing）】
-#   remove-target.txt に、`# @ignore-missing` の行（コメント行の形）があるときだけ、sf project deploy start に
-#   --ignore-warnings を付ける。削除対象が組織に存在しなくても、エラーにしない（「No ApexClass named: X found」を、
-#   警告として扱う）。後始末（sf-init.sh --verify --cleanup）のように、どこまで消えているか分からない削除を、何度でも
-#   実行できるようにするための指示。指示がなければ、これまでどおり、存在しない対象は、エラーになる
-#   （綴りの誤りなどを、見落とさないため。通常のリリース・削除には、付けないこと）。
-#
-# 【共有環境の保護】
-#   接続先のエイリアスが予約名（prod / staging / develop / main）の組織（共有環境）には、
-#   ローカルからは実行できません（dry-run を含む）。リリースは、GitHub にコミットし、
-#   レビューを通して、GitHub Actions で行います。個人用の Sandbox / Developer Edition / Scratch Org は、
-#   ローカルから実行できます。予約名以外の名前に付け替えた場合は、動作を保証しません。
+# 【使い方】
+#   sf-release.sh [オプション]
 #
 # 【オプション】
-#   デフォルト          : 最も安全な「検証モード (Dry-Run)」で実行します。
-#   -r, --release       : 実際に組織へのリリースを実行します。
-#   -n, --no-open       : ブラウザを開かずに実行します（CI/CD 等）。
-#   -f, --force         : コンフリクト検知を無効化して強制上書きします。
-#   -t, --target ALIAS  : 接続先組織のエイリアスを明示的に指定します。
-#   -j, --json          : sf コマンドの出力を JSON 形式で表示します。
-#   -v, --verbose       : コマンドの応答（出力）をコンソールにも表示します。
+#   （指定なし）          : 検証モード（sf project deploy start --dry-run）で実行する。
+#   --validate, --dry-run : 検証モードを明示する（指定なしと同じ）。
+#   -r, --release         : 実際に組織へリリースする（--dry-run を付けない）。
+#   -n, --no-open         : 組織のデプロイ状況の画面をブラウザで開かない（CI/CD 等）。
+#   -f, --force           : sf project deploy start に --ignore-conflicts を付け、コンフリクト検知を無効にして上書きする。
+#   -t, --target ALIAS    : 接続先組織のエイリアスを指定する。値がない、または値が「-」で始まる場合は中断する。
+#                           --target=ALIAS の形式には対応しない（不明なオプションとして中断する）。
+#   -j, --json            : このスクリプトが実行する sf コマンド（manifest 生成・org open・deploy start）に --json を付ける。
+#   -v, --verbose         : コマンドの応答（出力）をコンソールにも表示する（既定はログファイルのみ）。
+#   -h, --help            : このヘルプを表示して終了する。
+#   上記以外のオプション・引数は、エラーで中断する。
+#
+# 【処理の流れ】
+#   1. sf の終了コードを check_sf_cli --cache で確認する（【前提条件】参照）。
+#   2. 接続先組織を決める。優先順位: -t の値 > 環境変数 SF_TARGET_ORG > sf org display の alias
+#      （sf org display は既定で最大 3 回試行）。決まらなければ中断する。
+#   3. GitHub Actions 外（GITHUB_ACTIONS が true 以外）で、接続先が予約名（prod / staging / develop / main）なら、
+#      検証モードでも中断する（【補足】の「共有環境の保護」参照）。
+#   4. GitHub Actions 外・--release 指定・SF_DEPLOY_CONFIRMED が 1 以外のとき、確認（Y/N/q）を表示する。
+#      N / q なら中断する。-f も指定されていれば、確認の前に上書きの警告を表示する。
+#   5. sf-tools/release/branch_name.txt からブランチ名を読み、sf-tools/release/<ブランチ名>/ を対象にする。
+#   6. deploy-target.txt / remove-target.txt の存在を確認し、sf-check.sh で構文を検査する。エラーなら中断する。
+#   7. 既存の package.xml / destructiveChanges.xml を削除してから、マニフェストを生成する（【補足】参照）。
+#      両方のリストに対象が 1 件もなければ、何もせず終了コード 0 で終了する。
+#   8. deploy-target.txt の [files] にある .cls のうち、ファイル中に「@isTest」（大文字小文字を区別しない）を
+#      含むものをテストクラスとして検出し、--test-level RunSpecifiedTests と --tests <クラス名>（クラスごと）を付ける。
+#      検出されなければ、--test-level を付けない。
+#   9. -n がなければ、sf org open で「lightning/setup/DeployStatus/home」を開き、5 秒待つ。
+#  10. sf project deploy start --target-org <組織> --manifest package.xml を実行する。
+#      destructiveChanges.xml があれば --pre-destructive-changes で渡す（削除はデプロイより先に行われる）。
+#      検証モードなら --dry-run を付ける。失敗すれば中断する。
+#
+# 【前提条件】
+#   - force-* ディレクトリ（プロジェクトのルート）で実行すること。ログは ./sf-tools/logs/sf-release.log（毎回上書き）。
+#   - Salesforce CLI（sf）は npm 版であること。起動時に check_sf_cli（sf --version の終了コード）で確認し、
+#     0 以外なら、案内を表示して中断する。成功は 24 時間は確認を省略する（GitHub Actions 上・sf が未インストールの
+#     場合は確認しない）。
+#   - sf-tools/release/branch_name.txt と、sf-tools/release/<ブランチ名>/ の deploy-target.txt・remove-target.txt が
+#     存在すること（いずれかがなければ中断する）。
+#
+# 【補足】
+#   - マニフェストの生成: リストの行は、[files] セクション（既定）なら --source-dir <パス>、[members] セクションなら
+#     --metadata <種別名:メンバー名> として扱う（# で始まる行と空行は無視）。[files] と [members] は、別々に
+#     sf project generate manifest で生成し、1 つの XML に統合する（両方を同時に渡すと、sf CLI は、共通部分だけ
+#     （重なりがなければ空）を返すため）。統合後にメンバーが 1 つもなければ、エラーで中断する（「変更なし」の
+#     成功扱いで、見落とさないため）。
+#   - deploy-target.txt が空で remove-target.txt にだけ対象があるときは、メンバーのない package.xml（version 60.0）を
+#     作成し、削除だけを行う。
+#   - 存在しない削除対象を許す指示（# @ignore-missing）: remove-target.txt に、`# @ignore-missing` で始まる
+#     コメント行（行頭・# の後の空白は可）があるときだけ、sf project deploy start に --ignore-warnings を付ける。
+#     削除対象が組織に存在しなくても、エラーにしない（「No ApexClass named: X found」を、警告として扱う）。
+#     後始末（sf-init.sh --verify --cleanup）のように、どこまで消えているか分からない削除を、何度でも実行できる
+#     ようにするための指示。--ignore-warnings はデプロイ全体に付くため、削除以外の警告も、エラーにならない。
+#     指示がなければ、存在しない対象は、エラーになる（綴りの誤りなどを、見落とさないため。通常のリリース・削除には、
+#     付けないこと）。
+#   - 共有環境の保護: 接続先のエイリアスが予約名（prod / staging / develop / main）の組織（共有環境）には、
+#     ローカルからは実行できない（dry-run を含む）。リリースは、GitHub にコミットし、レビューを通して、
+#     GitHub Actions で行う。個人用の Sandbox / Developer Edition / Scratch Org は、ローカルから実行できる。
+#     予約名以外の名前に付け替えた場合は、動作を保証しない。
+#   - -h / --help は、1 番目の引数なら、他の処理の前にヘルプを表示して終了する。2 番目以降なら、手順 1 の後の
+#     引数の解析で、そこに到達した時点で表示して終了する（それより前の引数がエラーなら、そのエラーで中断する）。
+#   - 終了コード: 成功（対象なしを含む）は 0。中断・失敗は 1。
 # ==============================================================================
 
 # ------------------------------------------------------------------------------
@@ -160,7 +196,8 @@ log "INFO" "リリース処理開始 (Target: ${TARGET_ORG}, Branch: ${BRANCH_NA
 # 7. フェーズ定義
 # ------------------------------------------------------------------------------
 
-# 【CHECK】対象リストの準備（ディレクトリおよび雛形の自動生成）
+# 【CHECK】対象リストの確認（リリース用ディレクトリを mkdir -p し、deploy-target.txt / remove-target.txt が
+#   なければ中断する（雛形は作らない）。続けて sf-check.sh で構文を検査する）
 phase_check_target() {
     local created=0
     run mkdir -p "$RELEASE_DIR"
@@ -342,7 +379,7 @@ phase_release() {
         log "INFO" "組織へのリリースを実行します！"
     fi
 
-    # インタラクティブ実行時はブラウザで進捗画面を自動表示
+    # -n / --no-open がなければ、ブラウザで進捗画面を表示する（対話かどうかは判定しない）
     if [[ "$OPEN_BROWSER" -eq 1 ]]; then
         log "INFO" "リリース状況画面をブラウザで表示します..."
         run sf org open --target-org "$TARGET_ORG" --path "lightning/setup/DeployStatus/home" "${JSON_FLAG[@]}"

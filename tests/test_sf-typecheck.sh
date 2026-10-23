@@ -102,6 +102,18 @@ test_typecheck_full_run_ok() {
     teardown "$td" "$mb" "$mh"
 }
 
+# 回帰: LWC のサンプル（lwc/sfToolsE2eMinLwc/。コンポーネント名は先頭が小文字）が、安全の確認で中断していた
+test_typecheck_lwc_passes_safety_check() {
+    local td mb mh out rc; setup_std_env td mb mh
+    create_mock_sf "$mb"; _create_fake_sf "$mb"
+    local res="$td/result.txt"
+    out=$(FAKE_SF_LOG="$mb/fake.log" SF_TYPECHECK_CMD="bash $mb/fakesf"         MOCK_SF_ORG_INFO='{"status":0,"result":{"records":[{"Id":"00D000000000001AAA","Name":"Dev","IsSandbox":false,"OrganizationType":"Developer Edition","TrialExpirationDate":null}]}}'         _run_typecheck "$mb" "$mh" "$td" --org mydev --only LightningComponentBundle --out "$res" -y); rc=$?
+    assert_exit_ok "$rc" "LWC のサンプル → 安全の確認で中断せず、正常終了"
+    assert_file_contains "$res" "$(printf 'LightningComponentBundle	ok	ok')" "結果の表: LightningComponentBundle が release ok / delete ok"
+    assert_file_contains "$mb/fake.log" "--target-org mydev" "LWC のサンプルを、指定した組織へリリースした"
+    teardown "$td" "$mb" "$mh"
+}
+
 test_typecheck_delete_failure_reported() {
     local td mb mh out; setup_std_env td mb mh
     create_mock_sf "$mb"; _create_fake_sf "$mb"
@@ -201,6 +213,7 @@ test_typecheck_refuses_reserved_alias
 test_typecheck_refuses_missing_org_and_actions
 test_typecheck_refuses_production_and_unknown
 test_typecheck_full_run_ok
+test_typecheck_lwc_passes_safety_check
 test_typecheck_delete_failure_reported
 test_typecheck_coverage
 test_typecheck_warns_first

@@ -2,26 +2,36 @@
 # ==============================================================================
 # 06_pat_token.sh - Phase 6: PAT_TOKEN の設定
 # ==============================================================================
-# GitHub Personal Access Token（Classic）を GitHub Secrets に登録する。
+# GitHub Personal Access Token（Classic）を検証して、リポジトリの Secret PAT_TOKEN に登録する。
 # ワークフローがブランチ保護をバイパスして push するために必要。
 #
-# 【処理の流れ】
-#   1. この Token を作るべきアカウント（リポジトリのオーナー・組織の管理者）を表示する
-#   2. 手順（やることは 3 つ）を表示し、ブラウザで Token の作成ページを、すぐに開く
-#        Note（sf-metasync-<プロジェクト名>）・Scopes（repo, workflow）・Expiration（No expiration）は、URL で入力済み。
-#        「発行済みの Token があるか」は、聞かない（Token の値は、作成直後の 1 回しか表示されず、利用者は覚えていないため）。
-#        保存してある Token があれば、それを貼り付けてもよい
-#   3. Token を貼り付ける（画面には表示されない。表示されない旨を、先に伝える。空 Enter は無視）
-#   4. Token を GitHub に問い合わせて検証する（最大 3 回まで貼り直し。失敗の理由と、直し方を、表示する）
-#        - Token が有効であること
-#        - スコープに repo・workflow があること（Classic の PAT。Fine-grained は、スコープを確認できないため不可）
-#        - force-* のリポジトリの管理者（オーナー・組織の管理者）の Token であること
-#   5. GitHub Secrets（PAT_TOKEN）に登録する
+# 【使い方】
+#   sf-init.sh が、管理者用の作業フォルダ（admin）をカレントにして、bash で呼び出す。
 #
-# 【備考】
-#   生成した PAT_TOKEN_VALUE は .sf-init.env に書き出し、Phase 8 で使用する（push 後に削除される）。
-#   Token は、コマンドの引数に含めない（環境変数 GH_TOKEN で gh に渡す。ログ・プロセス一覧に残さないため）。
-#   PAT_TOKEN は、force-*（プロジェクト側）のリポジトリのための Token であり、sf-tools（公開リポジトリ）とは関係ない。
+# 【処理の流れ】
+#   1. この Token を作るアカウント（リポジトリのオーナー。組織のリポジトリでは、その組織の管理者）を表示する
+#   2. 手順（やることは 3 つ）を表示し、ブラウザで Token の作成ページを開く
+#        Note（sf-metasync-<PROJECT_NAME>）・Scopes（repo, workflow）・Expiration（No expiration）は、URL のパラメータで入力済み。
+#        「発行済みの Token があるか」は聞かない（Token の値は、作成直後の 1 回しか表示されないため）。
+#        保存してある Token を貼り付けてもよい
+#   3. Token を貼り付ける（read_secret: 値は表示せず、1 文字ごとに * を表示する。空 Enter は再入力。q だけの入力は die）
+#   4. Token を GitHub に問い合わせて検証する。使えない Token なら、理由と直し方を表示して、貼り直させる
+#      （貼り付けは合計 3 回まで。3 回とも使えなければ die）
+#        - gh api user でログイン名を取得できること（Token が有効であること）
+#        - 応答に X-OAuth-Scopes ヘッダーがあること（Classic の PAT。Fine-grained は、このヘッダーがないため不可）
+#        - スコープに repo と workflow があること
+#        - repos/{REPO_FULL_NAME} の permissions.admin が true であること（リポジトリの管理者の Token）
+#   5. Secret PAT_TOKEN に登録する（失敗は die）
+#   6. PAT_TOKEN_VALUE を状態ファイルに追記する（Phase 8 の push で使う）
+#
+# 【前提条件】
+#   - Phase 2 が書き出した状態ファイル（REPO_FULL_NAME・PROJECT_NAME。空なら die）
+#   - 環境変数 SF_TOOLS_DIR（sf-tools のルート。sf-init.sh が export する）
+#
+# 【補足】
+#   - Token は、コマンドの引数に含めない（検証は環境変数 GH_TOKEN で gh に渡し、登録は標準入力で渡す）
+#   - PAT_TOKEN_VALUE の行は、Phase 8 が push のあとに状態ファイルから削除する
+#   - PAT_TOKEN は、force-*（プロジェクト側）のリポジトリのための Token であり、sf-tools（公開リポジトリ）とは関係ない
 # ==============================================================================
 
 # SF_TOOLS_DIR は sf-init.sh（司令塔）から export される
@@ -122,7 +132,7 @@ echo "  （以前に作って、保存してある Token があれば、それ�
 echo ""
 open_browser "$PAT_NEW_URL"
 
-# Token の貼り付けと検証（使えない Token は、3 回まで貼り直せる）
+# Token の貼り付けと検証（貼り付けは合計 3 回まで。3 回とも使えなければ die）
 PAT_TOKEN_VALUE=""
 attempt=0
 while true; do

@@ -2,17 +2,34 @@
 # ==============================================================================
 # sf-upgrade.sh - 開発ツール一括アップデートスクリプト
 # ==============================================================================
-# sf-install.sh から自動呼び出しされるほか、手動でも実行できます。
+# npm・Salesforce CLI（sf）・Git（Windows の Git Bash のみ）を、最新版にアップデートする。
+# sf-install.sh が、前回から 24 時間以上たっているときに、バックグラウンドで自動で呼び出す（引数なし。標準出力は捨てる）。
+# 手動でも実行できる。
 #
-# 【処理の流れ】
-#   1. npm を最新バージョンにアップデート
-#   2. Salesforce CLI (sf) をアップデート
-#        npm 版（npm ls -g @salesforce/cli が成功）: npm install -g @salesforce/cli@latest
-#        それ以外（公式インストーラー・pkg など）  : sf update
-#   3. Git をアップデート（Windows のみ。最後に実行 ※アップデート時は GUI インストーラーが起動）
+# 【使い方】
+#   bash ~/sf-tools/bin/sf-upgrade.sh [オプション]     # force-* ディレクトリで実行する
 #
 # 【オプション】
-#   -v, --verbose       : コマンドの応答（出力）をコンソールにも表示します
+#   -v, --verbose : コマンドの応答（出力）をコンソールにも表示する
+#   -h, --help    : このヘルプを表示して終了する（第 1 引数に指定したときのみ）
+#   ※ そのほかの引数は検査しない（無視する）
+#
+# 【処理の流れ】
+#   1. npm をアップデートする: npm install -g npm@latest（npm が無ければ、WARNING を表示してスキップ）
+#   2. Salesforce CLI（sf）をアップデートする（sf が無ければ、WARNING を表示してスキップ）
+#        npm 版（npm があり、npm ls -g @salesforce/cli --depth=0 が成功）: npm install -g @salesforce/cli@latest
+#        それ以外（公式インストーラー・pkg など）                           : sf update
+#   3. Git をアップデートする（最後に実行）
+#        Windows の Git Bash（$OSTYPE が msys* / mingw* / cygwin*）: git update-git-for-windows --yes
+#        それ以外（macOS・Linux・WSL）: 実行しない（パッケージマネージャーで行うよう INFO を表示する）
+#
+# 【前提条件】
+#   - force-* ディレクトリ（フォルダ名が force- で始まる）で実行すること。それ以外では lib/common.sh が終了する
+#     （終了コード 1。SF_INIT_MODE=1 のときは、確認しない）
+#
+# 【補足】
+#   - どの手順が失敗しても、WARNING を表示して続行し、最後に「すべてのアップデートが完了しました」を表示する
+#   - ログ: ./sf-tools/logs/sf-upgrade.log（実行ごとに作り直す）
 # ==============================================================================
 
 # ------------------------------------------------------------------------------

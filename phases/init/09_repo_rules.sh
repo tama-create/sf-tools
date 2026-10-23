@@ -2,18 +2,37 @@
 # ==============================================================================
 # 09_repo_rules.sh - Phase 9: GitHub リポジトリ設定・Ruleset の適用
 # ==============================================================================
-# 新規リポジトリの基本設定と Ruleset を GitHub API で設定する。
+# リポジトリの基本設定と Ruleset（protect-main / protect-staging）を、GitHub API で設定する。
+# 開発版（SF_TOOLS_BRANCH=development）のときは、Variable SF_TOOLS_BRANCH も登録する。
 #
-#   1. リポジトリ基本設定（マージ設定・デフォルトブランチ等）
-#   2. Ruleset: protect-main の作成（削除禁止・強制プッシュ禁止・必須チェック）
-#   3. Ruleset: protect-staging の作成（同上）
+# 【使い方】
+#   sf-init.sh が、管理者用の作業フォルダ（admin）をカレントにして、bash で呼び出す。
 #
-# 無料プランでは Ruleset が利用できない場合があるため、失敗は WARNING 扱い。
+# 【処理の流れ】
+#   1. gh repo edit で基本設定を適用する（失敗は WARNING）
+#        既定のブランチ main・Issues / Projects / Wiki を有効・Discussions を無効・
+#        マージコミット / スカッシュ / リベースのマージをすべて許可・マージ後のブランチの自動削除を無効
+#   2. Ruleset protect-main: 同名の Ruleset を削除してから（delete_existing_ruleset）、作成する（失敗は WARNING）
+#        対象      : refs/heads/main
+#        ルール    : 削除の禁止・強制プッシュの禁止（non_fast_forward）・必須のステータスチェック 4 つ
+#                    （validate / 対象ファイル確認・validate / デプロイ検証・sequence / 対象ファイル確認・
+#                    sequence / 順序チェック。integration_id 15368 = GitHub Actions。strict なし）
+#        バイパス  : RepositoryRole の ID 5（リポジトリの Admin ロール）。bypass_mode は always
+#   3. Ruleset protect-staging: 対象を refs/heads/staging にして、手順 2 と同じ内容で作成する。
+#      ブランチ構成（BRANCH_COUNT）に関係なく作成する
+#   4. SF_TOOLS_BRANCH が development のときだけ、Variable SF_TOOLS_BRANCH=development を登録する（失敗は WARNING）。
+#      main のときは、登録しない
 #
-# 【既存 Ruleset の削除（再実行の冪等性確保）】
-#   delete_existing_ruleset（init-common.sh）が、同名の Ruleset の ID を取得して削除する。
-#   ID は数字のときだけ有効とみなす（gh api が失敗すると、エラーの応答本文が標準出力に出るため）。
-#   確認できなかった場合は WARNING を出して削除をスキップし、削除の成否はそのまま表示する。
+# 【前提条件】
+#   - Phase 2 が書き出した状態ファイル（REPO_FULL_NAME。空なら die。SF_TOOLS_BRANCH は、未設定なら main として扱う）
+#   - 環境変数 SF_TOOLS_DIR（sf-tools のルート。未設定のときは、このファイルの 2 つ上のフォルダ）
+#
+# 【補足】
+#   - 失敗を WARNING にする理由: 無料プランの Private リポジトリなど、Ruleset が使えない場合があるため。
+#     手順 1〜4 のどれが失敗しても、終了コードは 0
+#   - delete_existing_ruleset（init-common.sh）: 同名の Ruleset の ID を取得して削除する（再実行のため）。
+#     ID は数字のときだけ有効とみなす（gh api が失敗すると、エラーの応答本文が標準出力に出るため）。
+#     確認できなかった場合は WARNING を表示して削除しない。削除の成否は、そのまま表示する
 # ==============================================================================
 
 # SF_TOOLS_DIR は sf-init.sh（司令塔）から export される
@@ -158,7 +177,7 @@ else
     log "WARNING" "protect-staging の作成に失敗しました（無料プランでは利用不可の場合があります）。"
 fi
 
-# --- 4. SF_TOOLS_BRANCH GitHub Variable 登録（検証環境のみ）---
+# --- 4. SF_TOOLS_BRANCH GitHub Variable 登録（開発版 = SF_TOOLS_BRANCH=development のときのみ）---
 if [[ "${SF_TOOLS_BRANCH:-main}" == "development" ]]; then
     log "INFO" "SF_TOOLS_BRANCH=development を GitHub Variable に登録中..."
     if run gh variable set SF_TOOLS_BRANCH --body "development" -R "$REPO_FULL_NAME"; then

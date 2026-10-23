@@ -4,7 +4,7 @@
 # ==============================================================================
 # sf-init.sh のテストは、時間がかかる（Windows の CI で約 10 分）ため、3 つのファイル（test_sf-init.sh・test_sf-init2.sh・
 # test_sf-init3.sh）に分け、並列に動かす。共通の部品は tests/init-test-lib.sh。関数の分け方は、実測の所要時間で、均等になるようにした。
-# どのテストが、どのファイルにあるかは、下の一覧（関数名）を参照。全部で 48 の関数（件数は、3 つの合計）。
+# どのテストが、どのファイルにあるかは、下の一覧（関数名）を参照。全部で 49 の関数（件数は、3 つの合計）。
 #
 # 【このファイルのテスト関数】
 #   test_missing_tool_gh
@@ -15,6 +15,7 @@
 #   test_finish_unfinished_setup
 #   test_resume_state_case_insensitive
 #   test_flex_invalid_project_arg
+#   test_invalid_phase_args
 #   test_resume_runs_from_specified_phase
 #   test_add_tier_develop_without_staging
 #   test_phase9_ruleset_id
@@ -273,6 +274,56 @@ test_flex_invalid_project_arg() {
     out=$( { printf 'x\n' | ( cd "$work" && HOME="$mock_home" PATH="$mb:$PATH" \
               bash "$mock_home/sf-tools/bin/sf-init.sh" --project ); } 2>&1 )
     assert_exit_fail "$?" "--project に値がない → エラー終了"
+
+    teardown "$mb" "$mock_home" "$base"
+}
+
+# ==============================================================================
+# テスト 6e: --only / --resume / --add-tier の値の検査（値なし・数字以外・範囲外は、エラーで終了する）
+# ==============================================================================
+# 回帰: 値なしで最後に指定すると、引数の解析が終わらなかった（shift 2 が失敗。Ctrl+C は無効）。
+#       --resume 11 は、Phase を 1 つも実行せずに、完了と表示していた。時間の上限（10 秒）を付けて実行し、止まらなければ失敗にする
+test_invalid_phase_args() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] --only / --resume / --add-tier の値の検査${CLR_RST}"
+    source "$(dirname "${BASH_SOURCE[0]}")/../lib/platform.sh"   # run_with_timeout
+
+    local mb mock_home base work out rc args
+    mb=$(setup_mock_bin)
+    export MOCK_CALL_LOG="$mb/calls.log"
+    mock_home=$(setup_mock_home)
+    base=$(mktemp -d "${TMPDIR:-/tmp}/test-init-XXXX")
+    work="$base/work"
+    mkdir -p "$work"
+    create_all_mocks "$mb"
+    create_mock_gh_for_init "$mb"
+
+    # 値なし（最後の引数）: 無限ループにならず、すぐにエラーで終了する
+    for args in "--only" "--resume" "--add-tier"; do
+        out=$( { printf 'x
+' | ( cd "$work" && HOME="$mock_home" PATH="$mb:$PATH"                   run_with_timeout 10 bash "$mock_home/sf-tools/bin/sf-init.sh" $args ); } 2>&1 )
+        rc=$?
+        assert_exit_fail "$rc" "${args} に値がない → エラー終了"
+        [[ "$rc" != "124" ]] && pass "${args} に値がない → 時間切れ（無限ループ）にならない" || fail "${args} に値がない → 時間切れ（無限ループ）にならない" "終了コード 124（10 秒で打ち切り）"
+        assert_output_contains "$out" "には、" "${args} に値がない → 指定のしかたが表示される"
+    done
+
+    # 値が Phase 番号でない（数字以外・0・範囲外・先頭が 0・次のオプション）: 何も実行せずに、エラーで終了する
+    for args in "--resume 11" "--resume 0" "--resume abc" "--resume 02" "--resume --verify" "--only 11" "--only 0" "--only x" "--only -1"; do
+        out=$( { printf 'x
+' | ( cd "$work" && HOME="$mock_home" PATH="$mb:$PATH"                   run_with_timeout 10 bash "$mock_home/sf-tools/bin/sf-init.sh" $args ); } 2>&1 )
+        rc=$?
+        assert_exit_fail "$rc" "${args} → エラー終了"
+        [[ "$rc" != "124" ]] && pass "${args} → 時間切れにならない" || fail "${args} → 時間切れにならない" "終了コード 124（10 秒で打ち切り）"
+        assert_output_contains "$out" "Phase 番号（1〜10 の整数）" "${args} → 正しい指定が表示される"
+        assert_file_not_contains "$MOCK_CALL_LOG" "gh repo create" "${args} → 何も作らない"
+    done
+
+    # --add-tier に、次のオプションを値として渡さない
+    out=$( { printf 'x
+' | ( cd "$work" && HOME="$mock_home" PATH="$mb:$PATH"               run_with_timeout 10 bash "$mock_home/sf-tools/bin/sf-init.sh" --add-tier --status ); } 2>&1 )
+    assert_exit_fail "$?" "--add-tier の次がオプション → エラー終了"
+    assert_output_contains "$out" "追加する段階（staging または develop）" "--add-tier の次がオプション → 指定のしかたが表示される"
 
     teardown "$mb" "$mock_home" "$base"
 }
@@ -688,6 +739,13 @@ export SF_INIT_LOGIN_URL_PROD=login   # ログイン先を、質問せずに指�
         printf 'SF_INIT_DONE_PHASE=%s\nSF_INIT_DONE_AT="2026-10-11 14:32"\n' "$done_phase" > "$progf"
         [[ -n "${6:-}" ]] && printf '%b\n' "$6" >> "$progf"   # 進捗ファイルに追加する行（段階ごとの完了の記録など）
         rm -rf "$mb/deployed_src" "$mb/jwt.cnt" "$mock_home/.sf-jwt" "$mb/.repo_view_called"
+        if [[ -n "${7:-}" ]]; then   # 7 番目の引数: 既存の JWT 証明書を、先に作っておく（再利用 / 再生成の質問が出る）
+            mkdir -p "$mock_home/.sf-jwt/force-testproject"
+            printf 'OLD-KEY
+' > "$mock_home/.sf-jwt/force-testproject/server.key"
+            printf 'OLD-CRT
+' > "$mock_home/.sf-jwt/force-testproject/server.crt"
+        fi
         : > "$MOCK_CALL_LOG"
         # shellcheck disable=SC2086
         printf '%b' "$input" \
@@ -819,6 +877,26 @@ export SF_INIT_LOGIN_URL_PROD=login   # ログイン先を、質問せずに指�
     assert_file_contains      "$MOCK_CALL_LOG" "gh secret set SF_CONSUMER_KEY_STG"           "段階ごとの再開: 残りの段階（staging）は、実行される"
     assert_file_not_contains  "$progf" "SF_INIT_DONE_TIER_"                                  "段階ごとの再開: 完了後、段階ごとの記録は、消える（Phase 10 の完了に、置き換わる）"
     rm -rf "$init_base"
+    # 既存の証明書を「再利用する」なら、完了済みの段階は、スキップのまま（秘密鍵が変わらないため）
+    _rc_run 9 "tamashimon/force-testproject" "" 'Y
+1
+Y
+' 'BRANCH_COUNT="2"' 'SF_INIT_DONE_TIER_PROD=1' 1
+    assert_file_contains      "$out" "メイン組織（PROD）は、前回、設定が完了しているため、スキップします"  "証明書を再利用: 完了済みの段階は、スキップする"
+    assert_file_not_contains  "$MOCK_CALL_LOG" "gh secret set SF_CONSUMER_KEY_PROD"          "証明書を再利用: 完了済みの段階は、登録しなおさない"
+    rm -rf "$init_base"
+    # 回帰: 既存の証明書を「再生成する（N）」なら、完了済みの段階も、設定しなおす（以前は、スキップされ、
+    #   その段階の組織に古い証明書が残り、新しい秘密鍵（SF_PRIVATE_KEY）と合わなくなっていた）
+    _rc_run 9 "tamashimon/force-testproject" "" 'Y
+1
+N
+' 'BRANCH_COUNT="2"' 'SF_INIT_DONE_TIER_PROD=1' 1
+    assert_exit_ok            "$exit_code"                                                  "証明書を再生成: 正常終了する"
+    assert_file_contains      "$out" "証明書を作り直したため、前回、設定が完了した段階も、設定しなおします"  "証明書を再生成: 設定しなおす旨が表示される"
+    assert_file_not_contains  "$out" "メイン組織（PROD）は、前回、設定が完了しているため、スキップします"  "証明書を再生成: 完了済みの段階を、スキップしない"
+    assert_file_contains      "$MOCK_CALL_LOG" "gh secret set SF_CONSUMER_KEY_PROD"          "証明書を再生成: 完了済みの段階も、登録しなおす"
+    assert_file_contains      "$MOCK_CALL_LOG" "gh secret set SF_CONSUMER_KEY_STG"           "証明書を再生成: 残りの段階も、登録する"
+    rm -rf "$init_base"
     # 記録があっても、Secret が、もうなければ、やり直す（記録だけを、信じない）
     export MOCK_GH_SECRETS=""
     _rc_run 9 "tamashimon/force-testproject" "" 'Y\n1\n' 'BRANCH_COUNT="2"' 'SF_INIT_DONE_TIER_PROD=1'
@@ -928,6 +1006,7 @@ test_refuse_inside_admin_or_clone
 test_finish_unfinished_setup
 test_resume_state_case_insensitive
 test_flex_invalid_project_arg
+test_invalid_phase_args
 test_resume_runs_from_specified_phase
 test_add_tier_develop_without_staging
 test_phase9_ruleset_id

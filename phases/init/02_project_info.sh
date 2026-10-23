@@ -2,29 +2,40 @@
 # ==============================================================================
 # 02_project_info.sh - Phase 2: プロジェクト情報の確認
 # ==============================================================================
-# GITHUB_OWNER とプロジェクト名（XXXX）を確認する。値は、sf-init.sh が決めたもの（引数・対話）。
-# 環境種別（本番/検証）を選択し、.sf-init-XXXX.env に変数を書き出して後続フェーズと共有する。
+# sf-init.sh が決めたオーナーとプロジェクト名（XXXX）から、リポジトリ名・クローン先を決めて確認し、
+# sf-tools の版（配布版 = main / 開発版 = development）を選ばせる。結果を状態ファイル（SF_INIT_ENV_FILE）に書き出す。
 #
-# 【値の決まり方】
-#   カレント: 管理者用の作業フォルダ（{作業フォルダ}/admin/。sf-init.sh が自動作成・移動）
-#   PROJECT_NAME  = XXXX（環境変数 SF_INIT_PROJECT。sf-init.sh が、引数・対話から決める）
-#   GITHUB_OWNER  = オーナー（環境変数 SF_INIT_OWNER）
-#                   ※ この 2 つは必須（Phase だけを直接実行するときも、環境変数で渡す）
-#   REPO_NAME     = force-{PROJECT_NAME}
-#   REPO_FULL_NAME= {GITHUB_OWNER}/force-{PROJECT_NAME}
-#   REPO_DIR      = {PWD}/force-{PROJECT_NAME}
+# 【使い方】
+#   sf-init.sh が、管理者用の作業フォルダ（admin）をカレントにして、bash で呼び出す。
 #
-# 【環境種別】
-#   配布版 (production)    : SF_TOOLS_BRANCH=main       → GitHub Actions は sf-tools main を使用（通常はこちら）
-#   開発版 (staging)       : SF_TOOLS_BRANCH=development → GitHub Actions は sf-tools development を使用
-#                           sf-tools の開発者専用（未リリースのコードが使われる）。
-#                           誤選択を防ぐため、選択時に WARNING と Y/N/q 確認を行う（N なら選択に戻る）
+# 【処理の流れ】
+#   1. PROJECT_NAME = SF_INIT_PROJECT（空なら die）、GITHUB_OWNER = SF_INIT_OWNER
+#      （空、または「英数字とハイフンのみ・先頭と末尾は英数字・1〜39 文字」でなければ die）
+#   2. 次の値を決める
+#        REPO_NAME      = force-{PROJECT_NAME}
+#        REPO_FULL_NAME = {GITHUB_OWNER}/force-{PROJECT_NAME}
+#        REPO_DIR       = {PWD}/force-{PROJECT_NAME}
+#   3. リポジトリ（REPO_FULL_NAME）とクローン先（REPO_DIR）を表示し、ask_yn で確認する（N / q は die）
+#   4. sf-tools の版を選ぶ（1 / 2 / q。q は die）
+#        1 = 配布版: ENV_TYPE=production・SF_TOOLS_BRANCH=main
+#        2 = 開発版: WARNING を表示して ask_yn。Y なら ENV_TYPE=staging・SF_TOOLS_BRANCH=development、
+#            N なら選択に戻る、q は die
+#   5. ~/sf-tools（SF_TOOLS_DIR）のブランチと最新化を確認する
+#        - SF_INIT_TOOLS_CHECKED_BRANCH が空でない（sf-init.sh が起動時に最新化を確認済み）: そのブランチが
+#          SF_TOOLS_BRANCH と違うときだけ、WARNING と ask_yn（N / q は die）。最新化の確認は、ここでは行わない
+#        - 空: ensure_sf_tools_branch（init-common.sh）を呼ぶ。sf-tools を更新した（戻り値 2）ときは、
+#          状態ファイルを書かずに、終了コード 75 で終了する（sf-init.sh が、更新した sf-tools で、はじめから実行しなおす）
+#   6. 状態ファイルを上書きで作り、次の 7 つを書き出す（chmod 600。Windows では効果なし）
+#        GITHUB_OWNER / PROJECT_NAME / REPO_NAME / REPO_FULL_NAME / REPO_DIR / ENV_TYPE / SF_TOOLS_BRANCH
 #
-# 【sf-tools の最新化確認】
-#   環境種別の選択直後に ensure_sf_tools_branch（init-common.sh）を呼び、~/sf-tools が
-#   選択した環境のブランチ（本番=main / 検証=development）かどうか、origin より遅れていないかを確認する。
-#   ・遅れていれば確認のうえ git pull --ff-only を実行し、終了コード 75 で終了する（sf-init.sh が、自動で、実行しなおす）する
-#   ・ブランチ違いは確認（Y/N/q）。ローカルに未コミット・未 push の変更があれば更新せず警告のみ
+# 【前提条件】
+#   - 環境変数 SF_TOOLS_DIR（sf-tools のルート）・SF_INIT_OWNER・SF_INIT_PROJECT（sf-init.sh が export する）
+#
+# 【補足】
+#   - 状態ファイルは SF_INIT_ENV_FILE（sf-init.sh からは admin/.sf-init-XXXX.env。未設定時は ${PWD}/.sf-init.env）
+#   - 版は、GitHub Actions が使う sf-tools のブランチを決める（Salesforce の本番・Sandbox とは関係ない）。
+#     開発版は sf-tools の開発者専用（未リリースのコードが使われる）
+#   - 終了コード: 0 = OK / 75 = sf-tools を更新した / 1 = die
 # ==============================================================================
 
 # SF_TOOLS_DIR は sf-init.sh（司令塔）から export される

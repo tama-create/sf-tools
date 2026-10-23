@@ -229,6 +229,39 @@ test_no_warning_when_test_included() {
 }
 
 # ------------------------------------------------------------------------------
+# 回帰: 命名規則（〜Test / 〜_Test）に合わない名前のテストクラスが deploy-target.txt に含まれている → WARNING なし
+#   （以前は、内容検索の結果が ./ で始まり、deploy-target.txt の書き方と一致せず、含まれていても警告していた）
+test_no_warning_when_test_included_nonstandard_name() {
+    local td
+    td=$(setup_force_dir)
+    mkdir -p "$td/force-app/main/default/classes"
+    printf 'public class MyClass {}
+' > "$td/force-app/main/default/classes/MyClass.cls"
+    printf '@isTest
+public class MyClassSpec { static void t(){ MyClass x; } }
+' > "$td/force-app/main/default/classes/MyClassSpec.cls"
+    local deploy="$td/deploy.txt" remove="$td/remove.txt"
+    printf '[files]
+force-app/main/default/classes/MyClass.cls
+force-app/main/default/classes/MyClassSpec.cls
+' > "$deploy"
+    printf '[files]
+' > "$remove"
+
+    local out; out=$(cd "$td" && bash "$SF_TOOLS_DIR/bin/sf-check.sh" "$deploy" "$remove" 2>&1)
+    assert_exit_ok "$?" "名前が規則外のテストクラスが含まれている → exit 0"
+    echo "$out" | grep -qi "テストクラス不足の可能性"         && fail "名前が規則外のテストクラスが含まれている → warning なし"         || pass "名前が規則外のテストクラスが含まれている → warning なし"
+
+    # 含まれていないときは、警告する（表示するパスに ./ が付かない）
+    printf '[files]
+force-app/main/default/classes/MyClass.cls
+' > "$deploy"
+    out=$(cd "$td" && bash "$SF_TOOLS_DIR/bin/sf-check.sh" "$deploy" "$remove" 2>&1)
+    echo "$out" | grep -qi "テストクラス不足の可能性"         && pass "名前が規則外のテストクラスが含まれていない → warning"         || fail "名前が規則外のテストクラスが含まれていない → warning"
+    assert_output_contains "$out" "→ force-app/main/default/classes/MyClassSpec.cls" "警告に出るテストクラスのパスに ./ が付かない"
+    teardown "$td"
+}
+
 # テストクラス不足: @isTest クラス自身のみ → WARNING なし
 # ------------------------------------------------------------------------------
 test_no_warning_for_test_class_itself() {
@@ -361,6 +394,7 @@ test_file_not_exists
 test_auto_resolve_branch
 test_missing_test_class_warning
 test_no_warning_when_test_included
+test_no_warning_when_test_included_nonstandard_name
 test_no_warning_for_test_class_itself
 test_capability_ng_release_error
 test_capability_ng_delete_only_in_remove

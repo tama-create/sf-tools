@@ -2,21 +2,53 @@
 # ==============================================================================
 # sf-start.sh - 開発環境スタートアップスクリプト
 # ==============================================================================
-# ワンコマンドで開発環境を整えます。
-#   1. Salesforce 組織への接続確認・ログイン
-#   2. VS Code 設定の同期と起動
-#   ↓ VS Code 起動後にバックグラウンドで実行
-#   3. sf-tools 自動更新 & Git フック有効化
-#   4. リリース管理ディレクトリの準備
-#   5. 現在のブランチ名を sf-tools/release/branch_name.txt に保存
-#   6. sf-launcher.sh を起動
+# 開発環境を起動する。Salesforce 組織に接続（未接続ならログイン）し、VS Code を起動したあと、
+# sf-install.sh をバックグラウンドで実行し、sf-launcher.sh を前面で起動する。
 #
-# 【前提】
-#   Salesforce CLI（sf）は npm 版であること。起動時に check_sf_cli（sf --version の終了コード）で確認し、
-#   0 以外なら、案内を表示して中断する。成功は 24 時間は確認を省略する。
+# 【使い方】
+#   cd {ジョブフォルダ}/force-XXXX
+#   ~/sf-tools/bin/sf-start.sh [-v]
 #
 # 【オプション】
-#   -v, --verbose       : コマンドの応答（出力）をコンソールにも表示します
+#   -v, --verbose : run で実行したコマンドの応答（出力）を、コンソールにも表示する
+#   -h, --help    : この説明を表示して終了する（第 1 引数のときのみ）
+#   引数は、そのまま sf-install.sh に渡す（それ以外の解釈はしない）。
+#
+# 【処理の流れ】
+#   1. sf の確認（check_sf_cli --cache）。sf --version の終了コードが 0 以外なら、案内を表示して中断する。
+#      成功したら ~/.sf-tools-sf-check に sf の場所を記録し、同じ場所の sf なら 24 時間は確認を省略する。
+#      sf が未インストールのとき・GitHub Actions 上では確認しない
+#   2. 接続の確認。環境変数 FORCE_RELOGIN が 1 でなく、.sf/config.json があるときに sf org display --json を実行し、
+#      エイリアスが取れ、組織 ID が 00D で始まれば、接続済みとしてログインを省略する
+#   3. 未接続（または FORCE_RELOGIN=1）のときのログイン:
+#        a. 接続する組織のエイリアスを入力する（空 Enter は再入力。q / EOF で中断）
+#        b. sf alias unset vscodeOrg を実行する
+#        c. ログイン先を選ぶ: [1] https://login.salesforce.com / [2] https://test.salesforce.com（Enter = 2）/
+#           [3] 組織の URL を入力（https で、salesforce.com または force.com 配下）。q で中断。
+#           環境変数 SF_INIT_LOGIN_URL_START（login / test / URL）があれば、質問せずにそれを使う
+#        d. sf org logout --target-org {エイリアス} を実行する（失敗は無視。既存の同名エイリアスの認証は消える）
+#        e. sf org login web --set-default --alias {エイリアス} --instance-url {ログイン先} でブラウザからログインする。
+#           WSL で wslview がないときは、powershell.exe でブラウザを開く wslview を /tmp/sf-wsl-bin に作り、PATH の先頭に加える
+#        ログインに失敗しても中断しない（警告を表示して続け、その後「接続完了！」も表示する）
+#   4. .sf/config.json（{"target-org": エイリアス}）と .sfdx/sfdx-config.json（{"defaultusername": エイリアス}）を
+#      上書きする（書き込めなければ中断）。code コマンドがあれば code . で VS Code を起動する（なければ警告のみ）
+#   5. ~/sf-tools/bin/sf-install.sh があれば、バックグラウンドで実行する（出力は、このスクリプトのログに追記）。
+#      内容: ~/sf-tools の git pull・設定ファイルの確認・Git フック（pre-push）の設置・
+#      sf-tools/release/{ブランチ}/ の準備と sf-tools/release/branch_name.txt の更新（main ブランチでは行わない）・
+#      npm install（package.json があるとき。node_modules/.package-lock.json が package-lock.json 以降に更新済みなら省略）・開発ツールの更新（sf-upgrade.sh。24 時間に 1 回）。詳細は sf-install.sh の冒頭コメント
+#   6. ~/sf-tools/bin/sf-launcher.sh があり、環境変数 SF_LAUNCHER_ACTIVE が 1 でなければ、前面で起動する
+#      （sf-launcher.sh から呼ばれたときは、二重に起動しない）
+#
+# 【前提条件】
+#   - force-* フォルダ（カレントフォルダの名前が force- で始まる）で実行する。違えばエラーで終了する
+#     （sf-job.sh から呼ばれたときは、この確認を省略する）
+#   - Salesforce CLI（sf）は npm 版であること（公式インストーラー版は、Windows の Git Bash で、成功しても終了コード 1 を返すため）
+#
+# 【補足】
+#   - Ctrl+C は無効（1 の確認のあとから）。入力時に q で中断する。中断・失敗時の終了コードは 1
+#   - 終了コードは、sf-launcher.sh の終了コードによらず 0。バックグラウンドの sf-install.sh の失敗も、終了コードに影響しない
+#   - 接続済みの組織を切り替えるときは sf-restart.sh を使う
+#   - ログ: ./sf-tools/logs/sf-start.log（実行のたびに作り直す）。終了時に ./sf-tools/cmd_out_*.tmp と /tmp/sf-wsl-bin を削除する
 # ==============================================================================
 
 # ------------------------------------------------------------------------------
@@ -159,7 +191,7 @@ disown   # ジョブ完了通知をターミナルに表示しない
 # ------------------------------------------------------------------------------
 # 7. ランチャ起動
 # ------------------------------------------------------------------------------
-# ランチャーから Restart 経由で呼ばれた場合は二重起動しない
+# ランチャーから（Start / Restart で）呼ばれた場合は二重起動しない（SF_LAUNCHER_ACTIVE=1 はランチャーが export する）
 if [[ -f "$HOME/sf-tools/bin/sf-launcher.sh" ]] && [[ "${SF_LAUNCHER_ACTIVE:-}" != "1" ]]; then
     bash "$HOME/sf-tools/bin/sf-launcher.sh"
 fi

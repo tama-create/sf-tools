@@ -205,6 +205,20 @@ test_remove() {
     assert_exit_fail "$ec" "--remove + 環境ブランチ → エラー終了"
     assert_file_exists "$td/.github/workflows/wf-old.yml" "--remove + 環境ブランチ → 削除されない"
     unset MOCK_GIT_BRANCH
+
+    # 回帰: --check と --remove の同時指定は、拒否する（以前は、--check なのに、確認 1 回だけで削除していた）
+    echo "name: Old" > "$td/.github/workflows/wf-old.yml"
+    out=$(_wf_run "$td" "$mb" "$mh" "Y
+Y
+" --check --remove wf-old.yml); ec=$?
+    assert_exit_fail "$ec" "--check + --remove → エラー終了"
+    assert_output_contains "$out" "同時に指定できません" "--check + --remove → 理由が表示される"
+    assert_file_exists "$td/.github/workflows/wf-old.yml" "--check + --remove → 削除されない"
+    out=$(_wf_run "$td" "$mb" "$mh" "Y
+Y
+" --remove wf-old.yml --check); ec=$?
+    assert_exit_fail "$ec" "--remove + --check（順序を逆）→ エラー終了"
+    assert_file_exists "$td/.github/workflows/wf-old.yml" "--remove + --check（順序を逆）→ 削除されない"
     teardown "$td" "$mb" "$mh"
 }
 

@@ -100,6 +100,19 @@ sf-job.sh --project acme           # プロジェクトを指定する（force-a
     <li>ほかのコマンドの困りごとは、<a href="../admin/troubleshooting.html">トラブルシューティング</a>を見てください。</li>
   </ul>
 </div>
+<h3 id="first-run">初めて実行したときに、聞かれること</h3>
+<p>初めての <code>sf-job.sh</code>（または <code>sf-start.sh</code>）では、次のことを、順番に聞かれます。画面の案内に沿って、答えてください。2 回目以降は、すでに接続している組織なら、聞かれません。</p>
+<table>
+  <thead><tr><th>聞かれること</th><th>どうするか</th></tr></thead>
+  <tbody>
+    <tr><td>GitHub へのログイン（まだのとき）</td><td><code>sf-job.sh</code> が、<code>gh auth login</code> を始めます。画面の案内に沿って、ブラウザでログインします</td></tr>
+    <tr><td>ジョブ名</td><td>この作業の名前です（例: <code>JOB-20261024</code>）。ブランチの名前になります</td></tr>
+    <tr><td>組織のエイリアス</td><td>接続する<strong>自分用の組織</strong>に付ける、短い名前です（例: <code>myorg</code>）。<code>prod</code> / <code>staging</code> / <code>develop</code> / <code>main</code> は、共有の環境の名前なので、付けないでください（<code>sf-deploy.sh</code> が、使えなくなります）</td></tr>
+    <tr><td>ログイン先</td><td><strong>1</strong> = 本番・Developer Edition（<code>login.salesforce.com</code>）／ <strong>2</strong> = Sandbox（<code>test.salesforce.com</code>。Enter だけで、これになります）／ <strong>3</strong> = 組織の URL を入力。<code>q</code> で中断</td></tr>
+    <tr><td>Salesforce へのログイン</td><td>ブラウザが開きます。自分用の組織に、ログインしてください</td></tr>
+  </tbody>
+</table>
+
 <div class="box">
   <div class="title">Windows のパスの長さについて</div>
   <p>クローンは、<code>core.longpaths=true</code> を付けて行います。Windows には、パスの長さが 260 文字までという上限があり、それを超えないようにするための設定です。組織に長い名前のメタデータ（例: DevOps Center の <code>objectTranslations</code>）があっても、クローンに失敗しません。この設定は、クローンの中に残るので、そのあとの <code>git add</code>・<code>commit</code>・<code>push</code> にも効きます。</p>

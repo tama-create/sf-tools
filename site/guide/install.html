@@ -21,23 +21,20 @@
   <p>sf-tools は、管理者が、sf-tools の雛形で作った、決まった形のリポジトリ（<code>force-XXXX</code>）の上でしか動きません。<strong>このページの準備は、管理者から「プロジェクトができました」と連絡を受けてから、進めてください。</strong>管理者の作業と、開発者の作業は、同時には進められません。プロジェクトの名前（<code>XXXX</code>）は、管理者に聞いてください。</p>
 </div>
 
-<h2 id="env">動作環境</h2>
-<p>実際に動かして確かめた環境だけを書いています。</p>
-<table>
-  <thead><tr><th>環境</th><th>使う場面</th><th>確認した内容</th></tr></thead>
-  <tbody>
-    <tr><td><strong>Windows</strong>（Git Bash）</td><td>手元のパソコン（開発者・管理者）</td><td>✅ 自動テストに合格。さらに、実際の GitHub と Salesforce で、初期セットアップから、リリースと削除まで、通しで動かして確認しました</td></tr>
-    <tr><td><strong>Mac</strong>（macOS）</td><td>手元のパソコン</td><td>✅ 同じ確認を、Mac mini の実機で行いました</td></tr>
-    <tr><td><strong>WSL</strong>（Windows の中で動く Ubuntu）</td><td>手元のパソコン</td><td>✅ 同じ確認を行いました</td></tr>
-    <tr><td><strong>Linux</strong>（GitHub Actions のサーバー）</td><td>自動で動く部分（人は触りません）: 変更の検証・Salesforce へのリリース・メタデータの同期</td><td>✅ 実際の Salesforce に対して、検証・リリース・同期が成功することを確認しました</td></tr>
-  </tbody>
-</table>
-<ul>
-  <li>確認に使った Salesforce は、<strong>Developer Edition</strong>（開発者向けの無料の組織）です。ほかのエディション（Enterprise など）や Sandbox では、確認していません。</li>
-  <li><strong>自動テスト</strong>とは、プログラムの各部分が正しく動くかを、機械が確かめる仕組みです。GitHub 上で、変更のたびに自動で実行されます。Linux・Mac・Windows の 3 つの環境で、合格しています。</li>
-  <li>Linux のパソコンを、手元で使うことは、想定していません（Linux は、自動で動くサーバーとしてだけ使います）。WSL は、Windows の中で動くので、手元で使えます。</li>
-  <li>Mac は、標準のターミナル（zsh）と標準の Bash のままで動きます。Bash を入れ直す必要はありません。</li>
-</ul>
+<figure class="diagram">
+  <div class="flow">
+    <div class="node warn"><span class="who">① 待つ</span><strong>管理者の連絡</strong><small>プロジェクトができたと聞く</small></div>
+    <div class="arrow">→</div>
+    <div class="node dev"><span class="who">② 入れる</span><strong>ツール</strong><small>Git・Node.js・sf・gh・VS Code</small></div>
+    <div class="arrow">→</div>
+    <div class="node dev"><span class="who">③ 置く</span><strong>sf-tools</strong><small>git clone（1 回だけ）</small></div>
+    <div class="arrow">→</div>
+    <div class="node dev"><span class="who">④ 設定</span><strong>PATH</strong><small>コマンド名だけで呼べるように</small></div>
+    <div class="arrow">→</div>
+    <div class="node ok"><span class="who">⑤ 始める</span><strong>基本の使い方</strong><small>sf-job.sh で作業開始</small></div>
+  </div>
+  <figcaption>この順に進めます。②〜④は、パソコンごとに、最初の 1 回だけです。</figcaption>
+</figure>
 
 <h2 id="tools">必要なツール</h2>
 <p>次のコマンドが使えるかを、確認してください。まだ入っていないものは、右の列の方法で入れます。</p>
@@ -52,6 +49,8 @@
     <tr><td>Slack</td><td>—</td><td>リリース結果の通知を受け取る</td><td><a href="https://slack.com/downloads/windows">公式サイト</a>のインストーラーを実行</td></tr>
   </tbody>
 </table>
+<p>まとめて確認するには、次の 1 行を、Git Bash（Mac はターミナル）に貼り付けます。バージョンが 5 行並べば、そろっています。途中で「command not found」と出たら、そのツールが、まだ入っていません。</p>
+<pre><code>git --version && node --version && sf --version && gh --version && code --version</code></pre>
 <div class="box">
   <div class="title">シェルについて</div>
   <ul>
@@ -61,6 +60,10 @@
 </div>
 
 <h2 id="npm">Salesforce CLI は npm 版を使う</h2>
+<div class="box ok">
+  <div class="title">初めて入れる方は、上の表のコマンドだけで大丈夫です</div>
+  <p>この節の「入れ替え」の手順は、<strong>公式インストーラー版の Salesforce CLI を、すでに入れてしまった方</strong>だけが読めば足ります。</p>
+</div>
 <p>sf-tools は、Salesforce CLI（<code>sf</code>）の <strong>npm 版</strong>（<code>npm install -g @salesforce/cli</code>）で動かすことを前提にしています。npm 版も、Salesforce が案内しているインストール方法の 1 つです。</p>
 
 <h3 id="npm-why">理由</h3>
@@ -115,6 +118,24 @@
 <pre><code># sf-tools
 export PATH="$HOME/sf-tools/bin:$PATH"</code></pre>
 <p>追加したら、<code>source ~/.bashrc</code>（Mac は <code>source ~/.zshrc</code>）を実行して、反映します。ターミナルを開き直しても、同じです。</p>
+
+<h2 id="env">動作環境</h2>
+<p>実際に動かして確かめた環境だけを書いています。</p>
+<table>
+  <thead><tr><th>環境</th><th>使う場面</th><th>確認した内容</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Windows</strong>（Git Bash）</td><td>手元のパソコン（開発者・管理者）</td><td>✅ 自動テストに合格。さらに、実際の GitHub と Salesforce で、初期セットアップから、リリースと削除まで、通しで動かして確認しました</td></tr>
+    <tr><td><strong>Mac</strong>（macOS）</td><td>手元のパソコン</td><td>✅ 同じ確認を、Mac mini の実機で行いました</td></tr>
+    <tr><td><strong>WSL</strong>（Windows の中で動く Ubuntu）</td><td>手元のパソコン</td><td>✅ 同じ確認を行いました</td></tr>
+    <tr><td><strong>Linux</strong>（GitHub Actions のサーバー）</td><td>自動で動く部分（人は触りません）: 変更の検証・Salesforce へのリリース・メタデータの同期</td><td>✅ 実際の Salesforce に対して、検証・リリース・同期が成功することを確認しました</td></tr>
+  </tbody>
+</table>
+<ul>
+  <li>確認に使った Salesforce は、<strong>Developer Edition</strong>（開発者向けの無料の組織）です。ほかのエディション（Enterprise など）や Sandbox では、確認していません。</li>
+  <li><strong>自動テスト</strong>とは、プログラムの各部分が正しく動くかを、機械が確かめる仕組みです。GitHub 上で、変更のたびに自動で実行されます。Linux・Mac・Windows の 3 つの環境で、合格しています。</li>
+  <li>Linux のパソコンを、手元で使うことは、想定していません（Linux は、自動で動くサーバーとしてだけ使います）。WSL は、Windows の中で動くので、手元で使えます。</li>
+  <li>Mac は、標準のターミナル（zsh）と標準の Bash のままで動きます。Bash を入れ直す必要はありません。</li>
+</ul>
 
 <div class="box next">
   <div class="title">次へ</div>

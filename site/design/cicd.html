@@ -30,6 +30,20 @@
   <li><p><strong>自己完結型のワークフロー</strong> — 自動で動く処理（ワークフロー）を、各プロジェクト（<code>force-*</code>）の中に、すべて含めます。雛形は sf-tools が持っていて、プロジェクトを作るときに、コピーします。</p></li>
 </ol>
 
+<figure class="diagram">
+  <p class="lane-label">本番の変更が、自動で、ほかの段階へ広がる流れ（本番が正）</p>
+  <div class="flow">
+    <div class="node admin"><span class="who">Salesforce</span><strong>本番の組織で変更</strong><small>設定の変更など</small></div>
+    <div class="arrow">→</div>
+    <div class="node auto"><span class="who">🤖 wf-metasync</span><strong>main に同期</strong><small>差分を、コミットする</small></div>
+    <div class="arrow">→</div>
+    <div class="node auto"><span class="who">🤖 wf-propagate</span><strong>staging へ</strong><small>main の変更を伝える</small></div>
+    <div class="arrow">→</div>
+    <div class="node auto"><span class="who">🤖 wf-propagate</span><strong>develop へ</strong><small>staging の変更を伝える</small></div>
+  </div>
+  <figcaption>本番で起きた変更は、人が何もしなくても、自動で、すべての段階に届きます。</figcaption>
+</figure>
+
 <h2 id="branches">環境とブランチ</h2>
 <p>ブランチの階層は、<code>sf-tools/config/branches.txt</code> で、<strong>プロジェクトごとに</strong>決めます。</p>
 <table>
@@ -54,9 +68,17 @@
 
 <h2 id="release">リリースの流れ（スター型のプロモート）</h2>
 <p>すべてのリリースは、<code>feature/*</code> のブランチを起点にして、各ターゲットのブランチへ、<strong>個別に PR</strong> を出して行います。</p>
-<pre><code>feature/xxx ──→ develop   （開発組織へリリース）
-feature/xxx ──→ staging   （ステージング組織へリリース）
-feature/xxx ──→ main      （本番組織へリリース）</code></pre>
+<figure class="diagram">
+  <div class="fan">
+    <div class="node dev"><span class="who">作業層</span><strong>feature/xxx</strong><small>作業用のブランチ（各自の Sandbox で開発）</small></div>
+    <div class="branches">
+      <div class="b"><span class="arrow">→</span><div class="node ok"><strong>develop</strong><small>PR → 開発の組織へリリース</small></div></div>
+      <div class="b"><span class="arrow">→</span><div class="node warn"><strong>staging</strong><small>PR → ステージングの組織へリリース</small></div></div>
+      <div class="b"><span class="arrow">→</span><div class="node admin"><strong>main</strong><small>PR → 本番の組織へリリース</small></div></div>
+    </div>
+  </div>
+  <figcaption>1 つの feature ブランチから、各環境へ、<strong>別々に</strong> PR を出します。環境ブランチどうしは、直接マージしません。</figcaption>
+</figure>
 <p>デプロイする対象は、<code>sf-tools/release/&lt;ブランチ名&gt;/deploy-target.txt</code> に書いたものだけです（<a href="../reference/target-files.html">ターゲットファイルの書き方</a>）。</p>
 <div class="box">
   <div class="title">なぜ、環境ブランチどうしを、直接マージしないのか</div>

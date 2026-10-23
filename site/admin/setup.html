@@ -82,6 +82,23 @@ sf-init.sh --owner my-org --project acme            # 引数で指定（対話�
 
 <h2 id="flow">画面の流れ（全 9 ステップ）</h2>
 <p>実行すると、はじめに、<strong>作るもの・かかる時間の目安・先に用意するもの・全 9 ステップの一覧</strong>が表示されます。用意ができたら、Enter を押します（<code>q</code> で中断できます）。各ステップの先頭には、「ステップ n / 9」と、これまでに終わったステップ、そのステップの目的が表示されます。終わると、<strong>できたことと、次にやること</strong>（<code>sf-job.sh</code> の実行など）、そして<strong>管理者用フォルダ</strong>の場所が表示されます。</p>
+<figure class="diagram">
+  <div class="phases">
+    <div class="phase p1"><p class="ph-title">① 準備</p><ol>
+      <li><span class="n">1</span>準備の確認</li>
+      <li class="you"><span class="n">2</span>プロジェクトの確認</li></ol></div>
+    <div class="phase p2"><p class="ph-title">② リポジトリと通知</p><ol>
+      <li><span class="n">3</span>リポジトリの作成</li>
+      <li class="you"><span class="n">4</span>ブランチの構成</li>
+      <li class="you"><span class="n">5</span>GitHub の Token</li>
+      <li class="you"><span class="n">6</span>Slack の通知</li>
+      <li><span class="n">7</span>リポジトリの設定</li></ol></div>
+    <div class="phase p3"><p class="ph-title">③ Salesforce と確認</p><ol>
+      <li class="you"><span class="n">8</span>Salesforce の接続</li>
+      <li class="you"><span class="n">9</span>動作の確認（任意）</li></ol></div>
+  </div>
+  <figcaption>全 9 ステップを、3 つに分けた図です。👆 の付いたステップは、あなたの操作（選ぶ・貼り付ける・ブラウザで操作する）があります。付いていないステップは、自動で進みます。</figcaption>
+</figure>
 <table>
   <thead><tr><th>ステップ</th><th>何をするか</th><th>あなたの操作</th></tr></thead>
   <tbody>

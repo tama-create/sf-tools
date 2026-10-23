@@ -16,6 +16,14 @@
 <h1>🤖 自動実行コマンド</h1>
 <p class="lead">ほかのコマンドや、git のフック、GitHub Actions が、自動で呼び出すコマンドです。自分で実行することは、ほとんどありません。「裏で何が動いているのか」を知りたいときに、読んでください。全体の一覧は、<a href="commands.html">コマンド一覧</a>にあります。</p>
 
+<div class="box">
+  <div class="title">このページの要点</div>
+  <ul>
+    <li>ここにあるコマンドは、<strong>人が打つ必要は、ほとんどありません。</strong>ほかのコマンド・git のフック・GitHub Actions が、自動で動かします。</li>
+    <li>動くきっかけ: <code>sf-install.sh</code> は <code>sf-start.sh</code> から、<code>sf-upgrade.sh</code> は 24 時間おき、<code>sf-prepush.sh</code> は <code>git push</code> のとき、<code>sf-precommit.sh</code> は <code>git commit</code> のとき、<code>sf-metasync.sh</code> は GitHub Actions からです。</li>
+  </ul>
+</div>
+
 <h2 id="sf-install"><code>sf-install.sh</code></h2>
 <pre><code>sf-install.sh</code></pre>
 <p><code>sf-tools</code> 自体の更新と、プロジェクト側の準備（Git フック・リリース用フォルダなど）を行います。通常は、<code>sf-start.sh</code> がバックグラウンドで、<code>sf-init.sh</code> が Phase 4 で、自動で実行します。<code>force-*</code> フォルダの中で、単独でも実行できます。</p>

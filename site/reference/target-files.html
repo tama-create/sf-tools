@@ -16,6 +16,14 @@
 <h1>📝 ターゲットファイルの書き方</h1>
 <p class="lead">「何を反映するか」と「何を削除するか」を、2 つのファイルに書いておきます。ファイルは、<code>force-XXXX</code> フォルダの中の <code>sf-tools/release/&lt;ブランチ名&gt;/</code> に置きます（パソコンに置いた <code>~/sf-tools</code> とは、別のフォルダです）。ブランチ名は、<code>sf-job.sh</code> で作った作業の名前です。</p>
 
+<div class="box">
+  <div class="title">このページの要点</div>
+  <ul>
+    <li>書くのは、<code>deploy-target.txt</code>（反映するもの）と <code>remove-target.txt</code>（削除するもの）の 2 つです。</li>
+    <li>書き終わったら、ランチャーの <strong>[1] Check</strong>（<code>sf-check.sh</code>）で、書き方を確かめられます。<code>git commit</code> と <code>git push</code> のときにも、自動で確かめます。</li>
+  </ul>
+</div>
+
 <table>
   <thead><tr><th>ファイル</th><th>役割</th></tr></thead>
   <tbody>

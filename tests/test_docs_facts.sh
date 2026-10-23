@@ -145,6 +145,16 @@ check_env_vars() {
     done
 }
 
+# --- 検査 6（逆向き）: bin/ のすべてのコマンドが、コマンド一覧（site/reference/commands.html）に載っている ---
+check_commands_listed() {
+    local list="$SF_TOOLS_DIR/site/reference/commands.html" c
+    [[ -f "$list" ]] || { echo "site/reference/commands.html: 一覧のページがない"; return; }
+    for c in "$SF_TOOLS_DIR"/bin/sf-*.sh; do
+        c=$(basename "$c")
+        grep -qF -- "$c" "$list" || echo "site/reference/commands.html: コマンド ${c} が、一覧に載っていない"
+    done
+}
+
 # 検査の実行: 問題がなければ pass、あれば fail（問題の一覧つき）。引数: 名前 検査の関数
 _run_check() {
     local name="$1" fn="$2" out
@@ -158,6 +168,10 @@ test_facts_options()         { _run_check "文書のオプション（--xxx）�
 test_facts_command_options() { _run_check "文書のコード片で、コマンドと一緒に書かれたオプションが、そのコマンドの冒頭コメントにある" check_command_options; }
 test_facts_paths()           { _run_check "文書のパスが、リポジトリに実在する" check_paths; }
 test_facts_env_vars()        { _run_check "文書の環境変数（SF_…）が、コードにある" check_env_vars; }
+test_facts_commands_listed() {
+    local out; out=$(check_commands_listed)
+    if [[ -z "$out" ]]; then pass "bin/ のすべてのコマンドが、コマンド一覧（commands.html）に載っている"; else fail "bin/ のすべてのコマンドが、コマンド一覧に載っている" "$(echo "$out" | head -5)"; fi
+}
 
 # --- 自己テスト: 壊した見本の文書で、検査が、ちゃんと検出する ---
 test_facts_selftest() {
@@ -187,6 +201,10 @@ EOF
     out=$(check_command_options "$d/bad.md");   [[ "$out" == *"sf-push.sh に --no-such-md-opt"* && "$out" == *"sf-start.sh に --release"* ]] && pass "自己テスト: Markdown のコード片（インラインと囲み）も検出する" || fail "自己テスト: Markdown のコード片も検出する" "$out"
     out=$(check_paths "$d/bad.html");           [[ "$out" == *"tests/no_such_file.sh"* ]] && pass "自己テスト: 実在しないパスを検出する" || fail "自己テスト: 実在しないパスを検出する" "$out"
     out=$(check_env_vars "$d/bad.html");        [[ "$out" == *"SF_NO_SUCH_VARIABLE_XYZ"* ]] && pass "自己テスト: コードにない環境変数を検出する" || fail "自己テスト: コードにない環境変数を検出する" "$out"
+    # 一覧に載っていないコマンドの検出: 一覧のページを、仮のものに差し替えて確かめる
+    local saved="$SF_TOOLS_DIR"; mkdir -p "$d/fake/site/reference" "$d/fake/bin"; echo "<p>sf-only-listed.sh</p>" > "$d/fake/site/reference/commands.html"; : > "$d/fake/bin/sf-only-listed.sh"; : > "$d/fake/bin/sf-not-listed.sh"
+    SF_TOOLS_DIR="$d/fake" out=$(check_commands_listed); SF_TOOLS_DIR="$saved"
+    [[ "$out" == *"sf-not-listed.sh が、一覧に載っていない"* && "$out" != *"sf-only-listed.sh"* ]] && pass "自己テスト: 一覧に載っていないコマンドを検出する" || fail "自己テスト: 一覧に載っていないコマンドを検出する" "$out"
     out="$(check_commands "$d/good.html"; check_options "$d/good.html"; check_command_options "$d/good.html"; check_paths "$d/good.html"; check_env_vars "$d/good.html")"
     [[ -z "$out" ]] && pass "自己テスト: 正しい文書は、問題なしになる" || fail "自己テスト: 正しい文書は、問題なしになる" "$out"
 }
@@ -196,6 +214,7 @@ test_facts_options
 test_facts_command_options
 test_facts_paths
 test_facts_env_vars
+test_facts_commands_listed
 test_facts_selftest
 
 print_summary

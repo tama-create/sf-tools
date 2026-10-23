@@ -4,37 +4,37 @@
 #   コマンド（bin/sf-*.sh）は、どれかの文書の基になっていること（tests/docs-stamp.sh --check が確認する）。
 # 文書を足したら、その文書の基になるコードを、ここに足す（- のままで足し、文書を読み直してから --update する）。
 
-site/reference/commands-dev.html | bin/sf-job.sh | 2464617636-5628 | b2974dd
-site/reference/commands-dev.html | bin/sf-start.sh | 1512283495-4648 | b2974dd
-site/reference/commands-dev.html | bin/sf-launcher.sh | 3218658773-2750 | b2974dd
-site/reference/commands-dev.html | bin/sf-check.sh | 1116975468-5362 | b2974dd
-site/reference/commands-dev.html | bin/sf-dryrun.sh | 215413187-1724 | b2974dd
-site/reference/commands-dev.html | bin/sf-release.sh | 668921209-7143 | b2974dd
-site/reference/commands-dev.html | bin/sf-deploy.sh | 2535103889-3488 | b2974dd
-site/reference/commands-dev.html | bin/sf-push.sh | 2369266349-3217 | b2974dd
-site/reference/commands-dev.html | bin/sf-next.sh | 1493694740-4150 | b2974dd
-site/reference/commands-dev.html | bin/sf-restart.sh | 909704296-1982 | b2974dd
-site/reference/commands-dev.html | bin/sf-hook.sh | 242362213-2635 | b2974dd
-site/reference/commands-dev.html | bin/sf-unhook.sh | 4235624302-1629 | b2974dd
+site/reference/commands-dev.html | bin/sf-job.sh | 2464617636-5628 | d8fef9f
+site/reference/commands-dev.html | bin/sf-start.sh | 1512283495-4648 | d8fef9f
+site/reference/commands-dev.html | bin/sf-launcher.sh | 3218658773-2750 | d8fef9f
+site/reference/commands-dev.html | bin/sf-check.sh | 2811213405-5441 | d8fef9f
+site/reference/commands-dev.html | bin/sf-dryrun.sh | 2090079619-1804 | d8fef9f
+site/reference/commands-dev.html | bin/sf-release.sh | 668921209-7143 | d8fef9f
+site/reference/commands-dev.html | bin/sf-deploy.sh | 4139377917-3568 | d8fef9f
+site/reference/commands-dev.html | bin/sf-push.sh | 3296632298-3295 | d8fef9f
+site/reference/commands-dev.html | bin/sf-next.sh | 4034769213-4228 | d8fef9f
+site/reference/commands-dev.html | bin/sf-restart.sh | 909704296-1982 | d8fef9f
+site/reference/commands-dev.html | bin/sf-hook.sh | 490604334-2713 | d8fef9f
+site/reference/commands-dev.html | bin/sf-unhook.sh | 1120235648-1709 | d8fef9f
 
-site/reference/commands-auto.html | bin/sf-install.sh | 2819602361-5077 | b2974dd
-site/reference/commands-auto.html | bin/sf-upgrade.sh | 223369507-2045 | b2974dd
-site/reference/commands-auto.html | bin/sf-prepush.sh | 2947247230-3792 | b2974dd
-site/reference/commands-auto.html | bin/sf-precommit.sh | 2641340348-1404 | b2974dd
-site/reference/commands-auto.html | bin/sf-metasync.sh | 2693929167-6593 | b2974dd
+site/reference/commands-auto.html | bin/sf-install.sh | 2819602361-5077 | d8fef9f
+site/reference/commands-auto.html | bin/sf-upgrade.sh | 223369507-2045 | d8fef9f
+site/reference/commands-auto.html | bin/sf-prepush.sh | 2185657029-3873 | d8fef9f
+site/reference/commands-auto.html | bin/sf-precommit.sh | 2458480846-1487 | d8fef9f
+site/reference/commands-auto.html | bin/sf-metasync.sh | 2033149871-6675 | d8fef9f
 
-site/reference/target-files.html | bin/sf-check.sh | 1116975468-5362 | b2974dd
-site/reference/target-files.html | bin/sf-release.sh | 668921209-7143 | b2974dd
+site/reference/target-files.html | bin/sf-check.sh | 2811213405-5441 | d8fef9f
+site/reference/target-files.html | bin/sf-release.sh | 668921209-7143 | d8fef9f
 
 site/guide/basics.html | bin/sf-job.sh | 2464617636-5628 | b2974dd
 site/guide/basics.html | bin/sf-start.sh | 1512283495-4648 | b2974dd
 
-site/guide/daily.html | bin/sf-dryrun.sh | 215413187-1724 | b2974dd
-site/guide/daily.html | bin/sf-deploy.sh | 2535103889-3488 | b2974dd
-site/guide/daily.html | bin/sf-push.sh | 2369266349-3217 | b2974dd
-site/guide/daily.html | bin/sf-next.sh | 1493694740-4150 | b2974dd
-site/guide/daily.html | bin/sf-prepush.sh | 2947247230-3792 | b2974dd
-site/guide/daily.html | bin/sf-precommit.sh | 2641340348-1404 | b2974dd
+site/guide/daily.html | bin/sf-dryrun.sh | 2090079619-1804 | d8fef9f
+site/guide/daily.html | bin/sf-deploy.sh | 4139377917-3568 | d8fef9f
+site/guide/daily.html | bin/sf-push.sh | 3296632298-3295 | d8fef9f
+site/guide/daily.html | bin/sf-next.sh | 4034769213-4228 | d8fef9f
+site/guide/daily.html | bin/sf-prepush.sh | 2185657029-3873 | d8fef9f
+site/guide/daily.html | bin/sf-precommit.sh | 2458480846-1487 | d8fef9f
 
 site/admin/setup.html | bin/sf-init.sh | 3160184782-20242 | b2974dd
 site/admin/setup.html | phases/init/06_pat_token.sh | 2145606728-2590 | b2974dd
@@ -45,7 +45,7 @@ site/admin/maintenance.html | phases/init/add_tier.sh | 3930918282-4144 | b2974d
 site/admin/maintenance.html | phases/init/reconnect.sh | 786270870-3234 | b2974dd
 site/admin/maintenance.html | phases/init/status.sh | 3740411506-1385 | b2974dd
 
-site/admin/secrets.html | bin/sf-update-secret.sh | 1374813282-5936 | b2974dd
+site/admin/secrets.html | bin/sf-update-secret.sh | 2935474992-6023 | d8fef9f
 
 site/admin/workflows.html | bin/sf-sync-wf.sh | 2249883559-5781 | b2974dd
 
@@ -53,3 +53,24 @@ site/admin/verify.html | phases/init/verify.sh | 618974087-9729 | b2974dd
 site/admin/verify.html | bin/sf-typecheck.sh | 1832944975-6608 | b2974dd
 site/admin/verify.html | lib/typecheck.js | 1719922313-4920 | b2974dd
 
+site/guide/install.html | bin/sf-upgrade.sh | 223369507-2045 | d8fef9f
+site/guide/install.html | bin/sf-install.sh | 2819602361-5077 | d8fef9f
+site/guide/install.html | bin/sf-start.sh | 1512283495-4648 | d8fef9f
+
+site/admin/troubleshooting.html | bin/sf-job.sh | 2464617636-5628 | d8fef9f
+site/admin/troubleshooting.html | bin/sf-push.sh | 3296632298-3295 | d8fef9f
+site/admin/troubleshooting.html | bin/sf-prepush.sh | 2185657029-3873 | d8fef9f
+site/admin/troubleshooting.html | bin/sf-deploy.sh | 4139377917-3568 | d8fef9f
+site/admin/troubleshooting.html | bin/sf-sync-wf.sh | 2249883559-5781 | d8fef9f
+site/admin/troubleshooting.html | bin/sf-init.sh | 3160184782-20242 | d8fef9f
+
+site/reference/commands.html | bin/sf-launcher.sh | 3218658773-2750 | d8fef9f
+site/reference/commands.html | bin/sf-job.sh | 2464617636-5628 | d8fef9f
+site/reference/commands.html | bin/sf-init.sh | 3160184782-20242 | d8fef9f
+site/reference/commands.html | bin/sf-update-secret.sh | 2935474992-6023 | d8fef9f
+site/reference/commands.html | bin/sf-sync-wf.sh | 2249883559-5781 | d8fef9f
+site/reference/commands.html | bin/sf-typecheck.sh | 1832944975-6608 | d8fef9f
+site/reference/commands.html | bin/sf-metasync.sh | 2033149871-6675 | d8fef9f
+site/reference/commands.html | phases/init/verify.sh | 618974087-9729 | d8fef9f
+site/reference/commands.html | phases/init/add_tier.sh | 3930918282-4144 | d8fef9f
+site/reference/commands.html | phases/init/reconnect.sh | 786270870-3234 | d8fef9f

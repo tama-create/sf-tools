@@ -70,7 +70,7 @@
 <p>🔑 のついたコマンドは<strong>管理者専用</strong>です。実行すると、赤い警告ボックスが表示されて、続けてよいかを聞かれます（Y / N / q）。まちがえて実行したときは、<code>N</code> か <code>q</code> で、止められます。</p>
 <ul>
   <li><code>GITHUB_ACTIONS=true</code> が設定されている環境（GitHub Actions 上）では、<code>sf-metasync.sh</code> と <code>sf-update-secret.sh</code> は、確認をスキップして自動で実行します。例外が 2 つあります。<code>sf-sync-wf.sh</code> は、Actions 上でも、警告と確認を省略しません。<code>sf-typecheck.sh</code> と <code>sf-init.sh --verify</code> は、Actions 上では実行を拒否します（<code>sf-typecheck.sh</code> の <code>--list</code> と <code>--coverage</code> は、実行できます）。</li>
-  <li>🔑 のついた、<code>gh</code> を使うコマンドは、起動したときに、gh でログインしているユーザーが、リポジトリのオーナーと同じかを確かめます。違っていれば、そこで止まります（開発者向けの <code>sf-job.sh</code> は、確かめません。リポジトリを読み書きする権限は、GitHub が確認します）。
+  <li><code>sf-init.sh</code>（<code>--add-tier</code>・<code>--reconnect</code>・<code>--verify</code> を含む）と <code>sf-update-secret.sh</code> は、起動したときに、gh でログインしているユーザーが、リポジトリのオーナーと同じかを確かめます。違っていれば、そこで止まります。ほかのコマンド（開発者向けの <code>sf-job.sh</code> を含む）は、確かめません。リポジトリを読み書きする権限は、GitHub が確認します。
     <br>ただし、オーナーが GitHub 組織（例: <code>tamashimon-org</code>）で、認証ユーザーがその組織の有効な管理者（admin）なら、そのまま続行します。組織の一般メンバーや、組織の情報を取得できない場合は中断します（<code>gh auth switch</code> で正しいアカウントに切り替えてから、もう一度実行してください）。</li>
 </ul>
 

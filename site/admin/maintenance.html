@@ -21,6 +21,20 @@
   <p>「どこで間違えたか分からない」というときは、<a href="#status"><code>sf-init.sh --status</code></a> から始めてください。何も変更せずに、足りないものと、直し方を教えてくれます。</p>
 </div>
 
+<h2 id="which">どのコマンドを使うか</h2>
+<p>管理者のメンテナンスのコマンドを、「やりたいこと」から探せます。</p>
+<table>
+  <thead><tr><th>やりたいこと</th><th>コマンド</th><th>説明</th></tr></thead>
+  <tbody>
+    <tr><td>いまの状態を調べたい（何も変えない）</td><td><code>sf-init.sh --status</code></td><td><a href="#status">セットアップを診断する</a></td></tr>
+    <tr><td>段階（staging・develop）を足したい</td><td><code>sf-init.sh --add-tier</code></td><td><a href="#add-tier">段階を足す</a></td></tr>
+    <tr><td>接続先の Salesforce 組織を、付け替えたい</td><td><code>sf-init.sh --reconnect</code></td><td><a href="#reconnect">接続先を付け替える</a></td></tr>
+    <tr><td>秘密鍵・ユーザー名などを、登録し直したい</td><td><code>sf-update-secret.sh</code></td><td><a href="secrets.html#update">再登録する</a></td></tr>
+    <tr><td>ワークフローを、最新の雛形に合わせたい</td><td><code>sf-sync-wf.sh</code></td><td><a href="workflows.html#sync">雛形に合わせて更新する</a></td></tr>
+    <tr><td>実際に動くことを、確かめたい</td><td><code>sf-init.sh --verify</code></td><td><a href="verify.html">動作の確認</a></td></tr>
+  </tbody>
+</table>
+
 <h2 id="org">Salesforce 組織の接続の考え方</h2>
 <p>段階（main / staging / develop）と、組織の種類は、<strong>結びつけていません</strong>。どの段階にも、本番・Sandbox・Developer Edition などを、自由につなげられます（<code>main</code> に Sandbox や Developer Edition をつないでも構いません）。</p>
 <div class="box warn">

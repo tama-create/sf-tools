@@ -231,6 +231,7 @@ TEST_FILES=(
     test_run-tests.sh
     test_site.sh
     test_docs.sh
+    test_cli_args.sh
 )
 
 # ------------------------------------------------------------------------------
@@ -333,6 +334,9 @@ if [[ "${1:-}" == "--changed" ]]; then
                 ;;
             site/*|.github/workflows/pages.yml|tests/test_site.sh)
                 _changed_tests+=("test_site.sh")
+                ;;
+            tests/test_cli_args.sh)
+                _changed_tests+=("test_cli_args.sh")
                 ;;
             tests/run_tests.sh|tests/test_run-tests.sh)
                 _changed_tests+=("test_run-tests.sh")

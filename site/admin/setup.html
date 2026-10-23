@@ -102,7 +102,7 @@ sf-init.sh --owner my-org --project acme            # 引数で指定（対話�
 <p>PAT（Personal Access Token）は、GitHub の「合鍵」のようなものです。自動で動くワークフローが、あなたの代わりに、リポジトリを更新するために使います。</p>
 <ul>
   <li><strong>どのアカウントで作るか:</strong> force-* のリポジトリの<strong>オーナー</strong>のアカウントです（組織のリポジトリなら、その組織の<strong>管理者</strong>）。作るアカウントは、実行の最初に表示されます。ブラウザで、別のアカウントにログインしているときは、切り替えてください。sf-tools の開発者のアカウントは、関係ありません。</li>
-  <li><strong>作り方:</strong> ブラウザで、Token の作成ページが、自動で開きます（Note と Scopes は、入力済みです）。ページの一番下の「Generate token」を押して、表示された Token をコピーし、ターミナルに貼り付けます。発行済みの Token があるときは、ブラウザは開かず、そのまま貼り付けられます。</li>
+  <li><strong>作り方:</strong> ブラウザで、Token の作成ページが、自動で開きます（Note と Scopes は、入力済みです）。ページの一番下の「Generate token」を押して、表示された Token をコピーし、ターミナルに貼り付けます。「発行済みの Token があるか」は聞きません（Token の値は、作成した直後の 1 回しか表示されないためです）。保存してある Token があれば、それを貼り付けてもかまいません。</li>
   <li><strong>設定の内容:</strong> Note は <code>sf-metasync-{プロジェクト名}</code>（自動で表示）、Expiration は <code>No expiration</code>（期限なし）、Scopes は <code>repo</code>（全選択）と <code>workflow</code> です。</li>
   <li><strong>貼り付けるとき:</strong> 文字の数だけ <code>*</code> が並びます（Token の中身は、画面に出ません）。Git Bash では、<strong>右クリック</strong>（または Shift+Insert）で貼り付けます。Enter を押すと、「N 文字を受け取りました（先頭: ghp_…）」と表示されるので、コピーできたかを確かめられます。</li>
   <li><strong>確認:</strong> スコープ（<code>repo</code>・<code>workflow</code>）と、リポジトリの管理者であることを、GitHub に問い合わせて確かめます。違っていれば、理由が表示されます。3 回まで、貼り直せます。（Fine-grained の Token は、スコープを確かめられないので、使えません。）</li>
@@ -140,7 +140,7 @@ sf-init.sh --owner my-org --project acme            # 引数で指定（対話�
   <li>段階（main / staging / develop）ごとに、<strong>ログイン先</strong>を選んで、<strong>ブラウザで Salesforce にログイン</strong>します（接続するユーザーは、管理者権限を持つユーザーです）。あなたの操作は、これだけです。</li>
   <li>ブラウザでのログインは、約 2 分で時間切れになります。ブラウザが開いたら、すぐにログインしてください。</li>
   <li>アプリの作成・証明書の登録・ポリシーとプロファイルの設定・コンシューマー鍵の取得は、自動です。設定が反映されるまで時間がかかるので、接続のテストは、成功するまで、くり返します。</li>
-  <li>登録されるのは、<code>SF_PRIVATE_KEY</code>（秘密鍵。すべての組織で共通）と、組織ごとの <code>SF_CONSUMER_KEY_*</code>・<code>SF_USERNAME_*</code>・<code>SF_INSTANCE_URL_*</code> です（<a href="secrets.html">認証情報</a>）。</li>
+  <li>登録されるのは、<code>SF_PRIVATE_KEY</code>（秘密鍵。すべての組織で共通）と、組織ごとの <code>SF_CONSUMER_KEY_*</code>・<code>SF_USERNAME_*</code>・<code>SF_INSTANCE_URL_*</code> です。組織の情報を読み取れたときは、組織の ID・名前・種類・確認日時（<code>SF_ORG_*</code>）も保存します（<a href="secrets.html">認証情報</a>）。</li>
   <li><code>--legacy-connected-app</code> を付けると、従来の接続アプリケーション（廃止の予定）になります。Salesforce の画面での設定と、コンシューマーキー・ユーザー名の手入力が、必要です。</li>
 </ul>
 <p>ログイン先の選び方と、段階と組織の種類の関係は、<a href="maintenance.html#org">構成の変更と診断</a>で説明しています。</p>

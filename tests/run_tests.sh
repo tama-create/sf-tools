@@ -232,6 +232,7 @@ TEST_FILES=(
     test_site.sh
     test_docs.sh
     test_docs_facts.sh
+    test_docs_stamps.sh
     test_cli_args.sh
 )
 
@@ -278,6 +279,12 @@ if [[ "${1:-}" == "--changed" ]]; then
         case "$_file" in
             bin/sf-*.sh|hooks/*|tests/integration/*|tests/test_integration.sh|tests/test_integration-[!c]*.sh)
                 _changed_tests+=("test_integration.sh" "test_integration-git.sh" "test_integration-guards.sh" "test_integration-secrets.sh" "test_integration-job.sh" "test_integration-misc.sh" "test_integration-init.sh" "test_integration-init2.sh" "test_integration-metasync.sh" "test_integration-next.sh" "test_integration-init3.sh" "test_integration-rerun.sh")
+                ;;
+        esac
+        # 文書の見直しの印: コマンドの冒頭コメント・文書・印の一覧・道具が変わったとき
+        case "$_file" in
+            bin/sf-*.sh|phases/init/*|lib/typecheck.js|site/*|doc/doc-stamps.txt|tests/docs-stamp.sh|tests/test_docs_stamps.sh)
+                _changed_tests+=("test_docs_stamps.sh")
                 ;;
         esac
         # 文書の事実の検査: 文書・コマンドの冒頭コメント（オプションの一覧）・例外の一覧が変わったとき

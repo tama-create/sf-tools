@@ -1,0 +1,55 @@
+# 文書の見直しの印（スタンプ）。tests/docs-stamp.sh が読み書きする（仕組みは、そのファイルの冒頭コメントを参照）。
+# 書式: 文書 | 基になるコード | 冒頭コメントのチェックサム | 見直した時点のコミット
+#   チェックサムが - の行は、まだ見直していない（テストが失敗する）。印は、tests/docs-stamp.sh --update で付け直す（手で書き換えない）。
+#   コマンド（bin/sf-*.sh）は、どれかの文書の基になっていること（tests/docs-stamp.sh --check が確認する）。
+# 文書を足したら、その文書の基になるコードを、ここに足す（- のままで足し、文書を読み直してから --update する）。
+
+site/reference/commands-dev.html | bin/sf-job.sh | 2464617636-5628 | b2974dd
+site/reference/commands-dev.html | bin/sf-start.sh | 1512283495-4648 | b2974dd
+site/reference/commands-dev.html | bin/sf-launcher.sh | 3218658773-2750 | b2974dd
+site/reference/commands-dev.html | bin/sf-check.sh | 1116975468-5362 | b2974dd
+site/reference/commands-dev.html | bin/sf-dryrun.sh | 215413187-1724 | b2974dd
+site/reference/commands-dev.html | bin/sf-release.sh | 668921209-7143 | b2974dd
+site/reference/commands-dev.html | bin/sf-deploy.sh | 2535103889-3488 | b2974dd
+site/reference/commands-dev.html | bin/sf-push.sh | 2369266349-3217 | b2974dd
+site/reference/commands-dev.html | bin/sf-next.sh | 1493694740-4150 | b2974dd
+site/reference/commands-dev.html | bin/sf-restart.sh | 909704296-1982 | b2974dd
+site/reference/commands-dev.html | bin/sf-hook.sh | 242362213-2635 | b2974dd
+site/reference/commands-dev.html | bin/sf-unhook.sh | 4235624302-1629 | b2974dd
+
+site/reference/commands-auto.html | bin/sf-install.sh | 2819602361-5077 | b2974dd
+site/reference/commands-auto.html | bin/sf-upgrade.sh | 223369507-2045 | b2974dd
+site/reference/commands-auto.html | bin/sf-prepush.sh | 2947247230-3792 | b2974dd
+site/reference/commands-auto.html | bin/sf-precommit.sh | 2641340348-1404 | b2974dd
+site/reference/commands-auto.html | bin/sf-metasync.sh | 2693929167-6593 | b2974dd
+
+site/reference/target-files.html | bin/sf-check.sh | 1116975468-5362 | b2974dd
+site/reference/target-files.html | bin/sf-release.sh | 668921209-7143 | b2974dd
+
+site/guide/basics.html | bin/sf-job.sh | 2464617636-5628 | b2974dd
+site/guide/basics.html | bin/sf-start.sh | 1512283495-4648 | b2974dd
+
+site/guide/daily.html | bin/sf-dryrun.sh | 215413187-1724 | b2974dd
+site/guide/daily.html | bin/sf-deploy.sh | 2535103889-3488 | b2974dd
+site/guide/daily.html | bin/sf-push.sh | 2369266349-3217 | b2974dd
+site/guide/daily.html | bin/sf-next.sh | 1493694740-4150 | b2974dd
+site/guide/daily.html | bin/sf-prepush.sh | 2947247230-3792 | b2974dd
+site/guide/daily.html | bin/sf-precommit.sh | 2641340348-1404 | b2974dd
+
+site/admin/setup.html | bin/sf-init.sh | 3160184782-20242 | b2974dd
+site/admin/setup.html | phases/init/06_pat_token.sh | 2145606728-2590 | b2974dd
+site/admin/setup.html | phases/init/07_slack.sh | 164634661-1577 | b2974dd
+site/admin/setup.html | phases/init/10_sf_auth.sh | 4112449045-6088 | b2974dd
+
+site/admin/maintenance.html | phases/init/add_tier.sh | 3930918282-4144 | b2974dd
+site/admin/maintenance.html | phases/init/reconnect.sh | 786270870-3234 | b2974dd
+site/admin/maintenance.html | phases/init/status.sh | 3740411506-1385 | b2974dd
+
+site/admin/secrets.html | bin/sf-update-secret.sh | 1374813282-5936 | b2974dd
+
+site/admin/workflows.html | bin/sf-sync-wf.sh | 2249883559-5781 | b2974dd
+
+site/admin/verify.html | phases/init/verify.sh | 618974087-9729 | b2974dd
+site/admin/verify.html | bin/sf-typecheck.sh | 1832944975-6608 | b2974dd
+site/admin/verify.html | lib/typecheck.js | 1719922313-4920 | b2974dd
+

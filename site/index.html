@@ -25,6 +25,34 @@
   <p>しくみは、シェルスクリプト（コマンド）の集まりです。パソコンの <code>~/sf-tools</code> に置いて、各プロジェクトのフォルダから呼び出します。変更の検証とリリースは、GitHub Actions（GitHub 上の自動処理）が行います。</p>
 </div>
 
+<h2 id="flow">まず、全体の流れ</h2>
+<div class="box warn">
+  <div class="title">順番が決まっています。管理者の準備が先です</div>
+  <p>sf-tools は、<strong>管理者が、sf-tools の雛形で作った、決まった形のリポジトリ（<code>force-XXXX</code>）</strong>の上でしか動きません。そのため、<strong>最初に、管理者が、リポジトリを作ります。開発者は、それが終わってから始めます。同時には進められません。</strong></p>
+</div>
+<figure class="diagram">
+  <p class="lane-label">🔑 ① 管理者（最初に、1 回だけ）</p>
+  <div class="flow">
+    <div class="node admin"><span class="who">🔑 管理者</span><strong>sf-init.sh を実行</strong><small>雛形から、リポジトリ force-XXXX を作る</small></div>
+    <div class="arrow">→</div>
+    <div class="node admin"><span class="who">🔑 管理者</span><strong>接続と設定を整える</strong><small>Salesforce 組織・認証情報・ブランチの保護・自動処理</small></div>
+    <div class="arrow">→</div>
+    <div class="node ok"><span class="who">✅ できあがり</span><strong>開発者に連絡する</strong><small>リポジトリ名（force-XXXX）を知らせる</small></div>
+  </div>
+  <div class="gate">⛔ ここが終わるまで、開発者は、何もできません</div>
+  <p class="lane-label">💻 ② 開発者（毎日）</p>
+  <div class="flow">
+    <div class="node dev"><span class="who">💻 開発者</span><strong>sf-job.sh</strong><small>新しい作業を始める</small></div>
+    <div class="arrow">→</div>
+    <div class="node dev"><span class="who">💻 開発者</span><strong>ランチャーで進める</strong><small>確認 → 送信（メニューの番号を押すだけ）</small></div>
+    <div class="arrow">→</div>
+    <div class="node auto"><span class="who">🤖 自動</span><strong>自動でチェック</strong><small>GitHub Actions が検証</small></div>
+    <div class="arrow">→</div>
+    <div class="node auto"><span class="who">🤖 自動</span><strong>本番へ反映</strong><small>PR をマージすると、自動で</small></div>
+  </div>
+  <figcaption>実線の箱は人が行うこと、点線の箱は自動で行われることです。業務担当の方は、Slack に届く結果の通知を見る形で関わります。</figcaption>
+</figure>
+
 <h2>あなたはどれですか？</h2>
 <div class="cards">
   <a class="card" href="guide/install.html">
@@ -55,9 +83,9 @@
 </div>
 
 <h2>最短で試す</h2>
-<div class="box">
-  <div class="title">先に、プロジェクトが必要です</div>
-  <p>プロジェクト（<code>force-XXXX</code>）が、まだないときは、先に管理者が作ります（<a href="admin/setup.html">管理者ガイド</a>）。必要なツール（Git・Salesforce CLI など）も、あらかじめ入れておきます（<a href="guide/install.html">前提条件とインストール</a>）。</p>
+<div class="box warn">
+  <div class="title">先に、管理者がプロジェクトを作っている必要があります</div>
+  <p>プロジェクト（<code>force-XXXX</code>）は、管理者が先に作ります（<a href="admin/setup.html">管理者ガイド</a>）。<strong>管理者から「できました」と連絡を受けて、リポジトリの名前を聞いてから、始めてください。</strong>まだないうちは、下の手順は動きません。必要なツール（Git・Salesforce CLI など）も、あらかじめ入れておきます（<a href="guide/install.html">前提条件とインストール</a>）。</p>
 </div>
 <ol class="steps">
   <li>
@@ -71,8 +99,12 @@ echo 'export PATH="$HOME/sf-tools/bin:$PATH"' &gt;&gt; ~/.bashrc    # Mac は ~/
     <pre><code>sf-job.sh</code></pre>
   </li>
   <li>
-    <p>変更を書いたら、VS Code が開いているフォルダ（<code>force-XXXX</code>）の中で、変更を送ります。</p>
-    <pre><code>sf-push.sh</code></pre>
+    <p>作業を始めると、VS Code が開き、ターミナルには<strong>ランチャー（メニュー）</strong>が自動で開きます。変更を書いたら、ランチャーの番号を押して進めます（<code>[1]</code> で確認、<code>[2]</code> で変更を送る）。コマンドを覚える必要は、ありません。</p>
+    <pre><code>  [1] Check      ターゲットファイルの構文チェック
+  [2] Push       変更をコミット &amp; プッシュ
+  [3] Next       次の PR 先ブランチを確認
+  ……</code></pre>
+    <p>コマンドに慣れている方は、<code>sf-push.sh</code> のように、直接打つこともできます。メニューを出し直したいときは、<code>sf-launcher.sh</code> と打ちます（くわしくは<a href="guide/daily.html#launcher">日々の開発の流れ</a>）。</p>
   </li>
 </ol>
 <div class="box ok">

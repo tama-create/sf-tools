@@ -71,9 +71,10 @@
 </ul>
 
 <h2 id="sf-launcher"><code>sf-launcher.sh</code>（ランチャー）</h2>
-<pre><code>sfl          # メニュー形式で選択
-sflf         # fzf でインクリメンタル検索
-sfl 4        # 番号を直接指定して、すぐ実行</code></pre>
+<p><strong>開発者の毎日の操作は、このランチャーで足ります（おすすめ）。</strong>使い方は、<a href="../guide/daily.html#launcher">日々の開発の流れ</a>にあります。</p>
+<pre><code>sf-launcher.sh           # メニュー形式で選択（ふだんは、これだけ）
+sf-launcher.sh 4         # 番号を直接指定して、すぐ実行
+sf-launcher.sh --fzf     # fzf でインクリメンタル検索</code></pre>
 <p>sf-tools の主なコマンドを、メニューから選んで実行できます。<code>force-*</code> フォルダの中で使います。</p>
 <pre><code>  ──────────────────────────────────────────────────
   >> Launcher <<
@@ -90,8 +91,8 @@ sfl 4        # 番号を直接指定して、すぐ実行</code></pre>
 <p>VS Code の中では、<code>start</code> と <code>restart</code> は表示されません（二重に起動しないため）。</p>
 <ul>
   <li>メニューでは、番号を 1 文字入力すると（Enter 不要）実行し、終わるとメニューに戻ります。<code>q</code> で終了します。範囲外の数字や、数字と <code>q</code> 以外の入力は、無視されます。</li>
-  <li>番号を直接指定したとき（<code>sfl 4</code> など）は、そのコマンドを 1 回だけ実行して終わります。選んだコマンドは、引数なしで実行されます。</li>
-  <li><code>sflf</code>（<code>--fzf</code>）には、<code>fzf</code> が必要です。なければ、警告を表示して終了します。</li>
+  <li>番号を直接指定したとき（<code>sf-launcher.sh 4</code> など）は、そのコマンドを 1 回だけ実行して終わります。選んだコマンドは、引数なしで実行されます。</li>
+  <li><code>--fzf</code> には、<code>fzf</code> が必要です。なければ、警告を表示して終了します。</li>
   <li>メニューの中では、実行したコマンドが失敗しても、ランチャーは終了しません。</li>
 </ul>
 

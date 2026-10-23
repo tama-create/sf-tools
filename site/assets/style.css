@@ -218,6 +218,49 @@ a.card:hover { border-color: var(--accent); background: var(--accent-soft); }
 .card .tag { display: inline-block; font-size: .72rem; color: var(--fg-soft); border: 1px solid var(--line); border-radius: 1rem; padding: 0 .55rem; margin-bottom: .4rem; }
 .card.soon { opacity: .65; }
 
+/* ---- 図（HTML と CSS だけ。色は変数なので、ダークモードにも合う。幅が狭いときは縦に並ぶ）----
+ *   figure.diagram … 図の入れ物（figcaption で、何の図かを必ず書く）
+ *   .flow > .node + .arrow … 流れ図。.node の色: admin（管理者）/ dev（開発者）/ auto（自動）/ ok / warn
+ *   .gate … 「ここが終わるまで、次へ進めない」の帯
+ *   .nest … 入れ子の箱（フォルダの構成）  .term … ターミナルの画面の見本 */
+figure.diagram { margin: 0 0 1.5rem; padding: 1rem; border: 1px solid var(--line); border-radius: .7rem; background: var(--bg-soft); }
+figure.diagram figcaption { margin-top: .8rem; font-size: .85rem; color: var(--fg-soft); text-align: center; line-height: 1.6; }
+.diagram .lane-label { font-weight: 700; font-size: .9rem; margin: 0 0 .4rem; }
+.diagram .lane + .lane-label { margin-top: .2rem; }
+.flow { display: flex; align-items: stretch; gap: .35rem; margin: 0 0 .8rem; }
+.flow .node {
+  flex: 1 1 0; min-width: 0; padding: .65rem .7rem; border: 2px solid var(--line); border-radius: .7rem;
+  background: var(--bg); line-height: 1.5; font-size: .9rem; text-align: center;
+}
+.flow .node .who { display: block; font-size: .74rem; color: var(--fg-soft); margin-bottom: .1rem; }
+.flow .node strong { display: block; font-size: .95rem; }
+.flow .node small { display: block; color: var(--fg-soft); font-size: .78rem; margin-top: .15rem; }
+.flow .node.admin { border-color: var(--admin-line); background: var(--admin); }
+.flow .node.dev { border-color: var(--note-line); background: var(--note); }
+.flow .node.auto { border-color: var(--line); background: var(--bg); border-style: dashed; }
+.flow .node.ok { border-color: var(--ok-line); background: var(--ok); }
+.flow .node.warn { border-color: var(--warn-line); background: var(--warn); }
+.flow .arrow { flex: 0 0 auto; align-self: center; color: var(--fg-soft); font-size: 1.4rem; line-height: 1; }
+.gate {
+  margin: .2rem 0 .8rem; padding: .55rem .9rem; text-align: center; font-weight: 700; font-size: .92rem;
+  border: 2px solid var(--danger-line); background: var(--danger); border-radius: .6rem;
+}
+.nest { border: 2px dashed var(--line); border-radius: .7rem; padding: .6rem .8rem .2rem; margin: 0 0 .8rem; background: var(--bg); }
+.nest > .label { font-weight: 700; font-size: .9rem; margin: 0 0 .5rem; }
+.nest > .label small { font-weight: 400; color: var(--fg-soft); margin-left: .4rem; }
+.nest .nest { background: var(--bg-soft); }
+.nest .nest .nest { border-style: solid; border-color: var(--note-line); background: var(--note); }
+.nest .nest.admin { border-color: var(--admin-line); }
+.term {
+  background: #14181d; color: #e4e8ec; border-radius: .6rem; padding: .8rem 1rem; margin: 0 0 .8rem;
+  font-family: var(--mono); font-size: .85rem; line-height: 1.7; overflow-x: auto; white-space: pre; border: 1px solid #33404c;
+}
+.term .dim { color: #8895a3; } .term .num { color: #6cb2f2; font-weight: 700; } .term .hl { color: #f2c46c; }
+@media (max-width: 700px) {
+  .flow { flex-direction: column; }
+  .flow .arrow { transform: rotate(90deg); }
+}
+
 /* ---- 前へ・次へ ---- */
 .pager { display: flex; justify-content: space-between; gap: 1rem; margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid var(--line); }
 .pager a { flex: 1; padding: .8rem 1rem; border: 1px solid var(--line); border-radius: .6rem; text-decoration: none; color: var(--fg); }

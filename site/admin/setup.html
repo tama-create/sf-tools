@@ -16,6 +16,21 @@
 <h1>🏗️ 新規プロジェクトの作成（sf-init）</h1>
 <p class="lead">新しい Salesforce プロジェクトを、一から立ち上げます。<code>sf-init.sh</code> が、画面の案内に沿って、必要な準備をまとめて行います。GitHub のリポジトリの作成、Salesforce 組織への接続、ブランチの構成、認証情報の登録、ブランチ保護の設定です。あなたが行うのは、画面に出る質問に答えることと、ブラウザでの数回の操作だけです。</p>
 
+<div class="box warn">
+  <div class="title">この作業が、全員の出発点です。開発者は、これが終わるまで、何もできません</div>
+  <p>sf-tools は、<strong>この手順で作る、決まった形のリポジトリ（<code>force-XXXX</code>）</strong>の上でしか動きません。開発者は、リポジトリができて、あなたから連絡を受けるまで、始められません。<strong>管理者の作業と、開発者の作業は、同時には進められません。</strong>終わったら、開発者に、<strong>リポジトリの名前（<code>force-XXXX</code>）と、「使い始めてよい」</strong>ことを知らせてください。</p>
+</div>
+<figure class="diagram">
+  <div class="flow">
+    <div class="node admin"><span class="who">🔑 あなた（管理者）</span><strong>sf-init.sh</strong><small>リポジトリ・組織の接続・設定を、まとめて作る（30〜60 分）</small></div>
+    <div class="arrow">→</div>
+    <div class="node ok"><span class="who">✅ できあがり</span><strong>開発者に連絡</strong><small>force-XXXX の名前を知らせる</small></div>
+    <div class="arrow">→</div>
+    <div class="node dev"><span class="who">💻 開発者</span><strong>使い始める</strong><small>sf-job.sh で作業を始める</small></div>
+  </div>
+  <figcaption>左から右へ、順番に進みます。左が終わるまで、右には進めません。</figcaption>
+</figure>
+
 <div class="box admin">
   <div class="title">管理者専用です</div>
   <p>実行すると、赤い警告ボックスが表示され、続けてよいかを確認されます。Windows では、<strong>Git Bash</strong> で実行してください（PowerShell やコマンドプロンプトでは動きません）。</p>

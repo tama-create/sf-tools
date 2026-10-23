@@ -161,7 +161,7 @@
 | A8 | `sf-restart`（接続先の切り替え）→ `sf-dryrun` が、新しい組織を使う | L2 | ★★ |
 | A9 | `sf-unhook` → `sf-push`（フック無し）→ `sf-hook`（再設置）の往復 | L1 | ★ |
 | A10 | `sf-upgrade` / `sf-install`（24 時間スキップ、`package-lock` の差分判定）の連動 | L1 | ★ |
-| A11 | （作らない）`sf-launcher`（`sfl`）は、結合テストの対象外。理由は、10 の表 | — | — |
+| A11 | （作らない）`sf-launcher`は、結合テストの対象外。理由は、10 の表 | — | — |
 | A12 | `sf-deploy` が許可される条件の確認（**実際のリリースは、e2e では行わない**） | L1 | ★ |
 | A13 | `sf-init` が生成したリポジトリ（`branches.txt`・各段階のリリースファイル・状態ファイル・完了の印）を、後続のコマンド（`sf-job` → `sf-start` → `sf-install` → `sf-hook` → `sf-dryrun` → `sf-push`）が読んで動く、**代表的な最小の通しの経路（1 本）** | L1 | ★★★ |
 | A14 | `origin` の URL からの、プロジェクト判定（`admin` ブランチ・`force-*` 名・別オーナーの同名）が、複数の clone で正しく働く | L1 | ★★ |

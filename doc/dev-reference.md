@@ -395,11 +395,11 @@ check_gh_owner "$GITHUB_OWNER"   # 認証ユーザーの一致確認
 
 ### 4.7 sf-launcher.sh
 
-- `sfl` コマンドで起動するメニュー形式ランチャー
+- `sf-launcher.sh` で起動するメニュー形式ランチャー（`sf-job.sh` / `sf-start.sh` の最後に自動で起動する。別名（`sfl` など）は作らない。直接 `sf-launcher.sh` を打つ。2026-10-23 の決定）
 - `lib/common.sh` を source しない standalone 設計（ログ不要・カラー定義を独自に持つ）
 - VSCode 内では `sf-start` / `sf-restart` をメニューから除外（`$TERM_PROGRAM == "vscode"` で判定）
 - `SF_LAUNCHER_ACTIVE=1` をエクスポートして `sf-start.sh` からの二重起動を防止
-- `sflf` エイリアスで fzf モードも利用可能
+- `sf-launcher.sh --fzf` で fzf モードも利用可能
 
 ### 4.8 sf-deploy.sh
 

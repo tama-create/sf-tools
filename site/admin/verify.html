@@ -39,6 +39,20 @@ sf-init.sh --verify --cleanup     # 削除のみ（リリースの途中で止�
 <p>セットアップの最後（ステップ 9）でも、「動作を確認しますか？ [Enter = 確認する / s = あとで]」と聞かれます。Enter なら、環境全体の確認から、リリースと削除までを、続けて実行します（⏱️ 約 20 分。3 層の場合）。確認で失敗があっても、セットアップは、完了扱いです（結果と直し方が表示されます）。</p>
 
 <h2 id="flow">流れ</h2>
+<figure class="diagram">
+  <div class="flow">
+    <div class="node auto"><span class="who">① 〜 ③</span><strong>診断・表示・確認</strong><small>不足があれば、ここで止まる（組織は変わらない）</small></div>
+    <div class="arrow">→</div>
+    <div class="node auto"><span class="who">④</span><strong>環境の確認</strong><small>NG なら、リリースへ進まない</small></div>
+    <div class="arrow">→</div>
+    <div class="node warn"><span class="who">⑤</span><strong>リリース</strong><small>段階ごとに PR</small></div>
+    <div class="arrow">→</div>
+    <div class="node warn"><span class="who">⑥</span><strong>削除</strong><small>同じ順に</small></div>
+    <div class="arrow">→</div>
+    <div class="node ok"><span class="who">⑦</span><strong>結果</strong><small>段階ごとの成否</small></div>
+  </div>
+  <figcaption>組織を変えるのは、⑤ と ⑥ だけです。⑤ では、リリースしたものが、⑥ で、削除されます。</figcaption>
+</figure>
 <ol class="steps">
   <li><p><strong>診断:</strong> <a href="maintenance.html#status"><code>--status</code></a> と同じ診断です。不足があれば、ここで中断します（直し方が表示されます）。</p></li>
   <li><p><strong>実行内容の表示:</strong> リポジトリ・段階ごとの組織の名前と種類（本番は、赤く表示）・PR の数・目安の時間。</p></li>

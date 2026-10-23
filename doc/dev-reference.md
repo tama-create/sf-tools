@@ -444,9 +444,9 @@ GitHub Secrets / Variables の JWT 認証情報を再登録する。実行フロ
 4. 赤い警告ボックス + `ask_yn || die`（管理者向け確認）
 5. メインメニューで操作を選択 `[1-4/q]`（1文字即時選択）:
    - 1: 秘密鍵（`SF_PRIVATE_KEY` Secret）を更新
-   - 2: コンシューマキー（`SF_CONSUMER_KEY_*` Secret）+ ユーザー名（`SF_USERNAME_*` Variable）+ インスタンス URL（`SF_INSTANCE_URL_*` Variable）を組織ごとに更新
-   - 3: ユーザー名（`SF_USERNAME_*` Variable）を組織ごとに更新（現在値を `gh variable get` で自動取得して表示）
-   - 4: すべて更新（1〜3 を順に実行）
+   - 2: コンシューマーキー（`SF_CONSUMER_KEY_*` Secret）を組織ごとに更新（接続ユーザー名・ログイン先を決め、接続テストに成功してから登録。ユーザー名・インスタンス URL は登録しない）
+   - 3: ユーザー名（`SF_USERNAME_*` Variable）を組織ごとに更新（現在値を `gh variable get` で自動取得して表示。コンシューマーキーは接続テスト用で、登録しない）
+   - 4: すべて更新（`SF_PRIVATE_KEY` を先に登録し、続けて組織ごとに、`SF_CONSUMER_KEY_*`・`SF_USERNAME_*`・`SF_INSTANCE_URL_*` を、接続テストに成功してから登録）
 6. 組織選択は `branches.txt` の有効行数（1〜3）に応じて動的に変化:
    - 1行: PROD のみ `[1/q]`
    - 2行: PROD + STG `[1-2/q]`

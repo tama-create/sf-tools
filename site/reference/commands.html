@@ -14,7 +14,7 @@
 <main id="doc" class="doc">
 
 <h1>📋 コマンド一覧</h1>
-<p class="lead">sf-tools のコマンドの一覧です。コマンドは、すべて <code>~/sf-tools/bin/</code> にあります。どのコマンドも、<code>--help</code>（または <code>-h</code>）を付けると、概要・オプション・処理の流れを表示します。</p>
+<p class="lead">sf-tools のコマンドの一覧です。コマンドは、すべて <code>~/sf-tools/bin/</code> にあります。どのコマンドも、<code>--help</code>（または <code>-h</code>）を付けると、概要・オプション・処理の流れを表示します。文書にないオプションを付けると、「不明なオプションです」と表示して止まります（綴りの誤りに、気づけるようにするためです）。</p>
 
 <h2 id="list">一覧</h2>
 <p>「sfl のメニュー」の ○ は、<code>sfl</code> のメニューから選べるコマンドです（<a href="commands-dev.html#sf-launcher">ランチャー</a>）。🔑 は<strong>管理者専用</strong>、⚠️ は<strong>使うときに注意が必要</strong>なコマンドです（<a href="#admin">次の節</a>）。</p>
@@ -69,8 +69,8 @@
 <h2 id="admin">管理者専用コマンドの安全ガード</h2>
 <p>🔑 のついたコマンドは<strong>管理者専用</strong>です。実行すると、赤い警告ボックスが表示されて、続けてよいかを聞かれます（Y / N / q）。まちがえて実行したときは、<code>N</code> か <code>q</code> で、止められます。</p>
 <ul>
-  <li><code>GITHUB_ACTIONS=true</code> が設定されている環境（GitHub Actions 上）では、確認をスキップして自動で実行します。</li>
-  <li><code>gh</code> を使うコマンドは、起動したときに、gh でログインしているユーザーが、リポジトリのオーナーと同じかを確かめます。違っていれば、そこで止まります。
+  <li><code>GITHUB_ACTIONS=true</code> が設定されている環境（GitHub Actions 上）では、<code>sf-metasync.sh</code> と <code>sf-update-secret.sh</code> は、確認をスキップして自動で実行します。例外が 2 つあります。<code>sf-sync-wf.sh</code> は、Actions 上でも、警告と確認を省略しません。<code>sf-typecheck.sh</code> と <code>sf-init.sh --verify</code> は、Actions 上では実行を拒否します（<code>sf-typecheck.sh</code> の <code>--list</code> と <code>--coverage</code> は、実行できます）。</li>
+  <li>🔑 のついた、<code>gh</code> を使うコマンドは、起動したときに、gh でログインしているユーザーが、リポジトリのオーナーと同じかを確かめます。違っていれば、そこで止まります（開発者向けの <code>sf-job.sh</code> は、確かめません。リポジトリを読み書きする権限は、GitHub が確認します）。
     <br>ただし、オーナーが GitHub 組織（例: <code>tamashimon-org</code>）で、認証ユーザーがその組織の有効な管理者（admin）なら、そのまま続行します。組織の一般メンバーや、組織の情報を取得できない場合は中断します（<code>gh auth switch</code> で正しいアカウントに切り替えてから、もう一度実行してください）。</li>
 </ul>
 

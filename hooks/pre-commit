@@ -13,7 +13,7 @@
 readonly SCRIPT_PATH="$HOME/sf-tools/bin/sf-precommit.sh"
 
 if [[ ! -f "$SCRIPT_PATH" ]]; then
-    echo "[PRE-PUSH][ERROR] スクリプトが見つかりません: $SCRIPT_PATH" >&2
+    echo "[PRE-COMMIT][ERROR] スクリプトが見つかりません: $SCRIPT_PATH" >&2
     exit 1
 fi
 

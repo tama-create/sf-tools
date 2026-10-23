@@ -3,8 +3,9 @@
 # sf-prepush.sh - プッシュ前チェックスクリプト
 # ==============================================================================
 # git push のときに、pre-push フック（sf-hook.sh が hooks/pre-push を .git/hooks/pre-push にコピーしたもの）から
-# 呼ばれる本体。保護ブランチの上からのプッシュを拒否し、ターゲットファイルを検証したうえで、
-# origin/<現在のブランチ> と origin/main の未取り込みのコミットを、現在のブランチに merge で取り込む。
+# 呼ばれる本体。保護ブランチの上からのプッシュと、保護ブランチへのプッシュを拒否し、ターゲットファイルを検証したうえで、
+# origin/<現在のブランチ> と origin/main の未取り込みのコミットを、現在のブランチに merge で取り込む
+# （取り込みをしたときは、そのプッシュを中止する。もう一度プッシュすると、通る）。
 #
 # 【使い方】
 #   sf-prepush.sh [オプション]
@@ -15,8 +16,10 @@
 #   上記以外の引数・オプションを指定すると、エラーで終了する
 #
 # 【処理の流れ】
-#   1. 現在のブランチ（git symbolic-ref --short HEAD）が、保護ブランチ（sf-tools/config/branches.txt のブランチ。
-#      ファイルがない・空のときは main）なら、拒否して終了する。判定するのは現在のブランチだけで、プッシュ先のブランチは見ない
+#   1. 次のどちらかなら、拒否して終了する（保護ブランチ = sf-tools/config/branches.txt のブランチ。ファイルがない・空のときは main）
+#        - 現在のブランチ（git symbolic-ref --short HEAD）が、保護ブランチ
+#        - プッシュ先（フックの標準入力に、git が渡す、リモートの ref = refs/heads/<名前>）に、保護ブランチがある
+#          （git push origin feature:main や、保護ブランチの削除（:main）も、拒否する。端末から手動で実行したときは、標準入力を読まない）
 #   2. sf-check.sh（引数なし）でターゲットファイルを検証する。エラーなら中断する
 #   3. git fetch -q origin -- <対象> で、リモートの最新を取得する。対象は次のとおり（失敗したら中断する）
 #        - 現在のブランチ（origin にあるときだけ）
@@ -26,7 +29,10 @@
 #      そのコミットを表示して、git merge origin/<現在のブランチ> で取り込む。失敗したら git merge --abort して中断する
 #   5. origin/main に未取り込みのコミットがあれば、そのコミットを表示して、git merge origin/main で取り込む。
 #      失敗したら git merge --abort して中断する
-#   6. すべて通れば exit 0（プッシュ続行）
+#   6. 4・5 で取り込んだ（merge のコミットを作った）ときは、exit 1（プッシュ中止）。git は、フックを呼ぶ前に、プッシュする
+#      コミットを決めているため、そのままでは、取り込みが含まれないまま、プッシュが成功と表示される。取り込み後に、もう一度
+#      プッシュすれば、取り込みは済んでいるため、中止しない
+#   7. すべて通り、取り込みもなければ exit 0（プッシュ続行）
 #
 # 【前提条件】
 #   - 現在のディレクトリ（フックから呼ばれたときは、リポジトリのルート）の名前が force- で始まること
@@ -147,6 +153,7 @@ phase_pull_own() {
         run git merge "origin/${current_branch}" \
             || { run git merge --abort; die "${current_branch} の自動取り込みに失敗しました。コンフリクトを解消してから再度プッシュしてください。"; }
         log "SUCCESS" "${current_branch} ブランチのリモート変更を取り込みました。"
+        MERGED=1
     else
         log "INFO" "${current_branch} ブランチはリモートと同期されています。"
     fi
@@ -171,6 +178,7 @@ phase_check_main() {
         run git merge origin/main \
             || { run git merge --abort; die "main の自動取り込みに失敗しました。コンフリクトを解消してから再度プッシュしてください。"; }
         log "SUCCESS" "main ブランチの変更を自動的に取り込みました。"
+        MERGED=1
     else
         log "SUCCESS" "main ブランチと同期されています。"
     fi
@@ -187,12 +195,35 @@ phase_check_syntax() {
 # ------------------------------------------------------------------------------
 # 6. メイン実行フロー
 # ------------------------------------------------------------------------------
-CURRENT_BRANCH=$(run git symbolic-ref --short HEAD)
+# git は、pre-push フックの標準入力に、プッシュする ref を 1 行ずつ渡す:「<ローカルの ref> <ローカルの sha> <リモートの ref> <リモートの sha>」。
+#   ほかのコマンドが標準入力を読む前に、最初に全部読む。端末（手動で実行したとき）では、読まない。
+#   タイムアウト付き（フック以外から、閉じない標準入力で呼ばれても、止まり続けないため）
+PUSH_REF_LINES=""
+if [[ ! -t 0 ]]; then
+    while IFS= read -r -t 2 _push_line; do
+        PUSH_REF_LINES="${PUSH_REF_LINES}${_push_line}"$'
+'
+    done
+    unset _push_line
+fi
 
-# 現在のブランチが保護ブランチなら、プッシュを拒否する（プッシュ先のブランチは見ない）
+CURRENT_BRANCH=$(run git symbolic-ref --short HEAD)
+MERGED=0   # フックの中で merge したら 1（下の最後の確認で使う）
+
+# 現在のブランチが保護ブランチなら、プッシュを拒否する
 if is_protected_branch "$CURRENT_BRANCH"; then
     die "${CURRENT_BRANCH} ブランチへの直接プッシュは禁止されています。PR を作成してください。"
 fi
+
+# プッシュ先（リモートのブランチ）が保護ブランチなら、現在のブランチが何であっても、拒否する
+#   （git push origin feature:main / HEAD:main / :main（削除）などで、現在のブランチの確認をすり抜けないため）
+while IFS=' ' read -r _lref _lsha _rref _rsha; do
+    [[ "$_rref" == refs/heads/* ]] || continue
+    _target="${_rref#refs/heads/}"
+    if is_protected_branch "$_target"; then
+        die "${_target} ブランチへの直接プッシュは禁止されています（プッシュ先: ${_rref}）。PR を作成してください。"
+    fi
+done <<< "$PUSH_REF_LINES"
 
 phase_check_syntax || die "構文チェックに失敗しました。"
 
@@ -201,6 +232,14 @@ phase_fetch "$CURRENT_BRANCH" || die "リモート情報の取得に失敗しま
 phase_pull_own "$CURRENT_BRANCH" || die "自ブランチのリモート同期に失敗しました。"
 
 phase_check_main "$CURRENT_BRANCH" || die "main ブランチとの同期確認に失敗しました。"
+
+# フックの中で merge したときは、プッシュを中止する。git は、フックを呼ぶ前に、プッシュするコミットを決めているため、
+#   このプッシュには、取り込んだ内容（merge のコミット）が含まれない。手元のブランチだけが進み、プッシュは、成功と表示される
+#   （以前は、そのまま続行していた）。取り込み後の、もう一度のプッシュでは、取り込みが済んでいるため、中止しない
+if [[ "$MERGED" -eq 1 ]]; then
+    die "リモートの変更を、現在のブランチに取り込みました（merge のコミットを作成）。このプッシュには、取り込みが含まれないため、中止しました。"
+fi
+
 log "SUCCESS" "すべてのチェックが完了しました。プッシュを継続します。"
 
 exit $RET_OK

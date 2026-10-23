@@ -23,8 +23,9 @@
 #        - SF_INIT_LEGACY_CONNECTED_APP=1（--legacy-connected-app）: register_jwt_secret（init-common.sh。
 #          コンシューマー鍵・ユーザー名を手動で入力）
 #   7. 実行前のブランチを記録し（取得できなければ main）、git checkout main。origin に ADD_TIER のブランチがあれば
-#      作らない。なければ、ローカルの main から作って push --no-verify -u する（ローカルの main は pull しない）
-#   8. 作業用ブランチ system-add-tier-<ADD_TIER>-<YYYYMMDDHHMMSS> を作り、branches.txt の末尾に ADD_TIER を追記して、
+#      作らない。なければ、git fetch origin main のあと、origin/main から作って push --no-verify -u する
+#      （ローカルの main は pull しない。以前は、手元の main から作っていたため、古いと、古い内容から派生した）
+#   8. 作業用ブランチ system-add-tier-<ADD_TIER>-<YYYYMMDDHHMMSS> を origin/main から作り、branches.txt の末尾に ADD_TIER を追記して、
 #      commit --no-verify → push --no-verify -u → gh pr create --base main（main へは、直接 push しない）
 #   9. 実行前のブランチ（管理者用のクローンでは admin）に戻る
 #   手順 7〜9 の各操作は、失敗したら die
@@ -48,7 +49,7 @@
 
 # SF_TOOLS_DIR は sf-init.sh（司令塔）から export される
 PHASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SF_TOOLS_DIR="${SF_TOOLS_DIR:-$(dirname "$PHASE_DIR")}"
+SF_TOOLS_DIR="${SF_TOOLS_DIR:-$(dirname "$(dirname "$PHASE_DIR")")}"
 
 readonly SCRIPT_NAME="sf-init"
 mkdir -p "$HOME/sf-tools/logs" 2>/dev/null || true
@@ -169,13 +170,16 @@ ORIGINAL_BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null || true)  # VAR=$(cm
 log "INFO" "実行前のブランチ: ${ORIGINAL_BRANCH}（終わったら、ここへ戻ります）"
 
 run git checkout main || die "main ブランチへの切り替えに失敗しました。"
+# 新しいブランチは、リモートの最新の main から作る（手元の main が古いと、古い内容から派生してしまうため。
+#   以前は、手元の main から作っていた。手元の main は、更新しない）
+run git fetch origin main || die "origin/main の取得に失敗しました。"
 
-# 5-1. リモートに ${ADD_TIER} ブランチを作成（main から派生）
+# 5-1. リモートに ${ADD_TIER} ブランチを作成（origin/main から派生）
 if git ls-remote --exit-code --heads origin "$ADD_TIER" > /dev/null 2>&1; then
     # 条件チェックのため run 不使用
     log "INFO" "${ADD_TIER} ブランチはリモートに既に存在します（スキップ）。"
 else
-    run git checkout -b "$ADD_TIER"  || die "${ADD_TIER} ブランチの作成に失敗しました。"
+    run git checkout -b "$ADD_TIER" origin/main || die "${ADD_TIER} ブランチの作成に失敗しました。"
     run git push --no-verify -u origin "$ADD_TIER" \
         || die "${ADD_TIER} ブランチのプッシュに失敗しました。"
     run git checkout main            || die "main ブランチへの切り替えに失敗しました。"
@@ -184,7 +188,7 @@ fi
 
 # 5-2. 作業用のブランチで branches.txt を更新し、PR を作成する
 PR_BRANCH="system-add-tier-${ADD_TIER}-$(date +%Y%m%d%H%M%S)"   # 秒まで含める（同じ分の再実行で、衝突しないため）
-run git checkout -b "$PR_BRANCH" || die "作業用ブランチの作成に失敗しました: ${PR_BRANCH}"
+run git checkout -b "$PR_BRANCH" origin/main || die "作業用ブランチの作成に失敗しました: ${PR_BRANCH}"
 
 TMP_BRANCH_FILE="${BRANCHES_FILE}.tmp"
 {

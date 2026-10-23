@@ -77,7 +77,32 @@ test_unknown_option_does_not_hang() {
     teardown "$td" "$mb" "$mh"
 }
 
+# 回帰: phases/init/*.sh は、SF_TOOLS_DIR が未設定でも、sf-tools のルートを使い、lib/common.sh を読み込める
+#   （以前は、既定値が 1 つ上の phases/ を指し、14 本のうち 12 本が lib/common.sh を読み込めなかった。
+#   通常は sf-init.sh が SF_TOOLS_DIR を export するため、直接実行したときにだけ起きた）
+test_phase_scripts_default_sf_tools_dir() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] phases/init/*.sh は、SF_TOOLS_DIR が未設定でも、lib/common.sh を読み込める${CLR_RST}"
+    local td mb mh f name out count=0
+    setup_std_env td mb mh
+    create_all_mocks "$mb"
+    for f in "$SF_TOOLS_DIR"/phases/init/*.sh; do
+        name=$(basename "$f")
+        [[ "$name" == "init-common.sh" ]] && continue   # 関数の集まり（単独では実行しない）
+        out=$( ( cd "$td" && run_with_timeout 15 env -u SF_TOOLS_DIR HOME="$mh" PATH="$mb:$PATH" bash "$mh/sf-tools/phases/init/$name" </dev/null 2>&1 ) )
+        count=$((count + 1))
+        if echo "$out" | grep -q "lib/common.sh: No such file\|common.sh: そのようなファイル"; then
+            fail "${name}: SF_TOOLS_DIR が未設定でも、lib/common.sh を読み込める" "$(echo "$out" | grep "common.sh" | head -1)"
+        else
+            pass "${name}: SF_TOOLS_DIR が未設定でも、lib/common.sh を読み込める"
+        fi
+    done
+    [[ $count -ge 10 ]] && pass "phases の ${count} 本を確認した" || fail "phases の本数を確認した" "${count} 本だけ"
+    teardown "$td" "$mb" "$mh"
+}
+
 test_documented_options_are_accepted
 test_unknown_option_does_not_hang
+test_phase_scripts_default_sf_tools_dir
 
 print_summary

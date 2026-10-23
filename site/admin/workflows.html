@@ -54,14 +54,18 @@ sf-sync-wf.sh --remove wf-old.yml   # 雛形から廃止されたワークフロ
   <li><code>force-*</code> フォルダの中で、環境ブランチ（<code>branches.txt</code> のブランチ。<code>main</code> / <code>staging</code> / <code>develop</code> など）<strong>以外</strong>でしか、実行できません。</li>
   <li><strong>sf-tools（<code>~/sf-tools</code>）が最新であることが必須です。</strong>実行すると、まず、origin と比べて、遅れていないかを確かめます。遅れていれば、確認のうえで sf-tools を更新して、更新した sf-tools で、もう一度、自動で実行します（古い雛形で、プロジェクトのワークフローを書き換えないためです）。
     <ul>
-      <li>origin に接続できない・更新を断った・sf-tools に未コミットの変更や未プッシュのコミットがある場合は、中断します。</li>
+      <li>origin に接続できない・更新を断った・sf-tools に未コミットの変更や未プッシュのコミットがある場合は、中断します。更新して実行し直したあとも、まだ遅れているときも、中断します。</li>
+      <li>最新かどうかを確かめられないとき（sf-tools が Git のリポジトリでない・ブランチの上にいない・origin に同じブランチがない）は、警告を出して、続行します。</li>
       <li><code>--check</code> は、何も変更しない（読み取り専用の）ため、sf-tools を更新せず、遅れていれば中断します。</li>
     </ul>
   </li>
   <li>改行コード（CRLF / LF）だけの違いは、差分とみなしません。</li>
   <li>自動でコミット・プッシュはしません。</li>
   <li>雛形にないワークフローは、変更せず、表示するだけです。<code>--remove</code> で、雛形から廃止されたものだけを、二重に確認して削除できます（雛形にあるものは、削除できません）。</li>
-  <li><code>--check</code> は、差分なしで終了コード 0、あれば 1 を返します。複数のリポジトリを見回るときに使えます。</li>
+  <li><code>--check</code> は、差分なしで終了コード 0、あれば 1 を返します。複数のリポジトリを見回るときに使えます。ただし、1 は「中断」（sf-tools が遅れている・環境ブランチの上、など）のときにも返るので、「差分あり」とは区別できません。</li>
+  <li><code>--check</code> と <code>--remove</code> は、同時に指定できません（エラーで終了し、何も変更しません）。</li>
+  <li><code>--remove</code> が受け付けるのは、<code>wf-old.yml</code> のような、フォルダを含まないワークフローのファイル名（<code>.yml</code> / <code>.yaml</code>）だけです。確認は、冒頭の警告のあとと、削除の直前の、2 回あります。</li>
+  <li><code>GITHUB_ACTIONS=true</code> の環境でも、警告と確認は省略しません。</li>
 </ul>
 
 </main>

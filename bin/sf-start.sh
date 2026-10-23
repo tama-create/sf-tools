@@ -29,7 +29,7 @@
 #        d. sf org logout --target-org {エイリアス} を実行する（失敗は無視。既存の同名エイリアスの認証は消える）
 #        e. sf org login web --set-default --alias {エイリアス} --instance-url {ログイン先} でブラウザからログインする。
 #           WSL で wslview がないときは、powershell.exe でブラウザを開く wslview を /tmp/sf-wsl-bin に作り、PATH の先頭に加える
-#        ログインに失敗しても中断しない（警告を表示して続け、その後「接続完了！」も表示する）
+#        ログインに失敗したら、中断する（終了コード 1。設定ファイルの書き込み・VS Code の起動・ランチャーの起動は、行わない）
 #   4. .sf/config.json（{"target-org": エイリアス}）と .sfdx/sfdx-config.json（{"defaultusername": エイリアス}）を
 #      上書きする（書き込めなければ中断）。code コマンドがあれば code . で VS Code を起動する（なければ警告のみ）
 #   5. ~/sf-tools/bin/sf-install.sh があれば、バックグラウンドで実行する（出力は、このスクリプトのログに追記）。
@@ -74,6 +74,7 @@ if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
     exit 0
 fi
 source "$COMMON_LIB"
+reject_unknown_args "$@"   # -v / --verbose 以外の引数は、不明なオプションとして中断する
 source "${SCRIPT_DIR}/../lib/org.sh"   # ログイン先の選択（エイリアスの名前では、決めない）
 
 # ------------------------------------------------------------------------------
@@ -145,8 +146,9 @@ if [ "$SKIP_LOGIN" -eq 0 ]; then
     fi
 
     # ブラウザ起動に TTY が必要なため run ラッパーを使用しない
+    # 失敗したら、中断する（以前は、警告だけで先へ進み、「接続完了」と表示して、設定ファイルも書いていた）
     sf org login web --set-default --alias "$ORG_ALIAS" --instance-url "$LOGIN_URL" \
-        || log "WARNING" "ログインに失敗した可能性があります。接続が確立されていない場合は再実行してください。"
+        || die "Salesforce へのログインに失敗しました（エイリアス: ${ORG_ALIAS}）。"
     log "SUCCESS" "接続完了！"
 fi
 

@@ -516,6 +516,21 @@ test_phase7_channel_id() {
     assert_file_not_contains "$mb/var_SLACK_CHANNEL_ID.txt" "U01ABCDEFGH"  "U… は登録されない"
     rm -rf "$init_base"
 
+    # 回帰: Bot Token は、画面に表示しない（* で表示する）。xoxb- で始まらない値は、拒否して入力し直させる
+    #   （以前は、そのまま画面に表示し、形式も確認せずに登録していた）
+    _p7_run 'Y
+not-a-token
+xoxb-secretvalue123
+C01ABCDEFGH
+
+'
+    assert_exit_ok           "$exit_code"                                  "Bot Token: 形式違い → 再入力 → 正常終了"
+    assert_file_contains     "$out" "Bot User OAuth Token の形式ではありません" "Bot Token: 形式違いは、警告が出る"
+    assert_file_not_contains "$out" "xoxb-secretvalue123"                  "Bot Token: 入力した値を、画面に表示しない"
+    assert_file_not_contains "$out" "not-a-token"                          "Bot Token: 形式違いの値も、画面に表示しない"
+    assert_file_contains     "$MOCK_CALL_LOG" "gh secret set SLACK_BOT_TOKEN" "Bot Token: 正しい形式の値で、Secret が登録される"
+    rm -rf "$init_base"
+
     # 案内文（共有チャンネルの案内が表示される）
     _p7_run 'Y\nxoxb-fake\nC01ABCDEFGH\n\n'
     assert_file_contains     "$out" "共有チャンネル"                        "共有チャンネルを用意する案内が表示される"
@@ -838,22 +853,29 @@ export SF_INIT_LOGIN_URL_PROD=login   # ログイン先を、質問せずに指�
     # 完了済みのプロジェクトで、--resume N を明示 → 拒否する（接続処理を、確認なしで、やり直さない）
     _rc_run 10 "tamashimon/force-testproject" "--resume 10" 'Y\n'
     assert_exit_fail          "$exit_code"                                                  "完了済み・--resume 10: 拒否される"
-    assert_file_contains      "$out" "完了済みのプロジェクトでは、--resume は使えません"          "完了済み・--resume 10: 理由が表示される"
+    assert_file_contains      "$out" "完了済みのプロジェクトでは、--resume / --only は使えません"          "完了済み・--resume 10: 理由が表示される"
     assert_file_contains      "$out" "sf-init.sh --reconnect"                                   "完了済み・--resume 10: --reconnect が案内される"
     assert_file_not_contains  "$MOCK_CALL_LOG" "gh secret set"                              "完了済み・--resume 10: 何も登録しない"
     rm -rf "$init_base"
     # 境界: 完了済み・--resume 2 も拒否される（N > 1 は、すべて）
     _rc_run 10 "tamashimon/force-testproject" "--resume 2" 'Y\n'
     assert_exit_fail          "$exit_code"                                                  "完了済み・--resume 2: 拒否される"
-    assert_file_contains      "$out" "完了済みのプロジェクトでは、--resume は使えません"          "完了済み・--resume 2: 理由が表示される"
+    assert_file_contains      "$out" "完了済みのプロジェクトでは、--resume / --only は使えません"          "完了済み・--resume 2: 理由が表示される"
     rm -rf "$init_base"
     # 境界: 別のリポジトリの状態は、拒否しない（残骸として、扱う）
     _rc_run 10 "other/force-other" "--resume 2" 'Y\n'
-    assert_file_not_contains  "$out" "完了済みのプロジェクトでは、--resume は使えません"          "別のリポジトリの状態・--resume: 拒否しない"
+    assert_file_not_contains  "$out" "完了済みのプロジェクトでは、--resume / --only は使えません"          "別のリポジトリの状態・--resume: 拒否しない"
     rm -rf "$init_base"
-    # 境界: 完了済み・--only 10 は、拒否しない（デバッグ用）
-    _rc_run 10 "tamashimon/force-testproject" "--only 10" 'Y\n'
-    assert_file_not_contains  "$out" "完了済みのプロジェクトでは、--resume は使えません"          "完了済み・--only 10: 拒否しない"
+    # 回帰: 完了済み・--only N も、拒否する（以前は、拒否せず、確認なしで、その Phase を実行していた）
+    _rc_run 10 "tamashimon/force-testproject" "--only 10" 'Y
+'
+    assert_exit_fail          "$exit_code"                                                  "完了済み・--only 10: 拒否される"
+    assert_file_contains      "$out" "完了済みのプロジェクトでは、--resume / --only は使えません"  "完了済み・--only 10: 理由が表示される"
+    assert_file_not_contains  "$MOCK_CALL_LOG" "gh secret set"                              "完了済み・--only 10: 何も登録しない"
+    rm -rf "$init_base"
+    _rc_run 10 "tamashimon/force-testproject" "--only 6" 'Y
+'
+    assert_exit_fail          "$exit_code"                                                  "完了済み・--only 6: 拒否される"
     rm -rf "$init_base"
     # 未完了なら、--resume N は、これまでどおり使える
     _rc_run 9 "tamashimon/force-testproject" "--resume 10" 'Y\n'

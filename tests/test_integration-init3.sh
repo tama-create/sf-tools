@@ -46,7 +46,7 @@ test_X3_9() {
     _status
     assert_exit_fail "$IT_RC" "X3-9: Secret（SF_PRIVATE_KEY）がないと、--status は、不足で失敗する"
     _plain | grep -q "SF_PRIVATE_KEY" && pass "X3-9: 不足の Secret の名前が、表示される" || fail "X3-9: 不足の Secret の名前が、表示される"
-    _plain | grep -q "sf-init.sh --only 10" && pass "X3-9: 直し方（--only 10）が、表示される" || fail "X3-9: 直し方（--only 10）が、表示される"
+    _plain | grep -q "sf-update-secret.sh" && pass "X3-9: 直し方（sf-update-secret.sh）が、表示される" || fail "X3-9: 直し方（sf-update-secret.sh）が、表示される"
     mv "$IT_ROOT/saved.key" "$IT_STATE/secrets/SF_PRIVATE_KEY"
 
     # Variable が、消えている → 不足。直し方（--reconnect）が出る
@@ -157,10 +157,14 @@ test_X4_1b() {
     local rc1 rc2; rc1=$(cat "$IT_ROOT/r1.rc"); rc2=$(cat "$IT_ROOT/r2.rc")
     echo "  1 つ目: rc=${rc1} / 2 つ目: rc=${rc2}"
     local ok=0; [[ "$rc1" == "0" ]] && ok=$((ok + 1)); [[ "$rc2" == "0" ]] && ok=$((ok + 1))
-    assert_equals "$ok" "1" "X4-1b: 同名のリポジトリの同時作成は、片方だけが、成功する"
-    local loser_out="$IT_ROOT/r1.out"; [[ "$rc1" == "0" ]] && loser_out="$IT_ROOT/r2.out"
-    # 負けた側が止まる場所は、タイミングで変わる（作成の失敗 / 先に勝った側が main を push した後の初回コミットの失敗）。どちらも、失敗の画面（原因つき）が出ること
-    grep -q "作成に失敗\|already exists\|原因     :" "$loser_out" && pass "X4-1b: 負けた側に、失敗の画面（原因つき）が、表示される" || fail "X4-1b: 負けた側に、失敗の画面（原因つき）が、表示される" "$(sed 's/\x1b\[[0-9;]*m//g' "$loser_out" | tail -5)"
+    # 少なくとも片方は、成功する。両方が成功することもある（下の【現状の限界】: 作成に失敗した側も「すでにある」として続けるため、
+    #   タイミングによっては、負けた側も最後まで進む。CI の Windows で、実際に起きた）。守るべきことは、重複・破損がないこと（下の 2 つの確認）
+    [[ "$ok" -ge 1 ]] && pass "X4-1b: 同名のリポジトリの同時作成は、少なくとも片方が、成功する" || fail "X4-1b: 同名のリポジトリの同時作成は、少なくとも片方が、成功する" "成功: ${ok} 個（rc1=${rc1} / rc2=${rc2}）"
+    if [[ "$ok" -eq 1 ]]; then
+        local loser_out="$IT_ROOT/r1.out"; [[ "$rc1" == "0" ]] && loser_out="$IT_ROOT/r2.out"
+        # 負けた側が止まる場所は、タイミングで変わる（作成の失敗 / 先に勝った側が main を push した後の初回コミットの失敗）。どちらも、失敗の画面（原因つき）が出ること
+        grep -q "作成に失敗\|already exists\|原因     :" "$loser_out" && pass "X4-1b: 負けた側に、失敗の画面（原因つき）が、表示される" || fail "X4-1b: 負けた側に、失敗の画面（原因つき）が、表示される" "$(sed 's/\x1b\[[0-9;]*m//g' "$loser_out" | tail -5)"
+    fi
     assert_equals "$(it_remote_count main)" "1" "X4-1b: main の初回コミットは 1 つ（重複しない）"
     assert_equals "$(grep -cxF "${IT_OWNER}/${IT_REPO}" "$IT_STATE/repos")" "1" "X4-1b: リポジトリは、1 つだけ登録されている"
     # 【現状の限界】排他（ロック）は、同じ admin フォルダの中だけ。別のフォルダから、同名のリポジトリを同時に作ると、作成に失敗した側も、

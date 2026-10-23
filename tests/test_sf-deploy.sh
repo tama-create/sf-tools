@@ -172,7 +172,8 @@ test_reserved_alias_blocked() {
 #   --target=ALIAS 形式（sf-release.sh は未対応。接続中の組織を検査して素通りしないようにする）、値なし、次のオプションを値にする指定
 test_target_invalid_forms_rejected() {
     local td mb mh out ec args
-    for args in "--target=prod" "--target=dev00" "-t" "--target --no-open" "-t --no-open"; do
+    # 不明なオプション・2 番目以降の -h も、確認の前に拒否する（以前は、確認のあとで sf-release.sh が拒否していた）
+    for args in "--target=prod" "--target=dev00" "-t" "--target --no-open" "-t --no-open" "--bogus" "-n -h" "-t dev00 --bogus"; do
         setup_std_env td mb mh
         create_all_mocks "$mb"
         setup_release_dir "$td" "feature/deploy-test"

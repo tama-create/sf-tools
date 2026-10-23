@@ -101,7 +101,7 @@ test_missing() {
     _d main staging develop
     assert_equals "$NG" "6"                                                        "不足は 6 件"
     assert_file_contains "$OUT" "PAT_TOKEN がありません"                             "Secret の不足が表示される"
-    assert_file_contains "$OUT" "sf-init.sh --only 6"                               "PAT_TOKEN の直し方（--only 6）が表示される"
+    assert_file_contains "$OUT" "gh secret set PAT_TOKEN"                           "PAT_TOKEN の直し方（gh secret set）が表示される"
     assert_file_contains "$OUT" "SF_CONSUMER_KEY_STG がありません"                    "段階ごとの Secret の不足が表示される"
     assert_file_contains "$OUT" "sf-init.sh --reconnect staging"                    "段階の接続の直し方（--reconnect）が表示される"
     assert_file_contains "$OUT" "SLACK_CHANNEL_ID がありません"                       "Variable の不足が表示される"

@@ -13,8 +13,8 @@
 #   3. gh auth status が失敗したら、gh auth login を実行する（ログインに失敗したら die）
 #
 # 【前提条件】
-#   - 環境変数 SF_TOOLS_DIR（sf-tools のルート。sf-init.sh が export する）。未設定のときの既定値は phases/ を指し、
-#     lib/common.sh を読み込めない
+#   - 環境変数 SF_TOOLS_DIR（sf-tools のルート。sf-init.sh が export する）。未設定のときは、このスクリプトの
+#     2 つ上のフォルダ（sf-tools のルート）を使う（以前は 1 つ上の phases/ を指し、lib/common.sh を読み込めなかった）
 #
 # 【補足】
 #   - SF_INIT_ENV_FILE（未設定時は ${PWD}/.sf-init.env）があれば source する（この Phase では、その値を使わない）
@@ -24,7 +24,7 @@
 
 # SF_TOOLS_DIR は sf-init.sh（司令塔）から export される
 PHASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SF_TOOLS_DIR="${SF_TOOLS_DIR:-$(dirname "$PHASE_DIR")}"
+SF_TOOLS_DIR="${SF_TOOLS_DIR:-$(dirname "$(dirname "$PHASE_DIR")")}"
 
 readonly SCRIPT_NAME="sf-init"
 mkdir -p "$HOME/sf-tools/logs" 2>/dev/null || true

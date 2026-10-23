@@ -56,9 +56,9 @@ sf-check.sh -h</code></pre>
 sf-job.sh --project acme           # プロジェクトを指定する（force-acme）</code></pre>
 <p>ジョブ名（ブランチの名前になります）を入力するだけで、次のことが、自動で進みます。</p>
 <ol class="steps">
-  <li><p>ジョブ名（例: <code>JOB-20260323</code>）で、ブランチを作ります。</p></li>
-  <li><p>作業用のフォルダを、準備します（<code>git worktree</code> または <code>git clone</code>）。</p></li>
-  <li><p><code>sf-start.sh</code> が、自動で動きます（ログイン・フックの設定・VS Code の起動）。</p></li>
+  <li><p>ジョブ名（例: <code>JOB-20260323</code>）で、GitHub 上に、<code>main</code> の最新から、作業用のブランチを作ります。</p></li>
+  <li><p>作業用のフォルダ（<code>./ジョブ名/force-XXXX</code>）に、そのブランチをコピーします（<code>git clone</code>）。</p></li>
+  <li><p><code>sf-start.sh</code> が、自動で動きます（Salesforce へのログイン・VS Code の起動。Git のフックの設定は、そのあと裏で行われます）。</p></li>
 </ol>
 <div class="box">
   <div class="title">うまくいかないとき</div>

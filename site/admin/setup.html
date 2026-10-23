@@ -119,7 +119,7 @@ sf-init.sh --owner my-org --project acme            # 引数で指定（対話�
       <li>左のメニューの「OAuth &amp; Permissions」をクリックします。</li>
       <li>「ボットトークンのスコープ」→「OAuth スコープを追加する」で、<code>chat:write</code> を追加します。</li>
       <li>左のメニューの「Install App」→「Install to ワークスペース名」をクリックして、「許可する」をクリックします。</li>
-      <li>表示されたページの「Bot User OAuth Token」（<code>xoxb-</code> で始まる文字列）をコピーして、ターミナルに貼り付けます。</li>
+      <li>表示されたページの「Bot User OAuth Token」（<code>xoxb-</code> で始まる文字列）をコピーして、ターミナルに貼り付けます。貼り付けた文字は、<code>*</code> で表示されます（Token は画面に出ません）。<code>xoxb-</code> で始まらないときは、入力し直しになります。</li>
     </ol>
   </li>
   <li>
@@ -175,7 +175,7 @@ sf-init.sh --owner my-org --project acme            # 引数で指定（対話�
     </ul>
     別のリポジトリの状態が残っているときは、選択肢は出ず、最初から始まります。
   </li>
-  <li>完了済みのプロジェクトでは、<code>--resume N</code> は使えません（接続の処理を、確認なしで、やり直さないためです）。</li>
+  <li>完了済みのプロジェクトでは、<code>--resume N</code> と <code>--only N</code> は使えません（接続の処理などを、確認なしで、やり直さないためです）。</li>
   <li>進み具合は、<code>admin/.sf-init-XXXX.progress</code>（入力内容は <code>.sf-init-XXXX.env</code>）に記録されます。<strong>この 2 つのファイルは、最後まで終わると削除されます</strong>（途中で止まったときだけ、残ります）。終わっているかどうかは、クローンの <code>git config sf-tools.setup-complete</code> で判断します。</li>
   <li>リポジトリそのものを作り直したいときは、GitHub 上のリポジトリと <code>admin</code> フォルダを、手動で削除してから、実行します。</li>
 </ul>
@@ -215,8 +215,8 @@ sf-next.sh      # 次の PR 先を確認 → ブラウザで PR を作成 → �
   <thead><tr><th>オプション</th><th>内容</th></tr></thead>
   <tbody>
     <tr><td><code>--owner</code> / <code>--project</code></td><td>オーナーとプロジェクト名（XXXX）を指定します（対話なし）</td></tr>
-    <tr><td><code>--resume N</code></td><td>N 番目の段階から、質問なしで再開します（通常は、指定する必要はありません）。<strong>完了済みのプロジェクトでは、使えません。</strong>動作の確認（最後のステップ）は、聞きません</td></tr>
-    <tr><td><code>--only N</code></td><td>N 番目の段階だけを実行します（デバッグ用）。進み具合は更新しません。動作の確認は、聞きません</td></tr>
+    <tr><td><code>--resume N</code></td><td>N 番目の段階から、質問なしで再開します（通常は、指定する必要はありません）。N は 1〜10 の整数です（それ以外は、実行する前にエラーになります）。<strong>完了済みのプロジェクトでは、使えません。</strong>動作の確認（最後のステップ）は、聞きません</td></tr>
+    <tr><td><code>--only N</code></td><td>N 番目の段階だけを実行します（デバッグ用）。N は 1〜10 の整数です。進み具合は更新しません。動作の確認は、聞きません。<strong>完了済みのプロジェクトでは、使えません。</strong></td></tr>
     <tr><td><code>--add-tier staging|develop</code></td><td>既存のプロジェクトに、段階を足します（<a href="maintenance.html#add-tier">構成の変更と診断</a>）</td></tr>
     <tr><td><code>--reconnect &lt;段階&gt;</code></td><td>1 つの段階の、接続先の Salesforce 組織を、付け替えます（<a href="maintenance.html#reconnect">構成の変更と診断</a>）</td></tr>
     <tr><td><code>--status</code></td><td>セットアップの診断をします。<span class="badge safe">🔍 読み取りのみ</span>（<a href="maintenance.html#status">構成の変更と診断</a>）</td></tr>

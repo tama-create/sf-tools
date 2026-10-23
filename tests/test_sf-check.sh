@@ -384,8 +384,90 @@ test_capability_shipped_table_blocks_standard_value_set_delete() {
     teardown "$td"
 }
 
+# 回帰: [files] に、フォルダ（LWC・Aura など、フォルダ単位のもの）を書ける。雛形も、そう案内している
+#   （以前は、ファイルだけを認め、雛形の案内どおりに書くと、コミットが止まっていた）
+test_files_directory_is_accepted() {
+    local td; td=$(setup_force_dir)
+    mkdir -p "$td/force-app/main/default/lwc/myComponent"
+    echo x > "$td/force-app/main/default/lwc/myComponent/myComponent.js"
+    printf '[files]
+force-app/main/default/lwc/myComponent
+' > "$td/deploy.txt"; printf '[files]
+' > "$td/remove.txt"
+    local out; out=$(cd "$td" && bash "$SF_TOOLS_DIR/bin/sf-check.sh" "$td/deploy.txt" "$td/remove.txt" 2>&1)
+    assert_exit_ok "$?" "[files] にフォルダ（LWC）→ 正常終了"
+    mkdir -p "$td/force-app/main/default/aura/myAura"; echo x > "$td/force-app/main/default/aura/myAura/myAura.cmp"
+    printf '[files]
+force-app/main/default/aura/myAura
+force-app/main/default/lwc/myComponent/
+' > "$td/deploy.txt"
+    out=$(cd "$td" && bash "$SF_TOOLS_DIR/bin/sf-check.sh" "$td/deploy.txt" "$td/remove.txt" 2>&1)
+    assert_exit_ok "$?" "[files] に Aura のフォルダ・末尾に / のあるフォルダ → 正常終了"
+    # それ以外のフォルダ（classes・lwc 全体・.）は、対象が広がりすぎるため、エラー（remove-target.txt では、広範囲の削除になる）
+    mkdir -p "$td/force-app/main/default/classes"
+    local d
+    mkdir -p "$td/force-app/main/default/objects/MyObject__c"
+    printf '[files]
+force-app/main/default/objects/MyObject__c
+' > "$td/deploy.txt"
+    out=$(cd "$td" && bash "$SF_TOOLS_DIR/bin/sf-check.sh" "$td/deploy.txt" "$td/remove.txt" 2>&1)
+    assert_exit_ok "$?" "[files] にオブジェクトのフォルダ（objects/MyObject__c）→ 正常終了"
+    printf '[files]
+force-app/main/default/lwc/myComponent/
+' > "$td/deploy.txt"
+    for d in "force-app/main/default/classes" "force-app/main/default/lwc" "force-app/main/default/objects" "force-app/main/default/lwc/myComponent/.." "."; do
+        printf '[files]
+%s
+' "$d" > "$td/remove.txt"
+        out=$(cd "$td" && bash "$SF_TOOLS_DIR/bin/sf-check.sh" "$td/deploy.txt" "$td/remove.txt" 2>&1)
+        assert_exit_fail "$?" "remove-target.txt に、広いフォルダ（${d}）→ エラー終了"
+    done
+    printf '[files]
+' > "$td/remove.txt"
+    printf '[files]
+force-app/main/default/lwc/noSuchComponent
+' > "$td/deploy.txt"
+    out=$(cd "$td" && bash "$SF_TOOLS_DIR/bin/sf-check.sh" "$td/deploy.txt" "$td/remove.txt" 2>&1)
+    assert_exit_fail "$?" "[files] に存在しないフォルダ → エラー終了"
+    assert_output_contains "$out" "パスが存在しません" "存在しないフォルダ → 理由が表示される"
+    printf '[files]
+../outside-dir
+' > "$td/deploy.txt"; mkdir -p "$td/../outside-dir" 2>/dev/null
+    out=$(cd "$td" && bash "$SF_TOOLS_DIR/bin/sf-check.sh" "$td/deploy.txt" "$td/remove.txt" 2>&1)
+    assert_exit_fail "$?" "[files] にリポジトリの外のフォルダ → エラー終了（フォルダでも、外は認めない）"
+    rmdir "$td/../outside-dir" 2>/dev/null
+    teardown "$td"
+}
+
+# 回帰: 不明なオプションは、パスとして扱わず、エラーで終了する。-v は受け付ける
+test_unknown_option_rejected() {
+    local td; td=$(setup_force_dir)
+    printf '[files]
+' > "$td/deploy.txt"; printf '[files]
+' > "$td/remove.txt"
+    local out; out=$(cd "$td" && bash "$SF_TOOLS_DIR/bin/sf-check.sh" --bogus "$td/deploy.txt" 2>&1)
+    assert_exit_fail "$?" "不明なオプション → エラー終了"
+    assert_output_contains "$out" "不明なオプションです: --bogus" "不明なオプション → 理由が表示される"
+    out=$(cd "$td" && bash "$SF_TOOLS_DIR/bin/sf-check.sh" -v "$td/deploy.txt" "$td/remove.txt" 2>&1)
+    assert_exit_ok "$?" "-v は受け付ける（残りの 2 つが、パスとして扱われる）"
+    teardown "$td"
+}
+
+# 回帰: branch_name.txt がないときは、黙って成功せず、WARNING を出す（コミットは止めない: exit 0）
+test_missing_branch_file_warns() {
+    local td; td=$(setup_force_dir)
+    rm -f "$td/sf-tools/release/branch_name.txt"
+    local out; out=$(cd "$td" && bash "$SF_TOOLS_DIR/bin/sf-check.sh" 2>&1)
+    assert_exit_ok "$?" "branch_name.txt なし → exit 0（コミットは止めない）"
+    echo "$out" | sed 's/\[[0-9;]*m//g' | grep -q "WARNING.*スキップしました"         && pass "branch_name.txt なし → WARNING で、検証を飛ばしたことを知らせる"         || fail "branch_name.txt なし → WARNING で、検証を飛ばしたことを知らせる" "$out"
+    teardown "$td"
+}
+
 test_files_valid_path
 test_files_missing_path
+test_files_directory_is_accepted
+test_unknown_option_rejected
+test_missing_branch_file_warns
 test_files_outside_repo_path
 test_members_valid_format
 test_members_invalid_format

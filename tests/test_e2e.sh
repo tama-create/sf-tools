@@ -2106,8 +2106,8 @@ d="${MOCK_CALL_LOG%/*}"
 [[ "${1:-}" == "--status" ]] || exit 9
 echo "$PWD" >> "$d/status.cwd"
 rc=0
-if grep -qx SLACK_BOT_TOKEN "$d/secrets.txt" 2>/dev/null; then echo "    ✓ SLACK_BOT_TOKEN"; else echo "    ✗ SLACK_BOT_TOKEN が、ありません → プロジェクトのフォルダで sf-init.sh --only 7"; rc=1; fi
-if grep -q '^SLACK_CHANNEL_ID=' "$d/vars.txt" 2>/dev/null; then echo "    ✓ SLACK_CHANNEL_ID"; else echo "    ✗ SLACK_CHANNEL_ID が、ありません → プロジェクトのフォルダで sf-init.sh --only 7"; rc=1; fi
+if grep -qx SLACK_BOT_TOKEN "$d/secrets.txt" 2>/dev/null; then echo "    ✓ SLACK_BOT_TOKEN"; else echo "    ✗ SLACK_BOT_TOKEN が、ありません → force-* の中で gh secret set SLACK_BOT_TOKEN"; rc=1; fi
+if grep -q '^SLACK_CHANNEL_ID=' "$d/vars.txt" 2>/dev/null; then echo "    ✓ SLACK_CHANNEL_ID"; else echo "    ✗ SLACK_CHANNEL_ID が、ありません → force-* の中で gh variable set SLACK_CHANNEL_ID --body <チャンネル ID>"; rc=1; fi
 [[ "${MOCK_STATUS_BLIND:-}" == "1" ]] && exit 0   # 不足を見つけられない診断の再現
 exit $rc
 EOF
@@ -2128,7 +2128,7 @@ test_e2e_scenario_manual_delete() {
     _run_scenario -y manual-delete; rc=$?
     assert_exit_ok "$rc" "manual-delete: 成功する"
     assert_file_contains "$MB/out.log" "成功（15 件）" "manual-delete: 15 件の確認が成功する"
-    assert_file_contains "$MB/out.log" "sf-init.sh --only 7" "manual-delete: 直し方が、確認されている"
+    assert_file_contains "$MB/out.log" "gh secret set SLACK_BOT_TOKEN" "manual-delete: 直し方が、確認されている"
     assert_equals "$(sort "$MB/secrets.txt" | tr '\n' ',')" "PAT_TOKEN,SLACK_BOT_TOKEN," "manual-delete: Secret が、元の一覧に戻る"
     assert_equals "$(cat "$MB/secretval.SLACK_BOT_TOKEN" 2>/dev/null)" "xoxb-fakeslack" "manual-delete: 戻した Secret の値が、鍵一式の Token と同じ（空で戻さない）"
     assert_equals "$(grep '^SLACK_CHANNEL_ID=' "$MB/vars.txt")" "SLACK_CHANNEL_ID=C01ABCDEFGH" "manual-delete: Variable が、元の値で戻る"

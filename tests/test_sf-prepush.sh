@@ -13,6 +13,12 @@ run_prepush() {
     cd "$td" && PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-prepush.sh" 2>&1
 }
 
+# 標準入力に、git が pre-push フックに渡す行（「<ローカルの ref> <ローカルの sha> <リモートの ref> <リモートの sha>」）を渡して実行する
+run_prepush_refs() {
+    local td="$1" mb="$2" lines="$3"
+    ( cd "$td" && printf '%b' "$lines" | PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-prepush.sh" 2>&1 )
+}
+
 # ------------------------------------------------------------------------------
 # main ブランチへの直接プッシュを禁止
 # ------------------------------------------------------------------------------
@@ -91,7 +97,8 @@ test_own_branch_behind_merge_ok() {
     local out; out=$(run_prepush "$td" "$mb")
     local ec=$?
 
-    assert_exit_ok $ec "自ブランチのマージ成功 → 正常終了"
+    assert_exit_fail $ec "自ブランチのマージ成功 → プッシュは中止（取り込みは、今回のプッシュに含まれないため）"
+    assert_output_contains "$out" "このプッシュには、取り込みが含まれないため、中止しました" "取り込んだ → 中止の理由が表示される"
     grep -q "git-merge-arg: origin/feature/test" "$mb/calls.log" \
         && pass "origin/feature/test をマージした" \
         || fail "origin/feature/test をマージした"
@@ -139,7 +146,8 @@ test_main_behind_merge_ok() {
     local out; out=$(run_prepush "$td" "$mb")
     local ec=$?
 
-    assert_exit_ok $ec "main のマージ成功 → 正常終了"
+    assert_exit_fail $ec "main のマージ成功 → プッシュは中止（取り込みは、今回のプッシュに含まれないため）"
+    assert_output_contains "$out" "このプッシュには、取り込みが含まれないため、中止しました" "取り込んだ → 中止の理由が表示される"
     grep -q "git-merge-arg: origin/main" "$mb/calls.log" \
         && pass "origin/main をマージした" \
         || fail "origin/main をマージした"
@@ -187,7 +195,7 @@ test_both_behind_merge_order() {
     local out; out=$(run_prepush "$td" "$mb")
     local ec=$?
 
-    assert_exit_ok $ec "両方マージ成功 → 正常終了"
+    assert_exit_fail $ec "両方マージ成功 → プッシュは中止（取り込みは、今回のプッシュに含まれないため）"
     # 自ブランチ → main の順でマージされていることを確認
     local branch_line main_line
     branch_line=$(grep -n "git-merge-arg: origin/feature/test" "$mb/calls.log" | cut -d: -f1)
@@ -197,6 +205,48 @@ test_both_behind_merge_order() {
         || fail "自ブランチ → main の順でマージされた"
     teardown "$td" "$mb"
     unset MOCK_GIT_BRANCH MOCK_GIT_LOG_BRANCH_OUTPUT MOCK_GIT_LOG_MAIN_OUTPUT MOCK_GIT_MERGE_EXIT
+}
+
+# ------------------------------------------------------------------------------
+# 回帰: 現在のブランチが作業用でも、プッシュ先が保護ブランチなら、拒否する
+#   （以前は、現在のブランチしか見ず、git push origin feature:main などが、フックを通り抜けた）
+# ------------------------------------------------------------------------------
+test_block_push_target_protected() {
+    local td mb out ec ref
+    td=$(setup_force_dir); mb=$(setup_mock_bin)
+    export MOCK_CALL_LOG="$mb/calls.log"
+    export MOCK_GIT_BRANCH="feature/test"
+    export MOCK_GIT_LOG_BRANCH_OUTPUT=""
+    export MOCK_GIT_LOG_MAIN_OUTPUT=""
+    create_mock_git "$mb"
+
+    for ref in main staging develop; do
+        out=$(run_prepush_refs "$td" "$mb" "refs/heads/feature/test 1111111 refs/heads/${ref} 2222222
+"); ec=$?
+        assert_exit_fail $ec "feature/test から ${ref} へのプッシュ → エラー終了"
+        assert_output_contains "$out" "${ref} ブランチへの直接プッシュは禁止されています" "プッシュ先 ${ref} → 禁止メッセージが出る"
+    done
+    # 保護ブランチの削除（ローカルの ref が (delete)）も、拒否する
+    out=$(run_prepush_refs "$td" "$mb" "(delete) 0000000 refs/heads/main 2222222
+"); ec=$?
+    assert_exit_fail $ec "保護ブランチの削除（:main）→ エラー終了"
+    # 複数の ref のうち、1 つでも保護ブランチなら、拒否する
+    out=$(run_prepush_refs "$td" "$mb" "refs/heads/a 1 refs/heads/a 2
+refs/heads/b 3 refs/heads/main 4
+"); ec=$?
+    assert_exit_fail $ec "複数の ref のうち 1 つが main → エラー終了"
+    # 作業用ブランチへのプッシュ・タグは、止めない
+    out=$(run_prepush_refs "$td" "$mb" "refs/heads/feature/test 1111111 refs/heads/feature/test 2222222
+"); ec=$?
+    assert_exit_ok $ec "作業用ブランチへのプッシュ → 正常終了"
+    out=$(run_prepush_refs "$td" "$mb" "refs/tags/v1 1111111 refs/tags/v1 0000000
+"); ec=$?
+    assert_exit_ok $ec "タグのプッシュ → 正常終了（ブランチではない）"
+    # 標準入力が空（手動実行など）でも、これまでどおり動く
+    out=$(run_prepush_refs "$td" "$mb" ""); ec=$?
+    assert_exit_ok $ec "標準入力が空 → 正常終了"
+    teardown "$td" "$mb"
+    unset MOCK_GIT_BRANCH MOCK_GIT_LOG_BRANCH_OUTPUT MOCK_GIT_LOG_MAIN_OUTPUT
 }
 
 # ------------------------------------------------------------------------------
@@ -341,6 +391,7 @@ test_missing_remote_branch_skipped() {
 test_missing_remote_branch_skipped
 test_fetch_targets_safe
 test_block_push_to_main
+test_block_push_target_protected
 test_block_push_to_staging
 test_block_push_to_develop
 test_syntax_error_blocks_push

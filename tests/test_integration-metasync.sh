@@ -64,6 +64,8 @@ test_M1() {
     assert_exit_ok "$IT_RC" "M1: sf-metasync が成功する"
     [[ "$(_remote_ref main)" != "$m0" ]] && pass "M1: origin の main に、同期のコミットが届く" || fail "M1: origin の main に、同期のコミットが届く"
     _it_git --git-dir="$IT_ORIGIN" ls-tree -r --name-only main | grep -q 'classes/FromOrg1.cls' && pass "M1: 取得したファイルが、main に入る" || fail "M1: 取得したファイルが、main に入る"
+    # 回帰: 作業ブランチの作業用ファイル（sf-tools/release/JOB-A/。未追跡）は、main の同期のコミットに含めない（以前は含めていた）
+    _it_git --git-dir="$IT_ORIGIN" ls-tree -r --name-only main | grep -q 'sf-tools/release/JOB-A/' && fail "M1: 作業ブランチの release/JOB-A/ を、main に入れない" "main に入っている" || pass "M1: 作業ブランチの release/JOB-A/ を、main に入れない"
     assert_equals "$(_cur "$CL")" "JOB-A" "M1: 元のブランチ（JOB-A）に戻る"
     assert_equals "$(_head "$CL")" "$h0" "M1: 元のブランチの HEAD は、変わらない"
     assert_equals "$(_stashes "$CL")" "0" "M1: stash が、残らない（復元された）"

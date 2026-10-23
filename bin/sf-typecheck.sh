@@ -58,7 +58,7 @@
 #     （大文字・小文字を区別する。LWC のコンポーネント名は先頭が小文字でなければならないため、先頭を小文字にした
 #     sfToolsE2eMin も認める。認めるのは、この 2 通りの綴りだけ）。Account には、この名前のもの（ワークフロールール・項目自動更新・メールアラート・
 #     承認プロセス・カスタムボタン・トリガー）を追加し、削除するときも、その名前だけを指定する。
-#     冒頭の警告の文面は「SfToolsE2eMin で始まるもの」だが、判定は「含む」（例: Account.SfToolsE2eMinWr）
+#     冒頭の警告の文面も、判定と同じ「含むもの」にそろえてある（例: Account.SfToolsE2eMinWr は、名前の途中に含む）
 #   - 判定に当たるものがあると、lib/typecheck.js はその時点で中断する（終了コード 1）。それまでに処理した種類の
 #     リリース・削除（--validate-only なら検証）は、実行済みのまま残り、結果の表（--out）は、書かれない
 #   - 終了コード: 0 = 完了（release / delete に ng の種類があっても 0。WARNING を表示する）・--list・--coverage /
@@ -130,9 +130,9 @@ echo "" >&2
 if [[ $COVERAGE -eq 1 || $LIST_ONLY -eq 1 ]]; then
     print_admin_warning --standard "読み取りのみです（組織には、接続しません）。"
 elif [[ "$MODE" == "full" ]]; then
-    print_admin_warning --standard "個人用の組織へ、実際に、リリースして、削除します。" "名前は SfToolsE2eMin で始まるものだけ扱います。"
+    print_admin_warning --standard "個人用の組織へ、実際に、リリースして、削除します。" "名前に SfToolsE2eMin を含むものだけ扱います。"
 else
-    print_admin_warning --standard "個人用の組織で、検証だけ行います（何も反映しません）。" "名前は SfToolsE2eMin で始まるものだけ扱います。"
+    print_admin_warning --standard "個人用の組織で、検証だけ行います（何も反映しません）。" "名前に SfToolsE2eMin を含むものだけ扱います。"
 fi
 echo "" >&2
 if [[ $ASSUME_YES -eq 0 ]]; then

@@ -94,6 +94,32 @@ test_force_relogin() {
     teardown "$td" "$mb" "$mh"
 }
 
+# 回帰: ログインに失敗したら、先へ進まない（以前は、警告だけで「接続完了」と表示し、設定ファイルも書いていた）
+test_login_failure_aborts() {
+    local td mb mh out ec
+    setup_std_env td mb mh
+    create_all_mocks "$mb"
+    mkdir -p "$mh/sf-tools/bin"
+    printf '#!/bin/bash
+echo LAUNCHER-RAN >> "%s/launcher.log"
+exit 0
+' "$mb" > "$mh/sf-tools/bin/sf-launcher.sh"
+    chmod +x "$mh/sf-tools/bin/sf-launcher.sh"
+    rm -f "$td/.sf/config.json" "$td/.sfdx/sfdx-config.json"
+
+    out=$(cd "$td" && HOME="$mh" PATH="$mb:$PATH" MOCK_SF_LOGIN_WEB_FAIL=1         bash "$SF_TOOLS_DIR/bin/sf-start.sh" <<< $'failorg
+
+' 2>&1)
+    ec=$?
+
+    assert_exit_fail "$ec" "ログインに失敗 → エラー終了"
+    assert_output_contains "$out" "Salesforce へのログインに失敗しました" "ログインに失敗 → 理由が表示される"
+    echo "$out" | grep -q "接続完了"         && fail "ログインに失敗 → 「接続完了」と表示しない" "表示された"         || pass "ログインに失敗 → 「接続完了」と表示しない"
+    assert_file_not_exists "$td/.sf/config.json" "ログインに失敗 → 設定ファイル（.sf/config.json）を書かない"
+    assert_file_not_exists "$mb/launcher.log" "ログインに失敗 → ランチャーを起動しない"
+    teardown "$td" "$mb" "$mh"
+}
+
 # ログイン先は、エイリアスの名前では決めない（alias が prod でも、選択した URL でログインする）
 test_login_url_not_by_alias() {
     local td mb mh
@@ -160,6 +186,7 @@ test_connected_org
 test_alias_prompt_eof_aborts
 test_config_files_written
 test_force_relogin
+test_login_failure_aborts
 test_login_url_not_by_alias
 # sf の終了コードが 0 以外（インストーラー版の不具合）→ 案内を表示して中断する
 test_sf_cli_abort() {

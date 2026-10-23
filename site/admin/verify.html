@@ -72,6 +72,9 @@ sf-init.sh --verify --cleanup     # 削除のみ（リリースの途中で止�
   <li>検証用と同じ名前のクラス（<code>SfToolsE2eHello</code> / <code>SfToolsE2eHelloTest</code>）のファイルが、すでにリポジトリにあるときは、<strong>実行しません</strong>。上書きして、削除してしまうからです（前回の検証の残りなら、<code>--cleanup</code> で消せます）。組織だけにある同名のクラスは、検出できません。<code>--cleanup</code> は、この固定名のクラスだけを削除します。</li>
   <li><strong>失敗したとき:</strong> リリースのあとで止まった場合は、組織に Hello World が残ることがあります。残った段階と、<code>sf-init.sh --verify --cleanup</code>（削除のみ）を、表示します。</li>
   <li>gh のアカウントは、リポジトリのオーナー（組織の管理者）にしてください。</li>
+  <li>GitHub Actions の上では、実行できません。</li>
+  <li>対象にする段階は、リモートにあるブランチから決まります。<code>main</code> は必須です。<code>staging</code> があれば <code>staging</code> も、<code>develop</code> と <code>staging</code> の両方があれば <code>develop</code> も対象です。</li>
+  <li>終了コードは、すべての確認が成功したとき（<code>--plan</code> を含む）が <code>0</code>、失敗した確認がある・途中で止めたときが <code>1</code> です。ログは <code>~/sf-tools/logs/verify.log</code> に、実行のたびに新しく書かれます。</li>
 </ul>
 
 <h2 id="components">パターン別のサンプルの確認（<code>--components</code>）</h2>
@@ -112,8 +115,34 @@ sf-init.sh --verify --components --with-objects   # オブジェクト系（ト�
   <p>実行の前に、警告と確認が表示されます（<code>-y</code> で省略できます）。GitHub Actions 上では実行できません。</p>
 </div>
 <p>個人用の組織で、メタデータの種類ごとに、リリースと削除ができるかを確かめ、可否の表（<code>config/metadata-capability.txt</code>）を作ります。この表は、<code>sf-check.sh</code> が、ターゲットファイルの確認に使います。</p>
+<pre><code>sf-typecheck.sh --org ALIAS                        # リリースして、削除する
+sf-typecheck.sh --org ALIAS --validate-only        # 検証だけ（組織には、何も反映しない）
+sf-typecheck.sh --org ALIAS --only ApexPage,Queue  # 種類を絞る
+sf-typecheck.sh --list                             # 確認する種類の一覧だけ（組織には接続しない）
+sf-typecheck.sh --coverage                         # 確認の進み具合だけ（組織には接続しない）</code></pre>
+<table>
+  <thead><tr><th>オプション</th><th>内容</th></tr></thead>
+  <tbody>
+    <tr><td><code>--org ALIAS</code></td><td>接続先の組織のエイリアス（<code>--list</code> と <code>--coverage</code> 以外では必須）</td></tr>
+    <tr><td><code>--validate-only</code></td><td>検証だけを行います。削除の列は「unknown」（実行していない）のままです</td></tr>
+    <tr><td><code>--only A,B</code></td><td>指定した種類だけを確認します（<code>--list</code> に出る名前と完全に一致するもの。一致しない名前は無視され、1 つも一致しなければ 0 種類で正常終了します）</td></tr>
+    <tr><td><code>--out FILE</code></td><td>結果の表の出力先（既定: カレントフォルダの <code>sf-typecheck-result.txt</code>）。<strong>すべての種類を処理し終えたときだけ</strong>書きます</td></tr>
+    <tr><td><code>--list</code></td><td>確認する種類の一覧を表示して終了します</td></tr>
+    <tr><td><code>--coverage</code></td><td>変更セットで扱える種類のうち、確認済み・未確認の数を、区分ごとに表示します（リリースも削除も ok / リリースのみ ok / ng または limited を含む / 判定できない / 表にない）。種類の一覧は、ok 以外の 4 区分だけ出ます</td></tr>
+    <tr><td><code>-y</code>, <code>--yes</code></td><td>冒頭の確認（Y/N）を省略します（警告ボックスは表示されます）</td></tr>
+  </tbody>
+</table>
+<h3>安全のための拒否</h3>
+<p>次のどれかに当たると、何も実行せずに中断します。</p>
 <ul>
-  <li><code>--coverage</code>: 変更セットで扱える種類のうち、確認済み・未確認の数を表示します。組織には、接続しません。</li>
+  <li>GitHub Actions の上（<code>--list</code> と <code>--coverage</code> は、実行できます）</li>
+  <li>接続先が、予約名（<code>prod</code> / <code>staging</code> / <code>develop</code> / <code>main</code>）</li>
+  <li>組織の情報を読み取れない、または、組織の種類が本番、あるいは判定できない</li>
+</ul>
+<ul>
+  <li>Sandbox が「個人用」か「共有」かは、判定しません。個人用の組織を指定していることを、確認してから実行してください。</li>
+  <li>作成・削除するのは、名前に <code>SfToolsE2eMin</code> を含むものだけです。LWC は、名前が小文字で始まる決まりがあるため、<code>sfToolsE2eMin</code> の綴りも認めます。それ以外は、認めません。名前の条件に当たらないものがあると、その時点で全体を中断します。それまでに処理した種類は、実行済みのまま残り、結果の表も書かれません。</li>
+  <li>リリース・削除に失敗した種類（<code>ng</code>）があっても、終了コードは <code>0</code> です（警告が表示されます）。結果の表で判断してください。</li>
 </ul>
 
 </main>

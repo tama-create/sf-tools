@@ -739,6 +739,13 @@ export SF_INIT_LOGIN_URL_PROD=login   # ログイン先を、質問せずに指�
         printf 'SF_INIT_DONE_PHASE=%s\nSF_INIT_DONE_AT="2026-10-11 14:32"\n' "$done_phase" > "$progf"
         [[ -n "${6:-}" ]] && printf '%b\n' "$6" >> "$progf"   # 進捗ファイルに追加する行（段階ごとの完了の記録など）
         rm -rf "$mb/deployed_src" "$mb/jwt.cnt" "$mock_home/.sf-jwt" "$mb/.repo_view_called"
+        if [[ -n "${7:-}" ]]; then   # 7 番目の引数: 既存の JWT 証明書を、先に作っておく（再利用 / 再生成の質問が出る）
+            mkdir -p "$mock_home/.sf-jwt/force-testproject"
+            printf 'OLD-KEY
+' > "$mock_home/.sf-jwt/force-testproject/server.key"
+            printf 'OLD-CRT
+' > "$mock_home/.sf-jwt/force-testproject/server.crt"
+        fi
         : > "$MOCK_CALL_LOG"
         # shellcheck disable=SC2086
         printf '%b' "$input" \
@@ -869,6 +876,26 @@ export SF_INIT_LOGIN_URL_PROD=login   # ログイン先を、質問せずに指�
     assert_file_not_contains  "$MOCK_CALL_LOG" "alias sf-tools-PROD"                         "段階ごとの再開: main の組織には、ログインし直さない"
     assert_file_contains      "$MOCK_CALL_LOG" "gh secret set SF_CONSUMER_KEY_STG"           "段階ごとの再開: 残りの段階（staging）は、実行される"
     assert_file_not_contains  "$progf" "SF_INIT_DONE_TIER_"                                  "段階ごとの再開: 完了後、段階ごとの記録は、消える（Phase 10 の完了に、置き換わる）"
+    rm -rf "$init_base"
+    # 既存の証明書を「再利用する」なら、完了済みの段階は、スキップのまま（秘密鍵が変わらないため）
+    _rc_run 9 "tamashimon/force-testproject" "" 'Y
+1
+Y
+' 'BRANCH_COUNT="2"' 'SF_INIT_DONE_TIER_PROD=1' 1
+    assert_file_contains      "$out" "メイン組織（PROD）は、前回、設定が完了しているため、スキップします"  "証明書を再利用: 完了済みの段階は、スキップする"
+    assert_file_not_contains  "$MOCK_CALL_LOG" "gh secret set SF_CONSUMER_KEY_PROD"          "証明書を再利用: 完了済みの段階は、登録しなおさない"
+    rm -rf "$init_base"
+    # 回帰: 既存の証明書を「再生成する（N）」なら、完了済みの段階も、設定しなおす（以前は、スキップされ、
+    #   その段階の組織に古い証明書が残り、新しい秘密鍵（SF_PRIVATE_KEY）と合わなくなっていた）
+    _rc_run 9 "tamashimon/force-testproject" "" 'Y
+1
+N
+' 'BRANCH_COUNT="2"' 'SF_INIT_DONE_TIER_PROD=1' 1
+    assert_exit_ok            "$exit_code"                                                  "証明書を再生成: 正常終了する"
+    assert_file_contains      "$out" "証明書を作り直したため、前回、設定が完了した段階も、設定しなおします"  "証明書を再生成: 設定しなおす旨が表示される"
+    assert_file_not_contains  "$out" "メイン組織（PROD）は、前回、設定が完了しているため、スキップします"  "証明書を再生成: 完了済みの段階を、スキップしない"
+    assert_file_contains      "$MOCK_CALL_LOG" "gh secret set SF_CONSUMER_KEY_PROD"          "証明書を再生成: 完了済みの段階も、登録しなおす"
+    assert_file_contains      "$MOCK_CALL_LOG" "gh secret set SF_CONSUMER_KEY_STG"           "証明書を再生成: 残りの段階も、登録する"
     rm -rf "$init_base"
     # 記録があっても、Secret が、もうなければ、やり直す（記録だけを、信じない）
     export MOCK_GH_SECRETS=""

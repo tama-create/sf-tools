@@ -310,6 +310,7 @@ check_missing_tests() {
         fi
 
         [[ -z "$found_test" ]] && continue
+        found_test="${found_test#./}"   # Step B（grep -r .）の結果は ./ で始まる。deploy-target.txt の書き方（./ なし）に合わせてから比べる
 
         # 見つかったテストクラスが deploy-target.txt に含まれているか確認
         local in_deploy=false

@@ -11,7 +11,8 @@
 #   1.   JWT 用の秘密鍵・証明書（~/.sf-jwt/<REPO_NAME>/server.key・server.crt）を用意する
 #          - 両方あるとき: ask_yn で再利用するかを確認する
 #              Y: そのまま使う（証明書の発行先（subject）が空なら、秘密鍵はそのままで、証明書だけを作り直す）
-#              N: 両方を削除して、generate_jwt_cert で新しく作る（秘密鍵も変わる）
+#              N: 両方を削除して、generate_jwt_cert で新しく作る（秘密鍵も変わる）。手順 4 の「前回完了済み」のスキップは、
+#                 この実行ではしない（古い証明書が残る組織が出ないように、完了済みの段階も、設定しなおす）
 #              q: die
 #          - どちらかがないとき: generate_jwt_cert で作る（RSA 2048 ビット・PKCS#1、自己署名 3650 日、CN=sf-jwt-<REPO_NAME>）
 #   1.5. アプリの種類（APP_TYPE）を決める（利用者には聞かない）
@@ -51,8 +52,9 @@
 #     種類を判定できない組織も、main 以外にはつなげない。APP_TYPE=2 は deploy の前に、APP_TYPE=1 は JWT 接続テストの
 #     あと・登録の前に判定する
 #   - JWT 接続テストに失敗したときは、ask_yn で「テストをスキップして登録だけ行う」かを選べる（Y で登録、N / q は die）
-#   - 手順 1 で N を選んで鍵を作り直しても、手順 4 でスキップした段階は登録しなおさない。その段階の組織のアプリには、
-#     以前の証明書が残る（Secret SF_PRIVATE_KEY は、手順 3 で新しい秘密鍵に置き換わる）
+#   - 手順 1 で N を選んで鍵を作り直したときは、手順 4 の「前回完了済み」のスキップをしない（SF_INIT_TIER_RESUME=0 にする）。
+#     完了済みの段階も、設定しなおす（Secret SF_PRIVATE_KEY は新しい秘密鍵に置き換わるため、組織のアプリに以前の証明書が
+#     残ると、JWT 接続ができなくなる）
 #   - 進捗ファイルは、sf-init.sh が Phase の成功ごとに上書きする（Phase 10 が成功すると、段階の記録は消える）
 #   - 証明書（server.crt）は、APP_TYPE=1 では利用者が各組織へアップロードし、APP_TYPE=2 では deploy で登録する
 #   - 接続アプリケーションの注意:
@@ -142,6 +144,12 @@ if [[ -f "${JWT_DIR}/server.key" && -f "${JWT_DIR}/server.crt" ]]; then
         # （削除しないと generate_jwt_cert 内のスキップ判定に引っかかるため）
         rm -f "${JWT_DIR}/server.key" "${JWT_DIR}/server.crt"
         generate_jwt_cert "$JWT_DIR" "$REPO_NAME"
+        # 秘密鍵が新しくなる（Step 3 で SF_PRIVATE_KEY が置き換わる）。前回完了した段階をスキップすると、その段階の組織の
+        # アプリには以前の証明書が残り、新しい秘密鍵と合わなくなる。すべての段階を設定しなおす（_tier_done は、この値を見る）
+        if [[ "${SF_INIT_TIER_RESUME:-}" == "1" ]]; then
+            SF_INIT_TIER_RESUME=0
+            log "INFO" "  証明書を作り直したため、前回、設定が完了した段階も、設定しなおします。"
+        fi
     fi
 else
     generate_jwt_cert "$JWT_DIR" "$REPO_NAME"

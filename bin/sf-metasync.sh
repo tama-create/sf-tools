@@ -32,7 +32,7 @@
 #   7. 組織からメタデータを取得する（どちらも --target-org prod --ignore-conflicts）
 #      - 手順 6 の package/package.xml があれば、それで取得する（この取得の成否は、判定しない）
 #      - metadata.txt の全種類を --metadata で指定して取得する（失敗したら中断する）
-#   8. git add -A でステージし、HEAD との差分で分岐する
+#   8. git add -A でステージし（sf-tools/release/ は除く）、HEAD との差分で分岐する
 #      - 差分あり: 変更の一覧（git status --short）を表示して確認を取り、
 #        「定期更新: Salesforce変更の自動反映 (YYYY-MM-DD)」でコミットし、git push --no-verify origin main する
 #      - 差分なし・origin/main より先のコミットあり（前回の同期の push の失敗など）: そのコミットの一覧（git log --oneline）を
@@ -58,11 +58,14 @@
 # 【補足】
 #   - 終了コード: 0（同期した・変更がなかった）／ 1（中断した）
 #   - 手順 4・5 の「未コミットの変更」の判定（git diff-index HEAD）と git stash は、追跡中のファイルだけが対象。
-#     未追跡のファイルは、中断の対象にも退避の対象にもならず、手順 8 の git add -A でコミットに含まれる
-#     （ローカル実行では、コミット前の git status --short に表示される）
+#   - 追跡していないファイル（.gitignore の対象と、sf-tools/release/ を除く）がある場合、手元で実行したときは、手順 5 で中断する
+#     （手順 8 の git add -A で、無関係なファイルが、同期のコミットに含まれてしまうため）。GitHub Actions 上では、確認しない。
+#     sf-tools/release/（作業ブランチの作業用ファイル）は、確認の対象外で、同期のコミットにも含めない
 #   - main への push は --no-verify（pre-push フックを通さない）。サーバー側の保護（Ruleset）は、そのまま効く
 #   - branches.txt が無い・ブランチの定義が無いときは、WARNING を表示し、main のみとして扱う（手順 9 の対象なし）
-#   - 手順 9 の完了のメッセージは、branches.txt の内容にかかわらず「(main → staging、main → develop)」と表示する
+#   - 手順 9 の完了のメッセージは、実際に伝播できたブランチだけを表示する。スキップしたブランチ（リモートにない・失敗）が
+#     あれば、WARNING で一覧する（終了コードは 0 のまま）
+#   - ログ: ./sf-tools/logs/sf-metasync.log（実行のたびに作り直す）
 # ==============================================================================
 
 # ------------------------------------------------------------------------------
@@ -183,6 +186,19 @@ phase_git_update() {
         die "main ブランチにローカルの未コミット変更があります。Salesforce 組織の内容を正として同期するため、ローカル変更は反映しません。変更を破棄（git checkout .）してから再実行してください。"
     fi
 
+    # 手元で実行したときは、追跡していないファイル（.gitignore の対象と、sf-tools/release/ を除く）がある場合も中止する。
+    #   後の git add -A で、無関係なファイルが、同期のコミットに含まれてしまうため（以前は、含めていた）。
+    #   sf-tools/release/ は、作業ブランチの日常的な作業用ファイル（sf-install.sh が作る）のため、対象外（ステージもしない）。
+    #   GitHub Actions 上では、確認しない（クリーンなチェックアウトで、定期の同期を、予期しないファイルで止めないため）
+    if [[ "${GITHUB_ACTIONS:-false}" != "true" ]]; then
+        local untracked
+        untracked=$(git ls-files --others --exclude-standard -- . ':!sf-tools/release' | head -5)  # VAR=$(cmd) のため run 不使用
+        if [[ -n "$untracked" ]]; then
+            die "main ブランチに、追跡していないファイルがあります（同期のコミットに含まれてしまうため中止します）: $(echo "$untracked" | tr '
+' ' ')"
+        fi
+    fi
+
     run git fetch origin || log "WARNING" "git fetch に失敗しました。ローカルキャッシュで続行します。"
 
     if ! run git pull origin "$BRANCH_NAME" --rebase; then
@@ -225,7 +241,10 @@ phase_retrieve_metadata() {
 # 【SYNC】変更を Git へ反映
 phase_git_sync() {
     log "INFO" "Git リポジトリへ反映中..."
-    run git add -A || return $RET_NG
+    # sf-tools/release/ は、ステージしない。作業ブランチのクローンには、sf-install.sh が作る release/<ジョブ名>/ の
+    #   未追跡のファイルが、日常的にある（main に切り替えても、そのまま残る）。以前は、git add -A で、これらが、
+    #   main の同期のコミットに含まれていた
+    run git add -A -- . ':!sf-tools/release' || return $RET_NG
 
     # ステージに変更がなければ、未プッシュのコミットを確認する。あれば（前回、コミットのあとに push が失敗した）、push だけ行う。
     #   なければ、早期終了（組織側に変更なし）
@@ -257,6 +276,8 @@ phase_git_sync() {
 }
 
 # 【PROPAGATE】main の変更を、branches.txt の main 以外の各ブランチへ、マージして push する（例: main → staging、main → develop）
+PROPAGATED_OK=""        # 伝播できたブランチ（空白区切り）
+PROPAGATED_SKIPPED=""   # 伝播をスキップしたブランチ（ない・失敗）
 phase_propagate_downstream() {
     local downstream_branches
     downstream_branches=$(get_branch_list | grep -v '^main$')
@@ -264,6 +285,7 @@ phase_propagate_downstream() {
         # リモートにブランチが存在するか確認（出力は不要なため直接呼び出し）
         if ! git ls-remote --exit-code --heads origin "$branch" > /dev/null 2>&1; then
             log "WARNING" "${branch} ブランチがリモートに存在しないためスキップします"
+            PROPAGATED_SKIPPED="${PROPAGATED_SKIPPED}${branch} "
             continue
         fi
 
@@ -271,6 +293,7 @@ phase_propagate_downstream() {
 
         if ! run git checkout "$branch"; then
             log "WARNING" "${branch} のチェックアウトに失敗しました（スキップ）"
+            PROPAGATED_SKIPPED="${PROPAGATED_SKIPPED}${branch} "
             continue
         fi
 
@@ -278,6 +301,7 @@ phase_propagate_downstream() {
             log "WARNING" "${branch} の pull に失敗しました（スキップ）"
             run git rebase --abort
             run git checkout main
+            PROPAGATED_SKIPPED="${PROPAGATED_SKIPPED}${branch} "
             continue
         fi
 
@@ -285,16 +309,19 @@ phase_propagate_downstream() {
             log "WARNING" "${branch} へのマージに失敗しました（スキップ）"
             run git merge --abort
             run git checkout main
+            PROPAGATED_SKIPPED="${PROPAGATED_SKIPPED}${branch} "
             continue
         fi
 
         if ! run git push origin "$branch"; then
             log "WARNING" "${branch} の push に失敗しました（スキップ）"
             run git checkout main
+            PROPAGATED_SKIPPED="${PROPAGATED_SKIPPED}${branch} "
             continue
         fi
 
         log "SUCCESS" "${branch} への伝播が完了しました"
+        PROPAGATED_OK="${PROPAGATED_OK}${branch} "
     done
 
     # 作業ブランチを main に戻す
@@ -327,7 +354,9 @@ RES=$?
 if [[ $RES -eq $RET_OK ]]; then
     log "SUCCESS" "完了: リポジトリを最新に更新しました。"
     phase_propagate_downstream || die "下流ブランチへの伝播に失敗しました。"
-    log "SUCCESS" "下流ブランチへの伝播完了 (main → staging、main → develop)"
+    # 実際に伝播できたブランチだけを表示する（以前は、branches.txt の内容や、スキップの有無にかかわらず、固定の文言を出していた）
+    log "SUCCESS" "下流ブランチへの伝播完了（伝播したブランチ: ${PROPAGATED_OK% }${PROPAGATED_OK:+}$([[ -z "$PROPAGATED_OK" ]] && echo なし)）"
+    [[ -z "$PROPAGATED_SKIPPED" ]] || log "WARNING" "伝播できなかったブランチ（スキップ）: ${PROPAGATED_SKIPPED% }"
 elif [[ $RES -eq $RET_NO_CHANGE ]]; then
     log "SUCCESS" "完了: Salesforce 組織側に変更はありませんでした。"
 else

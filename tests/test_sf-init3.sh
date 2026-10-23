@@ -170,11 +170,14 @@ ENVEOF
     assert_file_not_contains "$MOCK_CALL_LOG" "checkout main"                            "Phase 3・別のリポジトリのクローン → 切り替えもしない"
     # 同じリポジトリ（admin ブランチにいる想定: モックの symbolic-ref は main 以外を返す）
     export MOCK_GIT_C_REMOTE_URL="https://github.com/Tamashimon/Force-TestProject.git"   # 大文字と小文字は、区別しない
+    # 完了の印は 0（やり直し中）にする。印が未設定で admin ブランチがあると、完了済みとみなされ、--only は拒否される
+    #   （完了済みのプロジェクトでは、--resume / --only は使えない）。ここは、セットアップの途中の Phase 3 を試すテスト
+    export MOCK_GIT_C_CONFIG_VALUE=0
     : > "$MOCK_CALL_LOG"
     out=$(printf 'Y\n' | ( cd "$work" && HOME="$mock_home" PATH="$mb:$PATH" \
         bash "$mock_home/sf-tools/bin/sf-init.sh" --only 3 --owner tamashimon --project testproject ) 2>&1)
     exit_code=$?
-    unset MOCK_GIT_C_REMOTE_URL
+    unset MOCK_GIT_C_REMOTE_URL MOCK_GIT_C_CONFIG_VALUE
     assert_exit_ok "$exit_code"                                                          "Phase 3・同じリポジトリのクローン（大文字と小文字の違いは許す）→ 正常終了する"
     assert_file_contains "$MOCK_CALL_LOG" "checkout main"                                "Phase 3・admin ブランチのままだと、あとの Phase のコミットが main に入らないため、main に切り替える"
     assert_file_contains "$MOCK_CALL_LOG" "pull --ff-only origin main"                   "Phase 3・main を最新にする（git pull --ff-only）"

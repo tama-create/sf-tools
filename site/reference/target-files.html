@@ -41,6 +41,9 @@ force-app/main/default/lwc/myComponent
   <li><code>[files]</code> と <code>[members]</code> の 2 つのセクションで構成します。</li>
   <li>行頭の <code>#</code> はコメントです。</li>
   <li>空行は無視されます。</li>
+  <li><code>[files]</code> には、ファイルまたはフォルダのパスを書きます（リポジトリのルートからの相対パス）。<strong>フォルダは、1 つのコンポーネント・オブジェクトを丸ごと指すものだけ</strong>書けます（<code>lwc/コンポーネント名</code>・<code>aura/コンポーネント名</code>・<code>objects/オブジェクト名</code>）。<code>classes</code> や <code>.</code> のような広いフォルダは、対象が広がりすぎる（<code>remove-target.txt</code> では、組織のメタデータが広範囲に削除される）ため、エラーです。絶対パスや <code>..</code> を含むパスも、エラーです。</li>
+  <li><code>[members]</code> には、<code>種別名:メンバー名</code> の形で書きます（<code>:</code> の前後が空ではいけません）。</li>
+  <li>最初の <code>[files]</code> / <code>[members]</code> の行より前に書いた行は、<code>[files]</code> として扱われます。</li>
   <li><code>@isTest</code> を持つ <code>.cls</code> ファイルを書くと、<code>sf-release.sh</code> が <code>--test-level RunSpecifiedTests --tests &lt;クラス名&gt;</code>（クラスごとに繰り返す）を、自動で設定します。</li>
   <li>テストクラスを書くかどうかは、利用者の責任です。ローカルにあるテストクラスの書き忘れは、<code>sf-check.sh</code> が警告で知らせます。</li>
 </ul>
@@ -48,6 +51,10 @@ force-app/main/default/lwc/myComponent
 <h2 id="remove"><code>remove-target.txt</code></h2>
 <pre><code># 削除対象のパスを列挙
 force-app/main/default/classes/OldClass.cls</code></pre>
+<p>書き方は、<code>deploy-target.txt</code> と同じです（<code>[files]</code> と <code>[members]</code>）。</p>
+<ul>
+  <li>組織にない削除対象を、エラーにしたくない（後始末など）ときは、<code># @ignore-missing</code> で始まるコメント行を書きます。<code>--ignore-warnings</code> が付き、削除以外の警告も、エラーになりません。通常のリリース・削除では、書かないでください（綴りの誤りを見落とすため）。</li>
+</ul>
 
 <div class="box">
   <div class="title">書いたあとは</div>

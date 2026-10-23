@@ -168,16 +168,21 @@ test_A14() {
     it_out_has "どのプロジェクトですか" && pass "A14: クローンが複数あるとき、プロジェクトを選ばせる" || fail "A14: クローンが複数あるとき、プロジェクトを選ばせる" "$(it_out | tail -6)"
 
     # --project だけ、同じ XXXX が、別のオーナーに 2 つ → 黙って最初のものを使わず、選ばせる
+    it_calls_clear
     _job "$p" '2\n' --project itproj
     it_out_has "どのオーナーの force-itproj ですか" && pass "A14: 同じ名前で、別のオーナーのクローンがあるとき、オーナーを選ばせる" || fail "A14: 同じ名前で、別のオーナーのクローンがあるとき、オーナーを選ばせる" "$(it_out | tail -6)"
-    it_out_has "リポジトリオーナー（ownerB）" && pass "A14: 選んだオーナー（ownerB）で、先へ進む（ownerA を、黙って使わない）" || fail "A14: 選んだオーナー（ownerB）で、先へ進む" "$(it_out | tail -4)"
+    # 選んだオーナーは、リポジトリの確認の呼び出し（gh repo view <オーナー>/force-itproj）で分かる
+    #   （以前は、オーナー権限の確認の失敗メッセージで調べていた。sf-job は、その確認をしなくなった）
+    it_calls gh | grep -q "repo view ownerB/force-itproj" && pass "A14: 選んだオーナー（ownerB）で、先へ進む（ownerA を、黙って使わない）" || fail "A14: 選んだオーナー（ownerB）で、先へ進む" "$(it_calls gh | head -5)"
+    it_calls_clear
     _job "$p" '1\n' --project itproj
-    it_out_has "リポジトリオーナー（ownerA）" && pass "A14: 選んだオーナー（ownerA）で、先へ進む" || fail "A14: 選んだオーナー（ownerA）で、先へ進む" "$(it_out | tail -4)"
+    it_calls gh | grep -q "repo view ownerA/force-itproj" && pass "A14: 選んだオーナー（ownerA）で、先へ進む" || fail "A14: 選んだオーナー（ownerA）で、先へ進む" "$(it_calls gh | head -5)"
 
     # --owner を指定すれば、選ばせず、そのオーナーのクローンから決まる
+    it_calls_clear
     _job "$p" '' --owner ownerB --project itproj
     it_out_has "どのオーナーの" && fail "A14: --owner 指定のときは、選ばせない" || pass "A14: --owner 指定のときは、選ばせない"
-    it_out_has "リポジトリオーナー（ownerB）" && pass "A14: --owner ownerB → ownerB で進む" || fail "A14: --owner ownerB → ownerB で進む"
+    it_calls gh | grep -q "repo view ownerB/force-itproj" && pass "A14: --owner ownerB → ownerB で進む" || fail "A14: --owner ownerB → ownerB で進む" "$(it_calls gh | head -5)"
     assert_equals "$(_branches)" "$b0" "A14: どの場合も、origin にブランチを作らない"
     IT_TIMEOUT=300
 }

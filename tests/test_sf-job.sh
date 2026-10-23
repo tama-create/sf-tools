@@ -46,6 +46,7 @@ fi
 case "$1 $2" in
     "auth status") exit "${MOCK_GH_AUTH_STATUS_EXIT:-0}" ;;
     "auth login")  exit "${MOCK_GH_AUTH_LOGIN_EXIT:-0}" ;;
+    "api user")    [[ -n "${MOCK_GH_API_USER:-}" ]] && echo "$MOCK_GH_API_USER"; exit 0 ;;   # 未設定なら、ユーザー名を返さない
     *) exit 0 ;;
 esac
 EOF
@@ -104,6 +105,36 @@ test_happy_path() {
     assert_file_contains "$MOCK_CALL_LOG" "git/refs"        "ブランチ作成 API が呼ばれる"
     assert_file_contains "$MOCK_CALL_LOG" "git clone"       "git clone が呼ばれる"
     assert_file_contains "$MOCK_CALL_LOG" "git clone -c core.longpaths=true" "git clone に core.longpaths=true が付く（Windows のパス長の上限対策）"
+
+    teardown "$mb" "$mock_home" "$(dirname "$(dirname "$(dirname "$cdir")")")"
+}
+
+# ==============================================================================
+# 回帰: オーナーでも組織の管理者でもない開発者も、実行できる（sf-job は開発者向けのコマンド）
+#   （以前は、オーナー権限の確認で中断し、開発者は、実行できなかった）
+# ==============================================================================
+test_developer_not_owner_can_run() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] オーナーでも管理者でもない開発者が、実行できる${CLR_RST}"
+
+    local mb mock_home cdir
+    mb=$(setup_mock_bin); export MOCK_CALL_LOG="$mb/calls.log"
+    mock_home=$(setup_mock_home); cdir=$(setup_company_dir)
+
+    create_mock_git "$mb"
+    create_mock_gh_for_job "$mb"
+    _stub_job_subscripts "$mock_home"
+
+    local ec out
+    out=$(printf 'JOB-dev
+Y
+'         | (export HOME="$mock_home" PATH="$mb:$PATH" MOCK_GH_API_USER="some-developer"; cd "$cdir" && bash "$mock_home/sf-tools/bin/sf-job.sh" --owner tamashimon-org --project yamada) 2>&1)
+    ec=$?
+
+    assert_exit_ok  $ec                                          "gh のユーザーがオーナーと違っても、正常終了する"
+    assert_file_contains "$MOCK_CALL_LOG" "git clone"            "git clone が呼ばれる"
+    assert_file_not_contains "$MOCK_CALL_LOG" "memberships/orgs" "組織の管理者かどうかは、問い合わせない"
+    echo "$out" | grep -q "管理者（admin）でもありません"         && fail "オーナー権限の拒否が、出ない" "拒否のメッセージが出た"         || pass "オーナー権限の拒否が、出ない"
 
     teardown "$mb" "$mock_home" "$(dirname "$(dirname "$(dirname "$cdir")")")"
 }
@@ -512,6 +543,7 @@ test_unknown_option() {
 }
 
 test_happy_path
+test_developer_not_owner_can_run
 test_from_force_dir
 test_repo_not_found
 test_local_job_dir_duplicate

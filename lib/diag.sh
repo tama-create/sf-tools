@@ -146,9 +146,9 @@ diag_run() {
     # --- 2. Secrets ---
     echo "  Secrets（登録した値の名前。値そのものは、読めません）" >&2
     if names=$(_diag_names secret "$repo"); then  # 条件チェック
-        _diag_need "$names" PAT_TOKEN "プロジェクトのフォルダで sf-init.sh --only 6"
-        _diag_need "$names" SLACK_BOT_TOKEN "プロジェクトのフォルダで sf-init.sh --only 7"
-        _diag_need "$names" SF_PRIVATE_KEY "プロジェクトのフォルダで sf-init.sh --only 10"
+        _diag_need "$names" PAT_TOKEN "force-* の中で gh secret set PAT_TOKEN（Classic Token: repo・workflow）"
+        _diag_need "$names" SLACK_BOT_TOKEN "force-* の中で gh secret set SLACK_BOT_TOKEN"
+        _diag_need "$names" SF_PRIVATE_KEY "force-* の中で sf-update-secret.sh（メニュー 1: 秘密鍵）"
         for tier in "${tiers[@]}"; do
             suffix=$(_diag_suffix "$tier")
             [[ -n "$suffix" ]] && _diag_need "$names" "SF_CONSUMER_KEY_${suffix}" "force-* の中で sf-init.sh --reconnect ${tier}"
@@ -160,7 +160,7 @@ diag_run() {
     # --- 3. Variables ---
     echo "  Variables" >&2
     if names=$(_diag_names variable "$repo"); then  # 条件チェック
-        _diag_need "$names" SLACK_CHANNEL_ID "プロジェクトのフォルダで sf-init.sh --only 7"
+        _diag_need "$names" SLACK_CHANNEL_ID "force-* の中で gh variable set SLACK_CHANNEL_ID --body <チャンネル ID>"
         for tier in "${tiers[@]}"; do
             suffix=$(_diag_suffix "$tier")
             [[ -n "$suffix" ]] || continue

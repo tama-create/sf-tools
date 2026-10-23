@@ -50,6 +50,55 @@ EOF
     teardown "$td" "$mb" "$mh"
 }
 
+# 回帰: sf-start.sh が失敗したら、削除した設定ファイルを戻す（以前は、2 つとも消えたままだった）
+test_restores_config_on_failure() {
+    local td mb mh out ec
+    setup_std_env td mb mh
+    create_all_mocks "$mb"
+    echo '{"target-org":"oldorg"}' > "$td/.sf/config.json"
+    echo '{"defaultusername":"oldorg"}' > "$td/.sfdx/sfdx-config.json"
+    mkdir -p "$mh/sf-tools/bin"
+    printf '#!/bin/bash
+exit 1
+' > "$mh/sf-tools/bin/sf-start.sh"     # 設定ファイルを書かずに失敗する
+    chmod +x "$mh/sf-tools/bin/sf-start.sh"
+
+    out=$(cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$mh/sf-tools/bin/sf-restart.sh" 2>&1)
+    ec=$?
+
+    assert_exit_fail "$ec" "sf-start.sh が失敗 → 終了コードも失敗"
+    assert_file_contains "$td/.sf/config.json" "oldorg" "sf-start.sh が失敗 → .sf/config.json が元に戻る"
+    assert_file_contains "$td/.sfdx/sfdx-config.json" "oldorg" "sf-start.sh が失敗 → .sfdx/sfdx-config.json が元に戻る"
+    assert_output_contains "$out" "元の接続設定" "sf-start.sh が失敗 → 戻したことが表示される"
+
+    # sf-start.sh が新しい設定を書いてから失敗したときは、新しい設定を、上書きしない
+    printf '#!/bin/bash
+echo "{\\"target-org\\":\\"neworg\\"}" > .sf/config.json
+exit 1
+' > "$mh/sf-tools/bin/sf-start.sh"
+    (cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$mh/sf-tools/bin/sf-restart.sh" >/dev/null 2>&1)
+    assert_file_contains "$td/.sf/config.json" "neworg" "新しい設定が書かれていれば、元の設定で上書きしない"
+    # 退避用の一時フォルダは、残さない
+    ls "${TMPDIR:-/tmp}"/sf-restart-* >/dev/null 2>&1         && fail "退避用の一時フォルダを残さない" "残っている"         || pass "退避用の一時フォルダを残さない"
+    teardown "$td" "$mb" "$mh"
+}
+
+# sf-start.sh が成功したときは、元の設定を戻さない（新しい設定に置き換わる）
+test_no_restore_on_success() {
+    local td mb mh
+    setup_std_env td mb mh
+    create_all_mocks "$mb"
+    echo '{"target-org":"oldorg"}' > "$td/.sf/config.json"
+    mkdir -p "$mh/sf-tools/bin"
+    printf '#!/bin/bash
+exit 0
+' > "$mh/sf-tools/bin/sf-start.sh"   # 何も書かずに成功する
+    chmod +x "$mh/sf-tools/bin/sf-start.sh"
+    (cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$mh/sf-tools/bin/sf-restart.sh" >/dev/null 2>&1)
+    assert_file_not_exists "$td/.sf/config.json" "sf-start.sh が成功 → 元の設定を戻さない"
+    teardown "$td" "$mb" "$mh"
+}
+
 # sf-start.sh が存在しない → エラー
 test_no_sf_start() {
     local td mb mh
@@ -84,6 +133,8 @@ test_outside_force_dir() {
 }
 
 test_clears_config_files
+test_restores_config_on_failure
+test_no_restore_on_success
 test_calls_sf_start_with_force_relogin
 test_no_sf_start
 test_outside_force_dir

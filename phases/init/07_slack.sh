@@ -10,8 +10,8 @@
 # 【処理の流れ】
 #   7-1. ブラウザで https://api.slack.com/apps を開き、App の作成手順（App Name: sf-notify-<PROJECT_NAME>・
 #        Bot Token のスコープ: chat:write）を表示して、Enter を待つ（q は die）。
-#        Bot User OAuth Token を入力させ（read_or_quit: 入力は画面に表示される。空 Enter は再入力。q は die。
-#        形式は確認しない）、Secret SLACK_BOT_TOKEN に登録する（失敗は die）
+#        Bot User OAuth Token を入力させ（read_secret: 入力した文字は * で表示する。空 Enter は再入力。q は die。
+#        xoxb- で始まる形式でなければ、入力し直させる）、Secret SLACK_BOT_TOKEN に登録する（失敗は die）
 #   7-2. チャンネル ID を入力させる。^[CG][A-Z0-9]{8,}$ に合わなければ WARNING を表示して再入力
 #        （通知先は全員が参加する共有チャンネル（C… / G…）。DM（D…）・ユーザー（U…）は受け付けない）。
 #        Variable SLACK_CHANNEL_ID に登録する（失敗は die）
@@ -25,7 +25,7 @@
 
 # SF_TOOLS_DIR は sf-init.sh（司令塔）から export される
 PHASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SF_TOOLS_DIR="${SF_TOOLS_DIR:-$(dirname "$PHASE_DIR")}"
+SF_TOOLS_DIR="${SF_TOOLS_DIR:-$(dirname "$(dirname "$PHASE_DIR")")}"
 
 readonly SCRIPT_NAME="sf-init"
 mkdir -p "$HOME/sf-tools/logs" 2>/dev/null || true
@@ -68,8 +68,14 @@ echo ""
 open_browser "https://api.slack.com/apps"
 press_enter "Bot Token を取得したら Enter を押してください..."
 
+# Bot Token は秘密情報のため、入力した文字は * で表示する（画面に残さない。以前は、そのまま表示していた）。
+# xoxb- で始まる形式かを確認し、違えば入力し直させる（以前は、形式を確認せず、そのまま登録していた）
 slack_token=""
-read_or_quit slack_token "  Bot User OAuth Token を貼り付けてください（q で中断）："
+while true; do
+    read_secret slack_token "  Bot User OAuth Token を貼り付けてください（* で表示されます・q で中断）："
+    [[ "$slack_token" =~ ^xoxb-[A-Za-z0-9-]+$ ]] && break
+    log "WARNING" "Bot User OAuth Token の形式ではありません（xoxb- で始まる文字列です）。入力し直してください。"
+done
 echo ""
 
 echo "$slack_token" | run gh secret set SLACK_BOT_TOKEN -R "$REPO_FULL_NAME" \

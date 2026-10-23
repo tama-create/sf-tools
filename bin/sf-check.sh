@@ -11,18 +11,24 @@
 #     引数 1 つ    : deploy-target.txt だけを検証する
 #     引数なし     : sf-tools/release/branch_name.txt（sf-start.sh / sf-install.sh が保存する）に書かれたブランチ名で、
 #                    sf-tools/release/<ブランチ名>/deploy-target.txt と remove-target.txt を検証する。
-#                    branch_name.txt がないときは、何も検証せず、終了コード 0 で終了する
+#                    branch_name.txt がないときは、何も検証せず、WARNING を表示して、終了コード 0 で終了する
+#                    （main など、リリース用のフォルダを作らないブランチでは、このファイルがないため、コミットは止めない）
 #                    （ブランチ名は、今の Git のブランチではなく、branch_name.txt の内容を使う）
 #
 # 【オプション】
-#   -h, --help : このヘルプを表示して終了する（1 つ目の引数のときだけ。ほかの引数は、すべてファイルのパスとして扱う）
+#   -v, --verbose : コマンドの応答（出力）をコンソールにも表示する
+#   -h, --help : このヘルプを表示して終了する（1 つ目の引数のときだけ）
+#   上記以外の - で始まる引数は、「不明なオプションです」で中断する。それ以外の引数は、ファイルのパスとして扱う
 #
 # 【処理の流れ】
 #   1. 各ターゲットファイルを 1 行ずつ検証する。CR と前後の空白を除き、空行と # で始まる行は読み飛ばす。
 #      セクションは [files] / [members]。最初のマーカーより前の行は [files] として扱う
 #        - [files]  : 次のときはエラー
 #                       ・リポジトリの外を指すパス（/ ・C:/ ・C:\ で始まる絶対パス、.. を含むパス）。存在してもエラー
-#                       ・カレントディレクトリからの相対パスで、通常のファイルとして存在しない（ディレクトリもエラー）
+#                       ・カレントディレクトリからの相対パスで、ファイルまたはディレクトリとして存在しない
+#                       ・ディレクトリは、LWC・Aura のコンポーネントと、オブジェクトのフォルダ（lwc/<名前>・aura/<名前>・
+#                         objects/<名前>）だけ書ける。classes や . など、ほかのディレクトリは、リリース・削除の対象が
+#                         広がりすぎるため、エラー
 #        - [members]: 「種別名:メンバー名」の形でない（: がない・: の前か後ろが空）ときはエラー
 #   2. 1 でエラーにならなかった行について、種類の可否を確認する
 #      （config/metadata-capability.txt。sf-typecheck.sh が実際の組織で確かめた表）
@@ -47,6 +53,7 @@
 #   - 可否の表のパスは、環境変数 SF_CHECK_CAPABILITY_FILE で変えられる（既定: sf-tools の config/metadata-capability.txt）。
 #     表のファイルがないときは、可否の確認をしない
 #   - 終了コード: 0 = エラーなし（警告のみ・検証を飛ばした場合を含む） / 1 = エラーあり（書式・パス・可否の ng）
+#   - ログ: ./sf-tools/logs/sf-check.log（実行のたびに追記する）
 # ==============================================================================
 
 # ------------------------------------------------------------------------------
@@ -75,6 +82,19 @@ source "$COMMON_LIB"
 # ------------------------------------------------------------------------------
 # 3. ターゲットファイルの解決
 # ------------------------------------------------------------------------------
+# 引数は、ファイルのパス。-v / --verbose は受け付ける。それ以外の - で始まる引数は、不明なオプションとして中断する
+#   （以前は、パスとして扱い、「ファイルがない」と黙って検証を飛ばしていた）
+_check_args=()
+for _a in "$@"; do
+    case "$_a" in
+        -v|--verbose) ;;
+        -*) die "不明なオプションです: ${_a}" ;;
+        *) _check_args+=("$_a") ;;
+    esac
+done
+set -- ${_check_args[@]+"${_check_args[@]}"}
+unset _check_args _a
+
 if [[ $# -ge 2 ]]; then
     DEPLOY_LIST="$1"
     REMOVE_LIST="$2"
@@ -85,7 +105,9 @@ else
     # 引数省略時: sf-tools/release/branch_name.txt から自動解決
     BRANCH_NAME_FILE="sf-tools/release/branch_name.txt"
     if [[ ! -f "$BRANCH_NAME_FILE" ]]; then
-        log "INFO" "ブランチ情報ファイルが見つかりません。構文チェックをスキップします。(${BRANCH_NAME_FILE})"
+        # 以前は INFO で、気づけなかった。検証を飛ばしたことを、警告として目立たせる（コミット・プッシュは止めない: main など、
+        #   リリース用のフォルダを作らないブランチでも、このファイルがないため）
+        log "WARNING" "ブランチ情報ファイル（${BRANCH_NAME_FILE}）がありません。ターゲットファイルの構文チェックを、スキップしました。"
         exit 0
     fi
     BRANCH_NAME=$(tr -d '\r\n' < "$BRANCH_NAME_FILE")
@@ -231,6 +253,16 @@ check_target_file() {
             if [[ "$clean" == /* || "$clean" == [A-Za-z]:/* || "$clean" == [A-Za-z]:\\* || "$clean" == ".." || "$clean" == ../* || "$clean" == */../* || "$clean" == */.. ]]; then
                 print_gcc_message "error" "$label" "$lineno" "$clean" "リポジトリの外を指すパスは使えません（絶対パス・.. を含むパス）"
                 error_count=$(( error_count + 1 ))
+            elif [[ -d "$clean" ]]; then
+                # フォルダは、1 つのコンポーネント・オブジェクトを丸ごと指すもの（lwc/<名前>・aura/<名前>・objects/<名前>）だけ認める。
+                #   classes や . のような、多数のメタデータを含むフォルダを書くと、リリース・削除の対象が、意図より広がるため
+                #   （remove-target.txt では、組織のメタデータが、広範囲に削除される）
+                if [[ "$clean" =~ (^|/)(lwc|aura|objects)/[^/]+/?$ ]]; then
+                    check_capability "$label" "$lineno" "$clean" "$(type_of_path "$clean")" || error_count=$(( error_count + 1 ))
+                else
+                    print_gcc_message "error" "$label" "$lineno" "$clean" "フォルダは、LWC・Aura のコンポーネントとオブジェクト（lwc/<名前>・aura/<名前>・objects/<名前>）だけ指定できます。それ以外は、ファイルのパスを書いてください"
+                    error_count=$(( error_count + 1 ))
+                fi
             elif [[ ! -f "$clean" ]]; then
                 print_gcc_message "error" "$label" "$lineno" "$clean" "パスが存在しません"
                 error_count=$(( error_count + 1 ))

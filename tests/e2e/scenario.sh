@@ -409,7 +409,7 @@ scn_manual_delete() {
     done
     _chk "Secret を削除すると、--status が、不足として終了する（終了コード ${rc}）" "$([[ $rc -ne 0 ]] && echo 0 || echo 1)"
     printf '%s' "$SCN_STATUS_OUT" | grep -q "✗.*SLACK_BOT_TOKEN"; _chk "不足の一覧に、SLACK_BOT_TOKEN が出る" $?
-    printf '%s' "$SCN_STATUS_OUT" | grep -q "sf-init.sh --only 7"; _chk "直し方（sf-init.sh --only 7）が、表示される" $?
+    printf '%s' "$SCN_STATUS_OUT" | grep -q "gh secret set SLACK_BOT_TOKEN"; _chk "直し方（gh secret set SLACK_BOT_TOKEN）が、表示される" $?
     printf '%s' "$SCN_STATUS_OUT" | e2e_scan_secrets >/dev/null; _chk "--status の出力に、秘密情報が出ていない" $?   # e2e_scan_secrets は、含まれていなければ 0
     _scn_restore; _chk "Secret SLACK_BOT_TOKEN を、元に戻した" $?
     _scn_status; rc=$?; _chk "戻すと、--status が、不足なしに戻る（終了コード ${rc}）" $rc

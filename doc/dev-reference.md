@@ -96,6 +96,8 @@
 | `test_sf-push.sh` | sf-push.sh |
 | `test_sf-update-secret.sh` | sf-update-secret.sh |
 | `test_docs.sh` | Markdown 文書の見出しの番号（番号がある・深さが階層と合う・連番・LF。`CLAUDE.md` 1.4 の決まり） |
+| `test_docs_facts.sh` | 文書（`site/`・README・`doc/`）に書かれた事実（コマンド名・オプション・パス・環境変数）が、コードと食い違っていないか（例外は `tests/docs-facts-allow.txt`。コマンドの一覧に、全 `bin/sf-*.sh` が載っているかの逆向きの確認も含む）。Windows はプロセス起動が遅いため、awk でまとめて処理する |
+| `test_docs_stamps.sh` | 冒頭コメントが、文書を最後に見直したときから変わっていないか（`doc/doc-stamps.txt` の印。`tests/docs-stamp.sh` で確認・付け直し）。自己テストつき |
 | `test_site.sh` | HTML の文書サイト `site/`（書き出しの決まり・相対リンクと見出しの実在・目次（`assets/site.js` の NAV）への登録漏れ・LF・コードのブロックのエスケープ・`pages.yml`。見た目は、確認しない） |
 | `test_sf-sync-wf.sh` | sf-sync-wf.sh |
 | `test_wf-sequence.sh` | templates/.github/workflows/wf-sequence.yml（YAML の判定スクリプトを取り出して、実際の git リポジトリで、順序どおり・順序外・最下位・環境ブランチからの PR を確認） |
@@ -736,6 +738,7 @@ sf-init.sh --add-tier develop    # main+staging → main+staging+develop
 | `templates/.github/workflows/` の `name:` | `site/admin/workflows.html` のワークフロー一覧 |
 | `templates/.github/workflows/` の内容 | `phases/init/09_repo_rules.sh` の `required_status_checks.context` との整合 |
 | コマンドの使い方・オプション・画面の文言 | `site/`（使い方ガイド・リファレンス。9.8）。README は、概要だけ（詳細は、サイトへ） |
+| 各スクリプトの冒頭コメント（仕様の正本） | `doc/doc-stamps.txt` に載っている文書。変えたら `bash tests/docs-stamp.sh --diff <文書>` で変更を見て、文書を読み直し、`--update <文書>` で印を付け直す（`tests/test_docs_stamps.sh` が、見直しの漏れを検出する。文書は自動では直さない） |
 | mm / rr の運用・リリース手順 | `CLAUDE.md` 1.3・4.3、`doc/dev-guide.md`、本書セクション 9 |
 
 > ドキュメントの詳細（フロー・パス等）はコードを確認してから記載すること。推測で書かないこと。
@@ -1027,6 +1030,7 @@ sf-tools の `main` への反映は、全ユーザーへの配布と同義であ
 - **構成**: `site/index.html`（トップ）・`site/guide/`（使い方ガイド）・`site/reference/`（リファレンス）。共通の部分は、`site/assets/style.css`（スタイル。ダークモード・スマホ対応）と `site/assets/site.js`。ビルドの手順は、ない（手書きの静的な HTML）。
 - **ページの足し方**: ① `<head>` と骨組み（`<header id="top">`・`<nav id="side">`・`<main id="doc" class="doc">`・`<aside id="toc">`・`<footer id="foot">`・`site.js` の読み込み）を、既存のページと同じにする。② `<body data-root="...">` は、`site/` からの深さに合わせる（直下は `""`・1 階層下は `"../"`）。③ **`assets/site.js` の `NAV` に 1 行足す**（左の目次・前後のリンクは、ここだけで決まる。`h` がない項目は「準備中」と表示される）。コード中の `<` は、`&lt;` にする。⑤ **囲み**（`<div class="box 種類">` + `<div class="title">題</div>`）は、種類で、アイコンが自動で付く（通常 = 💡、`warn` = ⚠️、`danger` = 🛑、`ok` = ✅、`next` = 👉、`admin` = 🔑 管理者専用）。題は、必ず付ける（`tests/test_site.sh` が確認する）。小さな印は `<span class="badge safe">🔍 読み取りのみ</span>`。言葉は、`site/guide/glossary.html`（用語集）にそろえる（管理者 = プロジェクト管理者・リリース = デプロイ・段階 = 環境）。④ **見出しの番号（大項目 `1.`・中項目 `1.1`・小項目 `1.1.1`）は、手で書かない**（`site.js` が h2・h3・h4 に自動で付ける）。階層は飛ばさない（h2 の次は h3、h3 の次は h4）。
 - **テスト**: `bash tests/run_tests.sh test_site.sh`（`--changed` は、`site/*`・`pages.yml` の変更で選ぶ）。
+- **食い違いの検出（`doc/doc-style.md` の 3 階層。コード → 技術文書 → 一般向け文書の順に正しさを伝える）**: ① `tests/test_docs_facts.sh` が、文書の中のコマンド名・オプション・パス・環境変数が、実在するかを調べる（仕様どおりに存在しない例の書き方は、`tests/docs-facts-allow.txt`）。② `tests/test_docs_stamps.sh` が、冒頭コメントが変わったのに文書が見直されていないものを検出する（`doc/doc-stamps.txt`。新しい `bin/sf-*.sh` は、どれかの文書の基にしないと失敗する）。CI は検出だけで、文書を自動では書き換えない。
 - **公開**: `.github/workflows/pages.yml` が、`main` に `site/` の変更が入ったとき、`site/` を GitHub Pages に公開する（`development` の途中経過は出ない）。リポジトリの Settings → Pages → Source を「GitHub Actions」にする設定が、最初の 1 回だけ必要。公開先は、`https://tama-create.github.io/sf-tools/`。
 - **手元で見る**: `site/index.html` を、ブラウザで直接開く（サーバーは不要）。
 

@@ -40,7 +40,7 @@
 
 # SF_TOOLS_DIR は sf-init.sh（司令塔）から export される
 PHASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SF_TOOLS_DIR="${SF_TOOLS_DIR:-$(dirname "$PHASE_DIR")}"
+SF_TOOLS_DIR="${SF_TOOLS_DIR:-$(dirname "$(dirname "$PHASE_DIR")")}"
 
 readonly SCRIPT_NAME="sf-init"
 mkdir -p "$HOME/sf-tools/logs" 2>/dev/null || true

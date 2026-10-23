@@ -138,6 +138,7 @@ export PATH="$HOME/sf-tools/bin:$PATH"
 | `doc/dev-guide.md` | 開発・リリースの流れ（`mm`・`rr`）と、e2e（実環境の通し検証）の使い方 |
 | `doc/dev-reference.md` | 実装の詳細リファレンス（関数・処理フロー・テスト） |
 | `doc/integration-test-plan.md` | 結合テストの計画と、カバレッジ表 |
+| `doc/doc-style.md` | 文書の書き方（3 階層の決まりと、食い違いの検出） |
 | `CLAUDE.md` | AI（Claude Code）向けの作業ルール |
 
 ---

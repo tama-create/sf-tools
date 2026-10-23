@@ -185,6 +185,8 @@ case "$1" in
         fi
         exit "${MOCK_GIT_CHECKOUT_EXIT:-0}" ;;
     status)         exit 0 ;;
+    ls-files)       [[ -n "${MOCK_GIT_UNTRACKED:-}" ]] && printf '%s
+' "$MOCK_GIT_UNTRACKED"; exit 0 ;;   # 追跡していないファイル（MOCK_GIT_UNTRACKED=<パス>）
     clone)
         _dest=""
         for _a in "$@"; do _dest="$_a"; done

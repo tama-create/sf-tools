@@ -102,7 +102,7 @@ sf-init.sh --owner my-org --project acme            # 引数で指定（対話�
 <p>PAT（Personal Access Token）は、GitHub の「合鍵」のようなものです。自動で動くワークフローが、あなたの代わりに、リポジトリを更新するために使います。</p>
 <ul>
   <li><strong>どのアカウントで作るか:</strong> force-* のリポジトリの<strong>オーナー</strong>のアカウントです（組織のリポジトリなら、その組織の<strong>管理者</strong>）。作るアカウントは、実行の最初に表示されます。ブラウザで、別のアカウントにログインしているときは、切り替えてください。sf-tools の開発者のアカウントは、関係ありません。</li>
-  <li><strong>作り方:</strong> ブラウザで、Token の作成ページが、自動で開きます（Note と Scopes は、入力済みです）。ページの一番下の「Generate token」を押して、表示された Token をコピーし、ターミナルに貼り付けます。発行済みの Token があるときは、ブラウザは開かず、そのまま貼り付けられます。</li>
+  <li><strong>作り方:</strong> ブラウザで、Token の作成ページが、自動で開きます（Note と Scopes は、入力済みです）。ページの一番下の「Generate token」を押して、表示された Token をコピーし、ターミナルに貼り付けます。「発行済みの Token があるか」は聞きません（Token の値は、作成した直後の 1 回しか表示されないためです）。保存してある Token があれば、それを貼り付けてもかまいません。</li>
   <li><strong>設定の内容:</strong> Note は <code>sf-metasync-{プロジェクト名}</code>（自動で表示）、Expiration は <code>No expiration</code>（期限なし）、Scopes は <code>repo</code>（全選択）と <code>workflow</code> です。</li>
   <li><strong>貼り付けるとき:</strong> 文字の数だけ <code>*</code> が並びます（Token の中身は、画面に出ません）。Git Bash では、<strong>右クリック</strong>（または Shift+Insert）で貼り付けます。Enter を押すと、「N 文字を受け取りました（先頭: ghp_…）」と表示されるので、コピーできたかを確かめられます。</li>
   <li><strong>確認:</strong> スコープ（<code>repo</code>・<code>workflow</code>）と、リポジトリの管理者であることを、GitHub に問い合わせて確かめます。違っていれば、理由が表示されます。3 回まで、貼り直せます。（Fine-grained の Token は、スコープを確かめられないので、使えません。）</li>
@@ -119,7 +119,7 @@ sf-init.sh --owner my-org --project acme            # 引数で指定（対話�
       <li>左のメニューの「OAuth &amp; Permissions」をクリックします。</li>
       <li>「ボットトークンのスコープ」→「OAuth スコープを追加する」で、<code>chat:write</code> を追加します。</li>
       <li>左のメニューの「Install App」→「Install to ワークスペース名」をクリックして、「許可する」をクリックします。</li>
-      <li>表示されたページの「Bot User OAuth Token」（<code>xoxb-</code> で始まる文字列）をコピーして、ターミナルに貼り付けます。</li>
+      <li>表示されたページの「Bot User OAuth Token」（<code>xoxb-</code> で始まる文字列）をコピーして、ターミナルに貼り付けます。貼り付けた文字は、<code>*</code> で表示されます（Token は画面に出ません）。<code>xoxb-</code> で始まらないときは、入力し直しになります。</li>
     </ol>
   </li>
   <li>
@@ -140,7 +140,7 @@ sf-init.sh --owner my-org --project acme            # 引数で指定（対話�
   <li>段階（main / staging / develop）ごとに、<strong>ログイン先</strong>を選んで、<strong>ブラウザで Salesforce にログイン</strong>します（接続するユーザーは、管理者権限を持つユーザーです）。あなたの操作は、これだけです。</li>
   <li>ブラウザでのログインは、約 2 分で時間切れになります。ブラウザが開いたら、すぐにログインしてください。</li>
   <li>アプリの作成・証明書の登録・ポリシーとプロファイルの設定・コンシューマー鍵の取得は、自動です。設定が反映されるまで時間がかかるので、接続のテストは、成功するまで、くり返します。</li>
-  <li>登録されるのは、<code>SF_PRIVATE_KEY</code>（秘密鍵。すべての組織で共通）と、組織ごとの <code>SF_CONSUMER_KEY_*</code>・<code>SF_USERNAME_*</code>・<code>SF_INSTANCE_URL_*</code> です（<a href="secrets.html">認証情報</a>）。</li>
+  <li>登録されるのは、<code>SF_PRIVATE_KEY</code>（秘密鍵。すべての組織で共通）と、組織ごとの <code>SF_CONSUMER_KEY_*</code>・<code>SF_USERNAME_*</code>・<code>SF_INSTANCE_URL_*</code> です。組織の情報を読み取れたときは、組織の ID・名前・種類・確認日時（<code>SF_ORG_*</code>）も保存します（<a href="secrets.html">認証情報</a>）。</li>
   <li><code>--legacy-connected-app</code> を付けると、従来の接続アプリケーション（廃止の予定）になります。Salesforce の画面での設定と、コンシューマーキー・ユーザー名の手入力が、必要です。</li>
 </ul>
 <p>ログイン先の選び方と、段階と組織の種類の関係は、<a href="maintenance.html#org">構成の変更と診断</a>で説明しています。</p>
@@ -175,7 +175,7 @@ sf-init.sh --owner my-org --project acme            # 引数で指定（対話�
     </ul>
     別のリポジトリの状態が残っているときは、選択肢は出ず、最初から始まります。
   </li>
-  <li>完了済みのプロジェクトでは、<code>--resume N</code> は使えません（接続の処理を、確認なしで、やり直さないためです）。</li>
+  <li>完了済みのプロジェクトでは、<code>--resume N</code> と <code>--only N</code> は使えません（接続の処理などを、確認なしで、やり直さないためです）。</li>
   <li>進み具合は、<code>admin/.sf-init-XXXX.progress</code>（入力内容は <code>.sf-init-XXXX.env</code>）に記録されます。<strong>この 2 つのファイルは、最後まで終わると削除されます</strong>（途中で止まったときだけ、残ります）。終わっているかどうかは、クローンの <code>git config sf-tools.setup-complete</code> で判断します。</li>
   <li>リポジトリそのものを作り直したいときは、GitHub 上のリポジトリと <code>admin</code> フォルダを、手動で削除してから、実行します。</li>
 </ul>
@@ -215,8 +215,8 @@ sf-next.sh      # 次の PR 先を確認 → ブラウザで PR を作成 → �
   <thead><tr><th>オプション</th><th>内容</th></tr></thead>
   <tbody>
     <tr><td><code>--owner</code> / <code>--project</code></td><td>オーナーとプロジェクト名（XXXX）を指定します（対話なし）</td></tr>
-    <tr><td><code>--resume N</code></td><td>N 番目の段階から、質問なしで再開します（通常は、指定する必要はありません）。<strong>完了済みのプロジェクトでは、使えません。</strong>動作の確認（最後のステップ）は、聞きません</td></tr>
-    <tr><td><code>--only N</code></td><td>N 番目の段階だけを実行します（デバッグ用）。進み具合は更新しません。動作の確認は、聞きません</td></tr>
+    <tr><td><code>--resume N</code></td><td>N 番目の段階から、質問なしで再開します（通常は、指定する必要はありません）。N は 1〜10 の整数です（それ以外は、実行する前にエラーになります）。<strong>完了済みのプロジェクトでは、使えません。</strong>動作の確認（最後のステップ）は、聞きません</td></tr>
+    <tr><td><code>--only N</code></td><td>N 番目の段階だけを実行します（デバッグ用）。N は 1〜10 の整数です。進み具合は更新しません。動作の確認は、聞きません。<strong>完了済みのプロジェクトでは、使えません。</strong></td></tr>
     <tr><td><code>--add-tier staging|develop</code></td><td>既存のプロジェクトに、段階を足します（<a href="maintenance.html#add-tier">構成の変更と診断</a>）</td></tr>
     <tr><td><code>--reconnect &lt;段階&gt;</code></td><td>1 つの段階の、接続先の Salesforce 組織を、付け替えます（<a href="maintenance.html#reconnect">構成の変更と診断</a>）</td></tr>
     <tr><td><code>--status</code></td><td>セットアップの診断をします。<span class="badge safe">🔍 読み取りのみ</span>（<a href="maintenance.html#status">構成の変更と診断</a>）</td></tr>

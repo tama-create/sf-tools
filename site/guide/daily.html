@@ -78,7 +78,7 @@
   <thead><tr><th>フック</th><th>いつ</th><th>内容</th></tr></thead>
   <tbody>
     <tr><td><strong>pre-commit</strong></td><td><code>git commit</code> のとき</td><td>ターゲットファイルの書き方を確認します。エラーがあれば、コミットを止めます</td></tr>
-    <tr><td><strong>pre-push</strong></td><td><code>git push</code> のとき</td><td><code>main</code> との同期を確認します。<code>main</code> / <code>staging</code> / <code>develop</code> へは、直接送れません（PR を通します）</td></tr>
+    <tr><td><strong>pre-push</strong></td><td><code>git push</code> のとき</td><td>ターゲットファイルの書き方を確認し、<code>main</code> などの新しい変更を取り込みます。<code>main</code> / <code>staging</code> / <code>develop</code> の上からも、これらへも、直接は送れません（PR を通します）。新しい変更を取り込んだときは、そのプッシュは止まります（もう一度プッシュすると、通ります）</td></tr>
   </tbody>
 </table>
 

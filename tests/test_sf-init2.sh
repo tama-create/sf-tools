@@ -401,7 +401,11 @@ GITEOF
     assert_file_contains "$MOCK_CALL_LOG" "gh variable set SF_ORG_KIND_STG --body sandbox" "組織の種類（Sandbox）が保存される"
     assert_file_contains "$force_dir/sf-tools/config/branches.txt" "staging"        "branches.txt に staging が追記される"
     # main への直接 push は、しない（PR を作成する）
-    assert_file_not_contains "$MOCK_CALL_LOG" "origin main"                         "main への直接 push をしない"
+    grep -Eq 'git push .*origin main' "$MOCK_CALL_LOG"         && fail "main への直接 push をしない" "main への push が呼ばれた"         || pass "main への直接 push をしない"
+    # 回帰: 新しいブランチは、リモートの最新の main（origin/main）から作る（以前は、手元の main から作り、古いと古い内容から派生した）
+    assert_file_contains "$MOCK_CALL_LOG" "git fetch origin main"                   "origin/main を取得する"
+    assert_file_contains "$MOCK_CALL_LOG" "git checkout -b staging origin/main"     "staging ブランチは、origin/main から作る"
+    grep -Eq 'git checkout -b system-add-tier-staging-[0-9]+ origin/main' "$MOCK_CALL_LOG"         && pass "作業用のブランチは、origin/main から作る"         || fail "作業用のブランチは、origin/main から作る" "$(grep 'git checkout' "$MOCK_CALL_LOG" | head -5)"
     assert_file_contains "$MOCK_CALL_LOG" "gh pr create --base main"                "PR を作成する"
     assert_file_contains "$MOCK_CALL_LOG" "git checkout admin"                      "終わったら、実行前のブランチ（管理者用の admin）に戻る（main に居座らない）"
     assert_file_contains "$MOCK_CALL_LOG" "origin system-add-tier-staging-"         "作業用のブランチを push する"
@@ -563,7 +567,7 @@ test_completed_by_clone() {
         bash "$mock_home/sf-tools/bin/sf-init.sh" --resume 5 ) > "$out" 2>&1
     exit_code=$?
     assert_exit_fail          "$exit_code"                                                  "クローンで完了済みと判定・--resume 5: 拒否される"
-    assert_file_contains      "$out" "完了済みのプロジェクトでは、--resume は使えません"          "クローンで完了済みと判定・--resume 5: 理由が表示される"
+    assert_file_contains      "$out" "完了済みのプロジェクトでは、--resume / --only は使えません"          "クローンで完了済みと判定・--resume 5: 理由が表示される"
     assert_file_not_contains  "$MOCK_CALL_LOG" "gh secret set"                              "クローンで完了済みと判定・--resume 5: 何も登録しない"
 
     # [1] 接続を見る: クローンのフォルダで status.sh が実行される
@@ -836,7 +840,7 @@ GITEOF
     exit_code=$?
     assert_exit_fail          "$exit_code"                                                    "--status: 診断で不足があれば、非ゼロで終了する"
     assert_file_contains      "$out" "PAT_TOKEN がありません"                                    "--status: 不足している Secret が表示される"
-    assert_file_contains      "$out" "sf-init.sh --only 6"                                      "--status: 直し方が表示される"
+    assert_file_contains      "$out" "gh secret set PAT_TOKEN"                                  "--status: 直し方が表示される"
     assert_file_contains      "$out" "SF_CONSUMER_KEY_STG がありません"                           "--status: 段階（staging）の不足が表示される"
     assert_file_contains      "$out" "sf-init.sh --add-tier staging"                            "--status: ブランチがないときの直し方が表示される"
     assert_file_not_contains  "$out" "--status が失敗しました"                                    "--status: 診断の結果を、エラー終了のメッセージにしない"

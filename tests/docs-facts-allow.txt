@@ -1,0 +1,7 @@
+# 文書に書いてよい「例外」の一覧（tests/test_docs_facts.sh が読む）
+# 書式: 種類 値  # 理由      種類 = command・option・path・env
+# コードや冒頭コメントには存在しないが、文書に書いてよいものだけを書く。書く前に、文書の誤りでないかを確かめること。
+
+command sf-logwatch.sh   # README の設計書の一覧（doc/sf-logwatch-design.md。未実装）
+option  --id             # winget install --id（外部コマンド）
+option  --state          # gh pr list --state（外部コマンド）

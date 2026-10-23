@@ -83,7 +83,13 @@ test_staging_fail_dev_merges_main() {
     export MOCK_GIT_DIFF_EXIT_2ND=1  # phase_git_sync で変更あり → commit → propagate 実行
     export MOCK_SF_ORG_JSON='{"result":{"alias":"testorg","id":"00D000000000001AAA"}}'
 
-    printf 'Y\nY\n' | ( cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-metasync.sh" ) 2>&1 >/dev/null
+    local out; out=$( printf 'Y
+Y
+' | ( cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-metasync.sh" ) 2>&1 )
+
+    # 回帰: 完了のメッセージは、実際に伝播できたブランチと、スキップしたブランチを表示する（以前は、固定の文言だった）
+    assert_output_contains "$out" "伝播したブランチ: develop）" "完了メッセージ: 伝播できたブランチ（develop）が表示される"
+    assert_output_contains "$out" "伝播できなかったブランチ（スキップ）: staging" "完了メッセージ: スキップしたブランチ（staging）が表示される"
 
     # develop のマージ元が "main" であることを確認（staging ではない）
     assert_file_contains "$MOCK_CALL_LOG" "git-merge-arg: main" "staging 失敗後、develop は main からマージした"
@@ -108,6 +114,37 @@ test_outside_force_dir() {
 }
 
 # feature ブランチ + ローカル変更あり → stash して処理し、終了後に stash pop
+# 回帰: 手元で実行したとき、追跡していないファイルがあれば中止する（以前は、git add -A で、同期のコミットに含めていた）
+test_untracked_files_abort_locally() {
+    local td mb mh out ec
+    setup_std_env td mb mh
+    create_all_mocks "$mb"
+    export MOCK_GIT_BRANCH="main"
+    export MOCK_GIT_DIFF_EXIT=0
+    export MOCK_GIT_DIFF_EXIT_2ND=1
+    export MOCK_GIT_UNTRACKED="memo.txt"
+    export MOCK_SF_ORG_JSON='{"result":{"alias":"testorg","id":"00D000000000001AAA"}}'
+
+    out=$( printf 'Y
+Y
+' | ( cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-metasync.sh" ) 2>&1 )
+    ec=$?
+    assert_exit_fail "$ec" "追跡していないファイルがある → 中止（終了コード 0 以外）"
+    assert_output_contains "$out" "追跡していないファイルがあります" "追跡していないファイル → 理由が表示される"
+    assert_output_contains "$out" "memo.txt" "追跡していないファイル → ファイル名が表示される"
+    assert_file_not_contains "$MOCK_CALL_LOG" "git commit" "追跡していないファイル → コミットしない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "git push" "追跡していないファイル → プッシュしない"
+
+    # GitHub Actions 上では、確認しない（クリーンなチェックアウトで、定期の同期を止めないため）
+    : > "$MOCK_CALL_LOG"
+    out=$( printf 'Y
+Y
+' | ( cd "$td" && HOME="$mh" PATH="$mb:$PATH" GITHUB_ACTIONS=true bash "$SF_TOOLS_DIR/bin/sf-metasync.sh" ) 2>&1 )
+    echo "$out" | grep -q "追跡していないファイルがあります"         && fail "GitHub Actions 上では、追跡していないファイルを、確認しない" "中止した"         || pass "GitHub Actions 上では、追跡していないファイルを、確認しない"
+    unset MOCK_GIT_BRANCH MOCK_GIT_DIFF_EXIT MOCK_GIT_DIFF_EXIT_2ND MOCK_GIT_UNTRACKED MOCK_SF_ORG_JSON
+    teardown "$td" "$mb"
+}
+
 test_stash_pop_on_exit() {
     local td mb mh
     setup_std_env td mb mh
@@ -205,6 +242,7 @@ test_commit_confirm_no_aborts() {
 }
 
 test_outside_force_dir
+test_untracked_files_abort_locally
 test_stash_pop_on_exit
 test_sf_cli_abort
 test_commit_confirm_no_aborts

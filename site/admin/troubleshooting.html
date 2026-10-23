@@ -20,7 +20,7 @@
   <div class="title">最初に試すこと</div>
   <ul>
     <li>エラーの文章を、最後まで読んでみてください。直し方が、書いてあることが多いです。</li>
-    <li>ログは、<code>force-*</code> フォルダの中の <code>sf-tools/logs/&lt;コマンド名&gt;.log</code> に残っています（<code>sf-init.sh</code> だけは、<code>~/sf-tools/logs/sf-init.log</code> です）。</li>
+    <li>ログは、<code>force-*</code> フォルダの中の <code>sf-tools/logs/&lt;コマンド名&gt;.log</code> に残っています（<code>sf-init.sh</code>・<code>sf-job.sh</code>・<code>sf-typecheck.sh</code> は、<code>~/sf-tools/logs/</code> の下です。くわしくは<a href="../reference/structure.html#logs">ログとリポジトリ構成</a>）。</li>
     <li>管理者は、<a href="maintenance.html#status"><code>sf-init.sh --status</code></a> で、足りないものを調べられます。</li>
   </ul>
 </div>
@@ -39,7 +39,8 @@
 <p><code>sf-job.sh</code> で作った、作業用のブランチに移ってから、もう一度実行してください。</p>
 
 <h3 id="dev-prepush"><code>git push</code> が止められる</h3>
-<p><code>main</code> / <code>staging</code> / <code>develop</code> へは、直接プッシュできない仕組みです。作業用のブランチから、PR（取り込みの依頼）を出して、反映してください（<code>sf-next.sh</code> が、出し先を案内します）。</p>
+<p><code>main</code> / <code>staging</code> / <code>develop</code> の上にいるとき、または、これらへプッシュしようとしたとき（<code>git push origin feature:main</code> など）は、プッシュを止める仕組みです。作業用のブランチに移って、PR（取り込みの依頼）を出して、反映してください（<code>sf-next.sh</code> が、出し先を案内します）。ターゲットファイルの書き方にエラーがあるときも、止まります（画面に、エラーの行が出ます）。</p>
+<p>「リモートの変更を、現在のブランチに取り込みました。このプッシュには、取り込みが含まれないため、中止しました」と表示されたときは、故障ではありません。<code>main</code> などの新しい変更を取り込んだので、もう一度 <code>git push</code> を実行してください（今度は通ります）。</p>
 <p>この仕組みを、避けて通る方法は、案内していません。どうしても必要なときは、管理者に相談してください。</p>
 
 <h3 id="dev-dryrun">dry-run（<code>sf-dryrun.sh</code>）が失敗する</h3>

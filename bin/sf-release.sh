@@ -55,6 +55,8 @@
 #     sf project generate manifest で生成し、1 つの XML に統合する（両方を同時に渡すと、sf CLI は、共通部分だけ
 #     （重なりがなければ空）を返すため）。統合後にメンバーが 1 つもなければ、エラーで中断する（「変更なし」の
 #     成功扱いで、見落とさないため）。
+#   - deploy-target.txt と remove-target.txt の両方に対象がないとき（コメント・空行だけ）は、「デプロイ対象なし。正常終了します。」と表示して、
+#     正常に終了する（CI で、リリースの定義だけを先に準備する運用を許すため）。
 #   - deploy-target.txt が空で remove-target.txt にだけ対象があるときは、メンバーのない package.xml（version 60.0）を
 #     作成し、削除だけを行う。
 #   - 存在しない削除対象を許す指示（# @ignore-missing）: remove-target.txt に、`# @ignore-missing` で始まる

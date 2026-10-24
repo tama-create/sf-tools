@@ -139,7 +139,7 @@ templates/.github/workflows/  ─sf-init→   .github/workflows/
 
 ### 4.2 ワークフロー一覧
 
-ファイル名・WF 名・トリガーの詳細は、文書サイトの `site/admin/workflows.html` を参照。
+ファイル名・トリガーの正本は、各ワークフロー（`templates/.github/workflows/*.yml`）本体。読み物としての一覧は、文書サイトの `site/admin/workflows.html`（本書より後に書かれた、利用者向けの説明）。
 
 | ワークフロー | 目的 | ブロック |
 | :--- | :--- | :--- |
@@ -314,7 +314,7 @@ PAT の作成: GitHub → Settings → Developer Settings → Personal access to
 
 | 判断 | 理由 |
 | :--- | :--- |
-| 本番同期を PR なしの直接 push にした | 毎時の同期に承認は不要。ボットコミットで手動コミットと区別可能。管理者の負担を最小化。PAT_TOKEN でブランチ保護ルールをバイパスする。 |
+| 本番同期を PR なしの直接 push にした | 数時間おき（平日の日本時間 9・12・15・18 時）の同期に承認は不要。ボットコミットで手動コミットと区別可能。管理者の負担を最小化。PAT_TOKEN でブランチ保護ルールをバイパスする。 |
 | sf-metasync のボット push で propagate を発火させない | PR マージ時のみトリガー。メタデータ同期の下流伝播は sf-metasync.sh 自身が担う。 |
 | マージ順序チェックを警告のみ（ブロックしない）にした | 緊急 Hotfix を妨げないため。Slack 通知で可視性は確保。 |
 | 環境ブランチ間の直接マージはブロック | 意図しない変更の混入を防止。feature 経由を強制し、各環境のデプロイ内容を追跡可能にする。 |

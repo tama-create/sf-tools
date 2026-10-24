@@ -68,6 +68,7 @@
   <tbody>
     <tr><td><strong>組織</strong>（org）</td><td>Salesforce の環境 1 つのことです。本番・Sandbox・Developer Edition などがあります</td></tr>
     <tr><td><strong>段階</strong></td><td>変更を、順番に確かめながら本番へ進めるための、段のことです。<code>develop</code>（開発）→ <code>staging</code>（検証）→ <code>main</code>（本番）の 3 段が標準です。段ごとに、ブランチと Salesforce の組織が、1 つずつ対応します。小さなプロジェクトは、<code>main</code> だけの 1 段でも使えます</td></tr>
+    <tr><td><strong>Phase</strong>（フェーズ）</td><td><code>sf-init.sh</code> の内部の処理の単位です（1〜10）。画面に出る「ステップ n / 9」とは、番号がずれています。<code>--resume</code> / <code>--only</code> を使うときだけ、意識します（<a href="../admin/setup.html#phase-map">ステップとの対応</a>）</td></tr>
     <tr><td><strong>環境</strong></td><td>段階と同じ意味で使います（本番環境・検証環境・開発環境）</td></tr>
   </tbody>
 </table>

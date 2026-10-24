@@ -112,6 +112,8 @@
 #     Slack App の作成・Bot Token の取得 / 通知先 Slack チャンネルで Bot を招待（/invite @sf-notify-<プロジェクト名>）
 #
 # 【補足】
+#   - 開始画面（新規の実行）には、作るもの・かかる時間の目安（30〜60 分。ブラウザでの作業と Salesforce の反映待ちを含む）・
+#     先に用意するもの・9 つのステップを表示する
 #   ◆ 途中で止まったとき（続きから）
 #     - Phase 2 以降が成功するたびに、admin/.sf-init-XXXX.progress を SF_INIT_DONE_PHASE=N・SF_INIT_DONE_AT で上書きする
 #       （--only のとき・.sf-init-XXXX.env がないときは、記録しない）

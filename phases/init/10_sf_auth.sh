@@ -42,6 +42,8 @@
 #   - openssl・sf（npm 版）・gh
 #
 # 【補足】
+#   - ブラウザでのログイン（sf org login web）は、約 2 分で時間切れになる（失敗・時間切れ・ブラウザを閉じたときは、終了コードが 0 以外になり die。
+#     画面にも、その旨の警告を出す）
 #   - 登録する Secrets: SF_PRIVATE_KEY（全段階で共通）/ SF_CONSUMER_KEY_PROD・_STG・_DEV
 #   - 登録する Variables: SF_USERNAME_PROD・_STG・_DEV / SF_INSTANCE_URL_PROD・_STG・_DEV /
 #     SF_ORG_ID_*・SF_ORG_NAME_*・SF_ORG_KIND_*・SF_ORG_CHECKED_*（組織の ID・名前・種類・確認日時。

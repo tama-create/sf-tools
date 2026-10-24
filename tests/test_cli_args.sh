@@ -101,7 +101,36 @@ test_phase_scripts_default_sf_tools_dir() {
     teardown "$td" "$mb" "$mh"
 }
 
+# 冒頭コメントの【オプション】が、コードの引数の扱いと食い違っていないか（静的な確認。実行しない）。
+#   reject_unknown_args を呼ぶコマンド（-v 以外の引数を、不明なオプションとして中断する）の【オプション】の項に、
+#   「不明なオプション」の記述があり、「検査しない・引数の解析はしない・無視する・そのまま渡す」の記述がないこと。
+#   （以前、コード側だけに reject_unknown_args を足して、冒頭コメントが「無視する」のまま残った）
+_header_options_section() {
+    awk '/^# ==/{c++; next} c==2{sub(/^# ?/,""); print} c==3{exit}' "$1" | awk '/^【オプション】/{on=1; next} /^【/{on=0} on'
+}
+
+test_header_matches_unknown_arg_policy() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] 冒頭コメントの【オプション】が、引数の拒否（reject_unknown_args）と食い違っていない${CLR_RST}"
+    local f script opts count=0
+    for f in "$SF_TOOLS_DIR"/bin/sf-*.sh; do
+        script=$(basename "$f")
+        grep -qE '^[^#]*reject_unknown_args "\$@"' "$f" || continue  # 条件チェック（呼ばないコマンドは、独自の解析のため対象外）
+        count=$((count + 1))
+        opts=$(_header_options_section "$f")  # VAR=$(cmd) のため run 不使用
+        if ! echo "$opts" | grep -q "不明なオプション"; then
+            fail "${script}: 冒頭コメントの【オプション】に、「不明なオプション」で中断する旨がある" "reject_unknown_args を呼ぶのに、記述がない"
+        elif echo "$opts" | grep -qE "検査しない|引数の解析はしない|引数は.*無視|そのまま.*渡"; then
+            fail "${script}: 冒頭コメントが、引数を無視する・そのまま渡すと書いていない" "$(echo "$opts" | grep -E '検査しない|引数の解析はしない|引数は.*無視|そのまま.*渡' | head -1)"
+        else
+            pass "${script}: 冒頭コメントの【オプション】が、引数の拒否と合っている"
+        fi
+    done
+    [[ $count -ge 5 ]] && pass "reject_unknown_args を呼ぶコマンド ${count} 本を確認した" || fail "reject_unknown_args を呼ぶコマンドを確認した" "${count} 本だけ"
+}
+
 test_documented_options_are_accepted
+test_header_matches_unknown_arg_policy
 test_unknown_option_does_not_hang
 test_phase_scripts_default_sf_tools_dir
 

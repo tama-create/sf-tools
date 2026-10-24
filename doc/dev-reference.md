@@ -328,13 +328,14 @@ check_gh_owner "$GITHUB_OWNER"   # 認証ユーザーの一致確認
 
 ### 4.3 sf-metasync.sh
 
-- 本番組織でのみ実行可（Sandbox に接続中の場合はエラー終了）
-- main ブランチを最新化して差分を抽出
-- `sf sgd source delta` で変更差分を算出
-- 差分対象メタデータを retrieve
-- 変更があれば commit / push / PR 作成まで進める
-- 変更がなくても、未プッシュのコミット（前回の push の失敗で残った）があれば、確認のうえ（`GITHUB_ACTIONS=true` では確認なし）、push だけ行う（`git rev-list --count origin/main..HEAD`）
-- main への push は `git push --no-verify`（このコマンド専用。pre-push フックは、開発者の main への直接 push を止めるためのもの。サーバー側の保護は、そのまま効く。結合テスト M0・M4 で見つかった）
+> 仕様の正本は、`bin/sf-metasync.sh` の冒頭コメント（`--help`）。ここは要点だけ。
+
+- `prod` エイリアスの組織（**本番・Sandbox のどちらでもよい**）から、メタデータを取得し、`main` にコミットして `push` する（**PR は作らない**）。push したときは、`branches.txt` の `main` 以外の各ブランチへ、`main` をマージして push する（伝播）
+- どのブランチから実行しても、`main` に切り替えて処理し、終了時に元のブランチへ戻る（追跡中のファイルに未コミットの変更があれば、`git stash` で退避して、戻すときに `stash pop`）
+- `sf sgd source delta` で差分を求め、`metadata.txt` の全種類を `retrieve` する
+- 差分がなくても、未プッシュのコミット（前回の push の失敗で残った）があれば、確認のうえ（`GITHUB_ACTIONS=true` では確認なし）、push だけ行う（`git rev-list --count origin/main..HEAD`）
+- `main` への push は `git push --no-verify`（このコマンド専用。pre-push フックは、開発者の `main` への直接 push を止めるためのもの。サーバー側の保護は、そのまま効く。結合テスト M0・M4 で見つかった）。伝播の push には、`--no-verify` を付けない
+- 手元で実行したとき、追跡していないファイル（`.gitignore` の対象と `sf-tools/release/` を除く）があれば、手順 5 で中断する（無関係なファイルが、同期のコミットに入るのを防ぐ）
 
 **安全ガード（セクション 3.4）:**
 - メインフロー先頭で赤い警告ボックス + `ask_yn || die`（`GITHUB_ACTIONS=true` 時はスキップ）
@@ -405,7 +406,7 @@ check_gh_owner "$GITHUB_OWNER"   # 認証ユーザーの一致確認
 
 - `sf-release.sh --release --force` のラッパー
 - `force-*` 以外では実行禁止
-- `main` / `staging` / `develop` ブランチでは実行禁止
+- `branches.txt` に書かれたブランチ（ファイルがない・空なら `main` だけ）の上では、中断する（作業用のブランチの上で実行する）
 - **安全ガード:** `log "WARNING"` で `--force` の意味を表示 → `ask_yn || die` で続行確認（**赤い警告ボックスなし**。赤いボックスは、管理者向けの sf-init / sf-metasync / sf-update-secret / sf-sync-wf / sf-typecheck のみ（print_admin_warning））
 - `export SF_DEPLOY_CONFIRMED=1` で sf-release.sh 側の二重確認を抑制
 - **共有環境には、ローカルからリリースできない。** 用途は、個人用の Sandbox / Developer Edition / Scratch Org への強制リリース。共有環境（本番・staging・develop）は、GitHub にコミットし、レビューを通して、GitHub Actions で行う。そのため、接続先のエイリアスが予約名（`SF_RESERVED_ORG_ALIASES` = `prod` / `staging` / `develop` / `main`。`is_reserved_org_alias`、`lib/common.sh`）なら、**確認の前に** `die` する（`-t` / `--target` の指定、なければ `SF_TARGET_ORG`、接続中の組織の順で特定。`GITHUB_ACTIONS=true` ではスキップ）。`sf-release.sh` の 5.1 も、同じ関数で判定する
@@ -422,17 +423,18 @@ check_gh_owner "$GITHUB_OWNER"   # 認証ユーザーの一致確認
 
 ### 4.10 sf-push.sh
 
-カレントディレクトリ配下だけをコミット＆プッシュする。実行フロー（順序は変更禁止）:
+> 仕様の正本は、`bin/sf-push.sh` の冒頭コメント（`--help`）。順序は変更禁止。
 
-1. origin/main を fetch して現在ブランチにマージ（main ブランチ自身はスキップ）
-   - コンフリクト発生時は `merge --abort` してエラー中止
-2. カレント配下だけを `git add --all`
-2b. ブランチの上にいない（detached HEAD。`git symbolic-ref -q HEAD` が失敗）・保護ブランチ（`is_protected_branch`。`branches.txt` のブランチ。ファイルがなければ main）の上にいるときは、`git add` の前に `die`（コミットだけが手元に残り、プッシュが通らない状態を作らない。結合テスト R5 で見つけた。以前は、main の上で、プッシュ前のフックに止められるまで、コミットしていた）
-3. 変更なしのとき: 未プッシュのコミット（追跡先より進んだコミット）があれば、コミットせず `git push` だけ行って終了（コミット後にプッシュが失敗した再実行用）。なければ WARNING で正常終了
-4. `sf-check.sh` でターゲットファイルを検証（エラーなら中止）
-5. VS Code を別ウィンドウで開いてコミットメッセージを入力
-6. メッセージ未入力なら何もせず正常終了
-7. `git commit` → `git push`
+カレントフォルダ配下だけをコミット＆プッシュする。実行フロー:
+
+1. **ブランチの確認（最初）**: ブランチの上にいない（detached HEAD。`git symbolic-ref -q HEAD` が失敗）・保護ブランチ（`is_protected_branch`。`branches.txt` のブランチ。ファイルがない・空なら `main`）の上にいるときは、何も変更せず `die`（コミットだけが手元に残り、プッシュが通らない状態を作らない。結合テスト R5 で見つけた）
+2. `origin/main` を `fetch` して、現在のブランチにマージ（`main` ブランチ自身では行わない。コンフリクトなら `merge --abort` して中止）
+3. カレント配下だけを `git add --all`
+4. ステージ済みの変更がないとき: 未プッシュのコミット（`@{u}..HEAD`。手順 2 で取り込んだものを含む）があれば、コミットせず `git push` だけ行って終了する（コミット後にプッシュが失敗した再実行用）。なければ、何もせず終了
+5. `sf-check.sh` でターゲットファイルを検証（エラーなら中止）
+6. VS Code（`code --new-window --wait`）を開いて、コミットメッセージを入力
+7. メッセージが空なら、何もせず終了
+8. `git commit` → `git push`
 
 ### 4.11 sf-update-secret.sh
 
@@ -1025,10 +1027,10 @@ sf-tools の `main` への反映は、全ユーザーへの配布と同義であ
 
 ### 9.8 文書サイト（`site/`）
 
-利用者向けの文書（使い方・管理者向けの手順・リファレンス・設計）は、HTML の文書サイトに置く。`README.md` は、概要と、サイトへの入口だけにする（以前の README の 9 章、sf-tools の開発者向けの手順は、`doc/dev-guide.md`）（段階的に移行中: いまは、使い方ガイドとリファレンス（開発者向け・自動実行・ターゲットファイル・構成）。管理者向けと設計は、順次）。AI 向け（`CLAUDE.md`・本書）と、テストが読み込む文書（`doc/integration-test-plan.md`）は、Markdown のまま。**実装・AI への指示に使う設計書（`doc/` の `jwt-auth-spec.md`・`wf-distribution-strategy.md`・`wizard-ux-design.md`・`sf-logwatch-design.md`・`sf-cicd-strategy.md`）も、Markdown のまま**（無理に HTML にしない。公開して価値のあるものだけを、サイトに載せる）。`sf-cicd-strategy.md` の要点は、読み物として `site/design/cicd.html` にある（設計を変えたときは、両方を直す）。
+利用者向けの文書（使い方・管理者向けの手順・リファレンス・設計）は、HTML の文書サイトに置く。`README.md` は、概要と、サイトへの入口だけにする（以前の README の 9 章、sf-tools の開発者向けの手順は、`doc/dev-guide.md`）。管理者向けと設計は、順次）。AI 向け（`CLAUDE.md`・本書）と、テストが読み込む文書（`doc/integration-test-plan.md`）は、Markdown のまま。**実装・AI への指示に使う設計書（`doc/` の `jwt-auth-spec.md`・`wf-distribution-strategy.md`・`wizard-ux-design.md`・`sf-logwatch-design.md`・`sf-cicd-strategy.md`）も、Markdown のまま**（無理に HTML にしない。公開して価値のあるものだけを、サイトに載せる）。`sf-cicd-strategy.md` の要点は、読み物として `site/design/cicd.html` にある（設計を変えたときは、両方を直す）。
 
-- **構成**: `site/index.html`（トップ）・`site/guide/`（使い方ガイド）・`site/reference/`（リファレンス）。共通の部分は、`site/assets/style.css`（スタイル。ダークモード・スマホ対応）と `site/assets/site.js`。ビルドの手順は、ない（手書きの静的な HTML）。
-- **ページの足し方**: ① `<head>` と骨組み（`<header id="top">`・`<nav id="side">`・`<main id="doc" class="doc">`・`<aside id="toc">`・`<footer id="foot">`・`site.js` の読み込み）を、既存のページと同じにする。② `<body data-root="...">` は、`site/` からの深さに合わせる（直下は `""`・1 階層下は `"../"`）。③ **`assets/site.js` の `NAV` に 1 行足す**（左の目次・前後のリンクは、ここだけで決まる。`h` がない項目は「準備中」と表示される）。コード中の `<` は、`&lt;` にする。⑤ **囲み**（`<div class="box 種類">` + `<div class="title">題</div>`）は、種類で、アイコンが自動で付く（通常 = 💡、`warn` = ⚠️、`danger` = 🛑、`ok` = ✅、`next` = 👉、`admin` = 🔑 管理者専用）。題は、必ず付ける（`tests/test_site.sh` が確認する）。小さな印は `<span class="badge safe">🔍 読み取りのみ</span>`。言葉は、`site/guide/glossary.html`（用語集）にそろえる（管理者 = プロジェクト管理者・リリース = デプロイ・段階 = 環境）。④ **見出しの番号（大項目 `1.`・中項目 `1.1`・小項目 `1.1.1`）は、手で書かない**（`site.js` が h2・h3・h4 に自動で付ける）。階層は飛ばさない（h2 の次は h3、h3 の次は h4）。
+- **構成**: `site/index.html`（トップ）・`site/guide/`（使い方ガイド・用語集）・`site/admin/`（管理者ガイド）・`site/reference/`（リファレンス）・`site/design/`（設計と背景）。共通の部分は、`site/assets/style.css`（スタイル。ダークモード・スマホ対応）と `site/assets/site.js`。ビルドの手順は、ない（手書きの静的な HTML）。
+- **ページの足し方**: ① `<head>` と骨組み（`<header id="top">`・`<nav id="side">`・`<main id="doc" class="doc">`・`<aside id="toc">`・`<footer id="foot">`・`site.js` の読み込み）を、既存のページと同じにする。② `<body data-root="...">` は、`site/` からの深さに合わせる（直下は `""`・1 階層下は `"../"`）。③ **`assets/site.js` の `NAV` に 1 行足す**（左の目次・前後のリンクは、ここだけで決まる。`h` がない項目は「準備中」と表示される）。コード中の `<` は、`&lt;` にする。④ **見出しの番号（大項目 `1.`・中項目 `1.1`・小項目 `1.1.1`）は、手で書かない**（`site.js` が h2・h3・h4 に自動で付ける）。階層は飛ばさない（h2 の次は h3、h3 の次は h4）。 ⑤ **囲み**（`<div class="box 種類">` + `<div class="title">題</div>`）は、種類で、アイコンが自動で付く（通常 = 💡、`warn` = ⚠️、`danger` = 🛑、`ok` = ✅、`next` = 👉、`admin` = 🔑 管理者専用）。題は、必ず付ける（`tests/test_site.sh` が確認する）。小さな印は `<span class="badge safe">🔍 読み取りのみ</span>`。言葉は、`site/guide/glossary.html`（用語集）にそろえる（管理者 = プロジェクト管理者・リリース = デプロイ・段階 = 環境）。
 - **図の足し方**: 画像ファイルは使わず、HTML と CSS だけで描く（ダークモード・スマホ幅に合う）。`<figure class="diagram">` の中に、①流れ図 `.flow`（`.node` と `.arrow` を交互に並べる。箱の色は `admin`・`dev`・`auto`・`ok`・`warn`。スマホ幅では縦に並ぶ）、②扇形 `.fan`（1 つの元から複数の行き先）、③区分け `.phases`（`.phase.p1`〜`p3`。人の操作がある手順は `li.you`）、④入れ子の箱 `.nest`（フォルダの構成）、⑤ターミナルの画面の見本 `.term` を置く。**`<figcaption>` で、何の図かを必ず書く**。定義は `site/assets/style.css`。`tests/test_site.sh` が、説明文の有無と、箱の色の種類を確認する。**開発者向けのページは、ランチャー（`sf-launcher.sh`）を中心に書く**（コマンドは、直接打つ場合として併記する）。
 - **テスト**: `bash tests/run_tests.sh test_site.sh`（`--changed` は、`site/*`・`pages.yml` の変更で選ぶ）。
 - **食い違いの検出（`doc/doc-style.md` の 3 階層。コード → 技術文書 → 一般向け文書の順に正しさを伝える）**: ① `tests/test_docs_facts.sh` が、文書の中のコマンド名・オプション・パス・環境変数が、実在するかを調べる（仕様どおりに存在しない例の書き方は、`tests/docs-facts-allow.txt`）。② `tests/test_docs_stamps.sh` が、冒頭コメントが変わったのに文書が見直されていないものを検出する（`doc/doc-stamps.txt`。新しい `bin/sf-*.sh` は、どれかの文書の基にしないと失敗する）。CI は検出だけで、文書を自動では書き換えない。

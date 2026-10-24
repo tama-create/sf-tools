@@ -283,13 +283,19 @@ if [[ "${1:-}" == "--changed" ]]; then
         esac
         # 文書の見直しの印: コマンドの冒頭コメント・文書・印の一覧・道具が変わったとき
         case "$_file" in
-            bin/sf-*.sh|phases/init/*|lib/typecheck.js|site/*|doc/doc-stamps.txt|tests/docs-stamp.sh|tests/test_docs_stamps.sh)
+            bin/sf-*.sh|phases/init/*|lib/*|hooks/*|templates/.github/workflows/*|site/*|README.md|doc/doc-stamps.txt|tests/docs-stamp.sh|tests/test_docs_stamps.sh)
                 _changed_tests+=("test_docs_stamps.sh")
+                ;;
+        esac
+        # 引数の検査（冒頭コメントの【オプション】と、コードの食い違い）: コマンド・フェーズ・引数の拒否（common.sh）が変わったとき
+        case "$_file" in
+            bin/sf-*.sh|phases/init/*|lib/common.sh|tests/test_cli_args.sh)
+                _changed_tests+=("test_cli_args.sh")
                 ;;
         esac
         # 文書の事実の検査: 文書・コマンドの冒頭コメント（オプションの一覧）・例外の一覧が変わったとき
         case "$_file" in
-            bin/sf-*.sh|phases/init/*|site/*|README.md|tests/docs-facts-allow.txt|tests/test_docs_facts.sh)
+            bin/sf-*.sh|phases/init/*|lib/*|hooks/*|templates/.github/workflows/*|site/*|README.md|tests/docs-facts-allow.txt|tests/test_docs_facts.sh)
                 _changed_tests+=("test_docs_facts.sh")
                 ;;
         esac

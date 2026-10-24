@@ -1025,7 +1025,8 @@ test_required_checks_match_workflows() {
     local names n jobs wf
     names=$( ( export SF_INIT_MODE=1; readonly SCRIPT_NAME=test; readonly LOG_FILE=/dev/null; readonly LOG_MODE=NEW
                source "$SF_TOOLS_DIR/lib/common.sh"; required_status_check_names ) )  # VAR=$(cmd) のため run 不使用
-    assert_equals "$(printf '%s\n' "$names" | awk 'NF' | sort -u | wc -l | tr -d ' ')" "3" "必須チェックの名前は、3 つ"
+    # 重複を除く数え方は、sort -u ではなく awk（macOS の sort は、環境によって、日本語の文字列を同じものとみなす）
+    assert_equals "$(printf '%s\n' "$names" | awk 'NF && !seen[$0]++' | wc -l | tr -d ' ')" "3" "必須チェックの名前は、3 つ（重複なし）"
     jobs=$(awk '/^    name: /{ sub(/^    name: */, ""); print }' \
         "$SF_TOOLS_DIR/templates/.github/workflows/wf-validate.yml" "$SF_TOOLS_DIR/templates/.github/workflows/wf-sequence.yml")  # VAR=$(cmd) のため run 不使用
     while IFS= read -r n; do

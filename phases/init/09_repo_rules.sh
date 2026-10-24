@@ -14,9 +14,11 @@
 #        マージコミット / スカッシュ / リベースのマージをすべて許可・マージ後のブランチの自動削除を無効
 #   2. Ruleset protect-main: 同名の Ruleset を削除してから（delete_existing_ruleset）、作成する（失敗は WARNING）
 #        対象      : refs/heads/main
-#        ルール    : 削除の禁止・強制プッシュの禁止（non_fast_forward）・必須のステータスチェック 4 つ
-#                    （validate / 対象ファイル確認・validate / デプロイ検証・sequence / 対象ファイル確認・
-#                    sequence / 順序チェック。integration_id 15368 = GitHub Actions。strict なし）
+#        ルール    : 削除の禁止・強制プッシュの禁止（non_fast_forward）・必須のステータスチェック 3 つ
+#                    （対象ファイル確認・デプロイ検証・順序チェック。名前は、ワークフローの「ジョブ名」だけで、ワークフロー名は
+#                    含めない: 「validate / 対象ファイル確認」の形では、永久に満たされず、PR がマージできなくなる
+#                    （2026-10-24 に、実際の GitHub で確認）。名前は required_status_check_names（lib/project.sh）が正本。
+#                    integration_id 15368 = GitHub Actions。strict なし）
 #        バイパス  : RepositoryRole の ID 5（リポジトリの Admin ロール）。bypass_mode は always
 #   3. Ruleset protect-staging: 対象を refs/heads/staging にして、手順 2 と同じ内容で作成する。
 #      ブランチ構成（BRANCH_COUNT）に関係なく作成する
@@ -77,6 +79,16 @@ else
     log "WARNING" "リポジトリ基本設定の適用に失敗しました。手動で設定してください。"
 fi
 
+# 必須のステータスチェックの JSON（名前は、ワークフローの「ジョブ名」だけ。ワークフロー名は含めない。
+# 「validate / 対象ファイル確認」の形は、永久に満たされず、PR がマージできなくなる: required_status_check_names（lib/project.sh））
+checks_json=""
+while IFS= read -r _check_name; do
+    [[ -n "$_check_name" ]] || continue
+    checks_json="${checks_json:+${checks_json},
+          }{ \"context\": \"${_check_name}\", \"integration_id\": 15368 }"
+done < <(required_status_check_names)
+unset _check_name
+
 # --- 2. Ruleset: protect-main ---
 log "INFO" "[2/3] Ruleset: protect-main を作成中..."
 
@@ -84,7 +96,7 @@ log "INFO" "[2/3] Ruleset: protect-main を作成中..."
 delete_existing_ruleset "$REPO_FULL_NAME" "protect-main"
 
 if run gh api --method POST "repos/${REPO_FULL_NAME}/rulesets" \
-    --input - << 'EOF'
+    --input - << EOF
 {
   "name": "protect-main",
   "target": "branch",
@@ -111,10 +123,7 @@ if run gh api --method POST "repos/${REPO_FULL_NAME}/rulesets" \
         "strict_required_status_checks_policy": false,
         "do_not_enforce_on_create": false,
         "required_status_checks": [
-          { "context": "validate / 対象ファイル確認", "integration_id": 15368 },
-          { "context": "validate / デプロイ検証", "integration_id": 15368 },
-          { "context": "sequence / 対象ファイル確認", "integration_id": 15368 },
-          { "context": "sequence / 順序チェック", "integration_id": 15368 }
+          ${checks_json}
         ]
       }
     }
@@ -134,7 +143,7 @@ log "INFO" "[3/3] Ruleset: protect-staging を作成中..."
 delete_existing_ruleset "$REPO_FULL_NAME" "protect-staging"
 
 if run gh api --method POST "repos/${REPO_FULL_NAME}/rulesets" \
-    --input - << 'EOF'
+    --input - << EOF
 {
   "name": "protect-staging",
   "target": "branch",
@@ -161,10 +170,7 @@ if run gh api --method POST "repos/${REPO_FULL_NAME}/rulesets" \
         "strict_required_status_checks_policy": false,
         "do_not_enforce_on_create": false,
         "required_status_checks": [
-          { "context": "validate / 対象ファイル確認", "integration_id": 15368 },
-          { "context": "validate / デプロイ検証", "integration_id": 15368 },
-          { "context": "sequence / 対象ファイル確認", "integration_id": 15368 },
-          { "context": "sequence / 順序チェック", "integration_id": 15368 }
+          ${checks_json}
         ]
       }
     }

@@ -124,7 +124,7 @@ sf-init.sh --add-tier develop    # main + staging → main + staging + develop</
 <pre><code>sf-init.sh --status</code></pre>
 <p><span class="badge safe">🔍 読み取りのみ</span> 何も変更せずに、いまの状態を調べます。「どこで間違えたか分からない」ときの、最初の手がかりです。</p>
 <ul>
-  <li>リポジトリ・ブランチ・ワークフロー・Secrets・Variables が、そろっているかを調べます。足りないものは、直し方もいっしょに表示します。</li>
+  <li>リポジトリ・ブランチ・ワークフロー・Secrets・Variables が、そろっているかを調べます。ブランチ保護（Ruleset）の<strong>必須チェックの名前</strong>が、ワークフローの実際の名前（<code>対象ファイル確認</code>・<code>デプロイ検証</code>・<code>順序チェック</code>）と合っているかも調べます（<a href="troubleshooting.html#required-checks">合っていないと、PR をマージできません</a>）。Ruleset が無い（無料プランの非公開リポジトリなど）ときは、「？」と表示するだけで、不足には数えません。足りないものは、直し方もいっしょに表示します。</li>
   <li>段階ごとの接続先（ログイン先・組織の種類・ユーザー・組織の ID・最後に確かめた日時）の一覧も、表示します。</li>
   <li>項目ごとに、次の記号で示します。
     <ul>

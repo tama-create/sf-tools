@@ -1015,6 +1015,38 @@ N
     teardown "$mb" "$mock_home" "$init_base"
 }
 
+# ==============================================================================
+# 必須チェックの名前（ブランチ保護 Ruleset）と、雛形のワークフローのジョブ名の突き合わせ（静的な確認）
+#   名前は「ジョブ名」だけ。「ワークフロー名 / ジョブ名」の形は、永久に満たされず、PR がマージできない（2026-10-24 に実機で確認）。
+#   ワークフローが reusable（呼び出し形式）からインライン形式に変わったとき、09_repo_rules.sh の名前が更新されず、7 か月残っていた。
+# ==============================================================================
+test_required_checks_match_workflows() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] 必須チェックの名前が、雛形のワークフローのジョブ名と合っている${CLR_RST}"
+    local names n jobs wf
+    names=$( ( export SF_INIT_MODE=1; readonly SCRIPT_NAME=test; readonly LOG_FILE=/dev/null; readonly LOG_MODE=NEW
+               source "$SF_TOOLS_DIR/lib/common.sh"; required_status_check_names ) )  # VAR=$(cmd) のため run 不使用
+    assert_equals "$(printf '%s\n' "$names" | awk 'NF' | sort -u | wc -l | tr -d ' ')" "3" "必須チェックの名前は、3 つ"
+    jobs=$(awk '/^    name: /{ sub(/^    name: */, ""); print }' \
+        "$SF_TOOLS_DIR/templates/.github/workflows/wf-validate.yml" "$SF_TOOLS_DIR/templates/.github/workflows/wf-sequence.yml")  # VAR=$(cmd) のため run 不使用
+    while IFS= read -r n; do
+        [[ -n "$n" ]] || continue
+        if printf '%s\n' "$jobs" | grep -qxF -- "$n"; then pass "必須チェック「${n}」は、wf-validate / wf-sequence のジョブ名にある"
+        else fail "必須チェック「${n}」は、wf-validate / wf-sequence のジョブ名にある" "ジョブ名: $(printf '%s' "$jobs" | tr '\n' ' ')"; fi
+    done <<< "$names"
+    # 09_repo_rules.sh に、「ワークフロー名 / ジョブ名」の形（コメント以外）が残っていない
+    if grep -vE '^[[:space:]]*#' "$SF_TOOLS_DIR/phases/init/09_repo_rules.sh" | grep -qE '(validate|sequence) / '; then
+        fail "09_repo_rules.sh に、「validate / …」の形の必須チェック名が残っていない" "$(grep -nE '(validate|sequence) / ' "$SF_TOOLS_DIR/phases/init/09_repo_rules.sh" | head -2)"
+    else
+        pass "09_repo_rules.sh に、「validate / …」の形の必須チェック名が残っていない"
+    fi
+    assert_file_contains "$SF_TOOLS_DIR/phases/init/09_repo_rules.sh" "required_status_check_names" "09_repo_rules.sh は、必須チェックの名前を、required_status_check_names から取る"
+    # すべてのワークフローに、最上位の name:（Actions の画面の名前。文書の案内と合わせる）がある
+    for wf in wf-validate wf-sequence wf-release wf-propagate wf-metasync; do
+        grep -qE '^name: "\[[a-z]+\] ' "$SF_TOOLS_DIR/templates/.github/workflows/${wf}.yml" \
+            && pass "${wf}.yml に、最上位の name:（[種別] 名前）がある" || fail "${wf}.yml に、最上位の name:（[種別] 名前）がある"
+    done
+}
+
 echo ""
 echo -e "${CLR_HEAD}========================================"
 echo "  sf-init.sh テスト（1/3）"
@@ -1037,5 +1069,6 @@ test_e2e_input_sequence
 test_wf_no_script_injection
 test_phase6_pat_token
 test_resume_choice
+test_required_checks_match_workflows
 
 print_summary

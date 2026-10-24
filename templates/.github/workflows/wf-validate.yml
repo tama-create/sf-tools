@@ -33,6 +33,7 @@
 #   SF_TOOLS_BRANCH      : clone する sf-tools のブランチ（任意。未設定なら main）
 #
 # ==============================================================================
+name: "[validate] デプロイ前検証"
 on:
   pull_request:
     types: [opened, synchronize, reopened]

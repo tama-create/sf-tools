@@ -15,6 +15,7 @@
 #   SLACK_CHANNEL_ID : 通知先 Slack チャンネル ID
 #
 # ==============================================================================
+name: "[propagate] ブランチ伝播"
 on:
   pull_request:
     types: [closed]

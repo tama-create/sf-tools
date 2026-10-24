@@ -158,6 +158,16 @@ test_X4_1() {
     grep -qF "すでに実行中です" "$b_out" && pass "X4-1: 拒否の理由（すでに実行中）が、表示される" || fail "X4-1: 拒否の理由（すでに実行中）が、表示される" "$(tail -5 "$b_out")"
     assert_equals "$(grep -c 'repo create' "$IT_STATE/calls.log")" "0" "X4-1: 2 つ目は、gh に、何も書き込まない（リポジトリを作らない）"
     assert_equals "$(ls "$IT_STATE/rulesets" 2>/dev/null | wc -l | tr -d ' ')" "2" "X4-1: Ruleset は、1 回分（2 つ）だけ"
+    # Ruleset の必須チェックの名前は、ワークフローのジョブ名だけ（「validate / …」の形は、永久に満たされず、PR がマージできない。2026-10-24 に、実際の GitHub で確認）
+    local _rs _ok=1
+    for _rs in "$IT_STATE"/rulesets/*; do
+        [[ -f "$_rs" ]] || continue
+        grep -qF '"context": "対象ファイル確認"' "$_rs" && grep -qF '"context": "デプロイ検証"' "$_rs" && grep -qF '"context": "順序チェック"' "$_rs" || _ok=0
+        grep -qE '"context": "[^"]* / ' "$_rs" && _ok=0
+        if command -v node >/dev/null 2>&1; then node -e 'JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"))' "$_rs" 2>/dev/null || _ok=0; fi  # 条件チェック（JSON として正しいか）
+    done
+    [[ $_ok -eq 1 ]] && pass "X4-1: Ruleset の必須チェックは、ジョブ名だけ（対象ファイル確認・デプロイ検証・順序チェック）で、JSON として正しい" \
+        || fail "X4-1: Ruleset の必須チェックは、ジョブ名だけで、JSON として正しい" "$(cat "$IT_STATE"/rulesets/1 2>/dev/null | head -30)"
     assert_equals "$(_it_git -C "$(_admin)" config sf-tools.setup-complete)" "1" "X4-1: 最終の状態は、完了している（完了の印）"
     assert_equals "$(it_remote_count main)" "1" "X4-1: main の初回コミットは 1 つ（二重にならない）"
     assert_equals "$(it_remote_snap | awk '{print $1}' | sed 's|refs/heads/||' | sort | tr '\n' ',')" "admin,main," "X4-1: ブランチは、admin と main だけ（二重・余分がない）"

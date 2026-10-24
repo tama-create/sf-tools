@@ -98,4 +98,6 @@ site/admin/setup.html | phases/init/02_project_info.sh | 3970585930-2757 | c52ff
 site/admin/setup.html | phases/init/03_repo_create.sh | 391042869-2181 | c52ffe3
 site/admin/setup.html | phases/init/05_setup_branches.sh | 3738321020-1331 | c52ffe3
 site/admin/setup.html | phases/init/08_initial_commit.sh | 3118319349-2431 | c52ffe3
-site/admin/setup.html | phases/init/09_repo_rules.sh | 1754936909-2667 | c52ffe3
+site/admin/setup.html | phases/init/09_repo_rules.sh | 1447380906-2978 | f7c43e4
+site/admin/maintenance.html | lib/diag.sh | 819403937-2494 | f7c43e4
+site/admin/troubleshooting.html | phases/init/09_repo_rules.sh | 1447380906-2978 | f7c43e4

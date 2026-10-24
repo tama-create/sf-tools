@@ -16,7 +16,11 @@
 #   2. Secrets       : PAT_TOKEN / SLACK_BOT_TOKEN / SF_PRIVATE_KEY / 段階ごとの SF_CONSUMER_KEY_*
 #   3. Variables     : SLACK_CHANNEL_ID / 段階ごとの SF_USERNAME_* / SF_INSTANCE_URL_*
 #                      （組織の種類の記録 SF_ORG_* は、なくても不足に数えない: 古いバージョンで作ったプロジェクトのため）
-#   4. 直近の実行    : wf-metasync / wf-release / wf-validate / wf-propagate の、直近の 1 回の結果（参考）
+#   4. ブランチ保護  : Ruleset（protect-main / protect-staging）の必須ステータスチェックの名前が、ワークフローのジョブ名
+#                      （対象ファイル確認・デプロイ検証・順序チェック。required_status_check_names）と合っているか。
+#                      合っていないと、条件が満たされず、PR をマージできない（以前の sf-init は、「validate / 対象ファイル確認」の
+#                      形で登録していた）。Ruleset が無い（無料プランの非公開リポジトリなど）・読めないときは、？ にする（不足に数えない）
+#   5. 直近の実行    : wf-metasync / wf-release / wf-validate / wf-propagate の、直近の 1 回の結果（参考）
 #   Salesforce 側（外部クライアントアプリ・JWT 接続）は、ログインが必要なため、ここでは確認しない。
 #   直近の wf-metasync / wf-release が成功していれば、JWT 接続は、できている。
 #
@@ -103,6 +107,44 @@ _diag_last_run() {
     esac
 }
 
+# ブランチ保護（Ruleset）の必須チェックの名前を、確認する。引数: リポジトリ
+_diag_rulesets() {
+    local repo="$1" list expected rs id got n missing extra fixlist
+    if ! list=$(gh api "repos/${repo}/rulesets" --jq '.[] | "\(.id) \(.name)"' 2>/dev/null); then  # 条件チェック
+        _diag_line unknown "Ruleset の一覧を、確認できませんでした（権限がない・プランが対応していない・通信エラーのどれか）"
+        return 0
+    fi
+    list=$(printf '%s\n' "$list" | tr -d '\r')  # VAR=$(cmd) のため run 不使用
+    expected=$(required_status_check_names)  # VAR=$(cmd) のため run 不使用
+    fixlist=$(printf '%s\n' "$expected" | tr '\n' ',' | sed 's/,$//; s/,/・/g')  # VAR=$(cmd) のため run 不使用
+    for rs in protect-main protect-staging; do
+        id=$(printf '%s\n' "$list" | awk -v n="$rs" '$2 == n { print $1; exit }')  # VAR=$(cmd) のため run 不使用
+        if [[ -z "$id" ]]; then
+            _diag_line unknown "Ruleset ${rs} が、ありません（無料プランの非公開リポジトリでは、設定できません）"
+            continue
+        fi
+        if ! got=$(gh api "repos/${repo}/rulesets/${id}" \
+                --jq '[.rules[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context] | .[]' 2>/dev/null); then  # 条件チェック
+            _diag_line unknown "Ruleset ${rs} の内容を、確認できませんでした"
+            continue
+        fi
+        got=$(printf '%s\n' "$got" | tr -d '\r' | awk 'NF')  # VAR=$(cmd) のため run 不使用
+        missing=""; extra=""
+        while IFS= read -r n; do
+            if [[ -n "$n" ]] && ! _diag_has "$got" "$n"; then missing="${missing:+${missing}・}${n}"; fi
+        done <<< "$expected"
+        while IFS= read -r n; do
+            if [[ -n "$n" ]] && ! _diag_has "$expected" "$n"; then extra="${extra:+${extra}・}${n}"; fi
+        done <<< "$got"
+        if [[ -z "$missing" && -z "$extra" ]]; then
+            _diag_line ok "Ruleset ${rs}: 必須チェックの名前が、ワークフローのジョブ名と合っています"
+        else
+            _diag_line ng "Ruleset ${rs}: 必須チェックの名前が、ワークフローのジョブ名と合っていません。このままでは、条件が満たされず、PR をマージできません（余分: ${extra:-なし} / 足りない: ${missing:-なし}）" \
+                "GitHub の Settings → Rules → Rulesets → ${rs} の「Require status checks to pass」を、${fixlist} だけにする（ワークフロー名は付けない）"
+        fi
+    done
+}
+
 # 診断を実行して、結果を表示する。引数: リポジトリ（owner/name）段階（ブランチ名）...
 diag_run() {
     local repo="$1"; shift
@@ -174,7 +216,11 @@ diag_run() {
         _diag_line unknown "Variables の一覧を、確認できませんでした（権限がない、または、通信エラー）"
     fi
 
-    # --- 4. 直近のワークフローの実行（参考。Salesforce 側の接続は、ここで分かる） ---
+    # --- 4. ブランチ保護（Ruleset）の必須チェックの名前 ---
+    echo "  ブランチ保護（Ruleset）の必須チェック" >&2
+    _diag_rulesets "$repo"
+
+    # --- 5. 直近のワークフローの実行（参考。Salesforce 側の接続は、ここで分かる） ---
     echo "  直近のワークフローの実行（成功していれば、Salesforce への JWT 接続も、できています）" >&2
     for wf in wf-metasync.yml wf-release.yml wf-validate.yml wf-propagate.yml; do
         _diag_last_run "$repo" "$wf"

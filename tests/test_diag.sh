@@ -35,6 +35,8 @@ case "$1 $2" in
     "run list")      _fail run && exit 1; printf '%s\n' "${MOCK_GH_RUN_OUT:-completed success 2026-10-11T08:00:00Z}"; exit 0 ;;
     "api repos/"*)
         case "$2" in
+            */rulesets)  _fail rulesets && exit 1; printf '%s\n' "${MOCK_GH_RULESETS_LIST:-}"; exit 0 ;;
+            */rulesets/*) printf '%s\n' "${MOCK_GH_RULESET_CHECKS:-}"; exit 0 ;;
             */branches)  _fail branches && exit 1; printf '%s\n' "${MOCK_GH_BRANCHES:-}"; exit 0 ;;
             */contents/.github/workflows) _fail workflows && exit 1; printf '%s\n' "${MOCK_GH_WORKFLOWS:-}"; exit 0 ;;
         esac
@@ -201,8 +203,55 @@ test_repo_missing() {
     _dc
 }
 
+# ブランチ保護（Ruleset）の必須チェックの名前: ジョブ名と合っていれば ✓、「validate / …」の形などで合っていなければ ✗（PR がマージできない）
+#   Ruleset が無い・一覧を読めないときは、？（不足に数えない: 無料プランの非公開リポジトリでは、Ruleset を設定できない）
+test_rulesets() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] ブランチ保護（Ruleset）の必須チェックの名前${CLR_RST}"
+    _all_ok_env
+    export MOCK_GH_RULESETS_LIST=$'11 protect-main\n12 protect-staging'
+    export MOCK_GH_RULESET_CHECKS=$'対象ファイル確認\nデプロイ検証\n順序チェック'
+    _d main staging develop
+    assert_equals "$NG" "0"                                                       "名前が合っている → 不足は 0 件"
+    assert_file_contains "$OUT" "Ruleset protect-main: 必須チェックの名前が、ワークフローのジョブ名と合っています"    "protect-main が ✓"
+    assert_file_contains "$OUT" "Ruleset protect-staging: 必須チェックの名前が、ワークフローのジョブ名と合っています"  "protect-staging が ✓"
+    _dc
+
+    # 以前の sf-init が登録していた形（ワークフロー名つき）→ ✗ 2 件（main・staging）。余分・足りない・直し方が出る
+    export MOCK_GH_RULESET_CHECKS=$'validate / 対象ファイル確認\nvalidate / デプロイ検証\nsequence / 順序チェック'
+    _d main staging develop
+    assert_equals "$NG" "2"                                                       "「validate / …」の形 → 不足は 2 件（main・staging）"
+    assert_file_contains "$OUT" "このままでは、条件が満たされず、PR をマージできません"   "PR がマージできない旨が表示される"
+    assert_file_contains "$OUT" "余分: validate / 対象ファイル確認"                    "余分な名前が表示される"
+    assert_file_contains "$OUT" "足りない: 対象ファイル確認・デプロイ検証・順序チェック"  "足りない名前が表示される"
+    assert_file_contains "$OUT" "対象ファイル確認・デプロイ検証・順序チェック だけにする"  "直し方（ジョブ名だけにする）が表示される"
+    _dc
+
+    # 一部だけ足りない
+    export MOCK_GH_RULESET_CHECKS=$'対象ファイル確認\nデプロイ検証'
+    _d main staging develop
+    assert_equals "$NG" "2"                                                       "1 つ足りない → 不足は 2 件"
+    assert_file_contains "$OUT" "足りない: 順序チェック"                               "足りない名前だけが表示される"
+    _dc
+
+    # Ruleset が無い（無料プランの非公開リポジトリ）→ ？。不足に数えない
+    export MOCK_GH_RULESETS_LIST=""
+    _d main staging develop
+    assert_equals "$NG" "0"                                                       "Ruleset が無い → 不足に数えない"
+    assert_file_contains "$OUT" "Ruleset protect-main が、ありません（無料プランの非公開リポジトリでは、設定できません）"  "無い旨（？）が表示される"
+    _dc
+
+    # 一覧を取得できない → ？
+    export MOCK_GH_RULESETS_LIST=$'11 protect-main\n12 protect-staging' MOCK_GH_FAIL="rulesets"
+    _d main staging develop
+    assert_equals "$NG" "0"                                                       "一覧を取得できない → 不足に数えない"
+    assert_file_contains "$OUT" "Ruleset の一覧を、確認できませんでした"                "取得できない旨（？）が表示される"
+    _dc
+    unset MOCK_GH_RULESETS_LIST MOCK_GH_RULESET_CHECKS MOCK_GH_FAIL
+}
+
 test_all_ok
 test_missing
+test_rulesets
 test_unknown
 test_tier_count
 test_tools_branch_optional

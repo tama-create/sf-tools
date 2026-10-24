@@ -68,6 +68,17 @@
 <p>ワークフローのファイルが、<code>.github/workflows/</code> の中にあるかを、確かめてください。</p>
 <p>ファイルがないときは、<a href="workflows.html#sync"><code>sf-sync-wf.sh</code></a> で、最新の雛形から作り直せます。</p>
 
+<h3 id="required-checks"><code>main</code> / <code>staging</code> への PR が、マージできない（必須のチェックが「待機中」のまま）</h3>
+<p>PR の画面で、「Expected — Waiting for status to be reported」のような表示のまま、マージのボタンが押せないときの原因です。ブランチ保護（Ruleset）の<strong>必須チェックの名前が、ワークフローの実際のチェック名と合っていない</strong>ためです。名前が合わないと、条件は、永久に満たされません。</p>
+<p>以前のバージョンの <code>sf-init.sh</code> は、必須チェックの名前を <code>validate / 対象ファイル確認</code> のように、ワークフロー名つきで登録していました。正しい名前は、<strong>ジョブ名だけ</strong>の <code>対象ファイル確認</code>・<code>デプロイ検証</code>・<code>順序チェック</code> です。この問題は、ブランチ保護が実際に効くリポジトリ（有料プラン、または公開リポジトリ）で起こります。管理者（リポジトリの Admin ロール）は、ブランチ保護をバイパスできるので、マージできます。</p>
+<p>確かめ方と直し方は、次のとおりです。</p>
+<ol class="steps">
+  <li><p>管理者用のフォルダ（<code>admin/force-XXXX</code>）で、<a href="maintenance.html#status"><code>sf-init.sh --status</code></a> を実行します。「Ruleset protect-main: 必須チェックの名前が、ワークフローのジョブ名と合っていません」と出たら、これが原因です（何も変更しません）。</p></li>
+  <li><p>GitHub のリポジトリの <strong>Settings → Rules → Rulesets</strong> で、<code>protect-main</code> と <code>protect-staging</code> を開きます。</p></li>
+  <li><p>「Require status checks to pass」の一覧を、<code>対象ファイル確認</code>・<code>デプロイ検証</code>・<code>順序チェック</code> の <strong>3 つだけ</strong>にします（ワークフロー名は付けません）。保存します。</p></li>
+</ol>
+<p>新しく作るプロジェクトは、最初から、正しい名前で登録されます。</p>
+
 <h3 id="crlf">CRLF の警告が出る</h3>
 <p>Windows と、ほかの環境の、改行コードの違いを知らせる警告です。動作には影響しないので、そのままで大丈夫です。</p>
 

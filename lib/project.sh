@@ -18,6 +18,7 @@
 #   get_branch_list           ... branches.txt からブランチ一覧を取得
 #   is_reserved_org_alias     ... 共有環境の組織エイリアス（sf-tools の予約名）か判定
 #   is_protected_branch       ... 指定ブランチが branches.txt の保護対象か判定
+#   required_status_check_names ... ブランチ保護（Ruleset）の必須ステータスチェックの名前（ジョブ名）を、1 行に 1 つ出す
 #   ensure_sf_tools_latest    ... sf-tools（Git リポジトリ）が origin の最新であることを確認
 #   clone_matches_repo DIR O R ... DIR が Git のクローンで、origin が GitHub の O/R か（大文字と小文字は区別しない）
 #   state_matches_repo FILE O R .. 状態ファイル（.sf-init-XXXX.env）の REPO_FULL_NAME が O/R か（大文字と小文字は区別しない）
@@ -455,6 +456,20 @@ is_reserved_org_alias() {
 # 【戻り値】
 #   RET_OK (0) : 保護対象ブランチである
 #   RET_NG (1) : 保護対象外
+
+# ------------------------------------------------------------------------------
+# required_status_check_names - ブランチ保護（Ruleset）の必須ステータスチェックの名前
+# ------------------------------------------------------------------------------
+# 【使い方】
+#   required_status_check_names     # 1 行に 1 つ（対象ファイル確認 / デプロイ検証 / 順序チェック）
+#   名前は、ワークフロー（templates/.github/workflows/wf-validate.yml・wf-sequence.yml）の「ジョブ名」（name:）。
+#   ワークフロー名は、含めない（「validate / 対象ファイル確認」の形では、永久に満たされず、PR がマージできなくなる）。
+#   sf-init の Phase 9（Ruleset の作成）と、sf-init.sh --status（既存のプロジェクトの診断）が、使う。
+#   ジョブ名を変えるときは、ここも直す（tests/test_sf-init.sh の突き合わせのテストが、食い違いを検出する）。
+required_status_check_names() {
+    printf '%s\n' "対象ファイル確認" "デプロイ検証" "順序チェック"
+}
+
 # ------------------------------------------------------------------------------
 is_protected_branch() {
     local branch="$1"

@@ -225,7 +225,15 @@ e2e_alias_dump() {
     names=$(json_get "$out" 'result.*.alias') || return 1   # VAR=$(cmd) のため run 不使用
     values=$(json_get "$out" 'result.*.value') || return 1  # VAR=$(cmd) のため run 不使用
     [[ -n "$names" ]] || return 0
-    paste -d= <(printf '%s\n' "$names") <(printf '%s\n' "$values")  # 要素ごとに 1 行ずつ（行の数は、そろう）
+    # 名前と値を、1 行ずつ「名前=値」にする。paste は使わない（Ubuntu 26.04 の ubuntu-latest で、このテストが失敗した。
+    #   標準コマンドの実装の違いが疑わしいため、シェルの組み込みだけで組み立てる）
+    local -a _ns=() _vs=()
+    local _l _i
+    while IFS= read -r _l; do _ns+=("$_l"); done <<< "$names"
+    while IFS= read -r _l; do _vs+=("$_l"); done <<< "$values"
+    for ((_i = 0; _i < ${#_ns[@]}; _i++)); do
+        printf '%s=%s\n' "${_ns[_i]}" "${_vs[_i]:-}"
+    done
 }
 
 # 戻り値 1: sf alias list に失敗した（保存できていない。呼び出し側は、中断すること）

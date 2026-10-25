@@ -11,19 +11,21 @@
 # 【オプション】
 #   -v, --verbose  : コマンドの応答（出力）をコンソールにも表示する
 #   -h, --help     : このヘルプを表示して終了する（1 つ目の引数のときだけ）
-#   上記以外の引数は、「不明なオプションです」と表示して中断する。
+#   上記以外の引数（2 つ目以降の -h / --help を含む）は、「不明なオプションです」と表示して中断する。
 #
 # 【処理の流れ】
-#   1. 現在のブランチを取得する。detached HEAD のとき・保護ブランチ（branches.txt のブランチ。
+#   1. 現在のブランチを取得する。取得できない（detached HEAD など）とき・保護ブランチ（branches.txt のブランチ。
 #      ファイルがない・空のときは main）の上にいるときは、エラーで終了する
 #   2. branches.txt の順序を逆にしたものを、マージの順とする（例: main / staging / develop → develop → staging → main）
-#   3. git fetch origin <各ブランチ> で、リモートの最新を取得する（失敗しても、警告を出して続行し、手元の origin/* で判定する）
+#   3. git fetch origin <全ブランチ>（1 回のコマンド）で、リモートの最新を取得する
+#      （失敗しても、警告を出して続行し、手元の origin/* で判定する）
 #   4. gh pr list で、マージ済み・オープンの PR を、それぞれ最新 50 件だけ取得する
 #      （取得に失敗したときは、警告を出さず、PR なしとして扱う）
 #   5. マージの順に、各ブランチの状態を、次の順で判定する
 #        a. 現在のブランチ → 対象ブランチの PR が、マージ済みにある                  → merged
 #        b. git merge-base --is-ancestor HEAD origin/<対象ブランチ> が真             → synced
-#           （直接の PR はないが、上位ブランチ経由で伝播済み。PR・デプロイ WF は未実行）
+#           （HEAD のコミットが、すでに origin/<対象ブランチ> に含まれている。直接の PR はないが、別のブランチ経由で
+#            伝播済みなど。この PR のデプロイ WF は未実行）
 #        c. 現在のブランチ → 対象ブランチの PR が、オープンにある                    → pr_open
 #        d. どれでもない                                                              → none
 #      最初の none のブランチを「次の PR 先」とする
@@ -32,17 +34,19 @@
 #   7. 結果を表示する（下の【補足】の表示）
 #   8. 次の PR 先があれば、「<次の PR 先> にPRを出しますか？」と確認する
 #        Y: ブラウザで <origin の URL>/compare/<次の PR 先>...<現在のブランチ>?expand=1 を開き、URL も表示する
-#           （origin の URL は、git@github.com: / ssh://git@github.com/ を https://github.com/ に直し、末尾の .git を除いたもの）
+#           （origin の URL は、http(s):// の URL に含まれる認証情報（//<ユーザー>:<Token>@ の部分）を除き、
+#           git@github.com: / ssh://git@github.com/ を https://github.com/ に直し、末尾の .git を除いたもの。
+#           origin の URL を取得できないときは、エラーで終了する）
 #        N: 何もせず終了する / q: 中断する（終了コード 1）
 #      次の PR 先がないときは、pr_open が残っていれば「マージ完了を待ってください」、
-#      なければ「全ブランチへのマージが完了しています」と表示して終了する
+#      なければ「全ブランチへのマージが完了しています！」と表示して終了する
 #
 # 【前提条件】
 #   - 現在のディレクトリの名前が force- で始まること（lib/common.sh が確認する）
 #   - PR の状態の判定には gh（認証済み）が必要。使えないときも止まらず、PR なしとして判定する
 #
 # 【補足】
-#   - 表示（状態ごと）:
+#   - 表示は、標準エラーに出す。見出し「<現在のブランチ> のマージ状況」の下に、マージの順で 1 行ずつ（状態ごと）:
 #       ✓ <ブランチ>   マージ済み                 : merged
 #       ✓ <ブランチ>   マージ済み（ブランチ同期） : synced
 #       ⚠ <ブランチ>   マージ済み（順序外）       : out_of_order
@@ -75,7 +79,7 @@ if [[ ! -f "$COMMON_LIB" ]]; then
     exit 1
 fi
 if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    awk '/^# ==/{f++; next} f==2{sub(/^# ?/,""); print} f==3{exit}' "${BASH_SOURCE[0]}"
+    awk '/^# ==/{f++; next} f==2{sub(/^# ?/,""); print} f==3{exit}' "${BASH_SOURCE[0]}"  # run 不使用: common.sh の読み込み前（run が未定義）
     exit 0
 fi
 source "$COMMON_LIB"
@@ -89,15 +93,16 @@ log "HEADER" "次のPR先を確認します (${SCRIPT_NAME}.sh)"
 CURRENT_BRANCH=$(run git symbolic-ref --short HEAD) \
     || die "現在のブランチを取得できません。"
 
-# 保護ブランチ（main/staging/develop）からは実行不可
+# 保護ブランチ（branches.txt のブランチ。例: main/staging/develop）からは実行不可
 if is_protected_branch "$CURRENT_BRANCH"; then
-    die "${CURRENT_BRANCH} は保護ブランチです。feature ブランチから実行してください。"
+    die "${CURRENT_BRANCH} は保護ブランチ（sf-tools/config/branches.txt）のため、実行できません。"
 fi
 
-BRANCH_LIST=$(get_branch_list) || die "ブランチ構成を取得できません。"
+# get_branch_list は常に成功する（ファイルがない・空のときは、WARNING を出して main だけを返す）ため、失敗の判定はしない
+BRANCH_LIST=$(get_branch_list)
 
-# branches.txt の順序（main → staging → develop）を逆順にしてマージ順にする
-# マージ順: develop → staging → main
+# branches.txt の順序（例: main → staging → develop）のまま MERGE_ORDER に読み込み、逆順にした REVERSED をマージ順にする
+# マージ順（REVERSED）: develop → staging → main
 MERGE_ORDER=()
 while IFS= read -r b; do
     MERGE_ORDER+=("$b")
@@ -114,17 +119,18 @@ done
 # ------------------------------------------------------------------------------
 # git merge-base（synced 判定）のためリモートの最新状態を取得する
 log "INFO" "リモートの最新状態を取得中..."
-run git fetch origin "${REVERSED[@]}" 2>/dev/null \
+#   （標準エラーは捨てない。run の「> Command:」の行と、-v のときのコマンドの応答は、標準エラーに出るため）
+run git fetch origin "${REVERSED[@]}" \
     || log "WARNING" "リモートブランチの取得に失敗しました（ローカルキャッシュで判定します）。"
 
 # gh pr list はブランチごとに呼ぶと遅いため、マージ済み・オープン を各1回で取得
-# --head フィルタが merged/open で正常動作しないバージョンがあるため全件取得して絞る
+# --head フィルタが merged/open で正常動作しないバージョンがあるため、それぞれ最新 50 件を取得して絞る
 # 出力は「ヘッド<TAB>ベース」の行（gh の --jq で作る。JSON を、シェルでは、読まない）。
 # 取得に失敗したときは、空（= PR なし）として扱う
 _merged_prs=$(gh pr list --state merged --limit 50 \
-    --json headRefName,baseRefName --jq '.[] | [.headRefName, .baseRefName] | @tsv' 2>/dev/null || echo "")
+    --json headRefName,baseRefName --jq '.[] | [.headRefName, .baseRefName] | @tsv' 2>/dev/null || echo "")  # VAR=$(cmd) のため run 不使用
 _open_prs=$(gh pr list --state open --limit 50 \
-    --json headRefName,baseRefName --jq '.[] | [.headRefName, .baseRefName] | @tsv' 2>/dev/null || echo "")
+    --json headRefName,baseRefName --jq '.[] | [.headRefName, .baseRefName] | @tsv' 2>/dev/null || echo "")  # VAR=$(cmd) のため run 不使用
 
 # ------------------------------------------------------------------------------
 # 5. 各ブランチへのマージ状況を確認
@@ -137,15 +143,15 @@ STATUSES=()
 # 固定文字列として、行全体で比較する（ブランチ名の . や [ を、正規表現として解釈しない）。
 _pr_exists() {
     local prs="$1" head="$2" base="$3"
-    printf '%s\n' "$prs" | grep -qxF -- "${head}"$'\t'"${base}"
+    printf '%s\n' "$prs" | grep -qxF -- "${head}"$'\t'"${base}"  # 条件チェックのため run 不使用（関数の戻り値にする）
 }
 
 for target in "${REVERSED[@]}"; do
     if _pr_exists "$_merged_prs" "$CURRENT_BRANCH" "$target"; then
         # 現在ブランチ → 対象ブランチへの直接 PR がマージ済み
         STATUSES+=("merged")
-    elif git merge-base --is-ancestor HEAD "origin/$target" 2>/dev/null; then
-        # 直接 PR はないが上位ブランチ経由で間接的にコミットが伝播済み（デプロイ WF は未実行）
+    elif git merge-base --is-ancestor HEAD "origin/$target" 2>/dev/null; then  # 条件チェックのため run 不使用
+        # HEAD のコミットが、すでに origin/<対象> に含まれている（直接 PR はないが、別のブランチ経由で伝播済みなど。デプロイ WF は未実行）
         STATUSES+=("synced")
     elif _pr_exists "$_open_prs" "$CURRENT_BRANCH" "$target"; then
         # PR が発行済み（マージ前）
@@ -239,8 +245,11 @@ fi
 
 if ask_yn "${NEXT_TARGET} にPRを出しますか？"; then
     # リモートリポジトリ情報を取得
+    #   http(s):// の URL に含まれる認証情報（//<ユーザー>:<Token>@）は除く（Token を、画面・ログ・ブラウザの履歴に出さないため）。
+    #   lib/project.sh の git_origin_redacted は *** に置き換える（表示用）ため、ブラウザで開く URL には使えない
     REPO_URL=$(git remote get-url origin 2>/dev/null \
-        | sed 's|git@github\.com:|https://github.com/|; s|ssh://git@github\.com/|https://github.com/|; s|\.git$||')
+        | sed 's#^\(https\{0,1\}://\)[^@/]*@#\1#; s|git@github\.com:|https://github.com/|; s|ssh://git@github\.com/|https://github.com/|; s|\.git$||')  # VAR=$(cmd) のため run 不使用
+    [[ -n "$REPO_URL" ]] || die "origin の URL を取得できません。"
     PR_URL="${REPO_URL}/compare/${NEXT_TARGET}...${CURRENT_BRANCH}?expand=1"
     log "INFO" "ブラウザでPR作成画面を開きます..."
     # open_browser（lib/platform.sh）が、OS に合ったコマンドで開く（Git Bash: start / WSL: powershell / macOS: open / Linux: xdg-open）

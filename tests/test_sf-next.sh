@@ -15,7 +15,8 @@ case "$1" in
     symbolic-ref)   echo "${MOCK_GIT_BRANCH:-feature/test}"; exit 0 ;;
     remote)
         if [[ "$2" == "get-url" ]]; then
-            echo "${MOCK_GIT_REMOTE_URL:-https://github.com/test-owner/force-tama.git}"
+            # MOCK_GIT_REMOTE_URL が未設定なら既定の URL。空を設定すると、origin がない（何も出さない）
+            echo "${MOCK_GIT_REMOTE_URL-https://github.com/test-owner/force-tama.git}"
         fi
         exit 0 ;;
     fetch)          exit 0 ;;
@@ -328,6 +329,62 @@ test_pr_url_from_remote_forms() {
     done
 }
 
+# --- 回帰: origin の URL に認証情報（https://user:TOKEN@）があっても、画面・ブラウザに出さない ---
+#   （以前は、そのまま PR 作成画面の URL にして、画面に表示し、ブラウザで開いていた）
+test_pr_url_strips_credentials() {
+    local td mb mh u
+    for u in "https://x-access-token:ghp_SECRETTOKEN123@github.com/test-owner/force-tama.git" "http://user@github.com/test-owner/force-tama.git"; do
+        setup_std_env td mb mh
+        create_mock_git_with_remote "$mb"
+        create_mock_browser "$mb"
+        export MOCK_GIT_REMOTE_URL="$u"
+        export MOCK_GIT_BRANCH="feature/my-feature"
+        export MOCK_GH_MERGED_PRS="feature/my-feature->develop"
+        export MOCK_GH_OPEN_PRS=""
+        local out; out=$(cd "$td" && echo "y" | PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-next.sh" 2>&1)
+        assert_output_contains "$out" "//github.com/test-owner/force-tama/compare/staging...feature/my-feature" "認証情報つきの origin（${u%%@*}@...）→ 認証情報を除いた URL を表示する"
+        echo "$out" | grep -q "SECRETTOKEN\|user@" \
+            && fail "認証情報つきの origin → 画面に認証情報を出さない" "$out" \
+            || pass "認証情報つきの origin → 画面に認証情報を出さない"
+        grep -v "remote get-url" "$MOCK_CALL_LOG" | grep -q "SECRETTOKEN\|user@" \
+            && fail "認証情報つきの origin → ブラウザに認証情報を渡さない" \
+            || pass "認証情報つきの origin → ブラウザに認証情報を渡さない"
+        unset MOCK_GIT_REMOTE_URL MOCK_GIT_BRANCH MOCK_GH_MERGED_PRS MOCK_GH_OPEN_PRS
+        teardown "$td" "$mb"
+    done
+}
+
+# --- origin の URL を取得できない → エラー終了（/compare/... だけの、開けない URL を開かない）---
+test_pr_url_no_origin() {
+    local td mb mh
+    setup_std_env td mb mh
+    create_mock_git_with_remote "$mb"
+    create_mock_browser "$mb"
+    export MOCK_GIT_REMOTE_URL=""
+    export MOCK_GIT_BRANCH="feature/my-feature"
+    export MOCK_GH_MERGED_PRS="feature/my-feature->develop"
+    export MOCK_GH_OPEN_PRS=""
+    local out; out=$(cd "$td" && echo "y" | PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-next.sh" 2>&1)
+    assert_exit_fail $? "origin の URL がない → エラー終了"
+    assert_output_contains "$out" "origin の URL を取得できません" "origin の URL がない → 理由が表示される"
+    assert_file_not_contains "$MOCK_CALL_LOG" "compare/" "origin の URL がない → ブラウザを開かない"
+    unset MOCK_GIT_REMOTE_URL MOCK_GIT_BRANCH MOCK_GH_MERGED_PRS MOCK_GH_OPEN_PRS
+    teardown "$td" "$mb"
+}
+
+# --- 回帰: git fetch の「> Command:」の行を、標準エラーごと捨てない（以前は 2>/dev/null で、-v の出力も消えていた）---
+test_fetch_command_line_shown() {
+    local td mb mh
+    setup_std_env td mb mh
+    create_mock_git_with_remote "$mb"
+    export MOCK_GIT_BRANCH="feature/my-feature"
+    export MOCK_GH_MERGED_PRS="" MOCK_GH_OPEN_PRS=""
+    local out; out=$(cd "$td" && echo "n" | PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-next.sh" 2>&1)
+    assert_output_contains "$out" "> Command: .*git fetch origin develop staging main" "git fetch の「> Command:」の行が表示される"
+    unset MOCK_GIT_BRANCH MOCK_GH_MERGED_PRS MOCK_GH_OPEN_PRS
+    teardown "$td" "$mb"
+}
+
 # --- PR 作成画面を開く: open_browser で、OS に合ったコマンド（Git Bash: start / WSL: powershell / macOS: open / Linux: xdg-open）を使う ---
 test_pr_open_browser() {
     local td mb mh
@@ -356,6 +413,9 @@ test_two_branches_none_merged
 test_pr_open_shown
 test_pr_open_browser
 test_pr_url_from_remote_forms
+test_pr_url_strips_credentials
+test_pr_url_no_origin
+test_fetch_command_line_shown
 test_out_of_order_merge
 test_staging_synced
 test_protected_branch_blocked

@@ -3,7 +3,8 @@
 # sf-upgrade.sh - 開発ツール一括アップデートスクリプト
 # ==============================================================================
 # npm・Salesforce CLI（sf）・Git（Windows の Git Bash のみ）を、最新版にアップデートする。
-# sf-install.sh が、前回から 24 時間以上たっているときに、バックグラウンドで自動で呼び出す（引数なし。標準出力は捨てる）。
+# sf-install.sh が、前回から 24 時間以上たっているときに、バックグラウンドで自動で呼び出す（引数なし。標準出力は捨て、
+# 標準エラー（画面への表示）は ./sf-tools/logs/sf-install.log に追記する）。
 # 手動でも実行できる。
 #
 # 【使い方】
@@ -67,7 +68,7 @@ log "HEADER" "開発ツールのアップデートを開始します (${SCRIPT_N
 # npm のアップデート
 # ------------------------------------------------------------------------------
 log "INFO" "npm をアップデートします..."
-if command -v npm >/dev/null 2>&1; then
+if command -v npm >/dev/null 2>&1; then  # 存在確認のため run 不使用
     run npm install -g npm@latest \
         || log "WARNING" "npm のアップデートに失敗しました（続行します）"
 else
@@ -78,7 +79,7 @@ fi
 # Salesforce CLI のアップデート
 # ------------------------------------------------------------------------------
 log "INFO" "Salesforce CLI をアップデートします..."
-if command -v sf >/dev/null 2>&1; then
+if command -v sf >/dev/null 2>&1; then  # 存在確認のため run 不使用
     sf_via_npm=0
     if command -v npm >/dev/null 2>&1; then  # 存在確認のため run 不使用
         if npm ls -g @salesforce/cli --depth=0 >/dev/null 2>&1; then sf_via_npm=1; fi  # 判定のみのため run 不使用

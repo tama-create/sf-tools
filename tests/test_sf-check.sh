@@ -262,6 +262,53 @@ force-app/main/default/classes/MyClass.cls
     teardown "$td"
 }
 
+# 回帰: Step B（内容検索）が、空白を含むパスのテストクラスも見つける
+#   （以前は xargs が空白でパスを分割し、テストクラスを見つけられず、含まれていなくても警告しなかった）
+test_missing_test_class_found_in_path_with_space() {
+    local td
+    td=$(setup_force_dir)
+    mkdir -p "$td/force-app/main/default/classes" "$td/force-app/main/default/my tests"
+    printf 'public class MyClass {}\n' > "$td/force-app/main/default/classes/MyClass.cls"
+    printf '@isTest\npublic class MyClassSpec { static void t(){ MyClass x; } }\n' \
+        > "$td/force-app/main/default/my tests/MyClassSpec.cls"
+    local deploy="$td/deploy.txt" remove="$td/remove.txt"
+    printf '[files]\nforce-app/main/default/classes/MyClass.cls\n' > "$deploy"
+    printf '[files]\n' > "$remove"
+
+    local out; out=$(cd "$td" && bash "$SF_TOOLS_DIR/bin/sf-check.sh" "$deploy" "$remove" 2>&1)
+    assert_exit_ok "$?" "空白を含むパスのテストクラス → exit 0（warning のみ）"
+    assert_output_contains "$out" "→ force-app/main/default/my tests/MyClassSpec.cls" \
+        "空白を含むパスのテストクラスが見つかり、含まれていないと警告される"
+    teardown "$td"
+}
+
+# 回帰: deploy-target.txt に ./ 付きで書いたテストクラスも、含まれていると判定する（警告しない）
+#   （以前は、見つかったパスだけ ./ を除いて比べ、./ 付きの行と一致せず、含まれていても警告していた）
+test_no_warning_when_test_included_with_dot_slash() {
+    local td
+    td=$(setup_force_dir)
+    mkdir -p "$td/force-app/main/default/classes"
+    printf 'public class MyClass {}\n' > "$td/force-app/main/default/classes/MyClass.cls"
+    printf '@isTest\npublic class MyClassTest {}\n' > "$td/force-app/main/default/classes/MyClassTest.cls"
+    local deploy="$td/deploy.txt" remove="$td/remove.txt"
+    printf '[files]\n./force-app/main/default/classes/MyClass.cls\n./force-app/main/default/classes/MyClassTest.cls\n' > "$deploy"
+    printf '[files]\n' > "$remove"
+
+    local out; out=$(cd "$td" && bash "$SF_TOOLS_DIR/bin/sf-check.sh" "$deploy" "$remove" 2>&1)
+    assert_exit_ok "$?" "./ 付きで書いたテストクラス → exit 0"
+    echo "$out" | grep -q "テストクラス不足の可能性" \
+        && fail "./ 付きで書いたテストクラス → warning なし" "$out" \
+        || pass "./ 付きで書いたテストクラス → warning なし"
+
+    # クラスだけ ./ 付き・テストクラスは ./ なし、でも同じ
+    printf '[files]\n./force-app/main/default/classes/MyClass.cls\nforce-app/main/default/classes/MyClassTest.cls\n' > "$deploy"
+    out=$(cd "$td" && bash "$SF_TOOLS_DIR/bin/sf-check.sh" "$deploy" "$remove" 2>&1)
+    echo "$out" | grep -q "テストクラス不足の可能性" \
+        && fail "クラスだけ ./ 付き → warning なし" "$out" \
+        || pass "クラスだけ ./ 付き → warning なし"
+    teardown "$td"
+}
+
 # テストクラス不足: @isTest クラス自身のみ → WARNING なし
 # ------------------------------------------------------------------------------
 test_no_warning_for_test_class_itself() {
@@ -477,6 +524,8 @@ test_auto_resolve_branch
 test_missing_test_class_warning
 test_no_warning_when_test_included
 test_no_warning_when_test_included_nonstandard_name
+test_missing_test_class_found_in_path_with_space
+test_no_warning_when_test_included_with_dot_slash
 test_no_warning_for_test_class_itself
 test_capability_ng_release_error
 test_capability_ng_delete_only_in_remove

@@ -1,6 +1,7 @@
-# sf-tools 結合テスト計画（案）
+# sf-tools 結合テスト計画
 
-> **本ドキュメントの範囲:** コマンドを連動させて動かす「結合レベル」のテストの、パターンの洗い出しと、作り方の方針。実装は、これから（案の段階）。
+> **本ドキュメントの範囲:** コマンドを連動させて動かす「結合レベル」のテストの、パターンの洗い出しと、作り方の方針・判断の理由。
+> **実装の状況:** L1（ローカル結合。`tests/test_integration*.sh`・`tests/integration/`）と、L2（実環境のシナリオ方式。`tests/e2e/scenario.sh`・`run.sh --interrupt`）は、実装済み。パターンごとの状況は 8.1。実装の詳細（ハーネス・fake・実行方法・CI での扱い）は、`doc/dev-reference.md` の 2.1.2（L1）・9.6（e2e・L2）。
 > 個々のコマンドの単体テストは、`tests/test_*.sh`（`doc/dev-reference.md` セクション 2）。実環境の通しの確認（e2e）は、`doc/dev-reference.md` の 9.6・9.7。
 
 ---
@@ -20,6 +21,8 @@
 ---
 
 ## 2. 現状
+
+> この章は、**計画を立てた時点（L1 の着手前。2026-10-19）の状態**（なぜ結合テストが要るかの根拠として残す）。今のテストの構成は 4.1・8.1 と、`doc/dev-reference.md` の 2.1.2・9.6。
 
 ### 2.1 テストの層
 
@@ -72,8 +75,8 @@
 
 | 層 | 内容 | 実行 |
 |---|---|---|
-| **L1 ローカル結合**（新設） | 実際の `git` と、ローカルの bare リポジトリ（`origin` の代わり）で、コマンドを連動させる。`gh`・`sf` は、モック（指定した回数だけ失敗させられる） | CI（Ubuntu・macOS・Windows の Git Bash）と手元。数分。費用なし |
-| **L2 実環境結合**（既存の e2e を拡張） | 今の `run.sh`（1 本の長い筋）を、シナリオ方式に分ける。モックでは表せないものだけ | 開発者（Claude）が実行。変更に関わる分だけを選ぶ |
+| **L1 ローカル結合**（実装済み。`tests/test_integration*.sh`・`tests/integration/lib.sh`・`init-lib.sh`） | 実際の `git` と、ローカルの bare リポジトリ（`origin` の代わり）で、コマンドを連動させる。`gh`・`sf`・`npm`・`curl`・`code`・`ssh` は、状態を持つ fake（指定した回数だけ失敗させられる） | `tests/run_tests.sh` の `TEST_FILES` に含まれる。CI（`.github/workflows/test.yml`）は、Ubuntu・macOS を別のジョブ `integration` で、Windows の Git Bash を全件の 6 つのジョブ（`--shard`）の中で動かす。費用なし。所要時間・詳細は `doc/dev-reference.md` 2.1.2 |
+| **L2 実環境結合**（実装済み。既存の e2e を拡張） | `run.sh`（1 本の長い筋）は残し、その上に、シナリオ方式（`tests/e2e/scenario.sh`）を足した。モックでは表せないものだけ | GitHub Actions（`.github/workflows/e2e.yml`）が、`run.sh` のあとに、自動で動かす（`dist-main` を除く）。手元では、調査・新しい環境の確認のときだけ（`doc/dev-reference.md` 9.6） |
 
 ### 4.2 L1 の設計方針
 
@@ -81,10 +84,10 @@
 - 複数の clone、remote ブランチ、フックを含める（bare リポジトリを用意するだけにしない）。
 - **どのコマンドを本物にし、どれをモックにするか:**
   - 本物: `git`（PATH の本物）、`bash`・`awk`・`sed`・`openssl`・`node`（`json_get` が使う）、テスト対象の sf-tools のスクリプトとフック。
-  - モック（PATH の先頭に置く）: `gh`・`sf`・`curl`（Slack）・ブラウザ（`start` / `open` / `xdg-open` / `powershell.exe`）。
+  - モック（PATH の先頭に置く）: `gh`・`sf`・`curl`（Slack）・ブラウザ（`start` / `open` / `xdg-open` / `wslview` / `powershell.exe`）。実装では、`npm`・`code`（コミットメッセージの入力）・`ssh`（`origin` を、ローカルの bare に向ける）も、fake にした（`doc/dev-reference.md` 2.1.2）。
 - **「既存で実現済みのもの」と「L1 のために新設するもの」を分ける:**
-  - 既存: 各テストが個別に作る bare リポジトリ（`test_common.sh`・`test_sf-init.sh`・`test_init-common.sh`・`test_e2e.sh`）、`test_helper.sh` のモック（`create_mock_git`・`create_mock_gh_*`・`create_mock_sf` など）、JWT の N 回失敗（`MOCK_SF_JWT_FAIL_FIRST`）、e2e 用の `gh` のモック（`test_e2e.sh`）。
-  - 新設: 共通の L1 ハーネス（実 `git` ＋ bare ＋ 複数 clone の作成）、共通の故障注入つきの `gh`・`sf`・`curl` のモック（4.4）、実行順序の記録、不変条件の確認の部品（4.5）。
+  - 既存: 各テストが個別に作る bare リポジトリ（`test_common.sh`・`test_sf-init2.sh`・`test_sf-init3.sh`（元の `test_sf-init.sh` を 3 つに分けたもの。12.10）・`test_init-common.sh`・`test_e2e.sh`・`test_wf-sequence.sh`）、`test_helper.sh` のモック（`create_mock_git`・`create_mock_gh_*`・`create_mock_sf` など）、JWT の N 回失敗（`MOCK_SF_JWT_FAIL_FIRST`）、e2e 用の `gh` のモック（`test_e2e.sh`）。
+  - 新設（実装済み。`tests/integration/lib.sh`・`init-lib.sh`）: 共通の L1 ハーネス（実 `git` ＋ bare ＋ 複数 clone の作成）、共通の故障注入つきの `gh`・`sf`・`curl` のモック（4.4）、実行順序の記録、不変条件の確認の部品（4.5）。既存の `test_helper.sh` のモックとは、統合せず、別に持つ。
 - **OS ごとの必須の確認項目**を定める:
   - Windows の Git Bash: パスの変換・LF（`core.autocrlf=false`）・実行権限・`/tmp` と一時フォルダの後始末。
   - macOS（Bash 3.2）: BSD の `sed` / `stat` / `base64`・`TMPDIR` の末尾の `/`。
@@ -119,9 +122,9 @@
 2. 子コマンドの失敗（故障注入）
 3. `SIGKILL`（強制終了。`EXIT` のトラップも動かない）
 
-#### 4.4.1 fake の必須仕様（L1 の前提。**新しく作る、大きな部品**）
+#### 4.4.1 fake の必須仕様（L1 の前提。`tests/integration/lib.sh` に実装済み）
 
-今の `tests/test_helper.sh` のモックは、固定の終了コードと、呼び出しの記録が中心で、状態の遷移・遅延・`SIGTERM`・子プロセス・排他を持たない。6 の異常系の多くは、次の仕様を満たす fake が無いと、L1 で再現できない。**L1 の基盤は、これを作ることが、前提になる**（最小の範囲から作り、必要になったものを足す）。
+`tests/test_helper.sh` のモックは、固定の終了コードと、呼び出しの記録が中心で、状態の遷移・遅延・`SIGTERM`・子プロセス・排他を持たない。6 の異常系の多くは、次の仕様を満たす fake が無いと、L1 で再現できない。**L1 の基盤は、これを作ることを、前提にした**（最小の範囲から作り、必要になったものを足す方針）。実装した fake の範囲は、`doc/dev-reference.md` 2.1.2。
 
 | # | 仕様 |
 |---|---|
@@ -132,6 +135,8 @@
 | 5 | **開始後 N 秒の遅延**・**出力後の終了**・**子プロセスの残留**・**部分ファイルの生成** |
 | 6 | **ロックの取得・解放のログ**と、**実行順序のログ** |
 | 7 | **プロセスの終了後に、fake の状態を検査する部品**（4.5 と連動） |
+
+> **実装の状況:** 1（リポジトリ・ブランチ・PR の一覧・Secret・Variable・Ruleset・ワークフローの実行を `state/` に保持。名前の衝突・権限なしは、状態ファイルで返す）・2（ログイン状態・デプロイ・ロック・テスト失敗）・3（成功の `{"ok":true}`。失敗は 4 で作る）・4（`it_fault`）・5 のうち遅延・6 のうち実行順序（`state/calls.log`）・7（`it_snap` など）は、実装済み。レート制限・認証の失効は、専用の状態はなく、4 の故障注入で作る。5 の「出力後の終了」「子プロセスの残留」「部分ファイルの生成」と、6 の「ロックの取得・解放のログ」は、専用の部品はない（必要になったテストがまだない）。
 
 ### 4.5 不変条件の確認の部品
 
@@ -241,6 +246,8 @@
 | 10 | ③Secret の登録の後・進捗の更新の前 | Secret・Variable | 登録済みを確認して、スキップ | なし | Secret・Variable が、重複しない |
 
 > 各行に、`SIGTERM`・子コマンドの失敗・`SIGKILL`（4.4）の 3 つの止め方を、当てる。`SIGKILL` では、3.7 の 3 つの確認を、あわせて行う。
+>
+> **実装（`tests/test_integration-init.sh` の X2-1）が確かめている停止点:** Phase 3 ②（リポジトリ作成の後・clone の失敗）・Phase 8 ②（初回コミットの後・push の拒否。進捗は 7 のまま・PAT は状態ファイルにだけ・権限 600）・Phase 10 ②（コンシューマーキーの `gh secret set` の失敗）・Phase 7 の `SIGTERM`（Slack の Secret の登録中。表にない Phase）・Phase 10 の `SIGKILL`（外部クライアントアプリのデプロイ中。残ったロックは、古いロックとして引き継ぐ）。どれも、「続きから」で完了し、完了後の状態が、通し（I1）の基準と同じ（重複がない）ことを確かめる。実環境（L2）では、`run.sh --interrupt` が Phase 8 ②を確かめる（11.3 の順 7）。**表のほかの行（Phase 3 ①③・Phase 8 ①③④⑤・Phase 10 ③）は、想定のまま（テストでは、未確認）。**
 
 ### 6.3 X3. 状態の食い違い
 
@@ -300,11 +307,11 @@ Actions 上の実行は、コマンドによって扱いが違う。「全部拒
 |---|---|---|
 | `sf-typecheck` | 確認（続行しますか）の後に「GitHub Actions 上では、実行できません」で拒否する。`-y` で確認を省いても、拒否される | 拒否の文言・失敗で終わる・外部へ書き込まない |
 | `sf-sync-wf` | 確認を**省かない**（ワークフローを書き換えるコマンドのため） | 確認が出る |
-| `sf-deploy` | `--force` の確認は**省かない**。省かれるのは、予約名の組織への拒否だけ | `--force` の確認が出る |
+| `sf-deploy` | `--force` の確認は**省かない**。省かれるのは、予約名の組織への拒否と、本番組織の拒否（組織の種類の判定）だけ | `--force` の確認が出る |
 | `sf-metasync` / `sf-update-secret` / `sf-release --release` | 確認を**省いて**、先へ進む（Actions で動かす前提） | 確認が出ない（`sf-release` は、デプロイまで進む） |
 | `sf-init` / `sf-init --verify` | 管理者の確認は省かない。`--verify` は、Actions 上では拒否。完了時の検証の質問だけ、省かれる | 結合では、扱わない（`--verify` は、リモート URL の読み取りに依存する。実環境の L2 で確認） |
 
-> 非管理者・別オーナー・`force-*` の中・本番組織に接続中、の拒否は、`check_gh_owner` と各コマンドの個別の確認の組み合わせ。X6-1 の次の段階で、同じ表の形（コマンド × 状況）で足す。
+> 非管理者・別オーナー・`force-*` の外・予約名の組織に接続中、の拒否は、`check_gh_owner` と各コマンドの個別の確認の組み合わせ。**X6-1b として実装済み**（`tests/test_integration-guards.sh`）: 別のオーナーは `sf-update-secret` が拒否する（Actions 上でも）・組織の有効な admin はオーナーの確認を通る・`force-*` の外では `sf-update-secret` / `sf-sync-wf` / `sf-metasync` / `sf-release` / `sf-push` が gh・sf を呼ばずに拒否する・`prod` に接続中は `sf-deploy` / `sf-release --release` / `sf-dryrun -n` がデプロイを呼ばずに拒否する。
 
 ### 6.7 X7. 秘密情報（異常系でこそ漏れる）
 
@@ -352,50 +359,56 @@ Actions 上の実行は、コマンドによって扱いが違う。「全部拒
 
 ---
 
-## 8. 着手の順番（案）
+## 8. 着手の順番と実装の状況
+
+> 下の 0〜6 は、計画した着手の順番（記録として残す）。**0〜4 は実装済み**（一部は △。8.1）。5 は、第 1 段階を、実機ではなく、Actions の Windows → macOS で実装した（12.11）。
 
 0. **カバレッジ表のガードのテスト**（10）。**実装済み: `tests/test_integration-coverage.sh`**。全コマンドが、表に載っていること（結合あり、または、理由つきの対象外）を、確かめる。最初に作る（実装を待たずに、作れる）。
 1. **L1 の基盤（最小）**: 実 `git` ＋ローカル bare ＋ 複数 clone、呼び出し別の故障注入つきの `gh`・`sf`・`curl` のモック、不変条件の確認の部品（4.5）。これで、**A13・X6-1・X6-2・X6-4（L1）・X2-3・X7-1** を入れる。
-   - **実装済み（第 1 弾）**: `tests/integration/lib.sh`（ハーネス・fake・故障注入・不変条件の部品）と、`tests/test_integration.sh` の **A13a・X2-3・X6-2・X6-1**（詳細は `doc/dev-reference.md` 2.1.2）。A13a は、テンプレートから作った最小のリポジトリで、`sf-job` → `sf-start` → `sf-install` → `sf-hook` → `sf-dryrun` → `sf-push` を通す（`sf-init` の生成物との通しは L2 の C1）。
+   - **実装済み（第 1 弾）**: `tests/integration/lib.sh`（ハーネス・fake・故障注入・不変条件の部品）と、`tests/test_integration.sh` の **A13a・X2-3・X6-2・X6-1**（詳細は `doc/dev-reference.md` 2.1.2）。A13a は、テンプレートから作った最小のリポジトリで、`sf-job` → `sf-start` → `sf-install` → `sf-hook` → `sf-dryrun` → `sf-push` を通す。`sf-init` の生成物との通しは、のちに、L1 の A13（`tests/test_integration-init.sh`）として足した（L2 では C1 の `dist-main` が、配布版のワークフローを確かめる）。
    - **第 1 弾で分かったこと**: (1) `sf-push` は、プッシュが失敗した後の再実行で、未プッシュのコミットを、プッシュしなかった（X2-3 で見つかり、変更がなくても未プッシュのコミットがあれば、プッシュだけ行うように直した）。(2) X6-1 は「Actions 上は全部拒否」ではなく、コマンドごとに違う（6.6.1）。(3) `git remote get-url` を使うコードのため、リモートは `ssh://git@github.com/...` に読み替える形にした。(4) `sf-install` のツール更新は、Windows で本物の Git 更新を動かすため、スタンプで止めている。
    - **その後（同日）の追加**: X6-4・X7-1 を含め、L1 の多くを実装した。**実装状況の一覧（どこまで終わったか）は、8.1**。`sf-init --verify` は、結合では扱わない（6.6.1）。
-2. **状態を持つ fake**（4.4.1 の 1・2・6・7）を足し、**X2-1（6.2.1 の表）・X3-5〜X3-10・X4-1a〜c・X8-4・X8-5** を入れる。
-3. L1 に、A1・A5・X1-2・X1-7・X10-1・X3-2 を足す。
-4. L2 をシナリオ方式に分け、**C1・B1・B3・X3-1・X8-2** を足す。**設計は 11（案。実装の前に、確認する）**。
-5. C2（OS 混在）を、Mac・WSL・Windows の実機で行う。
+2. **状態を持つ fake**（4.4.1 の 1・2・6・7）を足し、**X2-1（6.2.1 の表）・X3-5〜X3-10・X4-1a〜c・X8-4・X8-5** を入れる。→ 実装済み（X3-10・X8-5 は △）。
+3. L1 に、A1・A5・X1-2・X1-7・X10-1・X3-2 を足す。→ 実装済み（X1-7・X10-1 は、`curl` で Slack に送るのがワークフローだけのため、L1 の対象外にした。8.1）。
+4. L2 をシナリオ方式に分け、**C1・B1・B3・X3-1・X8-2** を足す。**設計は 11**。→ 実装済み（C1・X3-1 は △）。
+5. C2（OS 混在）を、Mac・WSL・Windows の実機で行う。→ 第 1 段階（`scenario.sh cross-os`）を、Actions で実装した（12.11）。第 2・3 段階は未。
 6. 残りは、優先度の順に、変更に関わるものから、足していく。
 
 > 既存の単体テスト（`tests/test_sf-init.sh`・`tests/test_wf-sequence.sh` など）で、代替できるケースは、重複して作らない（作る前に、代替できるかを確認する）。
 
-### 8.1 実装状況（2026-10-19 時点。どこまで終わったか）
+### 8.1 実装状況（2026-10-25 時点。どこまで終わったか）
 
-凡例: ✅ = L1 を実装済み / △ = 一部だけ実装（残りは、右の欄） / — = 未実装 / 対象外 = 結合では扱わない（理由つき）。**L2（実環境）は、既存の e2e（`tests/e2e/`）が一部を代替している。シナリオ方式の L2（`tests/e2e/scenario.sh`。設計は 11）は、基盤と最初の 1 つ（`log-secrets`）だけ実装済み**。
+凡例: ✅ = L1 を実装済み（「L2」とあるものは、実環境で実装済み） / △ = 一部だけ実装（残りは、右の欄） / — = 未実装 / 対象外 = 結合では扱わない（理由つき）。**L2（実環境）は、既存の e2e（`tests/e2e/run.sh`）と、シナリオ方式（`tests/e2e/scenario.sh` の 10 個: `log-secrets`・`manual-delete`・`update-secret`・`sync-wf`・`cross-os`・`validate-fail`・`dist-main`・`metasync-diff`・`propagate-fail`・`restart-org`。設計は 11）、`run.sh --interrupt`（中断と再開）で実装済み**。
 
-実装ファイル: `tests/test_integration.sh`（日常の通し）・`-git.sh`（フック・取り込み・競合・並行）・`-guards.sh`（安全ガード）・`-secrets.sh`（秘密情報）・`-job.sh`（sf-job の失敗）・`-misc.sh`（日常の分岐・設定の不正・再実行）・`-init.sh`（sf-init の通し・中断と再開・生成物の改変）・`-init2.sh`（sf-init の状態の食い違い・失敗・同時実行）・`-metasync.sh`（sf-metasync のローカルの動作・後始末）・`-next.sh`（sf-next の判定）・`-init3.sh`（sf-init の診断・欠け・Salesforce の失敗・同時の作成）・`-rerun.sh`（再実行・フックの改変）。部品は `tests/integration/lib.sh`・`init-lib.sh`。
+実装ファイル: `tests/test_integration.sh`（日常の通し）・`-git.sh`（フック・取り込み・競合・並行）・`-guards.sh`（安全ガード）・`-secrets.sh`（秘密情報）・`-job.sh`（sf-job の失敗）・`-misc.sh`（日常の分岐・設定の不正・環境の不備・同時のデプロイ・再実行）・`-init.sh`（sf-init の通し・中断と再開・生成物の改変）・`-init2.sh`（sf-init の状態の食い違い・失敗・同時実行）・`-metasync.sh`（sf-metasync のローカルの動作・後始末）・`-next.sh`（sf-next の判定）・`-init3.sh`（sf-init の診断・欠け・Salesforce の失敗・同時の作成）・`-rerun.sh`（再実行・フックの改変）。部品は `tests/integration/lib.sh`・`init-lib.sh`。各ファイルのシナリオの一覧は、ファイルの冒頭コメント（`doc/dev-reference.md` 2.1 の表）。
 
 | パターン | 状態 | 場所・備考 |
 |---|---|---|
 | A1 壊れた Apex → dryrun | ✅ L1 | misc。L2 は未 |
 | A2 pre-push フック | ✅ | git（`main` への直接 push の拒否を含む） |
 | A4 sf-check の指摘 | ✅ | guards（X6-4）・misc（X3-3） |
-| A5 main が進んだ・sf-next の判定 | ✅ | git（push 前の自動取り込み）・next（3 層で、なし・PR 発行中・マージ済み・順序外・Y で開く URL。origin が ssh:// のとき、開く URL が https にならない不具合を見つけて、直した） |
+| A5 main が進んだ・sf-next の判定 | ✅ | git（push 前の自動取り込み）・next（3 層で、なし・PR 発行中・マージ済み・順序外・他の人が先にマージ（A5-5）・Y で開く URL（A5-6）。origin が ssh:// のとき、開く URL が https にならない不具合を見つけて、直した） |
 | A6 / X4-2 コンフリクト | ✅ | git |
 | A7 2 つのジョブ | ✅ | git |
 | A9 sf-unhook ⇄ sf-hook | ✅ | git。`sf-unhook` が pre-push だけを外す（pre-commit は残る）のは、意図した仕様（プッシュの検証だけを止めるのが狙い。2026-10-19 に確認済み） |
 | A10 sf-install の間隔・判定 | ✅ | misc |
 | A12 sf-deploy の確認 | ✅ | misc |
-| A13 sf-init の生成物 → 後続コマンド | ✅ | init（A13）。A13a は `tests/test_integration.sh`（テンプレート版） |
+| A13 sf-init の生成物 → 後続コマンド | ✅ | init（A13: sf-init の通し（I1）が作ったリポジトリで、sf-job（→ sf-start → sf-install）→ sf-dryrun → sf-push）。A13a は `tests/test_integration.sh`（テンプレート版） |
 | A14 URL からのプロジェクト判定（複数 clone） | ✅ | job（A14）。同じ XXXX が別のオーナーに複数あるとき、最初のものを黙って使っていた不具合を見つけて、直した（選ばせる） |
 | A15 pre-commit フック | ✅ | git |
 | A3 PR の wf-validate の失敗 → 直して再検証 | ✅ L2（Slack 以外） | `scenario.sh validate-fail`（壊れた Apex の PR → 失敗・PR に「検証失敗」のコメント → 直して push → 成功・「検証成功」）。Slack の通知は未 |
 | A8 sf-restart | ✅ L2 | `scenario.sh restart-org`（接続先を staging の組織に切り替え → dry-run が新しい組織を使う → 元に戻す） |
-| B1 / X2-1 sf-init の中断と再開 | ✅ L1・L2（Phase 8） | init（5 つの止め方）。L2: `run.sh --interrupt`（実環境で Phase 8 の push を止め、「続きをやる」で再開 → いつもの確認）。Phase 3・10 の実環境での中断は未 |
+| B1 / X2-1 sf-init の中断と再開 | ✅ L1・L2（Phase 8） | init（5 つの停止点: Phase 3 の clone の失敗・Phase 8 の push の拒否・Phase 10 の Secret 登録の失敗・Phase 7 の SIGTERM・Phase 10 の SIGKILL。6.2.1）。L2: `run.sh --interrupt`（実環境で Phase 8 の push を止め、「続きをやる」で再開 → いつもの確認）。Phase 3・10 の実環境での中断は未 |
 | B2 sf-update-secret | ✅ L1・L2 | secrets（L1）。L2: `scenario.sh update-secret`（同じ秘密鍵で上書き → `SF_PRIVATE_KEY` の更新日時が進む・誤ったパスは拒否される。あとのシナリオで、JWT ログインを確かめる） |
 | B4 sf-sync-wf | ✅ L1・L2 | guards（X6-5。L1 のローカル部分）。L2: `scenario.sh sync-wf`（管理者用のクローンの中だけ。改変 → 検出 → 雛形に直す・`--remove` の拒否と削除） |
 | B3 wf-metasync の実差分の反映 | ✅ L1・L2 | metasync（ローカルの同期の動作）。L2: `scenario.sh metasync-diff`（組織にだけ Apex を作る → wf-metasync → main に反映 → 組織・main を実行前の状態に戻す） |
 | C1 配布版（main）の通し | △ L2 | `scenario.sh dist-main`（SF_TOOLS_BRANCH 未設定で、ワークフローが sf-tools の main を使う。rr の直後だけ）。配布版での `sf-init` の通しは未 |
 | C2 OS 混在 | △ L2（第 1 段階） | `scenario.sh cross-os`（別の OS が作ったリポジトリを clone → CRLF がない・フックが同じ内容で実行できる・`sf-sync-wf --check` が成功。Actions の macOS が、Windows の作ったリポジトリに対して動かす。読み取りのみ）。第 2 段階（日常の流れ全体）・第 3 段階（逆向き）は未（12.11） |
-| B5〜B8・C3〜C7 | — | L2・手動（未） |
+| B5 sf-init --reconnect / --status | △ L2 | `--status` だけ（`scenario.sh manual-delete` が、実環境で、不足の検出と直し方の表示を確かめる）。`--reconnect` は未 |
+| B6 --add-tier の追加パターン | △ L2 | `run.sh` の `--add-tier staging`（1 層 → 2 層。9.6）だけ。develop の追加・2 層 → 3 層は未 |
+| C6 Actions のログに秘密が出ない | ✅ L2 | `scenario.sh log-secrets`（X7-1 と同じ） |
+| C7 ブランチ保護（main への直接 push の拒否） | 対象外（L2） | テスト用の組織（無料プランの非公開リポジトリ）では、Ruleset の効きを確認できない（11.3 の順 1・11.7）。L1 のフック部分は A2 |
+| B7・B8・C3・C5 | — | L2・手動（未） |
 | X1-1 GitHub の一時的な失敗 | △ | job（ブランチ作成の失敗 → 再実行）。ほかの API は未 |
 | X1-2 PAT の権限不足・失効 | ✅ | init2（権限不足・無効） |
 | X1-3 別ユーザー・名前の衝突 | ✅ | init2・job |
@@ -417,9 +430,9 @@ Actions 上の実行は、コマンドによって扱いが違う。「全部拒
 | X3-7 完了の印と進捗の矛盾 | ✅ | init2（進捗 10 で main がない・印 1 で進捗が途中・印 0 の完了済み） |
 | X3-10 改変点ごとの拒否の表 | △ | init（A13 のクローンで: origin が別のリポジトリ・branches.txt がない（止まる。黙って作り直さない）・release/ がない（sf-install が復元））・rerun（フックの改変・削除 → sf-hook が戻す。detached HEAD・main の上での sf-push は、コミットせずに止まる = R5。不具合を見つけて、直した）・組織に未接続。origin がない・release/ブランチ名/ がない・deploy-target.txt が空は、既存の挙動で安全に止まることを確認した（テストにはしていない）。ほかの改変点は未（sfdx-project.json の欠落は、fake の sf が、本物の sf のように、プロジェクトの外でのデプロイを拒否しないため、L1 では判定できない。L2） |
 | X3-8 admin の欠け・X3-9 欠けの検出 | ✅ | init3（admin ブランチが origin から消えた → 後片付けで戻る・--status の欠けの検出。`SF_TOOLS_BRANCH` を、配布版でも、不足にしていた不具合を見つけて、直した） |
-| X4-1 sf-init の同時起動 | ✅ | init2（見つけた競合を直した: 同じプロジェクトの sf-init は、ロックで排他する。2 つ目は拒否・強制終了で残った古いロックは引き継ぐ） |
+| X4-1 sf-init の同時起動 | ✅ | init2（見つけた競合を直した: 同じプロジェクトの sf-init は、ロックで排他する。2 つ目は拒否・強制終了で残った古いロックは引き継ぐ）。あわせて、作られた Ruleset の必須チェックの名前が、ワークフローのジョブ名だけ（`対象ファイル確認`・`デプロイ検証`・`順序チェック`。`validate / …` の形ではない）であることも確かめる（`doc/dev-reference.md` 9.5） |
 | X4-1a 同時 push | ✅ | git |
-| X4-1b GitHub の競合・X4-1c Salesforce の競合 | ✅ | init3（同名のリポジトリの同時作成: 片方だけが成功。別のフォルダからの同時作成では、Ruleset が重複することがある現状の限界を記録）・misc（同じ組織への同時のデプロイ: ロックで失敗し、再実行で成功） |
+| X4-1b GitHub の競合・X4-1c Salesforce の競合 | ✅ | init3（同名のリポジトリの同時作成: 少なくとも片方が成功し、main の初回コミット・リポジトリの登録が重複しない。タイミングによっては、両方が成功する（CI の Windows で発生）。別のフォルダからの同時作成では、Ruleset が重複することがある現状の限界を記録）・misc（同じ組織への同時のデプロイ: ロックで失敗し、再実行で成功） |
 | X4-5 wf-propagate の失敗の経路 | ✅ L2 | `scenario.sh propagate-fail`（コンフリクトで失敗・Slack に通知・staging は変わらない） |
 | X4-3・X4-4 | — | L2（未） |
 | X5-1 ジョブ名の不正 | ✅ | job |
@@ -435,24 +448,26 @@ Actions 上の実行は、コマンドによって扱いが違う。「全部拒
 | X8-1 再実行の表 | ✅ | misc（hook・unhook）・test_integration.sh（install）・guards（sync-wf）・init（完了済みの sf-init）・rerun（sf-push の変更なしの再実行・sf-dryrun の連続実行・sf-update-secret の同じ入力の再実行）・metasync（変更なしの再実行 = M2）・job（同名の再実行 = X2-2） |
 | X8-4 主処理の失敗と後始末 | ✅ | metasync（SGD の失敗・push の拒否でも、元のブランチへ戻り、stash が復元される）。再実行で、push できなかったコミットが、origin に届く（直した） |
 | X8-5 後始末の一部の失敗 | △ | metasync（stash の復元が衝突しても、手元の変更は、失われない）。ほかの後始末は未 |
-| X8-2 失敗の画面が案内する復旧 | ✅ L1 | init（案内の表示と、実際の再開）・job（同名のブランチで続ける）・sf-push・sf-metasync（再実行で、未プッシュのコミットが届く）。L2 は未 |
+| X8-2 失敗の画面が案内する復旧 | ✅ L1・L2（Phase 8） | init（案内の表示と、実際の再開）・job（同名のブランチで続ける）・sf-push・sf-metasync（再実行で、未プッシュのコミットが届く）。L2: `run.sh --interrupt`（失敗の画面が「続きをやる」を案内し、その手順で再開できる。11.3 の順 7）。ほかの失敗の画面の L2 は未 |
 | X8-3 | — | L2（未） |
 | X9-1 リトライの上限 | ✅ | init3（JWT の接続テストは、上限で止まる。スキップすれば、Secret の登録まで進む） |
 | X9-2 | — | L2（未） |
 | X10-3・X10-4 | — | L2・e2e（未） |
 
-**この段階で見つかり、直したもの**: `sf-push` の再実行（X2-3）・`sf-check` の外部パス（X6-4）・`sf-init` の進捗の先行（X3-6・X3-7）・`sf-init` の同時起動（X4-1。Windows で、Ruleset が重複した。ロックを入れた）・`sf-prepush` の `branches.txt`（origin にないブランチ名が、すべての push を止めた。X3-2）・`sf-job` の同名ブランチ（clone だけをやり直せなかった。X2-2。環境ブランチの名前も、ジョブ名に使えないようにした）・`sf-metasync`（フックのあるクローンで main への push が止められた・push できなかったコミットが取り残された。M0・M4）・`lib/project.sh`（同じ XXXX が別のオーナーに複数あるとき、最初のものを黙って使った。A14）・`sf-next`（origin が ssh:// のとき、開く URL が https にならなかった。A5）・`sf-start`（標準入力が閉じたとき、エイリアスの入力を無限に繰り返した。X5-3）・`lib/diag.sh`（`SF_TOOLS_BRANCH` は任意なのに、配布版のプロジェクトで、必ず「不足」と表示した。X3-9）・`sf-push`（detached HEAD・main の上でも、先にコミットして、プッシュで失敗し、コミットだけが残った。X3-10 の R5）。**意図した仕様（確認済み）**: `sf-unhook` は pre-push だけを外す（プッシュの検証だけを止めるのが狙い）。
+**この段階で見つかり、直したもの**: `sf-push` の再実行（X2-3）・`sf-check` の外部パス（X6-4）・`sf-init` の進捗の先行（X3-6・X3-7）・`sf-init` の同時起動（X4-1。Windows で、Ruleset が重複した。ロックを入れた）・`sf-prepush` の `branches.txt`（origin にないブランチ名が、すべての push を止めた。X3-2）・`sf-job` の同名ブランチ（clone だけをやり直せなかった。X2-2。同名のブランチがあれば、作者・日時を見せて確認し、Y なら作らずに clone だけをやり直す。環境ブランチ・管理者用のブランチの名前（`main` / `staging` / `develop` / `admin`）も、ジョブ名に使えないようにした）・`sf-metasync`（フックのあるクローンで main への push が止められた・push できなかったコミットが取り残された。M0・M4）・`lib/project.sh`（同じ XXXX が別のオーナーに複数あるとき、最初のものを黙って使った。A14）・`sf-next`（origin が ssh:// のとき、開く URL が https にならなかった。A5）・`sf-start`（標準入力が閉じたとき、エイリアスの入力を無限に繰り返した。X5-3）・`lib/diag.sh`（`SF_TOOLS_BRANCH` は任意なのに、配布版のプロジェクトで、必ず「不足」と表示した。X3-9）・`sf-push`（detached HEAD・main の上でも、先にコミットして、プッシュで失敗し、コミットだけが残った。X3-10 の R5）。今の動きの要点は、`doc/dev-reference.md` の 2.1.2（「結合テストで見つかり、直したもの」）と 4.12.1。**意図した仕様（確認済み）**: `sf-unhook` は pre-push だけを外す（プッシュの検証だけを止めるのが狙い）。
 
 ---
 
 ## 9. 未決・未確認
 
-- L1 の基盤の置き場所（`tests/integration/` など）と、`tests/run_tests.sh` との連動のしかた。
-- L2 のシナリオ方式の、実行の単位（シナリオ名で選ぶ）と、前提の確認の部品。**案は 11。未決は 11.7**。
-- 故障注入の仕様（4.4）を実装する場所（共通のモックの置き場所）と、既存のモック（`test_helper.sh`・`test_e2e.sh`）との統合のしかた。
+**決まったこと（実装済み）:**
+- L1 の基盤の置き場所: `tests/integration/lib.sh`・`init-lib.sh`。テストのファイル（`tests/test_integration*.sh`）は、`tests/run_tests.sh` の `TEST_FILES` に入れ、`--changed` でも選ばれる（`doc/dev-reference.md` 2.1.2）。
+- L2 のシナリオ方式: シナリオ名で選ぶ `tests/e2e/scenario.sh`（11）。
+- 故障注入（4.4）と状態を持つ fake（4.4.1）: `tests/integration/lib.sh` に置き、既存のモック（`test_helper.sh`・`test_e2e.sh`）とは統合しない（L1 は、`test_helper.sh` の判定の関数だけを使う）。
+
+**未決・未確認:**
 - X10 の、パターンごとの最終の終了コードと報告の内容の定義（実装の前に、確定する）。
-- 6.2.1 の表の内容を、実装の前に、コードで確認して確定する（特に Phase 8 の分岐と、Phase 10 の段階ごとの再開）。
-- 状態を持つ fake（4.4.1）の、最小の範囲と、置き場所（共通のモックの置き場所と、既存のモックとの統合）。
+- 6.2.1 の表のうち、テストで確かめていない行（6.2.1 の注）。
 - 優先度は、案。実際に起きた事故・不安な箇所があれば、見直す。
 
 ---
@@ -514,9 +529,9 @@ Actions 上の実行は、コマンドによって扱いが違う。「全部拒
 
 ---
 
-## 11. L2（実環境）シナリオ方式の設計（案。2026-10-19）
+## 11. L2（実環境）シナリオ方式の設計（2026-10-19 に設計し、2026-10-20〜21 に実装）
 
-> 実装の前の設計。**実装は、この内容を確認してから始める**（このセクションは、案であり、確定ではない）。L1 の fake では確かめられないもの（本物の `gh` / `sf` / GitHub Actions の挙動）を、実環境で確かめる層。
+> L1 の fake では確かめられないもの（本物の `gh` / `sf` / GitHub Actions の挙動）を、実環境で確かめる層。**実装済み**（11.6）。仕様の正本は `tests/e2e/scenario.sh` の冒頭コメント、要点は `doc/dev-reference.md` 9.6。この章は、設計の意図と判断の理由を残す。
 
 ### 11.1 既存の e2e との関係
 
@@ -529,15 +544,15 @@ Actions 上の実行は、コマンドによって扱いが違う。「全部拒
 | 項目 | 内容 |
 |---|---|
 | 実行の単位 | `bash tests/e2e/scenario.sh <シナリオ名>...`（複数指定可。名前は 11.3 の表）。`--list` で一覧、名前なしは何もしない（全部は動かさない） |
-| 使うリポジトリ | `run.sh` が**前回残した**テスト用リポジトリ（最新の 1 つ。`--resume` と同じ探し方）。なければ、`run.sh --no-actions --no-add-tier` で作る（先に案内して止まる。**シナリオ側では、黙って作らない**） |
-| 前提の確認（前） | テスト用リポジトリの名前の形式・オーナーの一致（既存のガード）・`main` の SHA・ブランチと PR の一覧・組織の Apex の一覧・`sf` のエイリアス・`admin` クローンのブランチを記録する。崩れていたら、そのシナリオを実行しない |
-| 後始末と確認（後） | シナリオが作った PR・ブランチ・組織の変更を、**そのシナリオ自身が、元に戻す**。前に記録した状態と比べ、差があれば、報告して、後続のシナリオを止める |
-| 結果 | 1 シナリオ = 1 行（成功 / 失敗・所要時間・確認した件数）。`run.sh` と同じ、検証の記録の形式 |
+| 使うリポジトリ | `run.sh` が**前回残した**テスト用リポジトリ（最新の 1 つ。`--resume` と同じ探し方）。または `--repo force-e2e-日時`（手元に作業フォルダがない OS で、別の OS が作ったリポジトリを使う `cross-os` のため。名前の形式とオーナーの確認は同じ）。なければ、`run.sh --no-add-tier` で作るよう案内して止まる（**シナリオ側では、黙って作らない**） |
+| 前提の確認（前） | テスト用リポジトリの名前の形式・オーナーの一致（既存のガード）を通し、`main` の SHA・ブランチの一覧・開いている PR の数を記録する（設計の時点の案にあった、組織の Apex の一覧・`sf` のエイリアス・`admin` クローンのブランチは、記録しない。エイリアスは `e2e_alias_restore` で戻す）。取得できなければ中断する |
+| 後始末と確認（後） | シナリオが作った PR・ブランチ・組織の変更を、**そのシナリオ自身が、元に戻す**（終了時・中断時の `_scn_restore`）。前に記録した状態と比べ、差があれば、報告して、後続のシナリオを止める（`main` にコミットしてよいシナリオ（`metasync-diff`・`propagate-fail`）のあとは、基準を取り直す。12.9） |
+| 結果 | 1 シナリオ = 1 行（成功 / 失敗 / 実行できない・確認した件数・所要時間）。「実行できない」と、確認が 0 件のものは、成功に数えない。失敗があれば、非ゼロで終わる。すべて成功したときは、検証の記録（`doc/dev-reference.md` 9.7）の 1 行を出す |
 | 共通の部品 | `tests/e2e/lib.sh`（既存。ガード・fixture・PR の操作・Actions の待ち・Apex の削除）を使う。**新しい削除の経路は、作らない** |
 
-### 11.3 シナリオの候補（優先度順）
+### 11.3 シナリオ（優先度順。順 10〜12 は、あとから足したもの）
 
-「L1 で確かめられない理由」が、L2 にする根拠。所要時間は、見込み（実測ではない）。
+「L1 で確かめられない理由」が、L2 にする根拠。所要時間は、設計の時点の見込み（実測は 11.6・12.9）。
 
 | 順 | 名前 | 内容 | 計画のパターン | L1 で確かめられない理由 | 見込み | 組織への書き込み |
 |---|---|---|---|---|---|---|
@@ -550,6 +565,9 @@ Actions 上の実行は、コマンドによって扱いが違う。「全部拒
 | 7 | `resume-recovery`（**実装済み**。`scenario.sh` ではなく、`run.sh --interrupt`） | `sf-init` を、実際に Phase 8（初回コミットの push）で止め、失敗の画面が案内する手順（「続きをやる」）で再開する。git の shim（`tests/e2e/shims/git`）が、main への push を 1 回だけ失敗させる。中断した時点の状態（リポジトリがある・main がない・進捗は Phase 7 まで・秘密が出ていない）と、再開後の状態（初回コミットが 1 つ・Secret・Variable・ブランチ・ワークフロー・Actions・Hello World のリリースと削除）を、いつもの e2e の確認で、まとめて通す。新しいリポジトリを作るため、`scenario.sh` の「残っているリポジトリを使う」方式にせず、`run.sh` のオプションにした（`run.sh` の確認が、そのまま、再開した状態の確認になる） | B1・X8-2 | 本物の GitHub・Salesforce での再開 | 約 25 分 | あり（新しいテスト用リポジトリを作る。既存のガードと後掃除の下） |
 | 8 | `layout-fail` → **`propagate-fail`**（**実装済み**） | main と staging に、同じファイルの、違う内容をコミットし（追加どうしの衝突）、`wf-propagate` を手動で起動する → 失敗し、ログにコンフリクトが出て、Slack に通知され（ok:true）、staging の先頭が変わらない。終了時に、main・staging から、そのファイルを削除する。鍵一式に、別々の組織は要らない（2 層のリポジトリの staging ブランチがあればよい。`run.sh` の `--add-tier` の確認のあとのリポジトリで、実行できる） | X4-5 | 2 層以上の**別々の組織**が必要 | 約 15 分 | あり |
 | 9 | `restart-org`（**実装済み**） | `sf-restart.sh` で、ジョブのクローンの接続先を、staging の組織に切り替える → 接続先（`.sf/config.json`）とそのユーザーが変わる → `sf-dryrun.sh` が新しい組織を使う → 元の組織へ戻す。ログインは、認証 URL への差し替え。組織への書き込みはない（dry-run のみ）。`run.sh` の終わりに、sf のエイリアスは実行前へ戻るため、元のエイリアスには、認証 URL でログインし直してから、ユーザーを読む | A8 | 2 つ以上の組織が必要 | 約 5 分 | なし |
+| 10 | `update-secret`（**実装済み**。2026-10-21） | 管理者用のクローンで、`sf-update-secret.sh` の「1) 秘密鍵」を、同じ秘密鍵で実行 → Secret `SF_PRIVATE_KEY` の更新日時が進む・ほかの Secret は変わらない・出力に秘密鍵が出ない・誤ったパスは拒否される。あとの `validate-fail`・`metasync-diff` のワークフローが、上書きした鍵で JWT ログインできることも確かめる（そのため、順番を、それらの前にしている） | B2 | 本物の Secret の更新と、本物のワークフローの JWT ログイン | 未記録 | なし（テスト用リポジトリの Secret を、同じ値で上書き） |
+| 11 | `sync-wf`（**実装済み**。2026-10-21） | 管理者用のクローン（`admin` ブランチ）で、ワークフローを改変 → `sf-sync-wf.sh --check` が見つける → `sf-sync-wf.sh` が雛形に直す → 雛形にあるファイルの `--remove` は拒否・雛形にない不要なファイルは消せる。終了時に、`.github/workflows` を HEAD に戻す | B4 | 本物の `sf-init` が作った管理者用のクローン（L1 のローカル部分は X6-5） | 未記録 | なし（クローンの中だけ） |
+| 12 | `cross-os`（**実装済み**。2026-10-21。12.11） | 別の OS が作ったリポジトリを、GitHub から clone → 記録されたテキストファイルに CRLF がない・`sf-hook.sh` のフックが `~/sf-tools/hooks/` と同じ内容で、CR がなく、実行できる・`sf-sync-wf.sh --check` が成功する | C2 | 別の OS の実機（Actions の macOS が、Windows の作ったリポジトリに対して動かす） | 約 2 分（見込み） | なし（一時フォルダの中だけ） |
 
 - **順 3 は、組織にも GitHub にも書き込まない**（読み取りだけ）。順 2 は、テスト用リポジトリの Secret などを、手で削除する点だけが、書き込み。順 1 は、上のとおり、作れなかった。
 - 順 4 は、**rr の直後にだけ**意味がある。実行の前に、前提（`main` = `development`）を、自分で確認して、満たさなければ、「実行しない」と報告して終わる。
@@ -566,17 +584,21 @@ Actions 上の実行は、コマンドによって扱いが違う。「全部拒
 
 ### 11.5 いつ動かすか
 
-- **CI には載せない**（実環境・時間がかかる・Secret が要る）。Claude が、手元で、実行して報告する（CLAUDE.md 1.2）。
-- rr の前に、**変更したパスに関わるシナリオだけ**を選ぶ。目安:
+> **設計の時点の案**は、「CI には載せず、Claude が、手元で、変更に関わるシナリオだけを選んで実行する」だった。e2e を GitHub Actions に移した（12.3 の 3）ため、今は、次のとおり。
+
+- **通常の CI（`test.yml`）には載せない**（実環境・時間がかかる・Secret が要る）。**e2e の専用のワークフロー（`.github/workflows/e2e.yml`）が、Windows のジョブの最後に、`run.sh` が残したリポジトリに対して、`dist-main` 以外の 9 つを、毎回、すべて動かす**（`log-secrets manual-delete update-secret sync-wf cross-os validate-fail metasync-diff propagate-fail restart-org`）。続く macOS のジョブが、Windows が残したリポジトリに対して `cross-os` を動かす（`doc/dev-reference.md` 9.6）。e2e の起動の条件（配布物・`tests/e2e/`・`e2e.yml` が変わった `development` への push・週 1 回・手動）も 9.6。
+- `dist-main` は、「rr の直後（`origin/main` と `origin/development` の配布物に差がないとき）」だけ意味があるため、自動では動かさない（手で `scenario.sh dist-main`）。`resume-recovery`（`run.sh --interrupt`）も、`e2e.yml` では動かさない（手で実行する）。
+- 手元では、調査・新しい環境の確認のときだけ、名前を選んで動かす（同じ組織を、Actions の実行と取り合うため）。そのときの目安:
 
 | 変更したパス | 選ぶシナリオ |
 |---|---|
-| `templates/.github/workflows/`・`wf-*.yml` | `validate-fail`・`log-secrets`・`push-guard` |
-| `phases/init/`・`bin/sf-init.sh` | `manual-delete`・`resume-recovery`（＋従来の `run.sh`） |
+| `templates/.github/workflows/`・`wf-*.yml` | `validate-fail`・`log-secrets`・`propagate-fail` |
+| `phases/init/`・`bin/sf-init.sh` | `manual-delete`・`resume-recovery`（`run.sh --interrupt`） |
 | `bin/sf-metasync.sh`・`wf-metasync` | `metasync-diff` |
+| `bin/sf-update-secret.sh`・`bin/sf-sync-wf.sh`・`bin/sf-restart.sh` | `update-secret`・`sync-wf`・`restart-org` |
 | 配布の経路（`SF_TOOLS_BRANCH`・`sf-sync-wf`・`templates/`） | `dist-main`（rr の直後） |
 
-- 従来の `run.sh`（通し）は、**配布物のパスを変えた rr の前に、今までどおり**動かす。シナリオは、それに**足す**もの。
+- 従来の `run.sh`（通し）も、同じ `e2e.yml` が動かす（rr の前提は、`CLAUDE.md` 1.2）。シナリオは、それに**足す**もの。
 
 ### 11.6 実装の段階
 
@@ -586,15 +608,17 @@ Actions 上の実行は、コマンドによって扱いが違う。「全部拒
 4. **新しいリポジトリを作る系（実装済み 2026-10-20）**: `resume-recovery` は、`run.sh --interrupt` として実装した（実環境で通した。所要は、いつもの e2e（約 30 分）に、1 回目の約 3〜5 分を足したもの）。実装で分かったこと: (1) 再開後の `main` には、初回コミット（`chore: sf-tools 初期セットアップ`）のほかに、最初の同期のコミット（定期更新）も入る（`sf-init` が作る）。「コミットが 1 つ」ではなく、「初回コミットが 1 つ」を確認する。(2) 理由が空の `RefreshTokenAuthError`（認証 URL でのログインの一時的な失敗）が 1 度出たため、sf の shim に、待って 3 回までやり直す処理を足した。
 5. **複数の組織が要る系（実装済み 2026-10-20）**: `propagate-fail`（実環境で 11 件・46 秒）・`restart-org`（10 件・221 秒）。11.3 の `layout-fail` は、`propagate-fail` として実装した。
 
-各段階は、**手元で、実際に動かして成功**を確認してから、次へ進む（実行の結果は、`doc/dev-reference.md` 9.7 の記録に、シナリオ名つきで残す）。
+6. **あとから足したもの（実装済み 2026-10-21）**: `update-secret`・`sync-wf`（12.9。Actions で初めて動かした）・`cross-os`（12.11）。
 
-### 11.7 未決（実装の前に、決める）
+各段階は、**手元で、実際に動かして成功**を確認してから、次へ進む（実行の結果は、`doc/dev-reference.md` 9.7 の記録に、シナリオ名つきで残す）。e2e を Actions に移してからは、Actions の実行の結果で確かめる（12.9）。
 
-- `scenario.sh` を、`run.sh` の `--scenario` オプションにするか、別のスクリプトにするか（案: 別のスクリプト。`run.sh` を、これ以上、大きくしない）。
-- 前提の確認で比べる「状態」の範囲（11.2 の表は、案）。
-- `dist-main` で、`SF_TOOLS_BRANCH` を外す方法（Variable の削除と復元。**必ず復元する**。失敗したときの復元の保証が、必要）。
-- Slack への通知の確認（今は、Slack の読み取りの手段がない。PR のコメントだけで確認し、Slack は、対象外にするか）。
-- 実測の所要時間（見込みを、実際の値に直す。`log-secrets` は、実測 46 秒）。
+### 11.7 未決だったことと、決まったこと
+
+- `scenario.sh` を、`run.sh` の `--scenario` オプションにするか、別のスクリプトにするか → **別のスクリプト**にした（`run.sh` を、これ以上、大きくしない）。新しいリポジトリを作る `resume-recovery` だけは、`run.sh --interrupt` にした（11.3 の順 7）。
+- 前提の確認で比べる「状態」の範囲 → `main` の SHA・ブランチの一覧・開いている PR の数（11.2）。
+- `dist-main` で、`SF_TOOLS_BRANCH` を外す方法 → Variable を一時的に削除し、終了時（中断を含む）に必ず戻す（`_scn_restore`）。
+- Slack への通知の確認 → Slack を読む手段はないため、ワークフローのログの Slack の応答（`"ok":true`）で確かめる（`propagate-fail`・`run.sh` の `wf-sequence` と `wf-release`）。Slack の画面の確認は、対象外。
+- 実測の所要時間 → 11.6・12.9 に記録した（`log-secrets` は、実測 46 秒）。`update-secret`・`sync-wf`・`cross-os` の所要時間は、この文書には未記録。
 - **Ruleset の効きの確認（X6-3・C7）【決定 2026-10-20】**: L2 の対象外にする（無料プランの非公開リポジトリでは確認できず、公開リポジトリ・有料プランは、費用と、公開する内容の判断が要るため、採らない）。代わりに、`sf-init` が「無料プランでは利用不可」と警告すること（`phases/init/09_repo_rules.sh`）と、L1 のフックの確認（git）で、押さえる。有料プランに移る・公開のテスト用リポジトリを使う判断をしたときに、`push-guard` を作る（11.3 の順 1）。
 
 ---
@@ -613,22 +637,22 @@ Actions 上の実行は、コマンドによって扱いが違う。「全部拒
 |---|---|---|
 | 修正 | Claude | 修正し、`--changed` の軽いテストだけ手元で確認する。 |
 | **mm** | あなたの指示 | commit と push だけを、Claude が行う。 |
-| 自動の検証（軽い） | GitHub | 単体・shellcheck・結合テスト L1 が、Windows・macOS・Linux で自動で動く（目標: 約 8 分）。 |
-| 自動の検証（重い） | GitHub | 配布物（`bin/` `lib/` `phases/` `hooks/` `templates/` `config/`）が変わったとき、`development` への push で、e2e が動く（Windows は全部。macOS はクライアント側だけ。同じ組織を使うため、一列）。rr のときには、すでに緑。 |
+| 自動の検証（軽い） | GitHub | 単体・shellcheck・結合テスト L1 が、Windows・macOS・Linux で自動で動く（目標: 約 8 分。今の目安は約 12 分。`CLAUDE.md` 1.2）。 |
+| 自動の検証（重い） | GitHub | 配布物（`bin/` `lib/` `phases/` `hooks/` `templates/` `config/`）・`tests/e2e/`・`e2e.yml` が変わったとき、`development` への push で、e2e が動く（Windows は全部とシナリオ。macOS はクライアント側と `cross-os`。同じ組織を使うため、一列）。rr のときには、すでに緑。 |
 | PR | Claude | すべて緑なら、PR を作る。 |
 | **rr** | あなたの指示 | 緑なら、マージする（`main` に届く）。`main` の Ruleset の「必須のチェック」が、緑でないマージを止める。 |
-| rr の直後 | GitHub（任意） | `dist-main`（配布版の確認）を、自動で動かす。 |
+| rr の直後 | GitHub（任意） | `dist-main`（配布版の確認）を、自動で動かす。**未実装**（今は、手で `scenario.sh dist-main`。11.5）。 |
 
 ### 12.3 作業の順番
 
 | # | 作業 | 状態 |
 |---|---|---|
-| 1 | **CI の高速化**: Windows の全件（結合テスト L1 を含む）を、`--shard` で、6 つのジョブに分けて並列に動かす。macOS・Linux は、そのまま。 | 実装済み・実測済み（2026-10-20）。全体 約 16 分 24 秒（分ける前は約 21 分）。ジョブごとは 3 分 38 秒〜16 分 19 秒。**`test_sf-init.sh` 1 ファイルが 961 秒で、全体の下限になっている**（さらに縮めるには、このファイルを分割するか、遅い原因を直す。12.7） |
-| 2 | **ルールの書き換え**: CLAUDE.md の「mm の前に手元で全件」を、「手元は `--changed`、全件は CI の結果が正」に変える。「e2e は Claude が手で実行」は、**作業 3 で e2e を Actions に移すまで、そのまま**（移したら、「Actions の結果が正」に変える）。 | 実施済み（2026-10-20。CLAUDE.md 1.2・3.1、README 9、dev-reference 9.3・9.4。mm 待ち） |
+| 1 | **CI の高速化**: Windows の全件（結合テスト L1 を含む）を、`--shard` で、6 つのジョブに分けて並列に動かす。macOS・Linux は、そのまま。 | 実装済み・実測済み（2026-10-20）。全体 約 16 分 24 秒（分ける前は約 21 分）。ジョブごとは 3 分 38 秒〜16 分 19 秒。**`test_sf-init.sh` 1 ファイルが 961 秒で、全体の下限になっている**（さらに縮めるには、このファイルを分割するか、遅い原因を直す。12.7）。→ 2026-10-21 に、3 つのファイルに分割した（12.10） |
+| 2 | **ルールの書き換え**: CLAUDE.md の「mm の前に手元で全件」を、「手元は `--changed`、全件は CI の結果が正」に変える。「e2e は Claude が手で実行」は、**作業 3 で e2e を Actions に移すまで、そのまま**（移したら、「Actions の結果が正」に変える）。 | 実施済み（2026-10-20。CLAUDE.md 1.2・3.1、README 9、dev-reference 9.3・9.4）。作業 3 のあと、e2e も「Actions（`e2e.yml`）の結果が正」に変えた（`CLAUDE.md` 1.2） |
 | 3 | **e2e を GitHub Actions で動かす**: ガード（今は Actions 上では動かない）に、専用ワークフローだけの「実行してよい」印を足す（名前の形式・オーナーの一致は、そのまま）。認証情報（Secret）の登録（あなたが行う）。Windows → macOS の順。 | 実施済み（2026-10-21）。`development` への push で、Windows（全部 21 分 23 秒・119 件）→ macOS（クライアント側のみ 4 分 39 秒・56 件）が成功。原因の切り分けは 12.8 |
 | 4 | **Ruleset**: `main` に、「CI が緑」を必須のチェックとして入れる。**e2e は、必須にしない**（配布物が変わったときだけ動くため、必須にすると、動かない PR が永久に止まる。rr の前に、Claude が確認するルールで守る）。 | 実施済み（2026-10-21。`protect-main` に、必須チェック 11 個を追加。dev-reference 9.5） |
-| 5 | **定期実行（週 1 回・通知つき）**: `main`（利用者が受け取るもの）に対して、e2e を週 1 回、自動で動かし、失敗したら Slack に通知する。目的は、コードを変えていない間の外側の変化（`sf` の新しい版・Salesforce のリリース・Actions のイメージの更新・認証の期限切れ）の見張り。毎夜にはしない（外側の変化は週・月の単位で起きる。通知がないと意味がない）。e2e.yml が `main` に入ってから（schedule は既定のブランチのワークフローで動く） | 実装済み（2026-10-21。`e2e.yml` に schedule と、失敗時の Slack 通知 `notify`・`ci-notify.sh`。`main` に入ってから動く） |
-| 6 | **テストの穴（任意）**: B2・B4 の L2（`scenario.sh update-secret`・`sync-wf`）は実装済み（2026-10-21）。シナリオ 8 つを、Actions の Windows のジョブの最後で、自動で動かす。残り: B5〜B8・C3〜C7（手動が中心）。C2（OS 混在）の第 1 段階は実装済み（12.11） | 一部実施済み（B2・B4。実環境の確認は、Actions の実行で行う） |
+| 5 | **定期実行（週 1 回・通知つき）**: `main`（利用者が受け取るもの）に対して、e2e を週 1 回、自動で動かし、失敗したら Slack に通知する。目的は、コードを変えていない間の外側の変化（`sf` の新しい版・Salesforce のリリース・Actions のイメージの更新・認証の期限切れ）の見張り。毎夜にはしない（外側の変化は週・月の単位で起きる。通知がないと意味がない）。e2e.yml が `main` に入ってから（schedule は既定のブランチのワークフローで動く） | 実装済み（2026-10-21。`e2e.yml` に schedule と、失敗時の Slack 通知 `notify`・`ci-notify.sh`。`e2e.yml` は `main` に入っている: `doc/dev-reference.md` 9.6） |
+| 6 | **テストの穴（任意）**: B2・B4 の L2（`scenario.sh update-secret`・`sync-wf`）は実装済み（2026-10-21）。シナリオ 9 つ（`dist-main` 以外）を、Actions の Windows のジョブの最後で、自動で動かす（macOS のジョブは `cross-os`）。C2（OS 混在）の第 1 段階は実装済み（12.11）。残り: 8.1 の「—」「△」（B5〜B8・C3・C5 など。手動が中心） | 一部実施済み（B2・B4・C2 の第 1 段階。実環境の確認は、Actions の実行で行う） |
 
 ### 12.4 1 の設計（Windows の並列化）
 
@@ -653,7 +677,7 @@ Actions 上の実行は、コマンドによって扱いが違う。「全部拒
 - 認証情報の登録: あなたが行う（手順は、Claude が書く）。Environment `e2e`（Deployment branches は development と main だけ）に置く。
 
 **未決・これから**
-- Secrets / Variables の登録は完了（2026-10-20）。手動実行だけのワークフローは、`main` に入るまで起動できないため、push の起動を有効にして、その push で、最初の実行を行う。最初の成功の確認と、所要時間の記録（12.8）。
+- （済み）Secrets / Variables の登録は完了（2026-10-20）。手動実行だけのワークフローは、`main` に入るまで起動できないため、push の起動を有効にして、その push で、最初の実行を行った。最初の成功と所要時間は、12.8 に記録した。Variables は、のちに、すべて Secrets に移した（12.8・`doc/dev-reference.md` 9.6）。
 - `C7`（`main` への直接 push の拒否）を、有料プラン・公開リポジトリで確認するか（11.7）。
 
 ### 12.7 1 の実測（2026-10-20・コミット 5eb8c6f・GitHub Actions の Windows）
@@ -669,7 +693,7 @@ Actions 上の実行は、コマンドによって扱いが違う。「全部拒
 
 - 全体は 16 分 24 秒（ジョブは同時に動く）。**`test_sf-init.sh` が 961 秒で、1 ファイルだけで、全体の下限になる**。
 - 実測の秒数を、`_weight`（`tests/run_tests.sh`）に反映した。`test_sf-init.sh` は、1 つのジョブに単独で入り、残りは、ほかの 5 つに、ほぼ均等に入る。
-- 全体をさらに縮めるには、`test_sf-init.sh` を分割するか、遅い原因（Windows でのプロセス起動の多さなど）を直す。次の候補。
+- 全体をさらに縮めるには、`test_sf-init.sh` を分割するか、遅い原因（Windows でのプロセス起動の多さなど）を直す。次の候補。→ 分割した（12.10）。
 
 ### 12.8 3 の実測と、見つかった問題（2026-10-21・コミット 4ec3c92）
 

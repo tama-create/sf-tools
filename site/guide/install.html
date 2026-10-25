@@ -44,8 +44,8 @@
     <tr><td>Git（Git Bash）</td><td><code>git --version</code></td><td>変更の履歴の管理・フック</td><td><a href="https://git-scm.com/download/win">公式サイト</a>のインストーラーを実行</td></tr>
     <tr><td>Node.js</td><td><code>node --version</code></td><td>Salesforce CLI を入れるために必要</td><td><a href="https://nodejs.org/">公式サイト</a>のインストーラーを実行</td></tr>
     <tr><td>Salesforce CLI（<strong>npm 版</strong>）</td><td><code>sf --version</code></td><td>組織への接続・反映・取得</td><td><code>npm install -g @salesforce/cli</code>（<strong>公式インストーラー版は使えません</strong>。<a href="#npm">次の節</a>で説明します）</td></tr>
-    <tr><td>GitHub CLI</td><td><code>gh --version</code></td><td>PR の作成・認証情報の登録</td><td><code>winget install --id GitHub.cli</code></td></tr>
-    <tr><td>Visual Studio Code</td><td><code>code --version</code></td><td>エディタの起動</td><td><code>winget install --id Microsoft.VisualStudioCode</code></td></tr>
+    <tr><td>GitHub CLI</td><td><code>gh --version</code></td><td>GitHub へのログイン・作業用のブランチの作成・PR の状況の確認（管理者は、リポジトリの作成や認証情報の登録にも使います）</td><td><code>winget install --id GitHub.cli</code></td></tr>
+    <tr><td>Visual Studio Code</td><td><code>code --version</code></td><td>エディタの起動・コミットメッセージの入力（<code>sf-push.sh</code> は、<code>code</code> コマンドがないと動きません）</td><td><code>winget install --id Microsoft.VisualStudioCode</code></td></tr>
     <tr><td>Slack</td><td>—</td><td>リリース結果の通知を受け取る</td><td><a href="https://slack.com/downloads/windows">公式サイト</a>のインストーラーを実行</td></tr>
   </tbody>
 </table>
@@ -78,11 +78,11 @@
   <thead><tr><th>コマンド</th><th>終了コードが 0 でないとき</th></tr></thead>
   <tbody>
     <tr><td><code>sf-init.sh</code></td><td>案内を表示して、<strong>そこで止まります</strong></td></tr>
-    <tr><td>毎日のコマンド（<code>sf-start.sh</code>・<code>sf-release.sh</code>・<code>sf-metasync.sh</code>・<code>sf-update-secret.sh</code>）</td><td>案内を表示して、<strong>そこで止まります</strong>。途中で中途半端に止まるより、最初に止めるほうが安全だからです</td></tr>
-    <tr><td><code>sf-install.sh</code></td><td>警告を表示するだけで、続けます。止めてしまうと、sf-tools 自身の更新が、止まってしまうためです</td></tr>
+    <tr><td>そのほかの <code>sf</code> を使うコマンド（<code>sf-start.sh</code>・<code>sf-release.sh</code>（ランチャーの Dryrun・Deploy も）・<code>sf-metasync.sh</code>・<code>sf-update-secret.sh</code>・<code>sf-typecheck.sh</code>）</td><td>案内を表示して、<strong>そこで止まります</strong>。途中で中途半端に止まるより、最初に止めるほうが安全だからです</td></tr>
+    <tr><td><code>sf-install.sh</code>（<code>sf-start.sh</code> が裏で実行します）</td><td>警告を表示するだけで、続けます。止めてしまうと、sf-tools 自身の更新が、止まってしまうためです</td></tr>
   </tbody>
 </table>
-<p>確認に成功すると、24 時間は、確認を省略します。</p>
+<p>2 行目のコマンドは、確認に成功すると、同じ場所の <code>sf</code> なら、24 時間は確認を省略します。<code>sf</code> がまだ入っていないときは、この確認はしません（<code>sf</code> を使う手順で、エラーになります）。</p>
 
 <h3 id="npm-switch">インストーラー版から npm 版へ入れ替える（Windows）</h3>
 <ol class="steps">
@@ -98,7 +98,7 @@
   <div class="title">この 2 つのフォルダは、削除しないでください</div>
   <p><code>~/.sf</code> と <code>~/.sfdx</code> には、組織のログイン情報が入っています。入れ替えても、このログイン情報は残ります。VS Code を使っている場合は、入れ替えたあとに、VS Code を再起動してください。</p>
 </div>
-<p><strong>更新するとき:</strong> <code>sf-upgrade.sh</code> が、npm 版を <code>npm install -g @salesforce/cli@latest</code> で更新します（手動でも、同じコマンドです）。</p>
+<p><strong>更新するとき:</strong> 自動で更新されます（下の「<a href="#auto-update">自動で行われる更新</a>」）。<code>sf-upgrade.sh</code> が、npm 版を <code>npm install -g @salesforce/cli@latest</code> で更新します（手動でも、同じコマンドです）。npm 版でない <code>sf</code> は、<code>sf update</code> で更新します。</p>
 <p><strong>Mac・Linux:</strong> 同じく、npm 版をおすすめします。ほかの方法（pkg や Homebrew など）で入れた場合も、上の確認コマンドで終了コード 0 になれば、そのまま使えます。</p>
 
 <h2 id="install">sf-tools をインストールする</h2>
@@ -117,7 +117,19 @@
 </table>
 <pre><code># sf-tools
 export PATH="$HOME/sf-tools/bin:$PATH"</code></pre>
-<p>追加したら、<code>source ~/.bashrc</code>（Mac は <code>source ~/.zshrc</code>）を実行して、反映します。ターミナルを開き直しても、同じです。</p>
+<p>追加したら、<code>source ~/.bashrc</code>（Mac は <code>source ~/.zshrc</code>）を実行して、反映します。ターミナルを開き直しても、同じです。PATH を設定しないときは、<code>~/sf-tools/bin/sf-job.sh</code> のように、場所を付けて実行します。</p>
+
+<h3 id="auto-update">自動で行われる更新</h3>
+<p>sf-tools の置き直しや、ツールの更新は、自分で行う必要はありません。<code>sf-start.sh</code>（<code>sf-job.sh</code> からも動きます）が、毎回、裏で <code>sf-install.sh</code> を実行し、次のことを行います。</p>
+<ul>
+  <li><code>~/sf-tools</code> を、最新に更新します（<code>git pull</code>）。</li>
+  <li>プロジェクトの設定ファイル（<code>sf-tools/config/</code> の <code>metadata.txt</code>・<code>branches.txt</code>）があるかを確かめます。</li>
+  <li>Git のフック（<code>pre-commit</code> / <code>pre-push</code>。コミット・プッシュのときに自動で動くチェック）を設置します。</li>
+  <li>作業用のブランチのとき、ターゲットファイルを置くフォルダ（<code>sf-tools/release/&lt;ブランチ名&gt;/</code>）を用意します。</li>
+  <li>プロジェクトに必要な部品を入れます（<code>npm install</code>。入れ済みなら省きます）。</li>
+  <li>前回から 24 時間以上たっていれば、<code>sf-upgrade.sh</code> で、開発ツールを最新にします: <code>npm</code>・Salesforce CLI（<code>sf</code>）と、<strong>Windows の Git Bash では Git for Windows も</strong>（<code>git update-git-for-windows</code>）。Mac・Linux・WSL の Git は、更新しません（それぞれのパッケージ管理の方法で、更新してください）。</li>
+</ul>
+<p>どれかが失敗しても、作業は止まりません。結果は、<code>force-*</code> フォルダの中の <code>sf-tools/logs/sf-start.log</code>・<code>sf-install.log</code>・<code>sf-upgrade.log</code> で確かめられます。</p>
 
 <h2 id="env">動作環境</h2>
 <p>実際に動かして確かめた環境だけを書いています。</p>

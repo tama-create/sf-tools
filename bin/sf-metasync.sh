@@ -16,15 +16,20 @@
 #   ※ 上記以外のオプション・引数を指定すると、中断する（終了コード 1）
 #
 # 【処理の流れ】
-#   1. sf の確認: sf --version の終了コードが 0 以外なら、案内を表示して中断する（check_sf_cli --cache）
-#   2. 事前の確認（どれかが満たされなければ、中断する）
-#      - sf org display --target-org prod が成功すること（prod エイリアスの組織が登録済み）
-#      - ./sf-tools/config/metadata.txt が存在すること（コメント行・空行を除いた各行を、取得するメタデータの種類とする）
+#   1. sf の確認: sf --version の終了コードが 0 以外なら、案内を表示して中断する（check_sf_cli --cache）。
+#      引数の解析（【オプション】）は、この確認のあとに行う
+#   2. 事前の確認（上から順に確かめ、満たされなければ、何も変更せずに中断する）
+#      - sf org display --target-org prod --json の終了コードが 0 であること（prod エイリアスの組織が登録済み）。
+#        出力は、表示もログへの記録もしない（アクセストークンを含むため）
+#      - 現在の HEAD がブランチを指していること（git symbolic-ref -q HEAD の終了コードが 0。detached HEAD では中断する）
+#      - ./sf-tools/config/metadata.txt が存在すること（コメント行・空行を除いた各行を、取得するメタデータの種類とする。
+#        行末の CR は除く）
 #   3. 管理者向けの警告を表示し、続行の確認（Y/N）を取る。N・q なら中断する（GitHub Actions 上では、表示・確認しない）
 #   4. main ブランチへ切り替える（実行時のブランチが main 以外のとき）
 #      - 追跡中のファイルに未コミットの変更があれば、git stash で退避してから git checkout main する
 #   5. リモートの最新を取り込む
 #      - main で、追跡中のファイルに未コミットの変更があれば、中断する（ローカルの変更は、同期に含めない）
+#      - 手元で実行したときは、追跡していないファイル（.gitignore の対象と、sf-tools/release/ を除く）があっても、中断する（【補足】）
 #      - git fetch origin（失敗しても WARNING を表示して続行）→ git pull origin main --rebase
 #        （失敗したら git rebase --abort して中断する）
 #   6. 差分の解析: sf sgd source delta --from origin/main --to HEAD --output-dir ./sf-tools/temp_delta_<PID>
@@ -37,16 +42,16 @@
 #        「定期更新: Salesforce変更の自動反映 (YYYY-MM-DD)」でコミットし、git push --no-verify origin main する
 #      - 差分なし・origin/main より先のコミットあり（前回の同期の push の失敗など）: そのコミットの一覧（git log --oneline）を
 #        表示して確認を取り、git push --no-verify origin main だけ行う
-#      - 差分なし・先のコミットなし: 「組織側に変更はありませんでした」と表示して終了する（手順 9 は行わない）
+#      - 差分なし・先のコミットなし: 「完了: Salesforce 組織側に変更はありませんでした。」と表示して終了する（手順 9 は行わない）
 #      確認は Y/N で、N・q なら中断する（GitHub Actions 上では、表示・確認しない）。コミット・push の失敗は、中断する
 #   9. （手順 8 で push したときのみ）branches.txt の main 以外の各ブランチへ、main を伝播する
 #      - リモートに無いブランチは、WARNING を表示してスキップする
-#      - git checkout <ブランチ> → git pull origin <ブランチ> --rebase → git merge main --no-edit → git push origin <ブランチ>
-#        （この push には --no-verify を付けない）。失敗したら、WARNING を表示して、そのブランチをスキップする
+#      - git checkout <ブランチ> → git pull origin <ブランチ> --rebase → git merge main --no-edit →
+#        git push --no-verify origin <ブランチ>。失敗したら、WARNING を表示して、そのブランチをスキップする
 #        （pull の失敗: git rebase --abort → git checkout main。merge の失敗: git merge --abort → git checkout main。
 #         push の失敗: git checkout main。checkout の失敗: そのままスキップ）
 #      - 最後に git checkout main する（失敗したら中断する）
-#   10. 終了時（中断したときも）: 元のブランチへ git checkout し、手順 4 で退避していれば git stash pop する。
+#   10. 終了時（手順 2 の HEAD の確認より後に、中断したときも）: 元のブランチへ git checkout し、手順 4 で退避していれば git stash pop する。
 #       ./sf-tools/temp_delta_<PID> を削除する
 #
 # 【前提条件】
@@ -61,7 +66,9 @@
 #   - 追跡していないファイル（.gitignore の対象と、sf-tools/release/ を除く）がある場合、手元で実行したときは、手順 5 で中断する
 #     （手順 8 の git add -A で、無関係なファイルが、同期のコミットに含まれてしまうため）。GitHub Actions 上では、確認しない。
 #     sf-tools/release/（作業ブランチの作業用ファイル）は、確認の対象外で、同期のコミットにも含めない
-#   - main への push は --no-verify（pre-push フックを通さない）。サーバー側の保護（Ruleset）は、そのまま効く
+#   - main への push（手順 8）と、伝播の push（手順 9）は、--no-verify（pre-push フックを通さない）。pre-push フック
+#     （sf-prepush.sh）は、branches.txt のブランチ（保護ブランチ）の上からの push・保護ブランチへの push を、必ず拒否するため
+#     （手元で実行したとき、--no-verify がないと、伝播の push は、すべて失敗する）。サーバー側の保護（Ruleset）は、そのまま効く
 #   - branches.txt が無い・ブランチの定義が無いときは、WARNING を表示し、main のみとして扱う（手順 9 の対象なし）
 #   - 手順 9 の完了のメッセージは、実際に伝播できたブランチだけを表示する。スキップしたブランチ（リモートにない・失敗）が
 #     あれば、WARNING で一覧する（終了コードは 0 のまま）
@@ -71,7 +78,7 @@
 # ------------------------------------------------------------------------------
 # 1. 共通ライブラリの必須設定
 # ------------------------------------------------------------------------------
-readonly SCRIPT_NAME=$(basename "$0" .sh)
+readonly SCRIPT_NAME=$(basename "$0" .sh)  # run 不使用: common.sh の読み込み前（run が未定義）
 readonly LOG_FILE="./sf-tools/logs/${SCRIPT_NAME}.log"
 readonly LOG_MODE="NEW"
 
@@ -79,7 +86,7 @@ readonly LOG_MODE="NEW"
 # ------------------------------------------------------------------------------
 # 2. 共通ライブラリの読み込み
 # ------------------------------------------------------------------------------
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"  # run 不使用: common.sh の読み込み前（run が未定義）
 COMMON_LIB="${SCRIPT_DIR}/../lib/common.sh"
 
 if [[ ! -f "$COMMON_LIB" ]]; then
@@ -87,7 +94,7 @@ if [[ ! -f "$COMMON_LIB" ]]; then
     exit 1
 fi
 if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    awk '/^# ==/{f++; next} f==2{sub(/^# ?/,""); print} f==3{exit}' "${BASH_SOURCE[0]}"
+    awk '/^# ==/{f++; next} f==2{sub(/^# ?/,""); print} f==3{exit}' "${BASH_SOURCE[0]}"  # run 不使用: common.sh の読み込み前（run が未定義）
     exit 0
 fi
 source "$COMMON_LIB"
@@ -126,19 +133,28 @@ done
 # ------------------------------------------------------------------------------
 # sf-init で登録した prod エイリアスの組織情報を取得（本番・Sandbox どちらも許容）
 readonly TARGET_ORG="prod"
-ORG_DISPLAY_JSON=$(run sf org display --target-org "$TARGET_ORG" --json || echo "")
-[[ -z "$ORG_DISPLAY_JSON" ]] && die "prod エイリアスの組織情報を取得できませんでした。sf-init を実行して prod 組織を登録してください。"
+# run 不使用: 終了コードで判定するため（run は、失敗しても、エラーの文言を標準出力に返すため、出力が空かでは判定できない。
+#   以前は、そのため、prod が未登録でも、ここを素通りし、手順 7 の取得で、はじめて中断していた）。
+#   出力は捨てる（--json の出力には、アクセストークンが含まれる。run は、出力をログに記録する）
+if ! sf org display --target-org "$TARGET_ORG" --json > /dev/null 2>&1; then
+    die "prod エイリアスの組織情報を取得できませんでした（sf org display --target-org ${TARGET_ORG} が失敗しました）。"
+fi
 log "INFO" "接続先組織: ${TARGET_ORG}"
 
 # 常に main ブランチで作業する
 readonly BRANCH_NAME="main"
-ORIGINAL_BRANCH=$(run git symbolic-ref --short HEAD || echo "main")
+# 元のブランチ（終了時に戻る先）。detached HEAD のときは、戻る先のブランチがないため、何もせずに中断する（stash の前）
+#   run 不使用: 終了コードで判定するため（run は、失敗しても、エラーの文言を標準出力に返す。以前は、その文言と「main」が
+#   元のブランチとして入り、終了時に戻れないまま、main の上で git stash pop していた）
+ORIGINAL_BRANCH=$(git symbolic-ref -q --short HEAD) \
+    || die "現在の HEAD がブランチを指していません（detached HEAD）。元のブランチに戻れないため、中断します。"
 
 DELTA_DIR="./sf-tools/temp_delta_$$"
 STASH_USED=0
 
 # 終了時に元のブランチへ復帰し、stash した変更を復元、一時ファイルを削除
-trap 'run git checkout "$ORIGINAL_BRANCH" 2>/dev/null; [[ "$STASH_USED" -eq 1 ]] && run git stash pop 2>/dev/null; rm -rf "$DELTA_DIR" ./sf-tools/cmd_out_*.tmp 2>/dev/null' EXIT
+#   rm は run 不使用: 終了時の後始末のため（失敗しても、ほかの後始末を止めない。消すだけの操作をログに残さない）
+trap 'run git checkout "$ORIGINAL_BRANCH" 2>/dev/null; [[ "$STASH_USED" -eq 1 ]] && run git stash pop 2>/dev/null; rm -rf "$DELTA_DIR" 2>/dev/null' EXIT
 
 readonly COMMIT_MSG="定期更新: Salesforce変更の自動反映 ($(date +'%Y-%m-%d'))"
 
@@ -146,6 +162,7 @@ readonly METADATA_CONFIG="./sf-tools/config/metadata.txt"
 [[ ! -f "$METADATA_CONFIG" ]] && die "メタデータ設定ファイルが見つかりません: ${METADATA_CONFIG}"
 METADATA_TYPES=()
 while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%$'\r'}"  # 行末の CR を除く（Windows で編集された CRLF のファイルでも、種類の名前に CR が付かないように）
     [[ "$line" =~ ^[[:space:]]*# ]] && continue  # コメント行をスキップ
     [[ -z "${line//[[:space:]]/}" ]] && continue  # 空行をスキップ
     METADATA_TYPES+=("$line")
@@ -157,7 +174,7 @@ log "INFO" "対象メタデータ (${#METADATA_TYPES[@]} 件): ${METADATA_TYPES[
 # 6. フェーズ定義
 # ------------------------------------------------------------------------------
 
-# 【SWITCH】main ブランチへ切替（他ブランチから実行した場合は stash して切替）
+# 【SWITCH】main ブランチへ切替（他ブランチから実行した場合は、追跡中のファイルに未コミットの変更があれば stash してから切替）
 phase_switch_to_main() {
     if [[ "$ORIGINAL_BRANCH" == "main" ]]; then
         return $RET_OK
@@ -183,7 +200,7 @@ phase_git_update() {
     # main ブランチのローカル変更は Salesforce 組織の内容より優先されないため中止する
     # （stash して復元すると、ローカル変更が retrieve 後にコミットされてしまうため）
     if ! run git diff-index --quiet HEAD --; then
-        die "main ブランチにローカルの未コミット変更があります。Salesforce 組織の内容を正として同期するため、ローカル変更は反映しません。変更を破棄（git checkout .）してから再実行してください。"
+        die "main ブランチに、追跡中のファイルの未コミットの変更があります（Salesforce 組織の内容を正として同期するため、ローカルの変更は、同期に含めません）。"
     fi
 
     # 手元で実行したときは、追跡していないファイル（.gitignore の対象と、sf-tools/release/ を除く）がある場合も中止する。
@@ -280,7 +297,7 @@ PROPAGATED_OK=""        # 伝播できたブランチ（空白区切り）
 PROPAGATED_SKIPPED=""   # 伝播をスキップしたブランチ（ない・失敗）
 phase_propagate_downstream() {
     local downstream_branches
-    downstream_branches=$(get_branch_list | grep -v '^main$')
+    downstream_branches=$(get_branch_list | grep -v '^main$')  # VAR=$(cmd) のため run 不使用
     for branch in $downstream_branches; do
         # リモートにブランチが存在するか確認（出力は不要なため直接呼び出し）
         if ! git ls-remote --exit-code --heads origin "$branch" > /dev/null 2>&1; then
@@ -313,7 +330,9 @@ phase_propagate_downstream() {
             continue
         fi
 
-        if ! run git push origin "$branch"; then
+        # --no-verify: 伝播先は branches.txt のブランチ（保護ブランチ）のため、pre-push フック（sf-prepush.sh）は、必ず拒否する
+        #   （以前は付けておらず、手元で実行すると、伝播の push は、すべて失敗していた）。サーバー側の保護（Ruleset）は、そのまま効く
+        if ! run git push --no-verify origin "$branch"; then
             log "WARNING" "${branch} の push に失敗しました（スキップ）"
             run git checkout main
             PROPAGATED_SKIPPED="${PROPAGATED_SKIPPED}${branch} "
@@ -355,7 +374,7 @@ if [[ $RES -eq $RET_OK ]]; then
     log "SUCCESS" "完了: リポジトリを最新に更新しました。"
     phase_propagate_downstream || die "下流ブランチへの伝播に失敗しました。"
     # 実際に伝播できたブランチだけを表示する（以前は、branches.txt の内容や、スキップの有無にかかわらず、固定の文言を出していた）
-    log "SUCCESS" "下流ブランチへの伝播完了（伝播したブランチ: ${PROPAGATED_OK% }${PROPAGATED_OK:+}$([[ -z "$PROPAGATED_OK" ]] && echo なし)）"
+    log "SUCCESS" "下流ブランチへの伝播完了（伝播したブランチ: ${PROPAGATED_OK% }$([[ -z "$PROPAGATED_OK" ]] && echo なし)）"
     [[ -z "$PROPAGATED_SKIPPED" ]] || log "WARNING" "伝播できなかったブランチ（スキップ）: ${PROPAGATED_SKIPPED% }"
 elif [[ $RES -eq $RET_NO_CHANGE ]]; then
     log "SUCCESS" "完了: Salesforce 組織側に変更はありませんでした。"

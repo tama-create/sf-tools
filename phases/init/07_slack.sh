@@ -8,19 +8,22 @@
 #   sf-init.sh が、管理者用の作業フォルダ（admin）をカレントにして、bash で呼び出す。
 #
 # 【処理の流れ】
-#   7-1. ブラウザで https://api.slack.com/apps を開き、App の作成手順（App Name: sf-notify-<PROJECT_NAME>・
-#        Bot Token のスコープ: chat:write）を表示して、Enter を待つ（q は die）。
+#   7-1. App の作成手順（App Name: sf-notify-<PROJECT_NAME>・Bot Token のスコープ: chat:write）を表示し、
+#        ブラウザで https://api.slack.com/apps を開いて、Enter を待つ（q・EOF は die）。
 #        Bot User OAuth Token を入力させ（read_secret: 入力した文字は * で表示する。空 Enter は再入力。q は die。
 #        xoxb- で始まる形式でなければ、入力し直させる）、Secret SLACK_BOT_TOKEN に登録する（失敗は die）
-#   7-2. チャンネル ID を入力させる。^[CG][A-Z0-9]{8,}$ に合わなければ WARNING を表示して再入力
+#   7-2. チャンネル ID を入力させる（read_or_quit: 空 Enter は再入力。q は die）。^[CG][A-Z0-9]{8,}$ に合わなければ WARNING を表示して再入力
 #        （通知先は全員が参加する共有チャンネル（C… / G…）。DM（D…）・ユーザー（U…）は受け付けない）。
 #        Variable SLACK_CHANNEL_ID に登録する（失敗は die）
-#   7-3. 通知先のチャンネルで /invite @sf-notify-<PROJECT_NAME> を実行するよう案内し、Enter を待つ（q は die）。
+#   7-3. 通知先のチャンネルで /invite @sf-notify-<PROJECT_NAME> を実行するよう案内し、Enter を待つ（q・EOF は die）。
 #        招待は利用者が行う（このスクリプトは、招待も、招待の確認もしない）
 #
 # 【前提条件】
 #   - Phase 2 が書き出した状態ファイル（REPO_FULL_NAME・PROJECT_NAME。空なら die）
 #   - 環境変数 SF_TOOLS_DIR（sf-tools のルート。sf-init.sh が export する）
+#
+# 【補足】
+#   - 終了コード: 0 = OK / 1 = die
 # ==============================================================================
 
 # SF_TOOLS_DIR は sf-init.sh（司令塔）から export される
@@ -28,7 +31,7 @@ PHASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SF_TOOLS_DIR="${SF_TOOLS_DIR:-$(dirname "$(dirname "$PHASE_DIR")")}"
 
 readonly SCRIPT_NAME="sf-init"
-mkdir -p "$HOME/sf-tools/logs" 2>/dev/null || true
+mkdir -p "$HOME/sf-tools/logs" 2>/dev/null || true  # run 不使用: common.sh の読み込み前（run が未定義）
 readonly LOG_FILE="$HOME/sf-tools/logs/${SCRIPT_NAME}.log"
 readonly LOG_MODE="APPEND"  # 司令塔が NEW で初期化済みのため追記
 export SF_INIT_MODE=1

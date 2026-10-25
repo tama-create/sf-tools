@@ -1,19 +1,58 @@
 # ==============================================================================
 # wf-propagate.yml - ブランチ伝播
 # ==============================================================================
+# main への PR がマージされたら、main を staging と develop へ、PR を通さずに直接マージして push する（Git のブランチだけ。
+# Salesforce の組織には、接続しない）。staging / develop ブランチがない構成（main のみ・main + staging）では、そのブランチへの
+# 伝播をスキップする（失敗にしない）。コンフリクトしたら、マージを取り消して、Slack に通知し、ジョブを失敗させる。
+# Actions の画面での名前は「[propagate] ブランチ伝播」（最上位の name:）。
 #
-# 【概要】
-#   main への PR マージ後、staging と develop ブランチへ変更を直接伝播する。
-#   staging / develop ブランチがない構成（main のみ・main + staging）では、そのブランチへの伝播を
-#   スキップする（失敗にしない）。
+# 【起動の条件】
+#   - pull_request の closed で、マージ先が main のとき（マージせずに閉じた PR でも起動するが、ジョブはスキップされる）
+#   - workflow_dispatch（手動の実行。入力なし）。main で実行したときだけ、伝播する（ほかのブランチで実行すると、
+#     手順 1・2（取得・ユーザーの設定）だけを行い、伝播以降のステップはすべてスキップされ、成功で終わる）
+#   - 起動しない場合: main 以外（staging / develop など）へのマージ、PR の作成・更新、ブランチへの直接の push
+#     （sf-metasync.sh による main への push を含む。sf-metasync.sh は、自分で伝播する）。schedule はない
 #
-# 【必要な GitHub Secrets（このリポジトリに設定すること）】
-#   PAT_TOKEN        : GitHub PAT（ブランチ保護ルールのバイパスに使用）
-#   SLACK_BOT_TOKEN  : Slack API の Bot Token（コンフリクト時の通知に使用）
+# 【ジョブ】
+#   1. 下流伝播（propagate）: PR がマージされた、または workflow_dispatch のときだけ実行する（それ以外は、スキップされる）。
+#      同時実行の制御（concurrency。グループ propagate・実行中のものは取り消さない）で、1 つずつ動く（【補足】参照）
+#   ブランチ保護との関係: 必須チェックではない（PR を閉じたあとに動くため、マージの可否に関係しない）
 #
-# 【必要な GitHub Variables（このリポジトリに設定すること）】
-#   SLACK_CHANNEL_ID : 通知先 Slack チャンネル ID
+# 【処理の流れ】
+#   1. 全履歴（fetch-depth: 0）で、Secret PAT_TOKEN を使って、リポジトリを取得する（以降の git push も、この PAT で行う）
+#   2. コミットのユーザーを github-actions[bot]（github-actions[bot]@users.noreply.github.com）にする
+#   3. main → staging（マージ先、または実行したブランチが main のときだけ）:
+#        origin/staging がなければ、::notice を出して、スキップする（result=skipped）。
+#        あれば、git checkout staging → git merge origin/main --no-edit → git push origin staging（result=success）。
+#        マージがコンフリクトしたら、git merge --abort して、::error を出す（result=conflict。このステップは成功で終わる）
+#   4. main → develop: 手順 3 と同じ（対象は develop）。手順 3 がコンフリクトでも、実行する
+#   5. （手順 3・4 のどちらかがコンフリクトのとき。前のステップが失敗しても実行する）Slack の chat.postMessage に、
+#      コンフリクトしたブランチ・PR・実行日時（日本時間）・Actions のログの URL を送る。送信に失敗した（curl の失敗・
+#      応答の ok が true でない）ときは、::warning を出す（このステップは失敗にしない。応答の JSON は、ランナーの node で読む）
+#   6. （手順 5 と同じ条件）exit 1 で、ジョブを失敗させる
 #
+# 【必要な Secrets / Variables】
+#   Secrets（このリポジトリに設定する）:
+#     PAT_TOKEN        : GitHub の PAT（Classic。repo・workflow の権限。sf-init の Phase 6 が登録する）。
+#                        staging への push で、Ruleset protect-staging（必須チェック）をバイパスする（PAT の持ち主が
+#                        Admin のとき）ためと、.github/workflows/ の変更を含むマージを push するために使う
+#     SLACK_BOT_TOKEN  : Slack API の Bot Token（コンフリクト時の通知に使用。sf-init の Phase 7 が登録する）
+#   Variables（このリポジトリに設定する）:
+#     SLACK_CHANNEL_ID : 通知先 Slack チャンネル ID（sf-init の Phase 7 が登録する）
+#
+# 【補足】
+#   - 伝播の push は、pull_request ではないため、wf-release.yml は動かない（staging / develop の組織には、リリースしない）
+#   - PAT の期限切れ・未設定は、手順 1 のチェックアウトで失敗し、そのあとの手順は、すべて行われない。PAT の権限不足（持ち主が
+#     Admin でない・workflow の権限がない）は、git push の時点で、そのステップが失敗し、ジョブは失敗する。staging の push が
+#     失敗したときは、手順 4 は行われない。Slack への通知（手順 5）は、コンフリクトがあったときだけで、push の失敗だけでは、
+#     通知しない
+#   - コンフリクトしたブランチは、手動で解消する（main を、そのブランチにマージする）
+#   - 同時実行の制御: 続けてマージしても、伝播は 1 つずつ動く（並行すると、後の git push が拒まれるため）。待機中の実行は、
+#     GitHub の仕様で、より新しい実行に置き換えられ、「取り消し」と表示される。新しい実行は、開始の時点の最新の main を
+#     伝播するため、置き換えられた分の伝播も含まれる
+#   - wf-metasync.yml との重なりは、防がない（グループが別のため、並行して動ける）。重なって、後の push が拒まれたときは、
+#     ジョブが失敗する（Slack には通知しない）ので、再実行する。グループを共通にすると、待機中の実行が置き換えられて、
+#     伝播か同期のどちらかが、黙って取り消されるため、共通にしない
 # ==============================================================================
 name: "[propagate] ブランチ伝播"
 on:
@@ -28,12 +67,18 @@ jobs:
     name: 下流伝播
     if: github.event.pull_request.merged == true || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    # 伝播は、1 つずつ動かす（並行すると、後の git push が、先の push に追い越されて拒まれるため）。
+    #   実行中のものは取り消さない。待機中のものは、GitHub の仕様で、より新しい実行に置き換えられる（取り消される）が、
+    #   新しい実行は、その時点の最新の main を伝播するため、伝播の漏れはない
+    concurrency:
+      group: propagate
+      cancel-in-progress: false
     permissions:
       contents: write
 
     steps:
       # --------------------------------------------------------------------------
-      # Step 1: 全履歴付きでリポジトリをチェックアウト
+      # Step 1: 全履歴付きでリポジトリをチェックアウト（PAT_TOKEN を使う。以降の git push も、この PAT で行われる）
       # --------------------------------------------------------------------------
       - name: ソースコードを取得
         uses: actions/checkout@v4
@@ -50,13 +95,14 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
       # --------------------------------------------------------------------------
-      # Step 3: main → staging へ変更を伝播
+      # Step 3: main → staging へ変更を伝播（マージ先・実行したブランチが main のときだけ）
+      #   result: success（push した）/ skipped（staging がない）/ conflict（マージを取り消した。このステップは成功で終わる）
       # --------------------------------------------------------------------------
       - name: main から staging へ変更を伝播
         id: merge_staging
         if: ${{ (github.event.pull_request.base.ref || github.ref_name) == 'main' }}
         run: |
-          # ブランチがない構成（main のみ・main + staging など）では、失敗にせずスキップする
+          # staging がない構成（main のみ）では、失敗にせずスキップする
           if ! git rev-parse --verify --quiet origin/staging >/dev/null; then
             echo "result=skipped" >> "$GITHUB_OUTPUT"
             echo "::notice title=スキップ::staging ブランチがないため、main → staging の伝播をスキップしました。"
@@ -73,7 +119,7 @@ jobs:
           fi
 
       # --------------------------------------------------------------------------
-      # Step 4: main → develop へ変更を伝播
+      # Step 4: main → develop へ変更を伝播（Step 3 と同じ。Step 3 がコンフリクトでも実行する）
       # --------------------------------------------------------------------------
       - name: main から develop へ変更を伝播
         id: merge_develop
@@ -96,7 +142,8 @@ jobs:
           fi
 
       # --------------------------------------------------------------------------
-      # Step 5: コンフリクト発生時の Slack 通知
+      # Step 5: コンフリクト発生時の Slack 通知（前のステップが失敗しても実行する。送信の失敗は ::warning にし、
+      #   このステップは失敗にしない）
       # --------------------------------------------------------------------------
       - name: コンフリクト発生時に Slack へ通知
         if: |
@@ -140,10 +187,16 @@ jobs:
           MESSAGE=":rotating_light: *ブランチ伝播でコンフリクトが発生しました*\n• main → \`${CONFLICTS}\` のマージに失敗\n• 手動でコンフリクトを解消してください${PR_TEXT}\n• 実行日時: ${DATETIME}\n• <${RUN_URL}|Actions ログを見る>"
           PAYLOAD="{\"channel\": \"${SLACK_CHANNEL_ID}\", \"text\": \"${MESSAGE}\"}"
 
-          curl -s -X POST "https://slack.com/api/chat.postMessage" \
+          # 送信の失敗（curl の失敗・応答の ok が true でない（Token の誤り・Bot がチャンネルにいないなど））は、::warning を出すだけで、
+          #   このステップは失敗にしない（ジョブは、Step 6 で失敗する）。応答の JSON は、Node で読む（ランナーに入っている node を使う）
+          RESPONSE=$(curl -sS -X POST "https://slack.com/api/chat.postMessage" \
             -H "Authorization: Bearer ${SLACK_BOT_TOKEN}" \
             -H "Content-Type: application/json" \
-            -d "$PAYLOAD"
+            -d "$PAYLOAD" || true)   # 意図的なエラー無視（下で応答を確かめ、::warning にする）
+          echo "Slack の応答: $RESPONSE"
+          if ! node -e 'process.exit(JSON.parse(process.argv[1]).ok === true ? 0 : 1)' "$RESPONSE" 2>/dev/null; then
+            echo "::warning title=Slack 通知の失敗::Slack への通知が、失敗しました（応答の ok が true ではありません）。Secret SLACK_BOT_TOKEN・Variable SLACK_CHANNEL_ID を確認してください。"
+          fi
 
       # --------------------------------------------------------------------------
       # Step 6: コンフリクトがあった場合はジョブを失敗させる

@@ -402,6 +402,35 @@ test_git_origin_redacted() {
     teardown "$mb"; _rm_base "$dir"
 }
 
+# --project の XXXX と、クローンのリポジトリ名の比較は、大文字と小文字を区別しない（GitHub は、区別しない）。
+#   一致したときは、XXXX を、クローンの綴りにそろえる（以前は、区別して比べ、一致せずに、対話に進んでいた）
+test_job_identity_project_case() {
+    local mb dir out; mb=$(setup_mock_bin); create_mock_gh "$mb"; dir=$(_mkdirs)
+    _mkclone "$dir" "JOB-1" "force-acme" "https://github.com/org-x/force-acme.git"
+    out=$(_run_in "$dir" "" 'resolve_job_identity "" "ACME"' "$mb")
+    _has "$out" "owner=org-x project=acme" "--project ACME → force-acme のクローンから、オーナーが決まる（XXXX はクローンの綴り）"
+    out=$(_run_in "$dir" "" 'resolve_job_identity "" "Force-Acme"' "$mb")
+    _has "$out" "owner=org-x project=acme" "--project Force-Acme → 同じく、クローンから決まる"
+    _mkclone "$dir" "JOB-2" "force-ACME" "https://github.com/org-z/force-ACME.git"
+    out=$(_run_in "$dir" '2\n' 'resolve_job_identity "" "acme"' "$mb")
+    _has "$out" "どのオーナーの force-acme ですか" "綴りの違う同じ XXXX が、複数のオーナーにある → 選ばせる"
+    _has "$out" "owner=org-z project=ACME" "選んだクローンの、オーナーと綴りを使う（2 = org-z/force-ACME）"
+    teardown "$mb"; _rm_base "$dir"
+}
+
+# _pick_from_list: 番号は 10 進数として読む（08・09 を 8 進数として扱って、エラーにしない）
+test_pick_from_list_decimal() {
+    local mb out; mb=$(setup_mock_bin)
+    out=$(_run_in "${TMPDIR:-/tmp}" '08\n' '_pick_from_list X "選んでください" a b c d e f g h i; echo "X=[$X]"' "$mb")
+    _has "$out" "X=[h]" "08 → 8 番目（h）を選ぶ"
+    _hasnt "$out" "value too great" "08 → 8 進数のエラーが出ない"
+    out=$(_run_in "${TMPDIR:-/tmp}" '09\n' '_pick_from_list X "選んでください" a b c d e f g h i; echo "X=[$X]"' "$mb")
+    _has "$out" "X=[i]" "09 → 9 番目（i）を選ぶ"
+    out=$(_run_in "${TMPDIR:-/tmp}" '0\n10\n1234567890\n2\n' '_pick_from_list X "選んでください" a b; echo "X=[$X]"' "$mb")
+    _has "$out" "X=[b]" "0・範囲外・10 桁の数字は、再入力 → 2 で b"
+    teardown "$mb"
+}
+
 test_parse_github_remote
 test_normalize_project_name
 test_discover_clones
@@ -416,6 +445,8 @@ test_state_matches_repo
 test_setup_complete_mark
 test_init_identity_existing_case_and_state
 test_job_identity_owner_filter
+test_job_identity_project_case
+test_pick_from_list_decimal
 test_clone_setup_completed
 test_git_origin_redacted
 

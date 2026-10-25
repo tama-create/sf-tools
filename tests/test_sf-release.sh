@@ -127,7 +127,10 @@ test_protected_org_local_blocked() {
     local ec=$?
 
     assert_exit_fail $ec "保護組織(main) + ローカル → エラー終了"
-    assert_output_contains "$out" "PR 経由で GitHub Actions" "保護組織(main) + ローカル → 適切なエラーメッセージ"
+    assert_output_contains "$out" "共有環境（予約名）のため、ローカルから実行できません" "保護組織(main) + ローカル → 適切なエラーメッセージ"
+    echo "$out" | grep -q "PR 経由で GitHub Actions を使用してください" \
+        && fail "保護組織(main) + ローカル → die に復旧の案内を含めない" \
+        || pass "保護組織(main) + ローカル → die に復旧の案内を含めない"
     teardown "$td" "$mb"
 }
 
@@ -207,7 +210,7 @@ test_target_without_value_rejected() {
         out=$(cd "$td" && PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-release.sh" $args 2>&1)
         ec=$?
         assert_exit_fail $ec "値のない -t / --target（${args}）→ エラー終了"
-        assert_output_contains "$out" "組織のエイリアスを指定してください" "値のない -t / --target（${args}）→ 理由が表示される"
+        assert_output_contains "$out" "の値（組織のエイリアス）がない、または - で始まっています" "値のない -t / --target（${args}）→ 理由が表示される"
         assert_file_not_contains "$MOCK_CALL_LOG" "project deploy" "値のない -t / --target（${args}）→ デプロイしない"
         teardown "$td" "$mb"
     done
@@ -224,6 +227,29 @@ test_personal_alias_allowed() {
     ec=$?
     assert_exit_ok $ec "個人用の組織(dev00) + ローカル → 実行できる"
     assert_file_contains "$MOCK_CALL_LOG" "project deploy" "個人用の組織(dev00) + ローカル → デプロイされる"
+    teardown "$td" "$mb"
+}
+
+# 名前を付け替えた本番組織（予約名ではない）も、ローカルからは拒否する。種類を確認できない組織も拒否する
+test_renamed_production_org_denied() {
+    local td mb mh out ec
+    setup_std_env td mb mh
+    create_all_mocks "$mb"
+    setup_release_dir "$td"
+    unset GITHUB_ACTIONS
+    out=$(cd "$td" && PATH="$mb:$PATH" MOCK_SF_ORG_INFO='{"status":0,"result":{"records":[{"attributes":{"type":"Organization"},"Id":"00D000000000009AAA","Name":"Real Prod","IsSandbox":false,"OrganizationType":"Enterprise Edition","TrialExpirationDate":null}]}}' SF_DEPLOY_CONFIRMED=1 bash "$SF_TOOLS_DIR/bin/sf-release.sh" --release --target myprod 2>&1)
+    ec=$?
+    assert_exit_fail $ec "名前を付け替えた本番組織(myprod) + ローカル → エラー終了"
+    assert_output_contains "$out" "本番組織のため、ローカルから実行できません" "本番組織 → 拒否の旨が表示される"
+    assert_file_not_contains "$MOCK_CALL_LOG" "project deploy" "本番組織 → デプロイしない"
+    out=$(cd "$td" && PATH="$mb:$PATH" MOCK_SF_ORG_QUERY_EXIT=1 SF_DEPLOY_CONFIRMED=1 bash "$SF_TOOLS_DIR/bin/sf-release.sh" --release --target mystg 2>&1)
+    ec=$?
+    assert_exit_fail $ec "組織の種類を確認できない + ローカル → エラー終了"
+    assert_output_contains "$out" "組織の種類を確認できないため、ローカルから実行できません" "確認できない → 拒否の旨が表示される"
+    # GitHub Actions 上では、組織の種類は調べない（共有環境へのリリースは、Actions の役目）
+    out=$(cd "$td" && GITHUB_ACTIONS=true PATH="$mb:$PATH" MOCK_SF_ORG_INFO='{"status":0,"result":{"records":[{"attributes":{"type":"Organization"},"Id":"00D000000000009AAA","Name":"Real Prod","IsSandbox":false,"OrganizationType":"Enterprise Edition","TrialExpirationDate":null}]}}' bash "$SF_TOOLS_DIR/bin/sf-release.sh" --release --target myprod 2>&1)
+    ec=$?
+    assert_exit_ok $ec "GitHub Actions 上 → 組織の種類にかかわらず、実行できる"
     teardown "$td" "$mb"
 }
 
@@ -359,6 +385,7 @@ case "$1 $2" in
         printf '<?xml version="1.0" encoding="UTF-8"?>\n<Package xmlns="http://soap.sforce.com/2006/04/metadata">\n    <version>64.0</version>\n</Package>\n' > "$OUT_DIR/$OUT_NAME"
         exit 0 ;;
     "org display") echo '{"result":{"alias":"testorg","id":"00D000000000001AAA"}}'; exit 0 ;;
+    "data query") echo '{"status":0,"result":{"records":[{"Id":"00D000000000001AAA","Name":"Mock Sandbox","IsSandbox":true,"OrganizationType":"Enterprise Edition","TrialExpirationDate":null}]}}'; exit 0 ;;  # 組織の種類の確認（Sandbox）
 esac
 exit 0
 EOF
@@ -370,6 +397,52 @@ EOF
     assert_exit_fail $ec "空のマニフェスト: 非ゼロで終了する"
     assert_output_contains "$out" "メンバーが 1 つも含まれていません" "空のマニフェスト: 理由が表示される"
     assert_file_not_contains "$MOCK_CALL_LOG" "project deploy" "空のマニフェスト: デプロイまで、進まない"
+    unset MOCK_SF_ORG_JSON
+    teardown "$td" "$mb"
+}
+
+# 回帰: マニフェストの統合（merge_package_xml）の失敗で、中断する（以前は戻り値を見ていなかった）
+#   出力先の package.xml をフォルダにして、統合の書き込みを失敗させる
+test_merge_failure_aborts() {
+    local td mb mh
+    setup_std_env td mb mh
+    create_all_mocks "$mb"
+    setup_release_dir "$td"
+    export MOCK_SF_ORG_JSON='{"result":{"alias":"testorg","id":"00D000000000001AAA"}}'
+    local rd="$td/sf-tools/release/feature/test"
+    mkdir -p "$rd/package.xml/blocker"
+
+    local out; out=$(cd "$td" && PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-release.sh" --no-open 2>&1)
+    assert_exit_fail $? "統合の失敗 → 非ゼロで終了する"
+    assert_output_contains "$out" "マニフェストの統合（merge_package_xml）に失敗しました" "統合の失敗 → 理由が表示される"
+    assert_file_not_contains "$MOCK_CALL_LOG" "project deploy" "統合の失敗 → デプロイまで、進まない"
+    assert_file_not_exists "$rd/package.files.xml" "統合の失敗 → 統合前の一時ファイルを残さない"
+    unset MOCK_SF_ORG_JSON
+    teardown "$td" "$mb"
+}
+
+# 回帰: sf-check.sh のエラーで中断するとき、die は事実だけ（「上記のエラーを修正」と書かない）。sf-check.sh の理由は表示される
+test_check_error_message() {
+    local td mb mh
+    setup_std_env td mb mh
+    create_all_mocks "$mb"
+    setup_release_dir "$td"
+    export MOCK_SF_ORG_JSON='{"result":{"alias":"testorg","id":"00D000000000001AAA"}}'
+    printf '[files]\nforce-app/main/default/classes/NoSuchClass.cls\n' > "$td/sf-tools/release/feature/test/deploy-target.txt"
+
+    local out; out=$(cd "$td" && PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-release.sh" --no-open 2>&1)
+    assert_exit_fail $? "sf-check.sh のエラー → 非ゼロで終了する"
+    assert_output_contains "$out" "ターゲットファイルの検証（sf-check.sh）でエラーがありました" "sf-check.sh のエラー → 事実だけのメッセージ"
+    assert_output_contains "$out" "パスが存在しません" "sf-check.sh のエラー → 理由（どの行が、なぜ）が表示される"
+    echo "$out" | grep -q "上記のエラーを修正" \
+        && fail "sf-check.sh のエラー → die に復旧の案内を含めない" \
+        || pass "sf-check.sh のエラー → die に復旧の案内を含めない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "project deploy" "sf-check.sh のエラー → デプロイまで、進まない"
+    # 端末では、run を通すと、-v がなければ、sf-check.sh の出力が画面に出ない（テストの標準出力は端末でないため、上では区別できない）。
+    #   run を通して呼んでいないことを、コードで確かめる
+    grep -q 'run bash "${SCRIPT_DIR}/sf-check.sh"' "$SF_TOOLS_DIR/bin/sf-release.sh" \
+        && fail "sf-check.sh を run を通さずに呼ぶ（出力を画面に出す）" \
+        || pass "sf-check.sh を run を通さずに呼ぶ（出力を画面に出す）"
     unset MOCK_SF_ORG_JSON
     teardown "$td" "$mb"
 }
@@ -404,10 +477,13 @@ test_protected_org_staging_blocked
 test_reserved_aliases_blocked
 test_target_without_value_rejected
 test_personal_alias_allowed
+test_renamed_production_org_denied
 test_sf_cli_abort
 test_mixed_files_and_members
 test_members_only_and_files_only
 test_empty_manifest_aborts
+test_merge_failure_aborts
+test_check_error_message
 test_ignore_missing_directive
 
 print_summary

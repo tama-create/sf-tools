@@ -18,7 +18,7 @@
 #          git pull --ff-only origin main（失敗は die）
 #        - REPO_DIR はあるが、.git がない: die
 #        - REPO_DIR がない: git clone -c core.longpaths=true https://github.com/{REPO_FULL_NAME}.git（失敗は die）
-#   4. ${SF_TOOLS_DIR}/templates/ の全ファイル・全フォルダを、cp -r で REPO_DIR にコピーする（失敗は die）。
+#   4. ${SF_TOOLS_DIR}/templates/ の全ファイル・全フォルダ（. で始まるものを含む）を、cp -r で REPO_DIR にコピーする（失敗は die）。
 #      同名のファイルは上書きする。再実行でも同じで、クローンで変更した同名のファイルは、テンプレートの内容に戻る
 #   5. REPO_DIR/sfdx-project.json があれば、__REPO_NAME__ を REPO_NAME に置換する（sed_inplace。失敗は die）
 #
@@ -29,7 +29,9 @@
 # 【補足】
 #   - 可視性は、常に Private
 #   - sf-tools/templates/ が、雛形の唯一の正本（force-template リポジトリは廃止済み）
-#   - core.longpaths=true は、クローンの設定に残る（Windows のパスの長さの上限対策。ほかの OS では無視される）
+#   - core.longpaths=true は、この Phase でクローンしたときだけ付け、クローンの設定に残る（Windows のパスの長さの上限対策。
+#     ほかの OS では無視される）。既存のクローンには、設定しない
+#   - 終了コード: 0 = OK / 1 = die
 # ==============================================================================
 
 # SF_TOOLS_DIR は sf-init.sh（司令塔）から export される
@@ -37,7 +39,7 @@ PHASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SF_TOOLS_DIR="${SF_TOOLS_DIR:-$(dirname "$(dirname "$PHASE_DIR")")}"
 
 readonly SCRIPT_NAME="sf-init"
-mkdir -p "$HOME/sf-tools/logs" 2>/dev/null || true
+mkdir -p "$HOME/sf-tools/logs" 2>/dev/null || true  # run 不使用: common.sh の読み込み前（run が未定義）
 readonly LOG_FILE="$HOME/sf-tools/logs/${SCRIPT_NAME}.log"
 readonly LOG_MODE="APPEND"  # 司令塔が NEW で初期化済みのため追記
 export SF_INIT_MODE=1
@@ -63,7 +65,7 @@ if run gh repo view "$REPO_FULL_NAME" --json name 2>/dev/null; then
     log "WARNING" "リポジトリはすでに存在します。作成をスキップします: ${REPO_FULL_NAME}"
 else
     log "INFO" "GitHub リポジトリを作成中..."
-    # 常に Private で作成する
+    # 常に Private で作成する（作成の成否は、終了コードではなく、直後の gh repo view で確認する）
     run gh repo create "$REPO_FULL_NAME" --private
     if ! run gh repo view "$REPO_FULL_NAME" --json name 2>/dev/null; then
         die "リポジトリの作成に失敗しました。
@@ -112,7 +114,7 @@ log "INFO" "テンプレートファイルをコピー中: ${tmpl_src} → ${REP
 run mkdir -p "$REPO_DIR" || die "REPO_DIR を作成できません: $REPO_DIR"
 # cp -r でテンプレート配下の全ファイル・ディレクトリをコピー（上書き）
 # サブディレクトリ（.github/workflows/, force-app/, .vscode/ 等）も含む
-cp -r "${tmpl_src}/." "$REPO_DIR/" \
+run cp -r "${tmpl_src}/." "$REPO_DIR/" \
     || die "テンプレートファイルのコピーに失敗しました。"
 log "SUCCESS" "テンプレートファイルをコピーしました"
 
@@ -120,7 +122,7 @@ log "SUCCESS" "テンプレートファイルをコピーしました"
 sfdx_json="${REPO_DIR}/sfdx-project.json"
 if [[ -f "$sfdx_json" ]]; then
     # sed_inplace（lib/platform.sh）: GNU / BSD（macOS）の sed の、どちらでも動く、その場の置換
-    sed_inplace "s/__REPO_NAME__/${REPO_NAME}/g" "$sfdx_json" \
+    run sed_inplace "s/__REPO_NAME__/${REPO_NAME}/g" "$sfdx_json" \
         || die "sfdx-project.json のプレースホルダー置換に失敗しました。"
     log "SUCCESS" "sfdx-project.json のプロジェクト名を設定しました: ${REPO_NAME}"
 fi

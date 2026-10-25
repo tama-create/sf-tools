@@ -39,7 +39,7 @@
   <thead><tr><th>言葉</th><th>意味</th></tr></thead>
   <tbody>
     <tr><td><strong>プロジェクト</strong>（<code>force-XXXX</code>）</td><td>1 つの Salesforce 開発の単位です。GitHub 上のリポジトリ 1 つに対応します。名前は <code>force-</code> で始まり、<code>XXXX</code> の部分は管理者が決めます（例: <code>force-acme</code>）。<strong>管理者が、sf-tools の雛形で先に作ります。</strong>開発者は、それができてから使い始めます</td></tr>
-    <tr><td><strong>ランチャー</strong>（<code>sf-launcher.sh</code>）</td><td>sf-tools の毎日のコマンドを、メニューの番号で選んで実行する画面です。<code>sf-job.sh</code> や <code>sf-start.sh</code> のあとに、自動で開きます。コマンドを覚えなくても使えるので、おすすめです</td></tr>
+    <tr><td><strong>ランチャー</strong>（<code>sf-launcher.sh</code>）</td><td>sf-tools の毎日のコマンド（Check・Push・Next・Dryrun・Deploy など）を、メニューの番号で選んで実行する画面です。番号を 1 文字押すだけで（Enter は不要）実行し、終わるとメニューに戻ります。<code>sf-start.sh</code> の最後に、自動で開きます（<code>sf-job.sh</code> も、最後に <code>sf-start.sh</code> を動かすので、同じく開きます）。コマンドの名前を覚えなくても使えるので、開発者の方には、ランチャーをおすすめします</td></tr>
     <tr><td><strong>リポジトリ</strong></td><td>ファイルと、その変更の履歴を、しまっておく場所です（GitHub 上にあります）</td></tr>
     <tr><td><strong>クローン</strong>（clone）</td><td>リポジトリを、自分のパソコンにコピーすることです。コピーしたものも、クローンと呼びます</td></tr>
     <tr><td><strong>作業フォルダ</strong></td><td>作業用のフォルダを、まとめて置く場所です。どこでも構いません（おすすめは <code>~/sf</code> のような短い名前）</td></tr>
@@ -58,7 +58,10 @@
     <tr><td><strong>マージ</strong></td><td>PR の変更を、取り込み先のブランチに合わせることです</td></tr>
     <tr><td><strong>ワークフロー</strong>（GitHub Actions）</td><td>GitHub の上で、自動で動く処理です。この文書では、検証・リリース・同期などを行う仕組みを、ワークフローと呼びます。人が操作しなくても、PR を作ると動き出します</td></tr>
     <tr><td><strong>フック</strong></td><td>コミットやプッシュの直前に、自動で動くチェックです。まちがった内容を、送る前に止めてくれます</td></tr>
-    <tr><td><strong>ブランチ保護</strong>（Ruleset）</td><td><code>main</code> などの大切なブランチに、直接、変更を送れないようにする GitHub の設定です。必ず PR を通すので、検証を飛ばせません</td></tr>
+    <tr><td><strong>作業用のブランチ</strong></td><td>開発者が、1 つの作業のために作るブランチです。<code>sf-job.sh</code> が、<code>main</code> の最新から、ジョブ名と同じ名前で作ります。変更は、ここで行い、PR で共有の環境のブランチへ取り込みます</td></tr>
+    <tr><td><strong>環境ブランチ</strong>（保護ブランチ）</td><td>共有の段階に対応するブランチ（<code>main</code> / <code>staging</code> / <code>develop</code>）のことです。プロジェクトの <code>sf-tools/config/branches.txt</code> に書かれています。この上では、直接、作業しません。<code>sf-push.sh</code>・<code>sf-next.sh</code>・<code>sf-deploy.sh</code> などは、この上では止まります。フック（pre-push）も、このブランチへの直接のプッシュを止めます。変更は、作業用のブランチから PR を出して、取り込みます。文書によって「環境ブランチ」「保護ブランチ」と呼びますが、同じものです</td></tr>
+    <tr><td><strong>ブランチ保護</strong>（Ruleset）</td><td>大切なブランチを守るための、GitHub の設定です（Ruleset は、GitHub でのこの設定の名前です）。<code>sf-init.sh</code> が、<code>main</code> と <code>staging</code> に、<code>protect-main</code>・<code>protect-staging</code> という名前で設定します。ブランチの削除と、強制プッシュ（履歴の書き換え）を禁止し、PR をマージする前に、必須チェックが通ることを求めます。リポジトリの管理者は、このルールを越えられます（自動のワークフローが、管理者の Token で <code>main</code> に送るためです）。無料プランの非公開リポジトリなどでは、設定できないことがあります（<a href="../admin/setup.html#in-rules">セットアップ</a>）</td></tr>
+    <tr><td><strong>必須チェック</strong></td><td>「これが成功しないと、PR をマージできない」と、ブランチ保護に登録したチェックです。sf-tools では、<code>対象ファイル確認</code>・<code>デプロイ検証</code>・<code>順序チェック</code> の 3 つです。名前が、ワークフローのジョブの名前と合っていないと、いつまでも満たされず、PR をマージできなくなります（<a href="../admin/workflows.html#required-checks">ワークフロー</a>）</td></tr>
   </tbody>
 </table>
 
@@ -70,6 +73,10 @@
     <tr><td><strong>段階</strong></td><td>変更を、順番に確かめながら本番へ進めるための、段のことです。<code>develop</code>（開発）→ <code>staging</code>（検証）→ <code>main</code>（本番）の 3 段が標準です。段ごとに、ブランチと Salesforce の組織が、1 つずつ対応します。小さなプロジェクトは、<code>main</code> だけの 1 段でも使えます</td></tr>
     <tr><td><strong>Phase</strong>（フェーズ）</td><td><code>sf-init.sh</code> の内部の処理の単位です（1〜10）。画面に出る「ステップ n / 9」とは、番号がずれています。<code>--resume</code> / <code>--only</code> を使うときだけ、意識します（<a href="../admin/setup.html#phase-map">ステップとの対応</a>）</td></tr>
     <tr><td><strong>環境</strong></td><td>段階と同じ意味で使います（本番環境・検証環境・開発環境）</td></tr>
+    <tr><td><strong>エイリアス</strong></td><td>接続する組織に付ける、短い呼び名です（例: <code>myorg</code>）。Salesforce CLI（<code>sf</code>）でログインするときに付け、コマンドは、この名前で組織を選びます</td></tr>
+    <tr><td><strong>共有の環境</strong>（共有環境）</td><td>チームで共有する段階（<code>main</code> / <code>staging</code> / <code>develop</code>）の組織のことです。変更は、PR をマージしたときに、GitHub 上のワークフローが反映します。手元のパソコンからは、dry-run も反映もできません</td></tr>
+    <tr><td><strong>予約名</strong></td><td>共有の環境の組織のために取ってある、エイリアスの名前です（<code>prod</code> / <code>staging</code> / <code>develop</code> / <code>main</code>）。この名前の組織には、手元から dry-run も反映もできません。自分用の組織に、この名前を付けないでください</td></tr>
+    <tr><td><strong>自分用の組織</strong></td><td>開発者が、1 人で試すために使う組織です（個人の Sandbox・Developer Edition など）。手元から dry-run や反映ができるのは、この組織だけです。本番の組織は、名前に関係なく、手元からは使えません（種類を確かめられない組織も、念のため止まります。<a href="daily.html#own-org-only">日々の作業</a>）</td></tr>
   </tbody>
 </table>
 
@@ -78,9 +85,9 @@
   <thead><tr><th>言葉</th><th>意味</th></tr></thead>
   <tbody>
     <tr><td><strong>リリース</strong>（デプロイ）</td><td>変更を、Salesforce の組織に反映することです</td></tr>
-    <tr><td><strong>dry-run</strong>（検証）</td><td>実際には反映せずに、「反映できるか」だけを確かめることです。本番を変えずに、安心して試せます。sf-tools のリリースは、<strong>まず dry-run</strong> が基本です</td></tr>
+    <tr><td><strong>dry-run</strong>（検証）</td><td>実際には反映せずに、「反映できるか」だけを確かめることです。組織の中身は変わらないので、安心して試せます。sf-tools のリリースは、<strong>まず dry-run</strong> が基本です。手元のパソコンから dry-run できるのは、自分用の組織だけです（ランチャーの 4 Dryrun）。共有の環境と本番の組織への dry-run は、PR を作ったときに、GitHub 上のワークフローが自動で行います</td></tr>
     <tr><td><strong>メタデータ</strong></td><td>Apex クラス・項目・画面レイアウトなど、Salesforce の設定や部品のことです</td></tr>
-    <tr><td><strong>ターゲットファイル</strong></td><td>「何を反映するか」「何を削除するか」を書いておくファイルです（<code>deploy-target.txt</code> と <code>remove-target.txt</code>）</td></tr>
+    <tr><td><strong>ターゲットファイル</strong></td><td>「何を反映するか」「何を削除するか」を書いておくファイルです（<code>deploy-target.txt</code> と <code>remove-target.txt</code>）。作業用のブランチごとに、プロジェクトの中の <code>sf-tools/release/&lt;ブランチ名&gt;/</code> に置きます。どちらにも何も書いていないときは、「デプロイ対象なし」として、何も反映しません（<a href="daily.html">日々の作業</a>）</td></tr>
     <tr><td><strong>メタデータの同期</strong></td><td>組織の最新の状態を、Git に取り込む処理です。手元の変更とは関係なく、組織で直接加えられた変更も、Git に残せます</td></tr>
   </tbody>
 </table>
@@ -92,9 +99,9 @@
     <tr><td><strong>Secret</strong></td><td>GitHub に登録して、人にも見えないように隠しておく情報です（秘密鍵や Token など）</td></tr>
     <tr><td><strong>Variable</strong></td><td>GitHub に登録する情報のうち、見えても問題のないものです（ユーザー名や URL など）</td></tr>
     <tr><td><strong>Token</strong>（トークン）</td><td>長い英数字の文字列で、「合言葉」のように使います。パスワードの代わりに、ツールどうしが、おたがいを確かめます</td></tr>
-    <tr><td><strong>PAT</strong></td><td>GitHub の Personal Access Token のことで、GitHub の「合鍵」のようなものです。ワークフローが、リポジトリを更新するために使います</td></tr>
+    <tr><td><strong>PAT</strong></td><td>GitHub の Personal Access Token のことで、GitHub の「合鍵」のようなものです。ワークフローが、リポジトリを更新するために使います。管理者が、セットアップのときに、<code>force-XXXX</code> のリポジトリのオーナー（組織のリポジトリなら、その組織の管理者）のアカウントで作り、Secret <code>PAT_TOKEN</code> に登録します（<a href="../admin/setup.html#in-pat">セットアップ</a>）</td></tr>
     <tr><td><strong>JWT 認証</strong></td><td>パスワードの入力なしで、秘密鍵を使って、Salesforce にログインする方法です。GitHub 上のワークフローが、自動でログインするために使います</td></tr>
-    <tr><td><strong>外部クライアントアプリ</strong></td><td>Salesforce の側に作る、「このツールからのログインを許可する」という登録です。セットアップのときに、自動で作られます</td></tr>
+    <tr><td><strong>外部クライアントアプリ</strong></td><td>Salesforce の側に作る、「このツールからのログインを許可する」という登録です（Salesforce が推奨する方式です）。JWT 認証で、ワークフローがログインするために使います。既定の方式では、セットアップのときに、<code>sf-init.sh</code> が、段階の組織ごとに自動で作ります（名前は <code>SF_TOOLS_</code> で始まります。<a href="../admin/setup.html#in-sf">セットアップ</a>）</td></tr>
   </tbody>
 </table>
 

@@ -16,7 +16,8 @@
 #   4. sf-tools/config/branches.txt の、コメント・空行・main 以外の各ブランチについて:
 #        origin にあれば、何もしない。なければ、現在の main から git checkout -B <ブランチ> → push --no-verify -u →
 #        git checkout main（いずれも失敗は die）
-#   5. 状態ファイルから PAT_TOKEN_VALUE の行を削除する（sed_inplace）
+#   5. 状態ファイルから PAT_TOKEN_VALUE の行を削除する（sed_inplace。失敗したとき・削除のあとに行が残っているときは die。
+#      Token が平文のまま残るため。sf-init.sh の後処理でも、Token の値の行を消す）
 #   6. bash sf-hook.sh を実行し、pre-commit / pre-push フックを上書きで入れなおす（失敗は die）
 #
 # 【前提条件】
@@ -30,7 +31,10 @@
 #   - PAT の渡し方: Token は URL やコマンドの引数に含めない（コマンドのログ・.git/config・プロセス一覧に残さないため）。
 #     GIT_ASKPASS（一時スクリプト。終了時に trap で削除）と環境変数 SF_INIT_PUSH_TOKEN で git に渡し、
 #     -c credential.helper= で gh などの認証ヘルパーを無効にする。origin の URL は書き換えない
-#   - 手順 3・4 で die したときは、PAT_TOKEN_VALUE の行は状態ファイルに残る（手順 5 に進まないため）
+#   - 手順 2〜4 で die したときは、PAT_TOKEN_VALUE の行は状態ファイルに残る（手順 5 に進まないため。続きから再開するとき、
+#     この Phase が、もう一度使う）
+#   - 一時スクリプト（GIT_ASKPASS）の書き込み・chmod 700 の失敗は die
+#   - 終了コード: 0 = OK / 1 = die
 # ==============================================================================
 
 # SF_TOOLS_DIR は sf-init.sh（司令塔）から export される
@@ -38,7 +42,7 @@ PHASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SF_TOOLS_DIR="${SF_TOOLS_DIR:-$(dirname "$(dirname "$PHASE_DIR")")}"
 
 readonly SCRIPT_NAME="sf-init"
-mkdir -p "$HOME/sf-tools/logs" 2>/dev/null || true
+mkdir -p "$HOME/sf-tools/logs" 2>/dev/null || true  # run 不使用: common.sh の読み込み前（run が未定義）
 readonly LOG_FILE="$HOME/sf-tools/logs/${SCRIPT_NAME}.log"
 readonly LOG_MODE="APPEND"  # 司令塔が NEW で初期化済みのため追記
 export SF_INIT_MODE=1
@@ -86,7 +90,8 @@ fi
 askpass_script=$(mktemp "${TMPDIR:-/tmp}/sf-init-askpass.XXXXXX") \
     || die "一時ファイルを作成できません。"  # VAR=$(cmd) 形式のため run 不要
 trap 'rm -f "$askpass_script"' EXIT
-cat > "$askpass_script" << 'ASKEOF'
+# run 不使用: ファイル生成（ヒアドキュメントのリダイレクト。失敗は die）
+cat > "$askpass_script" << 'ASKEOF' || die "一時ファイルに書き込めません: ${askpass_script}"
 #!/bin/bash
 # GIT_ASKPASS: Username には固定値、Password には環境変数の Token を返す
 case "$1" in
@@ -94,7 +99,7 @@ case "$1" in
     *)         echo "$SF_INIT_PUSH_TOKEN" ;;
 esac
 ASKEOF
-chmod 700 "$askpass_script"
+run chmod 700 "$askpass_script" || die "一時ファイルに実行の権限を付けられません: ${askpass_script}"
 export GIT_ASKPASS="$askpass_script" GIT_TERMINAL_PROMPT=0 SF_INIT_PUSH_TOKEN="$PAT_TOKEN_VALUE"
 
 # main をプッシュ（.github/workflows/ を含むため workflow スコープ付き PAT が必須）
@@ -111,7 +116,7 @@ if [[ -f "$branches_file" ]]; then
         [[ -z "${branch// }" ]]            && continue  # 空行スキップ
         [[ "$branch" == "main" ]]          && continue  # main はスキップ
         # リモートに既に存在するか確認
-        if git -c credential.helper= ls-remote --exit-code --heads origin "$branch" > /dev/null 2>&1; then
+        if git -c credential.helper= ls-remote --exit-code --heads origin "$branch" > /dev/null 2>&1; then  # 条件チェックのため run 不使用
             log "INFO" "${branch} — スキップ（既に存在）"
             continue
         fi
@@ -125,9 +130,14 @@ if [[ -f "$branches_file" ]]; then
     done < "$branches_file"
 fi
 
-# push が完了したら、PAT を .sf-init.env に残さない（後続フェーズでは使用しない）
+# push が完了したら、PAT を .sf-init.env に残さない（後続フェーズでは使用しない）。
+#   削除できなかったら die（Token が平文のまま残るため。WARNING で続けない）。削除のあとに、行が残っていないことも確かめる
 unset GIT_ASKPASS SF_INIT_PUSH_TOKEN
-run sed_inplace '/^PAT_TOKEN_VALUE=/d' "$SF_INIT_ENV_FILE"
+run sed_inplace '/^PAT_TOKEN_VALUE=/d' "$SF_INIT_ENV_FILE" \
+    || die "状態ファイルから PAT_TOKEN_VALUE の行を削除できませんでした: ${SF_INIT_ENV_FILE}"
+if grep -q '^PAT_TOKEN_VALUE=' "$SF_INIT_ENV_FILE" 2>/dev/null; then  # 条件チェックのため run 不使用
+    die "状態ファイルに PAT_TOKEN_VALUE の行が残っています: ${SF_INIT_ENV_FILE}"
+fi
 
 log "SUCCESS" "初回コミット＆プッシュ完了。"
 

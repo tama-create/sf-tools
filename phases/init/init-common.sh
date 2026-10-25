@@ -2,7 +2,8 @@
 # ==============================================================================
 # init-common.sh - sf-init.sh 専用ヘルパー関数ライブラリ
 # ==============================================================================
-# sf-init.sh・各フェーズのスクリプト（phases/init/）・add_tier.sh・reconnect.sh が source して使う、共通のヘルパー関数集。
+# sf-init.sh と、phases/init/ のスクリプト（Phase 1〜10・add_tier.sh・reconnect.sh・status.sh。verify.sh は読み込まない）が
+# source して使う、共通のヘルパー関数集。
 #
 # 【使い方】
 #   source "${SF_TOOLS_DIR}/lib/common.sh"
@@ -10,7 +11,8 @@
 #   読み込むと、lib/org.sh も source する（このファイルの場所から ../../lib/org.sh）
 #
 # 【提供する関数】
-#   open_browser URL          ... OS を判定してブラウザを開く（lib/common.sh で定義済みなら、定義しない）
+#   open_browser URL          ... OS を判定してブラウザを開く（lib/platform.sh（lib/common.sh が読み込む）で定義済みなら、
+#                                 定義しない。通常は定義済みのため、このファイルの定義は使われない）
 #   generate_jwt_cert DIR REPO_NAME
 #                             ... JWT 用の秘密鍵・証明書を openssl で生成する（生成後に、発行先が空でないことを確認する）。
 #                                 両方がすでにあれば、生成せずに ensure_jwt_cert_subject だけを行う
@@ -21,18 +23,20 @@
 #                                 GitHub に登録する。テストに失敗したときは、スキップして登録だけ行うかを確認する
 #   register_jwt_secret_eca ALIAS SUFFIX LABEL KEY_FILE CERT_FILE
 #                             ... 外部クライアントアプリを deploy で作成し、コンシューマー鍵を retrieve で取得して、
-#                                 JWT 接続テストのあと、GitHub に登録する
+#                                 JWT 接続テストのあと、GitHub に登録する（ログインのあとの失敗の経路では、一時エイリアスを
+#                                 外してから die する: _eca_abort）
 #   generate_eca_metadata DIR APP_NAME CONTACT_EMAIL PROFILE_NAME CERT_FILE
-#                             ... 外部クライアントアプリのメタデータ（ソース形式・5 ファイル）を生成する
+#                             ... 外部クライアントアプリのメタデータ（ソース形式・5 ファイル）と sfdx-project.json を生成する
 #   ensure_sf_tools_branch BR ... ~/sf-tools（SF_TOOLS_DIR）のブランチ違い・遅れ・ローカル変更を確認する。
 #                                 更新したら戻り値 2（呼び出し側が、更新した sf-tools で実行しなおす）
 #   delete_existing_ruleset REPO NAME
-#                             ... 同名の Ruleset があれば削除する（常に戻り値 0）
+#                             ... 同名の Ruleset があれば（複数あれば、すべて）削除する（常に戻り値 0）
 #   initial_metadata_sync REPO DIR
 #                             ... セットアップの最後に、wf-metasync を実行して完了を待ち、同期した内容を、管理者用のクローンに取り込む
 #
 # 【前提条件】
-#   - lib/common.sh を source 済みであること（log / run / die / ask_yn / read_or_quit / press_enter など）
+#   - lib/common.sh を source 済みであること（log / run / die / ask_yn / read_or_quit / json_get / is_gitbash /
+#     run_isolated_home など。lib/org.sh も、lib/common.sh の関数を使う）
 #   - initial_metadata_sync は、lib/verify-common.sh の関数（verify_dispatch_workflow / verify_gh / verify_run_conclusion /
 #     _sfv_poll）を使う。このファイルは lib/verify-common.sh を source しないため、呼び出し側が source しておくこと
 #   - register_jwt_secret / register_jwt_secret_eca は、登録先のリポジトリとして、変数 REPO_FULL_NAME を使う
@@ -44,17 +48,17 @@ _INIT_COMMON_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${_INIT_COMMON_DIR}/../../lib/org.sh"
 
 # ------------------------------------------------------------------------------
-# ブラウザを開く（OS 判定）- lib/common.sh で定義済みなら再定義しない
+# ブラウザを開く（OS 判定）- lib/platform.sh（lib/common.sh が読み込む）で定義済みなら再定義しない（通常は、こちらは使われない）
 # ------------------------------------------------------------------------------
 if ! declare -f open_browser &>/dev/null; then
     open_browser() {
         local url="$1"
         if command -v start &>/dev/null; then
-            start "" "$url" 2>/dev/null || true
+            start "" "$url" 2>/dev/null || true  # run 不使用: ブラウザの起動の失敗は無視する（意図的エラー無視）
         elif command -v open &>/dev/null; then
-            open "$url" 2>/dev/null || true
+            open "$url" 2>/dev/null || true  # run 不使用: ブラウザの起動の失敗は無視する（意図的エラー無視）
         elif command -v xdg-open &>/dev/null; then
-            xdg-open "$url" 2>/dev/null || true
+            xdg-open "$url" 2>/dev/null || true  # run 不使用: ブラウザの起動の失敗は無視する（意図的エラー無視）
         fi
     }
 fi
@@ -121,14 +125,16 @@ ensure_jwt_cert_subject() {
 #   $1 - jwt_dir  : 保存先ディレクトリ（例: ~/.sf-jwt/force-test）
 #   $2 - repo_name: リポジトリ名（証明書の CN に使用）
 # 出力:
-#   $jwt_dir/server.key（秘密鍵）
-#   $jwt_dir/server.crt（公開鍵証明書）
+#   $jwt_dir/server.key（秘密鍵。RSA 2048 ビット・PKCS#1）
+#   $jwt_dir/server.crt（公開鍵証明書。自己署名・3650 日・CN=sf-jwt-<repo_name>）
+# 動作: 両方がすでにあれば、生成せずに ensure_jwt_cert_subject だけを行う。どちらかがなければ、両方を作る（鍵も上書き）。
+#       保存先の作成・生成・発行先の確認に失敗したら die
 # ------------------------------------------------------------------------------
 generate_jwt_cert() {
     local jwt_dir="$1"
     local repo_name="$2"
 
-    mkdir -p "$jwt_dir"
+    run mkdir -p "$jwt_dir" || die "JWT 用証明書の保存先を作成できません: ${jwt_dir}"
     chmod 700 "$jwt_dir" 2>/dev/null || true  # run 不使用: ファイル権限保護（Windows は効果なし）
 
     # 既存の証明書があればスキップ（--resume 時の再生成による Salesforce との不一致を防ぐ）
@@ -149,10 +155,11 @@ generate_jwt_cert() {
     # -traditional: OpenSSL 3.x で PKCS#1 形式を強制。1.x では不要なためフォールバック
     if openssl rsa -traditional -in "${jwt_dir}/server.key.tmp" \
                                 -out "${jwt_dir}/server.key" 2>/dev/null; then
-        rm -f "${jwt_dir}/server.key.tmp"
+        rm -f "${jwt_dir}/server.key.tmp"  # run 不使用: 一時ファイルの後始末（なくても続行）
     else
         # OpenSSL 1.x は genrsa が元から PKCS#1 を出力するため tmp をそのまま使用
-        mv "${jwt_dir}/server.key.tmp" "${jwt_dir}/server.key"
+        run mv "${jwt_dir}/server.key.tmp" "${jwt_dir}/server.key" \
+            || die "秘密鍵の保存に失敗しました: ${jwt_dir}/server.key"
     fi
     # -subj の書き方は OS で違う（_jwt_cert_subject_arg）。// を Git Bash 以外に渡すと、発行先が空の証明書ができる
     _issue_jwt_cert "${jwt_dir}/server.key" "${jwt_dir}/server.crt" "$repo_name" \
@@ -270,15 +277,18 @@ register_jwt_secret() {
 #   ensure_sf_tools_branch main          # 配布版（main）を選択した場合
 #   ensure_sf_tools_branch development   # 開発版（development）を選択した場合
 #   戻り値: 0 = 続行（最新・確認をスキップ・更新しなかった）/ 2 = sf-tools を更新した。
-#           ブランチ違いの確認で N / q のとき、git pull --ff-only が失敗したときは die
+#           ブランチ違いの確認で N / q のとき、更新の確認で q のとき、git pull --ff-only が失敗したときは die
 #
-# 【動作】（SF_TOOLS_DIR の Git リポジトリを対象にする）
-#   - Git リポジトリでない / HEAD が分離状態 / origin に接続できない → WARNING で確認をスキップして続行
-#   - 現在のブランチが目標ブランチと違う → WARNING + ask_yn（N/q は die。ブランチの自動切り替えはしない）
-#   - 未コミットの変更または未 push のコミットがある → 更新せず WARNING のみで続行（開発者の作業を守る）
-#   - origin より遅れている → 遅れたコミットを表示し ask_yn。Y なら git pull --ff-only を実行し、
-#     実行中のスクリプトが書き換わるため、戻り値 2 を返す（呼び出し側は、更新した sf-tools で、実行しなおすこと）。N なら WARNING で続行
-#   - 最新ならそのまま続行
+# 【動作】（SF_TOOLS_DIR の Git リポジトリを対象にする。上から順に判定する）
+#   - SF_TOOLS_DIR が空・Git リポジトリでない / HEAD が分離状態 → WARNING で確認をスキップして続行
+#   - 現在のブランチが目標ブランチと違う → WARNING + ask_yn（N/q は die。ブランチの自動切り替えはしない）。Y なら、
+#     現在のブランチのまま、以下を続ける
+#   - git fetch origin <現在のブランチ> に失敗 / origin に同名のブランチがない → WARNING で確認をスキップして続行
+#   - origin より遅れていない → 「最新です」で続行
+#   - 遅れているが、未コミットの変更または未 push のコミットがある → 更新せず WARNING のみで続行（開発者の作業を守る）
+#   - 遅れている → 遅れたコミット（最大 10 件）を表示し ask_yn。Y なら git pull --ff-only を実行し、
+#     実行中のスクリプトが書き換わるため、戻り値 2 を返す（呼び出し側は、更新した sf-tools で、実行しなおすこと）。
+#     N なら WARNING で続行。q は die
 # ------------------------------------------------------------------------------
 ensure_sf_tools_branch() {
     local target="$1"
@@ -337,26 +347,40 @@ ensure_sf_tools_branch() {
 #   delete_existing_ruleset "$REPO_FULL_NAME" "protect-main"
 #
 # 【動作】
-#   - Ruleset 一覧から同名の ID を取得する。ID は数字のときだけ有効とみなす
-#     （gh api が失敗した場合、エラーの応答本文が標準出力に出るため、数字以外は「確認できなかった」と扱う）
-#   - 確認できなかった場合（無料プランの Private リポジトリなど）は WARNING を出して何も削除しない
-#   - 削除の成否はそのまま表示する（失敗したのに「削除しました」と出さない）
+#   - Ruleset 一覧（gh api --paginate）から、同名の ID を取得する（1 行に 1 つ）
+#   - gh api が失敗した（終了コードが 0 以外。出力の有無を問わない。無料プランの Private リポジトリの 403 など）
+#     → 「確認できなかった」の WARNING を出して、何も削除しない
+#   - 成功して、出力が空 → 同名の Ruleset はないとみなし、何もしない（WARNING も出さない）
+#   - 成功して、数字以外の行がある → 「確認できなかった」の WARNING を出して、何も削除しない（誤った ID で DELETE しない）
+#   - 同名の Ruleset が複数ある（ID が複数行）→ すべて削除する（1 つでも残ると、同名の Ruleset が重なるため）
+#   - 削除の成否は ID ごとにそのまま表示する（失敗したのに「削除しました」と出さない）
 #   - いずれの場合も呼び出し元は続行する（常に RET_OK を返す）
 # ------------------------------------------------------------------------------
 delete_existing_ruleset() {
-    local repo="$1" name="$2" id
-    id=$(gh api "repos/${repo}/rulesets" \
-        --jq ".[] | select(.name==\"${name}\") | .id" 2>/dev/null || true)  # VAR=$(cmd) のため run 不使用
-    if [[ ! "$id" =~ ^[0-9]+$ ]]; then
-        # 空 = 同名の Ruleset なし。数字以外 = API のエラー本文など（確認できなかった）
-        [[ -n "$id" ]] && log "WARNING" "既存の ${name} を確認できなかったため、削除をスキップします（プランの制限などの可能性があります）。"
+    local repo="$1" name="$2" out id rc=0
+    out=$(gh api "repos/${repo}/rulesets" --paginate \
+        --jq ".[] | select(.name==\"${name}\") | .id" 2>/dev/null) || rc=$?  # VAR=$(cmd) のため run 不使用
+    out="${out//$'\r'/}"
+    if [[ $rc -ne 0 ]]; then
+        # 失敗（エラーの応答本文が出ていても、何も出ていなくても）= 確認できなかった。「同名なし」とは区別する
+        log "WARNING" "既存の ${name} を確認できなかったため、削除をスキップします（プランの制限などの可能性があります）。"
         return $RET_OK
     fi
-    if run gh api --method DELETE "repos/${repo}/rulesets/${id}"; then
-        log "INFO" "既存の ${name} (id: ${id}) を削除しました。"
-    else
-        log "WARNING" "既存の ${name} (id: ${id}) の削除に失敗しました。"
-    fi
+    [[ -n "$out" ]] || return $RET_OK   # 同名の Ruleset なし
+    while IFS= read -r id; do
+        [[ -z "$id" || "$id" =~ ^[0-9]+$ ]] && continue
+        # 数字以外 = 想定外の応答（確認できなかった）。誤った ID で DELETE しない
+        log "WARNING" "既存の ${name} を確認できなかったため、削除をスキップします（想定外の応答です）。"
+        return $RET_OK
+    done <<< "$out"
+    while IFS= read -r id; do
+        [[ -n "$id" ]] || continue
+        if run gh api --method DELETE "repos/${repo}/rulesets/${id}"; then
+            log "INFO" "既存の ${name} (id: ${id}) を削除しました。"
+        else
+            log "WARNING" "既存の ${name} (id: ${id}) の削除に失敗しました。"
+        fi
+    done <<< "$out"
     return $RET_OK
 }
 
@@ -364,6 +388,7 @@ delete_existing_ruleset() {
 # _xml_escape - XML の特殊文字（& < >）をエスケープする（プロファイル名などを XML に埋め込むため）
 # ------------------------------------------------------------------------------
 _xml_escape() {
+    # run 不使用: 値を標準出力に返す部品（呼び出し側が VAR=$(cmd) で受け取る）
     printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'
 }
 
@@ -384,13 +409,17 @@ _xml_escape() {
 #   externalClientApps / extlClntAppGlobalOauthSets / extlClntAppOauthSettings /
 #   extlClntAppOauthPolicies / extlClntAppPolicies
 #   consumerKey は出力項目のため書かない（deploy 後に retrieve して取得する）
+#   DIR/sfdx-project.json（パッケージのフォルダ force-app・sourceApiVersion 64.0）も書く（上書き）
+#
+# 【戻り値】
+#   0 = 生成した / RET_NG = フォルダを作れなかった（ファイルの書き込みの失敗は、検査しない）
 # ------------------------------------------------------------------------------
 generate_eca_metadata() {
     local dir="$1" app="$2" email="$3" profile="$4" cert_file="$5"
     local base="${dir}/force-app/main/default" cert esc_email esc_profile
     cert=$(grep -v -- '-----' "$cert_file" | tr -d '\r')  # VAR=$(cmd) のため run 不使用。PEM の本文のみ
-    esc_email=$(_xml_escape "$email")
-    esc_profile=$(_xml_escape "$profile")
+    esc_email=$(_xml_escape "$email")      # VAR=$(cmd) のため run 不使用
+    esc_profile=$(_xml_escape "$profile")  # VAR=$(cmd) のため run 不使用
 
     run mkdir -p "${base}/externalClientApps" "${base}/extlClntAppGlobalOauthSets" \
                  "${base}/extlClntAppOauthSettings" "${base}/extlClntAppOauthPolicies" \
@@ -399,7 +428,7 @@ generate_eca_metadata() {
     printf '%s\n' '{"packageDirectories":[{"path":"force-app","default":true}],"namespace":"","sourceApiVersion":"64.0"}' \
         > "${dir}/sfdx-project.json"
 
-    # run 不使用: ファイル生成（ヒアドキュメント）
+    # run 不使用: ファイル生成（ヒアドキュメントのリダイレクト。この関数の 5 つの cat > すべて同じ）
     cat > "${base}/externalClientApps/${app}.eca-meta.xml" << ECAEOF
 <?xml version="1.0" encoding="UTF-8"?>
 <ExternalClientApplication xmlns="http://soap.sforce.com/2006/04/metadata">
@@ -480,32 +509,50 @@ ECAEOF
 # 【処理フロー】
 #   1. ログイン先の URL を選ぶ（org_choose_login_url。3 択: login.salesforce.com / test.salesforce.com / 組織の URL。
 #      Enter は test.salesforce.com。SF_INIT_LOGIN_URL_<suffix> があれば質問しない）
-#   2. sf org login web（ブラウザでログイン。接続ユーザーは管理者権限のユーザー）
-#      成否は sf の終了コードで判定する（失敗・時間切れ・ブラウザを閉じた場合は、非 0 になり die。一時エイリアスは sf-tools-<suffix>）
+#   2. 一時エイリアス sf-tools-<suffix> を外してから（前回の認証の残りを使わないため）、sf org login web
+#      （ブラウザでログイン。接続ユーザーは管理者権限のユーザー）。
+#      成否は sf の終了コードで判定する（失敗・時間切れ・ブラウザを閉じた場合は、非 0 になり die）
 #   3. ログインしたユーザー名を取得する（取得できなければ die）。続けて、組織の種類を読み取り（org_read_info）、
 #      本番は main のみのガード（org_guard）を行う（違反・種類を判定できない組織を main 以外につなぐときは die。
 #      アプリを作る deploy の前に行う）。最後に、接続ユーザーのプロファイル名（表示名）を取得する（取得できなければ die）
 #   4. generate_eca_metadata でメタデータを生成し、sf project deploy でアプリを作成する（失敗は die）
-#   5. sf project retrieve でコンシューマー鍵を自動取得する（値はログに出さない。取得できなければ die）
-#   6. JWT 接続テスト（反映待ちのため、成功するまでリトライする）。最後まで失敗したときは、スキップして登録だけ行うかを
-#      ask_yn で確認する（N / q は die）。アプリは、手順 4 で作成済みのまま残る
+#   5. sf project retrieve でコンシューマー鍵を自動取得する（値はログに出さない。retrieve の失敗は die）。
+#      取得のあと、一時フォルダを消し、一時エイリアスを外す（sf alias unset。以降は、エイリアスを使わない）。
+#      鍵を取り出せなければ die
+#   6. JWT 接続テスト（反映待ちのため、成功するまでリトライする。失敗するたびに、最後の試行を除いて、間隔の秒数だけ待つ）。
+#      最後まで失敗したときは、スキップして登録だけ行うかを ask_yn で確認する（N / q は die）。アプリは、手順 4 で
+#      作成済みのまま残る
 #   7. SF_CONSUMER_KEY_<suffix>（Secret）/ SF_USERNAME_<suffix> / SF_INSTANCE_URL_<suffix>（Variable）を登録し、
 #      org_save で SF_ORG_ID_* / SF_ORG_NAME_* / SF_ORG_KIND_* / SF_ORG_CHECKED_*（Variable。読み取れたときだけ）を登録
 #
 # 【備考】
 #   ・sf の認証はユーザー名単位で、エイリアスは別名にすぎない。ログイン用の一時エイリアスは
 #     sf alias unset で消す（sf org logout は同じユーザー名の全エイリアスの認証を消すため使わない）
-#   ・リトライ回数・間隔は環境変数 SF_INIT_JWT_RETRIES（既定 20）/ SF_INIT_JWT_INTERVAL（既定 30 秒）で変更できる
+#   ・一時エイリアスは、手順 2 のログインのあと、手順 3〜5 のどこで die しても、外してから終了する（_eca_abort。
+#     die の前に外す。呼び出し側の EXIT トラップと衝突させないため、トラップは使わない）。手順 5 で外したあとは、
+#     エイリアスを使わない（JWT 接続テストは、一時的なホームの中で、コンシューマー鍵で行う）ため、手順 6・7 の die では
+#     残らない。Ctrl+C などのシグナルで止めたときは、外さない（次回の手順 2 の最初に外す）
+#   ・リトライ回数・間隔は環境変数 SF_INIT_JWT_RETRIES（既定 20）/ SF_INIT_JWT_INTERVAL（既定 30 秒）で変更できる。
+#     待つのは、試行の間だけ（最大 (回数 - 1) × 間隔。既定で 19 × 30 = 570 秒 = 約 10 分）
 #   ・JWT 接続テスト（sf org login jwt）は、run_isolated_home で、一時的なホームフォルダの中で実行する。
 #     ユーザーの sf に、エイリアス（prod 等）が増えず、同じユーザーの既存の認証も、JWT の認証に置き換わらない
 # ------------------------------------------------------------------------------
+# _eca_abort TMP_ALIAS WORK MESSAGE - register_jwt_secret_eca の、ログインのあとの失敗の経路の後始末をして、die する。
+#   一時エイリアスを外し（sf alias unset。失敗しても続ける）、一時フォルダ WORK（空なら何もしない）を消してから、
+#   die MESSAGE。どの失敗の経路でも、一時エイリアス sf-tools-<suffix> を残さないため
+_eca_abort() {
+    run sf alias unset "$1" || true  # 失敗しても続行（意図的エラー無視）。die の前の後始末
+    [[ -n "$2" ]] && rm -rf "$2"  # run 不使用: 失敗時の後始末（なくても続行）
+    die "$3"
+}
+
 register_jwt_secret_eca() {
     local org_alias="$1" suffix="$2" label="$3" key_file="$4" cert_file="$5"
     # ログイン用の一時エイリアス。ユーザーが運用中のエイリアス（prod 等）と重ならないよう sf-tools- を付ける
     local tmp_alias="sf-tools-${suffix}"
     local eca_name="SF_TOOLS_${REPO_NAME//[^A-Za-z0-9]/_}"
     local instance_url="https://login.salesforce.com"
-    local username profile work consumer_key jwt_out jwt_ok=0 i
+    local username profile work="" consumer_key jwt_out jwt_ok=0 i
     local retries="${SF_INIT_JWT_RETRIES:-20}" interval="${SF_INIT_JWT_INTERVAL:-30}"
     local key_xml
 
@@ -528,11 +575,12 @@ register_jwt_secret_eca() {
         || die "${label}へのログインに失敗しました。"
 
     # 3. ユーザー名とプロファイル名（表示名）
+    #   ここから手順 5 の retrieve までの失敗は、_eca_abort（一時エイリアスを外してから die）
     local org_info
     org_info=$(sf org display --target-org "$tmp_alias" --json 2>/dev/null) \
-        || die "${label}の接続情報を取得できませんでした。"  # VAR=$(cmd) のため run 不使用（出力の取得。成否は終了コードで判定）
+        || _eca_abort "$tmp_alias" "" "${label}の接続情報を取得できませんでした。"  # VAR=$(cmd) のため run 不使用（出力の取得。成否は終了コードで判定）
     username=$(json_get "$org_info" result.username)  # VAR=$(cmd) のため run 不使用（値の抽出のみ）
-    [[ -n "$username" ]] || die "${label}の接続ユーザー名を取得できませんでした。"
+    [[ -n "$username" ]] || _eca_abort "$tmp_alias" "" "${label}の接続ユーザー名を取得できませんでした。"
     log "INFO" "  ログインに成功しました。"
     log "INFO" "  接続ユーザー: ${username}"
 
@@ -542,32 +590,34 @@ register_jwt_secret_eca() {
         log "WARNING" "  組織の種類を、組織から読み取れませんでした（権限・通信など）。"
     fi
     if ! org_guard "${tier:-main}" "$label"; then
-        run sf alias unset "$tmp_alias" || true  # 失敗しても続行（意図的エラー無視）
-        die "${label}（${tier:-main}）に、Salesforce の本番組織は、つなげません（本番組織は main のみです）。"
+        _eca_abort "$tmp_alias" "" "${label}（${tier:-main}）に、Salesforce の本番組織、または、種類を判定できない組織は、つなげません（本番組織は main のみです）。"
     fi
     local prof_info
     prof_info=$(sf data query --query "SELECT Profile.Name FROM User WHERE Username='${username}'" \
         --target-org "$tmp_alias" --json 2>/dev/null) \
-        || die "接続ユーザーのプロファイル名を取得できませんでした。"  # VAR=$(cmd) のため run 不使用（出力の取得。成否は終了コードで判定）
+        || _eca_abort "$tmp_alias" "" "接続ユーザーのプロファイル名を取得できませんでした。"  # VAR=$(cmd) のため run 不使用（出力の取得。成否は終了コードで判定）
     profile=$(json_get "$prof_info" result.records.0.Profile.Name)  # VAR=$(cmd) のため run 不使用（値の抽出のみ）
-    [[ -n "$profile" ]] || die "接続ユーザーのプロファイル名を取得できませんでした。"
+    [[ -n "$profile" ]] || _eca_abort "$tmp_alias" "" "接続ユーザーのプロファイル名を取得できませんでした。"
     log "INFO" "  プロファイル: ${profile}"
 
     # 4. メタデータを生成して deploy（アプリ作成）
-    work=$(mktemp -d "${TMPDIR:-/tmp}/sf-init-eca.XXXXXX") || die "一時ディレクトリを作成できません。"  # VAR=$(cmd) のため run 不使用
+    work=$(mktemp -d "${TMPDIR:-/tmp}/sf-init-eca.XXXXXX") \
+        || _eca_abort "$tmp_alias" "" "一時ディレクトリを作成できません。"  # VAR=$(cmd) のため run 不使用
     generate_eca_metadata "$work" "$eca_name" "$username" "$profile" "$cert_file" \
-        || { rm -rf "$work"; die "外部クライアントアプリのメタデータを生成できませんでした。"; }
+        || _eca_abort "$tmp_alias" "$work" "外部クライアントアプリのメタデータを生成できませんでした。"
     log "INFO" "  外部クライアントアプリ（${eca_name}）を作成します（メタデータの deploy）..."
     (cd "$work" && run sf project deploy start --source-dir force-app --target-org "$tmp_alias") \
-        || { rm -rf "$work"; die "外部クライアントアプリの作成（deploy）に失敗しました。"; }
+        || _eca_abort "$tmp_alias" "$work" "外部クライアントアプリの作成（deploy）に失敗しました。"
 
     # 5. コンシューマー鍵を取得（値はログに出さない）
     (cd "$work" && run sf project retrieve start \
         --metadata "ExtlClntAppGlobalOauthSettings:${eca_name}_glbloauth" --target-org "$tmp_alias") \
-        || { rm -rf "$work"; die "コンシューマー鍵の取得（retrieve）に失敗しました。"; }
+        || _eca_abort "$tmp_alias" "$work" "コンシューマー鍵の取得（retrieve）に失敗しました。"
     key_xml="${work}/force-app/main/default/extlClntAppGlobalOauthSets/${eca_name}_glbloauth.ecaGlblOauth-meta.xml"
     consumer_key=$(sed -n 's:.*<consumerKey>\(.*\)</consumerKey>.*:\1:p' "$key_xml" 2>/dev/null | head -1)  # VAR=$(cmd) のため run 不使用
-    rm -rf "$work"
+    rm -rf "$work"  # run 不使用: 一時フォルダの後始末（なくても続行）
+    # ログイン用の一時エイリアスを消す（以降は使わない。sf org logout は同じユーザー名の全エイリアスの認証を消すため使わない）
+    run sf alias unset "$tmp_alias" || true  # 失敗しても続行（意図的エラー無視）
     [[ -n "$consumer_key" ]] || die "コンシューマー鍵を取得できませんでした。"
     log "INFO" "  コンシューマー鍵を取得しました。"
 
@@ -581,7 +631,9 @@ register_jwt_secret_eca() {
             jwt_ok=1
             break
         fi
-        log "INFO" "  Salesforce の反映を待っています（${i} / ${retries} 回目・最大 約 $(( retries * interval / 60 )) 分）。${interval} 秒後に、もう一度、確認します..."
+        # 最後の試行のあとは、待たない（次の試行がないため）
+        (( i < retries )) || break
+        log "INFO" "  Salesforce の反映を待っています（${i} / ${retries} 回目・最大 約 $(( ((retries - 1) * interval + 59) / 60 )) 分）。${interval} 秒後に、もう一度、確認します..."
         sleep "$interval"  # run 不使用: 待機
     done
     if [[ $jwt_ok -eq 1 ]]; then
@@ -595,8 +647,6 @@ register_jwt_secret_eca() {
             die "  JWT 接続テストに失敗しました。"
         fi
     fi
-    # ログイン用の一時エイリアスを消す（sf org logout は同じユーザー名の全エイリアスの認証を消すため使わない）
-    run sf alias unset "$tmp_alias" || true  # 失敗しても続行（意図的エラー無視）
 
     # 7. GitHub Secrets / Variables に登録
     printf '%s' "$consumer_key" | run gh secret set "SF_CONSUMER_KEY_${suffix}" -R "$REPO_FULL_NAME" \
@@ -618,11 +668,13 @@ register_jwt_secret_eca() {
 #           セットアップが終わった瞬間に、クローンへ、同期済みのメタデータが、全部入っているようにする。
 #           クローン（Phase 3）は、初期コミットの push に必要なため、同期（Phase 10 の接続情報が必要）より、先になる。
 #           そこで、同期（wf-metasync）が終わってから、クローンに git pull する（作り直したクローンと、同じ結果になる）。
-# 【動作】   wf-metasync（GitHub Actions）を手動で起動し、完了を待つ（SF_INIT_SYNC_TIMEOUT 秒。既定 1200。30 秒おきに経過を表示）。
-#           成功したら、クローンの main を git pull --ff-only する（core.longpaths=true も設定する）。
+# 【動作】   wf-metasync（GitHub Actions）を、main を対象に手動で起動し、完了を待つ（SF_INIT_SYNC_TIMEOUT 秒。既定 1200。
+#           状態を確かめる間隔は _sfv_poll（VERIFY_POLL_SEC / E2E_POLL_SEC。既定 5 秒）。経過が 30 秒の倍数になるたびに表示）。
+#           時間内に終わらなければ、実行を取り消す（gh run cancel）。
+#           成功したら、クローンを main に切り替え（main でなければ）、core.longpaths=true を設定して、git pull --ff-only origin main する。
 #           組織のメタデータは、main にコミットされる（PAT による保護のバイパス。wf-metasync の設計どおり）。
-# 【戻り値】 0 = 同期して、クローンに取り込んだ / 1 = 失敗（起動できない・時間切れ・同期の失敗・pull の失敗）。
-#           呼び出し側は、セットアップを、成功のままにして、警告にとどめる
+# 【戻り値】 0 = 同期して、クローンに取り込んだ / 1 = 失敗（引数が空・起動できない・時間切れ・同期の失敗・main への切り替えの失敗・
+#           pull の失敗）。呼び出し側は、セットアップを、成功のままにして、警告にとどめる
 initial_metadata_sync() {
     local repo="${1:-}" dir="${2:-}" id status="" concl cur waited=0 poll timeout
     [[ -n "$repo" && -n "$dir" ]] || return 1
@@ -642,9 +694,12 @@ initial_metadata_sync() {
     done
     if [[ "$status" != "completed" ]]; then
         # 実行が続いたままだと、あとの wf-metasync（動作の確認など）と、同時に動いてしまう（組織への取得が、重なると失敗する）ため、取り消す
-        verify_gh run cancel "$id" -R "$repo" >/dev/null 2>&1 \
-            && log "WARNING" "  同期が、${timeout} 秒以内に、終わらなかったため、取り消しました: https://github.com/${repo}/actions/runs/${id}" \
-            || log "WARNING" "  同期が、${timeout} 秒以内に、終わりませんでした（取り消しもできませんでした。GitHub の Actions で確認してください）: https://github.com/${repo}/actions/runs/${id}"
+        # run 不使用: 取り消しの成否で表示を分けるため、戻り値を直接見る（verify_gh は、時間の上限つきの gh）
+        if verify_gh run cancel "$id" -R "$repo" >/dev/null 2>&1; then
+            log "WARNING" "  同期が、${timeout} 秒以内に、終わらなかったため、取り消しました: https://github.com/${repo}/actions/runs/${id}"
+        else
+            log "WARNING" "  同期が、${timeout} 秒以内に、終わりませんでした（取り消しもできませんでした。GitHub の Actions で確認してください）: https://github.com/${repo}/actions/runs/${id}"
+        fi
         return 1
     fi
     concl=$(verify_run_conclusion "$repo" "$id")  # VAR=$(cmd) のため run 不使用

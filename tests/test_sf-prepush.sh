@@ -303,7 +303,7 @@ test_syntax_error_blocks_push() {
     local ec=$?
 
     assert_exit_fail $ec "構文エラーあり → プッシュを中断"
-    assert_output_contains "$out" "構文エラー" "構文エラーメッセージが表示された"
+    assert_output_contains "$out" "ターゲットファイルの検証でエラーがありました" "検証エラーのメッセージが表示された"
     teardown "$td" "$mb"
     unset MOCK_GIT_BRANCH
 }
@@ -385,9 +385,75 @@ test_missing_remote_branch_skipped() {
     unset MOCK_GIT_BRANCH MOCK_GIT_LOG_BRANCH_OUTPUT MOCK_GIT_LOG_MAIN_OUTPUT MOCK_GIT_LS_REMOTE_MISSING
 }
 
+# create_mock_git のあとに、引数（"$*"）が、指定のパターンに一致する呼び出しだけを失敗させるラッパーを被せる
+#   引数: モックの bin・パターン（case の書式。空白は使えない）・終了コード・標準エラーに出す文言（省略可）
+_fail_git_matching() {
+    local mb="$1" pattern="$2" code="$3" msg="${4:-}"
+    mv "$mb/git" "$mb/git-base"
+    cat > "$mb/git" << EOF
+#!/bin/bash
+case "\$*" in
+    $pattern) echo "git \$*" >> "\${MOCK_CALL_LOG:-/dev/null}"; [[ -n "$msg" ]] && echo "$msg" >&2; exit $code ;;
+esac
+exec "\$(dirname "\$0")/git-base" "\$@"
+EOF
+    chmod +x "$mb/git"
+}
+
+# ------------------------------------------------------------------------------
+# 回帰: detached HEAD → プッシュを中止する（以前は、run が返すエラーの文言を現在のブランチとして扱い、続けていた）
+# ------------------------------------------------------------------------------
+test_detached_head_aborts() {
+    local td mb out ec
+    td=$(setup_force_dir); mb=$(setup_mock_bin)
+    export MOCK_CALL_LOG="$mb/calls.log"
+    create_mock_git "$mb"
+    _fail_git_matching "$mb" "symbolic-ref*" 128 "fatal: ref HEAD is not a symbolic ref"
+
+    out=$(run_prepush "$td" "$mb"); ec=$?
+    assert_exit_fail "$ec" "detached HEAD → エラー終了（プッシュ中止）"
+    assert_output_contains "$out" "detached HEAD" "detached HEAD → 理由が表示される"
+    assert_file_not_contains "$mb/calls.log" "git fetch" "detached HEAD → fetch・取り込みに進まない"
+    teardown "$td" "$mb"
+}
+
+# ------------------------------------------------------------------------------
+# 回帰: 未取り込みのコミットの確認（git log）が失敗 → merge を試みずに中止する
+#   （以前は、run が返すエラーの文言を、未取り込みのコミットと見なして、merge を試みていた）
+# ------------------------------------------------------------------------------
+test_git_log_failure_aborts() {
+    local td mb out ec
+    # 自ブランチ（origin/feature/test）の確認が失敗
+    td=$(setup_force_dir); mb=$(setup_mock_bin)
+    export MOCK_CALL_LOG="$mb/calls.log"
+    export MOCK_GIT_BRANCH="feature/test"
+    create_mock_git "$mb"
+    _fail_git_matching "$mb" "log*origin/feature/test*" 128 "fatal: ambiguous argument 'feature/test..origin/feature/test': unknown revision"
+    out=$(run_prepush "$td" "$mb"); ec=$?
+    assert_exit_fail "$ec" "origin/feature/test の git log が失敗 → エラー終了"
+    assert_output_contains "$out" "origin/feature/test との差分を確認できませんでした" "origin/feature/test の git log が失敗 → 理由が表示される"
+    assert_file_not_contains "$mb/calls.log" "git-merge-arg" "origin/feature/test の git log が失敗 → merge しない"
+    teardown "$td" "$mb"
+
+    # origin/main の確認が失敗（手元に origin/main がない）
+    td=$(setup_force_dir); mb=$(setup_mock_bin)
+    export MOCK_CALL_LOG="$mb/calls.log"
+    export MOCK_GIT_LOG_BRANCH_OUTPUT=""
+    create_mock_git "$mb"
+    _fail_git_matching "$mb" "log*origin/main*" 128 "fatal: ambiguous argument 'feature/test..origin/main': unknown revision"
+    out=$(run_prepush "$td" "$mb"); ec=$?
+    assert_exit_fail "$ec" "origin/main の git log が失敗 → エラー終了"
+    assert_output_contains "$out" "origin/main との差分を確認できませんでした" "origin/main の git log が失敗 → 理由が表示される"
+    assert_file_not_contains "$mb/calls.log" "git-merge-arg" "origin/main の git log が失敗 → merge しない"
+    teardown "$td" "$mb"
+    unset MOCK_GIT_BRANCH MOCK_GIT_LOG_BRANCH_OUTPUT
+}
+
 # ------------------------------------------------------------------------------
 # 実行
 # ------------------------------------------------------------------------------
+test_detached_head_aborts
+test_git_log_failure_aborts
 test_missing_remote_branch_skipped
 test_fetch_targets_safe
 test_block_push_to_main

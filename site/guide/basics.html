@@ -18,7 +18,7 @@
 
 <div class="box warn">
   <div class="title">始める前に: プロジェクトは、管理者が先に作ります</div>
-  <p>sf-tools は、管理者が、sf-tools の雛形で作った、決まった形のリポジトリ（<code>force-XXXX</code>）の上でしか動きません。<strong>管理者が先にリポジトリを作り、「できました」と連絡をくれてから、開発者は始めます。</strong>同時には進められません。<code>XXXX</code> の部分（プロジェクトの名前）は、管理者に聞いてください。まだ作られていないと、<code>sf-job.sh</code> は、何も見つけられずに止まります。</p>
+  <p>sf-tools は、管理者が、sf-tools の雛形で作った、決まった形のリポジトリ（<code>force-XXXX</code>）の上でしか動きません。<strong>管理者が先にリポジトリを作り、「できました」と連絡をくれてから、開発者は始めます。</strong>同時には進められません。<code>XXXX</code> の部分（プロジェクトの名前）と、リポジトリのオーナー（GitHub の組織名、またはアカウント名）は、管理者に聞いてください。まだ作られていないと、<code>sf-job.sh</code> は、GitHub にリポジトリが見つからずに止まります。リポジトリを読み書きする権限も必要です（足りないときは、GitHub が拒否して止まります。管理者に相談してください）。</p>
 </div>
 
 <div class="box">
@@ -61,7 +61,13 @@
 </figure>
 <div class="box">
   <div class="title">どのプロジェクトを使うかは、自動で決まります</div>
-  <p>フォルダの名前を、気にする必要はありません。<code>sf-job.sh</code> は、作業フォルダの中にある、クローンの情報から、プロジェクトを自動で見つけます。複数あるときは、番号で選びます。決まり方の詳しい説明は、<a href="../reference/commands-dev.html#sf-job"><code>sf-job.sh</code> のリファレンス</a>にあります。</p>
+  <p>フォルダの名前を、気にする必要はありません。<code>sf-job.sh</code> は、作業フォルダの直下にあるクローン（<code>JOB-xxx/force-XXXX</code> など）が、どの GitHub のリポジトリからコピーしたものか（Git が記録している住所）を読み取って、プロジェクトを自動で見つけます。</p>
+  <ul>
+    <li>1 種類だけなら、自動で決まります。複数あるときは、番号で選びます。</li>
+    <li>初めてで、まだクローンが 1 つもないときは、オーナー（GitHub のログインから、自分のアカウントと所属する組織を候補に出します）と、プロジェクトの名前（<code>XXXX</code>）を聞かれます。</li>
+    <li><code>--project</code>・<code>--owner</code> で、はじめから指定することもできます。</li>
+  </ul>
+  <p>決まり方の詳しい説明は、<a href="../reference/commands-dev.html#sf-job-project"><code>sf-job.sh</code> のリファレンス</a>にあります。</p>
 </div>
 
 <h2 id="help">困ったら、まず <code>--help</code></h2>
@@ -72,11 +78,12 @@ sf-check.sh -h</code></pre>
 <h2 id="job">新しい作業を始める（sf-job）</h2>
 <p>作業フォルダで、次のコマンドを実行します。</p>
 <pre><code>sf-job.sh                          # 作業フォルダの下のクローンから、プロジェクトが決まる（複数なら、番号で選ぶ）
-sf-job.sh --project acme           # プロジェクトを指定する（force-acme）</code></pre>
-<p>ジョブ名（ブランチの名前になります）を入力するだけで、次のことが、自動で進みます。</p>
+sf-job.sh --project acme           # プロジェクトを指定する（force-acme）
+sf-job.sh --project acme --owner my-org   # オーナー（GitHub の組織名・アカウント名）も指定する</code></pre>
+<p>ジョブ名（ブランチの名前になります）を入力して、確認に答えるだけで、次のことが、自動で進みます。</p>
 <figure class="diagram">
   <div class="flow">
-    <div class="node dev"><span class="who">💻 あなた</span><strong>sf-job.sh</strong><small>ジョブ名を入力する</small></div>
+    <div class="node dev"><span class="who">💻 あなた</span><strong>sf-job.sh</strong><small>ジョブ名を入力して、確認する</small></div>
     <div class="arrow">→</div>
     <div class="node auto"><span class="who">🤖 自動</span><strong>ブランチを作る</strong><small>GitHub 上に、main の最新から</small></div>
     <div class="arrow">→</div>
@@ -86,13 +93,24 @@ sf-job.sh --project acme           # プロジェクトを指定する（force-a
     <div class="arrow">→</div>
     <div class="node ok"><span class="who">✅ できあがり</span><strong>ランチャーが開く</strong><small>番号を押して進める</small></div>
   </div>
-  <figcaption>入力するのは、ジョブ名だけです。点線の箱は、自動で進みます。</figcaption>
+  <figcaption>入力するのは、ジョブ名と確認だけです（初めてのときは、組織へのログインもあります）。点線の箱は、自動で進みます。</figcaption>
 </figure>
 <ol class="steps">
-  <li><p>ジョブ名（例: <code>JOB-20260323</code>）で、GitHub 上に、<code>main</code> の最新から、作業用のブランチを作ります。</p></li>
-  <li><p>作業用のフォルダ（<code>./ジョブ名/force-XXXX</code>）に、そのブランチをコピーします（<code>git clone</code>）。</p></li>
-  <li><p><code>sf-start.sh</code> が、自動で動きます（Salesforce へのログイン・VS Code の起動。Git のフックの設定は、そのあと裏で行われます）。</p></li>
+  <li><p>使うプロジェクトを決め（上の「どのプロジェクトを使うかは、自動で決まります」）、GitHub にそのリポジトリがあるかを確かめます。</p></li>
+  <li><p>ジョブ名（例: <code>JOB-20260323</code>）を入力します。最後に、ジョブ名・ブランチ・コピー先を表示して確認するので、よければ <code>Y</code> を押します（<code>N</code> / <code>q</code> で中断）。</p></li>
+  <li><p>GitHub 上に、<code>main</code> の最新から、ジョブ名と同じ名前の作業用のブランチを作ります。</p></li>
+  <li><p>作業用のフォルダ（<code>./ジョブ名/force-XXXX</code>）に、そのブランチをコピーします（<code>git clone</code>。クローンともいいます）。</p></li>
+  <li><p>そのフォルダで、<code>sf-start.sh</code> が、自動で動きます（Salesforce の組織へのログイン・VS Code の起動・ランチャーの起動。Git のフック（コミット・プッシュのときに自動で動くチェック）の設定などは、裏で行われます）。</p></li>
 </ol>
+<div class="box">
+  <div class="title">ジョブ名の決まり</div>
+  <ul>
+    <li>英数字で始まり、英数字・<code>-</code>・<code>_</code> だけの、1〜50 文字です。</li>
+    <li><code>main</code> / <code>staging</code> / <code>develop</code> / <code>admin</code> は、使えません（共有の環境のブランチと、管理者用のフォルダの名前です）。</li>
+    <li>同じ名前のフォルダ（<code>./ジョブ名/force-XXXX</code>）がすでにあるときも、入力し直しになります。</li>
+    <li>GitHub に、同じ名前のブランチがすでにあるときは、最後の変更をした人と日時を表示して、確認します。<code>Y</code> = そのブランチを使って続ける ／ <code>N</code> = 別の名前を入力し直す ／ <code>q</code> = 中断。<strong>ほかの人のブランチなら、<code>N</code> にしてください。</strong></li>
+  </ul>
+</div>
 <div class="box">
   <div class="title">うまくいかないとき</div>
   <ul>
@@ -101,35 +119,60 @@ sf-job.sh --project acme           # プロジェクトを指定する（force-a
   </ul>
 </div>
 <h3 id="first-run">初めて実行したときに、聞かれること</h3>
-<p>初めての <code>sf-job.sh</code>（または <code>sf-start.sh</code>）では、次のことを、順番に聞かれます。画面の案内に沿って、答えてください。2 回目以降は、すでに接続している組織なら、聞かれません。</p>
+<p>初めての <code>sf-job.sh</code> では、次のことを、順番に聞かれます。画面の案内に沿って、答えてください。</p>
 <table>
   <thead><tr><th>聞かれること</th><th>どうするか</th></tr></thead>
   <tbody>
     <tr><td>GitHub へのログイン（まだのとき）</td><td><code>sf-job.sh</code> が、<code>gh auth login</code> を始めます。画面の案内に沿って、ブラウザでログインします</td></tr>
-    <tr><td>ジョブ名</td><td>この作業の名前です（例: <code>JOB-20261024</code>）。ブランチの名前になります</td></tr>
-    <tr><td>組織のエイリアス</td><td>接続する<strong>自分用の組織</strong>に付ける、短い名前です（例: <code>myorg</code>）。<code>prod</code> / <code>staging</code> / <code>develop</code> / <code>main</code> は、共有の環境の名前なので、付けないでください（<code>sf-deploy.sh</code> が、使えなくなります）</td></tr>
-    <tr><td>ログイン先</td><td><strong>1</strong> = 本番・Developer Edition（<code>login.salesforce.com</code>）／ <strong>2</strong> = Sandbox（<code>test.salesforce.com</code>。Enter だけで、これになります）／ <strong>3</strong> = 組織の URL を入力。<code>q</code> で中断</td></tr>
-    <tr><td>Salesforce へのログイン</td><td>ブラウザが開きます。自分用の組織に、ログインしてください</td></tr>
+    <tr><td>オーナーとプロジェクト（自動で決まらないとき）</td><td>オーナーは、候補が複数あれば番号で選びます。プロジェクトの名前（<code>XXXX</code>）は、入力して <code>Y</code> / <code>N</code> で確かめます（<a href="#words">上の説明</a>）</td></tr>
+    <tr><td>ジョブ名と、最後の確認</td><td>この作業の名前です（例: <code>JOB-20261024</code>）。ブランチの名前になります（<a href="#job">ジョブ名の決まり</a>）。最後に、内容を確かめて <code>Y</code> を押します</td></tr>
+    <tr><td>組織のエイリアス</td><td>エイリアスは、接続する組織に付ける、短い呼び名です（例: <code>myorg</code>）。ここでは、<strong>自分用の組織</strong>（個人の Sandbox・Developer Edition など）に付けます。<code>prod</code> / <code>staging</code> / <code>develop</code> / <code>main</code> は、共有の環境の名前（予約名）なので、付けないでください（その名前の組織には、手元から、検証もリリースもできません。ランチャーの 4 Dryrun・5 Deploy が止まります）。同じエイリアスで、前にログインしていた組織の接続は、いったん消えて、新しいログインに置き換わります</td></tr>
+    <tr><td>ログイン先</td><td><strong>1</strong> = 本番・Developer Edition（<code>login.salesforce.com</code>）／ <strong>2</strong> = Sandbox（<code>test.salesforce.com</code>。Enter だけで、これになります）／ <strong>3</strong> = 組織の URL を入力（<code>https</code> で、<code>salesforce.com</code> か <code>force.com</code> の URL）。<code>q</code> で中断</td></tr>
+    <tr><td>Salesforce へのログイン</td><td>ブラウザが開きます。自分用の組織に、ログインしてください。ログインに失敗すると、そこで止まります（VS Code もランチャーも開きません）。もう一度実行してください</td></tr>
   </tbody>
 </table>
+<p>組織へのログインは、<code>sf-job.sh</code> を実行するたびに聞かれます（毎回、新しいコピーを作るため、接続の設定もまだないからです）。<code>sf-start.sh</code> で同じフォルダの作業を再開するときは、すでに接続していれば、聞かれません。</p>
+<div class="box warn">
+  <div class="title">止めたいときは、Ctrl+C ではなく q</div>
+  <ul>
+    <li><code>sf-job.sh</code>・<code>sf-start.sh</code>・ランチャーでは、<strong>Ctrl+C が効きません</strong>。止めたいときは、入力を求められたところで <code>q</code> を押します。</li>
+    <li>ただし、Salesforce CLI（<code>sf</code>）や <code>npm</code> の実行中に Ctrl+C を押すと、そのコマンドだけが止まることがあります。</li>
+    <li>途中で止まっても、それまでに作ったブランチ・フォルダは、消えません。ブランチを作ったあとにコピー（クローン）が失敗したときは、同じジョブ名でもう一度実行し、「そのブランチを使って続ける」で <code>Y</code> を押すと、続きから進められます。</li>
+    <li><code>sf-job.sh</code> は、ランチャーを <code>q</code> で終了するまで、終わりません。</li>
+  </ul>
+</div>
 
 <div class="box">
   <div class="title">Windows のパスの長さについて</div>
-  <p>クローンは、<code>core.longpaths=true</code> を付けて行います。Windows には、パスの長さが 260 文字までという上限があり、それを超えないようにするための設定です。組織に長い名前のメタデータ（例: DevOps Center の <code>objectTranslations</code>）があっても、クローンに失敗しません。この設定は、クローンの中に残るので、そのあとの <code>git add</code>・<code>commit</code>・<code>push</code> にも効きます。</p>
+  <p>クローンは、<code>core.longpaths=true</code> を付けて行います。Windows には、パスの長さが 260 文字までという上限があり、Git がそれを超える長いパスも扱えるようにするための設定です。組織に長い名前のメタデータ（例: DevOps Center の <code>objectTranslations</code>）があっても、クローンに失敗しません。この設定は、クローンの中に残るので、そのあとの <code>git add</code>・<code>commit</code>・<code>push</code> にも効きます。</p>
 </div>
 
 <h2 id="start">作業を再開する（sf-start）</h2>
 <p>前日の続きなど、すでにあるブランチで再開するときは、<code>force-*</code> フォルダの中で実行します。</p>
-<pre><code>sf-start.sh</code></pre>
+<pre><code>cd 作業フォルダ/JOB-20261024/force-acme
+sf-start.sh</code></pre>
+<p>次のことを、順に行います。</p>
+<ol>
+  <li>Salesforce CLI（<code>sf</code>）が使えるかを確かめます（<a href="install.html">インストール</a>の npm 版が前提です）。</li>
+  <li>組織に接続済みかを確かめます。接続済みなら、ログインを省きます。まだなら、<a href="#first-run">初めてのとき</a>と同じく、エイリアス・ログイン先を聞いて、ブラウザでログインします。</li>
+  <li>VS Code を開きます。</li>
+  <li>裏で、準備を進めます（<code>~/sf-tools</code> の更新・Git のフックの設置・リリース用のフォルダの準備・開発ツールの更新など）。</li>
+  <li>最後に、ランチャーを開きます。</li>
+</ol>
 <table>
   <thead><tr><th></th><th>sf-job</th><th>sf-start</th></tr></thead>
   <tbody>
     <tr><td>実行する場所</td><td>作業フォルダ（作業単位を置く場所）</td><td><code>force-*</code> フォルダの中</td></tr>
     <tr><td>ブランチの作成</td><td>自動で作る</td><td>作らない（すでにあるブランチを使う）</td></tr>
-    <tr><td>VS Code の起動</td><td>する</td><td>する</td></tr>
+    <tr><td>組織へのログイン</td><td>毎回（新しいコピーのため）</td><td>まだ接続していないときだけ</td></tr>
+    <tr><td>VS Code・ランチャーの起動</td><td>する</td><td>する</td></tr>
     <tr><td>使うタイミング</td><td>新しい作業を始めるとき</td><td>2 回目以降に、作業を再開するとき</td></tr>
   </tbody>
 </table>
+<div class="box">
+  <div class="title">接続する組織を変えたいとき</div>
+  <p>別の組織に切り替えるときは、<code>sf-restart.sh</code>（ランチャーの <strong>7</strong> Restart）を使います。接続済みでも、エイリアスの入力とログインから、やり直します。ログインに失敗したときは、元の接続の設定に戻ります。</p>
+</div>
 
 <div class="box next">
   <div class="title">次へ</div>

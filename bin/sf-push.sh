@@ -3,7 +3,7 @@
 # sf-push.sh - カレント配下をコミットしてプッシュ
 # ==============================================================================
 # 現在のディレクトリ配下の変更をステージし、VS Code で入力したコミットメッセージで commit / push する。
-# ステージする変更がなく、未プッシュのコミットがあるときは、push だけ行う（コミット後に push が失敗したときの再実行用）。
+# カレント配下にステージ済みの変更がなく、未プッシュのコミットがあるときは、push だけ行う（コミット後に push が失敗したときの再実行用）。
 #
 # 【使い方】
 #   sf-push.sh [オプション]
@@ -11,16 +11,19 @@
 # 【オプション】
 #   -v, --verbose  : コマンドの応答（出力）をコンソールにも表示する
 #   -h, --help     : このヘルプを表示して終了する（1 つ目の引数のときだけ）
-#   上記以外の引数は、「不明なオプションです」と表示して中断する。
+#   上記以外の引数（2 つ目以降の -h / --help を含む）は、「不明なオプションです」と表示して中断する。
 #
 # 【処理の流れ】
-#   1. 現在のブランチを確認する。次のときは、何も変更せず、エラーで終了する
+#   1. git と code のコマンドがあること・Git リポジトリの中であることを確認し（なければエラーで終了する）、
+#      現在のブランチを確認する。次のときは、何も変更せず、エラーで終了する
 #      （コミットだけが手元に残り、プッシュは通らない状態を、作らないため）
 #        - HEAD がブランチを指していない（detached HEAD）
 #        - 保護ブランチ（sf-tools/config/branches.txt に書かれたブランチ。ファイルがない・空のときは main）の上にいる
 #   2. git fetch origin main → git merge origin/main --no-edit で、origin/main を現在のブランチに取り込む
 #      （現在のブランチが main のときは行わない）。早送りできないときは、マージのコミットが作られる。
-#      マージに失敗したとき（コンフリクトなど）は、git merge --abort して、エラーで終了する
+#      git fetch に失敗したときは、エラーで終了する。
+#      マージに失敗したとき（コンフリクトなど）は、git merge の出力（失敗の理由）を表示し、git merge --abort して、
+#      エラーで終了する
 #   3. カレント配下だけを git add --all でステージする
 #   4. カレント配下に、ステージ済みの変更がなければ:
 #        - 未プッシュのコミット（@{u}..HEAD）があれば、コミットせず、git push だけ行って終了する
@@ -28,9 +31,10 @@
 #        - なければ、何もせず終了する（追跡先（upstream）がないときは、未プッシュ 0 件として扱う）
 #   5. sf-check.sh（引数なし）でターゲットファイルを検証する。エラーなら終了する
 #   6. VS Code（code --new-window --wait）で、コミットメッセージの入力ファイルを開き、閉じるまで待つ
-#   7. # で始まる行と空行を除いた内容が空なら、コミット・プッシュせず終了する
-#      （2 で取り込んだ結果と、3 のステージは、元に戻さず、そのまま残る）
-#   8. git commit -F（入力したメッセージ）→ git push を実行する
+#   7. 行末の CR を除き、# で始まる行（前の空白は可）を除き、先頭と末尾の空行（空白だけの行を含む）を除く。
+#      残りが空なら、コミット・プッシュせず終了する（2 で取り込んだ結果と、3 のステージは、元に戻さず、そのまま残る）
+#   8. 7 の残りをメッセージにして、git commit -F → git push を実行する。途中の空行（件名と本文の間の空行など）は残す
+#      （空白だけの行は、空行にする）
 #
 # 【前提条件】
 #   - 現在のディレクトリの名前が force- で始まること（lib/common.sh が確認する）
@@ -39,7 +43,12 @@
 # 【補足】
 #   - 8 の git commit は、パスを指定しない。カレント配下の外で、前からステージ済みの変更も、一緒にコミットされる
 #   - 4 の「変更なし」の判定は、カレント配下だけを見る
-#   - 8 の git commit / git push では、インストール済みの pre-commit / pre-push フックも動く
+#   - 8 の git commit / git push と、4 の「プッシュだけ行う」ときの git push では、インストール済みの
+#     pre-commit / pre-push フックも動く（4 では、コミットしないため、pre-push だけ）
+#   - git add・git push・git commit・VS Code の起動のいずれかに失敗したときも、エラーで終了する
+#   - 5 の sf-check.sh の出力（どの行が、なぜエラーか）は、-v の有無にかかわらず、画面に出る（run を通さずに実行する。
+#     エラーの行の表示は、画面にだけ出て、sf-push.sh のログには残らない。sf-check.sh の log の行（INFO など）は
+#     ./sf-tools/logs/sf-check.log に残る）
 #   - 終了コード: 0 = 正常終了（何もせず終了した場合を含む） / 1 = エラー
 #   - ログ: ./sf-tools/logs/sf-push.log（実行のたびに作り直す）
 # ==============================================================================
@@ -62,7 +71,7 @@ if [[ ! -f "$COMMON_LIB" ]]; then
     exit 1
 fi
 if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    awk '/^# ==/{f++; next} f==2{sub(/^# ?/,""); print} f==3{exit}' "${BASH_SOURCE[0]}"
+    awk '/^# ==/{f++; next} f==2{sub(/^# ?/,""); print} f==3{exit}' "${BASH_SOURCE[0]}"  # run 不使用: common.sh の読み込み前（run が未定義）
     exit 0
 fi
 source "$COMMON_LIB"
@@ -71,27 +80,29 @@ reject_unknown_args "$@"   # -v / --verbose 以外の引数は、不明なオプ
 # ------------------------------------------------------------------------------
 # 3. 必須コマンドのチェック
 # ------------------------------------------------------------------------------
-command -v git  >/dev/null 2>&1 || die "コマンドが見つかりません: git"
-command -v code >/dev/null 2>&1 || die "コマンドが見つかりません: code"
+command -v git  >/dev/null 2>&1 || die "コマンドが見つかりません: git"   # 存在確認のため run 不使用
+command -v code >/dev/null 2>&1 || die "コマンドが見つかりません: code"  # 存在確認のため run 不使用
 
 # ------------------------------------------------------------------------------
 # 4. リポジトリ情報の取得
 # ------------------------------------------------------------------------------
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" \
-    || die "現在のディレクトリから Git リポジトリを見つけられません。"
+    || die "現在のディレクトリから Git リポジトリを見つけられません。"  # VAR=$(cmd) のため run 不使用
 
+# ブランチ名（detached HEAD のときは、下のメッセージ用に、コミットの短いハッシュ）
 BRANCH_NAME="$(git -C "$REPO_ROOT" symbolic-ref --quiet --short HEAD 2>/dev/null || git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null)" \
-    || die "Git のブランチ名を取得できません。"
+    || die "Git のブランチ名を取得できません。"  # VAR=$(cmd) のため run 不使用
 
 # ブランチの上にいない（detached HEAD）と、コミットしても、どのブランチにも残らない。コミットの前に止める
 git -C "$REPO_ROOT" symbolic-ref --quiet HEAD >/dev/null 2>&1 \
-    || die "HEAD がブランチを指していません（detached HEAD: ${BRANCH_NAME}）。"
-# 保護ブランチ（main など）は、直接プッシュできない。コミットだけが手元に残るため、コミットの前に止める
+    || die "HEAD がブランチを指していません（detached HEAD: ${BRANCH_NAME}）。"  # 条件チェックのため run 不使用
+# 保護ブランチ（branches.txt のブランチ。ファイルがない・空なら main）は、直接プッシュできない。コミットだけが手元に残るため、コミットの前に止める
 if is_protected_branch "$BRANCH_NAME"; then
     die "${BRANCH_NAME} は保護ブランチです（ここでは、コミットもプッシュも行いません）。"
 fi
 
-REL_PREFIX="$(git rev-parse --show-prefix 2>/dev/null || true)"
+# カレントの、リポジトリのルートからの相対パス（git -C "$REPO_ROOT" に渡す pathspec。ルートにいるときは .）
+REL_PREFIX="$(git rev-parse --show-prefix 2>/dev/null || true)"  # VAR=$(cmd) のため run 不使用
 if [[ -n "$REL_PREFIX" ]]; then
     TARGET_PATHSPEC="${REL_PREFIX%/}"
 else
@@ -105,15 +116,18 @@ log "HEADER" "カレント配下のコミット・プッシュを開始します
 log "INFO" "対象: ${BRANCH_NAME}"
 
 # ------------------------------------------------------------------------------
-# 6. origin/main を取り込む（コンフリクトがあればエラー中止）
+# 6. origin/main を取り込む（main 以外のとき。fetch の失敗はエラー終了、マージの失敗は --abort してエラー終了）
 # ------------------------------------------------------------------------------
 if [[ "$BRANCH_NAME" != "main" ]]; then
     log "INFO" "origin/main を取り込みます。"
     run git -C "$REPO_ROOT" fetch origin main \
         || die "git fetch に失敗しました。"
-    if ! run git -C "$REPO_ROOT" merge origin/main --no-edit; then
-        git -C "$REPO_ROOT" merge --abort 2>/dev/null || true  # マージ中断（例外: エラー無視）
-        die "origin/main とのマージでコンフリクトが発生しました。手動で解決してください。"
+    # 失敗の理由（コンフリクト・上書きされる未追跡ファイルなど）は、git merge の出力にある。-v がなくても表示するため、出力を受け取る
+    #   （-v のときは、run が、すでに画面に出しているため、重ねて出さない）
+    if ! _merge_out=$(run git -C "$REPO_ROOT" merge origin/main --no-edit); then
+        [[ "${SILENT_EXEC:-}" == "1" && -n "$_merge_out" ]] && printf '%s\n' "$_merge_out" >&2
+        git -C "$REPO_ROOT" merge --abort 2>/dev/null || true  # マージ中断（例外: エラー無視。マージが始まっていなければ、失敗する）
+        die "origin/main とのマージに失敗しました。"
     fi
 fi
 
@@ -123,8 +137,8 @@ fi
 run git -C "$REPO_ROOT" add --all -- "$TARGET_PATHSPEC" \
     || die "git add に失敗しました。"
 
-if git -C "$REPO_ROOT" diff --cached --quiet -- "$TARGET_PATHSPEC"; then
-    # 変更がなくても、未プッシュのコミットがあれば、プッシュだけ行う
+if git -C "$REPO_ROOT" diff --cached --quiet -- "$TARGET_PATHSPEC"; then  # 条件チェックのため run 不使用（カレント配下にステージ済みの変更がない）
+    # カレント配下に変更がなくても、未プッシュのコミットがあれば、プッシュだけ行う
     #   （コミットは成功し、プッシュが失敗した後の再実行で、取り残されないように）。追跡先（upstream）がないときは、0 件として扱う
     _unpushed=$(git -C "$REPO_ROOT" rev-list --count '@{u}..HEAD' 2>/dev/null) || _unpushed=0  # VAR=$(cmd) のため run 不使用
     if [[ "$_unpushed" =~ ^[0-9]+$ && "$_unpushed" -gt 0 ]]; then
@@ -142,14 +156,15 @@ fi
 # 8. ターゲットファイルの検証（sf-check.sh）
 # ------------------------------------------------------------------------------
 log "INFO" "sf-check.sh でターゲットファイルを検証します。"
-run bash "${SCRIPT_DIR}/sf-check.sh" \
+# run 不使用: sf-check.sh の出力（どの行が、なぜエラーか）を、-v がなくても画面に出すため（run は、-v がなければ、出力をログにだけ残す）
+bash "${SCRIPT_DIR}/sf-check.sh" \
     || die "ターゲットファイルの検証に失敗しました。コミットを中止します。"
 
 # ------------------------------------------------------------------------------
 # 9. コミットメッセージ入力ファイルを作成
 # ------------------------------------------------------------------------------
 COMMIT_MSG_FILE="$(mktemp "${TMPDIR:-/tmp}/sf-push-commit-msg.XXXXXX.txt")" \
-    || die "一時ファイルの作成に失敗しました。"
+    || die "一時ファイルの作成に失敗しました。"  # VAR=$(cmd) のため run 不使用
 trap 'rm -f "$COMMIT_MSG_FILE"' EXIT
 
 printf '%s\n' \
@@ -166,13 +181,21 @@ log "INFO" "VS Code でコミットメッセージ入力画面を開きます。
 run code --new-window --wait "$COMMIT_MSG_FILE" \
     || die "VS Code の起動に失敗しました。"
 
-COMMIT_MSG="$(grep -v '^[[:space:]]*#' "$COMMIT_MSG_FILE" | sed '/^[[:space:]]*$/d')"
+# 行末の CR を除き、# で始まる行（前の空白は可）を除き、先頭と末尾の空行（空白だけの行を含む）を除く。
+#   途中の空行（件名と本文の間など）は、次の空でない行を出すときに、まとめて出す（空白だけの行は、空行にする）
+#   （以前は、空行をすべて除き、件名と本文の間の空行も消えて、本文が件名の続きになっていた）
+COMMIT_MSG="$(awk '
+    { sub(/\r$/, "") }
+    /^[[:space:]]*#/ { next }
+    /^[[:space:]]*$/ { if (started) blank++; next }
+    { if (started) for (i = 0; i < blank; i++) print ""; blank = 0; started = 1; print }
+' "$COMMIT_MSG_FILE")"  # VAR=$(cmd) のため run 不使用
 if [[ -z "$COMMIT_MSG" ]]; then
     log "INFO" "コミットメッセージが未入力のため、何もせず終了します。"
     exit $RET_OK
 fi
 
-# コメント除去済みのメッセージでファイルを上書き
+# コメント行・前後の空行を除いたメッセージでファイルを上書き
 printf '%s\n' "$COMMIT_MSG" > "$COMMIT_MSG_FILE"
 
 # ------------------------------------------------------------------------------

@@ -19,10 +19,11 @@
 #      成功したら ~/.sf-tools-sf-check に sf の場所を記録し、同じ場所の sf なら 24 時間は確認を省略する。
 #      sf が未インストールのとき・GitHub Actions 上では確認しない
 #   2. 接続の確認。環境変数 FORCE_RELOGIN が 1 でなく、.sf/config.json があるときに sf org display --json を実行し、
-#      エイリアスが取れ、組織 ID が 00D で始まれば、接続済みとしてログインを省略する
+#      エイリアスが取れ、組織 ID が 00D で始まれば、接続済みとしてログインを省略する（そのエイリアスを 4 で使う）。
+#      sf org display が失敗した・JSON を読み取れないときは、未接続として扱う
 #   3. 未接続（または FORCE_RELOGIN=1）のときのログイン:
 #        a. 接続する組織のエイリアスを入力する（空 Enter は再入力。q / EOF で中断）
-#        b. sf alias unset vscodeOrg を実行する
+#        b. sf alias unset vscodeOrg を実行する（失敗しても続行）
 #        c. ログイン先を選ぶ: [1] https://login.salesforce.com / [2] https://test.salesforce.com（Enter = 2）/
 #           [3] 組織の URL を入力（https で、salesforce.com または force.com 配下）。q で中断。
 #           環境変数 SF_INIT_LOGIN_URL_START（login / test / URL）があれば、質問せずにそれを使う
@@ -33,22 +34,26 @@
 #   4. .sf/config.json（{"target-org": エイリアス}）と .sfdx/sfdx-config.json（{"defaultusername": エイリアス}）を
 #      上書きする（書き込めなければ中断）。code コマンドがあれば code . で VS Code を起動する（なければ警告のみ）
 #   5. ~/sf-tools/bin/sf-install.sh があれば、バックグラウンドで実行する（出力は、このスクリプトのログに追記）。
-#      内容: ~/sf-tools の git pull・設定ファイルの確認・Git フック（pre-push）の設置・
+#      内容: ~/sf-tools の git pull・設定ファイルの確認・Git フック（pre-commit / pre-push）の設置・
 #      sf-tools/release/{ブランチ}/ の準備と sf-tools/release/branch_name.txt の更新（main ブランチでは行わない）・
-#      npm install（package.json があるとき。node_modules/.package-lock.json が package-lock.json 以降に更新済みなら省略）・開発ツールの更新（sf-upgrade.sh。24 時間に 1 回）。詳細は sf-install.sh の冒頭コメント
+#      npm install（package.json があるとき。node_modules/.package-lock.json が package-lock.json 以降に更新済みなら省略）・
+#      開発ツールの更新（sf-upgrade.sh。24 時間に 1 回）。詳細は sf-install.sh の冒頭コメント
 #   6. ~/sf-tools/bin/sf-launcher.sh があり、環境変数 SF_LAUNCHER_ACTIVE が 1 でなければ、前面で起動する
 #      （sf-launcher.sh から呼ばれたときは、二重に起動しない）
 #
 # 【前提条件】
 #   - force-* フォルダ（カレントフォルダの名前が force- で始まる）で実行する。違えばエラーで終了する
-#     （sf-job.sh から呼ばれたときは、この確認を省略する）
+#     （環境変数 SF_INIT_MODE=1 のとき（sf-job.sh から呼ばれたとき。sf-job.sh が export する）は、この確認を省略する）
 #   - Salesforce CLI（sf）は npm 版であること（公式インストーラー版は、Windows の Git Bash で、成功しても終了コード 1 を返すため）
 #
 # 【補足】
-#   - Ctrl+C は無効（1 の確認のあとから）。入力時に q で中断する。中断・失敗時の終了コードは 1
+#   - Ctrl+C は無効（1 の確認のあとから。trap '' INT）。入力時に q で中断する。中断・失敗時の終了コードは 1。
+#     シグナルの無視は、子の bash（前面で起動する sf-launcher.sh と、そこから実行する bash のコマンド）に継承されるため、
+#     それらも Ctrl+C を無視する。ただし、sf・npm など Node のコマンドは、起動時にシグナルの扱いを既定に戻すため、実行中に
+#     Ctrl+C を押すと、そのコマンドだけが止まることがある（sf-job.sh から呼ばれたときは、sf-job.sh の設定も、同じく引き継がれる）
 #   - 終了コードは、sf-launcher.sh の終了コードによらず 0。バックグラウンドの sf-install.sh の失敗も、終了コードに影響しない
 #   - 接続済みの組織を切り替えるときは sf-restart.sh を使う
-#   - ログ: ./sf-tools/logs/sf-start.log（実行のたびに作り直す）。終了時に ./sf-tools/cmd_out_*.tmp と /tmp/sf-wsl-bin を削除する
+#   - ログ: ./sf-tools/logs/sf-start.log（実行のたびに作り直す）。終了時に /tmp/sf-wsl-bin を削除する
 # ==============================================================================
 
 # ------------------------------------------------------------------------------
@@ -70,7 +75,7 @@ if [[ ! -f "$COMMON_LIB" ]]; then
     exit 1
 fi
 if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    awk '/^# ==/{f++; next} f==2{sub(/^# ?/,""); print} f==3{exit}' "${BASH_SOURCE[0]}"
+    awk '/^# ==/{f++; next} f==2{sub(/^# ?/,""); print} f==3{exit}' "${BASH_SOURCE[0]}"  # run 不使用: common.sh の読み込み前（run が未定義）
     exit 0
 fi
 source "$COMMON_LIB"
@@ -85,8 +90,9 @@ log "HEADER" "開発タスクのスタートアップを開始します (${SCRIP
 # sf が終了コードを正しく返すか確認する（npm 版が前提。異常なら中断する）。成功は 24 時間は確認を省略する
 check_sf_cli --cache
 
-trap '' INT  # Ctrl+C を無効化（q で中断すること）
-trap 'rm -f ./sf-tools/cmd_out_*.tmp 2>/dev/null; rm -rf /tmp/sf-wsl-bin 2>/dev/null' EXIT
+trap '' INT  # Ctrl+C を無効化（q で中断すること。無視の設定は子プロセスにも継承される）
+# 終了時の後始末。run 不使用: EXIT トラップの中の後始末（失敗しても、終了コード・表示に影響させない）
+trap 'rm -rf /tmp/sf-wsl-bin 2>/dev/null' EXIT
 
 # ------------------------------------------------------------------------------
 # 4. Salesforce 接続確認・ログイン
@@ -125,7 +131,7 @@ if [ "$SKIP_LOGIN" -eq 0 ]; then
         printf "\033[A\r\033[K" >&2
     done
 
-    # VS Code が参照する古いエイリアス設定をクリア
+    # VS Code が参照する古いエイリアス設定をクリア（失敗しても続行する。終了コードは見ない）
     run sf alias unset vscodeOrg --json
 
     # ログイン先は、エイリアスの名前では、決めない（Developer Edition や、別名の本番も、あるため）。
@@ -137,7 +143,7 @@ if [ "$SKIP_LOGIN" -eq 0 ]; then
 
     # WSL: sf org login web 内部の open パッケージが wslview を探すため、
     #       未インストール時は powershell.exe でブラウザを開く wslview を一時補完する
-    if grep -qi microsoft /proc/version 2>/dev/null && ! command -v wslview &>/dev/null; then
+    if grep -qi microsoft /proc/version 2>/dev/null && ! command -v wslview &>/dev/null; then  # 条件チェックのため run 不使用（WSL の判定）
         mkdir -p /tmp/sf-wsl-bin          # run 不使用: PATH export 前のシェル設定操作
         printf '#!/bin/bash\npowershell.exe Start-Process "$1" 2>/dev/null\n' \
             > /tmp/sf-wsl-bin/wslview
@@ -177,7 +183,8 @@ fi
 # ------------------------------------------------------------------------------
 # sf-install.sh が以下をすべて担当する（GitHub Actions ワークフローの更新は、担当しない。管理者が sf-sync-wf.sh で手動で行う）:
 #   - sf-tools 最新化 (git pull)
-#   - Git フック (pre-push) インストール
+#   - 設定ファイル（sf-tools/config/metadata.txt・branches.txt）の確認
+#   - Git フック (pre-commit / pre-push) インストール
 #   - リリース管理ディレクトリ準備 & branch_name.txt 更新
 #   - npm install / sf-upgrade.sh (24h スロットル)
 log "INFO" "バックグラウンドで sf-install.sh を実行中..."
@@ -187,7 +194,7 @@ log "INFO" "  完了後に sf-tools/release/<branch>/ が準備されます（np
         bash "$HOME/sf-tools/bin/sf-install.sh" "$@" 2>&1 \
             || true
     fi
-) >> "$LOG_FILE" 2>&1 &
+) >> "$LOG_FILE" 2>&1 &  # バックグラウンド起動のため run 不使用（出力は、このスクリプトのログに追記）
 disown   # ジョブ完了通知をターミナルに表示しない
 
 # ------------------------------------------------------------------------------
@@ -195,7 +202,7 @@ disown   # ジョブ完了通知をターミナルに表示しない
 # ------------------------------------------------------------------------------
 # ランチャーから（Start / Restart で）呼ばれた場合は二重起動しない（SF_LAUNCHER_ACTIVE=1 はランチャーが export する）
 if [[ -f "$HOME/sf-tools/bin/sf-launcher.sh" ]] && [[ "${SF_LAUNCHER_ACTIVE:-}" != "1" ]]; then
-    bash "$HOME/sf-tools/bin/sf-launcher.sh"
+    bash "$HOME/sf-tools/bin/sf-launcher.sh"  # 対話のため run 不使用。終了コードは使わない（このスクリプトは 0 で終わる）
 fi
 
 exit $RET_OK

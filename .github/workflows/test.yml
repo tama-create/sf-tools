@@ -1,7 +1,7 @@
 name: テスト
 
 # sf-tools 自体のテスト（モックベースの単体テスト。件数は変わるため、書かない）と、シェルの静的解析（shellcheck）。
-# 実際の GitHub / Salesforce には触れない（Secrets は使わない）。実環境の確認は tests/e2e（開発者が手動で実行する）。
+# 実際の GitHub / Salesforce には触れない（Secrets は使わない）。実環境の確認は tests/e2e（配布物が変わった development への push で、e2e.yml が自動で動かす。手元では、新しい環境の確認・調査のときだけ）。
 # shellcheck の設定（無効にしている項目と、その理由）は、リポジトリの .shellcheckrc。
 on:
   pull_request:

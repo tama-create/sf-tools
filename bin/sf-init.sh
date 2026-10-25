@@ -38,7 +38,8 @@
 #                           直し方つき）と、段階ごとの接続先（ログイン先・組織の種類・ユーザー・組織 ID）を一覧にする
 #                           （読み取りのみ。phases/init/status.sh）
 #   --verify              : 動作の確認（実際のリポジトリ・組織に、Hello World を、リリースして、削除する。phases/init/verify.sh）。
-#                           環境全体の確認（SF_TOOLS_BRANCH・ログに Token が残っていない・wf-metasync）も、最初に行う
+#                           環境全体の確認（SF_TOOLS_BRANCH・ログに Token が残っていない・wf-metasync）も、リリースの前に行う
+#                           （--cleanup のときは行わない）
 #     --plan              : （--verify と一緒に）診断と、実行内容の表示だけ（何も変更しない）
 #     --cleanup           : （--verify と一緒に）削除のみ（検証が途中で止まって、組織に Hello World が残ったときの後始末）
 #     --no-metasync       : （--verify と一緒に）環境の確認のうち、wf-metasync の実行を、省略する
@@ -68,15 +69,17 @@
 #      - 管理者向けの警告（赤いボックス）
 #      - sf-tools の最新化の確認（【補足】sf-tools の最新化）
 #      - 確認: --resume N（2 以上）/ --only N の指定がないときは、用意するものと、9 つのステップを表示して、
-#        「用意ができたら Enter を押してください」（Enter / Y で進む。N / q / EOF で終了）。指定があるときは「続行しますか？」（Y/N/q）
+#        「用意ができたら Enter を押してください」（Enter / Y で進む。N / q / EOF で終了）。指定があるときは「続行しますか？」
+#        （Y/N/q。N / q / EOF で終了）
 #      - gh の認証ユーザーが、オーナーと一致するか、オーナーの組織の有効な管理者（admin・active）でなければ、終了する
 #        （gh の認証ユーザーを取得できないときは、確認しない）
-#   4. 実行した場所に admin/ を作って移動し、排他のロックを取る（【補足】同時実行）。
-#      admin/force-XXXX が、OWNER/force-XXXX 以外を origin とするクローンなら、終了する（大文字・小文字は区別しない）
+#   4. 実行した場所に admin/ を作って移動する。admin/force-XXXX が、OWNER/force-XXXX 以外を origin とするクローン
+#      （.git フォルダがあり、origin が別のリポジトリ・origin がない・GitHub 以外）なら、終了する（大文字・小文字は区別しない）。
+#      そのあと、排他のロックを取る（【補足】同時実行）
 #   5. 前回の状態の判定（【補足】途中で止まったとき・完了済みのとき）
 #   6. 新規の実行（--resume N（2 以上）/ --only の指定なし、かつ「続きをやる」を選んでいない）では、admin/force-XXXX の
 #      完了の印を 0（やり直し中）にし、状態ファイル（admin/.sf-init-XXXX.env / admin/.sf-init-XXXX.progress）を消す
-#   7. Phase の実行（失敗したら、やり直し方を表示して終了する）
+#   7. Phase の実行（失敗したら、やり直し方を表示して終了する。--only のときは、やり直し方を表示しない）
 #        Phase 1:  環境チェック（ツール確認・GitHub CLI 認証確認）
 #        Phase 2:  プロジェクト情報の確認（OWNER・XXXX の確認、sf-tools の版（配布版 main / 開発版 development）の選択、
 #                  .sf-init-XXXX.env の作成）
@@ -89,61 +92,65 @@
 #        Phase 9:  GitHub リポジトリ設定・Ruleset の適用
 #        Phase 10: JWT 認証情報の設定（Salesforce GitHub Secrets 登録）
 #      画面には、Phase の番号ではなく、利用者向けの 9 つのステップ（準備の確認 〜 Salesforce の接続・動作の確認）の見出しを出す
-#      （--only のときは出さない）
-#   8. 後処理（実行範囲の終わりが Phase 10 のとき。--only 10・--resume N を含む。条件は項目ごと）
+#      （--only のときは出さない）。--resume N（2 以上）/ --only のときは、「実行フェーズ: Phase N 〜 Phase M」も表示する
+#   8. 後処理（条件は項目ごと。a〜e は、実行範囲の終わりが Phase 10 のときだけ。--only 10・--resume N を含む）
 #      a. .sf-init-XXXX.env があれば、Token の値の行（^[A-Z_]*TOKEN_VALUE=）を消す
 #      b. 最初のメタデータの同期（--only なし、開始が Phase 10 以下、.sf-init-XXXX.env に REPO_DIR・REPO_FULL_NAME があるとき）:
 #         wf-metasync を起動して完了を待ち（既定 1200 秒。SF_INIT_SYNC_TIMEOUT。時間切れなら、実行を取り消す）、成功したら、
 #         管理者用のクローンを main にして git pull --ff-only origin main。失敗しても、セットアップは成功のまま、完了画面で知らせる
 #      c. 動作の確認（任意。【補足】動作の確認）
 #      d. 管理者用のクローンを admin ブランチにして、GitHub にも push する（REPO_DIR があるとき。【補足】admin フォルダ）
-#      e. 完了の印を 1 にし、状態ファイルを消す（--only なしのとき）
-#      f. 完了画面（--resume N / --only N のときも表示する）
+#      e. 完了の印を 1 にし、状態ファイルを消す（--only なしのとき。印を付けられなければ、状態ファイルは残す）
+#      f. 完了画面（常に表示する。--resume N / --only N のときも。admin ブランチ・同期を行わなかったときは、行っていないことと、
+#         その理由（途中までの実行 / --only の実行 / 状態ファイルに REPO_DIR などがない）を表示する）
 #
 # 【前提条件】
 #   - 実行する場所: 通常の実行は、作業フォルダ（sf-job.sh を実行する場所。どこでもよい。おすすめ: ~/sf のような、短い名前のフォルダ）。
 #     実行した場所に admin/force-XXXX ができる。保守用のモード（--add-tier / --reconnect / --status / --verify）は、force-* の中
 #   - Salesforce CLI（sf）は npm 版（npm install -g @salesforce/cli）であること。起動時に sf --version の終了コードを確認し、
 #     0 以外なら案内を表示して終了する（Windows の Git Bash で公式インストーラー版を使うと、成功しても終了コード 1 になるため）。
-#     この確認は、--help 以外のすべてのモードで行う
+#     この確認は、--help 以外のすべてのモードで行う（sf が未インストールのとき・GitHub Actions 上では、確認しない）
 #   - gh の認証ユーザーが、オーナー本人か、オーナーの組織の有効な管理者であること（【処理の流れ】3）
 #   - 手動の操作が必要なもの:
 #     Salesforce 組織へのブラウザログイン / GitHub Classic PAT トークンの作成（repo + workflow スコープ）/
 #     Slack App の作成・Bot Token の取得 / 通知先 Slack チャンネルで Bot を招待（/invite @sf-notify-<プロジェクト名>）
 #
 # 【補足】
-#   - 開始画面（新規の実行）には、作るもの・かかる時間の目安（30〜60 分。ブラウザでの作業と Salesforce の反映待ちを含む）・
-#     先に用意するもの・9 つのステップを表示する
+#   - 開始画面（--resume N（2 以上）/ --only の指定がないとき。続き・完了済みの選択画面より前に出る）には、作るもの・
+#     かかる時間の目安（30〜60 分。ブラウザでの作業と Salesforce の反映待ちを含む）・先に用意するもの・9 つのステップを表示する
 #   ◆ 途中で止まったとき（続きから）
 #     - Phase 2 以降が成功するたびに、admin/.sf-init-XXXX.progress を SF_INIT_DONE_PHASE=N・SF_INIT_DONE_AT で上書きする
 #       （--only のとき・.sf-init-XXXX.env がないときは、記録しない）
 #     - --resume N（2 以上）/ --only の指定なしで起動し、進捗が 2〜9 で、.sf-init-XXXX.env の REPO_FULL_NAME が OWNER/force-XXXX
-#       （大文字・小文字は区別しない）なら、次から選ばせる（既定値はない）。選択は、【処理の流れ】3 の警告・確認のあとに出る
+#       （大文字・小文字は区別しない）なら、次から選ばせる（既定値はない）。選択は、【処理の流れ】3 の警告・確認と、
+#       4 のロックのあとに出る
 #         [1] 続きをやる: Phase 1 を実行してから、次の Phase〜10 を実行する（保存済みの入力内容を使う）。
 #             進捗が 8 以上なのに、GitHub の main ブランチを確認できない（gh api の失敗を含む）ときは、終了する
 #         [2] 最初からやり直す: 【処理の流れ】6 のとおり（作成済みのリポジトリ・admin フォルダは、そのまま使う）
-#         [q] 中断（終了する）
+#         [q] 中断（終了コード 1）
 #     - Phase 10 は、段階（main / staging / develop）ごとに、完了を進捗に記録し、再実行では、完了した段階を、スキップする
 #       （登録した Secret が、いまもあるときだけ。--only 10 では、記録も、スキップも、しない）
 #   ◆ 完了済みのとき
-#     - 判定: 状態ファイルが 2 つともあるときは、進捗が 10 で、REPO_FULL_NAME が OWNER/force-XXXX であること（完了の直前で止まった状態）。
+#     - 判定: 状態ファイルが 2 つともあるときは、進捗が 10 で、REPO_FULL_NAME が OWNER/force-XXXX であること（完了の直前で止まった・完了の印を付けられなかった・以前の版が残した状態）。
 #       そろっていないときは、admin/force-XXXX の origin が OWNER/force-XXXX で、完了の印（git config sf-tools.setup-complete）が 1 であること。
 #       印が未設定なら、ローカルに admin ブランチがあれば完了済みとみなし、印を 1 にする。印が 0 は、やり直し中（未完了）
-#     - --resume N（2 以上）/ --only の指定なしで起動したとき（続きの対象でないとき）は、次から選ばせる。状態ファイルが残っている
-#       ときは、先に GitHub の main ブランチを確認し（確認できなければ終了）、後片付け（admin ブランチ・push・完了の印・
-#       状態ファイルの削除）を済ませる
-#         [1] いまの Salesforce の接続を見る（status.sh。何も変更しない。終了コード 0）
-#         [2] 動作を確認する（verify.sh。確認は verify.sh が聞く。終了コードは verify.sh のもの）
+#     - --resume N（2 以上）/ --only の指定なしで起動したとき（続きの対象でないとき）は、次から選ばせる。状態ファイルが
+#       1 つでも残っているときは、先に GitHub の main ブランチを確認し（確認できなければ終了）、後片付け（admin ブランチ・
+#       push・完了の印・状態ファイルの削除。クローンが OWNER/force-XXXX のものでなければ、何もしない）を済ませる
+#         [1] いまの Salesforce の接続を見る（クローンで status.sh。何も変更しない。不足があっても終了コード 0）
+#         [2] 動作を確認する（クローンで verify.sh。確認は verify.sh が聞く。終了コードは verify.sh のもの）
+#             [1]・[2] は、クローンのフォルダがなければ終了する（終了コード 1）
 #         [3] 最初からやり直す（【処理の流れ】6。作成済みのリポジトリは、そのまま使い、設定を、上書きする）
 #         [q] 終了（終了コード 0）
 #     - --resume N（2 以上）と --only N は、拒否する（終了コード 1）
 #   ◆ --only N と状態ファイル
-#     - Phase 3〜10 のスクリプトは、Phase 2 が作る .sf-init-XXXX.env の値（REPO_FULL_NAME など）がないと終了する。
-#       状態ファイルは完了時に消えるため、完了後に --only N（3 以上）だけを実行すると、「〜が未設定です」で終了する
+#     - Phase 3〜10 のスクリプトは、Phase 2 が作る .sf-init-XXXX.env の値（REPO_FULL_NAME など）がないと、「〜が未設定です」で
+#       終了する。完了済みのプロジェクトでは、--only N は、Phase を実行する前に拒否する（◆ 完了済みのとき。終了コード 1）
 #   ◆ 同時実行
 #     - 同じ admin・同じ XXXX で、sf-init.sh を、同時に 2 つ動かすことはできない（後から起動した方は「すでに実行中です」で終了する）。
 #       admin/.sf-init-XXXX.lock（フォルダ。中に PID）で排他する。PID のプロセスがもういないときは、古いロックとして引き継ぐ。
-#       ロックを取るのは【処理の流れ】4（警告・確認のあと）。保守用のモードは、ロックを取らない
+#       ロックを取るのは【処理の流れ】4（警告・確認のあと）。保守用のモードは、ロックを取らない。
+#       Phase 2 の終了コード 75 で実行しなおすときは、作業フォルダに戻り、ロックを解放してから、実行しなおす
 #   ◆ 動作の確認（【処理の流れ】8c）
 #     - 聞く条件: 実行範囲の終わりが Phase 10、--resume N（2 以上）/ --only の指定なし（中断後の「続きをやる」を含む）、
 #       GITHUB_ACTIONS が true でない、標準入力が端末（または SF_INIT_VERIFY_ASK=1）
@@ -160,20 +167,25 @@
 #     - 完了の印は、クローンの .git/config にあり、GitHub には送られない
 #   ◆ sf-tools の最新化
 #     - 【処理の流れ】3 で、~/sf-tools の現在のブランチが origin より遅れていないかを確認する。Git リポジトリでない・HEAD が
-#       ブランチでない・fetch できない・origin にブランチがないときは、警告して続行する。未コミットの変更か未 push のコミットが
-#       あれば、更新せずに続行する。遅れていれば、確認（Y/N/q）のうえ git pull --ff-only し、同じ引数で自動的に実行しなおす
+#       ブランチでないときは、ここでは確認しない（警告も出さない。Phase 2 が、選んだ版で確認する）。fetch できない・origin に
+#       ブランチがないときは、警告して続行する。未コミットの変更か未 push のコミットがあれば、更新せずに続行する。
+#       遅れていれば、確認（Y/N/q）のうえ git pull --ff-only し、同じ引数で自動的に実行しなおす
 #       （N なら更新せずに続行。q・更新の失敗は終了）。実行しなおしたあとは、この確認をしない
-#     - Phase 2 は、選んだ版のブランチと、現在のブランチが違えば、確認する（N / q で終了）。実行しなおしたあとは、Phase 2 が、
-#       選んだ版で最新化を確認する。Phase 2 が更新したとき（終了コード 75）は、まだ実行しなおしていなければ実行しなおし、
-#       実行しなおしたあとなら「sf-tools を更新しても、最新になりませんでした。」で終了する
+#     - Phase 2 は、選んだ版のブランチと、現在のブランチが違えば、確認する（N / q で終了）。実行しなおしたあと（または、
+#       【処理の流れ】3 で確認しなかったとき）は、Phase 2 が、選んだ版で最新化を確認する。Phase 2 が更新したとき
+#       （終了コード 75）は、まだ実行しなおしていなければ、作業フォルダに戻り、ロックを解放して、同じ引数で実行しなおし
+#       （警告・確認から、もう一度。通常の流れでは起きない、備えの経路）、実行しなおしたあとなら
+#       「sf-tools を更新しても、最新になりませんでした。」で終了する
 #   ◆ 引数の解析
 #     - --only / --resume は、Phase 番号（1〜10 の整数。先頭の 0 は不可）だけを受け付ける。値なし・数字以外・範囲外は、
 #       エラーで終了する（終了コード 1）。--add-tier は、次の引数（- で始まらないもの）を値として受け取り、値なしは
-#       エラーで終了する（staging / develop かどうかは、add_tier.sh が確認する）
+#       エラーで終了する（staging / develop かどうかは、add_tier.sh が確認する）。--reconnect は、次の引数を値として受け取り
+#       （- で始まるものも受け取る）、値なしはエラーで終了する（段階の名前かどうかは、reconnect.sh が確認する）
 #     - 知らないオプションは、使い方を表示して終了する
 #   ◆ そのほか
 #     - Ctrl+C は、--help の判定のあと、引数の解析の前から無効（trap '' INT。子プロセスにも継承）。中断するには、ターミナルを閉じる
-#     - ログ: ~/sf-tools/logs/sf-init.log（起動のたびに空にする。各 Phase は追記する）
+#     - ログ: ~/sf-tools/logs/sf-init.log（起動のたびに空にする。各 Phase は追記する）。verify.sh（--verify・動作の確認）の
+#       記録は ~/sf-tools/logs/verify.log
 #     - 終了コード: 0 = 成功（完了済みの選択画面の [1] / [q] を含む）/ 1 = エラー（die）/
 #       --verify・--status・完了済みの [2] は、verify.sh・status.sh の終了コードを、そのまま返す
 # ==============================================================================
@@ -183,7 +195,7 @@
 # ------------------------------------------------------------------------------
 readonly SCRIPT_NAME=$(basename "$0" .sh)
 # sf-init.sh はプロジェクト外から実行するため、ログは sf-tools 配下に記録する
-mkdir -p "$HOME/sf-tools/logs" 2>/dev/null || true
+mkdir -p "$HOME/sf-tools/logs" 2>/dev/null || true  # run 不使用: common.sh（run）の読み込み前の準備（意図的エラー無視）
 readonly LOG_FILE="$HOME/sf-tools/logs/${SCRIPT_NAME}.log"
 readonly LOG_MODE="NEW"  # 司令塔が起動のたびにログをリセットする
 
@@ -201,7 +213,7 @@ if [[ ! -f "$COMMON_LIB" ]]; then
     exit 1
 fi
 if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    awk '/^# ==/{f++; next} f==2{sub(/^# ?/,""); print} f==3{exit}' "${BASH_SOURCE[0]}"
+    awk '/^# ==/{f++; next} f==2{sub(/^# ?/,""); print} f==3{exit}' "${BASH_SOURCE[0]}"  # run 不使用: common.sh の読み込み前（run が未定義）
     exit 0
 fi
 source "$COMMON_LIB"
@@ -211,7 +223,8 @@ source "${SCRIPT_DIR}/../lib/verify-common.sh"           # 最初のメタデー
 
 trap '' INT  # Ctrl+C を無効化（子プロセスにも継承される）
 
-ORIG_ARGS=("$@")   # sf-tools を更新したあと、同じ引数で、実行しなおすために覚えておく
+ORIG_ARGS=("$@")   # sf-tools を更新したあと、同じ引数で、実行しなおすために覚えておく（対話で決めたオーナー・XXXX は、
+                   #   resolve_init_identity が export する SF_INIT_OWNER / SF_INIT_PROJECT で引き継ぐ）
 
 # ------------------------------------------------------------------------------
 # 3. 引数解析
@@ -222,7 +235,7 @@ ADD_TIER_MODE=""
 RECONNECT_MODE=""
 STATUS_MODE=0
 VERIFY_MODE=0
-VERIFY_ARGS=()   # --verify のオプション（--plan / --cleanup / --no-metasync / --components / --validate-only）。verify.sh に、そのまま渡す
+VERIFY_ARGS=()   # --verify のオプション（--plan / --cleanup / --no-metasync / --components / --validate-only / --with-objects）。verify.sh に、そのまま渡す
 
 # --only / --resume の値の検査（Phase 番号 1〜10 の整数だけ）。値なしだと shift 2 が失敗して引数の解析が終わらず（Ctrl+C は無効）、
 # 数字以外・範囲外だと存在しない Phase を「成功」として実行してしまうため、解析の時点で拒否する。
@@ -233,7 +246,7 @@ _require_phase_number() {
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --help|-h) show_help ;;
+        --help|-h) show_help ;;   # 2 つ目以降の --help / -h（第 1 引数のときは、上で処理済み）。ヘルプを表示して終了 0
         --owner)
             [[ -n "${2:-}" ]] || die "--owner には、GitHub のオーナー（組織名またはユーザー名）を指定してください。"
             export SF_INIT_OWNER="$2"
@@ -260,7 +273,7 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         --reconnect)
-            RECONNECT_MODE="$2"
+            RECONNECT_MODE="$2"   # - で始まる値も受け取る（段階の名前かどうかは、reconnect.sh が確認する）
             [[ -n "$RECONNECT_MODE" ]] || die "--reconnect には、main・staging・develop のいずれかを指定してください。"
             shift 2
             ;;
@@ -294,22 +307,25 @@ while [[ $# -gt 0 ]]; do
   ~/sf-tools/bin/sf-init.sh --status               # セットアップの診断と、段階ごとの接続先を一覧にする
   ~/sf-tools/bin/sf-init.sh --verify               # 動作の確認（Hello World を、各段階にリリースして、削除する。--plan / --cleanup / --no-metasync）
   ~/sf-tools/bin/sf-init.sh --verify --components  # パターン別のサンプルを、develop の組織だけに、リリースして、削除する（--validate-only: 検証のみ）
+  ~/sf-tools/bin/sf-init.sh --verify --components --with-objects  # オブジェクト系も、リリースして、削除する
   ~/sf-tools/bin/sf-init.sh --legacy-connected-app # 従来の接続アプリケーションを使う（今後廃止予定）"
             ;;
     esac
 done
 
 # sf が終了コードを正しく返すか確認する（npm 版が前提。NG なら案内を表示して中断する）
-# --resume / --only / --add-tier / --verify / --status / --reconnect のときも確認する（--help 以外の、すべての実行で確認する）
+# --resume / --only / --add-tier / --verify / --status / --reconnect のときも確認する（--help 以外の、すべての実行で確認する）。
+# sf が未インストールのとき・GitHub Actions 上では、check_sf_cli は何もしない
 check_sf_cli
 
-# --add-tier モードは通常のフェーズループとは別処理
+# 保守用のモード: --add-tier → --verify → --status → --reconnect の順で、最初に該当した 1 つだけを実行して終了する
+# --add-tier モードは通常のフェーズループとは別処理（--verify なしの --plan などの拒否より先に判定する）
 if [[ -n "$ADD_TIER_MODE" ]]; then
     log "HEADER" "tier 追加モード: ${ADD_TIER_MODE} (${SCRIPT_NAME}.sh)"
     export SF_TOOLS_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
     export ADD_TIER="$ADD_TIER_MODE"
     bash "${SCRIPT_DIR}/../phases/init/add_tier.sh" \
-        || die "--add-tier ${ADD_TIER_MODE} が失敗しました。"
+        || die "--add-tier ${ADD_TIER_MODE} が失敗しました。"  # 対話があるため run 不使用（run は出力を一時ファイルに書き出す）
     exit $RET_OK
 fi
 
@@ -322,7 +338,7 @@ fi
 if [[ "$VERIFY_MODE" -eq 1 ]]; then
     export SF_TOOLS_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
     # 検証の失敗（終了コード 1）は、表示のとおり。エラー終了のメッセージは、出さない
-    bash "${SCRIPT_DIR}/../phases/init/verify.sh" ${VERIFY_ARGS[@]+"${VERIFY_ARGS[@]}"}
+    bash "${SCRIPT_DIR}/../phases/init/verify.sh" ${VERIFY_ARGS[@]+"${VERIFY_ARGS[@]}"}  # 対話があるため run 不使用（同上）
     exit $?
 fi
 
@@ -330,7 +346,7 @@ fi
 if [[ "$STATUS_MODE" -eq 1 ]]; then
     export SF_TOOLS_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
     # 診断で不足があるとき（終了コード 1）は、表示のとおり。エラー終了のメッセージは、出さない
-    bash "${SCRIPT_DIR}/../phases/init/status.sh"
+    bash "${SCRIPT_DIR}/../phases/init/status.sh"  # 画面への表示が目的のため run 不使用（run は出力を一時ファイルに書き出す）
     exit $?
 fi
 
@@ -338,7 +354,7 @@ fi
 if [[ -n "$RECONNECT_MODE" ]]; then
     export SF_TOOLS_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
     export RECONNECT_TIER="$RECONNECT_MODE"
-    bash "${SCRIPT_DIR}/../phases/init/reconnect.sh" || die "--reconnect ${RECONNECT_MODE} が失敗しました。"
+    bash "${SCRIPT_DIR}/../phases/init/reconnect.sh" || die "--reconnect ${RECONNECT_MODE} が失敗しました。"  # 対話があるため run 不使用
     exit $RET_OK
 fi
 
@@ -361,7 +377,7 @@ WIZ_STEP_PURPOSES=("" \
     "必要なツールと、GitHub へのログインを確認します。" \
     "作るリポジトリの名前と場所を、確認します。" \
     "GitHub にリポジトリを作り、設定ファイルを用意します。" \
-    "コードを、段階的に確認してから本番に出す流れ（ブランチの構成）を選びます。" \
+    "コードを、段階的に確認してから、最後の段階（main）に出す流れ（ブランチの構成）を選びます。" \
     "自動で動くワークフローが、リポジトリを更新するための、Token を登録します。" \
     "ワークフローの結果を、Slack に通知するための設定をします。" \
     "ここまでの内容を、リポジトリに反映し、保護のルールを設定します。" \
@@ -374,7 +390,8 @@ WIZ_PHASE_TITLES=("" "準備の確認" "プロジェクトの確認" "リポジ�
 
 export SF_TOOLS_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# --only / --resume N の指定がない（通常の新規実行）か。開始画面の全体像は、このときだけ出す
+# --only / --resume N（2 以上）の指定がない（通常の実行。中断後の「続きをやる」を選ぶ場合も含む）か。
+#   開始画面の全体像・動作の確認の質問は、このときだけ出す
 FULL_START=0
 [[ "$RESUME_PHASE" -eq 1 && -z "$ONLY_PHASE" ]] && FULL_START=1
 
@@ -387,7 +404,8 @@ fi
 
 resolve_init_identity  # GITHUB_OWNER / COMPANY_NAME（XXXX）をセット（引数 → 対話）
 
-# 開始画面（通常の新規実行は、全体像つき。--only / --resume N は、簡易表示）
+# 開始画面（FULL_START: --resume N（2 以上）/ --only の指定がないときは、全体像つき。続き・完了済みの選択画面は、このあとに出る。
+#   --only / --resume N（2 以上）は、簡易表示）
 if [[ "$FULL_START" -eq 1 ]]; then
     wizard_banner "新しい Salesforce プロジェクトを作ります"
     echo "" >&2
@@ -408,7 +426,7 @@ print_admin_warning --standard "新規 Salesforce リポジトリを GitHub に�
 #   実行しなおした後（SF_INIT_RESTARTED）は、確認しない（無限に実行しなおさないため）
 _cur_branch=""
 if [[ -z "${SF_INIT_RESTARTED:-}" ]]; then
-    # Git リポジトリのときだけ、現在のブランチを調べる（リポジトリでなければ、確認しない）
+    # Git リポジトリのときだけ、現在のブランチを調べる（リポジトリでない・HEAD がブランチでなければ、ここでは確認しない）
     if git -C "$SF_TOOLS_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then  # if cmd のため run 不使用
         _cur_branch=$(git -C "$SF_TOOLS_DIR" symbolic-ref --short HEAD 2>/dev/null || true)  # VAR=$(cmd) のため run 不使用
     fi
@@ -417,11 +435,13 @@ if [[ -z "${SF_INIT_RESTARTED:-}" ]]; then
         if [[ $? -eq 2 ]]; then
             export SF_INIT_RESTARTED=1
             log "INFO" "更新した sf-tools で、もう一度、はじめから実行します。"
+            # exec のため run 不使用（このプロセスを置き換える）。まだ admin/ に移動しておらず、ロックも取っていない
             exec bash "${BASH_SOURCE[0]}" "${ORIG_ARGS[@]}"
         fi
     fi
 fi
-# このブランチは、確認済み（Phase 2 の確認を、省略するため）
+# このブランチは、確認済み（Phase 2 は、最新化の確認を省略し、選んだ版とのブランチ違いだけを確認する）。
+#   空（確認していない: 実行しなおした後・Git リポジトリでない・HEAD がブランチでない）なら、Phase 2 が最新化を確認する
 export SF_INIT_TOOLS_CHECKED_BRANCH="$_cur_branch"
 
 if [[ "$FULL_START" -eq 1 ]]; then
@@ -453,9 +473,9 @@ _state_suffix="-${COMPANY_NAME}"           # 途中経過のファイルは、�
 run mkdir -p "$INIT_DIR" || die "管理者用フォルダの作成に失敗しました: ${INIT_DIR}"
 cd "$INIT_DIR" || die "管理者用フォルダに移動できません: ${INIT_DIR}"
 
-# 管理者用フォルダ（admin）には、XXXX だけの名前で、クローン（force-XXXX）を置く。同じ XXXX で、別のオーナーのクローンがあるときは、
-#   中断する（このあとの Phase が、別のリポジトリのクローンに、コミット・push してしまうため。状態ファイルも、消さない）。
-#   大文字と小文字は、区別しない
+# 管理者用フォルダ（admin）には、XXXX だけの名前で、クローン（force-XXXX）を置く。同じ名前で、OWNER/force-XXXX 以外のクローン
+#   （別のオーナーのもの・origin がない・GitHub 以外）があるときは、中断する（このあとの Phase が、別のリポジトリのクローンに、
+#   コミット・push してしまうため。状態ファイルも、消さない）。大文字と小文字は、区別しない
 if [[ -d "${PWD}/force-${COMPANY_NAME}/.git" ]] \
    && ! clone_matches_repo "${PWD}/force-${COMPANY_NAME}" "$GITHUB_OWNER" "force-${COMPANY_NAME}"; then
     die "管理者用フォルダ（${PWD}）の force-${COMPANY_NAME} は、${GITHUB_OWNER}/force-${COMPANY_NAME} のクローンではありません（origin: $(git_origin_redacted "${PWD}/force-${COMPANY_NAME}")）。"
@@ -473,7 +493,9 @@ export SF_INIT_PROGRESS_FILE="${PWD}/.sf-init${_state_suffix}.progress"
 
 # 同じプロジェクト（同じ admin フォルダ・同じ XXXX）の sf-init を、同時に 2 つ動かさない（状態ファイルの取り合い・重複作成を防ぐ）。
 #   ロックは、フォルダ（mkdir は、原子的）。中に、実行中の PID を書く。PID のプロセスが、もういなければ、古いロックとして引き継ぐ
-#   （強制終了・SIGTERM では、ロックが残るため）。終了時に、削除する（EXIT トラップ）
+#   （強制終了・SIGTERM では、ロックが残るため）。終了時に、削除する（EXIT トラップ）。
+#   exec で実行しなおすとき（Phase 2 が終了コード 75 を返したとき）は、EXIT トラップが動かないため、exec の前に削除する
+#   （残すと、実行しなおした側が、同じ PID のロックを「実行中」と判定して終了する）
 _init_lock_dir="${PWD}/.sf-init${_state_suffix}.lock"
 if ! mkdir "$_init_lock_dir" 2>/dev/null; then  # 条件チェックのため run 不使用（ロックの取得は、mkdir の成否で決まる）
     _init_lock_pid=$(cat "$_init_lock_dir/pid" 2>/dev/null || true)  # VAR=$(cmd) のため run 不使用
@@ -481,7 +503,8 @@ if ! mkdir "$_init_lock_dir" 2>/dev/null; then  # 条件チェックのため ru
         die "同じプロジェクト（${COMPANY_NAME}）の sf-init が、すでに実行中です（PID ${_init_lock_pid}。${_init_lock_dir}）。"
     fi
     log "WARNING" "前回の sf-init の、古いロックを引き継ぎます（実行中のプロセスは、ありません）: ${_init_lock_dir}"
-    rm -rf "$_init_lock_dir"  # 古いロックの削除（実行中のプロセスがいないことを確認済み）
+    run rm -rf "$_init_lock_dir" || die "古いロックを削除できません: ${_init_lock_dir}"  # 実行中のプロセスがいないことは確認済み
+    # 条件チェックのため run 不使用（ロックの取得は、mkdir の成否で決まる。失敗は、別の sf-init が先に取った場合）
     mkdir "$_init_lock_dir" 2>/dev/null || die "ロックを取得できません（別の sf-init が、同時に、起動した可能性があります）: ${_init_lock_dir}"
 fi
 echo "$$" > "$_init_lock_dir/pid"
@@ -495,8 +518,9 @@ _kv_value() {
 }
 
 # 完了済みのプロジェクトか（戻り値 0 = 完了済み）。完了時に、状態ファイルは消す（完了後は、読む場所がないため）ので、
-#   ・状態ファイルがある: 進捗が Phase 10 で、リポジトリが一致すること（以前の版が残した、完了済みの状態）
-#   ・状態ファイルがない: このフォルダ（admin）の、同じリポジトリのクローン（force-XXXX）が、セットアップ済みであること
+#   ・状態ファイルが 2 つともある: 進捗が Phase 10 で、リポジトリが一致すること（以前の版が残した、または、完了の直前で
+#     中断した、完了済みの状態）。一致しなければ、完了済みではない（クローンでは判定しない）
+#   ・そろっていない: このフォルダ（admin）の、同じリポジトリのクローン（force-XXXX）が、セットアップ済みであること
 #     （clone_setup_completed: クローンの git config sf-tools.setup-complete が 1。未設定のときは、admin ブランチがあれば、
 #     印を導入する前の版で完了したものとみなす。0 は、やり直し中）。やり直しの開始時に、印を 0 にする
 #   進捗が 2〜9（途中まで）のときは、完了済みではない（続きをやる、の対象）。結果: COMPLETED_REPO / COMPLETED_DIR / COMPLETED_AT
@@ -510,6 +534,7 @@ _project_completed() {
         [[ "$_done" == "10" ]] && state_matches_repo "$SF_INIT_ENV_FILE" "$GITHUB_OWNER" "force-${COMPANY_NAME}" || return 1   # リポジトリ名は、大文字と小文字を区別しない
         COMPLETED_REPO="$_repo"
         COMPLETED_DIR=$(_kv_value REPO_DIR "$SF_INIT_ENV_FILE")          # VAR=$(cmd) のため run 不使用
+        [[ -n "$COMPLETED_DIR" ]] || COMPLETED_DIR="${PWD}/force-${COMPANY_NAME}"   # REPO_DIR が状態ファイルにないとき（印を付けられず残ったときなど）は、管理者用のフォルダの、既定の場所
         COMPLETED_AT=$(_kv_value SF_INIT_DONE_AT "$SF_INIT_PROGRESS_FILE")  # VAR=$(cmd) のため run 不使用
         return 0
     fi
@@ -520,12 +545,14 @@ _project_completed() {
 }
 
 # 前回、完了の直前で中断したときの後片付け（進捗は 10 まで進んだが、admin ブランチの作成・完了の印・状態ファイルの削除が、
-#   済んでいない）。何度実行しても、同じ結果になる。引数: クローンのフォルダ
-#   クローンがあれば、admin ブランチにして GitHub にも push し、完了の印を付けてから、状態ファイルを削除する
+#   済んでいない。以前の版が状態ファイルを残した場合も、同じ）。何度実行しても、同じ結果になる。引数: クローンのフォルダ
+#   クローン（OWNER/force-XXXX のもの）があれば、admin ブランチにして GitHub にも push し（失敗は警告のみ）、完了の印を付けてから、
+#   状態ファイルを削除する。印を付けられなければ、状態ファイルは残す。クローンがない・別のリポジトリのクローンなら、何もしない
 _finish_unfinished_setup() {
     local dir="$1"
     [[ -d "$dir/.git" ]] || return 0   # クローンがないときは、何もしない（状態ファイルも、そのまま）
-    # 状態ファイルの REPO_DIR が指すクローンが、このプロジェクトのものであること（別の場所の、別のクローンに、push しないため）
+    # 渡されたクローン（状態ファイルの REPO_DIR、または admin/force-XXXX）が、このプロジェクトのものであること
+    #   （別の場所の、別のクローンに、push しないため）
     clone_matches_repo "$dir" "$GITHUB_OWNER" "force-${COMPANY_NAME}" || return 0
     log "INFO" "前回のセットアップの、最後の後片付け（admin ブランチ・完了の印・状態ファイルの整理）が、済んでいません。いま、済ませます。"
     if ensure_admin_branch "$dir"; then
@@ -550,10 +577,11 @@ _require_origin_main() {
         || die "${why}が、${repo} の main ブランチを確認できません（状態ファイルと、実際の GitHub が、食い違っている可能性があります）。"   # 条件チェックのため run 不使用
 }
 
-# 前回の続きの確認（引数なしで起動したときだけ）
-#   前回、途中まで進んでいて（SF_INIT_DONE_PHASE が 2〜9）、そのリポジトリが、この作業フォルダのものなら、
+# 前回の続きの確認（--resume N（2 以上）/ --only の指定がないときだけ。--owner / --project などは、あってよい）
+#   前回、途中まで進んでいて（SF_INIT_DONE_PHASE が 2〜9）、状態ファイルのリポジトリ（REPO_FULL_NAME）が OWNER/force-XXXX なら、
 #   「続きをやる / 最初からやり直す」を選ばせる。続きを選ぶと、Phase 1（環境チェック）を実行したうえで、次の Phase から始める
-#   表示は、Phase の番号ではなく、利用者向けの名前（WIZ_PHASE_TITLES）で出す
+#   表示は、Phase の番号ではなく、利用者向けの名前（WIZ_PHASE_TITLES）で出す。
+#   続きの対象でなく、完了済み（_project_completed）なら、完了済みの選択画面を出す
 RESUMED=0
 if [[ "$RESUME_PHASE" -eq 1 && -z "$ONLY_PHASE" ]]; then
     prev_done=""; prev_at=""; prev_repo=""
@@ -584,11 +612,11 @@ if [[ "$RESUME_PHASE" -eq 1 && -z "$ONLY_PHASE" ]]; then
                START_PHASE=$next_phase
                END_PHASE=10
                ;;
-            2) ;;  # 最初から（下で .sf-init-XXXX.env を削除する）
-            *) die "中断しました。" ;;
+            2) ;;  # 最初から（下で、完了の印を 0 にし、状態ファイルを削除する）
+            *) die "中断しました。" ;;   # q / Q（終了コード 1）
         esac
     elif _project_completed; then
-        # 状態ファイルが残っているとき（完了の直前の中断）は、origin に main があること（なければ、完了にしない）
+        # 状態ファイルが 1 つでも残っているとき（完了の直前の中断・以前の版）は、origin に main があること（なければ、終了する）
         if [[ -f "$SF_INIT_ENV_FILE" || -f "$SF_INIT_PROGRESS_FILE" ]]; then
             _require_origin_main "$COMPLETED_REPO" "セットアップは完了と記録されています"
         fi
@@ -611,31 +639,32 @@ if [[ "$RESUME_PHASE" -eq 1 && -z "$ONLY_PHASE" ]]; then
         case "$done_choice" in
             1) [[ -d "$prev_dir" ]] || die "管理者用のフォルダが見つかりません: ${prev_dir}"
                # 診断で不足があっても（終了コード 1）、表示のとおり。ここでは、エラー終了にしない
-               ( cd "$prev_dir" && bash "${SF_TOOLS_DIR}/phases/init/status.sh" ) || true  # 不足の表示は、status.sh が行う
+               ( cd "$prev_dir" && bash "${SF_TOOLS_DIR}/phases/init/status.sh" ) || true  # 画面への表示が目的のため run 不使用。不足の表示は status.sh が行い、終了コードは意図的に無視
                exit $RET_OK
                ;;
             2) [[ -d "$prev_dir" ]] || die "管理者用のフォルダが見つかりません: ${prev_dir}"
                # 動作の確認（verify.sh）。結果は、verify.sh が、表示する。確認は、verify.sh の中で、聞く
-               ( cd "$prev_dir" && bash "${SF_TOOLS_DIR}/phases/init/verify.sh" )
+               ( cd "$prev_dir" && bash "${SF_TOOLS_DIR}/phases/init/verify.sh" )  # 対話があるため run 不使用
                exit $?
                ;;
-            3) ;;  # 最初から（下で .sf-init-XXXX.env を削除する）
-            *) exit $RET_OK ;;
+            3) ;;  # 最初から（下で、完了の印を 0 にし、状態ファイルを削除する）
+            *) exit $RET_OK ;;   # q / Q: 何もせずに終了（終了コード 0）
         esac
     fi
 fi
 
 # 完了済みのプロジェクトで、--resume N（2 以上）または --only N を明示した場合は、拒否する（接続処理などを、確認なしで、
 #   やり直さないため。--only も、同じ Phase を、確認なしで実行できてしまう。以前は、--only は拒否しなかった）。
-#   やり直したいときは、引数なしで実行して選ぶ（[1] 接続を見る / [2] 動作を確認 / [3] 最初から）か、--reconnect を使う
+#   やり直したいときは、--resume / --only を付けずに（--owner / --project は付けてよい）実行して選ぶ
+#   （[1] 接続を見る / [2] 動作を確認 / [3] 最初から）か、--reconnect を使う
 if [[ ( "$RESUME_PHASE" -gt 1 || -n "$ONLY_PHASE" ) ]] && _project_completed; then
     log "ERROR" "  このプロジェクト（${COMPLETED_REPO}）は、セットアップが、すでに完了しています。"
     log "WARNING" "  接続先を付け替える        : force-* の中で sf-init.sh --reconnect <main|staging|develop>"
-    log "WARNING" "  いまの状態を見る・動作を確認する・最初からやり直す : 引数なしで sf-init.sh を実行して、選んでください"
+    log "WARNING" "  いまの状態を見る・動作を確認する・最初からやり直す : --resume / --only を付けずに（--owner / --project は付けてよい）sf-init.sh を実行して、選んでください"
     die "完了済みのプロジェクトでは、--resume / --only は使えません。"
 fi
 
-# 新規実行時（--resume / --only 時、前回の続きを選んだ時以外）は、前回の残骸を削除する（空ファイルは作らない）
+# 新規実行時（--resume / --only 時、前回の続きを選んだ時以外）は、完了の印を 0 にし、前回の残骸を削除する（空ファイルは作らない）
 if [[ "$RESUME_PHASE" -eq 1 && -z "$ONLY_PHASE" && "$RESUMED" -eq 0 ]]; then
     # 前回の「最初から、やり直す」が、途中で止まったままか（印が 0）を、利用者に知らせる（完了済みの案内も、続きの選択も、出ないため）
     if [[ ! -f "$SF_INIT_ENV_FILE" && ! -f "$SF_INIT_PROGRESS_FILE" \
@@ -645,18 +674,19 @@ if [[ "$RESUME_PHASE" -eq 1 && -z "$ONLY_PHASE" && "$RESUMED" -eq 0 ]]; then
     fi
     # 完了の印を 0（やり直し中）にする（やり直しの途中で止まったとき、クローンがあるだけで、完了済みと判定しないため）
     clear_setup_mark "${PWD}/force-${COMPANY_NAME}"
-    rm -f "$SF_INIT_ENV_FILE" "$SF_INIT_PROGRESS_FILE"  # 新規実行時は残骸削除のみ（Phase 2 が初回書き出し）
+    # 新規実行時は残骸削除のみ（Phase 2 が初回書き出し）。消せないときは、前回の状態が残ったまま進まないよう、中断する
+    run rm -f "$SF_INIT_ENV_FILE" "$SF_INIT_PROGRESS_FILE" || die "前回の状態ファイルを削除できません: ${SF_INIT_ENV_FILE}"
 fi
 
 # ------------------------------------------------------------------------------
 # 7. メイン実行フロー（フェーズループ）
 # ------------------------------------------------------------------------------
-# 通常の実行では、Phase の番号は出さない（ステップの見出しを出す）。--resume / --only のときだけ、範囲を出す
+# 通常の実行では、Phase の番号は出さない（ステップの見出しを出す）。--resume N（2 以上）/ --only のときだけ、範囲を出す
 [[ "$FULL_START" -eq 1 ]] || log "INFO" "実行フェーズ: Phase ${START_PHASE} 〜 Phase ${END_PHASE}"
 [[ -z "$ONLY_PHASE" ]] || log "WARNING" "--only は、指定した Phase だけを実行します。進捗は、更新しません（通常の「続きをやる」の状態は、変わりません）。"
 
 # 続きから始める場合も、Phase 1（環境チェック。状態を持たない）は、毎回実行する
-PHASE_LIST="$(seq "$START_PHASE" "$END_PHASE")"
+PHASE_LIST="$(seq "$START_PHASE" "$END_PHASE")"  # VAR=$(cmd) のため run 不使用
 [[ "$RESUMED" -eq 1 ]] && PHASE_LIST="1 ${PHASE_LIST}"
 
 # ステップの見出しを出す（同じステップの Phase が続くときは、最初の 1 回だけ）。引数: Phase 番号
@@ -665,7 +695,10 @@ _show_step_header() {
     s="${WIZ_PHASE_STEP[$p]}"
     [[ "$s" == "$_LAST_STEP_SHOWN" ]] && return 0
     _LAST_STEP_SHOWN="$s"
-    for i in $(seq 1 $((s - 1))); do done_titles+=("${WIZ_STEP_TITLES[$i]}"); done
+    # 完了したステップ（1〜s-1）。s = 1 のときは、ない（seq 1 0 は、macOS（BSD）では 1 0 と逆順に出るため、呼ばない）
+    if [[ "$s" -gt 1 ]]; then
+        for i in $(seq 1 $((s - 1))); do done_titles+=("${WIZ_STEP_TITLES[$i]}"); done
+    fi
     wizard_step "$s" "$WIZ_TOTAL" "${WIZ_STEP_TITLES[$s]}" "${WIZ_STEP_PURPOSES[$s]}" "${done_titles[@]}"
 }
 _LAST_STEP_SHOWN=""
@@ -677,17 +710,22 @@ for phase_num in $PHASE_LIST; do
     fi
     # 通常の実行（--only なし）では、ステップの見出しを出す
     [[ -z "$ONLY_PHASE" ]] && _show_step_header "$phase_num"
-    bash "$phase_script"
+    bash "$phase_script"  # 対話があるため run 不使用（run は出力を一時ファイルに書き出す）。終了コードは、下で判定する
     phase_rc=$?
     if [[ $phase_rc -eq 75 ]]; then
-        # sf-tools を更新した（Phase 2）。更新した sf-tools で、最初から、実行しなおす（1 回だけ。無限に繰り返さない）
+        # sf-tools を更新した（Phase 2）。更新した sf-tools で、最初から、実行しなおす（1 回だけ。無限に繰り返さない）。
+        #   実行しなおす前に、作業フォルダ（INIT_BASE）に戻り、ロックを解放する。admin/ の中のままだと、実行場所の確認で終了し、
+        #   ロックが残ったままだと（exec では EXIT トラップが動かず、PID も同じ）、「すでに実行中です」で終了するため
         [[ -z "${SF_INIT_RESTARTED:-}" ]] || die "sf-tools を更新しても、最新になりませんでした。"
         export SF_INIT_RESTARTED=1
         log "INFO" "更新した sf-tools で、もう一度、はじめから実行します。"
-        exec bash "${BASH_SOURCE[0]}" "${ORIG_ARGS[@]}"
+        cd "$INIT_BASE" || die "作業フォルダに移動できません: ${INIT_BASE}"
+        run rm -rf "$_init_lock_dir" || die "ロックを解放できません: ${_init_lock_dir}"
+        exec bash "${BASH_SOURCE[0]}" "${ORIG_ARGS[@]}"  # exec のため run 不使用（このプロセスを置き換える）
     fi
     if [[ $phase_rc -ne 0 ]]; then
-        # 失敗の三点セット（原因は、直前の表示。直し方は、各 Phase の表示。ここでは、やり直しの方法を、正確に出す）
+        # 失敗の三点セット（原因は、直前の表示。直し方は、各 Phase の表示。ここでは、やり直しの方法を、正確に出す）。
+        #   --only のときは、やり直しの方法を出さずに、終了する
         if [[ -z "$ONLY_PHASE" && "$phase_num" -ge 3 ]]; then
             wizard_fail "「${WIZ_PHASE_TITLES[$phase_num]}」で、中断しました（上の表示を、確認してください）" \
                 "" \
@@ -700,7 +738,8 @@ for phase_num in $PHASE_LIST; do
         fi
         die "「${WIZ_PHASE_TITLES[$phase_num]}」が失敗しました。"
     fi
-    # 成功した Phase を記録する（Phase 1 は、状態を持たないため、記録しない。--only は、記録しない）
+    # 成功した Phase を記録する（上書き。Phase 1 は、状態を持たないため、記録しない。--only・.sf-init-XXXX.env がないときは、
+    #   記録しない）。上書きのため、Phase 10 が追記した段階ごとの記録（SF_INIT_DONE_TIER_*）も、ここで消える
     if [[ -z "$ONLY_PHASE" && "$phase_num" -ge 2 && -f "$SF_INIT_ENV_FILE" ]]; then
         {
             printf 'SF_INIT_DONE_PHASE=%s\n' "$phase_num"
@@ -710,9 +749,9 @@ for phase_num in $PHASE_LIST; do
 done
 
 # ------------------------------------------------------------------------------
-# 8. 後処理（全フェーズ完了後）
+# 8. 後処理（実行範囲の Phase が、すべて成功したあと）
 # ------------------------------------------------------------------------------
-# .sf-init-XXXX.env から REPO_DIR などを取得（完了画面の管理者用フォルダの案内に使用）
+# .sf-init-XXXX.env から REPO_DIR・REPO_FULL_NAME・BRANCH_COUNT などを取得（同期・動作の確認・admin ブランチ・完了画面に使用）
 [[ -f "$SF_INIT_ENV_FILE" ]] && source "$SF_INIT_ENV_FILE"
 
 # admin フォルダは、削除せずに残す（管理者用のフォルダ。更新・接続の確認・やり直しなどのメンテナンスに使う）
@@ -725,9 +764,9 @@ fi
 
 # 最初のメタデータの同期: セットアップが終わった瞬間に、Salesforce のメタデータが、リポジトリ（main）と、管理者用のクローンに、
 #   全部入っているようにする（初期コミットの force-app は、空のひな型。何もしないと、次の定期実行（平日 3 時間おき）まで入らない）。
-#   Phase 10（接続情報の登録）のあとでないと動かないため、クローンの作成（Phase 3）のあと。wf-metasync を実行し、
-#   終わったら、クローンに git pull する。失敗しても、セットアップは成功のまま、完了画面で知らせる。
-#   Phase 10 を実行した、最後までの実行のときだけ（--only N では行わない）
+#   同期は、Phase 10（接続情報の登録）のあとでないと動かないため、クローンの作成（Phase 3）よりあとになる。そこで、
+#   wf-metasync を実行し、終わったら、クローンに git pull する。失敗しても、セットアップは成功のまま、完了画面で知らせる。
+#   Phase 10 を実行した、最後までの実行で、状態ファイルに REPO_DIR・REPO_FULL_NAME があるときだけ（--only N では行わない）
 SYNC_RESULT=""   # "" = 行わなかった / done = 同期して、クローンに取り込んだ / failed = できなかった
 if [[ "$END_PHASE" -eq 10 && -z "$ONLY_PHASE" && "$START_PHASE" -le 10 && -n "${REPO_DIR:-}" && -n "${REPO_FULL_NAME:-}" ]]; then
     log "HEADER" "最初のメタデータの同期（Salesforce → GitHub → この管理者用のクローン）"
@@ -739,7 +778,7 @@ if [[ "$END_PHASE" -eq 10 && -z "$ONLY_PHASE" && "$START_PHASE" -le 10 && -n "${
 fi
 
 # ステップ 9: 動作の確認（verify.sh）。聞くのは、「通しの実行」と、中断後の「続きをやる」だけ（FULL_START。
-#   --resume N / --only N を明示した実行では、聞かない: Phase 単位のやり直しに、20 分ほどの検証を、混ぜないため）。
+#   --resume N（2 以上）/ --only N を明示した実行では、聞かない: Phase 単位のやり直しに、20 分ほどの検証を、混ぜないため）。
 #   対話できる端末のときだけ聞く（SF_INIT_VERIFY_ASK=1 で、端末でなくても聞く: テスト用。GITHUB_ACTIONS 上では、聞かない）
 #   Enter = 確認する / s = あとで。標準入力が閉じている（EOF）ときは、あとで、とする。確認の失敗は、セットアップの失敗にはしない
 VERIFY_RESULT=""   # "" = 聞かなかった / done = 成功 / failed = 失敗あり / skipped = あとで
@@ -763,7 +802,7 @@ if [[ "$END_PHASE" -eq 10 && "$FULL_START" -eq 1 && "${GITHUB_ACTIONS:-}" != "tr
     if [[ "$_vrun" -eq 1 ]]; then
         # REPO_DIR が空のときは、現在のフォルダで実行する（${REPO_DIR:-.}）。Bash 5.3（Git for Windows 2.55 以降）は、
         #   cd "" を「cd: null directory」のエラーにする（3.2・5.2 は、何もせず成功する）。通常は、Phase 2 が設定する
-        if ( cd "${REPO_DIR:-.}" && SF_VERIFY_CONFIRMED=1 bash "${SF_TOOLS_DIR}/phases/init/verify.sh" ); then  # 条件チェック
+        if ( cd "${REPO_DIR:-.}" && SF_VERIFY_CONFIRMED=1 bash "${SF_TOOLS_DIR}/phases/init/verify.sh" ); then  # 条件チェックのため run 不使用
             VERIFY_RESULT="done"
         else
             VERIFY_RESULT="failed"
@@ -774,12 +813,13 @@ if [[ "$END_PHASE" -eq 10 && "$FULL_START" -eq 1 && "${GITHUB_ACTIONS:-}" != "tr
 fi
 
 # 管理者用のクローンを、admin ブランチにして、GitHub にも push する（main の上で、作業しないため）。
-#   実行範囲の終わりが Phase 10 のときだけ（--only 10・--resume N を含む）。動作の確認（verify.sh）のあとに行う。
-#   どちらに失敗しても、セットアップは成功のまま、完了画面で知らせる
+#   実行範囲の終わりが Phase 10 で、REPO_DIR があるときだけ（--only 10・--resume N を含む）。動作の確認（verify.sh）のあとに行う。
+#   admin ブランチにできなければ、push はしない。どちらに失敗しても、セットアップは成功のまま、完了画面で知らせる
 _admin_branch_line="     ・ブランチは admin です（このコンピューターと GitHub の両方にあります）"
 _admin_stale_line="     ・admin は、main から古くなります。使う前に、main を取り込んでください（git pull origin main）"
 if [[ "$END_PHASE" -eq 10 && -n "${REPO_DIR:-}" ]]; then
-    # 動作の確認（verify.sh）で、Hello World のリリースと削除が main に入っているときは、最新の main を取り込んでから、admin を作る
+    # 動作の確認（verify.sh）を実行した（成功・失敗とも。Hello World のリリースと削除が main に入っている）ときは、クローンが
+    #   main にいれば、最新の main を取り込んでから（失敗は警告のみ）、admin を作る
     if [[ "$VERIFY_RESULT" == "done" || "$VERIFY_RESULT" == "failed" ]] \
        && [[ "$(git -C "$REPO_DIR" symbolic-ref --short HEAD 2>/dev/null || true)" == "main" ]]; then  # 条件チェックのため run 不使用
         run git -C "$REPO_DIR" pull --ff-only origin main \
@@ -792,22 +832,31 @@ if [[ "$END_PHASE" -eq 10 && -n "${REPO_DIR:-}" ]]; then
         log "WARNING" "admin ブランチを GitHub に push できませんでした: ${REPO_DIR}"
         _admin_branch_line="     ・admin ブランチは、このコンピューターだけにあります（GitHub に push できませんでした）。管理者用フォルダで、git push -u origin admin を実行してください"
     fi
-else
+elif [[ "$END_PHASE" -ne 10 ]]; then
     _admin_branch_line="     ・ブランチは、そのままです（途中までの実行のため）"
+    _admin_stale_line=""
+else
+    # 最後まで実行したが、状態ファイルに REPO_DIR がない（クローンの場所が分からない）
+    _admin_branch_line="     ・ブランチは、そのままです（状態ファイルに、クローンの場所（REPO_DIR）がないため）"
     _admin_stale_line=""
 fi
 
-# 状態ファイル（.sf-init-XXXX.env / .progress）は、セットアップが最後まで終わったら、消す。
+# セットアップが最後まで終わったら、クローンに完了の印（1）を付け、状態ファイル（.sf-init-XXXX.env / .progress）を消す。
 #   完了後は、読む場所がないため（完了済みかどうかは、このフォルダのクローンで判定する: _project_completed）。
+#   印を付けられなかったとき（REPO_DIR がない・クローンがない・git config の失敗）は、警告して、状態ファイルは残す
+#   （_finish_unfinished_setup と同じ扱い。消すと、完了済みとも、途中とも、判定できなくなるため。残った状態ファイルは、
+#   進捗が 10 なので、次回は完了済みとして扱い、後片付けを試みる）。Token の値の行は、上で消してある。
 #   途中で止まったときは、続きをやるために残る。--only N の実行は、状態を持ち越すため、消さない
 if [[ "$END_PHASE" -eq 10 && -z "$ONLY_PHASE" ]]; then
-    mark_setup_complete "${REPO_DIR:-}" \
-        || log "WARNING" "完了の印を付けられませんでした（クローンがありません）: ${REPO_DIR:-なし}"
-    run rm -f "$SF_INIT_ENV_FILE" "$SF_INIT_PROGRESS_FILE" \
-        || log "WARNING" "状態ファイルを削除できませんでした: ${SF_INIT_ENV_FILE}"
+    if mark_setup_complete "${REPO_DIR:-}"; then
+        run rm -f "$SF_INIT_ENV_FILE" "$SF_INIT_PROGRESS_FILE" \
+            || log "WARNING" "状態ファイルを削除できませんでした: ${SF_INIT_ENV_FILE}"
+    else
+        log "WARNING" "完了の印を付けられなかったため、状態ファイルは、残します（クローン: ${REPO_DIR:-なし}）: ${SF_INIT_ENV_FILE}"
+    fi
 fi
 
-# 完了画面（できたこと / 次にやること / 管理者用のフォルダ）
+# 完了画面（できたこと / 次にやること / 管理者用のフォルダ）。途中までの実行（--only N など）でも、常に表示する
 _org_count=$(( ${BRANCH_COUNT:-1} ))
 _admin_dir="${REPO_DIR:-${INIT_DIR}/force-${COMPANY_NAME}}"
 # 動作の確認の結果の行。$( ) の中に case を書かない（Bash 3.2 は、case の「)」を、$( ) の終わりと取り違える）
@@ -817,16 +866,23 @@ case "$VERIFY_RESULT" in
     skipped) _verify_line="4. 動作の確認は、あとで行えます: 管理者用フォルダで、~/sf-tools/bin/sf-init.sh --verify（または、作業フォルダ（${INIT_BASE}）で、同じオーナー・プロジェクト名で sf-init.sh を再実行して、2 を選ぶ）" ;;
     *)       _verify_line="4. 動作の確認は、あとで行えます: 管理者用フォルダで、~/sf-tools/bin/sf-init.sh --verify" ;;
 esac
-# 最初のメタデータの同期の結果の行
+# 最初のメタデータの同期の結果の行（行わなかったときは、その理由）
 case "$SYNC_RESULT" in
     done)   _sync_line="5. Salesforce のメタデータは、同期済みです（リポジトリにも、この管理者用のクローンにも、入っています）。以後は、平日 3 時間おきに、自動で同期されます" ;;
     failed) _sync_line="5. Salesforce のメタデータの同期は、できませんでした（セットアップは、完了しています）。次の定期実行（平日 3 時間おき）で入ります。すぐ同期するには: gh workflow run wf-metasync.yml -R ${REPO_FULL_NAME:-${GITHUB_OWNER}/force-${COMPANY_NAME}}（終わったら、管理者用フォルダで git pull origin main）" ;;
-    *)      _sync_line="5. （途中までの実行のため、メタデータの同期は、行っていません。定期実行は、平日 3 時間おきです）" ;;
+    *)  # 行わなかった: 理由を、実際の条件（上の同期の if）に合わせて出す
+        if [[ "$END_PHASE" -ne 10 ]]; then
+            _sync_line="5. （途中までの実行のため、メタデータの同期は、行っていません。定期実行は、平日 3 時間おきです）"
+        elif [[ -n "$ONLY_PHASE" ]]; then
+            _sync_line="5. （--only の実行のため、メタデータの同期は、行っていません。定期実行は、平日 3 時間おきです）"
+        else
+            _sync_line="5. （状態ファイルに、リポジトリの情報（REPO_DIR・REPO_FULL_NAME）がないため、メタデータの同期は、行っていません。定期実行は、平日 3 時間おきです）"
+        fi ;;
 esac
 wizard_done "できました: ${REPO_FULL_NAME:-${GITHUB_OWNER}/force-${COMPANY_NAME}}" \
     "GitHub リポジトリ / Token / Slack 通知 / Salesforce の接続（${_org_count} 組織）" \
     -- \
-    "1. 開発を始める人は、次のフォルダで、次のコマンドを実行してください" \
+    "1. 開発を始める人は、自分の作業フォルダで、次のコマンドを実行してください（管理者自身なら、次のフォルダ）" \
     "     cd \"${INIT_BASE}\"" \
     "     sf-job.sh" \
     "2. リポジトリを見る:" \

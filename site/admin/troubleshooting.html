@@ -14,83 +14,181 @@
 <main id="doc" class="doc">
 
 <h1>🩺 トラブルシューティング</h1>
-<p class="lead">うまく動かないときの、原因と直し方です。落ち着いて、当てはまるものを探してください。ほとんどは、やり直せば元に戻ります。</p>
+<p class="lead">うまく動かないときの、原因と直し方です。落ち着いて、当てはまるものを探してください。ほとんどは、原因を直して、もう一度実行すれば元に戻ります。前半は管理者の方（セットアップ・ワークフロー）、後半は開発者の方（毎日の作業）向けです。</p>
 
 <div class="box">
   <div class="title">最初に試すこと</div>
   <ul>
     <li>エラーの文章を、最後まで読んでみてください。直し方が、書いてあることが多いです。</li>
-    <li>ログは、<code>force-*</code> フォルダの中の <code>sf-tools/logs/&lt;コマンド名&gt;.log</code> に残っています（<code>sf-init.sh</code>・<code>sf-job.sh</code>・<code>sf-typecheck.sh</code> は、<code>~/sf-tools/logs/</code> の下です。くわしくは<a href="../reference/structure.html#logs">ログとリポジトリ構成</a>）。</li>
-    <li>管理者は、<a href="maintenance.html#status"><code>sf-init.sh --status</code></a> で、足りないものを調べられます。</li>
+    <li>ログは、<code>force-*</code> フォルダの中の <code>sf-tools/logs/&lt;コマンド名&gt;.log</code> に残っています（<code>sf-init.sh</code>・<code>sf-job.sh</code>・<code>sf-typecheck.sh</code> と、動作の確認の <code>verify.log</code> は、<code>~/sf-tools/logs/</code> の下です。くわしくは<a href="../reference/structure.html#logs">ログとリポジトリ構成</a>）。</li>
+    <li>管理者は、<a href="maintenance.html#status"><code>sf-init.sh --status</code></a> で、足りないものを調べられます（何も変更しません）。</li>
+    <li>GitHub のワークフローの失敗は、リポジトリの <strong>Actions</strong> の画面で、失敗したステップ（手順）の名前とログを見ます。下の見出しは、そのステップの名前でも探せます。</li>
   </ul>
 </div>
 
+<h2 id="index">症状から探す</h2>
+<table>
+  <thead><tr><th>症状</th><th>見るところ</th></tr></thead>
+  <tbody>
+    <tr><td><code>sf-init.sh</code> が途中で止まった・中断したい</td><td><a href="#init">sf-init が止まった・中断したい</a></td></tr>
+    <tr><td><code>main</code> / <code>staging</code> への PR が、いつまでもマージできない</td><td><a href="#required-checks">必須チェックの名前の食い違い</a></td></tr>
+    <tr><td><code>wf-metasync</code> / <code>wf-propagate</code> が失敗する</td><td><a href="#pat">PAT_TOKEN</a>・<a href="#propagate-conflict">伝播のコンフリクト</a></td></tr>
+    <tr><td><code>wf-validate</code> / <code>wf-sequence</code> が動かない・失敗する</td><td><a href="#wf-missing">検証のワークフロー</a></td></tr>
+    <tr><td>マージしたのに、組織にリリースされない</td><td><a href="#release-skip">リリースされない</a></td></tr>
+    <tr><td><code>sf-sync-wf.sh</code> が止まる</td><td><a href="#sync-wf">sf-sync-wf が止まる</a></td></tr>
+    <tr><td><code>sf-job.sh</code> が動かない</td><td><a href="#dev-job">sf-job が動かない</a></td></tr>
+    <tr><td><code>sf-push.sh</code>・<code>git push</code> が止まる</td><td><a href="#dev-push">sf-push</a>・<a href="#dev-prepush">git push</a></td></tr>
+    <tr><td>Dryrun・Deploy が、実行の前に断られる</td><td><a href="#dev-refused">手元から実行できない組織</a></td></tr>
+  </tbody>
+</table>
+
+<h2 id="admin">管理者の方へ（セットアップや自動処理で困ったとき）</h2>
+
+<h3 id="init"><code>sf-init.sh</code> が途中で止まった・中断したい</h3>
+<p>まず、ログを見ます。</p>
+<pre><code>cat ~/sf-tools/logs/sf-init.log</code></pre>
+<p>「どこで間違えたか分からない」ときは、管理者用の <code>admin</code> フォルダの中の <code>force-*</code> で、<code>sf-init.sh --status</code> を実行します。リポジトリ・ブランチ・ワークフロー・Secrets・Variables・ブランチ保護が、そろっているかを、✓（できている）と ✗（足りない。直し方も表示）で教えてくれます（何も変更しません。<a href="maintenance.html#status">診断の説明</a>）。</p>
+<p>原因を直したら、<strong>前と同じ作業フォルダで、もう一度 <code>sf-init.sh</code> を実行</strong>してください（同じオーナー・XXXX を選びます）。途中まで進んでいたときは、開始画面の確認のあとに、「続きをやる」「最初からやり直す」の選択肢が出ます（<a href="setup.html#resume">途中で止まったとき</a>）。</p>
+<ul>
+  <li><strong>中断したいとき:</strong> セットアップの間は、Ctrl+C が効きません（途中の半端な状態を作らないためです）。質問の画面で <code>q</code> を入力するか、ターミナルを閉じてください。閉じたあとも、もう一度実行すれば、続きから再開できます。</li>
+  <li><strong>「すでに実行中です」と出て止まる:</strong> 同じ作業フォルダ・同じ XXXX の <code>sf-init.sh</code> が、ほかのターミナルで動いています。そちらを終えてから実行してください。前の実行が、もう動いていない（ターミナルを閉じたなど）ときは、自動で引き継ぐので、このメッセージは出ません。</li>
+  <li><strong>完了済みのプロジェクトで、<code>--resume</code> / <code>--only</code> が断られる:</strong> 完了済みのプロジェクトでは、使えません。オプションなしで <code>sf-init.sh</code> を実行して、メニューから選ぶか、<a href="maintenance.html#reconnect"><code>--reconnect</code></a> / <a href="maintenance.html#add-tier"><code>--add-tier</code></a> を使います。</li>
+  <li><strong>実行の場所が違う:</strong> 最初のセットアップは、作業フォルダ（<code>admin</code> や <code>force-*</code> の外）で実行します。<code>--status</code> などの保守のモードは、反対に、<code>force-*</code> の中で実行します。</li>
+</ul>
+
+<h3 id="required-checks"><code>main</code> / <code>staging</code> への PR が、マージできない（必須のチェックが「待機中」のまま）</h3>
+<p>PR の画面で、「Expected — Waiting for status to be reported」のような表示のまま、マージのボタンが押せないときの原因です。ブランチ保護（Ruleset）の<strong>必須チェックの名前が、ワークフローの実際のチェック名と合っていない</strong>ためです。名前が合わないと、条件は、永久に満たされません。</p>
+<p>以前のバージョンの <code>sf-init.sh</code> は、必須チェックの名前を <code>validate / 対象ファイル確認</code> のように、ワークフロー名つきで登録していました。正しい名前は、<strong>ジョブ名だけ</strong>の <code>対象ファイル確認</code>・<code>デプロイ検証</code>・<code>順序チェック</code> です（いまの <code>sf-init.sh</code> は、この 3 つで登録します）。この問題は、ブランチ保護が実際に効くリポジトリ（有料プラン、または公開リポジトリ）で起こります。管理者（リポジトリの Admin ロール）は、ブランチ保護を迂回できるので、マージできます。</p>
+<p>確かめ方と直し方は、次のとおりです。</p>
+<ol class="steps">
+  <li><p>管理者用のフォルダ（<code>admin/force-XXXX</code>）で、<a href="maintenance.html#status"><code>sf-init.sh --status</code></a> を実行します。「Ruleset protect-main: 必須チェックの名前が、ワークフローのジョブ名と合っていません」と出たら、これが原因です（余分な名前と、足りない名前も表示されます。何も変更しません）。</p></li>
+  <li><p>GitHub のリポジトリの <strong>Settings → Rules → Rulesets</strong> で、<code>protect-main</code> と <code>protect-staging</code> を開きます。</p></li>
+  <li><p>「Require status checks to pass」の一覧を、<code>対象ファイル確認</code>・<code>デプロイ検証</code>・<code>順序チェック</code> の <strong>3 つだけ</strong>にします（ワークフロー名は付けません）。保存します。</p></li>
+</ol>
+<p>新しく作るプロジェクトは、最初から、正しい名前で登録されます。<a href="workflows.html#sync"><code>sf-sync-wf.sh</code></a> はワークフローのファイルだけを書き換え、ブランチ保護は変えないので、この直し方は、手で行う必要があります。必須チェックの仕組みは、<a href="workflows.html#required-checks">ワークフローのページ</a>にあります。</p>
+
+<h3 id="pat"><code>wf-metasync</code> / <code>wf-propagate</code> が失敗する（<code>PAT_TOKEN</code>）</h3>
+<p><code>wf-metasync</code>（[metasync] メタ同期）と <code>wf-propagate</code>（[propagate] ブランチ伝播）は、Secret <code>PAT_TOKEN</code>（GitHub の Token）を使って、リポジトリを取得し、<code>main</code> / <code>staging</code> / <code>develop</code> へプッシュします。失敗したステップで、原因を見分けます。</p>
+<table>
+  <thead><tr><th>失敗したところ</th><th>主な原因</th></tr></thead>
+  <tbody>
+    <tr><td>最初のステップ「ソースコードを取得」</td><td><code>PAT_TOKEN</code> が登録されていない・有効期限が切れた・無効にした</td></tr>
+    <tr><td>プッシュのところで「push declined due to repository rule violations」</td><td>Token の持ち主が、リポジトリの Admin ではない（ブランチ保護を迂回できない）</td></tr>
+    <tr><td>伝播のプッシュ（ワークフローのファイルの変更を含むとき）</td><td>Token に <code>workflow</code> の権限がない</td></tr>
+  </tbody>
+</table>
+<p>どの場合も、リポジトリのオーナー（組織の場合は、その組織の管理者）のアカウントで、新しい Token（Classic。<code>repo</code>・<code>workflow</code>）を発行し、リポジトリの Secrets の <code>PAT_TOKEN</code> を登録し直してください（手順は<a href="secrets.html#other">そのほかの情報の登録し直し</a>）。<code>sf-init.sh</code> は、登録のときに、Token の有効性・権限・持ち主が Admin であることを確かめますが、そのあとで Token を無効にしたり、期限が切れたり、持ち主の権限が変わったりすると、この状態になります。<code>sf-update-secret.sh</code> では、<code>PAT_TOKEN</code> は更新できません。</p>
+<div class="box warn">
+  <div class="title">この失敗は、Slack に通知されません</div>
+  <p><code>wf-metasync</code> は、成功も失敗も通知しません。<code>wf-propagate</code> が通知するのは、コンフリクトのときだけです。Actions の画面か、<a href="maintenance.html#status"><code>sf-init.sh --status</code></a> の「直近の実行」で、ときどき確かめてください。</p>
+</div>
+<p>手元で <code>sf-metasync.sh</code> を実行した時刻と重なって、<code>wf-metasync</code> のプッシュが拒まれることもあります。このときは、Actions の画面から、もう一度実行してください。</p>
+
+<h3 id="propagate-conflict"><code>wf-propagate</code> が、コンフリクトで失敗する</h3>
+<p><code>main</code> へのマージのあと、<code>main</code> を <code>staging</code> / <code>develop</code> へ伝えるときに、同じ場所が別々に変更されていると、コンフリクト（衝突）します。このときは、そのブランチへのマージを取り消して（ブランチは変わりません）、Slack に、コンフリクトしたブランチ・PR・ログの URL を通知し、失敗で終わります。</p>
+<p>コンフリクトしたブランチは、手で解消します（<code>main</code> を、そのブランチにマージします）。解消するまで、そのブランチは <code>main</code> から遅れたままです。</p>
+
+<h3 id="wf-missing"><code>wf-validate</code> / <code>wf-sequence</code> が動かない・失敗する</h3>
+<p>動かないときは、次を確かめてください。</p>
+<ul>
+  <li>ワークフローのファイルが、<code>.github/workflows/</code> の中にあるか。ないときは、<a href="workflows.html#sync"><code>sf-sync-wf.sh</code></a> で、最新の雛形から作り直せます。</li>
+  <li>PR に、コンフリクトがないか。コンフリクトのある PR では、どちらも動きません。解消すると動きます。</li>
+  <li><code>wf-sequence</code> は、<code>main</code> / <code>staging</code> への PR でだけ動きます。</li>
+  <li>PR のタイトル・本文の編集では、動きません（PR の作成・ソースブランチへのプッシュ・再オープンで動きます）。</li>
+</ul>
+<p>失敗するときは、次を確かめてください。</p>
+<ul>
+  <li><strong><code>wf-validate</code> が「Salesforce 組織にログイン」で失敗する:</strong> <code>main</code> / <code>staging</code> 以外への PR は、<code>develop</code> の組織で検証します。<code>develop</code> の組織を登録していない構成（<code>main</code> のみ・<code>main</code> + <code>staging</code>）では、このステップで失敗します。PR の出し先を確かめてください。</li>
+  <li><strong>PR のコメントが「⚠️ 検証が実行されませんでした」:</strong> 検証の前のステップ（ログイン・sf-tools の取得など）で止まったか、取り消し・時間切れです。Actions の画面で、失敗したステップを見ます。</li>
+  <li><strong>「❌ 検証失敗」:</strong> dry-run の検証そのものが失敗しています。コメントのログに、原因（どのファイルの、どの問題か）が出ます。開発者が、ターゲットファイルか変更の内容を直して、プッシュし直します。</li>
+  <li><strong><code>順序チェック</code> が失敗する:</strong> 環境ブランチ（<code>main</code> / <code>staging</code> / <code>develop</code> など）から、直接 PR を出しています。作業用のブランチから出し直してください。</li>
+</ul>
+
+<h3 id="release-skip">マージしたのに、組織にリリースされない</h3>
+<ul>
+  <li>ターゲットファイル（<code>deploy-target.txt</code>・<code>remove-target.txt</code>）に中身がないと、<code>wf-release</code> の「リリース実行」はスキップされます。Slack にも通知されません。</li>
+  <li><code>wf-propagate</code> や <code>wf-metasync</code> が <code>staging</code> / <code>develop</code> へ伝えた変更は、PR のマージではないので、リリースされません。その段階にリリースするには、その段階への PR を出して、マージします。順序を飛ばしてマージしたときの注意は、<a href="../reference/commands-dev.html#sf-next"><code>sf-next.sh</code> の説明</a>にあります。</li>
+  <li><code>main</code> / <code>staging</code> / <code>develop</code> 以外のブランチへのマージでは、リリースは行われません。</li>
+</ul>
+
+<h3 id="sync-wf"><code>sf-sync-wf.sh</code> が止まる</h3>
+<table>
+  <thead><tr><th>表示</th><th>原因と直し方</th></tr></thead>
+  <tbody>
+    <tr><td>「force-* ディレクトリの中ではありません」</td><td><code>force-*</code> のフォルダに移ってから実行します</td></tr>
+    <tr><td>「… ブランチでは実行できません（環境ブランチです）」「現在のブランチを取得できません」</td><td><code>main</code> などの環境ブランチの上、またはブランチの上にいない（detached HEAD）ためです。<code>sf-job.sh</code> で作業用のブランチ（<code>system-日付</code>）を作って、そこで実行します（<a href="workflows.html#steps">更新の手順</a>）</td></tr>
+    <tr><td>「origin に接続できないため、sf-tools が最新かどうかを確認できません」</td><td>ネットワークの不調などで、GitHub につながりません。つながる状態で、もう一度実行します</td></tr>
+    <tr><td>「sf-tools に未コミットの変更または未 push のコミットがあるため、自動では更新できません」</td><td><code>~/sf-tools</code> を手で変更しています。<code>git -C ~/sf-tools status</code> で確かめて、変更を片付けてから実行します</td></tr>
+    <tr><td>「sf-tools が最新ではないため、続行できません」</td><td>sf-tools の更新の確認で、<code>N</code> / <code>q</code> を答えました。古い雛形でワークフローを書き換えないため、更新しないと実行できません</td></tr>
+    <tr><td>「sf-tools の更新に失敗しました」「sf-tools を更新しても、最新になりませんでした」</td><td>更新の途中で失敗したか、更新の直後に、さらに新しい版が出ました。もう一度実行します</td></tr>
+    <tr><td>「sf-tools が最新ではありません」（<code>--check</code> のとき）</td><td><code>--check</code> は sf-tools を更新しません。<code>--check</code> なしで実行するか、sf-tools を更新してから調べます</td></tr>
+    <tr><td><code>--remove</code> の「ファイル名として正しくありません」「削除対象が見つかりません」「雛形にあるため、削除できません」</td><td>フォルダを含まないファイル名（<code>wf-old.yml</code> など）で、<code>.github/workflows/</code> にあり、雛形から廃止されたものだけを指定できます</td></tr>
+  </tbody>
+</table>
+<p>更新したワークフローのプッシュが拒まれるときは、GitHub の認証に <code>workflow</code> の権限（スコープ）があるかを確かめてください。ワークフローのファイルをプッシュするには、この権限が必要です。</p>
+
+<h3 id="clone-token"><code>wf-metasync</code> / <code>wf-validate</code> / <code>wf-release</code> が「自動化ツール（sf-tools）を取得」で失敗する</h3>
+<p><code>sf-tools</code> は公開リポジトリなので、新しいワークフローは、Token なしで取得します。このエラーは、<strong>以前のバージョンの雛形で作ったプロジェクト</strong>で起こります。ワークフローが <code>SF_TOOLS_TOKEN</code> 付きで取得していて、その Token が使えないときに起こります（登録されていない・期限が切れた・無効になった、のどれかです）。</p>
+<p><a href="workflows.html#sync"><code>sf-sync-wf.sh</code></a> で、ワークフローを最新の雛形に合わせると、Token なしの取得に変わります。新しい雛形の取得の行は、次の形です。</p>
+<pre><code>git clone -b ${{ vars.SF_TOOLS_BRANCH || 'main' }} https://github.com/tama-create/sf-tools.git ...</code></pre>
+<p>Variable <code>SF_TOOLS_BRANCH</code> が、存在しないブランチを指しているときも、このステップで失敗します（ふつうは登録しません。未登録なら <code>main</code> を使います）。</p>
+
+<h3 id="node">「差分抽出ツール（Salesforce Git Delta）をインストール」で TypeError が出て失敗する</h3>
+<p>エラーの例: <code>TypeError: webidl.util.markAsUncloneable is not a function</code></p>
+<p>以前のバージョンの雛形で作ったプロジェクトで、ワークフローの Node.js のバージョン（<code>node-version</code>）が古いときに起こります。いまの雛形は、Node.js 22 を使います。<a href="workflows.html#sync"><code>sf-sync-wf.sh</code></a> で、ワークフローを最新の雛形に合わせてください（雛形の変更は、作成済みのプロジェクトには、自動では届きません）。</p>
+
 <h2 id="dev">開発者の方へ（毎日の作業で困ったとき）</h2>
+<p>毎日の作業は、ランチャー（<code>sf-launcher.sh</code>。<code>sf-job.sh</code> や <code>sf-start.sh</code> のあとに開くメニュー）から行うのがおすすめです。メニューの番号は、1 Check・2 Push・3 Next・4 Dryrun・5 Deploy です（VS Code のターミナル以外では、6 Start・7 Restart も出ます）。</p>
 
 <h3 id="dev-job"><code>sf-job.sh</code> が動かない</h3>
-<p><code>sf-job.sh</code> は、管理者用のフォルダ（<code>admin</code>）や、<code>force-*</code> フォルダの中では、動きません。<strong>作業フォルダ</strong>（作業用のフォルダを、まとめて置いている場所）に移動して、もう一度実行してください。</p>
-
-<h3 id="dev-push"><code>sf-push.sh</code> が、コミットする前に止まる</h3>
-<p>次のどちらかのときに、止まります。変更が、手元に半端に残らないようにするための仕組みです。</p>
 <ul>
-  <li>ブランチの上にいない（detached HEAD）</li>
-  <li>保護ブランチ（<code>main</code> など）の上にいる</li>
+  <li><strong>実行する場所:</strong> <code>sf-job.sh</code> は、管理者用のフォルダ（<code>admin</code>）や、<code>force-*</code> フォルダの中では、動きません。<strong>作業フォルダ</strong>（作業用のフォルダを、まとめて置いている場所）に移動して、もう一度実行してください。</li>
+  <li><strong>リポジトリが見つからない:</strong> プロジェクトのリポジトリ（<code>force-XXXX</code>）は、管理者が先に作ります。まだ作られていない・オーナーや XXXX の名前が違う・自分のアカウントに読み書きの権限がない、のどれかです。管理者に確かめてください（リポジトリができるまでは、始められません）。</li>
+  <li><strong>途中で失敗した:</strong> それまでに作ったブランチ・フォルダは、残ります。ブランチを作ったあとでクローンに失敗したときは、同じジョブ名で、もう一度実行し、「既存のブランチを使う」に <code>Y</code> を答えると、続きから進めます。</li>
+  <li><strong>中断したい:</strong> Ctrl+C は効きません。入力の画面で <code>q</code> を入力してください。</li>
 </ul>
-<p><code>sf-job.sh</code> で作った、作業用のブランチに移ってから、もう一度実行してください。</p>
+
+<h3 id="dev-push"><code>sf-push.sh</code>（ランチャーの 2 Push）が止まる</h3>
+<p>次のときに、コミットする前に止まります。変更が、手元に半端に残らないようにするための仕組みです。</p>
+<ul>
+  <li><strong>ブランチの上にいない（detached HEAD）・保護ブランチ（<code>main</code> など）の上にいる:</strong> <code>sf-job.sh</code> で作った、作業用のブランチに移ってから、もう一度実行してください。</li>
+  <li><strong>「origin/main とのマージに失敗しました」:</strong> <code>sf-push.sh</code> は、コミットの前に、最新の <code>main</code> を取り込みます。同じファイルの同じ場所を、ほかの人が先に変えて <code>main</code> に入っていると、コンフリクトで失敗します（取り込みは取り消され、手元は元のままです）。画面に、失敗の理由が出ます。解消の仕方が分からないときは、管理者かレビュアーに相談してください。</li>
+  <li><strong>「git fetch に失敗しました」:</strong> GitHub につながりません。ネットワークを確かめて、もう一度実行します。</li>
+  <li><strong>ターゲットファイルのエラー:</strong> どの行が、なぜエラーかが、画面に出ます。直して、もう一度実行します（書き方は<a href="../reference/target-files.html">ターゲットファイルの書き方</a>）。</li>
+</ul>
+<p>コミットメッセージを空のまま閉じると、コミットもプッシュもせずに終わります。コミットのあとでプッシュだけ失敗したときは、もう一度 <code>sf-push.sh</code> を実行すると、プッシュだけを行います。</p>
 
 <h3 id="dev-prepush"><code>git push</code> が止められる</h3>
-<p><code>main</code> / <code>staging</code> / <code>develop</code> の上にいるとき、または、これらへプッシュしようとしたとき（<code>git push origin feature:main</code> など）は、プッシュを止める仕組みです。作業用のブランチに移って、PR（取り込みの依頼）を出して、反映してください（<code>sf-next.sh</code> が、出し先を案内します）。ターゲットファイルの書き方にエラーがあるときも、止まります（画面に、エラーの行が出ます）。</p>
-<p>「リモートの変更を、現在のブランチに取り込みました。このプッシュには、取り込みが含まれないため、中止しました」と表示されたときは、故障ではありません。<code>main</code> などの新しい変更を取り込んだので、もう一度 <code>git push</code> を実行してください（今度は通ります）。</p>
+<p>プッシュのときに、自動のチェック（pre-push フック）が動きます。次のときは、プッシュを止めます。</p>
+<ul>
+  <li><code>main</code> / <code>staging</code> / <code>develop</code>（保護ブランチ）の上にいるとき、ブランチの上にいないとき、保護ブランチへプッシュしようとしたとき（<code>git push origin feature:main</code> など）。作業用のブランチに移って、PR（取り込みの依頼）を出して、反映してください（<code>sf-next.sh</code>、ランチャーの 3 Next が、出し先を案内します）。</li>
+  <li>ターゲットファイルの書き方にエラーがあるとき（画面に、エラーの行が出ます）。</li>
+  <li>GitHub の最新の取得に失敗したとき（「リモート情報の取得に失敗しました」）・取り込みがコンフリクトしたとき（「… の自動取り込み（git merge）に失敗しました」。取り込みは取り消されます）。</li>
+</ul>
+<p>「リモートの変更を、現在のブランチに取り込みました（早送りを含む）。このプッシュには、取り込みが含まれないため、中止しました。」と表示されたときは、故障ではありません。<code>main</code> などの新しい変更を取り込んだので、<strong>もう一度プッシュ</strong>してください（<code>sf-push.sh</code> をもう一度実行するか、<code>git push</code>）。今度は通ります。</p>
 <p>この仕組みを、避けて通る方法は、案内していません。どうしても必要なときは、管理者に相談してください。</p>
 
-<h3 id="dev-dryrun">dry-run（<code>sf-dryrun.sh</code>）が失敗する</h3>
-<p>画面に、エラーの内容が出ています。多くは、ターゲットファイルの書き方や、変更の内容が原因です。直して、もう一度実行してください。書き方は、<a href="../reference/target-files.html">ターゲットファイルの書き方</a>にあります。</p>
+<h3 id="dev-dryrun">dry-run（<code>sf-dryrun.sh</code>。ランチャーの 4 Dryrun）が失敗する</h3>
+<p>画面に、エラーの内容が出ています。多くは、ターゲットファイルの書き方や、変更の内容が原因です。直して、もう一度実行してください。書き方は、<a href="../reference/target-files.html">ターゲットファイルの書き方</a>にあります。実行の前に断られるときは、次の見出しを見てください。</p>
 
-<h3 id="dev-deploy"><code>sf-deploy.sh</code> が、実行前に断られる</h3>
-<p>接続先の組織が、共有の環境（エイリアスが <code>prod</code> / <code>staging</code> / <code>develop</code> の組織）だからです。<code>sf-deploy.sh</code> は、自分専用の組織（Sandbox・Developer Edition・Scratch Org）にだけ、使えます。<code>sf-restart.sh</code> で、接続先を、自分用の組織に切り替えてください。</p>
+<h3 id="dev-refused">Dryrun・Deploy が、実行の前に断られる（手元から実行できない組織）</h3>
+<p><code>sf-dryrun.sh</code>（4 Dryrun）・<code>sf-deploy.sh</code>（5 Deploy）・<code>sf-release.sh</code> は、手元のパソコンからは、<strong>自分専用の組織</strong>（個人用の Sandbox・Developer Edition・Scratch Org）にだけ使えます。次の組織には、検証（dry-run）も含めて、実行できません。</p>
+<table>
+  <thead><tr><th>表示</th><th>理由</th></tr></thead>
+  <tbody>
+    <tr><td>「… は共有環境（予約名）のため、ローカルから実行できません」</td><td>接続先のエイリアス（組織の呼び名）が、<code>prod</code> / <code>staging</code> / <code>develop</code> / <code>main</code> です。これは、チームで共有する段階の組織の名前です</td></tr>
+    <tr><td>「… は本番組織のため、ローカルから実行できません」</td><td>組織の種類を調べたら、本番でした（名前を変えて接続した本番も、止めます）</td></tr>
+    <tr><td>「… の組織の種類を確認できないため、ローカルから実行できません」</td><td>組織の情報を読み取れず、本番でないことを確かめられません（ログインが切れている・組織につながらない など）</td></tr>
+  </tbody>
+</table>
+<p>（<code>sf-deploy.sh</code> では、「実行できません」が「強制リリースできません」になります。）共有の段階の組織へは、変更を GitHub に送り、PR を作って、レビューを通し、マージします。そうすると、ワークフローが反映します。自分用の組織に切り替えるには、<code>sf-restart.sh</code>（VS Code のターミナル以外で開いたランチャーでは、7 Restart）を使います。</p>
+<p><code>sf-deploy.sh</code> は、このほか、保護ブランチ（<code>main</code> など）の上や、ブランチの上にいないときも、断ります。作業用のブランチで実行してください。</p>
 
 <h3 id="dev-sf"><code>sf</code> は成功しているのに、失敗と表示される</h3>
 <p>Salesforce CLI が、公式インストーラー版のときに起こります。npm 版に入れ替えると、直ります（<a href="../guide/install.html#npm">Salesforce CLI は npm 版を使う</a>）。</p>
 
-<h2 id="admin">管理者の方へ（セットアップや自動処理で困ったとき）</h2>
-
-<h3 id="init"><code>sf-init.sh</code> が、途中でエラーで止まった</h3>
-<p>まず、ログを見ます。</p>
-<pre><code>cat ~/sf-tools/logs/sf-init.log</code></pre>
-<p>「どこで間違えたか分からない」ときは、管理者用の <code>admin</code> フォルダの中の <code>force-*</code> で、<code>sf-init.sh --status</code> を実行します。リポジトリ・ブランチ・ワークフロー・Secrets・Variables が、そろっているかを、✓（できている）と ✗（足りない。直し方も表示）で教えてくれます（何も変更しません。<a href="maintenance.html#status">診断の説明</a>）。</p>
-<p>原因を直したら、<strong>同じフォルダで、もう一度 <code>sf-init.sh</code> を実行</strong>してください。途中まで進んでいたときは、続きから再開する選択肢が出ます（<a href="setup.html#resume">途中で止まったとき</a>）。</p>
-
-<h3 id="pat"><code>wf-metasync</code>（[metasync] メタ同期）が「push declined due to repository rule violations」で失敗する</h3>
-<p><code>PAT_TOKEN</code> が登録されていないか、権限が足りないのが原因です。<code>sf-init.sh</code> は、登録のときに、権限を確かめます。そのあとで、Token を無効にしたり、有効期限が切れたりすると、この状態になります。</p>
-<p>新しい Token を発行して、リポジトリの Secrets の <code>PAT_TOKEN</code> を、登録し直してください。<code>sf-update-secret.sh</code> では、<code>PAT_TOKEN</code> は更新できません。</p>
-
-<h3 id="wf-missing"><code>wf-validate</code>（[validate] デプロイ前検証）や <code>wf-sequence</code>（[sequence] マージ順序チェック）が動かない</h3>
-<p>ワークフローのファイルが、<code>.github/workflows/</code> の中にあるかを、確かめてください。</p>
-<p>ファイルがないときは、<a href="workflows.html#sync"><code>sf-sync-wf.sh</code></a> で、最新の雛形から作り直せます。</p>
-
-<h3 id="required-checks"><code>main</code> / <code>staging</code> への PR が、マージできない（必須のチェックが「待機中」のまま）</h3>
-<p>PR の画面で、「Expected — Waiting for status to be reported」のような表示のまま、マージのボタンが押せないときの原因です。ブランチ保護（Ruleset）の<strong>必須チェックの名前が、ワークフローの実際のチェック名と合っていない</strong>ためです。名前が合わないと、条件は、永久に満たされません。</p>
-<p>以前のバージョンの <code>sf-init.sh</code> は、必須チェックの名前を <code>validate / 対象ファイル確認</code> のように、ワークフロー名つきで登録していました。正しい名前は、<strong>ジョブ名だけ</strong>の <code>対象ファイル確認</code>・<code>デプロイ検証</code>・<code>順序チェック</code> です。この問題は、ブランチ保護が実際に効くリポジトリ（有料プラン、または公開リポジトリ）で起こります。管理者（リポジトリの Admin ロール）は、ブランチ保護をバイパスできるので、マージできます。</p>
-<p>確かめ方と直し方は、次のとおりです。</p>
-<ol class="steps">
-  <li><p>管理者用のフォルダ（<code>admin/force-XXXX</code>）で、<a href="maintenance.html#status"><code>sf-init.sh --status</code></a> を実行します。「Ruleset protect-main: 必須チェックの名前が、ワークフローのジョブ名と合っていません」と出たら、これが原因です（何も変更しません）。</p></li>
-  <li><p>GitHub のリポジトリの <strong>Settings → Rules → Rulesets</strong> で、<code>protect-main</code> と <code>protect-staging</code> を開きます。</p></li>
-  <li><p>「Require status checks to pass」の一覧を、<code>対象ファイル確認</code>・<code>デプロイ検証</code>・<code>順序チェック</code> の <strong>3 つだけ</strong>にします（ワークフロー名は付けません）。保存します。</p></li>
-</ol>
-<p>新しく作るプロジェクトは、最初から、正しい名前で登録されます。</p>
-
 <h3 id="crlf">CRLF の警告が出る</h3>
-<p>Windows と、ほかの環境の、改行コードの違いを知らせる警告です。動作には影響しないので、そのままで大丈夫です。</p>
-
-<h3 id="clone-token"><code>wf-metasync</code> / <code>wf-validate</code> / <code>wf-release</code> が「自動化ツール（sf-tools）を取得」で失敗する</h3>
-<p><code>sf-tools</code> は公開リポジトリなので、新しいワークフローは、Token なしで取得します。このエラーは、<strong>以前のバージョンの雛形で作ったプロジェクト</strong>で起こります。ワークフローが <code>SF_TOOLS_TOKEN</code> 付きで取得していて、その Token が使えないときに起こります（登録されていない・期限が切れた・無効になった、のどれかです）。</p>
-<p>プロジェクトの <code>wf-metasync.yml</code> / <code>wf-validate.yml</code> / <code>wf-release.yml</code> にある、取得の行を、新しい雛形と同じ、Token なしの形に直してください。</p>
-<pre><code>git clone -b ${{ vars.SF_TOOLS_BRANCH || 'main' }} https://github.com/tama-create/sf-tools.git ...</code></pre>
-<p>配布済みのプロジェクトには、自動では反映されません。<a href="workflows.html#sync"><code>sf-sync-wf.sh</code></a> で、雛形に合わせて更新できます。</p>
-
-<h3 id="node">「差分抽出ツール（Salesforce Git Delta）をインストール」で TypeError が出て失敗する</h3>
-<p>エラーの例: <code>TypeError: webidl.util.markAsUncloneable is not a function</code></p>
-<p>ワークフローで使っている Node.js が、古いのが原因です（<code>@salesforce/cli</code> の最新版は、Node 22 以上が必要です）。各ワークフローの <code>node-version</code> を、<code>22</code> 以上に直してください。雛形を直しても、配布済みのプロジェクトには、自動では反映されません。プロジェクト側のワークフローも、<a href="workflows.html#sync"><code>sf-sync-wf.sh</code></a> で更新します。</p>
+<p>Windows と、ほかの環境の、改行コード（行の終わりの印）の違いを知らせる、Git の警告です。動作には影響しないので、そのままで大丈夫です。</p>
 
 </main>
 <aside id="toc"></aside>

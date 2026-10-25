@@ -46,6 +46,12 @@ test_step() {
     assert_file_contains     "$WOUT" "ステップ 1 / 8: 準備の確認"               "最初のステップ: 現在地が出る"
     assert_file_not_contains "$WOUT" "完了:"                                   "最初のステップ: 完了済みは出ない"
     _wc
+    # 引数が 4 つ未満（目的の 1 文を省略）→ 完了済みは出ない（以前は shift 4 が失敗し、番号などが完了済みとして出た）
+    _w 'wizard_step 2 8 "タイトルだけ"'
+    assert_exit_ok           "$WRC"                                              "引数 3 つ: 正常終了する"
+    assert_file_contains     "$WOUT" "ステップ 2 / 8: タイトルだけ"              "引数 3 つ: 現在地とタイトルが出る"
+    assert_file_not_contains "$WOUT" "完了:"                                   "引数 3 つ: 完了済みは出ない"
+    _wc
 }
 
 test_checklist_do() {

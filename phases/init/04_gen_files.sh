@@ -22,8 +22,10 @@
 #       - sf-tools/config/ の metadata.txt・branches.txt を、ないときだけテンプレートからコピーする（通常は、ないと die）
 #       - .gitmessage を置き、commit.template に設定する
 #       - npm install をしない
-#   - pre-commit / pre-push フックのインストール（sf-hook.sh）と、sf-tools/release/ の準備は、通常どおり行う
+#   - pre-commit / pre-push フックのインストール（sf-hook.sh）と、sf-tools/release/ の準備は、通常どおり行う。
+#     sf-upgrade.sh のバックグラウンド起動（前回の起動から 24 時間以上たっているとき）も、通常どおり行う
 #   - ワークフロー（.github/workflows/）は、この Phase ではなく、Phase 3 がテンプレートからコピーする
+#   - 終了コード: 0 = OK / 1 = die
 # ==============================================================================
 
 # SF_TOOLS_DIR は sf-init.sh（司令塔）から export される
@@ -31,7 +33,7 @@ PHASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SF_TOOLS_DIR="${SF_TOOLS_DIR:-$(dirname "$(dirname "$PHASE_DIR")")}"
 
 readonly SCRIPT_NAME="sf-init"
-mkdir -p "$HOME/sf-tools/logs" 2>/dev/null || true
+mkdir -p "$HOME/sf-tools/logs" 2>/dev/null || true  # run 不使用: common.sh の読み込み前（run が未定義）
 readonly LOG_FILE="$HOME/sf-tools/logs/${SCRIPT_NAME}.log"
 readonly LOG_MODE="APPEND"  # 司令塔が NEW で初期化済みのため追記
 export SF_INIT_MODE=1

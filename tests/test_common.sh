@@ -163,6 +163,25 @@ test_check_gh_owner_org_api_failure() {
     rm -f "$script"; teardown "$mb"
 }
 
+# 大文字と小文字だけが違う → 同じユーザーとして通過（GitHub は区別しない。以前は区別して die していた）
+test_check_gh_owner_case_insensitive() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] check_gh_owner: 大文字と小文字だけが違う → 正常終了${CLR_RST}"
+
+    local mb script
+    mb=$(_make_mock_gh_bin "TestOwner" "" "fail")   # 組織 API は失敗させる（一致の判定だけで通過することを確かめる）
+    script=$(_make_check_gh_owner_script)
+
+    PATH="$mb:$PATH" bash "$script" "testowner" > /dev/null 2>&1
+    assert_exit_ok $? "gh のユーザー TestOwner・オーナー testowner → 終了コード 0"
+    PATH="$mb:$PATH" bash "$script" "TESTOWNER" > /dev/null 2>&1
+    assert_exit_ok $? "gh のユーザー TestOwner・オーナー TESTOWNER → 終了コード 0"
+    PATH="$mb:$PATH" bash "$script" "testowner2" > /dev/null 2>&1
+    assert_exit_fail $? "大文字と小文字以外も違う（testowner2）→ die"
+
+    rm -f "$script"; teardown "$mb"
+}
+
 
 # ------------------------------------------------------------------------------
 # read_secret のテスト
@@ -231,7 +250,53 @@ test_read_secret() {
     out=$(printf 'abcdef\n' | bash "$script" 2>&1)
     [[ "$out" == *"6 文字を受け取りました"* && "$out" != *"先頭:"* ]] && pass "「英字_」で始まらない値は、文字数だけを表示する" || fail "「英字_」で始まらない値は、文字数だけを表示する" "$out"
 
+    # 矢印キーなどの制御シーケンス（ESC [ A・ESC O B・ESC [ 1 ; 5 C）は、まとめて読み捨てる（[A などを値に入れない）
+    out=$(printf 'ghp_a\x1b[Ab\x1bOBc\x1b[1;5Cd\n' | bash "$script" 2>&1)
+    [[ "$out" == *"GOT=[ghp_abcd]"* ]] && pass "矢印キーの制御シーケンスは、値に入らない" || fail "矢印キーの制御シーケンスは、値に入らない" "$out"
+
+    # CRLF の貼り付け: CR で確定し、続く LF は次の入力に残さない（次の読み取りが、空 Enter にならない）
+    local script2
+    script2=$(mktemp /tmp/test-read-secret2-XXXX.sh)
+    cat > "$script2" << SEOF
+#!/bin/bash
+readonly SCRIPT_NAME=test
+readonly LOG_FILE=/dev/null
+readonly LOG_MODE=NEW
+export SF_INIT_MODE=1
+source '${SF_TOOLS_DIR}/lib/common.sh'
+V=""; W=""
+read_secret V "P1: "
+IFS= read -r W
+echo "GOT=[\$V] NEXT=[\$W]"
+SEOF
+    out=$(printf 'ghp_crlf\r\nnext\n' | bash "$script2" 2>&1)
+    [[ "$out" == *"GOT=[ghp_crlf] NEXT=[next]"* ]] && pass "CRLF: 続く LF を読み捨て、次の入力に残さない" || fail "CRLF: 続く LF を読み捨て、次の入力に残さない" "$out"
+    rm -f "$script2"
+
     rm -f "$script"
+}
+
+# ------------------------------------------------------------------------------
+# read_key: VALID の省略時は、空 Enter 以外のすべての文字（空白・タブを含む）を受け付ける / press_enter は標準出力に出さない
+# ------------------------------------------------------------------------------
+test_read_key_and_press_enter() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] read_key（空白・タブを受け付ける）/ press_enter（標準出力に出さない）${CLR_RST}"
+    local out
+    _rk() {   # 引数: 実行する式。標準入力は、呼び出し側のもの。標準出力だけを返す
+        bash -c "
+            readonly SCRIPT_NAME=test; readonly LOG_FILE=/dev/null; readonly LOG_MODE=NEW; export SF_INIT_MODE=1
+            source '${SF_TOOLS_DIR}/lib/common.sh'
+            $1" 2>/dev/null
+    }
+    out=$(printf ' x' | _rk 'read_key K "P: "; echo "K=[$K]"')
+    assert_equals "$out" "K=[ ]" "read_key（VALID なし）: 空白を、その文字のまま受け付ける（以前は空になり、無視された）"
+    out=$(printf '\tx' | _rk 'read_key K "P: "; echo "K=[$K]"')
+    assert_equals "$out" "K=[$(printf '\t')]" "read_key（VALID なし）: タブを、その文字のまま受け付ける"
+    out=$(printf '\n y' | _rk 'read_key K "P: " "[xy]"; echo "K=[$K]"')
+    assert_equals "$out" "K=[y]" "read_key（VALID あり）: 空 Enter・VALID に合わない空白は、無視する"
+    out=$(printf '\n' | _rk 'v=$(press_enter "M"); echo "STDOUT=[$v]"')
+    assert_equals "$out" "STDOUT=[]" "press_enter: 標準出力に、何も出さない（命令置換の結果に混ざらない）"
 }
 
 
@@ -266,6 +331,18 @@ SEOF
     assert_file_contains     "$logf" "***masked***"     "run のコマンドログに伏せ字が記録される"
 
     rm -f "$script" "$logf"
+
+    # 失敗したコマンドの error.log の見出しの行も、伏せ字にする（以前は、見出しの行だけ、伏せ字にしていなかった）
+    local td
+    td=$(mktemp -d "${TMPDIR:-/tmp}/test-mask-err-XXXX")
+    ( export SF_INIT_MODE=1; readonly SCRIPT_NAME=test LOG_FILE="$td/test.log" LOG_MODE=NEW
+      source "$SF_TOOLS_DIR/lib/common.sh"
+      run false "https://ghp_ERRSECRET@github.com/o/r.git" xoxb-8-8-YyYy ) > /dev/null 2>&1
+    assert_file_exists       "$td/error.log"                 "run の失敗 → error.log に記録される"
+    assert_file_not_contains "$td/error.log" "ghp_ERRSECRET" "error.log の見出しの行に、GitHub の Token が残らない"
+    assert_file_not_contains "$td/error.log" "xoxb-8-8-YyYy" "error.log の見出しの行に、Slack の Token が残らない"
+    assert_file_contains     "$td/error.log" "***masked***"  "error.log の見出しの行に、伏せ字が記録される"
+    rm -rf "$td"
 }
 
 # ------------------------------------------------------------------------------
@@ -326,6 +403,49 @@ test_open_browser_gitbash() {
     done
     unset MOCK_CALL_LOG
     teardown "$mb"
+}
+
+# WSL: URL を PowerShell の単引用符で囲んで渡す。URL の中の ' は '' にする（以前は、そのまま埋め込み、文字列が壊れた）
+#   WSL の判定（/proc/version の grep）は、関数で差し替えて、WSL として動かす
+test_open_browser_wsl_quote() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] open_browser: WSL では、URL の ' を '' にして、PowerShell に渡す${CLR_RST}"
+    local mb n
+    mb=$(setup_mock_bin)
+    export MOCK_CALL_LOG="$mb/calls.log"
+    for n in start powershell.exe open xdg-open; do
+        printf '#!/bin/bash\necho "%s $*" >> "$MOCK_CALL_LOG"\n' "$n" > "$mb/$n"
+        chmod +x "$mb/$n"
+    done
+    : > "$MOCK_CALL_LOG"
+    PATH="$mb:$PATH" _osd_run linux-gnu "grep() { return 0; }; open_browser \"https://example.com/a'b?x=it's\"" > /dev/null
+    assert_file_contains "$MOCK_CALL_LOG" "powershell.exe -c Start-Process 'https://example.com/a''b?x=it''s'" "WSL: ' を '' にして、単引用符で囲んで渡す"
+    : > "$MOCK_CALL_LOG"
+    PATH="$mb:$PATH" _osd_run linux-gnu "grep() { return 0; }; open_browser 'https://example.com/x'" > /dev/null
+    assert_file_contains "$MOCK_CALL_LOG" "powershell.exe -c Start-Process 'https://example.com/x'" "WSL: ' のない URL は、そのまま渡す"
+    unset MOCK_CALL_LOG
+    teardown "$mb"
+}
+
+# is_protected_branch: ブランチ名を、固定の文字列として、行全体で比べる（. を正規表現として扱わない・- で始まる名前も扱える）
+test_is_protected_branch() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] is_protected_branch: ブランチ名は、固定の文字列として比べる${CLR_RST}"
+    local td out b
+    td=$(mktemp -d "${TMPDIR:-/tmp}/test-ipb-XXXX")
+    mkdir -p "$td/sf-tools/config"
+    printf '%s\n' "# 保護するブランチ" "main" "release.1" "staging" > "$td/sf-tools/config/branches.txt"
+    for b in main release.1 staging "ma.n" "release-1" "releasex1" "-x" "--help" "Main" ""; do
+        out=$( cd "$td" && bash -c "
+            readonly SCRIPT_NAME=test; readonly LOG_FILE=/dev/null; readonly LOG_MODE=NEW; export SF_INIT_MODE=1
+            source '${SF_TOOLS_DIR}/lib/common.sh'
+            is_protected_branch \"\$1\" && echo YES || echo NO" _ "$b" 2>&1 )
+        case "$b" in
+            main|release.1|staging) assert_equals "$out" "YES" "「${b}」→ 保護対象" ;;
+            *)                      assert_equals "$out" "NO"  "「${b}」→ 保護対象ではない（エラーも出さない）" ;;
+        esac
+    done
+    rm -rf "$td"
 }
 
 # ------------------------------------------------------------------------------
@@ -627,6 +747,17 @@ test_ensure_sf_tools_latest() {
     assert_file_contains "$b/out.log" "最新かどうかを確認できません" "origin に接続できない → 理由が表示される"
     teardown "$b"
 
+    # origin に同じブランチがない（手元だけの作業ブランチ）→ 確認できないため、WARNING を出して続行（戻り値 0）
+    #   以前は、git fetch origin <ブランチ> の失敗を「接続できない」として、中断していた
+    b=$(_esl_repos)
+    git -C "$b/sf-tools" checkout -q -b local-only-work
+    _esl_run "$b" "" "$b/sf-tools"
+    assert_exit_ok $? "origin に同じブランチがない → 終了コード 0（中断しない）"
+    assert_file_contains "$b/out.log" "RC=0" "origin に同じブランチがない → 戻り値 0"
+    assert_file_contains "$b/out.log" "origin に local-only-work ブランチが存在しない" "origin に同じブランチがない → 警告が表示される"
+    assert_file_not_contains "$b/out.log" "接続できない" "origin に同じブランチがない → 「接続できない」とは言わない"
+    teardown "$b"
+
     # Git リポジトリでない → 確認できないため、WARNING を出して続行
     b=$(mktemp -d "${TMPDIR:-/tmp}/test-esl-XXXX"); mkdir -p "$b/sf-tools"
     _esl_run "$b" "" "$b/sf-tools"
@@ -760,6 +891,27 @@ test_merge_package_xml() {
     _mp "merge_package_xml '$td/o2.xml' '$td/empty.xml' '$td/empty.xml'"
     assert_equals "$(grep -c '<members>' "$td/o2.xml")" "0" "統合: 入力が空なら、メンバーのない、空のマニフェストを出力する"
     assert_equals "$(grep -c '<version>64.0</version>' "$td/o2.xml")" "1" "統合: 空でも、version を出力する"
+
+    # 日本語の名前（レイアウトなど）: 別の名前を、同じものとして消さない（LC_ALL=C の sort -u。macOS の sort -u は、ロケールにより、
+    #   別の日本語を同一視することがある）
+    printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' '<Package xmlns="http://soap.sforce.com/2006/04/metadata">' \
+        '    <types>' '        <members>Account-取引先 レイアウト</members>' '        <members>Account-商談 レイアウト</members>' \
+        '        <name>Layout</name>' '    </types>' '    <version>64.0</version>' '</Package>' > "$td/ja.xml"
+    _mp "merge_package_xml '$td/o-ja.xml' '$td/ja.xml' '$td/ja.xml'"
+    assert_equals "$(grep -c '<members>' "$td/o-ja.xml")" "2" "統合: 別の日本語の名前は、両方とも残る（重複だけを除く）"
+
+    # 入力が読めない → 戻り値 1。古い出力（前回の結果）は、削除する（以前は、戻り値 0 で、古い出力が残った）
+    cp "$td/out.xml" "$td/o3.xml"
+    _mp "merge_package_xml '$td/o3.xml' '$td/a.xml' '$td/none.xml'; echo RC=\$?" > "$td/mp.log"
+    assert_file_contains "$td/mp.log" "RC=1" "入力がない → 戻り値 1"
+    assert_file_contains "$td/mp.log" "読めません" "入力がない → ERROR を表示する"
+    assert_file_not_exists "$td/o3.xml" "入力がない → 古い出力を削除する（古い内容を、統合の結果として使わせない）"
+    _mp "merge_package_xml '$td/o4.xml'; echo RC=\$?" > "$td/mp.log"
+    assert_file_contains "$td/mp.log" "RC=1" "入力の指定がない → 戻り値 1（標準入力を読みに行かない）"
+    _mp "merge_package_xml '$td/no-such-dir/o5.xml' '$td/a.xml'; echo RC=\$?" > "$td/mp.log"
+    assert_file_contains "$td/mp.log" "RC=1" "出力に書けない → 戻り値 1"
+    _mp "merge_package_xml '$td/o6.xml' '$td/a.xml'; echo RC=\$?" > "$td/mp.log"
+    assert_file_contains "$td/mp.log" "RC=0" "成功 → 戻り値 0"
     rm -rf "$td"
 }
 
@@ -944,6 +1096,7 @@ test_check_gh_owner_org_admin
 test_check_gh_owner_org_member
 test_check_gh_owner_org_admin_pending
 test_check_gh_owner_org_api_failure
+test_check_gh_owner_case_insensitive
 # ------------------------------------------------------------------------------
 # ensure_admin_branch のテスト（実際の Git で確認する）
 # ------------------------------------------------------------------------------
@@ -1134,11 +1287,14 @@ EOF
 }
 
 test_read_secret
+test_read_key_and_press_enter
 test_get_target_org
 test_mask_secrets
 test_is_gitbash
 test_is_reserved_org_alias
 test_open_browser_gitbash
+test_open_browser_wsl_quote
+test_is_protected_branch
 test_check_sf_cli
 test_check_sf_cli_cache
 test_print_admin_warning

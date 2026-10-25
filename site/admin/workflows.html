@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ワークフローの更新（sf-sync-wf） | sf-tools ドキュメント</title>
-<meta name="description" content="自動生成されるワークフローの一覧と、sf-sync-wf.sh で雛形に合わせて更新する手順。">
+<meta name="description" content="sf-init が作る 5 つのワークフローの動きと、sf-sync-wf.sh で雛形に合わせて更新する手順。">
 <link rel="stylesheet" href="../assets/style.css">
 </head>
 <body data-root="../">
@@ -14,13 +14,15 @@
 <main id="doc" class="doc">
 
 <h1>⚙️ ワークフローの更新（sf-sync-wf）</h1>
-<p class="lead">ワークフローは、GitHub の上で自動で動く処理です（検証・リリース・同期など）。このページでは、<code>sf-init</code> が作るワークフローの一覧と、作成済みのプロジェクトのワークフローを、sf-tools の最新の雛形に合わせて更新する <code>sf-sync-wf.sh</code> の使い方を説明します。</p>
+<p class="lead">ワークフローは、GitHub の上で自動で動く処理です（検証・リリース・同期など。GitHub Actions という仕組みで動きます）。このページでは、<code>sf-init</code> が作る 5 つのワークフローが、いつ・何をするのかと、作成済みのプロジェクトのワークフローを、sf-tools の最新の雛形に合わせて更新する <code>sf-sync-wf.sh</code> の使い方を説明します。</p>
 
 <div class="box">
   <div class="title">このページの要点</div>
   <ul>
     <li>ワークフローは、<code>sf-init.sh</code> が作る <strong>5 つ</strong>（validate・sequence・release・propagate・metasync）です。</li>
-    <li>あとから雛形が直ったときは、<code>sf-sync-wf.sh</code>（管理者専用）で、作成済みのプロジェクトに、反映します。<strong>自動では、反映されません。</strong></li>
+    <li><code>main</code> / <code>staging</code> への PR は、3 つのチェック（<code>対象ファイル確認</code>・<code>デプロイ検証</code>・<code>順序チェック</code>）が通らないと、マージできません（ブランチ保護が効いているとき）。</li>
+    <li>リリースや同期の処理の中身は、ワークフローが動くたびに、sf-tools から取ってきます。sf-tools の更新は、すぐに届きます。</li>
+    <li>ただし、<strong>ワークフローのファイル自体</strong>の修正は、自動では届きません。<code>sf-sync-wf.sh</code>（管理者専用）で、作成済みのプロジェクトに反映します。</li>
     <li><code>sf-sync-wf.sh --check</code> は、差分があるかを調べるだけです（何も変更しません）。</li>
   </ul>
 </div>
@@ -31,41 +33,145 @@
   <div class="flow">
     <div class="node dev"><span class="who">💻 開発者</span><strong>PR を作る</strong><small>作成・更新のたび</small></div>
     <div class="arrow">→</div>
-    <div class="node auto"><span class="who">🤖 wf-validate</span><strong>dry-run で検証</strong><small>失敗なら、マージを止める</small></div>
+    <div class="node auto"><span class="who">🤖 wf-validate</span><strong>dry-run で検証</strong><small>main / staging への PR は、失敗するとマージできない</small></div>
     <div class="arrow">→</div>
     <div class="node dev"><span class="who">👀 レビュー</span><strong>マージする</strong></div>
     <div class="arrow">→</div>
-    <div class="node auto"><span class="who">🤖 wf-release</span><strong>組織へリリース</strong><small>Slack に通知</small></div>
+    <div class="node auto"><span class="who">🤖 wf-release</span><strong>組織へリリース</strong><small>結果を Slack に通知</small></div>
     <div class="arrow">→</div>
-    <div class="node auto"><span class="who">🤖 wf-propagate</span><strong>下の段階へ伝える</strong><small>main のとき</small></div>
+    <div class="node auto"><span class="who">🤖 wf-propagate</span><strong>下の段階へ伝える</strong><small>main へのマージのとき</small></div>
   </div>
   <p class="lane-label">これとは別に、決まった時刻に</p>
   <div class="flow">
-    <div class="node auto"><span class="who">🤖 wf-metasync</span><strong>本番の変更を main へ</strong><small>平日 9・12・15・18 時（日本時間）</small></div>
+    <div class="node auto"><span class="who">🤖 wf-metasync</span><strong>main の組織の変更を、main ブランチへ</strong><small>平日 9・12・15・18 時（日本時間）</small></div>
   </div>
   <figcaption>点線の箱は、自動で動きます。<code>wf-sequence</code>（マージ順序の確認）は、<code>main</code> / <code>staging</code> への PR のときに、検証と同時に動きます。</figcaption>
 </figure>
-<p><code>sf-init.sh</code> は、<code>.github/workflows/</code> に、次の 5 つを作ります（雛形は <code>sf-tools/templates/.github/workflows/</code>）。</p>
+<p><code>sf-init.sh</code> は、プロジェクトの <code>.github/workflows/</code> に、次の 5 つを作ります（雛形は <code>sf-tools/templates/.github/workflows/</code>）。GitHub の Actions の画面には、2 列目の名前で表示されます。</p>
 <table>
-  <thead><tr><th>ファイル</th><th>名前（<code>name:</code>）</th><th>いつ動くか</th></tr></thead>
+  <thead><tr><th>ファイル</th><th>画面での名前</th><th>いつ動くか</th><th>手動の実行</th></tr></thead>
   <tbody>
-    <tr><td><code>wf-validate.yml</code></td><td>[validate] デプロイ前検証</td><td>すべてのブランチへの PR の作成・更新・再オープンのとき</td></tr>
-    <tr><td><code>wf-sequence.yml</code></td><td>[sequence] マージ順序チェック</td><td><code>main</code> / <code>staging</code> への PR の作成・更新のとき</td></tr>
-    <tr><td><code>wf-release.yml</code></td><td>[release] デプロイ</td><td><code>main</code> / <code>staging</code> / <code>develop</code> への PR をマージしたあと</td></tr>
-    <tr><td><code>wf-propagate.yml</code></td><td>[propagate] ブランチ伝播</td><td><code>main</code> への PR をマージしたあと</td></tr>
-    <tr><td><code>wf-metasync.yml</code></td><td>[metasync] メタ同期</td><td>平日の日本時間 9:00 / 12:00 / 15:00 / 18:00（3 時間おき）に自動で</td></tr>
+    <tr><td><code>wf-validate.yml</code></td><td>[validate] デプロイ前検証</td><td>PR の作成・更新（ソースブランチへのプッシュ）・再オープンのとき。マージ先のブランチは問いません</td><td>できない</td></tr>
+    <tr><td><code>wf-sequence.yml</code></td><td>[sequence] マージ順序チェック</td><td><code>main</code> / <code>staging</code> への PR の作成・更新・再オープンのとき</td><td>できない</td></tr>
+    <tr><td><code>wf-release.yml</code></td><td>[release] デプロイ</td><td><code>main</code> / <code>staging</code> / <code>develop</code> への PR をマージしたあと</td><td>できる（<code>main</code> / <code>staging</code> / <code>develop</code> で実行したときだけ、リリースする）</td></tr>
+    <tr><td><code>wf-propagate.yml</code></td><td>[propagate] ブランチ伝播</td><td><code>main</code> への PR をマージしたあと</td><td>できる（<code>main</code> で実行したときだけ、伝える）</td></tr>
+    <tr><td><code>wf-metasync.yml</code></td><td>[metasync] メタ同期</td><td>平日（月〜金）の日本時間 9:00 / 12:00 / 15:00 / 18:00（3 時間おき）に自動で。GitHub の混雑で、開始が遅れることがあります</td><td>できる（どのブランチで実行しても、<code>main</code> を同期する）</td></tr>
   </tbody>
 </table>
-<p>順序外の PR を知らせる <code>wf-sequence</code> の仕組みは、<a href="../reference/commands-dev.html#sf-next"><code>sf-next.sh</code> の説明</a>にあります。</p>
+<ul>
+  <li>「手動の実行」は、GitHub の Actions の画面の「Run workflow」ボタン（<code>workflow_dispatch</code>）のことです。<code>sf-init</code> のセットアップの最後と、<a href="verify.html"><code>sf-init.sh --verify</code></a> は、<code>wf-metasync</code> を、この方法で起動します。</li>
+  <li>どのワークフローも、ブランチへの直接のプッシュでは動きません。PR のタイトル・本文の編集でも動きません。</li>
+  <li>コンフリクト（同じ場所を、別々に変更した衝突）のある PR では、<code>wf-validate</code> と <code>wf-sequence</code> は動きません（GitHub が、マージした結果を作れないためです）。コンフリクトを解消すると、動きます。</li>
+</ul>
+
+<h3 id="required-checks">マージの前の必須チェック</h3>
+<p>必須チェックとは、「これが成功しないと、PR をマージできない」と、ブランチ保護（GitHub の Ruleset）に登録したチェックです。<code>sf-init</code> は、<code>main</code> と <code>staging</code> のブランチ保護（<code>protect-main</code> / <code>protect-staging</code>）に、次の 3 つを登録します。</p>
+<table>
+  <thead><tr><th>必須チェックの名前</th><th>どのワークフローのジョブか</th><th>失敗するとき</th></tr></thead>
+  <tbody>
+    <tr><td><code>対象ファイル確認</code></td><td><code>wf-validate</code> と <code>wf-sequence</code> の両方にあります（PR の画面には、同じ名前で 2 つ並びます）</td><td>ふつうは失敗しません（デプロイの対象があるかを調べるだけです）</td></tr>
+    <tr><td><code>デプロイ検証</code></td><td><code>wf-validate</code></td><td>dry-run の検証が失敗したとき</td></tr>
+    <tr><td><code>順序チェック</code></td><td><code>wf-sequence</code></td><td>環境ブランチ（<code>main</code> / <code>staging</code> / <code>develop</code> など）から、直接 PR を出したとき</td></tr>
+  </tbody>
+</table>
+<ul>
+  <li>必須チェックは、<strong>ジョブの名前だけ</strong>で照合されます。ワークフローの名前を付けた形（以前の <code>sf-init</code> が登録していた「<code>validate / 対象ファイル確認</code>」など）は、<strong>永久に満たされず</strong>、PR をマージできなくなります。以前のバージョンで作ったプロジェクトは、<a href="troubleshooting.html#required-checks">トラブルシューティング</a>を見てください（<a href="maintenance.html#status"><code>sf-init.sh --status</code></a> が、食い違いを見つけます）。</li>
+  <li>デプロイの対象がない PR（ターゲットファイルが空）では、<code>デプロイ検証</code> と <code>順序チェック</code> は、スキップされます。スキップされたチェックは、GitHub の仕様で、成功として扱われるので、マージは止まりません。</li>
+  <li><code>develop</code> などへの PR には、ブランチ保護がないため、検証が失敗しても、マージは止まりません（結果の表示だけです）。</li>
+  <li>ブランチ保護が作れなかったプロジェクト（無料プランの非公開リポジトリなど）では、どのチェックが失敗しても、マージは止まりません。また、リポジトリの Admin（管理者の権限を持つ人）は、ブランチ保護を迂回できます。</li>
+</ul>
+<div class="box warn">
+  <div class="title">ジョブの名前を、変えないでください</div>
+  <p>ワークフローのジョブの名前（<code>name:</code>）を手で変えると、必須チェックが永久に満たされず、PR をマージできなくなります。<code>wf-release</code> の「<code>リリース対象確認</code>」は、必須チェックの「<code>対象ファイル確認</code>」と、<strong>わざと別の名前</strong>にしてあります（同じ名前だと、先の段階の PR で付いた成功が、次の段階の PR の必須チェックを、満たしてしまう恐れがあるためです）。</p>
+</div>
+
+<h3 id="wf-validate">wf-validate（デプロイ前検証）</h3>
+<p>PR を作るたび・更新するたびに、<code>sf-release.sh</code> を、検証のモード（dry-run。組織には反映しない）で実行し、結果を PR にコメントします。</p>
+<ul>
+  <li>ジョブは 2 つです。<code>対象ファイル確認</code> が、ターゲットファイル（<code>sf-tools/release/&lt;ソースブランチ名&gt;/</code> の <code>deploy-target.txt</code>・<code>remove-target.txt</code>）に中身があるかを調べ、あれば <code>デプロイ検証</code> が動きます。</li>
+  <li>検証に使う組織は、マージ先で決まります。<code>main</code> への PR は <code>main</code> の組織、<code>staging</code> への PR は <code>staging</code> の組織、<strong>それ以外（<code>develop</code> や、作業用のブランチへの PR）は <code>develop</code> の組織</strong>です。<code>develop</code> の組織を登録していない構成（<code>main</code> のみ・<code>main</code> + <code>staging</code>）で、<code>main</code> / <code>staging</code> 以外への PR を出すと、ログインで失敗します。</li>
+  <li>PR へのコメントは、毎回、新しく追加します。見出しは「✅ 検証成功」「❌ 検証失敗（終了コード）」、途中の手順で止まった・取り消された・時間切れになったときは「⚠️ 検証が実行されませんでした」です。長いログは、末尾の 3000 文字だけを載せます。</li>
+  <li>Slack には通知しません。</li>
+</ul>
+
+<h3 id="wf-sequence">wf-sequence（マージ順序チェック）</h3>
+<p><code>main</code> / <code>staging</code> への PR で、マージの順序（<code>develop</code> → <code>staging</code> → <code>main</code>）が守られているかを確かめます。順序は、<code>main</code> ブランチの <code>sf-tools/config/branches.txt</code> の並びで決まります（PR の中身ではなく、常に <code>main</code> から読みます）。</p>
+<table>
+  <thead><tr><th>PR の状態</th><th>チェック</th><th>知らせ方</th></tr></thead>
+  <tbody>
+    <tr><td>順序どおり</td><td>成功</td><td>何もしません（以前に警告のコメントがあれば、「✅ 問題ありません」に書き換えます）</td></tr>
+    <tr><td>順序外（前の段階に、まだマージされていない）</td><td><strong>成功</strong>（マージは止めない）</td><td>PR へのコメント「⚠️ マージ順序の確認が必要です」と、Slack</td></tr>
+    <tr><td>環境ブランチから直接出した PR</td><td><strong>失敗</strong>（マージできない）</td><td>PR へのコメント「⛔ 環境ブランチからの PR は、許可されていません」と、Slack</td></tr>
+  </tbody>
+</table>
+<ul>
+  <li>順序外でもマージを止めないのは、緊急の修正（Hotfix）を妨げないためです。気づいたレビュアーが、PR を却下します。</li>
+  <li>開発者が <code>sf-next.sh</code>（ランチャーの「次の PR」）を使う限り、順序は守られます。このチェックは、GitHub の画面で直接 PR を作ったときの備えです。仕組みの詳細は、<a href="../reference/commands-dev.html#sf-next"><code>sf-next.sh</code> の説明</a>にあります。</li>
+  <li>Salesforce の組織には、接続しません。</li>
+</ul>
+
+<h3 id="wf-release">wf-release（デプロイ）</h3>
+<p>PR を <code>main</code> / <code>staging</code> / <code>develop</code> にマージすると、マージ先に対応する組織へ、<code>sf-release.sh --release</code> でリリースし（組織に反映し）、結果を Slack に通知します。</p>
+<ul>
+  <li>ジョブは 2 つです。<code>リリース対象確認</code> がターゲットファイルに中身があるかを調べ、あれば <code>リリース実行</code> が動きます。中身がない・マージせずに閉じた PR では、リリースせず、Slack にも通知しません。</li>
+  <li>ログインするのは、マージ先の組織だけです（<code>main</code> → <code>main</code> の組織、<code>staging</code> → <code>staging</code> の組織、<code>develop</code> → <code>develop</code> の組織）。</li>
+  <li>Slack には、成功なら「リリース成功」、失敗・取り消しなら「リリース失敗」を、リリース先・ブランチ・PR・日時・ログの URL と一緒に送ります。</li>
+  <li>続けてマージしても、同じマージ先へのリリースは、1 つずつ順に動きます（待っている実行は、取り消されません。ただし、待ちが 100 を超えると、GitHub の仕様で、それ以降は取り消されます）。マージ先が違うリリースは、並行して動きます。</li>
+  <li><code>wf-propagate</code> や <code>wf-metasync</code> による伝播（PR を通さないプッシュ）では、動きません。<code>staging</code> / <code>develop</code> の組織にリリースするのは、その段階への PR をマージしたときだけです。</li>
+</ul>
+<div class="box warn">
+  <div class="title">手動の実行（Run workflow）の注意</div>
+  <ul>
+    <li><code>main</code> / <code>staging</code> / <code>develop</code> 以外のブランチで実行すると、リリースしません（警告を表示するだけです）。</li>
+    <li>3 つのブランチで実行すると、そのブランチの名前の <code>sf-tools/release/&lt;ブランチ名&gt;/</code> を、ターゲットファイルとして使います。このフォルダに <code>deploy-target.txt</code>・<code>remove-target.txt</code> のどちらかがないと、失敗します。両方とも中身がないと、組織に何も反映せずに成功し、Slack には「リリース成功」と通知されます。</li>
+  </ul>
+</div>
+
+<h3 id="wf-propagate">wf-propagate（ブランチ伝播）</h3>
+<p><code>main</code> への PR をマージすると、<code>main</code> を <code>staging</code> と <code>develop</code> へ、PR を通さずに直接マージして、プッシュします。下の段階のブランチを、<code>main</code> に追いつかせるためです（Git のブランチだけで、Salesforce の組織には接続しません）。</p>
+<ul>
+  <li><code>staging</code> / <code>develop</code> がない構成では、そのブランチへの伝播を飛ばします（失敗にはしません）。</li>
+  <li>コンフリクトしたときは、そのマージを取り消し、Slack に通知して、失敗で終わります。コンフリクトしたブランチは、手で解消します（<code>main</code> を、そのブランチにマージします）。</li>
+  <li>伝播のプッシュには、Secret <code>PAT_TOKEN</code> を使います（下の<a href="#secrets">Secrets と Variables</a>）。<code>PAT_TOKEN</code> の期限切れ・権限不足では、失敗します。このときは Slack に通知しないので、Actions の画面で気づく必要があります。</li>
+  <li>続けてマージしても、伝播は 1 つずつ動きます。待っている実行は、より新しい実行に置き換えられ、「取り消し」と表示されますが、新しい実行が最新の <code>main</code> を伝えるので、漏れはありません。</li>
+</ul>
+
+<h3 id="wf-metasync">wf-metasync（メタ同期）</h3>
+<p><code>main</code> の組織（<code>prod</code> の名前で接続した組織。本番とは限りません）から、最新のメタデータを取得し、変更があれば、<code>main</code> ブランチにコミットしてプッシュします（Salesforce の組織の内容を正とします）。処理の中身は <a href="../reference/commands-auto.html#sf-metasync"><code>sf-metasync.sh</code></a> です。</p>
+<ul>
+  <li>プッシュしたときは、<code>sf-metasync.sh</code> 自身が、<code>main</code> を <code>staging</code> / <code>develop</code> へ伝えます（<code>wf-propagate</code> は動きません）。伝えるのに失敗したブランチは、警告を出して飛ばし、ジョブは成功で終わります（ログの警告で気づいて、補います）。</li>
+  <li>このプッシュは PR ではないので、<code>wf-release</code> は動かず、組織へのリリースは行われません。</li>
+  <li>変更がなければ、何もせずに成功します。</li>
+  <li><strong>Slack には、成功・失敗のどちらも通知しません。</strong>失敗に気づくには、Actions の画面か、<a href="maintenance.html#status"><code>sf-init.sh --status</code></a> の「直近の実行」を見ます。</li>
+  <li>定期の実行と手動の実行が重なっても、1 つずつ動きます（待っている実行は、新しい実行に置き換えられます）。手元で実行した <code>sf-metasync.sh</code> と重なってプッシュが拒まれたときは、失敗するので、もう一度実行してください。</li>
+</ul>
+
+<h3 id="secrets">Secrets と Variables</h3>
+<p>ワークフローは、GitHub に登録した Secret（隠しておく値）と Variable（見えてもよい値）を使います。登録は <code>sf-init</code> が行い、あとからの登録し直しは、<a href="secrets.html">秘密の情報の管理</a>のページで説明しています。</p>
+<table>
+  <thead><tr><th>使うもの</th><th>使うワークフロー</th><th>用途</th></tr></thead>
+  <tbody>
+    <tr><td><code>SF_PRIVATE_KEY</code>・<code>SF_CONSUMER_KEY_*</code>・<code>SF_USERNAME_*</code>・<code>SF_INSTANCE_URL_*</code></td><td>validate・release・metasync</td><td>Salesforce の組織に、JWT 認証でログインする</td></tr>
+    <tr><td><code>PAT_TOKEN</code></td><td><strong>metasync・propagate だけ</strong></td><td>リポジトリの取得と、<code>main</code> / <code>staging</code> / <code>develop</code> へのプッシュ（ブランチ保護を迂回し、ワークフローのファイルの変更を含むプッシュもできるようにするため。PAT の持ち主が Admin であることが前提）</td></tr>
+    <tr><td><code>SLACK_BOT_TOKEN</code>・<code>SLACK_CHANNEL_ID</code></td><td>release・sequence・propagate</td><td>Slack への通知（release はリリースのたび、sequence は順序外・環境ブランチのとき、propagate はコンフリクトのとき）</td></tr>
+    <tr><td><code>SF_TOOLS_BRANCH</code>（任意）</td><td>validate・release・metasync</td><td>取ってくる sf-tools のブランチ。ふつうは登録しません（未登録なら <code>main</code>）</td></tr>
+  </tbody>
+</table>
+<p>PR へのコメント（validate・sequence）には、GitHub が自動で用意する Token を使うので、登録は要りません。</p>
 
 <h2 id="sync">雛形に合わせて更新する（<code>sf-sync-wf.sh</code>）</h2>
 <pre><code>sf-sync-wf.sh            # 雛形との差分を表示し、確認のうえ、上書きする
 sf-sync-wf.sh --check    # 差分があるかだけを調べる（何も変更しない）
 sf-sync-wf.sh --remove wf-old.yml   # 雛形から廃止されたワークフローを削除する</code></pre>
 <p><code>sf-init.sh</code> で作成済みの <code>force-*</code> に、あとから、ワークフローの修正（不具合の修正・安全対策など）を反映するコマンドです。sf-tools の雛形と、プロジェクトのワークフローを比べて、違いを表示します。確認のうえで、雛形の内容に上書きします。</p>
+
+<h3 id="when">いつ必要になるか</h3>
+<p>validate・release・metasync は、動くたびに、公開されている sf-tools（ふつうは <code>main</code> ブランチ）を取ってきて、その中の <code>sf-release.sh</code> や <code>sf-metasync.sh</code> を使います。そのため、<strong>リリースや同期の処理の中身の修正は、sf-tools が更新されれば、すべてのプロジェクトに、すぐ届きます</strong>（<code>sf-sync-wf.sh</code> は要りません）。</p>
+<p><code>sf-sync-wf.sh</code> が必要なのは、<strong>ワークフローのファイル自体</strong>（起動の条件・ジョブの構成・使う Secret など）が、雛形で直ったときです。これは、作成済みのプロジェクトには、自動では届きません。届いていないかは、<code>sf-sync-wf.sh --check</code> で調べられます。</p>
+
 <div class="box admin">
   <div class="title">管理者専用</div>
-  <p>CI/CD（リリース・検証）の動作が変わるため、実行の冒頭に、赤い警告ボックスと確認が表示されます（<code>--check</code> を除く）。<code>sf-install.sh</code> などから、自動では実行されません（利用者の意思なく、ワークフローが書き換わるのを防ぐためです）。</p>
+  <p>CI/CD（リリース・検証）の動作が変わるため、実行の冒頭に、赤い警告ボックスと確認（Y/N/q）が表示されます（<code>--check</code> を除く）。<code>sf-install.sh</code> などから、自動では実行されません（利用者の意思なく、ワークフローが書き換わるのを防ぐためです）。</p>
 </div>
 
 <h3 id="steps">更新の手順（おすすめ）</h3>
@@ -84,31 +190,39 @@ sf-sync-wf.sh --remove wf-old.yml   # 雛形から廃止されたワークフロ
   <figcaption>ワークフローの更新も、通常の変更と同じように、PR を通して反映します。</figcaption>
 </figure>
 <ol class="steps">
-  <li><p><code>sf-job.sh</code> で、ジョブ名 <code>system-日付</code>（例: <code>system-20261006</code>）の作業用ブランチを作ります。<code>main</code> から作られ、古くなりません。ワークフローの更新の PR だと、名前で分かります。</p></li>
+  <li><p><code>sf-job.sh</code> で、ジョブ名 <code>system-日付</code>（例: <code>system-20261006</code>）の作業用ブランチを作ります。ブランチは、GitHub の最新の <code>main</code> から作られます。ワークフローの更新の PR だと、名前で分かります。</p></li>
   <li><p>そのフォルダで <code>sf-sync-wf.sh</code> を実行し、差分を確認して Y を答えます。</p></li>
   <li><p><code>git diff .github/workflows/</code> で、内容を確認します。</p></li>
-  <li><p><code>sf-push.sh</code> で、コミットしてプッシュします（ワークフローをプッシュするには、<code>workflow</code> スコープのある権限が必要です）。</p></li>
+  <li><p><code>sf-push.sh</code> で、コミットしてプッシュします（ワークフローのファイルをプッシュするには、<code>workflow</code> の権限（スコープ）のある GitHub の認証が必要です）。</p></li>
   <li><p>PR を出して、マージします。<code>develop</code> / <code>staging</code> がある構成では、通常の変更と同じ順序（<code>develop</code> → <code>staging</code> → <code>main</code>）で、PR を出します（次の PR 先は、<code>sf-next.sh</code> が案内します）。</p></li>
 </ol>
 
 <h3 id="behavior">動作</h3>
 <ul>
-  <li><code>force-*</code> フォルダの中で、環境ブランチ（<code>branches.txt</code> のブランチ。<code>main</code> / <code>staging</code> / <code>develop</code> など）<strong>以外</strong>でしか、実行できません。</li>
-  <li><strong>sf-tools（<code>~/sf-tools</code>）が最新であることが必須です。</strong>実行すると、まず、origin と比べて、遅れていないかを確かめます。遅れていれば、確認のうえで sf-tools を更新して、更新した sf-tools で、もう一度、自動で実行します（古い雛形で、プロジェクトのワークフローを書き換えないためです）。
+  <li><code>force-*</code> フォルダの中で、作業用のブランチの上でしか、実行できません。環境ブランチ（<code>sf-tools/config/branches.txt</code> のブランチ。<code>main</code> / <code>staging</code> / <code>develop</code> など）の上や、ブランチの上にいないとき（detached HEAD）は、中断します。sf-tools に雛形のフォルダがないときも、中断します。</li>
+  <li><strong>sf-tools（<code>~/sf-tools</code>）が最新であることが必須です。</strong>実行すると、まず、sf-tools が GitHub（origin）の同じブランチより遅れていないかを確かめます。遅れていれば、確認（Y/N/q）のうえで sf-tools を更新し、更新した sf-tools で、同じオプションのまま、もう一度、自動で実行します（古い雛形で、プロジェクトのワークフローを書き換えないためです）。
     <ul>
-      <li>origin に接続できない・更新を断った・sf-tools に未コミットの変更や未プッシュのコミットがある場合は、中断します。更新して実行し直したあとも、まだ遅れているときも、中断します。</li>
+      <li>origin に接続できない・更新を断った（N / q）・更新に失敗した・sf-tools に未コミットの変更や未プッシュのコミットがある場合は、中断します。</li>
+      <li>もう一度実行したあとも、まだ遅れているときは、確認と更新は行いますが、3 回目の実行はせずに、中断します。</li>
       <li>最新かどうかを確かめられないとき（sf-tools が Git のリポジトリでない・ブランチの上にいない・origin に同じブランチがない）は、警告を出して、続行します。</li>
       <li><code>--check</code> は、何も変更しない（読み取り専用の）ため、sf-tools を更新せず、遅れていれば中断します。</li>
     </ul>
   </li>
-  <li>改行コード（CRLF / LF）だけの違いは、差分とみなしません。</li>
+  <li>比べるとき、改行コード（CRLF / LF）だけの違いは、差分とみなしません。雛形にあってプロジェクトにないファイルは「新規」、内容が違うファイルは差分（<code>diff -u</code>）を表示します。</li>
+  <li>差分を表示したあと、もう一度「雛形の内容で、上記のワークフローを上書きします。よろしいですか？」（Y/N/q）と聞かれます。N / q なら、何も変更しません。</li>
   <li>自動でコミット・プッシュはしません。</li>
-  <li>雛形にないワークフローは、変更せず、表示するだけです。<code>--remove</code> で、雛形から廃止されたものだけを、二重に確認して削除できます（雛形にあるものは、削除できません）。</li>
+  <li>雛形にないワークフローは、変更せず、名前を表示するだけです。<code>--remove</code> で、雛形から廃止されたものだけを削除できます（雛形にあるものは、削除できません）。</li>
+  <li><code>--remove</code> が受け付けるのは、<code>wf-old.yml</code> のような、フォルダを含まないワークフローのファイル名（英数字で始まり、<code>.yml</code> / <code>.yaml</code> で終わるもの）だけです。<code>.github/workflows/</code> にないファイルを指定したときは、中断します。確認は、冒頭の警告のあとと、削除の直前の、2 回あります。<code>--remove</code> のときは、比較・上書きはしません。</li>
   <li><code>--check</code> は、差分なしで終了コード 0、あれば 1 を返します。複数のリポジトリを見回るときに使えます。ただし、1 は「中断」（sf-tools が遅れている・環境ブランチの上、など）のときにも返るので、「差分あり」とは区別できません。</li>
   <li><code>--check</code> と <code>--remove</code> は、同時に指定できません（エラーで終了し、何も変更しません）。</li>
-  <li><code>--remove</code> が受け付けるのは、<code>wf-old.yml</code> のような、フォルダを含まないワークフローのファイル名（<code>.yml</code> / <code>.yaml</code>）だけです。確認は、冒頭の警告のあとと、削除の直前の、2 回あります。</li>
+  <li><code>-v</code>（<code>--verbose</code>）は、コマンドの応答をコンソールにも表示します。ほかの引数は、「不明なオプションです」で中断します。</li>
   <li><code>GITHUB_ACTIONS=true</code> の環境でも、警告と確認は省略しません。</li>
+  <li>ログは <code>./sf-tools/logs/sf-sync-wf.log</code> です（実行のたびに作り直します）。</li>
 </ul>
+<div class="box warn">
+  <div class="title">ブランチ保護（Ruleset）は、変更しません</div>
+  <p><code>sf-sync-wf.sh</code> が書き換えるのは、<code>.github/workflows/</code> のファイルだけです。雛形で、必須チェックになっているジョブの名前が変わったときは、ブランチ保護の必須チェックも、合わせて直す必要があります。食い違いは、<a href="maintenance.html#status"><code>sf-init.sh --status</code></a> が見つけます（直し方は、<a href="troubleshooting.html#required-checks">トラブルシューティング</a>）。</p>
+</div>
 
 </main>
 <aside id="toc"></aside>

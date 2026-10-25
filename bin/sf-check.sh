@@ -3,33 +3,38 @@
 # sf-check.sh - デプロイターゲットファイル構文チェッカー
 # ==============================================================================
 # ターゲットファイル（deploy-target.txt / remove-target.txt）の内容を検証する。
-# sf-release.sh・sf-push.sh・sf-precommit.sh・sf-prepush.sh から呼ばれる。単体でも実行できる。
+# sf-release.sh・sf-push.sh・sf-precommit.sh・sf-prepush.sh・sf-launcher.sh（メニューの Check）から呼ばれる。単体でも実行できる。
 #
 # 【使い方】
 #   sf-check.sh [deploy-target.txt のパス] [remove-target.txt のパス]
 #     引数 2 つ以上: 1 つ目を deploy-target.txt、2 つ目を remove-target.txt として検証する（3 つ目以降は無視）
 #     引数 1 つ    : deploy-target.txt だけを検証する
-#     引数なし     : sf-tools/release/branch_name.txt（sf-start.sh / sf-install.sh が保存する）に書かれたブランチ名で、
+#     引数なし     : sf-tools/release/branch_name.txt（sf-install.sh が保存する。sf-start.sh が sf-install.sh を実行する）に書かれたブランチ名で、
 #                    sf-tools/release/<ブランチ名>/deploy-target.txt と remove-target.txt を検証する。
 #                    branch_name.txt がないときは、何も検証せず、WARNING を表示して、終了コード 0 で終了する
-#                    （main など、リリース用のフォルダを作らないブランチでは、このファイルがないため、コミットは止めない）
-#                    （ブランチ名は、今の Git のブランチではなく、branch_name.txt の内容を使う）
+#                    （branch_name.txt は Git の管理外の、手元のファイル。一度も作られていないとき（新しいクローンの
+#                    main など）は、このファイルがない。コミットは止めない）
+#                    （ブランチ名は、今の Git のブランチではなく、branch_name.txt の内容を使う。sf-install.sh は、main では
+#                    branch_name.txt を書き込みも削除もしないため、作業用ブランチのあと main に切り替えると、前のブランチの
+#                    値が残り、そのブランチのターゲットファイルを検証する）
 #
 # 【オプション】
-#   -v, --verbose : コマンドの応答（出力）をコンソールにも表示する
+#   -v, --verbose : 受け付けるだけで、表示は変わらない（このスクリプトは run を使わないため、コマンドの応答の表示がない）
 #   -h, --help : このヘルプを表示して終了する（1 つ目の引数のときだけ）
-#   上記以外の - で始まる引数は、「不明なオプションです」で中断する。それ以外の引数は、ファイルのパスとして扱う
+#   上記以外の - で始まる引数（2 つ目以降の -h / --help を含む）は、「不明なオプションです」で中断する。
+#   それ以外の引数は、ファイルのパスとして扱う（-v / --verbose は、どの位置でもよく、引数の数には数えない）
 #
 # 【処理の流れ】
 #   1. 各ターゲットファイルを 1 行ずつ検証する。CR と前後の空白を除き、空行と # で始まる行は読み飛ばす。
 #      セクションは [files] / [members]。最初のマーカーより前の行は [files] として扱う
 #        - [files]  : 次のときはエラー
-#                       ・リポジトリの外を指すパス（/ ・C:/ ・C:\ で始まる絶対パス、.. を含むパス）。存在してもエラー
+#                       ・リポジトリの外を指すパス（/ ・C:/ ・C:\ で始まる絶対パス、要素に .. を含むパス
+#                         （..・../〜・〜/../〜・〜/..））。存在してもエラー
 #                       ・カレントディレクトリからの相対パスで、ファイルまたはディレクトリとして存在しない
 #                       ・ディレクトリは、LWC・Aura のコンポーネントと、オブジェクトのフォルダ（lwc/<名前>・aura/<名前>・
 #                         objects/<名前>）だけ書ける。classes や . など、ほかのディレクトリは、リリース・削除の対象が
 #                         広がりすぎるため、エラー
-#        - [members]: 「種別名:メンバー名」の形でない（: がない・: の前か後ろが空）ときはエラー
+#        - [members]: 「種別名:メンバー名」の形でない（: がない・先頭か末尾が :）ときはエラー
 #   2. 1 でエラーにならなかった行について、種類の可否を確認する
 #      （config/metadata-capability.txt。sf-typecheck.sh が実際の組織で確かめた表）
 #        deploy-target.txt は release 列、remove-target.txt は delete 列を見る
@@ -39,7 +44,7 @@
 #          */lwc/* → LightningComponentBundle / */aura/* → AuraDefinitionBundle /
 #          */servicePresenceStatuses/* → ServicePresenceStatus / */standardValueSets/* → StandardValueSet
 #        組織の権限で、できる場合は、環境変数 SF_CHECK_IGNORE_CAPABILITY=1 で、この確認を省略できる
-#   3. テストクラス不足を確認する（警告のみ。エラーにしない）
+#   3. テストクラス不足を確認する（警告のみ。エラーにしない。1・2 のエラーの有無にかかわらず行う）
 #        対象: deploy-target.txt の [files] の .cls のうち、存在し、@isTest（大文字・小文字を区別しない）を含まないもの
 #        Step A: 同じディレクトリの <クラス名>Test.cls / <クラス名>_Test.cls を探す
 #        Step B: A で見つからなければ、カレントディレクトリ以下の、@isTest（大文字・小文字を区別する）を含む .cls のうち、
@@ -47,12 +52,21 @@
 #        見つかったテストクラスのパスが、deploy-target.txt の [files] の行と、文字列として一致しなければ、警告する
 #        （本番/Sandbox に既にあるテストクラスは、含めなくてよいため）。テストクラスが見つからないときは、何も表示しない
 #
+# 【前提条件】
+#   - force-* ディレクトリ（プロジェクトのルート）で実行すること（lib/common.sh が確認する。違えば終了コード 1）
+#
 # 【補足】
 #   - ターゲットファイルが存在しないときは、そのファイルの検証を飛ばす（エラーにしない）。何も書かれていないときは、警告だけ
-#   - Step B で見つかったパスは ./ で始まる形（例: ./force-app/...）のまま、deploy-target.txt の行と比べる
+#   - 1・2 のエラー・警告は「<ファイル名>:<行番号>: error|warning: <理由>」と、その行の内容を、標準出力に表示する
+#     （<ファイル名> は、渡したパスではなく deploy-target.txt / remove-target.txt）。3 の警告は、行番号なしで、
+#     deploy-target.txt のパスと、見つかったテストクラスのパスを表示する
+#   - 3 で、見つかったテストクラスのパスと deploy-target.txt の行は、どちらも先頭の ./ を除いてから比べる
+#     （例: ./force-app/... → force-app/...。deploy-target.txt に ./ 付きで書いても、書かなくても、同じ結果になる）
+#   - 3 の Step B は、空白を含むパスでも動く（ファイル名を NUL 区切りで受け取る）
 #   - 可否の表のパスは、環境変数 SF_CHECK_CAPABILITY_FILE で変えられる（既定: sf-tools の config/metadata-capability.txt）。
 #     表のファイルがないときは、可否の確認をしない
-#   - 終了コード: 0 = エラーなし（警告のみ・検証を飛ばした場合を含む） / 1 = エラーあり（書式・パス・可否の ng）
+#   - 終了コード: 0 = エラーなし（警告のみ・検証を飛ばした場合を含む） / 1 = エラーあり（書式・パス・可否の ng）・不明なオプション・
+#     force-* ディレクトリの外で実行した
 #   - ログ: ./sf-tools/logs/sf-check.log（実行のたびに追記する）
 # ==============================================================================
 
@@ -74,7 +88,7 @@ if [[ ! -f "$COMMON_LIB" ]]; then
     exit 1
 fi
 if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    awk '/^# ==/{f++; next} f==2{sub(/^# ?/,""); print} f==3{exit}' "${BASH_SOURCE[0]}"
+    awk '/^# ==/{f++; next} f==2{sub(/^# ?/,""); print} f==3{exit}' "${BASH_SOURCE[0]}"  # run 不使用: common.sh の読み込み前（run が未定義）
     exit 0
 fi
 source "$COMMON_LIB"
@@ -105,12 +119,13 @@ else
     # 引数省略時: sf-tools/release/branch_name.txt から自動解決
     BRANCH_NAME_FILE="sf-tools/release/branch_name.txt"
     if [[ ! -f "$BRANCH_NAME_FILE" ]]; then
-        # 以前は INFO で、気づけなかった。検証を飛ばしたことを、警告として目立たせる（コミット・プッシュは止めない: main など、
-        #   リリース用のフォルダを作らないブランチでも、このファイルがないため）
+        # 以前は INFO で、気づけなかった。検証を飛ばしたことを、警告として目立たせる（コミット・プッシュは止めない:
+        #   branch_name.txt は Git の管理外の手元のファイルで、一度も作られていないとき（新しいクローンの main など）はないため。
+        #   なお、sf-install.sh は main では書き込みも削除もしないため、main でも、前のブランチの値が残っていることがある）
         log "WARNING" "ブランチ情報ファイル（${BRANCH_NAME_FILE}）がありません。ターゲットファイルの構文チェックを、スキップしました。"
         exit 0
     fi
-    BRANCH_NAME=$(tr -d '\r\n' < "$BRANCH_NAME_FILE")
+    BRANCH_NAME=$(tr -d '\r\n' < "$BRANCH_NAME_FILE")  # VAR=$(cmd) のため run 不使用
     DEPLOY_LIST="sf-tools/release/${BRANCH_NAME}/deploy-target.txt"
     REMOVE_LIST="sf-tools/release/${BRANCH_NAME}/remove-target.txt"
 fi
@@ -128,11 +143,12 @@ CAPABILITY_FILE="${SF_CHECK_CAPABILITY_FILE:-${SCRIPT_DIR}/../config/metadata-ca
 # 種類の可否を返す。引数: 種類 release|delete → 表の値（ok / ng / limited / unknown）。表にない・表のファイルがないときは、空
 capability_status() {
     [[ -f "$CAPABILITY_FILE" ]] || return 0
-    awk -F'\t' -v t="$1" -v c="$2" '$0 !~ /^#/ && $1 == t { v = (c == "release") ? $2 : $3; gsub(/\r/, "", v); print v; exit }' "$CAPABILITY_FILE"
+    awk -F'\t' -v t="$1" -v c="$2" '$0 !~ /^#/ && $1 == t { v = (c == "release") ? $2 : $3; gsub(/\r/, "", v); print v; exit }' "$CAPABILITY_FILE"  # 値の取得（呼び出し側が VAR=$(cmd) で受け取る）のため run 不使用
 }
+# 種類の備考（4 列目）を返す。引数: 種類。表にない・表のファイルがないときは、空
 capability_note() {
     [[ -f "$CAPABILITY_FILE" ]] || return 0
-    awk -F'\t' -v t="$1" '$0 !~ /^#/ && $1 == t { v = $4; gsub(/\r/, "", v); print v; exit }' "$CAPABILITY_FILE"
+    awk -F'\t' -v t="$1" '$0 !~ /^#/ && $1 == t { v = $4; gsub(/\r/, "", v); print v; exit }' "$CAPABILITY_FILE"  # 値の取得（呼び出し側が VAR=$(cmd) で受け取る）のため run 不使用
 }
 
 # [files] のパスから、種類を推定する（確認済みの NG がありうる主な種類だけ）。分からなければ、空
@@ -215,8 +231,8 @@ print_gcc_message() {
 # 5. チェック関数
 # ------------------------------------------------------------------------------
 
-# ターゲットファイルの構文チェック
-# 引数: $1 = ファイルパス, $2 = ファイル種別ラベル
+# ターゲットファイルの構文チェック（書式・パス）と、種類の可否の確認（check_capability）
+# 引数: $1 = ファイルパス, $2 = ファイル種別ラベル（deploy-target.txt / remove-target.txt。表示と、可否の列の選択に使う）
 # エラー数は _CHECK_ERRORS に加算する（return のオーバーフロー防止）
 check_target_file() {
     local file="$1"
@@ -248,8 +264,8 @@ check_target_file() {
         entry_count=$(( entry_count + 1 ))
 
         if [[ "$section" == "files" ]]; then
-            # [files]: リポジトリの外を指すパス（絶対パス・.. を含むパス）は使えない。そのうえで、ファイルとして存在するか
-            #   （外のファイルを、リリース・削除の対象にしないため。存在するファイルでも、エラーにする）
+            # [files]: リポジトリの外を指すパス（絶対パス・.. を含むパス）は使えない（外のファイルを、リリース・削除の対象に
+            #   しないため。存在するファイルでも、エラーにする）。そのうえで、認めるフォルダ、またはファイルとして存在するか
             if [[ "$clean" == /* || "$clean" == [A-Za-z]:/* || "$clean" == [A-Za-z]:\\* || "$clean" == ".." || "$clean" == ../* || "$clean" == */../* || "$clean" == */.. ]]; then
                 print_gcc_message "error" "$label" "$lineno" "$clean" "リポジトリの外を指すパスは使えません（絶対パス・.. を含むパス）"
                 error_count=$(( error_count + 1 ))
@@ -270,7 +286,7 @@ check_target_file() {
                 check_capability "$label" "$lineno" "$clean" "$(type_of_path "$clean")" || error_count=$(( error_count + 1 ))
             fi
         else
-            # [members]: 「種別名:メンバー名」形式チェック（コロン必須・両側が非空）
+            # [members]: 「種別名:メンバー名」形式チェック（コロン必須・先頭と末尾がコロンでない）
             if [[ "$clean" != *:* || "$clean" == :* || "$clean" == *: ]]; then
                 print_gcc_message "error" "$label" "$lineno" "$clean" "書式エラー（種別名:メンバー名）"
                 error_count=$(( error_count + 1 ))
@@ -319,7 +335,7 @@ check_missing_tests() {
     for filepath in "${deployed_files[@]}"; do
         [[ ! -f "$filepath" ]] && continue
         # @isTest があればテストクラス自身なのでスキップ
-        grep -qi "@isTest" "$filepath" 2>/dev/null && continue
+        grep -qi "@isTest" "$filepath" 2>/dev/null && continue  # 条件チェック
 
         local classname class_dir
         classname=$(basename "$filepath" .cls)  # VAR=$(cmd) のため run 不使用
@@ -335,19 +351,25 @@ check_missing_tests() {
         done
 
         # Step B: 命名規則で見つからなければ @isTest ファイルをコンテンツ検索
+        #   ファイル名は NUL 区切り（--null。GNU・BSD の grep の共通の書き方。-Z は BSD では別の意味）で受け取り、
+        #   while read で 1 つずつ調べる（以前の xargs は、空白を含むパスを分割して、正しく動かなかった）
         if [[ -z "$found_test" ]]; then
-            found_test=$(grep -rl --include="*.cls" "@isTest" . 2>/dev/null \
-                | xargs grep -lw "$classname" 2>/dev/null \
-                | head -1 || true)  # VAR=$(cmd) のため run 不使用
+            local candidate_b
+            while IFS= read -r -d '' candidate_b; do
+                if grep -qw -- "$classname" "$candidate_b" 2>/dev/null; then  # 条件チェックのため run 不使用
+                    found_test="$candidate_b"
+                    break
+                fi
+            done < <(grep -rl --null --include="*.cls" "@isTest" . 2>/dev/null || true)  # プロセス置換で一覧を渡すため run 不使用（見つからなくても続行）
         fi
 
         [[ -z "$found_test" ]] && continue
-        found_test="${found_test#./}"   # Step B（grep -r .）の結果は ./ で始まる。deploy-target.txt の書き方（./ なし）に合わせてから比べる
+        found_test="${found_test#./}"   # Step B（grep -r .）の結果は ./ で始まる（Step A も、クラスのパスが ./ で始まるときは同じ）。先頭の ./ を除いて比べる
 
-        # 見つかったテストクラスが deploy-target.txt に含まれているか確認
+        # 見つかったテストクラスが deploy-target.txt に含まれているか確認（deploy-target.txt の行も、先頭の ./ を除いて比べる）
         local in_deploy=false
         for df in "${deployed_files[@]}"; do
-            [[ "$df" == "$found_test" ]] && in_deploy=true && break
+            [[ "${df#./}" == "$found_test" ]] && in_deploy=true && break
         done
 
         if [[ "$in_deploy" == false ]]; then

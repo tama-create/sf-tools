@@ -26,14 +26,14 @@
     <div class="arrow">→</div>
     <div class="node ok"><span class="who">✅ できあがり</span><strong>開発者に連絡</strong><small>force-XXXX の名前を知らせる</small></div>
     <div class="arrow">→</div>
-    <div class="node dev"><span class="who">💻 開発者</span><strong>使い始める</strong><small>sf-job.sh で作業を始める</small></div>
+    <div class="node dev"><span class="who">💻 開発者</span><strong>使い始める</strong><small>sf-job.sh で始めて、ランチャーで進める</small></div>
   </div>
   <figcaption>左から右へ、順番に進みます。左が終わるまで、右には進めません。</figcaption>
 </figure>
 
 <div class="box admin">
   <div class="title">管理者専用です</div>
-  <p>実行すると、赤い警告ボックスが表示され、続けてよいかを確認されます。Windows では、<strong>Git Bash</strong> で実行してください（PowerShell やコマンドプロンプトでは動きません）。</p>
+  <p>実行すると、赤い警告ボックスが表示され、続けてよいかを確認されます。続けて、GitHub CLI（<code>gh</code>）にログインしているユーザーが、リポジトリのオーナー本人か、オーナーの組織の有効な管理者かを確かめます（違えば、そこで止まります）。Windows では、<strong>Git Bash</strong> で実行してください（PowerShell やコマンドプロンプトでは動きません）。</p>
 </div>
 
 <div class="box">
@@ -41,6 +41,7 @@
   <ul>
     <li>⏱️ 目安は、<strong>30〜60 分</strong>です（ブラウザでの作業と、Salesforce の反映待ちを含みます）。</li>
     <li><strong>途中で止まっても大丈夫です。</strong>もう一度、同じように実行すれば、続きから再開できます（<a href="#resume">途中で止まったとき</a>）。</li>
+    <li><strong>セットアップ中は、Ctrl+C が効きません。</strong>やめたいときは、入力を求められたところで <code>q</code> を押します。どうしても止めたいときは、ターミナルを閉じます（画面にも、そう表示されます）。どちらの場合も、あとで、続きから再開できます。</li>
   </ul>
 </div>
 
@@ -50,8 +51,8 @@
   <thead><tr><th>用意するもの</th><th>内容</th></tr></thead>
   <tbody>
     <tr><td><strong>ツール</strong></td><td>Git（Git Bash）・GitHub CLI・Node.js / npm・Salesforce CLI（<strong>npm 版</strong>）・VS Code・Slack。入れ方は、<a href="../guide/install.html">前提条件とインストール</a>にあります。VS Code には、Salesforce Extension Pack (Expanded) も入れておきます</td></tr>
-    <tr><td><strong>GitHub</strong></td><td>リポジトリを作れる権限のあるアカウントで、GitHub CLI にログインしておきます（<code>gh auth login</code>）。ブラウザでも、GitHub の管理者のアカウントにログインできる状態にしておきます</td></tr>
-    <tr><td><strong>Salesforce</strong></td><td>つなげる組織（本番・Sandbox・Developer Edition など）と、その組織の管理者権限を持つユーザー</td></tr>
+    <tr><td><strong>GitHub</strong></td><td>リポジトリのオーナー（個人のアカウント、または GitHub の組織）を決めておきます。GitHub CLI には、<strong>オーナー本人か、その組織の管理者</strong>のアカウントでログインしておきます（<code>gh auth login</code>。ログインしていなければ、ステップ 1 で、ログインの画面が出ます）。ブラウザでも、同じアカウントでログインしておきます（Token の作成で使います）</td></tr>
+    <tr><td><strong>Salesforce</strong></td><td>つなげる組織（本番・Sandbox・Developer Edition など）と、その組織のシステム管理者のアカウント。組織の数は、選ぶブランチの構成で決まります（1〜3 組織。<a href="#in-branch">ブランチの構成</a>）</td></tr>
     <tr><td><strong>Slack</strong></td><td>通知先にする、<strong>このプロジェクトを使う全員が参加している共有チャンネル</strong>。<code>sf-init</code> は、チャンネルを作りません。Slack で、先に作っておいてください（既存のチャンネルでも構いません）</td></tr>
   </tbody>
 </table>
@@ -60,9 +61,9 @@
 <p>リポジトリの名前は、<strong><code>force-XXXX</code></strong> の形です（<code>force-</code> は固定で、<code>XXXX</code> は管理者が決めます）。<strong>作業フォルダ</strong>（置く場所は自由です。おすすめは、<code>~/sf</code> のような短い名前）で、実行します。</p>
 <pre><code>cd {作業フォルダ}
 sf-init.sh                                          # 対話: オーナーを選び、XXXX を入力
-sf-init.sh --owner my-org --project acme            # 引数で指定（対話なし）→ my-org/force-acme</code></pre>
-<p>対話では、次のように聞かれます。</p>
-<pre><code>  GitHub のオーナー: my-org（gh のログインから取得。複数あれば、番号で選ぶ）
+sf-init.sh --owner my-org --project acme            # オーナーと XXXX を引数で指定 → my-org/force-acme</code></pre>
+<p>引数で指定すると、オーナーと XXXX の質問が出ません（開始画面や、各ステップの質問は、同じように出ます）。対話では、次のように聞かれます。</p>
+<pre><code>  GitHub のオーナー: my-org（gh のログインから取得）
 
   リポジトリ名は「force-XXXX」の形です。
   「force-」は自動で付きます。XXXX の部分だけを入力してください。
@@ -71,17 +72,25 @@ sf-init.sh --owner my-org --project acme            # 引数で指定（対話�
   my-org に、すでにあるプロジェクト（XXXX）:
      acme / beta
 
-  XXXX（force- の後ろ）を入力してください: yamada</code></pre>
+  XXXX（force- の後ろ）を入力してください: yamada
+
+  XXXX = yamada
+  → 作るリポジトリ         : my-org/force-yamada
+  → 管理者用の作業フォルダ : /c/Users/you/sf/admin/force-yamada
+  これでよいですか？ [Y/N/q]:</code></pre>
 <ul>
-  <li>入力するのは、<strong>XXXX の部分だけ</strong>です（<code>force-yamada</code> と書いても、<code>yamada</code> として扱います）。すでにある名前を入れると、警告が出て、聞き直されます。</li>
-  <li><strong>XXXX に使える文字:</strong> 英数字と、区切り（<code>-</code> <code>_</code> <code>.</code>）です。区切りは、英数字の間に 1 つだけ置けます（<code>a--b</code> や、末尾の <code>-</code> は使えません）。50 文字までです。</li>
+  <li><strong>オーナーの候補</strong>は、<code>gh</code> にログインしているアカウントから作ります（あなたが管理者の GitHub 組織と、あなた自身のアカウント）。候補が 1 つなら自動で決まり、複数なら番号で選びます。候補がなければ、入力します。</li>
+  <li>入力するのは、<strong>XXXX の部分だけ</strong>です（<code>force-yamada</code> と書いても、<code>yamada</code> として扱います）。すでにある名前を入れると、警告が出て、聞き直されます（大文字と小文字は、区別しません）。ただし、この作業フォルダに、そのプロジェクトの途中の状態や、管理者用のクローンが残っているときは、受け付けて、<a href="#resume">続きから・完了済み</a>の画面に進みます。</li>
+  <li>「これでよいですか？」で <code>N</code> を押すと、XXXX を入力し直せます。</li>
+  <li><strong>XXXX に使える文字:</strong> 英数字と、区切り（<code>-</code> <code>_</code> <code>.</code>）です。区切りは、英数字の間に 1 つだけ置けます（<code>a--b</code> や、先頭・末尾の <code>-</code> は使えません）。50 文字までで、末尾を <code>.git</code> にはできません。Salesforce に自動で作るアプリの名前に、この XXXX が入るための決まりです（合わない名前は、入力した時点で断られます）。</li>
+  <li><code>--project</code> で指定したときは、すでにある名前かどうかを、ここでは確かめません。<code>--owner</code> は、英数字とハイフンだけ（39 文字まで）です。</li>
   <li>同じ作業フォルダでは、同じ XXXX で、別のオーナーのプロジェクトは作れません。</li>
   <li>管理者用のフォルダ（<code>admin</code>）や、<code>force-*</code> の中では、実行できません。作業フォルダで実行してください。</li>
   <li>できあがる管理者用のフォルダは、<code>{作業フォルダ}/admin/force-XXXX</code> です。<code>admin</code> は、いつもこの名前になります。複数のプロジェクトを、同じ <code>admin</code> に作っても構いません。</li>
 </ul>
 
 <h2 id="flow">画面の流れ（全 9 ステップ）</h2>
-<p>実行すると、はじめに、<strong>作るもの・かかる時間の目安・先に用意するもの・全 9 ステップの一覧</strong>が表示されます。用意ができたら、Enter を押します（<code>q</code> で中断できます）。各ステップの先頭には、「ステップ n / 9」と、これまでに終わったステップ、そのステップの目的が表示されます。終わると、<strong>できたことと、次にやること</strong>（<code>sf-job.sh</code> の実行など）、そして<strong>管理者用フォルダ</strong>の場所が表示されます。</p>
+<p>実行すると、はじめに、<strong>作るもの・かかる時間の目安・管理者向けの赤い警告・先に用意するもの・全 9 ステップの一覧</strong>が表示されます。用意ができたら、Enter を押します（<code>N</code> か <code>q</code> で中断できます。ほかのキーでは進みません）。各ステップの先頭には、「ステップ n / 9」と、これまでに終わったステップ、そのステップの目的が表示されます。</p>
 <figure class="diagram">
   <div class="phases">
     <div class="phase p1"><p class="ph-title">① 準備</p><ol>
@@ -102,20 +111,28 @@ sf-init.sh --owner my-org --project acme            # 引数で指定（対話�
 <table>
   <thead><tr><th>ステップ</th><th>何をするか</th><th>あなたの操作</th></tr></thead>
   <tbody>
-    <tr><td>1. 準備の確認</td><td>必要なツールと、GitHub へのログインを確かめます</td><td>なし</td></tr>
-    <tr><td>2. プロジェクトの確認</td><td>作るリポジトリの名前と場所を確かめます。使う sf-tools の版（<a href="#in-env">配布版か開発版か</a>）を選びます</td><td>確認と選択</td></tr>
-    <tr><td>3. リポジトリの作成</td><td>GitHub にリポジトリを作って、パソコンにコピーし、設定ファイルとワークフローを用意します</td><td>なし</td></tr>
-    <tr><td>4. ブランチの構成</td><td>変更を、段階的に確かめて、本番に出す流れ（<a href="#in-branch">ブランチの構成</a>）を選んで、作ります</td><td>選択</td></tr>
-    <tr><td>5. GitHub の Token</td><td>自動で動くワークフローが、リポジトリを更新するための Token（PAT）を登録します</td><td>ブラウザで発行して、貼り付ける</td></tr>
-    <tr><td>6. Slack の通知</td><td>ワークフローの結果を、Slack に通知するための設定をします</td><td>ブラウザと Slack での操作</td></tr>
-    <tr><td>7. リポジトリの設定</td><td>ここまでの内容を、リポジトリに反映して（最初のコミットとプッシュ）、ブランチ保護のルールを設定します（<code>main</code> と <code>staging</code> に、必須のチェック <code>対象ファイル確認</code>・<code>デプロイ検証</code>・<code>順序チェック</code> を付けます。無料プランの非公開リポジトリなどでは、ルールを設定できないことがあります。その場合は警告が出て、先へ進みます）</td><td>なし</td></tr>
+    <tr><td>1. 準備の確認</td><td>必要なツール（<code>git</code>・<code>gh</code>・<code>node</code>・<code>npm</code>・<code>sf</code>・<code>code</code>）があるかと、GitHub CLI へのログインを確かめます。1 つでもなければ、止まります。GitHub CLI にログインしていなければ、ログインの画面を出します</td><td>なし（ログインしていなければ、ログイン）</td></tr>
+    <tr><td>2. プロジェクトの確認</td><td>作るリポジトリの名前と、管理者用のクローンの場所を表示して、確認します（Y/N/q。<code>N</code> か <code>q</code> で中断します）。使う sf-tools の版（<a href="#in-env">配布版か開発版か</a>）を選びます</td><td>確認と選択</td></tr>
+    <tr><td>3. リポジトリの作成</td><td>GitHub に、<strong>非公開（Private）</strong>のリポジトリを作って、管理者用フォルダにクローンします。sf-tools の雛形（設定ファイル・ワークフロー）をコピーして、Git のフック（コミット・プッシュの前に動くチェック）を入れます</td><td>なし</td></tr>
+    <tr><td>4. ブランチの構成</td><td>変更を、段階的に確かめて、最後の段階（<code>main</code>）に出す流れ（<a href="#in-branch">ブランチの構成</a>）を選びます。GitHub のブランチは、ステップ 7 で作ります</td><td>選択</td></tr>
+    <tr><td>5. GitHub の Token</td><td>自動で動くワークフローが、リポジトリを更新するための Token（PAT）を確かめて、Secret <code>PAT_TOKEN</code> に登録します</td><td>ブラウザで発行して、貼り付ける</td></tr>
+    <tr><td>6. Slack の通知</td><td>ワークフローの結果を、Slack に通知するための設定をします（Secret <code>SLACK_BOT_TOKEN</code>・Variable <code>SLACK_CHANNEL_ID</code>）</td><td>ブラウザと Slack での操作</td></tr>
+    <tr><td>7. リポジトリの設定</td><td>ここまでの内容を、最初のコミットとして、GitHub に送ります（<code>main</code> と、選んだ段階のブランチを作ります）。続けて、リポジトリの設定と、ブランチ保護（<a href="#in-rules">保護のルール</a>）を設定します</td><td>なし</td></tr>
     <tr><td>8. Salesforce の接続</td><td>Salesforce の各組織と、GitHub をつなげます。続けて、最初のメタデータの同期も行います</td><td>ブラウザで、組織にログインする</td></tr>
-    <tr><td>9. 動作の確認（任意）</td><td>作ったものが、実際に動くことを確かめます（<a href="verify.html">動作の確認</a>）</td><td>Enter で確認する／<code>s</code> であとにする</td></tr>
+    <tr><td>9. 動作の確認（任意）</td><td>作ったものが、実際に動くことを確かめます（<a href="verify.html">動作の確認</a>）。目安の時間（段階の数 × 6 + 3 分）が表示されます</td><td>Enter で確認する／<code>s</code> であとにする</td></tr>
   </tbody>
 </table>
+<p>終わると、完了の画面に、次の 5 つが表示されます。</p>
+<ol>
+  <li>開発を始めるときに実行するコマンド（作業フォルダで <code>sf-job.sh</code>）</li>
+  <li>リポジトリの URL</li>
+  <li><strong>管理者用フォルダ</strong>の場所と、ブランチ（<a href="#admin-folder">admin フォルダと admin ブランチ</a>）</li>
+  <li>動作の確認の結果（あとにしたときは、あとで確かめる方法）</li>
+  <li>最初のメタデータの同期の結果（<a href="#metasync">最初のメタデータの同期</a>）</li>
+</ol>
 <div class="box">
   <div class="title">sf-tools が古いときは、自動でやり直します</div>
-  <p><code>~/sf-tools</code> が古いときは、確認のうえで更新します。そのあと、<strong>更新した sf-tools で、自動的に、はじめから実行し直します</strong>。もう一度実行する必要は、ありません。</p>
+  <p>開始画面で、<code>~/sf-tools</code> が GitHub の最新より遅れていないかを確かめます。古いときは、「sf-tools を更新しますか？」（Y/N/q）と聞かれます。<code>Y</code> で更新すると、<strong>更新した sf-tools で、自動的に、はじめから（警告と確認から）実行し直します</strong>。もう一度実行する必要は、ありません。<code>N</code> なら、更新せずに続けます。<code>~/sf-tools</code> に、まだ送っていない変更があるときは、更新せずに続けます。</p>
 </div>
 
 <h2 id="inputs">入力する項目</h2>
@@ -124,20 +141,31 @@ sf-init.sh --owner my-org --project acme            # 引数で指定（対話�
 <p>ステップ 2 で、2 つの選択肢が出ます。これは、Salesforce の組織の話ではなく、「<strong>どの版の sf-tools を、このプロジェクトの自動処理に使うか</strong>」の選択です。（用語集の「段階」「環境」（develop / staging / main）とは、別のものです。）</p>
 <ul>
   <li><strong>1. 配布版（main）（通常は、こちら）:</strong> GitHub Actions が、sf-tools の <code>main</code>（リリース済みの版）を使います。</li>
-  <li><strong>2. 開発版（development）:</strong> <strong>sf-tools の開発者だけ</strong>が使います。リリース前の、未検証のコード（<code>development</code>）が使われます。選ぶと、確認（Y/N/q）が出ます。</li>
+  <li><strong>2. 開発版（development）:</strong> <strong>sf-tools の開発者だけ</strong>が使います。リリース前の、未検証のコード（<code>development</code>）が使われます。選ぶと、警告と確認（Y/N/q）が出ます（<code>N</code> で選び直し）。開発版を選んだときだけ、GitHub の Variable <code>SF_TOOLS_BRANCH</code>（<code>development</code>）を登録します。</li>
 </ul>
+<p>選んだ版と、手元の <code>~/sf-tools</code> のブランチが違うときは、警告が出て、続けるかを聞かれます（Y/N/q。<code>N</code> か <code>q</code> で中断）。</p>
 
 <h3 id="in-branch">ブランチの構成（3 / 2 / 1 階層）</h3>
-<p>ステップ 4 で、段階の数を選びます。標準は、3 階層（<code>develop</code> → <code>staging</code> → <code>main</code>）です。小さなプロジェクトは、<code>main</code> だけの 1 階層でも使えます。あとから、段階を足すこともできます（<a href="maintenance.html#add-tier">段階を足す</a>）。段階の考え方は、<a href="../design/cicd.html#branches">CI/CD の仕組み</a>にあります。</p>
+<p>ステップ 4 で、段階の数を、番号で選びます（<code>q</code> で中断）。段階ごとに、ブランチと Salesforce の組織が 1 つずつ対応するので、選んだ数だけ、ステップ 8 で組織に接続します。</p>
+<table>
+  <thead><tr><th>番号</th><th>ブランチ</th><th>向いている場合</th></tr></thead>
+  <tbody>
+    <tr><td>1</td><td><code>main</code> / <code>staging</code> / <code>develop</code></td><td>標準の構成です。3 段階で確かめてから出します</td></tr>
+    <tr><td>2</td><td><code>main</code> / <code>staging</code></td><td>2 段階です。開発用の組織を使わない場合</td></tr>
+    <tr><td>3</td><td><code>main</code></td><td>小さなプロジェクトや、1 人での開発</td></tr>
+  </tbody>
+</table>
+<p>あとから、段階を足すこともできます（<a href="maintenance.html#add-tier">段階を足す</a>）。減らす操作は、自動化していません。段階の考え方は、<a href="../design/cicd.html#branches">CI/CD の仕組み</a>にあります。</p>
 
 <h3 id="in-pat">GitHub の Token（PAT）</h3>
-<p>PAT（Personal Access Token）は、GitHub の「合鍵」のようなものです。自動で動くワークフローが、あなたの代わりに、リポジトリを更新するために使います。</p>
+<p>PAT（Personal Access Token）は、GitHub の「合鍵」のようなものです。自動で動くワークフローが、あなたの代わりに、リポジトリを更新するために使います（メタデータの同期で <code>main</code> に送るときなど。<code>main</code> は保護されていますが、リポジトリの管理者の Token なら、保護のルールを越えて送れます）。この Token は、作る <code>force-XXXX</code> のためのもので、sf-tools のリポジトリとは関係ありません。</p>
 <ul>
   <li><strong>どのアカウントで作るか:</strong> force-* のリポジトリの<strong>オーナー</strong>のアカウントです（組織のリポジトリなら、その組織の<strong>管理者</strong>）。作るアカウントは、実行の最初に表示されます。ブラウザで、別のアカウントにログインしているときは、切り替えてください。sf-tools の開発者のアカウントは、関係ありません。</li>
   <li><strong>作り方:</strong> ブラウザで、Token の作成ページが、自動で開きます（Note と Scopes は、入力済みです）。ページの一番下の「Generate token」を押して、表示された Token をコピーし、ターミナルに貼り付けます。「発行済みの Token があるか」は聞きません（Token の値は、作成した直後の 1 回しか表示されないためです）。保存してある Token があれば、それを貼り付けてもかまいません。</li>
   <li><strong>設定の内容:</strong> Note は <code>sf-metasync-{プロジェクト名}</code>（自動で表示）、Expiration は <code>No expiration</code>（期限なし）、Scopes は <code>repo</code>（全選択）と <code>workflow</code> です。</li>
   <li><strong>貼り付けるとき:</strong> 文字の数だけ <code>*</code> が並びます（Token の中身は、画面に出ません）。Git Bash では、<strong>右クリック</strong>（または Shift+Insert）で貼り付けます。Enter を押すと、「N 文字を受け取りました（先頭: ghp_…）」と表示されるので、コピーできたかを確かめられます。</li>
-  <li><strong>確認:</strong> スコープ（<code>repo</code>・<code>workflow</code>）と、リポジトリの管理者であることを、GitHub に問い合わせて確かめます。違っていれば、理由が表示されます。3 回まで、貼り直せます。（Fine-grained の Token は、スコープを確かめられないので、使えません。）</li>
+  <li><strong>確認:</strong> Token が有効か、Classic の Token か、スコープ（<code>repo</code>・<code>workflow</code>）があるか、リポジトリの管理者の Token か、を GitHub に問い合わせて確かめます。違っていれば、理由と直し方が表示され、貼り直せます。貼り付けは、合計 3 回までです（3 回とも使えなければ、止まります。もう一度実行すると、このステップから再開できます）。Fine-grained の Token は、スコープを確かめられないので、使えません。</li>
+  <li><strong>やめたいとき:</strong> <code>q</code> だけを入力して Enter を押すと、中断します。</li>
 </ul>
 
 <h3 id="in-slack">Slack の通知</h3>
@@ -151,62 +179,112 @@ sf-init.sh --owner my-org --project acme            # 引数で指定（対話�
       <li>左のメニューの「OAuth &amp; Permissions」をクリックします。</li>
       <li>「ボットトークンのスコープ」→「OAuth スコープを追加する」で、<code>chat:write</code> を追加します。</li>
       <li>左のメニューの「Install App」→「Install to ワークスペース名」をクリックして、「許可する」をクリックします。</li>
-      <li>表示されたページの「Bot User OAuth Token」（<code>xoxb-</code> で始まる文字列）をコピーして、ターミナルに貼り付けます。貼り付けた文字は、<code>*</code> で表示されます（Token は画面に出ません）。<code>xoxb-</code> で始まらないときは、入力し直しになります。</li>
+      <li>表示されたページの「Bot User OAuth Token」（<code>xoxb-</code> で始まる文字列）をコピーします。</li>
+      <li>ターミナルに戻って Enter を押し、続けて、コピーした Token を貼り付けて Enter を押します。貼り付けた文字は、<code>*</code> で表示されます（Token は画面に出ません）。<code>xoxb-</code> で始まらないときは、入力し直しになります。Token は、Secret <code>SLACK_BOT_TOKEN</code> に登録されます。</li>
     </ol>
   </li>
   <li>
-    <p><strong>チャンネル ID を入れる</strong>（<code>C</code> で始まる文字列）</p>
-    <p>Slack で、通知先のチャンネルを開き、チャンネル名をクリックすると、いちばん下に「チャンネル ID」が出ます。DM（<code>D…</code>）やユーザー（<code>U…</code>）の ID は、本人にしか通知が届かないので、受け付けられません（入力し直しになります）。</p>
+    <p><strong>チャンネル ID を入れる</strong>（<code>C</code> で始まる文字列。<code>G</code> で始まるものも受け付けます）</p>
+    <p>Slack で、通知先のチャンネルを開き、チャンネル名をクリックすると、いちばん下に「チャンネル ID」が出ます。DM（<code>D…</code>）やユーザー（<code>U…</code>）の ID は、本人にしか通知が届かないので、受け付けられません（入力し直しになります）。チャンネル ID は、Variable <code>SLACK_CHANNEL_ID</code> に登録されます。</p>
   </li>
   <li>
     <p><strong>Bot をチャンネルに招待する</strong>（Slack で、手動で行います）</p>
-    <p>通知先のチャンネルで、次のコマンドを実行します。Bot がチャンネルにいないと、通知が届きません。</p>
+    <p>通知先のチャンネルで、次のコマンドを実行してから、ターミナルで Enter を押します。Bot がチャンネルにいないと、通知が届きません。<code>sf-init</code> は、招待されたかどうかを確かめないので、忘れずに行ってください。</p>
     <pre><code>/invite @sf-notify-&lt;プロジェクト名&gt;</code></pre>
   </li>
 </ol>
+<p>どの入力でも、<code>q</code> で中断できます。</p>
+
+<h3 id="in-rules">最初のコミットと、保護のルール（自動）</h3>
+<p>ステップ 7 は、自動で進みます。入力はありません。</p>
+<ul>
+  <li><strong>最初のコミット:</strong> ここまでに用意したファイルを、コミットして、<code>main</code> に送ります。ステップ 4 で選んだ段階のブランチ（<code>staging</code>・<code>develop</code>）も、<code>main</code> から作って送ります。送るときは、ステップ 5 の Token を使い、送ったあとで、手元に保存していた Token の値を消します。</li>
+  <li><strong>リポジトリの設定:</strong> 既定のブランチを <code>main</code> にし、PR のマージの方法（マージコミット・スカッシュ・リベース）をすべて許可し、マージしたあとのブランチの自動削除を、しない設定にします。</li>
+  <li><strong>ブランチ保護（Ruleset）:</strong> <code>main</code> と <code>staging</code> に、ルール（<code>protect-main</code>・<code>protect-staging</code>）を設定します。ブランチの構成に関係なく、両方を作ります。中身は、次のとおりです。
+    <ul>
+      <li>ブランチの削除と、強制プッシュ（履歴の書き換え）を禁止します。</li>
+      <li>PR をマージする前に、3 つのチェックが通ることを必須にします。名前は、ワークフローのジョブの名前の <code>対象ファイル確認</code>・<code>デプロイ検証</code>・<code>順序チェック</code> です（ワークフローの名前は含めません。含めると、チェックが永久に満たされず、PR をマージできなくなります。以前の sf-init で作ったプロジェクトは、<a href="troubleshooting.html#required-checks">トラブルシューティング</a>を見てください）。</li>
+      <li>リポジトリの管理者（Admin）は、このルールを越えられます（メタデータの同期などで、ワークフローが、管理者の Token で <code>main</code> に送るためです）。</li>
+    </ul>
+  </li>
+  <li>無料プランの非公開リポジトリなどでは、ブランチ保護を設定できないことがあります。その場合は、警告が出て、先へ進みます（セットアップは止まりません）。ブランチ保護がないと、チェックに失敗した PR も、マージできてしまいます。<a href="maintenance.html#status"><code>--status</code></a> で、設定されているかを確かめられます。</li>
+</ul>
 
 <h3 id="in-sf">Salesforce の接続（JWT 認証）</h3>
 <p>JWT 認証は、パスワードの入力なしで、秘密鍵を使って Salesforce にログインする方法です。GitHub 上のワークフローが、自動でログインするために使います。</p>
-<p>既定は、<strong>外部クライアントアプリケーション</strong>（Salesforce の推奨）です。アプリの作成は、<code>sf-init</code> が自動で行います（アプリの種類は、聞かれません）。</p>
+<p>既定は、<strong>外部クライアントアプリ</strong>（Salesforce の側に作る、「このツールからのログインを許可する」という登録。Salesforce の推奨）です。アプリの作成は、<code>sf-init</code> が自動で行います（アプリの種類は、聞かれません）。</p>
+<p>はじめに、JWT 認証に使う<strong>秘密鍵と証明書</strong>を、この PC の <code>~/.sf-jwt/force-XXXX/</code>（<code>server.key</code>・<code>server.crt</code>）に作ります。前回の実行で作ったものが残っているときは、使い続けるかを聞かれます（Y/N/q）。</p>
 <ul>
-  <li>段階（main / staging / develop）ごとに、<strong>ログイン先</strong>を選んで、<strong>ブラウザで Salesforce にログイン</strong>します（接続するユーザーは、管理者権限を持つユーザーです）。あなたの操作は、これだけです。</li>
-  <li>ブラウザでのログインは、約 2 分で時間切れになります。ブラウザが開いたら、すぐにログインしてください。</li>
-  <li>アプリの作成・証明書の登録・ポリシーとプロファイルの設定・コンシューマー鍵の取得は、自動です。設定が反映されるまで時間がかかるので、接続のテストは、成功するまで、くり返します。</li>
-  <li>登録されるのは、<code>SF_PRIVATE_KEY</code>（秘密鍵。すべての組織で共通）と、組織ごとの <code>SF_CONSUMER_KEY_*</code>・<code>SF_USERNAME_*</code>・<code>SF_INSTANCE_URL_*</code> です。組織の情報を読み取れたときは、組織の ID・名前・種類・確認日時（<code>SF_ORG_*</code>）も保存します（<a href="secrets.html">認証情報</a>）。</li>
-  <li><code>--legacy-connected-app</code> を付けると、従来の接続アプリケーション（廃止の予定）になります。Salesforce の画面での設定と、コンシューマーキー・ユーザー名の手入力が、必要です。</li>
+  <li><code>Y</code>: そのまま使います（ふつうは、こちら）。</li>
+  <li><code>N</code>: 消して、新しく作り直します。秘密鍵が変わるので、接続が済んでいる段階も、すべて接続し直します（ブラウザでのログインも、やり直します）。</li>
 </ul>
-<p>ログイン先の選び方と、段階と組織の種類の関係は、<a href="maintenance.html#org">構成の変更と診断</a>で説明しています。</p>
+<p>続けて、段階ごとに（<code>main</code> → <code>staging</code> → <code>develop</code> の順。選んだ構成にある段階だけ）、次のように進みます。</p>
+<ol class="steps">
+  <li><p><strong>ログイン先を選びます。</strong>組織の種類ではなく、ログインする URL で選びます。</p>
+    <pre><code>      [1] https://login.salesforce.com   本番・Developer Edition・Trial など
+      [2] https://test.salesforce.com    Sandbox   ← 安全なおすすめ（本番に影響しません）
+      [3] 組織の URL を入力する   My Domain（例: https://会社名.my.salesforce.com）</code></pre>
+    <p>Enter だけなら 2 番です。<code>main</code> 以外の段階では、1 番の説明が「Developer Edition・Trial など（※ Salesforce の本番は、main のみ）」になります。</p></li>
+  <li><p><strong>ブラウザで、Salesforce にログインします。</strong>接続するユーザーは、システム管理者のユーザーです。ブラウザでのログインは、<strong>約 2 分で時間切れ</strong>になります。ブラウザが開いたら、すぐにログインしてください（時間切れ・ブラウザを閉じたときは、止まります。もう一度実行すると、このステップから再開できます）。<strong>あなたの操作は、ここまでです。</strong></p></li>
+  <li><p><strong>組織の種類を確かめます（自動）。</strong>組織から、ID・名前・種類（本番 / Sandbox / Developer Edition / Trial）を読み取ります。<strong>本番の組織は、<code>main</code> にしかつなげません。</strong>種類を判定できない組織も、<code>main</code> 以外にはつなげません。<code>staging</code> や <code>develop</code> に、本番の組織でログインすると、アプリを作る前に止まります。</p></li>
+  <li><p><strong>アプリを作って、接続を確かめます（自動）。</strong>外部クライアントアプリ（名前は <code>SF_TOOLS_</code> で始まります）の作成・証明書の登録・ポリシーとプロファイルの設定・コンシューマー鍵の取得を行います。組織に設定が反映されるまで時間がかかるので、JWT での接続のテストを、30 秒おきに、最大 20 回（約 10 分）くり返します。それでも成功しないときは、「接続テストをスキップして、登録だけ行いますか？」と聞かれます（<code>Y</code> で登録して先へ、<code>N</code> / <code>q</code> で中断。アプリは、組織に作られたまま残ります）。</p></li>
+  <li><p><strong>GitHub に登録します（自動）。</strong></p></li>
+</ol>
+<table>
+  <thead><tr><th>登録先</th><th>名前</th><th>内容</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Secret</strong>（隠す）</td><td><code>SF_PRIVATE_KEY</code></td><td>秘密鍵（すべての段階で共通。毎回、上書きします）</td></tr>
+    <tr><td><strong>Secret</strong>（隠す）</td><td><code>SF_CONSUMER_KEY_PROD</code> / <code>_STG</code> / <code>_DEV</code></td><td>段階ごとの、アプリのコンシューマー鍵</td></tr>
+    <tr><td><strong>Variable</strong>（見えてよい）</td><td><code>SF_USERNAME_*</code> / <code>SF_INSTANCE_URL_*</code></td><td>段階ごとの、接続ユーザー名と、組織の URL</td></tr>
+    <tr><td><strong>Variable</strong>（見えてよい）</td><td><code>SF_ORG_ID_*</code> / <code>SF_ORG_NAME_*</code> / <code>SF_ORG_KIND_*</code> / <code>SF_ORG_CHECKED_*</code></td><td>組織の ID・名前・種類・確認した日時（<a href="maintenance.html#status"><code>--status</code></a> の表示用。組織の情報を読み取れたときだけ）</td></tr>
+  </tbody>
+</table>
+<p>名前の末尾の <code>PROD</code> / <code>STG</code> / <code>DEV</code> は、段階の <code>main</code> / <code>staging</code> / <code>develop</code> を表します。くわしくは、<a href="secrets.html">認証情報</a>にあります。段階と組織の種類の関係は、<a href="maintenance.html#org">構成の変更と診断</a>でも説明しています。</p>
+<div class="box warn">
+  <div class="title">従来の接続アプリケーション（<code>--legacy-connected-app</code>）</div>
+  <ul>
+    <li><code>--legacy-connected-app</code> を付けると、従来の接続アプリケーション（今後、廃止の予定）を使います。Salesforce の画面での設定（画面に手順が出ます）と、段階ごとの、コンシューマーキー・接続ユーザー名の手入力が必要です。証明書（<code>server.crt</code>）も、自分で各組織にアップロードします。</li>
+    <li>一度決まったアプリの種類は、続きから再開しても変わりません。外部クライアントアプリで始めたプロジェクトに、あとから <code>--legacy-connected-app</code> を付けると、止まります。</li>
+    <li>作った接続アプリケーションを、Salesforce の画面で「外部クライアントアプリへの移行」や「削除」をしないでください。接続ができなくなります（<code>client_identifier_invalid</code> のエラー）。問題が起きたときは、同じアプリを直さずに、別の名前で作り直します。</li>
+    <li>Developer Edition の組織では、事前承認の反映が遅れる、または失敗することがあります。本番・Sandbox での利用をおすすめします。</li>
+  </ul>
+</div>
 
 <h3 id="metasync">最初のメタデータの同期（自動）</h3>
-<p>Salesforce の接続のあとで、<code>wf-metasync</code>（組織の最新の状態を、Git に取り込む処理）を実行し、終わるのを待ちます。続けて、同期した内容を、管理者用のクローン（<code>admin/force-XXXX</code>）に取り込みます。数分かかります（組織の大きさで、長くなります）。</p>
+<p>Salesforce の接続のあとで、<code>wf-metasync</code>（組織の最新の状態を、Git に取り込むワークフロー）を GitHub で実行し、終わるのを待ちます。待っている間は、30 秒おきに経過が表示されます。続けて、同期した内容を、管理者用のクローン（<code>admin/force-XXXX</code>）に取り込みます。数分かかります（組織の大きさで、長くなります）。</p>
 <ul>
   <li><strong>セットアップが終わると、Salesforce のメタデータが、すべて入った状態になります。</strong>GitHub の <code>main</code> にも、手元のクローンにも入ります（最初のコミットの <code>force-app</code> は、空のひな型です）。</li>
-  <li>同期に失敗しても、セットアップ自体は、成功のままです。完了の画面に、すぐ同期するための方法が出ます（定期の同期は、平日の 3 時間おきに動きます）。</li>
+  <li>待つのは、最長 20 分です。時間切れのときは、実行を取り消します（あとの同期と重ならないようにするためです）。</li>
+  <li>同期に失敗しても（時間切れを含みます）、セットアップ自体は、成功のままです。完了の画面に、すぐ同期するためのコマンド（<code>gh workflow run wf-metasync.yml -R オーナー/force-XXXX</code>。終わったら、管理者用フォルダで <code>git pull origin main</code>）が出ます。何もしなくても、定期の同期（平日の 3 時間おき）で入ります。</li>
 </ul>
 
 <h2 id="resume">途中で止まったとき（続きから）</h2>
 <div class="box ok">
   <div class="title">どこまで進んだかを、覚えておく必要はありません</div>
-  <p>止まったら、<strong>同じフォルダで、もう一度 <code>sf-init.sh</code> を実行</strong>してください。前回の状態が残っていれば、続きから再開する選択肢が出ます。</p>
+  <p>止まったら、<strong>同じ作業フォルダで、もう一度 <code>sf-init.sh</code> を実行</strong>してください（同じオーナー・XXXX を選びます）。前回の状態が残っていれば、開始画面の確認のあとに、続きから再開する選択肢が出ます。</p>
 </div>
+<p>止まったときは、画面に「うまくいきませんでした」と、原因と、やり直しの方法が表示されます。ステップ 3 以降で止まったときは、止まったところ（内部の処理の単位の最初）から再開できます。ステップ 1・2 で止まったときは、保存された状態がないので、最初から始まります。</p>
 <pre><code>前回のセットアップは、「ブランチの構成」まで完了しています（2026-10-11 14:32）。（owner/force-xxx）
 
     [1] 「GitHub の Token」から、続きをやる   ← おすすめ
     [2] 最初からやり直す（作成済みのリポジトリ・admin フォルダは、そのまま使います）
     [q] 中断</code></pre>
 <ul>
-  <li><strong>[1] 続きをやる:</strong> 保存してある入力内容（sf-tools の版・ブランチの構成など）を使って、失敗した所から再開します（最初の環境チェックは、毎回行います）。</li>
-  <li><strong>[2] 最初からやり直す:</strong> 保存した状態を消して、最初から始めます。作成済みのリポジトリと <code>admin</code> フォルダは、削除せず、そのまま使います。</li>
-  <li><strong>Salesforce の接続は、段階ごとに、終わったことを記録します。</strong>途中（たとえば staging）で失敗しても、「続きをやる」では、終わった段階（main など）は飛ばして、残りの段階だけを実行します。ブラウザでのログインを、やり直さなくて済みます（登録した Secret が、いまもあるときだけ、飛ばします）。</li>
-  <li>前回が最後まで終わっているときは、「セットアップは、すでに完了しています」と表示されます。次の 4 つから選べます。
+  <li><strong>[1] 続きをやる:</strong> 保存してある入力内容（sf-tools の版・ブランチの構成など）を使って、失敗した所から再開します（最初の準備の確認は、毎回行います）。表示される名前（「GitHub の Token」など）は、内部の処理の単位の名前で、画面のステップの名前と少し違うことがあります（「設定ファイルの作成」「初回のコミット」など）。</li>
+  <li><strong>[2] 最初からやり直す:</strong> 保存した状態を消して、最初から始めます。作成済みのリポジトリと <code>admin</code> フォルダは、削除せず、そのまま使います。設定は、上書きします（管理者用のクローンで、sf-tools の雛形と同じ名前のファイルを変えていたときは、雛形の内容に戻ります）。</li>
+  <li><strong>[q] 中断:</strong> 何もせずに終わります。</li>
+  <li><strong>Salesforce の接続は、段階ごとに、終わったことを記録します。</strong>途中（たとえば staging）で失敗しても、「続きをやる」では、終わった段階（main など）は飛ばして、残りの段階だけを実行します。ブラウザでのログインを、やり直さなくて済みます（登録した Secret が、いまもあるときだけ、飛ばします。秘密鍵を作り直したときは、すべての段階をやり直します）。</li>
+  <li>GitHub に <code>main</code> を送ったと記録されているのに、GitHub に <code>main</code> が見つからないときは、続けずに止まります（記録と実際が食い違っているためです）。</li>
+  <li>前回が最後まで終わっているときは、「セットアップが、すでに完了しています」と表示されます。次の 4 つから選べます。
     <ul>
-      <li>[1] いまの Salesforce の接続を見る（何も変更しません）</li>
-      <li>[2] 動作を確認する（<code>--verify</code>）</li>
-      <li>[3] 最初からやり直す</li>
+      <li>[1] いまの Salesforce の接続を見る（何も変更しません。<a href="maintenance.html#status"><code>--status</code></a> と同じ表示です）</li>
+      <li>[2] 動作を確認する（<a href="verify.html"><code>--verify</code></a>。Hello World を各段階にリリースして、削除します。約 20 分。確認が出ます）</li>
+      <li>[3] 最初からやり直す（作成済みのリポジトリは、そのまま使い、設定を上書きします）</li>
       <li>[q] 終了</li>
     </ul>
     別のリポジトリの状態が残っているときは、選択肢は出ず、最初から始まります。
   </li>
+  <li>同じ作業フォルダ・同じ XXXX の <code>sf-init.sh</code> を、同時に 2 つ動かすことはできません（あとから実行したほうは、「すでに実行中です」で止まります）。</li>
   <li>完了済みのプロジェクトでは、<code>--resume N</code> と <code>--only N</code> は使えません（接続の処理などを、確認なしで、やり直さないためです）。</li>
   <li>進み具合は、<code>admin/.sf-init-XXXX.progress</code>（入力内容は <code>.sf-init-XXXX.env</code>）に記録されます。<strong>この 2 つのファイルは、最後まで終わると削除されます</strong>（途中で止まったときだけ、残ります）。終わっているかどうかは、クローンの <code>git config sf-tools.setup-complete</code> で判断します。</li>
   <li>リポジトリそのものを作り直したいときは、GitHub 上のリポジトリと <code>admin</code> フォルダを、手動で削除してから、実行します。</li>
@@ -228,25 +306,27 @@ sf-init.sh --owner my-org --project acme            # 引数で指定（対話�
   <li><p><strong>GitHub で、開発者に、リポジトリの権限を付けます。</strong>リポジトリ（<code>オーナー/force-XXXX</code>）の Settings → Collaborators and teams で、開発者を追加します。ブランチを作って、変更を送って、PR を出すので、<strong>書き込みの権限（Write）</strong>が必要です。リポジトリが非公開のときは、権限がないと、リポジトリが見つからないと表示されます。</p></li>
   <li><p><strong>Slack の共有チャンネルに、開発者が参加していることを確かめます。</strong>リリースや検証の結果は、そのチャンネルに届きます（<a href="#in-slack">Slack の通知</a>）。</p></li>
   <li><p><strong>開発者に、自分用の Salesforce 組織があることを確かめます。</strong>開発者は、自分専用の組織（Sandbox・Developer Edition など）に接続して作業します。共有の環境（本番・staging・develop）には、GitHub を通して反映されるので、開発者が、共有の環境の認証情報を持つ必要は、ありません。</p></li>
-  <li><p><strong>開発者に、次の 3 つを知らせます。</strong>オーナーとリポジトリの名前（<code>force-XXXX</code>）、<a href="../guide/install.html">前提条件とインストール</a>のページ、「ツールを入れたら、<code>sf-job.sh</code> から始める」こと。</p></li>
+  <li><p><strong>開発者に、次の 3 つを知らせます。</strong>オーナーとリポジトリの名前（<code>force-XXXX</code>）、<a href="../guide/install.html">前提条件とインストール</a>のページ、「ツールを入れたら、自分の作業フォルダで <code>sf-job.sh</code> から始める」こと。作業を始めると、<strong>ランチャー</strong>（<code>sf-launcher.sh</code>。毎日のコマンドを、メニューの番号で選んで実行する画面）が自動で開きます。開発者には、ランチャーで進めることを勧めてください（<a href="../guide/daily.html#launcher">ランチャーの使い方</a>）。</p></li>
 </ol>
 
 <h3 id="check">動作を確認する</h3>
-<p>セットアップが正しく終わったかは、次の 2 つで確かめられます。</p>
+<p>設定がそろっているかは、管理者用フォルダで <a href="maintenance.html#status"><code>sf-init.sh --status</code></a> を実行すると、何も変更せずに確かめられます。実際に動くかは、次の 2 つで確かめられます。</p>
 <ol class="steps">
   <li>
-    <p><strong>メタデータの同期:</strong> GitHub → Actions → 「[metasync] メタ同期」→「Run workflow」で、手動で実行します。正常に終われば、組織のメタデータが <code>main</code> に同期されます。</p>
+    <p><strong>メタデータの同期:</strong> セットアップの最後に、1 回、自動で実行済みです（<a href="#metasync">最初のメタデータの同期</a>）。あとで確かめたいときは、GitHub → Actions → 「[metasync] メタ同期」→「Run workflow」で、手動で実行します。正常に終われば、組織のメタデータが <code>main</code> に同期されます。</p>
   </li>
   <li>
-    <p><strong>PR のワークフロー:</strong> 作業フォルダで <code>sf-job.sh</code> を実行すると、<code>sf-start.sh</code> が自動で動きます。<code>sf-install.sh</code> が、<code>sf-tools/release/&lt;ブランチ名&gt;/</code> の下に、空のターゲットファイルを作ります。これがそのまま差分になるので、ほかの変更は要りません。続けて、次を実行します。</p>
-    <pre><code>sf-push.sh      # 自動で作られたファイルを、コミットして送る
-sf-next.sh      # 次の PR 先を確認 → ブラウザで PR を作成 → マージ</code></pre>
-    <p>ブランチが 3 階層なら、<code>develop</code> → <code>staging</code> → <code>main</code> の順に、くり返します。PR を作ると、次の処理が、自動で動きます。</p>
+    <p><strong>PR のワークフロー:</strong> 作業フォルダで <code>sf-job.sh</code> を実行すると、<code>sf-start.sh</code> が自動で動きます。<code>sf-install.sh</code> が、<code>sf-tools/release/&lt;ブランチ名&gt;/</code> の下に、空のターゲットファイル（説明のコメントだけのもの）を作ります。これがそのまま差分になるので、ほかの変更は要りません。続けて、ランチャーで、次の番号を押します（コマンドで打つなら、かっこの中）。</p>
+    <pre><code>[2] Push   （sf-push.sh）  # 自動で作られたファイルを、コミットして送る
+[3] Next   （sf-next.sh）  # 次の PR 先を確認 → ブラウザで PR の作成画面を開く → PR を作って、マージ</code></pre>
+    <p>ブランチが 3 階層なら、<code>develop</code> → <code>staging</code> → <code>main</code> の順に、<code>[3] Next</code> をくり返します。PR を作ると、次の処理が、自動で動きます。</p>
     <ul>
       <li>[validate] デプロイ前の検証 — すべての PR で動く</li>
       <li>[sequence] マージ順序の確認 — <code>main</code> と <code>staging</code> への PR で動く</li>
-      <li>[release] デプロイ → Slack に通知 — PR をマージしたあとで動く</li>
+      <li>[release] デプロイ → Slack に通知 — <code>main</code>・<code>staging</code>・<code>develop</code> への PR をマージしたあとで動く</li>
+      <li>[propagate] ブランチの伝播 — <code>main</code> への PR をマージしたあとで、<code>main</code> の内容を <code>staging</code>・<code>develop</code> に反映する</li>
     </ul>
+    <p>ターゲットファイルが空なので、検証とリリースの本体は「デプロイ対象なし」で飛ばされます（組織には、何も反映しません）。ここで確かめられるのは、ワークフローが動くことと、PR をマージできることです。組織へのリリースと削除（と、その通知）まで確かめるときは、次の <code>--verify</code> を使います。</p>
   </li>
 </ol>
 <p>もっとしっかり確かめたいときは、<strong><a href="verify.html">動作の確認（<code>--verify</code>）</a></strong>を使います。実際のリポジトリと組織で、リリースと削除まで、通しで確かめます。セットアップの最後（ステップ 9）に、「動作を確認しますか？」と聞かれます（任意です）。</p>
@@ -255,14 +335,15 @@ sf-next.sh      # 次の PR 先を確認 → ブラウザで PR を作成 → �
 <table>
   <thead><tr><th>オプション</th><th>内容</th></tr></thead>
   <tbody>
-    <tr><td><code>--owner</code> / <code>--project</code></td><td>オーナーとプロジェクト名（XXXX）を指定します（対話なし）</td></tr>
-    <tr><td><code>--resume N</code></td><td>内部の <strong>Phase</strong> N（<a href="#phase-map">ステップとの対応</a>）から、質問なしで再開します（通常は、指定する必要はありません）。N は 1〜10 の整数です（それ以外は、実行する前にエラーになります）。<strong>完了済みのプロジェクトでは、使えません。</strong>動作の確認（最後のステップ）は、聞きません</td></tr>
-    <tr><td><code>--only N</code></td><td>内部の <strong>Phase</strong> N（<a href="#phase-map">ステップとの対応</a>）だけを実行します（デバッグ用）。N は 1〜10 の整数です。進み具合は更新しません。動作の確認は、聞きません。<strong>完了済みのプロジェクトでは、使えません。</strong></td></tr>
+    <tr><td><code>--owner</code> / <code>--project</code></td><td>オーナーとプロジェクト名（XXXX）を指定します（その 2 つの質問を省きます。正しくない値なら、止まります）</td></tr>
+    <tr><td><code>--resume N</code></td><td>内部の <strong>Phase</strong> N（<a href="#phase-map">ステップとの対応</a>）から、Phase 10 までを実行します。「続きをやる」の質問や、完了済みの画面は出ません（通常は、指定する必要はありません。止まったときは、オプションなしで実行して「続きをやる」を選びます）。N は 1〜10 の整数です（それ以外は、実行する前にエラーになります。N = 1 は、指定なしと同じです）。開始画面の確認は「続行しますか？」（Y/N/q）になります。<strong>完了済みのプロジェクトでは、使えません。</strong>動作の確認（最後のステップ）は、聞きません</td></tr>
+    <tr><td><code>--only N</code></td><td>内部の <strong>Phase</strong> N（<a href="#phase-map">ステップとの対応</a>）だけを実行します（デバッグ用）。N は 1〜10 の整数です。進み具合は更新しません。Phase 3 以降は、途中の状態（<code>admin/.sf-init-XXXX.env</code>）が必要です。メタデータの同期・動作の確認は、行いません。<strong>完了済みのプロジェクトでは、使えません。</strong></td></tr>
     <tr><td><code>--add-tier staging|develop</code></td><td>既存のプロジェクトに、段階を足します（<a href="maintenance.html#add-tier">構成の変更と診断</a>）</td></tr>
     <tr><td><code>--reconnect &lt;段階&gt;</code></td><td>1 つの段階の、接続先の Salesforce 組織を、付け替えます（<a href="maintenance.html#reconnect">構成の変更と診断</a>）</td></tr>
     <tr><td><code>--status</code></td><td>セットアップの診断をします。<span class="badge safe">🔍 読み取りのみ</span>（<a href="maintenance.html#status">構成の変更と診断</a>）</td></tr>
     <tr><td><code>--verify</code></td><td>動作の確認をします（<a href="verify.html">動作の確認</a>）</td></tr>
-    <tr><td><code>--legacy-connected-app</code></td><td>従来の接続アプリケーション（廃止の予定。手動の入力）を使います。既定は、外部クライアントアプリ（自動で作成）</td></tr>
+    <tr><td><code>--legacy-connected-app</code></td><td>従来の接続アプリケーション（廃止の予定。手動の入力）を使います。既定は、外部クライアントアプリ（自動で作成）。<a href="#in-sf">Salesforce の接続</a></td></tr>
+    <tr><td><code>-h</code> / <code>--help</code></td><td>使い方を表示して、終わります</td></tr>
   </tbody>
 </table>
 
@@ -272,6 +353,7 @@ sf-next.sh      # 次の PR 先を確認 → ブラウザで PR を作成 → �
   <thead><tr><th>Phase</th><th>1</th><th>2</th><th>3</th><th>4</th><th>5</th><th>6</th><th>7</th><th>8</th><th>9</th><th>10</th></tr></thead>
   <tbody>
     <tr><td>画面のステップ</td><td>1</td><td>2</td><td>3</td><td>3</td><td>4</td><td>5</td><td>6</td><td>7</td><td>7</td><td>8</td></tr>
+    <tr><td>内部の名前（「続きをやる」の表示）</td><td>準備の確認</td><td>プロジェクトの確認</td><td>リポジトリの作成</td><td>設定ファイルの作成</td><td>ブランチの構成</td><td>GitHub の Token</td><td>Slack の通知</td><td>初回のコミット</td><td>リポジトリの設定</td><td>Salesforce の接続</td></tr>
   </tbody>
 </table>
 <p>ステップ 9（動作の確認）は、Phase ではなく、<code>sf-init.sh --verify</code> を呼ぶ最後のステップです。</p>

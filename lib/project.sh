@@ -3,18 +3,21 @@
 # project.sh - プロジェクト（force-*・GitHub・組織・ブランチ）に関する関数
 # ==============================================================================
 # lib/common.sh から source される（呼び出し側は、common.sh だけを source すればよい。単独では、source しない）。
-# common.sh の変数・関数（log / run / die / RET_* / 色の定義 など）を、使う。
+# common.sh の変数・関数（log / run / die / json_get / RET_* / BRANCH_LIST_FILE / SF_RESERVED_ORG_ALIASES など）と、
+# input.sh の read_or_quit / ask_yn、platform.sh の set_var を、使う。
 #
 # 【提供する関数】
 #   get_target_org [ALIAS]    ... 接続先組織エイリアスを解決
 #   check_force_dir           ... force-* ディレクトリ内か確認
-#   resolve_init_identity     ... sf-init 用: オーナーとプロジェクト名（XXXX）を、引数・対話で決める
+#   resolve_init_identity     ... sf-init 用: オーナーとプロジェクト名（XXXX）を、環境変数 SF_INIT_OWNER / SF_INIT_PROJECT・対話で決める
 #   resolve_job_identity O P  ... sf-job 用: 同上（引数・カレントの下のクローンの git remote・対話）
+#   prompt_project_identity MODE ... オーナーと XXXX を、対話で決める（MODE: init / job。上の 2 つが使う）
 #   parse_github_remote URL   ... GitHub の URL から「owner repo」を取り出す（HTTPS / SSH）
 #   normalize_project_name X  ... 入力から XXXX（force- の後ろ）を取り出す（force- が付いていれば除く。不正なら戻り値 1）
 #   discover_clones DIR       ... DIR/*/force-*/ のクローンの git remote から「owner repo」を取り出す
 #   gh_owner_candidates MODE  ... gh のログインから、オーナーの候補を出す（MODE: admin / member）
-#   check_gh_owner OWNER      ... gh 認証ユーザーが期待するオーナーと一致するか確認（組織の有効な admin も許可）
+#   gh_existing_projects OWNER ... そのオーナーにある force-* リポジトリの XXXX を出す
+#   check_gh_owner OWNER      ... gh 認証ユーザーが期待するオーナーと一致するか確認（大文字と小文字は区別しない。組織の有効な admin も許可）
 #   get_branch_list           ... branches.txt からブランチ一覧を取得
 #   is_reserved_org_alias     ... 共有環境の組織エイリアス（sf-tools の予約名）か判定
 #   is_protected_branch       ... 指定ブランチが branches.txt の保護対象か判定
@@ -28,7 +31,9 @@
 #   git_origin_redacted DIR   ... origin の URL を、認証情報を伏せて出す（エラーの文言・ログ用）
 #   ensure_admin_branch DIR   ... 管理者用のクローンを、admin ブランチ（ローカル）にする（main の上で、作業しないため）
 #   push_admin_branch DIR     ... admin ブランチを、GitHub にも作る（git push -u origin admin。強制 push はしない）
-#   merge_package_xml OUT IN... ... package.xml 形式のマニフェストを 1 つに統合する（種類ごとに、メンバーを重複なく並べる）
+#   merge_package_xml OUT IN... ... package.xml 形式のマニフェストを 1 つに統合する（種類ごとに、メンバーを重複なく並べる。
+#                               入力が読めない・書けないときは、OUT を削除して戻り値 1）
+#   （内部用: _pick_from_list。変数: _GH_OWNER_RE = GitHub のオーナー名の形式）
 # ==============================================================================
 
 # merge_package_xml - package.xml 形式のマニフェストを、1 つに統合する
@@ -37,17 +42,37 @@
 # 【理由】   `sf project generate manifest` は、--source-dir と --metadata を同時に渡すと、両方の「共通部分」だけを返す
 #           （重なりがなければ、<types> が 1 つもない空のマニフェストになる。しかも、成功として終わる）。
 #           そのため、sf-release.sh は、[files] と [members] を、別々に生成して、ここで統合する。
-# 【動作】   各入力の <types> を読み、種類 → メンバーの順に、重複を除いて並べる。<version> は、最初に見つかったもの。
-#           awk と sort だけで動く（GNU / BSD 共通。追加の依存なし）
-# 【戻り値】 0 = 出力した（メンバーが 1 つもなくても、空のマニフェストを出力する。判定は、呼び出し側）
+# 【動作】   各入力の <types> を読み、種類 → メンバーの順に、重複を除いて並べる（LC_ALL=C の sort -u の順 = バイト順。
+#           ロケールに依存すると、macOS の sort -u が、別の日本語の名前を同じとみなして、消すことがあるため）。
+#           <version> は、最初に見つかったもの（どの入力にもなければ 64.0）。
+#           【前提】各 <types> の中で、<members> が <name> より前にあること（sf が生成する形）。<name> を読んだ時点で、
+#           それまでの <members> を、その種類のものとする。<name> が <members> より前にある XML は、正しく統合できない
+#           （その <members> は、次の <types> の種類に入り、最後の <types> のものは、捨てられる）
+#           grep・awk・sort だけで動く（GNU / BSD 共通。追加の依存なし）
+# 【戻り値】 0 = 出力した（メンバーが 1 つもなくても、空のマニフェストを出力する。判定は、呼び出し側）/
+#           1 = 入力がない・入力が読めない（通常のファイルでない・読み取りの権限がない）・OUT に書けない。
+#               ERROR を表示し、OUT を削除する（前回の古い OUT を、統合の結果として、使わせないため）
 # ------------------------------------------------------------------------------
 merge_package_xml() {
     local out="$1" f ver
     shift
+    if [[ $# -eq 0 ]]; then
+        log "ERROR" "merge_package_xml: 入力のマニフェストが、指定されていません。"
+        rm -f "$out"  # run 不使用: 失敗の後始末（古い出力を残さない）
+        return $RET_NG
+    fi
+    for f in "$@"; do
+        if [[ ! -f "$f" || ! -r "$f" ]]; then
+            log "ERROR" "merge_package_xml: 入力のマニフェストを読めません: ${f}"
+            rm -f "$out"  # run 不使用: 失敗の後始末（古い出力を残さない）
+            return $RET_NG
+        fi
+    done
     ver=$(grep -h -o '<version>[^<]*</version>' "$@" 2>/dev/null | head -n 1)  # VAR=$(cmd) のため run 不使用
     [[ -n "$ver" ]] || ver="<version>64.0</version>"
     {
         printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' '<Package xmlns="http://soap.sforce.com/2006/04/metadata">'
+        # run 不使用: awk・sort は、パイプの部品（出力を、そのまま次の処理と OUT に渡す。ログには残さない）
         for f in "$@"; do
             awk '
                 /<members>/ { s = $0; sub(/^[[:space:]]*<members>/, "", s); sub(/<\/members>[[:space:]]*$/, "", s); m[n++] = s }
@@ -55,7 +80,7 @@ merge_package_xml() {
                               for (i = 0; i < n; i++) printf "%s\t%s\n", t, m[i]
                               n = 0 }
             ' "$f"
-        done | sort -u | awk -F'\t' '
+        done | LC_ALL=C sort -u | awk -F'\t' '
             {
                 if ($1 != cur) {
                     if (cur != "") { printf "        <name>%s</name>\n    </types>\n", cur }
@@ -68,7 +93,12 @@ merge_package_xml() {
         '
         printf '    %s\n' "$ver"
         printf '%s\n' '</Package>'
-    } > "$out"
+    } > "$out" || {
+        log "ERROR" "merge_package_xml: 統合したマニフェストを書けません: ${out}"
+        rm -f "$out"  # run 不使用: 失敗の後始末（書きかけの出力を残さない）
+        return $RET_NG
+    }
+    return $RET_OK
 }
 
 # get_target_org - 接続先組織エイリアスを解決して echo する
@@ -79,7 +109,7 @@ merge_package_xml() {
 # 【解決の優先順位】
 #   1. 引数 ALIAS（明示指定）
 #   2. 環境変数 SF_TARGET_ORG（GitHub Actions の secrets 等）
-#   3. ローカル接続情報（sf org display の出力）
+#   3. ローカル接続情報（sf org display --json の result.alias。既定の組織にエイリアスがなければ、特定できない扱い）
 #
 # 【戻り値】
 #   RET_OK (0) : エイリアスを echo して正常終了
@@ -101,7 +131,7 @@ get_target_org() {
     if [[ -z "$target" ]]; then
         local current_alias disp_json="" cause i tries="${SF_TOOLS_ORG_DISPLAY_TRIES:-3}" wait_sec="${SF_TOOLS_ORG_DISPLAY_WAIT:-2}"
         for (( i = 1; i <= tries; i++ )); do
-            disp_json=$(run sf org display --json || echo "")  # VAR=$(cmd) のため run 不使用（出力の取得）
+            disp_json=$(run sf org display --json || echo "")  # run の出力（標準エラーを含む）を受け取る（失敗したときは、run が返すエラーの出力が入る。json_get で alias が取れず、やり直しに進む）
             current_alias=$(json_get "$disp_json" result.alias)  # VAR=$(cmd) のため run 不使用（値の抽出のみ）
             if [[ -n "$current_alias" && "$current_alias" != "null" ]]; then target="$current_alias"; break; fi
             (( i < tries )) && sleep "$wait_sec"  # run 不使用: 待機（一時的な失敗への備え）
@@ -126,7 +156,7 @@ get_target_org() {
 #   RET_NG (1) : それ以外
 # ------------------------------------------------------------------------------
 check_force_dir() {
-    [[ "$(basename "$PWD")" =~ ^force- ]] && return $RET_OK
+    [[ "$(basename "$PWD")" =~ ^force- ]] && return $RET_OK  # 条件チェックのため run 不使用
     return $RET_NG
 }
 
@@ -138,16 +168,21 @@ check_force_dir() {
 #
 # 【検証内容】
 #   - gh api user でログイン中のユーザー名を取得
-#   - 期待するオーナーと一致すれば通過
+#   - 期待するオーナーと一致すれば通過（文字列の完全一致。大文字と小文字は区別しない。GitHub のユーザー名・組織名は、
+#     大文字と小文字を区別しないため。Bash 3.2 には ${x,,} がないため、tr で小文字にして比べる）
 #   - 一致しない場合、オーナーが組織で認証ユーザーがその組織の有効な管理者（admin かつ active）なら通過
 #   - 上記以外は die（組織 API が失敗した場合も通過させない）
 #   - gh コマンドが使えない場合（ユーザー名が空）はチェックをスキップ（ネットワーク障害等への配慮）
+#   戻り値: RET_OK = 通過（組織の管理者として通過したときは、INFO を表示）。通過しなければ die
 # ------------------------------------------------------------------------------
 check_gh_owner() {
     local expected_owner="$1"
-    local gh_user org_status
+    local gh_user org_status gh_user_lc owner_lc
     gh_user=$(gh api user --jq '.login' 2>/dev/null || true)  # VAR=$(cmd) のため run 不使用
-    [[ -z "$gh_user" || "$gh_user" == "$expected_owner" ]] && return $RET_OK
+    [[ -z "$gh_user" ]] && return $RET_OK
+    gh_user_lc=$(printf '%s' "$gh_user" | tr 'A-Z' 'a-z')          # VAR=$(cmd) のため run 不使用
+    owner_lc=$(printf '%s' "$expected_owner" | tr 'A-Z' 'a-z')     # VAR=$(cmd) のため run 不使用
+    [[ "$gh_user_lc" == "$owner_lc" ]] && return $RET_OK
     # 不一致: オーナーが組織なら、認証ユーザーがその組織の有効な管理者かを確認する
     org_status=$(gh api "user/memberships/orgs/${expected_owner}" --jq '.role + " " + .state' 2>/dev/null || true)  # VAR=$(cmd) のため run 不使用
     if [[ "$org_status" == "admin active" ]]; then
@@ -168,8 +203,9 @@ check_gh_owner() {
 # 結果は、グローバル変数 GITHUB_OWNER / COMPANY_NAME（XXXX）にセットする。
 
 # parse_github_remote - GitHub の URL から「owner repo」（空白区切り）を取り出す
-#   対応: https://github.com/o/r(.git) / https://user@github.com/o/r / git@github.com:o/r(.git) / ssh://git@github.com/o/r
-#   戻り値: 0 = 取り出した / 1 = GitHub の URL ではない・形が違う
+#   対応: https://github.com/o/r(.git) / https://user@github.com/o/r / http://github.com/o/r / git@github.com:o/r(.git) /
+#         ssh://git@github.com/o/r（末尾の / と .git は除く）
+#   戻り値: 0 = 取り出した（標準出力に「owner repo」）/ 1 = GitHub の URL ではない・形が違う（owner/repo の 2 階層でない）
 parse_github_remote() {
     local u="$1" rest
     case "$u" in
@@ -191,10 +227,10 @@ parse_github_remote() {
 # normalize_project_name - 入力から XXXX（リポジトリ名 force-XXXX の、force- の後ろ）を取り出す
 #   前後の空白を除き、先頭の「force-」（大文字小文字を問わない）が付いていれば除く（force-force-XXXX を防ぐ）。
 #   使える文字: 英数字・ハイフン・アンダースコア・ピリオド。区切り（- _ .）は、英数字の間に、1 つだけ（連続・先頭・末尾は不可）。
-#   50 文字まで・末尾の .git は不可。
+#   50 文字まで（force- を除いたあとの長さ）・末尾の .git は不可。
 #   理由: Phase 10 の外部クライアントアプリの名前（SF_TOOLS_ + force-XXXX の区切りを _ にしたもの + _glbloauth）が、
 #   Salesforce の API 名の制約（連続した _ ・末尾の _ は不可。80 文字まで）を満たすため。守らないと、セットアップの終盤で失敗する
-#   戻り値: 0 = 出力した / 1 = 不正
+#   戻り値: 0 = 出力した（標準出力に XXXX）/ 1 = 不正（何も出さない）
 normalize_project_name() {
     local n="$1"
     n="${n#"${n%%[![:space:]]*}"}"
@@ -208,21 +244,23 @@ normalize_project_name() {
 
 # discover_clones - DIR/*/force-*/ のクローン（作業単位のフォルダの中の force-xxx）の git remote から「owner repo」を出す
 #   フォルダ名ではなく、クローンに記録された住所（git clone のときに、Git が書き込む）から読む。
-#   force- で始まる GitHub のリポジトリだけを対象にする（無関係なリポジトリは、無視する）。重複は除く
+#   force- で始まる GitHub のリポジトリだけを対象にする（無関係なリポジトリは、無視する）。1 行に 1 つ、LC_ALL=C の sort -u で
+#   重複を除く（大文字と小文字だけが違うものは、別の行のまま。呼び出し側が、区別せずに扱う）
 discover_clones() {
     local d u parsed
     for d in "$1"/*/force-*; do
         [[ -e "$d/.git" ]] || continue
         u=$(git -C "$d" remote get-url origin 2>/dev/null) || continue  # VAR=$(cmd) のため run 不使用
-        parsed=$(parse_github_remote "$u") || continue
+        parsed=$(parse_github_remote "$u") || continue                  # VAR=$(cmd) のため run 不使用
         case "${parsed##* }" in force-?*) echo "$parsed" ;; esac
-    done | sort -u
+    done | LC_ALL=C sort -u  # run 不使用: 出力を、そのまま一覧として返す（パイプの部品）
 }
 
 # gh_owner_candidates - gh のログインから、オーナーの候補を 1 行ずつ出す（組織 → 自分のアカウント。重複なし）
-#   引数: admin = 自分が管理者の組織（sf-init 用） / member = 自分が所属する組織（sf-job 用）
-#   gh が使えない・未認証なら、何も出さない（呼び出し側が、入力に切り替える）
+#   引数: admin = 自分が管理者（admin かつ active）の組織（sf-init 用） / member = 自分が所属する組織（sf-job 用。省略時）
+#   gh が使えない・未認証なら、何も出さない（呼び出し側が、入力に切り替える）。戻り値は、常に 0
 gh_owner_candidates() {
+    # run 不使用: 出力を、そのまま候補の一覧にする（gh の失敗は、何も出さない扱い）
     {
         if [[ "${1:-member}" == "admin" ]]; then
             gh api user/memberships/orgs --jq '.[] | select(.role=="admin" and .state=="active") | .organization.login' 2>/dev/null
@@ -235,14 +273,18 @@ gh_owner_candidates() {
 }
 
 # gh_existing_projects - そのオーナーにある force-* リポジトリの、XXXX（force- を除いた名前）を 1 行ずつ出す
+#   引数: オーナー。gh repo list の最大 200 件から探す。gh が使えなければ、何も出さない。戻り値は、常に 0
+#   run 不使用: 出力を、そのまま一覧にする（gh の失敗は、何も出さない扱い）
 gh_existing_projects() {
     gh repo list "$1" --limit 200 --json name --jq '.[].name | select(startswith("force-")) | sub("^force-";"")' 2>/dev/null
     return 0
 }
 
-# _pick_from_list VAR 見出し 項目... - 番号で選ばせて、選んだ項目を VAR に入れる（q で中断）
+# _pick_from_list VAR 見出し 項目... - 番号で選ばせて、選んだ項目を VAR に入れる（q で中断 = die）
+#   一覧は標準エラーに出す。範囲外・数字以外（9 桁を超える数字を含む）は、WARNING を出して再入力。
+#   番号は 10 進数として読む（先頭に 0 があっても、8 進数として扱わない。08・09 も、8・9 として受け付ける）
 _pick_from_list() {
-    local _pl_var="$1" _pl_title="$2" _pl_n _pl_i=1 _pl_item _pl_ans
+    local _pl_var="$1" _pl_title="$2" _pl_n _pl_i=1 _pl_item _pl_ans _pl_num
     shift 2
     _pl_n=$#
     echo "  ${_pl_title}" >&2
@@ -252,17 +294,25 @@ _pick_from_list() {
     done
     while true; do
         read_or_quit _pl_ans "  番号を入力してください（q で中断）: "
-        if [[ "$_pl_ans" =~ ^[0-9]+$ ]] && [[ "$_pl_ans" -ge 1 && "$_pl_ans" -le $_pl_n ]]; then
-            set_var "$_pl_var" "${!_pl_ans}"
-            return 0
+        if [[ "$_pl_ans" =~ ^[0-9]{1,9}$ ]]; then
+            _pl_num=$(( 10#$_pl_ans ))   # 10# = 10 進数（[[ -ge ]] は、08 を 8 進数として読み、エラーになるため）
+            if [[ $_pl_num -ge 1 && $_pl_num -le $_pl_n ]]; then
+                set_var "$_pl_var" "${!_pl_num}"
+                return 0
+            fi
         fi
         log "WARNING" "  1〜${_pl_n} の番号を入力してください。"
     done
 }
 
-# 対話で、オーナーと XXXX を決める（GITHUB_OWNER / COMPANY_NAME が、すでにセットされていれば、その項目は聞かない）
-#   引数: init（新しく作る。管理者）/ job（すでにあるプロジェクトを使う）
+# _GH_OWNER_RE - GitHub のオーナー名の形式（英数字とハイフン。先頭・末尾は英数字。39 文字まで）
 _GH_OWNER_RE='^[a-zA-Z0-9]([a-zA-Z0-9-]{0,37}[a-zA-Z0-9])?$'
+# prompt_project_identity - 対話で、オーナーと XXXX を決める（GITHUB_OWNER / COMPANY_NAME が、すでにセットされていれば、その項目は聞かない）
+#   引数: init（新しく作る。管理者）/ job（すでにあるプロジェクトを使う）
+#   オーナー: gh のログインからの候補が 0 件なら入力、1 件ならそれを使う、複数なら番号で選ぶ
+#   XXXX: 入力 → 確認（Y/N。N なら入力し直し）。init で、すでにあるリポジトリ名は断る（ただし、カレントの admin/ に、同じリポジトリの
+#         管理者用のクローン、または状態ファイル .sf-init-XXXX.env があれば、確認なしで受け付ける）
+#   結果: GITHUB_OWNER / COMPANY_NAME
 prompt_project_identity() {
     local mode="$1" cands c raw norm existing exists
     local list=()
@@ -334,7 +384,9 @@ prompt_project_identity() {
     COMPANY_NAME="$norm"
 }
 
-# resolve_init_identity - sf-init 用: オーナーと XXXX を決める（引数 SF_INIT_OWNER / SF_INIT_PROJECT → 対話）
+# resolve_init_identity - sf-init 用: オーナーと XXXX を決める（環境変数 SF_INIT_OWNER / SF_INIT_PROJECT → 対話）
+#   SF_INIT_OWNER / SF_INIT_PROJECT は、sf-init.sh が --owner / --project から export する。関数の引数は、取らない。
+#   値が不正なら die。どちらかが空なら、prompt_project_identity init で、空の項目を対話で決める
 #   結果: GITHUB_OWNER / COMPANY_NAME
 #   決めた値は SF_INIT_OWNER / SF_INIT_PROJECT に export する（sf-tools を更新して、実行しなおすときと、Phase 2 が使う）
 resolve_init_identity() {
@@ -358,7 +410,12 @@ resolve_init_identity() {
 }
 
 # resolve_job_identity - sf-job 用: オーナーと XXXX を決める（引数 → カレントの下のクローン → 対話）
-#   引数: オーナー（空でもよい） XXXX（空でもよい）
+#   引数: オーナー（空でもよい） XXXX（空でもよい）。値が不正なら die
+#   クローンは、discover_clones "$PWD"（オーナーの指定があれば、そのオーナーのものだけ）から探す:
+#     XXXX の指定あり: オーナーの指定がなければ、同じ force-XXXX のクローン（大文字と小文字は区別しない）のオーナー
+#                      （複数なら選ばせる）。クローンから決めたときは、XXXX も、クローンの綴り（大文字と小文字）にそろえる。
+#                      なければ対話
+#     XXXX の指定なし: クローンが 1 つならそれ、複数なら選ばせる、0 なら対話
 #   結果: GITHUB_OWNER / COMPANY_NAME
 resolve_job_identity() {
     local a_owner="${1:-}" a_project="${2:-}" norm="" clones line n
@@ -383,17 +440,20 @@ resolve_job_identity() {
         # XXXX は指定済み。オーナーは、指定がなければ、同じリポジトリのクローンから取る（なければ、対話）
         if [[ -z "$GITHUB_OWNER" ]]; then
             # 同じ XXXX のクローンが、複数のオーナーにあるときは、最初のものを、黙って使わず、選ばせる（別のオーナーの同名の
-            #   リポジトリを、操作してしまわないため）。大文字と小文字は、区別しない
-            local owners=() _o
-            while IFS= read -r _o; do [[ -n "$_o" ]] && owners+=("$_o"); done < <(printf '%s\n' "$clones" | awk -v r="force-${norm}" '$2 == r && !seen[tolower($1)]++ { print $1 }')
-            case ${#owners[@]} in
-                0) GITHUB_OWNER="" ;;
-                1) GITHUB_OWNER="${owners[0]}" ;;
-                *) local _labels=() _k pick=""
-                   for _k in "${owners[@]}"; do _labels+=("${_k}/force-${norm}"); done
-                   _pick_from_list pick "どのオーナーの force-${norm} ですか？（このフォルダの下に、同じ名前で、複数のオーナーのクローンがあります）" "${_labels[@]}"
-                   GITHUB_OWNER="${pick%%/*}" ;;
+            #   リポジトリを、操作してしまわないため）。force-XXXX との一致も、オーナーの重複の除去も、大文字と小文字を区別しない
+            #   （GitHub は、区別しない）。一致したクローンの「オーナー リポジトリ名」を、そのままの綴りで使う
+            local pairs=() _p
+            while IFS= read -r _p; do [[ -n "$_p" ]] && pairs+=("$_p"); done < <(printf '%s\n' "$clones" | awk -v r="force-${norm}" 'tolower($2) == tolower(r) && !seen[tolower($1)]++ { print $1 "/" $2 }')
+            case ${#pairs[@]} in
+                0) _p="" ;;
+                1) _p="${pairs[0]}" ;;
+                *) _p=""
+                   _pick_from_list _p "どのオーナーの force-${norm} ですか？（このフォルダの下に、同じ名前で、複数のオーナーのクローンがあります）" "${pairs[@]}" ;;
             esac
+            if [[ -n "$_p" ]]; then
+                GITHUB_OWNER="${_p%%/*}"
+                COMPANY_NAME="${_p##*/}"; COMPANY_NAME="${COMPANY_NAME#force-}"
+            fi
         fi
         [[ -z "$GITHUB_OWNER" ]] && prompt_project_identity job
         return 0
@@ -418,6 +478,21 @@ resolve_job_identity() {
     return 0
 }
 
+# get_branch_list - branches.txt からブランチ一覧を取得して echo する
+# ------------------------------------------------------------------------------
+# 【使い方】
+#   branches=$(get_branch_list)
+#
+# 【ファイル参照先】
+#   BRANCH_LIST_FILE（common.sh。sf-tools/config/branches.txt。カレントディレクトリ = force-* からの相対パス）
+#
+# 【動作】
+#   1 行に 1 ブランチ。行末の CR を除き、# で始まる行（前に空白があってもよい）と、空白だけの行は読み飛ばす。
+#
+# 【戻り値】
+#   RET_OK (0) : 常に。ブランチ一覧を、1 行に 1 つ echo する。
+#                ファイルがない・ブランチが 1 つもないときは、WARNING を表示して main だけを echo する
+# ------------------------------------------------------------------------------
 get_branch_list() {
     if [[ ! -f "$BRANCH_LIST_FILE" ]]; then
         log "WARNING" "ブランチ構成ファイルが見つかりません: ${BRANCH_LIST_FILE}（デフォルト: main のみ）"
@@ -440,6 +515,27 @@ get_branch_list() {
     return $RET_OK
 }
 
+# is_reserved_org_alias - 共有環境の組織エイリアス（sf-tools の予約名）かを返す
+# ------------------------------------------------------------------------------
+# 【背景】
+#   共有環境（main・staging・develop）へのリリースは、ローカルの PC からはできない。
+#   GitHub にコミットし、レビューを通して、GitHub Actions で行う。
+#   sf-init は、組織のエイリアスとして prod / staging / develop を付ける（prod は main の組織のエイリアス名。組織の種類は、問わない）。
+#   この名前を予約名とし、ローカルからのリリースを禁止する（sf-release.sh / sf-deploy.sh）。
+#   main は、ブランチ名と同じ名前（互換のため、予約名に含める）。
+#   予約名以外の名前を付けた本番組織は、名前では止められないため、sf-release.sh / sf-deploy.sh は、組織の種類も確認する
+#   （lib/org.sh の org_local_release_check）。
+#
+# 【使い方】
+#   is_reserved_org_alias "$TARGET_ORG" && die "ローカルからは実行できません。"
+#
+# 【判定】
+#   SF_RESERVED_ORG_ALIASES（common.sh。prod / staging / develop / main）との完全一致（大文字と小文字は区別する）
+#
+# 【戻り値】
+#   RET_OK (0) : 予約名（共有環境）
+#   RET_NG (1) : それ以外
+# ------------------------------------------------------------------------------
 is_reserved_org_alias() {
     local alias_name="$1" reserved
     for reserved in $SF_RESERVED_ORG_ALIASES; do
@@ -448,15 +544,6 @@ is_reserved_org_alias() {
     return $RET_NG
 }
 
-# is_protected_branch - 指定ブランチが branches.txt の保護対象かを返す
-# ------------------------------------------------------------------------------
-# 【使い方】
-#   is_protected_branch "staging" && die "直接プッシュ禁止"
-#
-# 【戻り値】
-#   RET_OK (0) : 保護対象ブランチである
-#   RET_NG (1) : 保護対象外
-
 # ------------------------------------------------------------------------------
 # required_status_check_names - ブランチ保護（Ruleset）の必須ステータスチェックの名前
 # ------------------------------------------------------------------------------
@@ -464,18 +551,32 @@ is_reserved_org_alias() {
 #   required_status_check_names     # 1 行に 1 つ（対象ファイル確認 / デプロイ検証 / 順序チェック）
 #   名前は、ワークフロー（templates/.github/workflows/wf-validate.yml・wf-sequence.yml）の「ジョブ名」（name:）。
 #   ワークフロー名は、含めない（「validate / 対象ファイル確認」の形では、永久に満たされず、PR がマージできなくなる）。
-#   sf-init の Phase 9（Ruleset の作成）と、sf-init.sh --status（既存のプロジェクトの診断）が、使う。
+#   sf-init の Phase 9（Ruleset の作成）と、lib/diag.sh（sf-init.sh --status・--verify の、既存のプロジェクトの診断）が、使う。
 #   ジョブ名を変えるときは、ここも直す（tests/test_sf-init.sh の突き合わせのテストが、食い違いを検出する）。
 required_status_check_names() {
     printf '%s\n' "対象ファイル確認" "デプロイ検証" "順序チェック"
 }
 
 # ------------------------------------------------------------------------------
+# is_protected_branch - 指定ブランチが branches.txt の保護対象かを返す
+# ------------------------------------------------------------------------------
+# 【使い方】
+#   is_protected_branch "staging" && die "直接プッシュ禁止"
+#
+# 【判定】
+#   get_branch_list の一覧（branches.txt のすべてのブランチ。ファイルがない・空なら main のみ）に、行全体で一致するか
+#   （grep -qxF --。ブランチ名は、固定の文字列として比べる（. などを、正規表現として扱わない。- で始まる名前も、
+#   オプションとして扱わない）。大文字と小文字は区別する（Git のブランチ名は、区別するため））
+#
+# 【戻り値】
+#   RET_OK (0) : 保護対象ブランチである
+#   RET_NG (1) : 保護対象外
+# ------------------------------------------------------------------------------
 is_protected_branch() {
     local branch="$1"
     local branches
-    branches=$(get_branch_list)
-    echo "$branches" | grep -qx "$branch" && return $RET_OK
+    branches=$(get_branch_list)  # VAR=$(cmd) のため run 不使用
+    printf '%s\n' "$branches" | grep -qxF -- "$branch" && return $RET_OK  # 条件チェックのため run 不使用
     return $RET_NG
 }
 
@@ -485,23 +586,27 @@ is_protected_branch() {
 #   ensure_sf_tools_latest [--no-update] [DIR]    # DIR は、省略時 $SF_TOOLS_DIR
 #
 # 【戻り値】
-#   RET_OK (0) : 最新である（または、Git リポジトリでない・HEAD が分離状態・origin にブランチがない等で、
+#   RET_OK (0) : 最新である（または、Git リポジトリでない・HEAD が分離状態・origin に同じブランチがない、のどれかで、
 #                確認できないため、WARNING を出して続行する）
 #   2          : 遅れていたため、git pull --ff-only で更新した。実行中のスクリプトが書き換わった可能性があるため、
 #                呼び出し元は、再実行（exec）すること
-#   （die）    : origin に接続できない・遅れているのに、ローカルに未コミットの変更または未 push のコミットがある・
-#                更新を断った（N / q）・更新に失敗した・--no-update で遅れている
+#   （die）    : origin に接続できない・origin から取得（fetch）できない・遅れているのに、ローカルに未コミットの変更
+#                または未 push のコミットがある・更新を断った（N / q）・更新に失敗した・--no-update で遅れている
 #
 # 【動作】
 #   - 古い sf-tools で、作成済みのプロジェクトのワークフローなどを書き換える事故を防ぐ。
 #     「最新でなければ続行しない」ことが目的のため、origin に接続できないときは、続行せず、中断する
+#   - 先に git ls-remote --exit-code --heads origin refs/heads/<ブランチ> で、origin に同じブランチがあるかを確かめる
+#     （終了コード 2 = ない → WARNING を出して続行 / 0 = ある → fetch して比べる / それ以外 = 接続できない → die）。
+#     以前は、いきなり fetch していたため、origin にないブランチ（手元だけの作業ブランチ）でも、
+#     「接続できない」として中断していた
 #   - --no-update: 確認の質問と更新をしない（読み取り専用の実行用）。遅れていれば、die
 # ------------------------------------------------------------------------------
 ensure_sf_tools_latest() {
     local no_update=0
     if [[ "${1:-}" == "--no-update" ]]; then no_update=1; shift; fi
     local dir="${1:-${SF_TOOLS_DIR:-}}"
-    local cur dirty ahead behind line
+    local cur dirty ahead behind line rc_ls
 
     if [[ -z "$dir" ]] || ! git -C "$dir" rev-parse --is-inside-work-tree >/dev/null 2>&1; then  # if cmd のため run 不使用
         log "WARNING" "sf-tools が Git リポジトリではないため、最新かどうかを確認できません。"
@@ -512,8 +617,19 @@ ensure_sf_tools_latest() {
         log "WARNING" "sf-tools の HEAD がブランチを指していないため、最新かどうかを確認できません。"
         return $RET_OK
     fi
+    # origin に、同じブランチがあるか（終了コードで分岐するため run 不使用。run は、失敗を、すべて 1 にする）
+    rc_ls=0
+    git -C "$dir" ls-remote --exit-code --heads origin "refs/heads/${cur}" >/dev/null 2>&1 || rc_ls=$?
+    case $rc_ls in
+        0) ;;
+        2)
+            log "WARNING" "origin に ${cur} ブランチが存在しないため、最新かどうかを確認できません。"
+            return $RET_OK ;;
+        *)
+            die "origin に接続できないため、sf-tools が最新かどうかを確認できません。" ;;
+    esac
     run git -C "$dir" fetch origin "$cur" \
-        || die "origin に接続できないため、sf-tools が最新かどうかを確認できません。"
+        || die "origin から ${cur} を取得できないため、sf-tools が最新かどうかを確認できません。"
     if ! git -C "$dir" rev-parse --verify --quiet "origin/${cur}" >/dev/null 2>&1; then  # if cmd のため run 不使用
         log "WARNING" "origin に ${cur} ブランチが存在しないため、最新かどうかを確認できません。"
         return $RET_OK
@@ -613,6 +729,8 @@ state_matches_repo() {
 #   かといって「印がない = 未完了」では、印を導入する前に完了したプロジェクトを、未完了と誤判定し、運用中のリポジトリを
 #   新規セットアップとして上書きしてしまう。そこで、やり直し中は、印を消さず、0 にして、未設定と区別する。
 #   印は、クローンの .git/config にあり、GitHub には送られない
+#
+# mark_setup_complete DIR - 印を 1（完了）にする。戻り値: 0 = 付けた / 1 = DIR が空・フォルダがない・git config の失敗
 mark_setup_complete() {
     local dir="${1:-}"
     [[ -n "$dir" && -d "$dir" ]] || return 1
@@ -650,7 +768,8 @@ clone_setup_completed() {
 
 # git_origin_redacted - クローンの origin の URL を、認証情報（https://user:TOKEN@ の部分）を伏せて、標準出力に返す
 #   エラーの文言・ログに、origin の URL を出すときに使う（Token つきの URL で作ったクローンが、画面とログに、Token を出さないため）。
-#   origin がなければ「なし」
+#   引数: クローンのフォルダ（省略時はカレント）。「//」と「@」の間を *** にする。末尾に改行は付けない。
+#   origin がなければ「なし」。戻り値は、常に 0
 git_origin_redacted() {
     local u
     u=$(git -C "${1:-.}" remote get-url origin 2>/dev/null) || { printf '%s' "なし"; return 0; }  # VAR=$(cmd) のため run 不使用

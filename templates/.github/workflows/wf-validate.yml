@@ -1,37 +1,87 @@
 # ==============================================================================
 # wf-validate.yml - Salesforce デプロイ前検証
 # ==============================================================================
+# PR の作成・更新のたびに、sf-release.sh を検証モード（sf project deploy start --dry-run。組織には反映しない）で実行し、
+# 結果を PR にコメントする。検証が失敗すると、ジョブ「デプロイ検証」が失敗する（main / staging への PR では、ブランチ保護の
+# 必須チェックのため、マージできなくなる。【ジョブ】参照）。Actions の画面での名前は「[validate] デプロイ前検証」（最上位の name:）。
 #
-# 【概要】
-#   PR 作成・更新時に sf-release.sh を「検証のみ（反映なし）」で実行する。
-#   検証結果は PR にコメントとして投稿され、失敗時はマージがブロックされる。
+# 【起動の条件】
+#   - pull_request の opened / synchronize / reopened（PR の作成・ソースブランチへの push・再オープン）。
+#     マージ先のブランチは問わない（branches の指定なし。main / staging / develop 以外への PR でも動く）
+#   - 起動しない場合: PR のタイトル・本文・マージ先の変更（edited）、マージ・クローズ（closed）、ブランチへの直接の push、
+#     コンフリクトのある PR（GitHub がマージ結果を作れないため）。workflow_dispatch（手動の実行）・schedule はない
 #
-# 【処理フロー】
-#   1. PR のソースブランチをチェックアウト
-#   2. Node.js / Salesforce CLI をインストール
-#   3. sf-tools をクローン（sf-release.sh の取得）
-#   4. マージ先ブランチに応じて接続する Salesforce 組織を選択
-#   5. 選択した組織に認証
-#   6. sf-release.sh が参照する branch_name.txt を動的生成
-#   7. sf-release.sh を検証モード（--release なし）で実行
-#   8. 検証結果を PR にコメントとして投稿
-#   9. 検証失敗時はマージをブロック（exit 1）
+# 【ジョブ】
+#   1. 対象ファイル確認（check-branch）: デプロイ対象があるかを判定し、出力 skip（true / false）を返す。常に実行する
+#   2. デプロイ検証（validate）: check-branch のあと（needs）。skip が true のときは、スキップされる
+#   ブランチ保護との関係: ジョブ名「対象ファイル確認」「デプロイ検証」は、sf-init の Phase 9（phases/init/09_repo_rules.sh）が、
+#   Ruleset protect-main / protect-staging（対象: main / staging）に登録する必須チェック 3 つのうちの 2 つ（もう 1 つは
+#   wf-sequence.yml の「順序チェック」。名前の正本は lib/project.sh の required_status_check_names）。ジョブ名（name:）を
+#   変えると、必須チェックが永久に満たされず、PR をマージできなくなる。
+#     - 必須チェックは、ジョブ名だけで照合される。main / staging への PR では、このワークフローと wf-sequence.yml の
+#       「対象ファイル確認」が、同じ名前のチェックとして 2 つ並ぶ。この場合に、GitHub が、どちらの結果で（または両方で）
+#       判定するかは、未確認（wf-release.yml の同じ役のジョブは、同じ名前にならないよう、「リリース対象確認」にしてある。
+#       同じコミットが、次の段階の PR にも使われるため、先の PR で成功した同じ名前のチェックが、次の PR の必須チェックを
+#       満たしてしまうのを避ける）
+#     - main / staging への PR: どちらかのジョブが失敗すると、マージできない。スキップされたジョブは、GitHub の仕様で、
+#       必須チェックとしては成功として扱われる（デプロイ対象のない PR は、止まらない）
+#     - それ以外（develop など）への PR: Ruleset がないため、失敗しても、マージは止まらない（結果の表示だけ）
+#     - Ruleset がない場合（作成に失敗した。無料プランの Private リポジトリなど）は、失敗しても、マージは止まらない。
+#       リポジトリの Admin は、Ruleset をバイパスできる（bypass_mode: always）
 #
-# 【必要な GitHub Secrets（このリポジトリに設定すること）】
-#   SF_PRIVATE_KEY       : 秘密鍵（PEM 形式・全組織共通）
-#   SF_CONSUMER_KEY_PROD : main の組織の Connected App コンシューマーキー
-#   SF_CONSUMER_KEY_STG  : staging の組織の Connected App コンシューマーキー
-#   SF_CONSUMER_KEY_DEV  : develop の組織の Connected App コンシューマーキー
+# 【処理の流れ】
+#   対象ファイル確認:
+#     1. PR のマージ結果（pull_request の既定のチェックアウト）を取得する
+#     2. sf-tools/release/<ソースブランチ名>/ の deploy-target.txt・remove-target.txt に、実質的な行（# の行・空行・
+#        [files]・[members] 以外）があるかを確認する。どちらにもなければ skip=true とし、
+#        「デプロイ対象なし（… に内容なし）のためスキップします。」と表示する。あれば skip=false
+#   デプロイ検証（番号は、本体のコメントの Step の番号と同じ）:
+#     1. PR のマージ結果（pull_request の既定のチェックアウト）を取得する
+#     2. Node.js 22 を入れる
+#     3. Salesforce CLI を入れる（npm install -g @salesforce/cli）
+#     4. sf-tools を、公開リポジトリ https://github.com/tama-create/sf-tools.git から、Variable SF_TOOLS_BRANCH のブランチ
+#        （未設定なら main）で、~/sf-tools に clone する（Token は使わない）
+#     5. マージ先のブランチで、接続先を選ぶ: main → *_PROD、staging → *_STG、それ以外 → *_DEV
+#        （SF_CONSUMER_KEY・SF_USERNAME・SF_INSTANCE_URL を、GITHUB_ENV に書く）
+#     6. JWT で組織にログインする（sf org login jwt。エイリアス ci-org・既定の組織に設定）。秘密鍵は、Secret SF_PRIVATE_KEY を
+#        base64 -d で /tmp/server.key に戻し（umask 077）、ステップの終了時に必ず消す。ログインの失敗は、ステップの失敗
+#     7. sf-tools/release/branch_name.txt に、ソースブランチ名を書く（sf-release.sh が、対象のフォルダを決めるのに読む）
+#     8. SF_TARGET_ORG=ci-org で、sf-release.sh --no-open を実行する（--release なし = 検証モード）。出力は /tmp/sf_result.txt に
+#        保存してから、ログに表示する。set +e のため、検証が失敗しても、このステップは失敗にせず、終了コードを出力 exit_code に残す
+#     9. （常に。if: always()）PR に結果をコメントする（毎回、新しいコメントを追加する。ログは、端末の色の指定を除き、
+#        3000 文字を超えたら「...(前半省略)...」と末尾の 3000 文字）。見出しは exit_code で決める:
+#        0 → 「✅ … 検証成功」、0 以外 → 「❌ … 検証失敗（終了コード N）」、
+#        空（手順 1〜7 のどれかの失敗、または手順 8 の取り消し・タイムアウトで、終了コードを取得できなかった）→ 「⚠️ … 検証が実行されませんでした（…）」。
+#        投稿の完了を待つ（await）ため、投稿の失敗は、このステップの失敗になる
+#    10. （常に）exit_code で終了する（空なら 1）。0 以外なら、ジョブ「デプロイ検証」が失敗する
 #
-# 【必要な GitHub Variables（このリポジトリに設定すること）】
-#   SF_USERNAME_PROD     : main の組織の接続ユーザー名
-#   SF_USERNAME_STG      : staging の組織の接続ユーザー名
-#   SF_USERNAME_DEV      : develop の組織の接続ユーザー名
-#   SF_INSTANCE_URL_PROD : main の組織の接続 URL（https://login.salesforce.com 等）
-#   SF_INSTANCE_URL_STG  : staging の組織の接続 URL
-#   SF_INSTANCE_URL_DEV  : develop の組織の接続 URL
-#   SF_TOOLS_BRANCH      : clone する sf-tools のブランチ（任意。未設定なら main）
+# 【必要な Secrets / Variables】
+#   Secrets（このリポジトリに設定する。SF_PRIVATE_KEY は sf-init の Phase 10・sf-update-secret.sh が、SF_CONSUMER_KEY_* は
+#   それに加えて sf-init.sh --add-tier（_STG・_DEV だけ）/ --reconnect も登録する）:
+#     SF_PRIVATE_KEY       : JWT の秘密鍵（server.key の PEM を、1 行の Base64 にした値。全組織共通）
+#     SF_CONSUMER_KEY_PROD : main の組織のアプリ（外部クライアントアプリケーション / 接続アプリケーション）のコンシューマー鍵
+#     SF_CONSUMER_KEY_STG  : staging の組織のアプリのコンシューマー鍵
+#     SF_CONSUMER_KEY_DEV  : develop の組織のアプリのコンシューマー鍵（main / staging 以外への PR で使う）
+#   Variables（このリポジトリに設定する。SF_USERNAME_*・SF_INSTANCE_URL_* の登録元は、SF_CONSUMER_KEY_* と同じ）:
+#     SF_USERNAME_PROD     : main の組織の接続ユーザー名
+#     SF_USERNAME_STG      : staging の組織の接続ユーザー名
+#     SF_USERNAME_DEV      : develop の組織の接続ユーザー名
+#     SF_INSTANCE_URL_PROD : main の組織の接続 URL（https://login.salesforce.com 等）
+#     SF_INSTANCE_URL_STG  : staging の組織の接続 URL
+#     SF_INSTANCE_URL_DEV  : develop の組織の接続 URL
+#     SF_TOOLS_BRANCH      : clone する sf-tools のブランチ（任意。未設定なら main。Phase 9 は development のときだけ登録する）
+#   このほか、PR へのコメントに、自動の GITHUB_TOKEN を使う（設定不要。permissions: pull-requests: write）
 #
+# 【補足】
+#   - 検証の中身（マニフェストの生成・テストクラスの指定・sf project deploy start --dry-run）は、sf-release.sh の冒頭コメントを参照
+#   - main / staging 以外への PR（feature ブランチ向けの PR を含む）は、DEV の組織を使う。DEV の組織を登録していない構成
+#     （main のみ・main + staging）では、Secrets / Variables が空のため、手順 6 のログインで失敗する
+#   - 手順 7 までで失敗した場合も、手順 8 が取り消し・タイムアウトになった場合も、手順 9 のコメントは投稿される（ログは、手順 7 までの
+#     失敗なら「（ログファイルが見つかりません）」、手順 8 の取り消し・タイムアウトなら途中までのログ。
+#     見出しは、どちらも「⚠️ … 検証が実行されませんでした」）。ジョブは、手順 10 の exit 1 で、失敗になる
+#   - Slack への通知はしない
+#   - フォークからの PR では、GitHub の既定の設定で、Secrets が渡されないため、手順 6 のログインで失敗する
+#     （GITHUB_TOKEN も読み取り専用のため、手順 9 のコメントも失敗する）
 # ==============================================================================
 name: "[validate] デプロイ前検証"
 on:
@@ -57,7 +107,7 @@ jobs:
           HEAD="$HEAD_REF"
           DEPLOY="sf-tools/release/${HEAD}/deploy-target.txt"
           REMOVE="sf-tools/release/${HEAD}/remove-target.txt"
-          # コメント行・空行を除いた実質的な内容があるか確認
+          # コメント行・空行・セクション行（[files] / [members]）を除いた実質的な内容があるか確認
           has_content() {
             [[ -f "$1" ]] && grep -qvE '^\s*(#|$|\[files\]|\[members\])' "$1"
           }
@@ -81,7 +131,7 @@ jobs:
 
     steps:
       # --------------------------------------------------------------------------
-      # Step 1: ソースコードのチェックアウト
+      # Step 1: ソースコードのチェックアウト（PR のマージ結果。pull_request の既定）
       # --------------------------------------------------------------------------
       - name: ソースコードを取得
         uses: actions/checkout@v4
@@ -101,7 +151,7 @@ jobs:
         run: npm install -g @salesforce/cli
 
       # --------------------------------------------------------------------------
-      # Step 4: sf-tools のクローン
+      # Step 4: sf-tools のクローン（公開リポジトリ。Token なし。Variable SF_TOOLS_BRANCH のブランチ、未設定なら main）
       # --------------------------------------------------------------------------
       - name: 自動化ツール（sf-tools）を取得
         run: |
@@ -109,7 +159,7 @@ jobs:
           chmod +x "$HOME/sf-tools/bin/"*.sh "$HOME/sf-tools/lib/"*.sh
 
       # --------------------------------------------------------------------------
-      # Step 5: 接続先 Salesforce 組織の選択
+      # Step 5: 接続先 Salesforce 組織の選択（main → *_PROD、staging → *_STG、それ以外 → *_DEV。GITHUB_ENV に書く）
       # --------------------------------------------------------------------------
       - name: 接続先組織を選択（マージ先ブランチに応じて切り替え）
         env:
@@ -152,7 +202,7 @@ jobs:
           rm -f /tmp/server.key
 
       # --------------------------------------------------------------------------
-      # Step 7: デプロイ対象ブランチの設定
+      # Step 7: デプロイ対象ブランチの設定（sf-tools/release/branch_name.txt に、ソースブランチ名を書く）
       # --------------------------------------------------------------------------
       - name: デプロイ対象ブランチを設定
         env:
@@ -164,6 +214,7 @@ jobs:
 
       # --------------------------------------------------------------------------
       # Step 8: Salesforce へのデプロイ検証（反映なし）
+      #   set +e のため、検証が失敗しても、このステップは失敗にしない。終了コードを出力 exit_code に残し、Step 10 で判定する
       # --------------------------------------------------------------------------
       - name: Salesforce にデプロイ検証を実行（反映なし）
         id: sf_validate
@@ -177,15 +228,19 @@ jobs:
           echo "exit_code=$EXIT_CODE" >> "$GITHUB_OUTPUT"
 
       # --------------------------------------------------------------------------
-      # Step 9: 検証結果を PR にコメントとして投稿
+      # Step 9: 検証結果を PR にコメントとして投稿（前のステップが失敗しても実行する。毎回、新しいコメントを追加する。
+      #   見出しは、Step 8 の終了コードで決める: 0 → ✅ 検証成功、0 以外 → ❌ 検証失敗、空（Step 8 まで届かなかった、または Step 8 の取り消し・タイムアウト）→ ⚠️）
       # --------------------------------------------------------------------------
       - name: 検証結果を PR に投稿
         if: always()
         uses: actions/github-script@v7
         env:
-          # ブランチ名は、JavaScript のソースに直接埋め込まず、環境変数で受け取る
+          # ブランチ名などは、JavaScript のソースに直接埋め込まず、環境変数で受け取る
           HEAD_REF: ${{ github.event.pull_request.head.ref || github.ref_name }}
           BASE_REF: ${{ github.event.pull_request.base.ref || github.ref_name }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || '' }}
+          # Step 8 の終了コード（Step 8 まで届かなかった、または Step 8 の取り消し・タイムアウトのときは、空）
+          EXIT_CODE: ${{ steps.sf_validate.outputs.exit_code }}
         with:
           script: |
             const fs = require('fs');
@@ -199,9 +254,17 @@ jobs:
             }
             // 端末の色の指定（ANSI エスケープコード）を除く。残すと、PR のコメントや通知メールで「[34m」のように化ける
             ログ = ログ.replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]/g, '');
-            const 終了コード = parseInt('${{ steps.sf_validate.outputs.exit_code }}') || 0;
-            const アイコン = 終了コード === 0 ? '✅' : '❌';
-            const 結果   = 終了コード === 0 ? '検証成功' : '検証失敗';
+            // 終了コードが空 = Step 8 の sf-release.sh の終了コードを取得できなかった（前のステップの失敗、または Step 8 の取り消し・タイムアウト）。
+            //   成功と区別するため、「実行されませんでした」と表示する
+            const 終了コード文字列 = (process.env.EXIT_CODE || '').trim();
+            let アイコン, 結果;
+            if (終了コード文字列 === '') {
+              アイコン = '⚠️'; 結果 = '検証が実行されませんでした（sf-release.sh の終了コードを取得できません。前のステップの失敗、または取り消し・タイムアウト）';
+            } else if (終了コード文字列 === '0') {
+              アイコン = '✅'; 結果 = '検証成功';
+            } else {
+              アイコン = '❌'; 結果 = `検証失敗（終了コード ${終了コード文字列}）`;
+            }
             const 最大文字数 = 3000;
             const 表示ログ = ログ.length > 最大文字数
               ? '...(前半省略)...\n' + ログ.slice(-最大文字数)
@@ -212,7 +275,7 @@ jobs:
               `| 項目 | 値 |`,
               `| --- | --- |`,
               `| ブランチ | \`${ヘッドブランチ}\` → \`${ベースブランチ}\` |`,
-              `| コミット | \`${{ github.event.pull_request.head.sha || '' }}\` |`,
+              `| コミット | \`${process.env.HEAD_SHA}\` |`,
               `| 実行モード | 検証のみ（反映なし） |`,
               '',
               '<details>',
@@ -224,7 +287,8 @@ jobs:
               '',
               '</details>'
             ].join('\n');
-            github.rest.issues.createComment({
+            // await で、投稿の完了を待つ（待たないと、投稿の失敗が、このステップの失敗にならない）
+            await github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -232,7 +296,8 @@ jobs:
             });
 
       # --------------------------------------------------------------------------
-      # Step 10: 検証失敗時のマージブロック
+      # Step 10: 検証の終了コードで、ジョブを終える（0 以外・空（空は 1）なら、ジョブ「デプロイ検証」が失敗する。
+      #   main / staging への PR では、必須チェックのため、マージできなくなる）
       # --------------------------------------------------------------------------
       - name: 検証失敗時はマージをブロック
         if: always()

@@ -36,7 +36,7 @@
 #   4. 安全の確認（どれかに当たれば、何もせずに中断する）
 #        GITHUB_ACTIONS=true / --org がない / --org が予約名（prod・staging・develop・main）/
 #        sf --version の終了コードが 0 以外（npm 版の sf が前提。24 時間以内に成功を確認済みなら、省略）/
-#        組織の情報（Organization の IsSandbox・OrganizationType・TrialExpirationDate）を読み取れない /
+#        組織の情報（sf data query で読む Organization の Id・IsSandbox）を読み取れない /
 #        組織の種類が本番、または判定できない
 #      組織の種類: IsSandbox=true → Sandbox、OrganizationType に Developer を含む → Developer Edition、
 #      TrialExpirationDate がある → Trial、OrganizationType が空 → 判定できない、それ以外 → 本番
@@ -53,16 +53,19 @@
 #
 # 【補足】
 #   - 拒否するのは、上の 4. の条件だけ。Sandbox が個人用か共有かは、判定しない
-#   - --list・--coverage は、GitHub Actions 上でも実行できる（4. の確認より前に終了するため）
+#   - --list・--coverage は、GitHub Actions 上でも実行できる（4. の確認より前に終了するため）。ただし、1. の確認は省略しないため、
+#     標準入力から答えられない環境では、-y を付ける（付けないと、入力が中断されたとして終了コード 1 で終わる）
 #   - 作成・削除するのは、名前（ファイルのパス・削除するメンバー名）に SfToolsE2eMin を含むものだけ
 #     （大文字・小文字を区別する。LWC のコンポーネント名は先頭が小文字でなければならないため、先頭を小文字にした
 #     sfToolsE2eMin も認める。認めるのは、この 2 通りの綴りだけ）。Account には、この名前のもの（ワークフロールール・項目自動更新・メールアラート・
 #     承認プロセス・カスタムボタン・トリガー）を追加し、削除するときも、その名前だけを指定する。
+#     例外: 1 つのファイルに複数の定義をまとめる種類（Account のワークフロー workflows/Account.workflow-meta.xml・
+#     カスタム表示ラベル labels/CustomLabels.labels-meta.xml）は、パスに含まないため、ファイルの中身に含めば書く
 #     冒頭の警告の文面も、判定と同じ「含むもの」にそろえてある（例: Account.SfToolsE2eMinWr は、名前の途中に含む）
 #   - 判定に当たるものがあると、lib/typecheck.js はその時点で中断する（終了コード 1）。それまでに処理した種類の
 #     リリース・削除（--validate-only なら検証）は、実行済みのまま残り、結果の表（--out）は、書かれない
 #   - 終了コード: 0 = 完了（release / delete に ng の種類があっても 0。WARNING を表示する）・--list・--coverage /
-#     1 = 中断（N / q の回答、4. の拒否、必要なファイル・node がない、lib/typecheck.js の失敗）
+#     1 = 中断（不明なオプション・値のないオプション、N / q の回答、4. の拒否、必要なファイル・node がない、lib/typecheck.js の失敗）
 #   - ログ: ~/sf-tools/logs/sf-typecheck.log（実行ごとに作り直す）
 #   - 環境変数: SF_TYPECHECK_CHANGESET_FILE・SF_CHECK_CAPABILITY_FILE で、--coverage が読む 2 つの表を差し替えられる
 # ==============================================================================
@@ -146,6 +149,7 @@ if [[ $COVERAGE -eq 1 ]]; then
     [[ -f "$CS_FILE" ]] || die "変更セット対応の種類の一覧が見つかりません: ${CS_FILE}"
     [[ -f "$CAP_FILE" ]] || die "可否の表が見つかりません: ${CAP_FILE}"
     # 可否の表の種類名が、変更セット側の複数形・単数形と違うもの（CustomLabels など）は、別名で引く
+    # run 不使用: 突き合わせの結果を、画面（標準出力）に出すため（run は、既定では、応答をログにだけ記録する）。終了コードは awk のもの
     awk -v CAP="$CAP_FILE" '
         BEGIN {
             FS = "\t"
@@ -200,13 +204,13 @@ fi
 [[ -n "$ORG_ALIAS" ]] || die "--org で、接続先の組織のエイリアスを指定してください。"
 case "$ORG_ALIAS" in
     prod|staging|develop|main)
-        die "${ORG_ALIAS} は、共有環境の予約名のため、実行できません（共有環境は、GitHub Actions 経由だけです）。個人用のエイリアスで、ログインし直してください。" ;;
+        die "${ORG_ALIAS} は、共有環境の予約名のため、実行できません（共有環境は、GitHub Actions 経由だけです）。" ;;
 esac
 check_sf_cli --cache
 
 log "HEADER" "メタデータの種類ごとの確認（${SCRIPT_NAME}.sh）"
 org_read_info "$ORG_ALIAS" \
-    || die "組織の種類を読み取れません（${ORG_ALIAS}）。ログイン済みのエイリアスを指定してください。推測では、実行しません。"
+    || die "組織の種類を読み取れません（${ORG_ALIAS}）。推測では、実行しません。"
 ORG_KIND=$(org_kind)  # VAR=$(cmd) のため run 不使用
 case "$ORG_KIND" in
     production) die "${ORG_ALIAS} は、本番の組織です。実行できません（Developer Edition・Sandbox・Scratch・Trial のみ）。" ;;

@@ -1,27 +1,88 @@
 # ==============================================================================
 # wf-release.yml - Salesforce リリース
 # ==============================================================================
+# PR が main / staging / develop にマージされたら、マージ先のブランチに対応する Salesforce 組織へ、sf-release.sh --release で
+# リリースし（組織に反映する）、結果を Slack に通知する。Actions の画面での名前は「[release] デプロイ」（最上位の name:）。
 #
-# 【概要】
-#   PR マージをトリガーに、マージ先ブランチに対応する Salesforce 組織へリリースを実行する。
+# 【起動の条件】
+#   - pull_request の closed で、マージ先が main / staging / develop のとき（マージせずに閉じた PR でも起動するが、
+#     ジョブ「リリース実行」はスキップされる）
+#   - workflow_dispatch（手動の実行。入力なし）。main / staging / develop で実行したときだけ、リリースする。実行したブランチを、
+#     マージ先・ソースブランチの両方として扱う（【補足】参照）
+#   - 起動しない場合: PR の作成・更新（opened / synchronize など）、上記以外のブランチへのマージ、ブランチへの直接の push
+#     （wf-propagate.yml・sf-metasync.sh による main からの伝播の push を含む。伝播では、組織へのリリースは行われない）。
+#     schedule はない
 #
-# 【必要な GitHub Secrets（このリポジトリに設定すること）】
-#   SF_PRIVATE_KEY       : 秘密鍵（PEM 形式・全組織共通）
-#   SF_CONSUMER_KEY_PROD : main の組織の Connected App コンシューマーキー
-#   SF_CONSUMER_KEY_STG  : staging の組織の Connected App コンシューマーキー
-#   SF_CONSUMER_KEY_DEV  : develop の組織の Connected App コンシューマーキー
-#   SLACK_BOT_TOKEN      : Slack API の Bot Token
+# 【ジョブ】
+#   1. リリース対象確認（check-branch）: デプロイ対象があるかを判定し、出力 skip（true / false）を返す。常に実行する
+#      （workflow_dispatch のときは、判定せずに skip=false）
+#   2. リリース実行（release）: check-branch のあと（needs）。PR がマージされた、または main / staging / develop での
+#      workflow_dispatch で、かつ、skip が true でないときだけ実行する（それ以外は、スキップされる）。
+#      同時実行の制御（concurrency）: グループは、マージ先のブランチごと（release-<ブランチ名>）。同じグループの実行は、
+#      1 つずつ動く。実行中のものは取り消さず（cancel-in-progress: false）、待機中のものも、すべて残す（queue: max。最大 100）
+#   ブランチ保護との関係: どちらのジョブも、必須チェックではない（PR を閉じたあとに動くため、マージの可否に関係しない）。
+#   ジョブ名「リリース対象確認」は、wf-validate.yml・wf-sequence.yml の必須チェック「対象ファイル確認」と、わざと、別の名前にしてある
+#   （PR のソースの最新のコミットには、チェックの結果が付く。同じ名前だと、先の PR のマージで付いた成功が、同じコミットの
+#   次の段階の PR の必須チェックを、満たしてしまう恐れがあるため）
 #
-# 【必要な GitHub Variables（このリポジトリに設定すること）】
-#   SF_USERNAME_PROD     : main の組織の接続ユーザー名
-#   SF_USERNAME_STG      : staging の組織の接続ユーザー名
-#   SF_USERNAME_DEV      : develop の組織の接続ユーザー名
-#   SF_INSTANCE_URL_PROD : main の組織の接続 URL（https://login.salesforce.com 等）
-#   SF_INSTANCE_URL_STG  : staging の組織の接続 URL
-#   SF_INSTANCE_URL_DEV  : develop の組織の接続 URL
-#   SLACK_CHANNEL_ID     : 通知先 Slack チャンネル ID
-#   SF_TOOLS_BRANCH      : clone する sf-tools のブランチ（任意。未設定なら main）
+# 【処理の流れ】
+#   リリース対象確認:
+#     1. イベントの既定のコミットを取得する
+#     2. workflow_dispatch なら、skip=false で終わる（main / staging / develop 以外のブランチなら、::warning で、
+#        リリースしない旨を表示する）
+#     3. sf-tools/release/<ソースブランチ名>/ の deploy-target.txt・remove-target.txt に、実質的な行（# の行・空行・
+#        [files]・[members] 以外）があるかを確認する。どちらにもなければ skip=true（スキップの旨を表示）、あれば skip=false
+#   リリース実行（番号は、本体のコメントの Step の番号と同じ）:
+#     1. リリース先（main → 🚀 main の組織 (prod)、staging → 🧪 staging の組織 (staging)、develop → 🔧 develop の組織 (develop)）を、
+#        ::notice と、Actions の Summary（リリース先・ブランチ・PR 番号とタイトル（PR のときだけ）・実行日時（日本時間））に書く
+#     2. マージ先のブランチの最新（実行の時点）を、全履歴（fetch-depth: 0）で取得する
+#     3. Node.js 22 を入れる
+#     4. Salesforce CLI を入れる（npm install --global @salesforce/cli）
+#     5. マージ先のブランチに対応する組織だけに、JWT でログインする（sf org login jwt・既定の組織に設定）:
+#        main → *_PROD・エイリアス prod、staging → *_STG・エイリアス staging、develop → *_DEV・エイリアス develop。
+#        秘密鍵は、Secret SF_PRIVATE_KEY を base64 -d で /tmp/server.key に戻し（umask 077）、ステップの終了時に必ず消す
+#     6. sf-tools を、公開リポジトリ https://github.com/tama-create/sf-tools.git から、Variable SF_TOOLS_BRANCH のブランチ
+#        （未設定なら main）で、~/sf-tools に clone する（Token は使わない）
+#     7. sf-tools/release/branch_name.txt に、ソースブランチ名を書き、
+#        sf-release.sh --release --no-open --target <prod / staging / develop> を実行する
+#        （main → prod、staging → staging、develop → develop。GitHub Actions 上のため、確認は表示されない）
+#     8. （常に。if: always()）Slack の chat.postMessage に、結果を送る。ジョブの状態（job.status）が success なら
+#        「:white_check_mark: … リリース成功」、それ以外（失敗・取り消し）は「:x: … リリース失敗」。
+#        リリース先・ブランチ・PR（PR のときだけ）・実行日時（日本時間）・Actions のログの URL を含む。
+#        送信に失敗した（curl の失敗・応答の ok が true でない）ときは、::warning を出す（このステップは失敗にしない。
+#        応答の JSON は、node で読む）
+#   手順 1〜7 のどれかが失敗すると、以降の手順（8 を除く）は行わず、ジョブは失敗する。リリースの中身（マニフェストの生成・
+#   テストクラスの指定・sf project deploy start）と終了コードは、sf-release.sh の冒頭コメントを参照
 #
+# 【必要な Secrets / Variables】
+#   Secrets（このリポジトリに設定する。SF_PRIVATE_KEY は sf-init の Phase 10・sf-update-secret.sh が、SF_CONSUMER_KEY_* は
+#   それに加えて sf-init.sh --add-tier（_STG・_DEV だけ）/ --reconnect も登録する。SLACK_BOT_TOKEN は Phase 7 が登録する）:
+#     SF_PRIVATE_KEY       : JWT の秘密鍵（server.key の PEM を、1 行の Base64 にした値。全組織共通）
+#     SF_CONSUMER_KEY_PROD : main の組織のアプリ（外部クライアントアプリケーション / 接続アプリケーション）のコンシューマー鍵
+#     SF_CONSUMER_KEY_STG  : staging の組織のアプリのコンシューマー鍵
+#     SF_CONSUMER_KEY_DEV  : develop の組織のアプリのコンシューマー鍵
+#     SLACK_BOT_TOKEN      : Slack API の Bot Token（結果の通知に使用）
+#   Variables（このリポジトリに設定する。SF_USERNAME_*・SF_INSTANCE_URL_* の登録元は、SF_CONSUMER_KEY_* と同じ。
+#   SLACK_CHANNEL_ID は Phase 7 が登録する）:
+#     SF_USERNAME_PROD     : main の組織の接続ユーザー名
+#     SF_USERNAME_STG      : staging の組織の接続ユーザー名
+#     SF_USERNAME_DEV      : develop の組織の接続ユーザー名
+#     SF_INSTANCE_URL_PROD : main の組織の接続 URL（https://login.salesforce.com 等）
+#     SF_INSTANCE_URL_STG  : staging の組織の接続 URL
+#     SF_INSTANCE_URL_DEV  : develop の組織の接続 URL
+#     SLACK_CHANNEL_ID     : 通知先 Slack チャンネル ID
+#     SF_TOOLS_BRANCH      : clone する sf-tools のブランチ（任意。未設定なら main。Phase 9 は development のときだけ登録する）
+#
+# 【補足】
+#   - ジョブ「リリース実行」がスキップされたとき（デプロイ対象がない・マージせずに閉じた）は、Slack に通知しない
+#   - workflow_dispatch: main / staging / develop 以外のブランチで実行すると、ジョブ「リリース実行」は、スキップされる
+#     （ジョブ「リリース対象確認」が ::warning を出す。Slack には通知しない）。3 つのブランチで実行すると、実行したブランチの
+#     名前が、そのまま、マージ先（ログインする組織・--target）とソースブランチ（branch_name.txt）になる。sf-release.sh は
+#     sf-tools/release/<そのブランチ名>/ を対象にするため、そのフォルダに deploy-target.txt・remove-target.txt のどちらかが
+#     ないと、失敗する。両方に対象がない（コメント・空行だけ）と、組織にデプロイせずに成功（0）で終わり、Slack には
+#     「リリース成功」と通知される
+#   - 同時実行の制御: 続けてマージしても、同じマージ先へのリリースは、並行せず、1 つずつ動く（待機中の実行は、取り消されない。
+#     ただし、待機が 100 を超えると、GitHub の仕様で、それ以降の実行は取り消される）。マージ先が違うリリースは、並行して動く
 # ==============================================================================
 name: "[release] デプロイ"
 on:
@@ -35,7 +96,7 @@ on:
 
 jobs:
   check-branch:
-    name: 対象ファイル確認
+    name: リリース対象確認
     runs-on: ubuntu-latest
     outputs:
       skip: ${{ steps.check.outputs.skip }}
@@ -50,9 +111,15 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
         run: |
-          # workflow_dispatch の場合はスキップしない
+          # workflow_dispatch の場合は、デプロイ対象で判定しない（skip=false）。
+          #   main / staging / develop 以外のブランチで実行したときは、ジョブ「リリース実行」の if: でスキップされるため、::warning で知らせる
+          #   （GITHUB_REF_NAME は、ランナーが設定する、実行したブランチ名）
           if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
             echo "skip=false" >> "$GITHUB_OUTPUT"
+            case "$GITHUB_REF_NAME" in
+              main|staging|develop) ;;
+              *) echo "::warning title=リリースしません::手動の実行は、main / staging / develop のブランチでだけリリースします。このブランチでは、ジョブ「リリース実行」はスキップされます。" ;;
+            esac
             exit 0
           fi
           HEAD="$HEAD_REF"
@@ -71,8 +138,19 @@ jobs:
   release:
     name: リリース実行
     needs: check-branch
-    if: (github.event.pull_request.merged == true || github.event_name == 'workflow_dispatch') && needs.check-branch.outputs.skip != 'true'
+    # PR がマージされた、または、main / staging / develop での手動の実行（workflow_dispatch）のときだけ、リリースする。
+    #   手動の実行を 3 つのブランチに限るのは、ほかのブランチでは、対応する組織にログインしないまま、sf-release.sh が動くため
+    if: (github.event.pull_request.merged == true || (github.event_name == 'workflow_dispatch' && contains(fromJSON('["main","staging","develop"]'), github.ref_name))) && needs.check-branch.outputs.skip != 'true'
     runs-on: ubuntu-latest
+    # 同じ組織（マージ先のブランチ）へのリリースは、1 つずつ動かす（並行させない。待機の順は、原則、先に起動したものから。
+    #   GitHub の仕様で、順序は保証されない）。
+    #   queue: max で、待機中の実行を置き換えずに、すべて残す（既定の queue: single では、待機中の実行が、より新しい実行に
+    #   置き換えられて取り消され、そのマージのリリースが、行われないまま終わるため。各実行は、自分のソースブランチの
+    #   リストだけをリリースする）。実行中のものは取り消さない
+    concurrency:
+      group: release-${{ github.event.pull_request.base.ref || github.ref_name }}
+      cancel-in-progress: false
+      queue: max
 
     steps:
       # --------------------------------------------------------------------------
@@ -109,7 +187,7 @@ jobs:
           echo "| 実行日時 | $(TZ='Asia/Tokyo' date '+%Y-%m-%d %H:%M:%S JST') |" >> $GITHUB_STEP_SUMMARY
 
       # --------------------------------------------------------------------------
-      # Step 2: マージ先ブランチをチェックアウト
+      # Step 2: マージ先ブランチ（workflow_dispatch のときは、実行したブランチ）の最新をチェックアウト
       # --------------------------------------------------------------------------
       - name: ソースコードを取得
         uses: actions/checkout@v4
@@ -132,7 +210,8 @@ jobs:
         run: npm install --global @salesforce/cli
 
       # --------------------------------------------------------------------------
-      # Step 5: マージ先ブランチに対応する Salesforce 組織への認証
+      # Step 5: マージ先ブランチに対応する Salesforce 組織への認証（main / staging / develop のどれか 1 つだけが動く。
+      #   ジョブの if: で、マージ先は、この 3 つのどれかに限られる）
       # --------------------------------------------------------------------------
       - name: main の組織にログイン（JWT）
         if: ${{ (github.event.pull_request.base.ref || github.ref_name) == 'main' }}
@@ -180,13 +259,14 @@ jobs:
           rm -f /tmp/server.key
 
       # --------------------------------------------------------------------------
-      # Step 6: sf-tools のクローン
+      # Step 6: sf-tools のクローン（公開リポジトリ。Token なし。Variable SF_TOOLS_BRANCH のブランチ、未設定なら main）
       # --------------------------------------------------------------------------
       - name: 自動化ツール（sf-tools）を取得
         run: git clone -b ${{ vars.SF_TOOLS_BRANCH || 'main' }} https://github.com/tama-create/sf-tools.git ~/sf-tools
 
       # --------------------------------------------------------------------------
-      # Step 7: Salesforce へのリリース実行
+      # Step 7: Salesforce へのリリース実行（main → prod、staging → staging、develop → develop の組織。
+      #   sf-tools/release/branch_name.txt に、ソースブランチ名を書いてから、sf-release.sh --release を実行する。失敗はジョブの失敗）
       # --------------------------------------------------------------------------
       - name: Salesforce にリリースを実行
         env:
@@ -208,7 +288,8 @@ jobs:
           ~/sf-tools/bin/sf-release.sh --release --no-open --target "$TARGET"
 
       # --------------------------------------------------------------------------
-      # Step 8: Slack への結果通知
+      # Step 8: Slack への結果通知（前のステップが失敗しても実行する。ジョブの状態 job.status で、成功・失敗を書き分ける。
+      #   送信の失敗は ::warning にし、このステップは失敗にしない）
       # --------------------------------------------------------------------------
       - name: Slack に結果を通知
         if: always()
@@ -256,9 +337,13 @@ jobs:
           MESSAGE="${ICON} *Salesforce Release ${STATUS_TEXT}*\n• リリース先: ${ENV_LABEL}\n• ブランチ: \`${BRANCH}\`${PR_TEXT}\n• 実行日時: ${DATETIME}\n• <${RUN_URL}|Actions ログを見る>"
           PAYLOAD="{\"channel\": \"${SLACK_CHANNEL_ID}\", \"text\": \"${MESSAGE}\"}"
 
-          RESPONSE=$(curl -s -X POST "https://slack.com/api/chat.postMessage" \
+          # 送信の失敗（curl の失敗・応答の ok が true でない（Token の誤り・Bot がチャンネルにいないなど））は、::warning を出すだけで、
+          #   このステップは失敗にしない（リリースの成否を、通知の失敗で変えないため）。応答の JSON は、Node で読む
+          RESPONSE=$(curl -sS -X POST "https://slack.com/api/chat.postMessage" \
             -H "Authorization: Bearer ${SLACK_BOT_TOKEN}" \
             -H "Content-Type: application/json" \
-            -d "$PAYLOAD")
-
-          echo "Slack response: $RESPONSE"
+            -d "$PAYLOAD" || true)   # 意図的なエラー無視（下で応答を確かめ、::warning にする）
+          echo "Slack の応答: $RESPONSE"
+          if ! node -e 'process.exit(JSON.parse(process.argv[1]).ok === true ? 0 : 1)' "$RESPONSE" 2>/dev/null; then
+            echo "::warning title=Slack 通知の失敗::Slack への通知が、失敗しました（応答の ok が true ではありません）。Secret SLACK_BOT_TOKEN・Variable SLACK_CHANNEL_ID を確認してください。"
+          fi

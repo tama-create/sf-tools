@@ -18,7 +18,9 @@
 #
 # 【補足】
 #   - SF_INIT_ENV_FILE（未設定時は ${PWD}/.sf-init.env）があれば source する（この Phase では、その値を使わない）
-#   - 状態ファイルに何も書かない。sf-init.sh は、続きから再開するときも、この Phase を毎回実行する
+#   - 状態ファイルに何も書かない。sf-init.sh は、通常の実行（はじめから）と、「続きをやる」（前回の続きから再開。
+#     RESUMED=1）のときに、この Phase を実行する（「続きをやる」では、続きの Phase の前に足す）。
+#     --resume N（N が 2 以上）・--only N（N が 2 以上）のときは、実行しない
 #   - 終了コード: 0 = OK / 1 = die
 # ==============================================================================
 
@@ -27,7 +29,7 @@ PHASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SF_TOOLS_DIR="${SF_TOOLS_DIR:-$(dirname "$(dirname "$PHASE_DIR")")}"
 
 readonly SCRIPT_NAME="sf-init"
-mkdir -p "$HOME/sf-tools/logs" 2>/dev/null || true
+mkdir -p "$HOME/sf-tools/logs" 2>/dev/null || true  # run 不使用: common.sh の読み込み前（run が未定義）
 readonly LOG_FILE="$HOME/sf-tools/logs/${SCRIPT_NAME}.log"
 readonly LOG_MODE="APPEND"  # 司令塔が NEW で初期化済みのため追記
 export SF_INIT_MODE=1
@@ -45,7 +47,7 @@ SF_INIT_ENV_FILE="${SF_INIT_ENV_FILE:-${PWD}/.sf-init.env}"
 log "HEADER" "環境チェック"
 
 # 管理者用の作業フォルダ（admin）からのみ実行を許可
-local_dir=$(basename "$PWD")
+local_dir=$(basename "$PWD")  # VAR=$(cmd) のため run 不使用
 if [[ "$local_dir" != "admin" ]]; then
     die "このスクリプトは、管理者用の作業フォルダ（admin）から実行してください。
 実行方法（通常は、sf-init.sh が、このフォルダを作って移動します）:
@@ -57,7 +59,7 @@ log "INFO" "必要なツールを確認中..."
 missing=0
 for cmd in git gh node npm sf code; do
     if command -v "$cmd" &>/dev/null; then
-        ver=$("$cmd" --version 2>&1 | head -1)
+        ver=$("$cmd" --version 2>&1 | head -1)  # VAR=$(cmd) のため run 不使用（表示用の版の取得）
         log "INFO" "  ✅ $cmd: $ver"
     else
         log "ERROR" "  ❌ $cmd が見つかりません"

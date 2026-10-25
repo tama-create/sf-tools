@@ -156,10 +156,14 @@ case "$1 $2" in
         esac
         # Ruleset 一覧: MOCK_GH_RULESETS=error → エラー本文を標準出力に出して exit 1（無料プランの 403 を再現）、
         #               MOCK_GH_RULESETS=id    → 既存の Ruleset の ID（12345）を返す
+        #               MOCK_GH_RULESETS=ids   → 同名の Ruleset が 2 つ（12345・12346）
+        #               MOCK_GH_RULESETS=silent → 何も出力せずに exit 1（失敗を「同名なし」と区別できるか）
         if [[ "$2" == */rulesets ]]; then
             case "${MOCK_GH_RULESETS:-none}" in
                 error) echo '{"message":"Upgrade to GitHub Pro or make this repository public to enable this feature.","status":"403"}'; exit 1 ;;
                 id)    echo "12345"; exit 0 ;;
+                ids)   printf '12345\n12346\n'; exit 0 ;;
+                silent) exit 1 ;;
                 *)     exit 0 ;;
             esac
         fi

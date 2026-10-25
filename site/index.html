@@ -18,37 +18,37 @@
   <p class="lead">Salesforce の変更を、安全に、決まった手順で、本番に届けるための道具です。</p>
   <p>「変更を作る → 確かめる → 本番に反映する」という毎日のくり返しを、コマンドと自動の仕組みに任せられます。変更は、本番に出る前に、自動でチェックされます。うっかりミスや、反映のし忘れを防げます。</p>
   <ul>
-    <li>🔑 <strong>最初の準備</strong>は、プロジェクト管理者が、1 回だけ行います。</li>
-    <li>💻 <strong>毎日の作業</strong>で使うのは、おもに開発者です。</li>
+    <li>🔑 <strong>最初の準備</strong>（プロジェクトのリポジトリ作り）は、プロジェクト管理者が、<strong>先に</strong> 1 回だけ行います。そのあとは、ときどきの保守だけです。</li>
+    <li>💻 <strong>毎日の作業</strong>で使うのは、おもに開発者です。管理者の準備が終わってから始めます。コマンドは、<strong>ランチャー</strong>（番号で選ぶメニュー）から使うのがおすすめです。</li>
     <li>👀 業務担当の方が、コマンドを使う必要は、ほとんどありません。Slack に届く結果の通知を見る形で、関わります。</li>
   </ul>
-  <p>しくみは、シェルスクリプト（コマンド）の集まりです。パソコンの <code>~/sf-tools</code> に置いて、各プロジェクトのフォルダから呼び出します。変更の検証とリリースは、GitHub Actions（GitHub 上の自動処理）が行います。</p>
+  <p>しくみは、シェルスクリプト（コマンド）の集まりです。パソコンの <code>~/sf-tools</code> に置いて、各プロジェクトのフォルダから呼び出します。共有の環境（本番など）への検証とリリースは、GitHub Actions（GitHub 上の自動処理）が行います。手元のパソコンから試せるのは、自分用の組織（個人の Sandbox など）だけです。</p>
 </div>
 
 <h2 id="flow">まず、全体の流れ</h2>
 <div class="box warn">
   <div class="title">順番が決まっています。管理者の準備が先です</div>
-  <p>sf-tools は、<strong>管理者が、sf-tools の雛形で作った、決まった形のリポジトリ（<code>force-XXXX</code>）</strong>の上でしか動きません。そのため、<strong>最初に、管理者が、リポジトリを作ります。開発者は、それが終わってから始めます。同時には進められません。</strong></p>
+  <p>sf-tools は、<strong>管理者が、sf-tools の雛形で作った、決まった形のリポジトリ（<code>force-XXXX</code>）</strong>の上でしか動きません。そのため、<strong>最初に、管理者が、リポジトリを作ります。開発者は、それが終わってから始めます。管理者と開発者の作業は、並行して進められません。</strong>リポジトリがまだないうちに、開発者が <code>sf-job.sh</code> を実行しても、止まります。</p>
 </div>
 <figure class="diagram">
   <p class="lane-label">🔑 ① 管理者（最初に、1 回だけ）</p>
   <div class="flow">
     <div class="node admin"><span class="who">🔑 管理者</span><strong>sf-init.sh を実行</strong><small>雛形から、リポジトリ force-XXXX を作る</small></div>
     <div class="arrow">→</div>
-    <div class="node admin"><span class="who">🔑 管理者</span><strong>接続と設定を整える</strong><small>Salesforce 組織・認証情報・ブランチの保護・自動処理</small></div>
+    <div class="node admin"><span class="who">🔑 管理者</span><strong>接続と設定を整える</strong><small>Salesforce 組織・認証情報・ブランチの保護・自動処理（sf-init.sh が、順に案内する）</small></div>
     <div class="arrow">→</div>
     <div class="node ok"><span class="who">✅ できあがり</span><strong>開発者に連絡する</strong><small>リポジトリ名（force-XXXX）を知らせる</small></div>
   </div>
   <div class="gate">⛔ ここが終わるまで、開発者は、何もできません</div>
   <p class="lane-label">💻 ② 開発者（毎日）</p>
   <div class="flow">
-    <div class="node dev"><span class="who">💻 開発者</span><strong>sf-job.sh</strong><small>新しい作業を始める</small></div>
+    <div class="node dev"><span class="who">💻 開発者</span><strong>sf-job.sh</strong><small>新しい作業を始める（ランチャーが開く）</small></div>
     <div class="arrow">→</div>
-    <div class="node dev"><span class="who">💻 開発者</span><strong>ランチャーで進める</strong><small>確認 → 送信（メニューの番号を押すだけ）</small></div>
+    <div class="node dev"><span class="who">💻 開発者</span><strong>ランチャーで進める</strong><small>確認 → 自分の組織で試す → 送信 → PR（メニューの番号を押すだけ）</small></div>
     <div class="arrow">→</div>
-    <div class="node auto"><span class="who">🤖 自動</span><strong>自動でチェック</strong><small>GitHub Actions が検証</small></div>
+    <div class="node auto"><span class="who">🤖 自動</span><strong>自動でチェック</strong><small>PR を作ると、GitHub Actions が検証</small></div>
     <div class="arrow">→</div>
-    <div class="node auto"><span class="who">🤖 自動</span><strong>本番へ反映</strong><small>PR をマージすると、自動で</small></div>
+    <div class="node auto"><span class="who">🤖 自動</span><strong>各段階の組織へ反映</strong><small>PR をマージすると、自動で（開発 → 検証 → 本番の順）</small></div>
   </div>
   <figcaption>実線の箱は人が行うこと、点線の箱は自動で行われることです。業務担当の方は、Slack に届く結果の通知を見る形で関わります。</figcaption>
 </figure>
@@ -95,11 +95,12 @@ echo 'export PATH="$HOME/sf-tools/bin:$PATH"' &gt;&gt; ~/.bashrc    # Mac は ~/
     <p>そのあと、ターミナルを開き直します。</p>
   </li>
   <li>
-    <p>プロジェクトの作業フォルダで、新しい作業を始めます。ブランチの名前を入力すると、作業用のコピーの準備から、VS Code の起動までが進みます。</p>
-    <pre><code>sf-job.sh</code></pre>
+    <p>作業フォルダ（作業用のフォルダを置く場所。おすすめは <code>~/sf</code> のような短い名前）で、新しい作業を始めます。ジョブ名（作業の名前。ブランチの名前になります。例: <code>JOB-20261025</code>）を入力すると、作業用のブランチとコピーの準備、Salesforce の自分用の組織へのログイン、VS Code の起動までが進みます。初めてのときは、プロジェクトの名前（<code>force-XXXX</code> の <code>XXXX</code>）も聞かれます（<a href="guide/basics.html">初めての作業</a>）。</p>
+    <pre><code>mkdir -p ~/sf &amp;&amp; cd ~/sf
+sf-job.sh</code></pre>
   </li>
   <li>
-    <p>作業を始めると、VS Code が開き、ターミナルには<strong>ランチャー（メニュー）</strong>が自動で開きます。変更を書いたら、ランチャーの番号を押して進めます（<code>[1]</code> で確認、<code>[2]</code> で変更を送る）。コマンドを覚える必要は、ありません。</p>
+    <p>作業を始めると、VS Code が開き、ターミナルには<strong>ランチャー（メニュー）</strong>が自動で開きます。変更を書いたら、ランチャーの番号のキーを押して進めます（<code>[1]</code> で確認、<code>[4]</code> で自分の組織で試す、<code>[2]</code> で変更を送る、<code>[3]</code> で次の PR を出す）。コマンドを覚える必要は、ありません。</p>
     <pre><code>  [1] Check      ターゲットファイルの構文チェック
   [2] Push       変更をコミット &amp; プッシュ
   [3] Next       次の PR 先ブランチを確認
@@ -108,8 +109,8 @@ echo 'export PATH="$HOME/sf-tools/bin:$PATH"' &gt;&gt; ~/.bashrc    # Mac は ~/
   </li>
 </ol>
 <div class="box ok">
-  <div class="title">Windows と Mac で動きます</div>
-  <p>Windows は Git Bash、Mac は標準のターミナルで使えます。確かめた環境の一覧は、<a href="guide/install.html#env">動作環境</a>にあります。</p>
+  <div class="title">Windows・Mac・WSL で、動作を確かめています</div>
+  <p>Windows は Git Bash（PowerShell・コマンドプロンプトでは動きません）、Mac は標準のターミナル、WSL は Ubuntu で使えます。実際に動かして確かめた環境の一覧は、<a href="guide/install.html#env">動作環境</a>にあります。</p>
 </div>
 
 </main>

@@ -11,7 +11,7 @@
 #   1.   JWT 用の秘密鍵・証明書（~/.sf-jwt/<REPO_NAME>/server.key・server.crt）を用意する
 #          - 両方あるとき: ask_yn で再利用するかを確認する
 #              Y: そのまま使う（証明書の発行先（subject）が空なら、秘密鍵はそのままで、証明書だけを作り直す）
-#              N: 両方を削除して、generate_jwt_cert で新しく作る（秘密鍵も変わる）。手順 4 の「前回完了済み」のスキップは、
+#              N: 両方を削除して（削除の失敗は die）、generate_jwt_cert で新しく作る（秘密鍵も変わる）。手順 4 の「前回完了済み」のスキップは、
 #                 この実行ではしない（古い証明書が残る組織が出ないように、完了済みの段階も、設定しなおす）
 #              q: die
 #          - どちらかがないとき: generate_jwt_cert で作る（RSA 2048 ビット・PKCS#1、自己署名 3650 日、CN=sf-jwt-<REPO_NAME>）
@@ -20,7 +20,8 @@
 #            （sf-init.sh --legacy-connected-app）で、APP_TYPE が 1 以外なら die。
 #            APP_TYPE=1 が保存済みで、SF_INIT_LEGACY_CONNECTED_APP=1 の指定がないときは、1 のまま使う
 #          - ないとき: SF_INIT_LEGACY_CONNECTED_APP=1 なら 1（接続アプリケーション）、それ以外は 2（外部クライアント
-#            アプリケーション）とし、状態ファイルに追記する
+#            アプリケーション）とし、状態ファイルに追記する（追記の失敗は die）
+#          - APP_TYPE が 1・2 以外（状態ファイルの値）なら die
 #   2.   APP_TYPE=1: 接続アプリケーションの設定手順を表示し、Enter を待つ（q は die）。
 #        APP_TYPE=2: 自動で作成する旨を表示するだけ
 #   3.   server.key（CR を除去）を base64 の 1 行にして、Secret SF_PRIVATE_KEY に登録する（毎回上書き。失敗は die）
@@ -32,7 +33,8 @@
 #              ・gh secret list に SF_CONSUMER_KEY_<接尾辞> がある（一覧を取得できなければ、スキップしない）
 #          - APP_TYPE=1: register_jwt_secret（init-common.sh。コンシューマー鍵・ユーザー名を手動で入力）
 #            APP_TYPE=2: register_jwt_secret_eca（init-common.sh。ブラウザでログインし、外部クライアントアプリを
-#            deploy で作成して、コンシューマー鍵を retrieve で取得する）
+#            deploy で作成して、コンシューマー鍵を retrieve で取得する）。どちらも、失敗は、関数の中で die する。
+#            関数が 0 以外を返したときも、その段階で die する（以降の段階に進まない）
 #          - 成功したら、SF_INIT_TIER_RESUME=1 のときだけ、進捗ファイルに SF_INIT_DONE_TIER_<接尾辞>=1 を追記する
 #
 # 【前提条件】
@@ -42,8 +44,8 @@
 #   - openssl・sf（npm 版）・gh
 #
 # 【補足】
-#   - ブラウザでのログイン（sf org login web）は、約 2 分で時間切れになる（失敗・時間切れ・ブラウザを閉じたときは、終了コードが 0 以外になり die。
-#     画面にも、その旨の警告を出す）
+#   - APP_TYPE=2 のブラウザでのログイン（sf org login web）は、約 2 分で時間切れになる（失敗・時間切れ・ブラウザを閉じたときは、
+#     終了コードが 0 以外になり die。画面にも、その旨の警告を出す）
 #   - 登録する Secrets: SF_PRIVATE_KEY（全段階で共通）/ SF_CONSUMER_KEY_PROD・_STG・_DEV
 #   - 登録する Variables: SF_USERNAME_PROD・_STG・_DEV / SF_INSTANCE_URL_PROD・_STG・_DEV /
 #     SF_ORG_ID_*・SF_ORG_NAME_*・SF_ORG_KIND_*・SF_ORG_CHECKED_*（組織の ID・名前・種類・確認日時。
@@ -54,6 +56,12 @@
 #     種類を判定できない組織も、main 以外にはつなげない。APP_TYPE=2 は deploy の前に、APP_TYPE=1 は JWT 接続テストの
 #     あと・登録の前に判定する
 #   - JWT 接続テストに失敗したときは、ask_yn で「テストをスキップして登録だけ行う」かを選べる（Y で登録、N / q は die）
+#   - 環境変数:
+#       SF_INIT_JWT_RETRIES  : APP_TYPE=2 の JWT 接続テストの最大の試行回数（既定 20）
+#       SF_INIT_JWT_INTERVAL : 試行の間の待ち時間（秒。既定 30）。待つのは試行の間だけで、既定では、最大
+#                              (20 - 1) × 30 = 570 秒（約 10 分）待つ（作成したアプリの反映待ち）
+#       SF_INIT_LOGIN_URL_<PROD|STG|DEV> : ログイン先（上記）
+#       SF_INIT_LEGACY_CONNECTED_APP=1   : 従来の接続アプリケーション（手順 1.5）
 #   - 手順 1 で N を選んで鍵を作り直したときは、手順 4 の「前回完了済み」のスキップをしない（SF_INIT_TIER_RESUME=0 にする）。
 #     完了済みの段階も、設定しなおす（Secret SF_PRIVATE_KEY は新しい秘密鍵に置き換わるため、組織のアプリに以前の証明書が
 #     残ると、JWT 接続ができなくなる）
@@ -65,6 +73,7 @@
 #         問題が起きた場合は、同じアプリを修正せず、別名で新規作成すること
 #       ・Developer Edition 組織では、事前承認（pre-authorization）の反映が遅れる・失敗する場合がある。
 #         JWT Bearer Flow は Production / Sandbox 組織での使用を推奨する
+#   - 終了コード: 0 = OK / 1 = die
 # ==============================================================================
 
 # SF_TOOLS_DIR は sf-init.sh（司令塔）から export される
@@ -72,7 +81,7 @@ PHASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SF_TOOLS_DIR="${SF_TOOLS_DIR:-$(dirname "$(dirname "$PHASE_DIR")")}"
 
 readonly SCRIPT_NAME="sf-init"
-mkdir -p "$HOME/sf-tools/logs" 2>/dev/null || true
+mkdir -p "$HOME/sf-tools/logs" 2>/dev/null || true  # run 不使用: common.sh の読み込み前（run が未定義）
 readonly LOG_FILE="$HOME/sf-tools/logs/${SCRIPT_NAME}.log"
 readonly LOG_MODE="APPEND"  # 司令塔が NEW で初期化済みのため追記
 export SF_INIT_MODE=1
@@ -144,7 +153,8 @@ if [[ -f "${JWT_DIR}/server.key" && -f "${JWT_DIR}/server.crt" ]]; then
     else
         # N を選んだ場合は既存ファイルを削除してから再生成
         # （削除しないと generate_jwt_cert 内のスキップ判定に引っかかるため）
-        rm -f "${JWT_DIR}/server.key" "${JWT_DIR}/server.crt"
+        run rm -f "${JWT_DIR}/server.key" "${JWT_DIR}/server.crt" \
+            || die "既存の証明書を削除できません: ${JWT_DIR}/"
         generate_jwt_cert "$JWT_DIR" "$REPO_NAME"
         # 秘密鍵が新しくなる（Step 3 で SF_PRIVATE_KEY が置き換わる）。前回完了した段階をスキップすると、その段階の組織の
         # アプリには以前の証明書が残り、新しい秘密鍵と合わなくなる。すべての段階を設定しなおす（_tier_done は、この値を見る）
@@ -166,7 +176,7 @@ log "HEADER" "Salesforce アプリの種類"
 #   既定: 外部クライアントアプリケーション（[2] Salesforce 推奨の新方式。自動で作成する）
 #   従来の接続アプリケーション（[1] 今後廃止予定）は、`sf-init.sh --legacy-connected-app`（環境変数
 #   SF_INIT_LEGACY_CONNECTED_APP=1）を指定したときだけ
-#   --resume 時は、.sf-init.env に保存済みの種別を再利用する。--legacy-connected-app の指定があり、保存済みの種別が
+#   再実行（--resume・続きから・--only 10）では、.sf-init.env に保存済みの種別を再利用する。--legacy-connected-app の指定があり、保存済みの種別が
 #   1 以外のときだけ、中断する（保存済みが 1 で、指定がないときは、1 のまま使う）
 want_type="2"
 [[ "${SF_INIT_LEGACY_CONNECTED_APP:-}" == "1" ]] && want_type="1"
@@ -178,7 +188,9 @@ if [[ -n "${APP_TYPE:-}" ]]; then
 else
     APP_TYPE="$want_type"
     # .sf-init.env に書き出して --resume 時に再利用
-    echo "APP_TYPE=${APP_TYPE}" >> "$SF_INIT_ENV_FILE"
+    # run 不使用: 状態ファイルへの追記（リダイレクト。終了コードを直接確認する）
+    echo "APP_TYPE=${APP_TYPE}" >> "$SF_INIT_ENV_FILE" \
+        || die "状態ファイルに書き込めません: ${SF_INIT_ENV_FILE}"
 fi
 
 case "$APP_TYPE" in
@@ -217,20 +229,21 @@ log "HEADER" "各組織の JWT 認証情報を設定します。"
 # アプリ種別に応じた組織ごとの登録
 #   接続アプリ（1）      : コンシューマーキー・ユーザー名を入力 → JWT 接続テスト → 登録
 #   外部クライアントアプリ（2）: 自動作成（deploy）→ コンシューマー鍵を自動取得 → JWT 接続テスト → 登録
-#   段階ごとの再開: 完了した段階は、進捗ファイル（.sf-init.progress）に SF_INIT_DONE_TIER_<接尾辞>=1 を記録する。
+#   段階ごとの再開: 完了した段階は、進捗ファイル（SF_INIT_PROGRESS_FILE。admin/.sf-init-XXXX.progress）に
+#   SF_INIT_DONE_TIER_<接尾辞>=1 を記録する（SF_INIT_TIER_RESUME=1 のときだけ）。
 #   再実行では、記録があり、登録した Secret（SF_CONSUMER_KEY_<接尾辞>）が、いまもあるときだけ、その段階をスキップする
 #   （ブラウザのログインを、やり直さなくてよいように）。付け替えるときは、sf-init.sh --reconnect <段階>。
 #   進捗ファイルは、Phase 10 が成功したとき、sf-init.sh が書き直す（段階の記録は、消える）。--only 10 では、使わない
 _tier_done() {
     [[ "${SF_INIT_TIER_RESUME:-}" == "1" && -f "${SF_INIT_PROGRESS_FILE:-}" ]] || return 1
-    grep -qx "SF_INIT_DONE_TIER_${1}=1" "$SF_INIT_PROGRESS_FILE" 2>/dev/null || return 1
+    grep -qx "SF_INIT_DONE_TIER_${1}=1" "$SF_INIT_PROGRESS_FILE" 2>/dev/null || return 1  # 条件チェックのため run 不使用
     local list
     # Secret の一覧を取得できないとき（権限不足・通信エラー）は、「ない」と区別して、理由を表示し、その段階を実行する（安全側）
     if ! list=$(gh secret list -R "$REPO_FULL_NAME" 2>/dev/null); then  # 条件チェック（取得のため run 不使用）
         log "INFO" "  Secret の一覧を確認できないため、${1} の段階は、スキップせずに、実行します。"
         return 1
     fi
-    printf '%s\n' "$list" | awk '{print $1}' | tr -d '\r' | grep -qx "SF_CONSUMER_KEY_${1}"
+    printf '%s\n' "$list" | awk '{print $1}' | tr -d '\r' | grep -qx "SF_CONSUMER_KEY_${1}"  # 条件チェック（戻り値）のため run 不使用
 }
 _register_org() {
     local alias="$1" suffix="$2" label="$3"
@@ -250,17 +263,18 @@ _register_org() {
     fi
 }
 
+# 段階ごとの登録の戻り値を確かめる（0 以外なら、以降の段階に進まず、中断する）
 # 10-4-1. メイン組織（必須。ログイン先は URL で選ぶ）
-_register_org "prod" "PROD" "メイン組織"
+_register_org "prod" "PROD" "メイン組織" || die "メイン組織（PROD）の設定に失敗しました。"
 
 # 10-4-2. ステージング組織（2 階層以上）
 if [[ $BRANCH_COUNT -ge 2 ]]; then
-    _register_org "staging" "STG" "ステージング組織"
+    _register_org "staging" "STG" "ステージング組織" || die "ステージング組織（STG）の設定に失敗しました。"
 fi
 
 # 10-4-3. 開発組織（3 階層）
 if [[ $BRANCH_COUNT -ge 3 ]]; then
-    _register_org "develop" "DEV" "開発組織"
+    _register_org "develop" "DEV" "開発組織" || die "開発組織（DEV）の設定に失敗しました。"
 fi
 
 log "SUCCESS" "完了: JWT 認証情報の設定 OK。"

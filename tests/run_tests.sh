@@ -3,8 +3,9 @@
 # run_tests.sh - sf-tools テストスイート実行スクリプト
 # ==============================================================================
 # 使い方: bash tests/run_tests.sh [テストファイル名]
-#   引数なし → 全テストを順番に実行
+#   引数なし → 全テストを実行（既定は並列。--serial で 1 つずつ）
 #   引数あり → 指定したテストのみ実行（例: bash run_tests.sh test_sf-hook.sh）
+#   --changed           : 変更したファイル（git の差分）に対応するテストだけを実行する（対応は、下の case 文）
 #   --jobs N / --serial : 同時に動かすテストファイルの数（既定: CPU の数。環境変数 SF_TEST_JOBS でも指定できる。
 #                         --serial は 1 = 1 つずつ）。時間のかかるファイルから先に起動する（全体の時間を短くするため）
 #   --shard I/N         : テストファイルを N 組に分け、I 番目（1 始まり）の組だけを実行する（GitHub Actions で、複数のジョブに分けて、並列に動かすため。
@@ -334,7 +335,7 @@ if [[ "${1:-}" == "--changed" ]]; then
             config/metadata-capability.txt)
                 _changed_tests+=("test_sf-check.sh")
                 ;;
-            lib/verify-common.sh)
+            lib/verify-common.sh|lib/verify-samples.sh)
                 _changed_tests+=("test_verify.sh")
                 ;;
             phases/init/verify.sh)

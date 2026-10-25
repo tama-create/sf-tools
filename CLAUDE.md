@@ -22,9 +22,9 @@
 |---|---|
 | 変更前 | 方針・内容を提示 → GO を待つ |
 | 変更中 | `run` ラッパー必須・日本語コメント・UTF-8/LF 維持 |
-| 変更後 | 手元は `bash tests/run_tests.sh --changed`（変えたファイルのテスト）だけ → PASS したら mm を依頼。**全件は手元で回さない（CI が正）** |
-| mm 後 | push で、GitHub Actions が全件（Windows・macOS・Linux）と shellcheck を自動で動かす。**Claude が結果を確認して報告する。赤なら直して、もう一度 mm を依頼する**（約 12 分） |
-| 検証 | **e2e は GitHub Actions（`e2e.yml`）の結果が正。** 配布物（下記）・`tests/e2e/` が変わった `development` への push で、自動で動く（Windows の全部 約 25 分 → macOS のクライアント側 約 5 分）。**Claude が結果を確認して報告する。手元では動かさない**（同じ 3 つの組織を取り合う。確認の内容は `doc/dev-reference.md` 9.6）。ユーザーに手動の確認を頼むのは、e2e で見えないことだけ |
+| 変更後 | **変えた箇所のコメント（冒頭コメント・コード本体の中のコメント）を見直す（2.5）。** 手元は `bash tests/run_tests.sh --changed`（変えたファイルのテスト）だけ → PASS したら mm を依頼。**全件は手元で回さない（CI が正）** |
+| mm 後 | push で、GitHub Actions が全件（Windows・macOS・Linux）と shellcheck を自動で動かす。**Claude が結果を確認して報告する。赤なら直して、もう一度 mm を依頼する**（目安 約 11 分。実績 7〜20 分。ランナーの空き待ちで延びる） |
+| 検証 | **e2e は GitHub Actions（`e2e.yml`）の結果が正。** 配布物（下記）・`tests/e2e/`・`e2e.yml` が変わった `development` への push で、自動で動く（目安。実績: Windows の全部 25〜50 分 → macOS のクライアント側 5〜6 分。前の実行が終わるまで待つ）。**Claude が結果を確認して報告する。手元では動かさない**（同じ 3 つの組織を取り合う。確認の内容は `doc/dev-reference.md` 9.6）。ユーザーに手動の確認を頼むのは、e2e で見えないことだけ |
 | リリース | CI 全緑と検証 OK の報告後に rr を依頼 |
 
 > **mm の前に、`--changed` の PASS は必須。PASS 確認なしの mm 依頼は禁止。全件は、mm 後の CI の結果が正（手元の Windows は遅く、全件は 2 時間以上かかることもある。手元で全件が必要なときだけ、WSL で `run_tests.sh`）。CI が赤のまま、PR・rr を進めない。**
@@ -122,11 +122,11 @@ git pull origin main                     # main の最新を取り込む
 - ログレベルは `INFO` / `SUCCESS` / `WARNING` / `ERROR` / `FATAL` を使い分けること
   - `FATAL` は `die` が内部で使用する。直接呼び出し不可
   - **`die` のメッセージに復旧案内を含めないこと**（事実のみ記載。2次災害防止）
-- **Bash 3.2 で動くこと（macOS 標準の `/bin/bash`。追加のインストールなしで動かすため）**。Bash 4 以降の機能は使わない: `local -n`（→ `set_var`）・`declare -A`（→ 配列）・`mapfile`（→ `while read`）・`${x^}` / `${x,,}`（→ `tr`）・`wait -n`・`|&`・`$( )` の中の `case`。`timeout` は使わず `run_with_timeout`（`lib/platform.sh`）。`tests/test_common.sh` の `test_bash32_compat` が検査する。詳細は `doc/dev-reference.md` セクション1 参照
+- **Bash 3.2 で動くこと（macOS 標準の `/bin/bash`。追加のインストールなしで動かすため）**。Bash 4 以降の機能は使わない: `local -n`（→ `set_var`）・`declare -A`（→ 配列）・`mapfile` / `readarray`（→ `while read`）・`${x^}` / `${x,,}`（→ `tr`）・`wait -n`・`|&` / `&>>`・`$( )` の中の `case`。`timeout` は使わず `run_with_timeout`（`lib/platform.sh`）。`tests/test_common.sh` の `test_bash32_compat` が検査する。詳細は `doc/dev-reference.md` セクション1 参照
 
 ### 2.3 インタラクティブ入力
 
-全インタラクティブ入力は `lib/common.sh` 定義の関数を使うこと。スクリプト内での独自実装・重複定義は禁止。
+全インタラクティブ入力は `lib/common.sh` が提供する関数（実体は `lib/input.sh`）を使うこと。スクリプト内での独自実装・重複定義は禁止。
 
 | 関数 | 用途 |
 |---|---|
@@ -135,6 +135,7 @@ git pull origin main                     # main の最新を取り込む
 | `press_enter [MSG]` | Enter 待ち（q で中断） |
 | `read_or_quit VAR PROMPT` | テキスト入力（空 Enter 無視・q で中断） |
 | `ask_yn "質問"` | Y/N/q 確認（q は `die`） |
+| `read_secret VAR PROMPT` | 秘密情報（Token など）の入力（`*` で表示。値は画面・ログに出さない） |
 
 > `sf-launcher.sh` は `common.sh` を source しない standalone 設計のため例外。`read -rsn1` 直書き時は `|| { printf "\n"; exit 0; }` で EOF 対応を必ず付けること。
 
@@ -144,25 +145,23 @@ git pull origin main                     # main の最新を取り込む
 
 | ルール | 内容 |
 |---|---|
-| 警告ボックス表示 | `CLR_ERR` (赤) + box-drawing chars で目立つ警告を表示 |
+| 警告ボックス表示 | `print_admin_warning`（`lib/common.sh`。赤 = `CLR_ERR` の枠）で表示する。`echo` で直書きしない（使い方は `doc/dev-reference.md` 3.4.1） |
 | `ask_yn \|\| die` | N/q で必ず中断すること（`|| die` 必須）。`lib/wizard.sh` の `wizard_confirm`（Enter / Y で進み、N / q は die）も、同等として扱う（sf-init の開始画面）|
 | `check_gh_owner "$OWNER"` | gh 認証ユーザーがリポジトリオーナーと一致するか確認（不一致は `die`。ただしオーナーが組織で、ユーザーがその有効な admin なら通過）|
-| GITHUB_ACTIONS スキップ | `GITHUB_ACTIONS=true` の場合は警告・確認をスキップして自動実行（**例外**: `sf-sync-wf.sh` は省略しない。`sf-typecheck.sh` と `sf-init.sh --verify` は、Actions 上では実行を拒否する）|
+| GITHUB_ACTIONS スキップ | `GITHUB_ACTIONS=true` の場合は警告・確認をスキップして自動実行（**例外**: `sf-sync-wf.sh`・`sf-init.sh`（`--add-tier`・`--reconnect` を含む）は省略しない。`sf-typecheck.sh` と `sf-init.sh --verify` は、Actions 上では実行を拒否する）|
 | 二重確認の防止 | `SF_DEPLOY_CONFIRMED=1` を export して呼び出し先の確認をスキップ |
 
 **管理者向けコマンド一覧（警告必須）:**
 
 | スクリプト | 状態 |
 |---|---|
-| `sf-init.sh` | ✅ 実装済み |
+| `sf-init.sh`（`--add-tier`・`--reconnect` の `phases/init/add_tier.sh`・`reconnect.sh` を含む） | ✅ 実装済み |
 | `sf-metasync.sh` | ✅ 実装済み |
 | `sf-update-secret.sh` | ✅ 実装済み |
 | `sf-sync-wf.sh` | ✅ 実装済み |
 | `sf-init.sh --verify`（`phases/init/verify.sh`） | ✅ 実装済み（警告ボックス + 実行内容の表示 + `wizard_confirm`（Enter。入力を最小に）。本番を含むときは、文面で明示） |
-| `sf-release.sh`（`--release` 時） | ✅ 実装済み |
 | `sf-typecheck.sh` | ✅ 実装済み（警告ボックス + `ask_yn \|\| die`（`-y` で省略可）。GitHub Actions 上・予約名のエイリアス・本番は拒否。作成・削除は `SfToolsE2eMin` を含むものだけ（LWC は名前が小文字で始まる決まりのため、`sfToolsE2eMin` の綴りも可）。**この安全ガードを緩めないこと**） |
 
-> **警告ボックスは、`print_admin_warning`（`lib/common.sh`）を使うこと。`echo` で直書きしない。** 使い方は `doc/dev-reference.md` セクション 3.4 参照
 > **警告は、必ず、確認（`ask_yn || die` / `wizard_confirm`）とセットにする。** 警告を出しただけで、先へ進まない（表示だけで流れると、意味がない）。読み取りのみのモード（`--list` など）も、同じ（`-y` で省略できるようにする）
 > `sf-hook.sh` / `sf-unhook.sh`（手元のフックの入れ替え）・`sf-release.sh`（単独では、まず打たない。確認のみ）・`sf-deploy.sh`（開発者向けのラッパー）は、管理者向けではないため、警告ボックスは不要
 
@@ -172,20 +171,9 @@ git pull origin main                     # main の最新を取り込む
 
 全 `sf-*.sh` スクリプトは `--help` / `-h` オプションに対応している。冒頭コメントの第2ブロック（2つ目の `===` 行〜3つ目の `===` 行）がヘルプとして表示される。
 
-**冒頭コメントは、文書の 3 階層の最上位**（技術的で正確に書く。書式は `doc/doc-style.md` 3.2）。技術者向け・一般向けの文書（`site/`）は、これを読み取って書く。**コードを変えたら、同じ変更の中で冒頭コメントも直し、mm の前に、見出しの書式（【使い方】【オプション】【処理の流れ】【前提条件】【補足】）と、コードの動きとの一致を確かめること。** CI は文書を自動で書き換えない。冒頭コメントを変えて、対応する文書の印（`doc/doc-stamps.txt`）が合わなくなると、`tests/test_docs_stamps.sh` が失敗する。文書を読み直して直し、`bash tests/docs-stamp.sh --update <文書> [<コード>]` で印を付け直す（冒頭コメントが変わったコードが複数あるときは、1 本ずつ読んで、`<コード>` を付ける）（`--check` で一覧、`--diff <文書>` で変更を見られる）。
+**コードを変えたら、コメントも必ず見直す。冒頭コメントだけでなく、コード本体の中のコメントも対象。** 対象は、①冒頭コメント ②変えた関数・ブロックの説明コメント ③変えた行の横のコメントと、近くの「なぜ」の説明。古い説明を残さない（コードと食い違うコメントは、ないより悪い）。mm を依頼する前に、`git diff` の変更箇所とその周りのコメントを読み直して確かめ、依頼の報告に「コメントの見直し済み」と書くこと（検出する仕組みは、冒頭コメントの印だけ。本体のコメントは、見直しの習慣が、唯一の守りになる）。
 
-```bash
-# ==============================================================================
-# sf-xxx.sh - スクリプトの一行説明
-# ==============================================================================
-# 概要説明
-#   1. 処理ステップ1
-#   2. 処理ステップ2
-#
-# 【オプション】
-#   -x, --xxx  : 説明
-# ==============================================================================
-```
+**冒頭コメントは、文書の 3 階層の最上位**（技術的で正確に書く。書式は `doc/doc-style.md` 3.2）。技術者向け・一般向けの文書（`site/`）は、これを読み取って書く。**コードを変えたら、同じ変更の中で冒頭コメントも直し、mm の前に、見出しの書式（【使い方】【オプション】【処理の流れ】【前提条件】【補足】）と、コードの動きとの一致を確かめること。** CI は文書を自動で書き換えない。冒頭コメントを変えて、対応する文書の印（`doc/doc-stamps.txt`）が合わなくなると、`tests/test_docs_stamps.sh` が失敗する。文書を読み直して直し、`bash tests/docs-stamp.sh --update <文書> [<コード>]` で印を付け直す（冒頭コメントが変わったコードが複数あるときは、1 本ずつ読んで、`<コード>` を付ける）（`--check` で一覧、`--diff <文書>` で変更を見られる）。
 
 ---
 
@@ -199,22 +187,22 @@ bash tests/run_tests.sh --shard 2/6            # 全ファイルを 6 組に分�
 bash tests/run_tests.sh test_sf-metasync.sh   # 単体実行
 bash tests/run_tests.sh --changed             # 変更ファイルに対応するテストのみ実行
 bash tests/run_tests.sh --jobs 4 / --serial   # 同時に動かすファイル数（既定: CPU の数。--serial は 1 つずつ）
-bash tests/test_integration.sh                # 結合テスト L1（実 git ＋ fake。run_tests.sh の全件にも含まれる。手元の Windows は約 10 分、CI は 2 分ほど）
+bash tests/test_integration.sh                # 結合テスト L1（実 git ＋ fake。run_tests.sh の全件にも含まれる。手元の Windows は約 10 分、CI は 1〜3 分）
 bash tests/e2e/doctor.sh                       # e2e を動かせる環境かの確認（読み取りのみ。新しい環境で、run.sh の前に実行）
-bash tests/e2e/run.sh                          # 実環境の通し検証（検証のとき Claude が実行。通常のテストには含まれない）
+bash tests/e2e/run.sh                          # 実環境の通し検証（通常のテストには含まれない。通常は Actions の e2e.yml が動かす。手元は新しい環境の確認・調査のときだけ: 1.2）
 bash tests/e2e/scenario.sh --list             # 実環境のシナリオ（run.sh が残したリポジトリに、名前で選んで実行。読み取りのみのものから）
 ```
 
-> **開発中も mm 前も `--changed`、全件は CI が正** が基本ワークフロー。PR（main・development 向け）と development への push で、GitHub Actions（`.github/workflows/test.yml`）が、全件テストと shellcheck を実行する（Windows は 6 つのジョブに分けて並列。全体で約 12 分）。
+> **開発中も mm 前も `--changed`、全件は CI が正** が基本ワークフロー。PR（main・development 向け）と development への push で、GitHub Actions（`.github/workflows/test.yml`）が、全件テスト・結合テスト L1・shellcheck を実行する（Windows は 6 つのジョブに分けて並列。所要時間は 1.2）。
 > `tests/e2e/` は実際の GitHub / Salesforce にテスト用のものを作って削除する。**削除の安全ガード（名前の形式・オーナーの一致）を緩めないこと**。詳細は `doc/dev-reference.md` 9.6。
 
 ### 3.2 デグレ防止チェックリスト
 
-- **新規 `sf-*.sh` を追加した場合**：対応する `test_sf-*.sh` を作成し、`tests/run_tests.sh` の `TEST_FILES` に追加すること
+- **新規 `sf-*.sh` を追加した場合**：対応する `test_sf-*.sh` を作成し、`tests/run_tests.sh` の `TEST_FILES` に追加すること。どれかの文書の基として `doc/doc-stamps.txt` にも足すこと（ないと `tests/test_docs_stamps.sh` が失敗する）
 - **インタラクティブ入力を含むスクリプトのテスト**：`echo "n" |` または `run_script_with_no()` で stdin を供給すること（ブロック防止）
 - **既存ロジックを変更する場合**：変更前後の動作差分をコメントまたはコミットメッセージに明記すること
 - **コマンドのオプションを足す・変える場合**：冒頭コメントの【オプション】も直すこと（`tests/test_cli_args.sh` が、文書に書いたオプションをコードが受け付けるか、不正な引数で止まらないかを全コマンドで確認する）
-- **git 操作を含む新規スクリプトを作成する場合**：`CLAUDE.md` の「スクリプト別の処理概要」に実行フローを先に記載してから実装すること
+- **git 操作を含む新規スクリプトを作成する場合**：`doc/dev-reference.md` 4（スクリプト別処理概要）に実行フローを先に記載してから実装すること
 - **ブラウザ・GUI系コマンドを呼ぶスクリプトを追加した場合**：`test_helper.sh` の `create_mock_browser` にモックを追加すること
 
 > テスト対象一覧・`test_helper.sh` の関数詳細は `doc/dev-reference.md` セクション2 参照
@@ -230,7 +218,7 @@ Salesforce 開発の環境構築と日々の作業を自動化するシェルス
 
 - `~/sf-tools/` に設置して使う
 - 実行場所は各 Salesforce プロジェクト (`force-*`) 側
-- `sf-hook.sh` は `hooks/pre-push` をコピーする設計
+- `sf-hook.sh` は `hooks/pre-commit`・`hooks/pre-push` をコピーする設計
 - husky が設定されている場合は `core.hooksPath` を削除する設計
 - **動作環境（Windows の Git Bash・macOS・Linux・WSL）の「検証済み」は、実際に動かした環境だけを書く**（README・文書サイト（`site/guide/install.html`）の表と、`doc/dev-reference.md` 9.7 の記録を、実際の確認と一致させる。未検証は「未検証」と書く。目標は、すべての OS で動くこと）。新しい環境は、`bash tests/e2e/doctor.sh` で確認してから `bash tests/e2e/run.sh`
 - Salesforce CLI（`sf`）は **npm 版が前提**（`check_sf_cli`）。Windows の Git Bash で公式インストーラー版を使うと、成功しても終了コード 1 になるため非対応（`run` は終了コードのみで判定する。詳細は `doc/dev-reference.md` 3.3）
@@ -242,14 +230,14 @@ Salesforce 開発の環境構築と日々の作業を自動化するシェルス
 | パス | 役割 |
 |---|---|
 | `bin/sf-*.sh` | 各種自動化スクリプト本体 |
-| `lib/common.sh` | 全スクリプト共通ライブラリ。`log` / `run` / `die` / 入力関数群を提供 |
-| `phases/init/` | sf-init.sh のサブスクリプト（Phase 02〜10 + `add_tier.sh`） |
+| `lib/` | 共通ライブラリ。`common.sh` が窓口（`log` / `run` / `die` など。`input.sh`・`platform.sh`・`project.sh` を読み込む）。`org.sh`・`wizard.sh`・`diag.sh`・`verify-common.sh` などは、使うスクリプトが個別に読み込む（`doc/dev-reference.md` 3） |
+| `phases/init/` | sf-init.sh のサブスクリプト（Phase 01〜10・`init-common.sh`・`--add-tier` / `--reconnect` / `--status` / `--verify` の `add_tier.sh` / `reconnect.sh` / `status.sh` / `verify.sh`） |
 | `config/changeset-types.txt` | 変更セットで扱える種類の一覧（公式の Metadata Coverage Report。「全種類を対象にする」目標の一覧。`sf-typecheck.sh --coverage` で、確認の進み具合を見る） |
 | `config/metadata-capability.txt` | メタデータの種類ごとの「リリース・削除」の可否の表（`sf-typecheck.sh` が実機で確認した結果。`sf-check.sh` が読む） |
-| `hooks/pre-push` | git push フックの実体 |
-| `templates/` | force-* へ配布する雛形。**参照は sf-init 専用**（`phase_setup_release_dir` のみ日常運用でも参照可） |
-| `tests/` | モックベースの単体テスト一式 |
-| `tests/e2e/` | 実環境での `sf-init` の通し検証（自動実行・自動削除）。通常のテストには含めない |
+| `hooks/` | git フック（`pre-commit`・`pre-push`）の実体。`bin/` のスクリプトを呼ぶだけのラッパー |
+| `templates/` | force-* へ配布する雛形。**参照は sf-init（Phase 3・sf-init から実行中の `sf-install.sh`）と `sf-sync-wf.sh`（ワークフロー）だけ**。日常運用で参照してよいのは、`sf-install.sh` の `phase_setup_release_dir`（release の雛形）のみ |
+| `tests/` | モックベースの単体テスト一式と、結合テスト L1（`test_integration*.sh`・`tests/integration/`） |
+| `tests/e2e/` | 実環境での `sf-init` の通し検証（自動実行。作ったものは既定で残し、次回の前掃除で削除）。通常のテストには含めない |
 | `site/` | 利用者向けの文書サイト（HTML。GitHub Pages で公開。`doc/dev-reference.md` 9.8） |
 | `doc/` | 設計思想・戦略・開発リファレンス |
 
@@ -264,7 +252,7 @@ Salesforce 開発の環境構築と日々の作業を自動化するシェルス
 
 - 作業は `development` ブランチで行い、`main` へは PR 経由でマージする
 - mm = commit → push（`development` まで。`main` には入らない）
-- rr = PR 作成 → `main` へマージ（配布）。実施前に検証環境の force-* で確認すること
+- rr = PR 作成 → `main` へマージ（配布）。実施前の確認は 1.2（CI 全緑・配布物の変更があれば e2e の成功）
 - 検証環境 = Variable `SF_TOOLS_BRANCH=development` の force-*（Actions が sf-tools の `development` を使う）。詳細は `doc/dev-reference.md` セクション 9
 - `main` のブランチ保護は、`sf-tools` が公開リポジトリのため設定済み（Ruleset `protect-main`: 削除禁止・強制プッシュ禁止・PR 必須・**必須チェック 11 個（通常の CI。e2e は含めない）**）。直接 push は拒否され、CI が緑でない PR はマージできない。ジョブ名を変えるときは、Ruleset も更新する（`doc/dev-reference.md` 9.5）。上記の運用ルールを守る
 
@@ -276,12 +264,12 @@ Salesforce 開発の環境構築と日々の作業を自動化するシェルス
 
 | セクション | 内容 |
 |---|---|
-| 1. クロスプラットフォーム詳細 | OS検出ルール・Bash バージョン要件 |
-| 2. テスト詳細 | テスト対象一覧・test_helper.sh 関数 |
-| 3. common.sh 詳細 | 全関数・戻り値・ログレベル・安全ガードパターン |
+| 1. クロスプラットフォーム詳細 | Bash バージョン要件・OS検出ルール・新規スクリプト追加後のチェック |
+| 2. テスト詳細 | テスト対象一覧・CI・結合テスト L1・test_helper.sh 関数 |
+| 3. 共通ライブラリ（`lib/`）詳細 | 全関数・戻り値・ログレベル・安全ガードパターン |
 | 4. スクリプト別処理概要 | 各スクリプトの詳細フロー |
 | 5. ドキュメント連動ルール | 変更時の確認先 |
 | 6. スクリプト依存関係マップ | 呼び出し関係 |
-| 7. デバッグコマンド集 | Salesforce CLI / Git コマンド |
+| 7. デバッグコマンド集 | テスト / Salesforce CLI / Git・GitHub コマンド |
 | 8. force-* ローカル環境 | ディレクトリ構成 |
-| 9. 開発・リリース手順 | 検証環境・検証チェックリスト・rr の前提・e2e（9.6） |
+| 9. 開発・リリース手順 | 検証環境・検証チェックリスト（rr の前提）・ガードレール（Ruleset・必須チェック: 9.5）・e2e（9.6）・検証済み環境の記録（9.7）・文書サイト（9.8） |

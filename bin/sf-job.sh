@@ -13,7 +13,8 @@
 # 【オプション】
 #   --project XXXX : プロジェクト名（リポジトリ force-XXXX の XXXX）。先頭の「force-」（大文字小文字を問わない）は除いて扱う。
 #                    使える文字は英数字・- ・_ ・.（区切りは英数字の間に 1 つずつ。50 文字まで。末尾 .git は不可）。不正なら中断する
-#   --owner OWNER  : GitHub のオーナー（組織名またはユーザー名）。英数字とハイフンのみ。不正なら中断する
+#   --owner OWNER  : GitHub のオーナー（組織名またはユーザー名）。英数字とハイフンのみ（先頭・末尾は英数字。39 文字まで）。
+#                    不正なら中断する
 #   -h, --help     : この説明を表示して終了する（第 1 引数のときのみ）
 #   上記以外の引数を渡すと、「不明なオプション」で中断する（-v / --verbose も受け付けない）。
 #
@@ -55,7 +56,11 @@
 #   - GitHub CLI（gh）。gh の認証ユーザーに、そのリポジトリを読み書きする権限があること（オーナーや管理者である必要は、ない）
 #
 # 【補足】
-#   - Ctrl+C は無効。入力時に q で中断する。中断・失敗時の終了コードは 1
+#   - Ctrl+C は無効（引数の解析の前から。trap '' INT）。入力時に q で中断する。中断・失敗時の終了コードは 1。
+#     シグナルの無視は、子の bash（ここから起動する sf-start.sh・sf-launcher.sh と、ランチャーから実行する bash のコマンド）に
+#     継承されるため、それらも Ctrl+C を無視する。ただし、sf・npm など Node のコマンドは、起動時にシグナルの扱いを既定に戻すため、
+#     実行中に Ctrl+C を押すと、そのコマンドだけが止まることがある（親の bash のスクリプトは、止まらない）
+#   - gh auth status が失敗したときの gh auth login は、run を使わずに実行する（gh の対話画面を、そのまま表示するため）
 #   - 途中で中断・失敗しても、それまでに作成したブランチ・フォルダ・クローンは削除しない。
 #     ブランチ作成のあとに clone が失敗したときは、同じジョブ名で再実行し、既存のブランチを使う（Y）と、続きから進める
 #   - sf-start.sh が 0 以外で終了すると、sf-job.sh も中断する（クローンは残る）
@@ -66,14 +71,14 @@
 # 1. 共通ライブラリの必須設定
 # ------------------------------------------------------------------------------
 readonly SCRIPT_NAME=$(basename "$0" .sh)
-mkdir -p "$HOME/sf-tools/logs" 2>/dev/null || true
+mkdir -p "$HOME/sf-tools/logs" 2>/dev/null || true  # run 不使用: common.sh（run）の読み込み前の準備（意図的エラー無視）
 readonly LOG_FILE="$HOME/sf-tools/logs/${SCRIPT_NAME}.log"
 readonly LOG_MODE="NEW"
 
 # ------------------------------------------------------------------------------
 # 2. 共通ライブラリの読み込み
 # ------------------------------------------------------------------------------
-export SF_INIT_MODE=1   # force-* チェックをバイパス
+export SF_INIT_MODE=1   # force-* チェックをバイパス（export のため、子の sf-start.sh・sf-launcher.sh とその先にも引き継がれる）
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 COMMON_LIB="${SCRIPT_DIR}/../lib/common.sh"
@@ -83,12 +88,12 @@ if [[ ! -f "$COMMON_LIB" ]]; then
     exit 1
 fi
 if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    awk '/^# ==/{f++; next} f==2{sub(/^# ?/,""); print} f==3{exit}' "${BASH_SOURCE[0]}"
+    awk '/^# ==/{f++; next} f==2{sub(/^# ?/,""); print} f==3{exit}' "${BASH_SOURCE[0]}"  # run 不使用: common.sh の読み込み前（run が未定義）
     exit 0
 fi
 source "$COMMON_LIB"
 
-trap '' INT  # Ctrl+C を無効化（q で中断すること）
+trap '' INT  # Ctrl+C を無効化（q で中断すること。無視の設定は子プロセスにも継承される）
 
 # 引数の解析
 ARG_OWNER=""
@@ -111,7 +116,7 @@ done
 # 3. 変数定義
 # ------------------------------------------------------------------------------
 COMPANY_NAME=""       # プロジェクト名 XXXX（リポジトリ force-XXXX の XXXX の部分）
-REPO_NAME=""          # force-company 形式のリポジトリ名
+REPO_NAME=""          # force-XXXX 形式のリポジトリ名
 GITHUB_OWNER=""       # GitHub ユーザー名または組織名（引数・クローンの git remote・対話のいずれかで決まる）
 REPO_FULL_NAME=""     # OWNER/REPO 形式
 JOB_NAME=""           # ジョブ名（例: JOB-20260323）
@@ -124,7 +129,7 @@ USE_EXISTING_BRANCH=0 # 1 = GitHub 上に、すでにある同名のブランチ
 # 4. ヘルパー関数
 # ------------------------------------------------------------------------------
 
-# press_enter / read_or_quit は lib/common.sh で定義済み
+# read_or_quit / ask_yn は lib/input.sh（lib/common.sh が読み込む）で定義済み
 
 # ------------------------------------------------------------------------------
 # 5. フェーズ定義
@@ -133,7 +138,7 @@ USE_EXISTING_BRANCH=0 # 1 = GitHub 上に、すでにある同名のブランチ
 # 【CHECK】実行場所（カレントフォルダ名が admin・force-* でないこと）と gh の認証状態を確認
 phase_check_environment() {
     local current_dir
-    current_dir=$(basename "$PWD")
+    current_dir=$(basename "$PWD")  # VAR=$(cmd) のため run 不使用
 
     # 管理者用の作業フォルダ（admin）・force-* フォルダからは実行禁止
     if [[ "$current_dir" == "admin" ]]; then
@@ -152,7 +157,8 @@ phase_check_environment() {
     log "INFO" "GitHub CLI の認証状態を確認中..."
     if ! run gh auth status; then
         log "WARNING" "GitHub CLI が未認証です。ログインします..."
-        run gh auth login || die "GitHub 認証に失敗しました。"
+        # 対話のため run 不使用（run は出力を一時ファイルに書き出すため、gh の質問・ブラウザの案内が表示されない）
+        gh auth login || die "GitHub 認証に失敗しました。"
     fi
 
     log "SUCCESS" "環境チェック完了。"
@@ -171,10 +177,9 @@ phase_load_project_info() {
     log "INFO" "  リポジトリ名: ${REPO_NAME}"
 
     # リポジトリの存在確認
-    if ! gh repo view "$REPO_FULL_NAME" --json name &>/dev/null; then
-        die "リポジトリが見つかりません: ${REPO_FULL_NAME}
-  プロジェクト名（force-XXXX の XXXX）とオーナーが正しいか確認してください。
-  指定して実行する場合: ~/sf-tools/bin/sf-job.sh --project XXXX --owner OWNER"
+    if ! gh repo view "$REPO_FULL_NAME" --json name &>/dev/null; then  # 条件チェックのため run 不使用
+        log "WARNING" "プロジェクト名（force-XXXX の XXXX）とオーナーが、正しいか確認してください。指定して実行する場合: ~/sf-tools/bin/sf-job.sh --project XXXX --owner OWNER"
+        die "リポジトリが見つかりません: ${REPO_FULL_NAME}"
     fi
 
     log "SUCCESS" "プロジェクト情報確認完了: ${REPO_FULL_NAME}"
@@ -210,8 +215,8 @@ phase_ask_job_name() {
         esac
 
         # --- ローカルフォルダの重複チェック ---
-        #   同じジョブ名のフォルダに、同じプロジェクトのクローンがあれば、重複。
-        #   別のプロジェクトのクローンだけを含むなら、重複ではない（同じジョブ名で、複数のプロジェクトを扱える）
+        #   同じジョブ名のフォルダに、同じ名前（force-XXXX）のもの（フォルダ・ファイル。オーナーは問わない）があれば、重複。
+        #   別の force-* だけを含むなら、重複ではない（同じジョブ名で、複数のプロジェクトを扱える）
         JOB_DIR="${PWD}/${JOB_NAME}"
         if [[ -e "${JOB_DIR}/${REPO_NAME}" ]]; then
             log "WARNING" "同名のフォルダがすでに存在します: ${JOB_DIR}"
@@ -223,7 +228,7 @@ phase_ask_job_name() {
         # --- GitHub ブランチの重複チェック ---
         log "INFO" "GitHub ブランチの存在を確認中..."
         local branch_exists=0 _last=""
-        if gh api "repos/${REPO_FULL_NAME}/branches/${JOB_NAME}" &>/dev/null 2>&1; then
+        if gh api "repos/${REPO_FULL_NAME}/branches/${JOB_NAME}" &>/dev/null 2>&1; then  # 条件チェックのため run 不使用
             branch_exists=1
         fi
 
@@ -275,7 +280,7 @@ phase_create_branch() {
 
     # 作業用ブランチは常に main から作成する
     BASE_BRANCH="main"
-    if ! gh api "repos/${REPO_FULL_NAME}/branches/${BASE_BRANCH}" &>/dev/null 2>&1; then
+    if ! gh api "repos/${REPO_FULL_NAME}/branches/${BASE_BRANCH}" &>/dev/null 2>&1; then  # 条件チェックのため run 不使用
         die "分岐元ブランチ（main）が見つかりません。"
     fi
 
@@ -284,7 +289,7 @@ phase_create_branch() {
     # 分岐元ブランチの最新 SHA を取得
     local base_sha
     base_sha=$(gh api "repos/${REPO_FULL_NAME}/branches/${BASE_BRANCH}" --jq '.commit.sha') \
-        || die "分岐元ブランチの SHA を取得できません: ${BASE_BRANCH}"
+        || die "分岐元ブランチの SHA を取得できません: ${BASE_BRANCH}"  # VAR=$(cmd) のため run 不使用
 
     # ブランチ作成
     run gh api "repos/${REPO_FULL_NAME}/git/refs" \
@@ -321,7 +326,7 @@ phase_sf_start() {
     log "INFO" "sf-start.sh を起動します..."
     cd "$REPO_DIR" || die "ディレクトリに移動できません: ${REPO_DIR}"
 
-    # インタラクティブなため run を使わない（run 内の pipe が read プロンプトを破壊する）
+    # インタラクティブなため run を使わない（run は出力を一時ファイルに書き出すため、入力のプロンプト・画面が表示されない）
     bash "$SCRIPT_DIR/sf-start.sh" \
         || die "sf-start.sh の実行に失敗しました。"
 

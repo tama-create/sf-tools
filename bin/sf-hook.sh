@@ -25,11 +25,14 @@
 #   - コピー元は $HOME/sf-tools/hooks/ に固定（このスクリプトの場所ではない）。
 #
 # 【補足】
+#   - husky 以外の値の core.hooksPath（ローカル・グローバル）が残っているときは、git が .git/hooks/ を使わず、入れたフックが
+#     動かないため、WARNING を出し、最後の「自動的に検証が実行されます」の案内は出さない（フックのコピーは行う）
 #   - インストールされるフック:
 #       pre-commit : ~/sf-tools/bin/sf-precommit.sh --verbose を呼ぶ。sf-check.sh でターゲットファイルを検査し、
 #                    エラーならコミットを中止する。
 #       pre-push   : ~/sf-tools/bin/sf-prepush.sh --verbose を呼ぶ。branches.txt のブランチへの直接プッシュの禁止、
-#                    sf-check.sh による構文検査、origin の自ブランチと main の取り込み（git merge）を行う。
+#                    sf-check.sh によるターゲットファイルの検証、origin の自ブランチと main の取り込み（git merge）を行う。
+#                    取り込んだときは、そのプッシュを中止する（もう一度プッシュすると、通る）。
 #                    Salesforce 組織への検証（dry-run）は行わない。詳細は sf-prepush.sh --help。
 #   - コピーされるフックは、$HOME/sf-tools/bin/ のスクリプトを呼ぶだけのラッパー。bin/ の sf-precommit.sh・
 #     sf-prepush.sh の更新は、全プロジェクトに即時反映される。ラッパー（hooks/ のファイル）自体の変更は、
@@ -71,7 +74,8 @@ reject_unknown_args "$@"   # -v / --verbose 以外の引数は、不明なオプ
 readonly HOOK_DEST_PRECOMMIT=".git/hooks/pre-commit"
 readonly HOOK_DEST=".git/hooks/pre-push"
 
-# SF_HOOK_MARKER は lib/common.sh で定義済み
+# SF_HOOK_MARKER（lib/common.sh で定義済み）は、ここでは使わない。目印は、コピー元の hooks/pre-commit・pre-push に
+#   書いてあり、sf-unhook.sh が、削除の前に確認する
 
 # ------------------------------------------------------------------------------
 # 4. フェーズ定義
@@ -83,7 +87,7 @@ phase_check_environment() {
 
     # Git リポジトリのルートであることを確認
     if [[ ! -d ".git" ]]; then
-        die "Gitリポジトリのルートで実行してください（.git ディレクトリが見つかりません）。"
+        die "カレントフォルダに .git ディレクトリがありません（Git リポジトリのルートではありません）。"
     fi
 
     return $RET_OK
@@ -92,12 +96,19 @@ phase_check_environment() {
 # 【FIX】hooksPath が .husky 系に設定されていれば削除
 phase_fix_hooks_path() {
     local hooks_path
-    hooks_path=$(run git config --local core.hooksPath 2>/dev/null || true)
+    # run 不使用: 設定値の取得（未設定は終了コード 1。run は、失敗したとき、エラーの文言を標準出力に返すため、値に混ざる）
+    hooks_path=$(git config --local core.hooksPath 2>/dev/null || true)
     if [[ "$hooks_path" == *husky* ]]; then
         log "WARNING" "core.hooksPath が '$hooks_path' に設定されています。削除します..."
         run git config --local --unset core.hooksPath \
             || die "core.hooksPath の削除に失敗しました。"
         log "SUCCESS" "core.hooksPath を削除しました。"
+    fi
+    # husky を消したあとも、ほかの値（ローカル・グローバル）が残っていれば、git は .git/hooks/ を使わず、入れたフックは動かない
+    # run 不使用: 設定値の取得（上と同じ理由）
+    HOOKS_PATH_OTHER=$(git config core.hooksPath 2>/dev/null || true)
+    if [[ -n "$HOOKS_PATH_OTHER" ]]; then
+        log "WARNING" "core.hooksPath が '${HOOKS_PATH_OTHER}' に設定されているため、git は .git/hooks/ を使いません。入れたフックは、動きません。"
     fi
     return $RET_OK
 }
@@ -151,7 +162,11 @@ phase_install_hook || die "pre-push フックのインストールに失敗し�
 log "SUCCESS" "pre-push フックを強制適用しました。"
 
 echo "--------------------------------------------------------"
-log "INFO" "次回以降の git commit / push 時に自動的に検証が実行されます。"
+if [[ -n "${HOOKS_PATH_OTHER:-}" ]]; then
+    log "WARNING" "core.hooksPath が設定されているため、入れたフックは、git commit / push で動きません。"
+else
+    log "INFO" "次回以降の git commit / push 時に自動的に検証が実行されます。"
+fi
 log "HEADER" "セットアップが完了しました"
 
 exit $RET_OK

@@ -4,7 +4,7 @@
 # ==============================================================================
 # sf-init.sh のテストは、時間がかかる（Windows の CI で約 10 分）ため、3 つのファイル（test_sf-init.sh・test_sf-init2.sh・
 # test_sf-init3.sh）に分け、並列に動かす。共通の部品は tests/init-test-lib.sh。関数の分け方は、実測の所要時間で、均等になるようにした。
-# どのテストが、どのファイルにあるかは、下の一覧（関数名）を参照。全部で 49 の関数（件数は、3 つの合計）。
+# どのテストが、どのファイルにあるかは、下の一覧（関数名）を参照。一覧は、このファイルにある分（ほかの 2 つのファイルにも、別の関数がある）。
 #
 # 【このファイルのテスト関数】
 #   test_missing_tool_gh
@@ -19,11 +19,13 @@
 #   test_resume_runs_from_specified_phase
 #   test_add_tier_develop_without_staging
 #   test_phase9_ruleset_id
+#   test_phase5_8_write_failures
 #   test_phase7_channel_id
 #   test_e2e_input_sequence
 #   test_wf_no_script_injection
 #   test_phase6_pat_token
 #   test_resume_choice
+#   test_required_checks_match_workflows
 # ==============================================================================
 source "$(dirname "${BASH_SOURCE[0]}")/init-test-lib.sh"
 
@@ -392,10 +394,12 @@ test_add_tier_develop_without_staging() {
 
     create_all_mocks "$mb"
 
+    # 確認は、origin/main の branches.txt（git show）で行う。origin/main も main のみ
     cat > "$mb/git" << 'GITEOF'
 #!/bin/bash
 case "$1 $2" in
     "remote get-url") echo "https://github.com/tamashimon/force-testproject.git" ;;
+    "show origin/main:sf-tools/config/branches.txt") printf 'main\n' ;;
     *) exit 0 ;;
 esac
 GITEOF
@@ -456,8 +460,87 @@ test_phase9_ruleset_id() {
     assert_exit_ok            "$exit_code"                                     "既存 Ruleset あり → 正常終了"
     assert_file_contains      "$MOCK_CALL_LOG" "rulesets/12345"                "既存 Ruleset あり → その ID で DELETE される"
     assert_file_contains      "$out" "を削除しました"                           "既存 Ruleset あり → 「削除しました」と表示される"
+    # 回帰: 進捗の表示は、実際の手順の数（4 つ。手順 4 = Variable SF_TOOLS_BRANCH）に合わせる（以前は [1/3]〜[3/3]）
+    assert_file_contains      "$out" "[1/4]"                                   "進捗の表示は [1/4] から始まる"
+    assert_file_contains      "$out" "[4/4] SF_TOOLS_BRANCH"                   "手順 4（SF_TOOLS_BRANCH）も、進捗に表示される（main のときも）"
+    assert_file_not_contains  "$out" "/3]"                                     "進捗の表示に、/3 が残っていない"
+    rm -rf "$init_base"
+
+    # 回帰: 同名の Ruleset が複数ある → すべて削除する（以前は、ID が複数行だと、どれも削除しなかった）
+    MOCK_GH_RULESETS=ids _p9_run
+    assert_exit_ok            "$exit_code"                                     "同名の Ruleset が複数 → 正常終了"
+    assert_file_contains      "$MOCK_CALL_LOG" "--method DELETE repos/tamashimon/force-testproject/rulesets/12345" "同名の Ruleset が複数 → 1 つ目を削除する"
+    assert_file_contains      "$MOCK_CALL_LOG" "--method DELETE repos/tamashimon/force-testproject/rulesets/12346" "同名の Ruleset が複数 → 2 つ目も削除する"
+    assert_file_not_contains  "$out" "確認できなかった"                         "同名の Ruleset が複数 → 「確認できなかった」としない"
+    rm -rf "$init_base"
+
+    # 回帰: 一覧の取得が、何も出力せずに失敗 → 「同名なし」と区別して、「確認できなかった」と表示する（削除はしない）
+    MOCK_GH_RULESETS=silent _p9_run
+    assert_exit_ok            "$exit_code"                                     "一覧の取得が出力なしで失敗 → Phase 9 は正常終了する"
+    assert_file_not_contains  "$MOCK_CALL_LOG" "--method DELETE"               "一覧の取得が出力なしで失敗 → DELETE しない"
+    assert_file_contains      "$out" "確認できなかった"                         "一覧の取得が出力なしで失敗 → 「確認できなかった」と表示される"
 
     unset -f _p9_run
+    teardown "$mb" "$mock_home" "$init_base"
+}
+
+# ==============================================================================
+# テスト: Phase 5・Phase 8 の書き込みの失敗を、見逃さない（--only 5 / --only 8）
+#   - Phase 5: sf-tools/config を作れない → 中断する（回帰: 以前は mkdir・mv の失敗を見ず、「更新しました」と表示して続けた）
+#   - Phase 8: 状態ファイルから PAT_TOKEN_VALUE の行を消せない → 中断する（回帰: 以前は失敗を見ず、Token が残ったまま続けた）
+# ==============================================================================
+test_phase5_8_write_failures() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] Phase 5・Phase 8: 書き込みの失敗で中断する${CLR_RST}"
+
+    local mb mock_home init_base init_dir exit_code out repo_dir real_sed
+    mb=$(setup_mock_bin)
+    export MOCK_CALL_LOG="$mb/calls.log"
+    mock_home=$(setup_mock_home)
+    create_all_mocks "$mb"
+    create_mock_gh_for_init "$mb"
+    _stub_subscripts "$mock_home"
+    out="$mb/out.log"
+
+    # --- Phase 5: sf-tools/config が、フォルダではなくファイル → mkdir -p が失敗する ---
+    init_base=$(_setup_init_dir "tamashimon" "testproject")
+    init_dir="$init_base/home/tamashimon/testproject"
+    repo_dir="$init_base/repo/force-testproject"
+    mkdir -p "$init_dir/admin" "$repo_dir/sf-tools"
+    : > "$repo_dir/sf-tools/config"
+    printf 'REPO_FULL_NAME="tamashimon/force-testproject"\nREPO_NAME="force-testproject"\nPROJECT_NAME="testproject"\nREPO_DIR="%s"\n' "$repo_dir" \
+        > "$init_dir/admin/.sf-init-testproject.env"
+    printf 'Y\n1\n' \
+        | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
+              bash "$mock_home/sf-tools/bin/sf-init.sh" --only 5 ) > "$out" 2>&1
+    exit_code=$?
+    assert_exit_fail          "$exit_code"                                    "Phase 5: sf-tools/config を作れない → 中断する"
+    assert_file_contains      "$out" "sf-tools/config を作成できません"         "Phase 5: 理由が表示される"
+    assert_file_not_contains  "$out" "branches.txt を更新しました"             "Phase 5: 「更新しました」と表示しない"
+    assert_file_not_contains  "$init_dir/admin/.sf-init-testproject.env" "BRANCH_COUNT=" "Phase 5: BRANCH_COUNT を書かない"
+    rm -rf "$init_base"
+
+    # --- Phase 8: PAT_TOKEN_VALUE の行の削除（sed）が失敗する → 中断する ---
+    real_sed=$(command -v sed)
+    printf '#!/bin/bash\nfor a in "$@"; do [[ "$a" == *PAT_TOKEN_VALUE* ]] && { echo "sed: mock failure" >&2; exit 4; }; done\nexec "%s" "$@"\n' "$real_sed" > "$mb/sed"
+    chmod +x "$mb/sed"
+    init_base=$(_setup_init_dir "tamashimon" "testproject")
+    init_dir="$init_base/home/tamashimon/testproject"
+    repo_dir="$init_base/repo/force-testproject"
+    mkdir -p "$init_dir/admin" "$repo_dir/sf-tools/config"
+    printf 'main\n' > "$repo_dir/sf-tools/config/branches.txt"
+    printf 'REPO_FULL_NAME="tamashimon/force-testproject"\nREPO_NAME="force-testproject"\nPROJECT_NAME="testproject"\nREPO_DIR="%s"\nPAT_TOKEN_VALUE="ghp_fakepat"\n' "$repo_dir" \
+        > "$init_dir/admin/.sf-init-testproject.env"
+    : > "$MOCK_CALL_LOG"
+    printf 'Y\n' \
+        | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
+              bash "$mock_home/sf-tools/bin/sf-init.sh" --only 8 ) > "$out" 2>&1
+    exit_code=$?
+    assert_exit_fail          "$exit_code"                                    "Phase 8: PAT_TOKEN_VALUE の行を消せない → 中断する"
+    assert_file_contains      "$out" "PAT_TOKEN_VALUE の行を削除できませんでした" "Phase 8: 理由が表示される"
+    assert_file_not_contains  "$out" "完了: 初回コミット＆プッシュ OK"         "Phase 8: 完了と表示しない"
+    rm -f "$mb/sed"
+
     teardown "$mb" "$mock_home" "$init_base"
 }
 
@@ -598,9 +681,10 @@ test_wf_no_script_injection() {
     local d="$SF_TOOLS_DIR/templates/.github/workflows" f name bad
     for f in "$d"/wf-*.yml; do
         name=$(basename "$f")
-        # env: の代入行（NAME: ${{ ... }}）と、if: / ref: の行は、除く。残った行が、スクリプトへの直接の埋め込み
+        # env: の代入行（NAME: ${{ ... }}）と、if: / ref: / group:（concurrency のグループ名。スクリプトではない）の行は、除く。
+        #   残った行が、スクリプトへの直接の埋め込み
         bad=$(grep -nE '\$\{\{ *github\.(event\.pull_request\.(title|head\.ref|base\.ref|html_url)|ref_name|head_ref)|steps\.sequence_check\.outputs\.(feature|prev)' "$f" \
-              | grep -vE '^[0-9]+:[[:space:]]+(if:|ref:)|^[0-9]+:[[:space:]]+[A-Z_]+: \$\{\{' || true)
+              | grep -vE '^[0-9]+:[[:space:]]+(if:|ref:|group:)|^[0-9]+:[[:space:]]+[A-Z_]+: \$\{\{' || true)
         if [[ -z "$bad" ]]; then pass "${name}: 利用者が決められる値を、スクリプトに直接埋め込んでいない"
         else fail "${name}: 利用者が決められる値を、スクリプトに直接埋め込んでいない" "$(echo "$bad" | head -2)"; fi
     done
@@ -770,7 +854,8 @@ export SF_INIT_LOGIN_URL_PROD=login   # ログイン先を、質問せずに指�
     }
 
     # [1] 続きをやる: Phase 1 を実行したうえで、Phase 10 だけを実行する（Y=警告 / 1=続き / 2=外部クライアントアプリ / N=Sandbox?）
-    _rc_run 9 "tamashimon/force-testproject" "" 'Y\n1\n'   # ログイン先は、環境変数（SF_INIT_LOGIN_URL_PROD=login）で指定する
+    # 完了の印は、クローン（REPO_DIR）に付ける。付けられないと状態ファイルを残す（下の「完了時の掃除」）ため、クローンのフォルダを持たせる
+    _rc_run 9 "tamashimon/force-testproject" "" 'Y\n1\n' 'REPO_DIR="@INIT@/force-testproject"'   # ログイン先は、環境変数（SF_INIT_LOGIN_URL_PROD=login）で指定する
     assert_exit_ok            "$exit_code"                                                  "[1] 続き: 正常終了する"
     assert_file_contains      "$out" "前回のセットアップは、「リポジトリの設定」まで完了しています"   "続き: 前回の進捗が表示される"
     assert_file_contains      "$out" "2026-10-11 14:32"                                     "続き: 前回の時刻が表示される"
@@ -963,7 +1048,7 @@ N
     unset SF_INIT_VERIFY_ASK
 
     # 完了時の後始末: 状態ファイルを消す（残っていた Token の値の行も、一緒に消える）。admin フォルダ自体は、残す
-    _rc_run 9 "tamashimon/force-testproject" "" 'Y\n1\n' 'PAT_TOKEN_VALUE="ghp_leftover"'
+    _rc_run 9 "tamashimon/force-testproject" "" 'Y\n1\n' $'PAT_TOKEN_VALUE="ghp_leftover"\nREPO_DIR="@INIT@/force-testproject"'
     assert_exit_ok            "$exit_code"                                                  "完了時の掃除: 正常終了する"
     assert_file_not_exists    "$envf"                                                         "完了時の掃除: 状態ファイル（Token の値の行を含む）が、消える"
     assert_file_not_exists    "$progf"                                                        "完了時の掃除: 進捗ファイルも、消える"
@@ -1065,6 +1150,7 @@ test_invalid_phase_args
 test_resume_runs_from_specified_phase
 test_add_tier_develop_without_staging
 test_phase9_ruleset_id
+test_phase5_8_write_failures
 test_phase7_channel_id
 test_e2e_input_sequence
 test_wf_no_script_injection

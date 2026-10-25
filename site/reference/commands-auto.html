@@ -20,107 +20,136 @@
   <div class="title">このページの要点</div>
   <ul>
     <li>ここにあるコマンドは、<strong>人が打つ必要は、ほとんどありません。</strong>ほかのコマンド・git のフック・GitHub Actions が、自動で動かします。</li>
-    <li>動くきっかけ: <code>sf-install.sh</code> は <code>sf-start.sh</code> から、<code>sf-upgrade.sh</code> は 24 時間おき、<code>sf-prepush.sh</code> は <code>git push</code> のとき、<code>sf-precommit.sh</code> は <code>git commit</code> のとき、<code>sf-metasync.sh</code> は GitHub Actions からです。</li>
+    <li>動くきっかけ: <code>sf-install.sh</code> は <code>sf-start.sh</code> から、<code>sf-upgrade.sh</code> は <code>sf-install.sh</code> から 24 時間おきに、<code>sf-prepush.sh</code> は <code>git push</code> のとき、<code>sf-precommit.sh</code> は <code>git commit</code> のとき、<code>sf-metasync.sh</code> は GitHub Actions からです。</li>
+    <li>どれも、<code>force-*</code> フォルダ（フォルダの名前が <code>force-</code> で始まる）で動きます。</li>
   </ul>
 </div>
 
 <h2 id="sf-install"><code>sf-install.sh</code></h2>
-<pre><code>sf-install.sh</code></pre>
-<p><code>sf-tools</code> 自体の更新と、プロジェクト側の準備（Git フック・リリース用フォルダなど）を行います。通常は、<code>sf-start.sh</code> がバックグラウンドで、<code>sf-init.sh</code> が Phase 4 で、自動で実行します。<code>force-*</code> フォルダの中で、単独でも実行できます。</p>
+<pre><code>sf-install.sh [-v]</code></pre>
+<p><code>~/sf-tools</code> 自体の更新と、プロジェクト側の準備（Git フック・リリース用フォルダなど）を行います。通常は、<code>sf-start.sh</code> がバックグラウンドで、<code>sf-init.sh</code> が Phase 4 で、自動で実行します。<code>force-*</code> フォルダの中で、単独でも実行できます。</p>
+<p><code>-v</code>（<code>--verbose</code>）は、コマンドの応答をコンソールにも表示します（<code>sf-hook.sh</code> にも渡し、<code>sf-upgrade.sh</code> には渡しません）。<code>-h</code>（<code>--help</code>。1 つ目の引数のときだけ）以外の、ほかの引数は、「不明なオプションです」で中断します。</p>
 <h3>主な処理（この順序）</h3>
 <ol>
-  <li><code>sf</code> が動くかを確認する（動かなくても、警告だけで、続けます）</li>
-  <li><code>~/sf-tools</code> の現在のブランチを、<code>git pull</code> で最新にする（失敗しても続行。<code>sf-init.sh</code> から呼ばれたときは行わない）</li>
-  <li>設定ファイル（<code>sf-tools/config/metadata.txt</code> と <code>branches.txt</code>）を確認する。通常の実行で、どちらかがなければ<strong>中断</strong>します（プロジェクトの破損として扱い、作りません）。<code>sf-init.sh</code> から呼ばれたときだけ、雛形からコピーします</li>
-  <li>Git フック（<code>pre-commit</code> と <code>pre-push</code>）を、<code>sf-hook.sh</code> でインストールする</li>
-  <li><code>release/&lt;ブランチ名&gt;/</code> を準備する（<code>main</code> ブランチでは、作りません）</li>
-  <li>（<code>sf-init.sh</code> から呼ばれたときだけ）コミットメッセージの雛形（<code>.gitmessage</code>）を置く</li>
-  <li><code>npm install</code>（<code>package.json</code> があるとき。<code>node_modules</code> が <code>package-lock.json</code> 以降に更新済みなら省略）</li>
-  <li>前回から 24 時間以上たっていれば、<code>sf-upgrade.sh</code> をバックグラウンドで実行する</li>
+  <li><code>sf</code> が動くかを確認する（<code>sf --version</code> の終了コードが 0 以外なら、エラーの案内を表示しますが、中断はしません。中断すると、sf-tools 自身の更新まで止まるためです）。<code>sf</code> が未インストールのとき・GitHub Actions 上では、確認しません</li>
+  <li><code>~/sf-tools</code> の現在のブランチ（取得できなければ <code>main</code>）を、<code>git pull</code> で最新にする（失敗しても続行。<code>sf-init.sh</code> から呼ばれたときは行わない）</li>
+  <li>設定ファイル（<code>sf-tools/config/metadata.txt</code> と <code>branches.txt</code>）を確認する。通常の実行で、どちらかがなければ<strong>中断</strong>します（プロジェクトの破損として扱い、作りません）。<code>sf-init.sh</code> から呼ばれたときだけ、ないものを雛形からコピーします（失敗したら中断）</li>
+  <li>Git フック（<code>pre-commit</code> と <code>pre-push</code>）を、<a href="commands-dev.html#sf-hook"><code>sf-hook.sh</code></a> でインストールする</li>
+  <li>リリース用のフォルダを準備する
+    <ul>
+      <li>現在のブランチ名を取得できない（detached HEAD など）ときは、警告を表示して、何もしません</li>
+      <li><code>sf-tools/release/</code> と <code>sf-tools/release/.gitkeep</code> を作ります</li>
+      <li><code>main</code> ブランチでは、ここで終わります（<code>release/&lt;ブランチ名&gt;/</code> と <code>branch_name.txt</code> は、作成も更新もしません）</li>
+      <li>それ以外のブランチでは、<code>release/&lt;ブランチ名&gt;/</code> を作り、<code>deploy-target.txt</code>・<code>remove-target.txt</code> がなければ雛形からコピーし、<code>release/branch_name.txt</code> にブランチ名を書き込みます</li>
+    </ul>
+  </li>
+  <li>（<code>sf-init.sh</code> から呼ばれたときだけ）コミットメッセージの雛形（<code>.gitmessage</code>）を置き、<code>git config commit.template</code> を設定する</li>
+  <li><code>npm install</code> を実行する（<code>package.json</code> があるとき）。<code>node_modules/.package-lock.json</code> が <code>package-lock.json</code> 以降に更新済みのとき（<code>package-lock.json</code> がないときは、省略しない）と、<code>sf-init.sh</code> から呼ばれたときは、省略します</li>
+  <li><code>~/.sf-tools-last-update</code> がない、またはその更新時刻から 24 時間以上たっていれば、<code>sf-upgrade.sh</code> をバックグラウンドで実行する（画面への表示（標準エラー）は、<code>sf-install.log</code> に追記）。起動を確認できたら、<code>~/.sf-tools-last-update</code> の時刻を更新します（完了の時点ではなく、起動の時点です）</li>
 </ol>
-<p>手順 3 以外の失敗は、警告を表示して続行します。ワークフロー（<code>.github/workflows/</code>）は、扱いません。作成済みのプロジェクトへの反映は、<a href="../admin/workflows.html"><code>sf-sync-wf.sh</code></a>（管理者が手動で実行）が行います。</p>
+<h3>補足</h3>
+<ul>
+  <li>手順 3 以外の失敗は、警告を表示して続行します。終了コードは <code>0</code> で、手順 3 で中断したとき・不明なオプションのときだけ <code>1</code> です。</li>
+  <li><code>branch_name.txt</code> は、Git の管理外の、手元のファイルです。<code>main</code> では書き換えないため、作業用のブランチのあとで <code>main</code> に切り替えると、前のブランチの値が残ります（<a href="commands-dev.html#sf-check"><code>sf-check.sh</code></a> は、その値で検証します）。</li>
+  <li>前提: <code>~/sf-tools</code> が初回のインストール済み（<code>git clone https://github.com/tama-create/sf-tools.git ~/sf-tools</code>）で、Salesforce CLI（<code>sf</code>）が npm 版であること。</li>
+  <li>ワークフロー（<code>.github/workflows/</code>）は、扱いません。新しいプロジェクトには <code>sf-init.sh</code>（Phase 3）が雛形からコピーし、作成済みのプロジェクトへの反映は、<a href="../admin/workflows.html"><code>sf-sync-wf.sh</code></a>（管理者が手動で実行）が行います。</li>
+  <li>ログは <code>./sf-tools/logs/sf-install.log</code> です（実行のたびに作り直します）。</li>
+</ul>
 
 <h2 id="sf-upgrade"><code>sf-upgrade.sh</code></h2>
-<pre><code>sf-upgrade.sh</code></pre>
-<p>npm と Salesforce CLI（<code>sf</code>）を、最新版に更新します。Git は、Windows の Git Bash でだけ更新します（macOS・Linux・WSL では実行せず、パッケージマネージャーで更新するよう案内します）。<code>sf-install.sh</code> から、前回から 24 時間以上たっているときに、バックグラウンドで自動で実行されます。手動でも実行できます。</p>
+<pre><code>sf-upgrade.sh [-v]</code></pre>
+<p>npm・Salesforce CLI（<code>sf</code>）・Git（Windows の Git Bash だけ）を、最新版に更新します。<code>sf-install.sh</code> から、前回から 24 時間以上たっているときに、バックグラウンドで自動で実行されます（引数なし）。<code>force-*</code> フォルダの中で、手動でも実行できます。<code>-v</code>（<code>--verbose</code>）・<code>-h</code>（<code>--help</code>。1 つ目の引数のときだけ）以外の引数は、「不明なオプションです」で中断します。</p>
+<ol>
+  <li>npm を更新する（<code>npm install -g npm@latest</code>。npm がなければ、警告を表示して飛ばす）</li>
+  <li><code>sf</code> を更新する（<code>sf</code> がなければ、警告を表示して飛ばす）。npm 版（<code>npm ls -g @salesforce/cli</code> が成功する）なら <code>npm install -g @salesforce/cli@latest</code>、それ以外（公式インストーラー版など）なら <code>sf update</code></li>
+  <li>Git を更新する（最後に実行）。Windows の Git Bash では <code>git update-git-for-windows --yes</code>。macOS・Linux・WSL では実行せず、パッケージマネージャーで更新するよう案内する</li>
+</ol>
 <ul>
   <li>どの手順が失敗しても、警告を表示して続行し、最後に「すべてのアップデートが完了しました」と表示します。</li>
-  <li><code>sf</code> は、npm 版なら <code>npm install -g @salesforce/cli@latest</code>、それ以外（公式インストーラー版など）なら <code>sf update</code> で更新します。</li>
+  <li>ログは <code>./sf-tools/logs/sf-upgrade.log</code> です（実行のたびに作り直します）。</li>
 </ul>
 
 <h2 id="sf-prepush"><code>sf-prepush.sh</code></h2>
-<p><code>git push</code> の前に自動で実行される、チェックのスクリプトです（pre-push フックの本体）。</p>
+<p><code>git push</code> のときに自動で実行される、チェックのスクリプトです（pre-push フックの本体。フックは <code>-v</code> を付けて呼びます）。<code>-v</code>・<code>-h</code> 以外の引数は、エラーで終了します。</p>
 <h3>主な処理</h3>
 <ol>
-  <li>次のどちらかなら、プッシュを拒否する（保護ブランチ = <code>sf-tools/config/branches.txt</code> に書かれたブランチ。ファイルがない・空のときは <code>main</code>）。
+  <li>次のどれかなら、プッシュを拒否する（保護ブランチ = <code>sf-tools/config/branches.txt</code> に書かれたブランチ。ファイルがない・空のときは <code>main</code>）。
     <ul>
+      <li>ブランチの上にいない（detached HEAD）</li>
       <li>現在のブランチが、保護ブランチ</li>
-      <li>プッシュ先が、保護ブランチ（<code>git push origin feature:main</code> や、保護ブランチの削除も、拒否します）</li>
+      <li>プッシュ先が、保護ブランチ（<code>git push origin feature:main</code> や、保護ブランチの削除（<code>:main</code>）も、拒否します。プッシュ先は、git がフックに渡す内容から読みます。端末から手動で実行したときは、読みません）</li>
     </ul>
   </li>
-  <li><code>sf-check.sh</code> で、ターゲットファイルの構文を検証する（エラーなら中断）</li>
-  <li>リモートの最新を取得する（現在のブランチと、<code>branches.txt</code> のブランチ）。<code>origin</code> にまだないブランチや、使えない名前は、警告を表示して飛ばします。プッシュは止めません</li>
+  <li><code>sf-check.sh</code> で、ターゲットファイルを検証する（エラーなら中断）</li>
+  <li>リモートの最新を取得する（<code>origin</code> にある現在のブランチと、保護ブランチ）。<code>origin</code> にまだないブランチや、使えない名前の保護ブランチは、警告を表示して飛ばします。<strong>取得に失敗したときは、中断します</strong></li>
   <li><code>origin/&lt;現在のブランチ&gt;</code> に未取り込みのコミットがあれば、表示して、<code>git merge</code> で取り込む（失敗したら <code>git merge --abort</code> して中断）</li>
-  <li><code>origin/main</code> に未取り込みのコミットがあれば、同じように、<code>git merge</code> で取り込む</li>
+  <li><code>origin/main</code> に未取り込みのコミットがあれば、同じように、<code>git merge</code> で取り込む（手順 3 で取得したかにかかわらず、手元の <code>origin/main</code> を見ます）</li>
 </ol>
 <h3>補足</h3>
 <ul>
   <li>取り込みは <code>merge</code> で行います（<code>rebase</code> ではありません）。</li>
-  <li>構文の検証は、取り込みより前に行います。手順 4・5 で取り込んだ変更は、検証されません。</li>
-  <li><strong>取り込みをしたとき（<code>merge</code> のコミットを作ったとき）は、そのプッシュを中止します。</strong>git は、フックを呼ぶ前に、送るコミットを決めているため、そのままでは、取り込みが含まれないまま、プッシュが成功と表示されるからです。取り込み後に、もう一度プッシュすると、取り込みは済んでいるため、通ります。</li>
+  <li>検証は、取り込みより前に行います。手順 4・5 で取り込んだ変更は、検証されません。</li>
+  <li>未取り込みのコミットの確認が失敗したとき（手元に <code>origin/main</code> がないなど）は、取り込みを試みずに中断します。</li>
+  <li><strong>取り込みをしたとき（早送り（fast-forward）を含む）は、そのプッシュを中止します。</strong>git は、フックを呼ぶ前に、送るコミットを決めているため、そのままでは、取り込みが含まれないまま、プッシュが成功と表示されるからです。取り込み後に、もう一度プッシュすると、取り込みは済んでいるため、通ります。</li>
   <li>中断したときは、終了コード 1 で終わり、プッシュも中止されます。</li>
+  <li>ログは <code>./sf-tools/logs/sf-prepush.log</code> です（実行のたびに追記します）。</li>
 </ul>
 
 <h2 id="sf-precommit"><code>sf-precommit.sh</code></h2>
 <p><code>git commit</code> のときに自動で実行される、pre-commit フックの本体です。直接実行することはありません。</p>
 <h3>主な処理</h3>
 <ul>
-  <li><code>sf-check.sh</code> で、ターゲットファイルの構文を確認する</li>
-  <li>エラーがあれば、コミットを中止する</li>
+  <li><code>sf-check.sh</code> を引数なしで実行して、ターゲットファイルを検証する</li>
+  <li>エラーがあれば、コミットを中止する（終了コード 1）</li>
 </ul>
 <h3>補足</h3>
 <ul>
-  <li>確認するのは、<code>sf-tools/release/branch_name.txt</code> に書かれたブランチのターゲットファイルです。このファイルがないときは、確認せずに成功となり、コミットは続行されます。</li>
-  <li>確認するのは、作業フォルダにあるファイルです（ステージした内容ではありません）。</li>
+  <li>検証するのは、<code>sf-tools/release/branch_name.txt</code> に書かれたブランチのターゲットファイルです。このファイルがないときは、検証せずに成功となり、コミットは続行されます。</li>
+  <li>検証するのは、作業フォルダにあるファイルです（ステージした内容ではありません）。</li>
+  <li>ログは <code>./sf-tools/logs/sf-precommit.log</code> です（実行のたびに作り直します）。</li>
 </ul>
 
 <h2 id="sf-metasync"><code>sf-metasync.sh</code></h2>
-<pre><code>sf-metasync.sh</code></pre>
-<p><code>sf-init</code> で登録した <code>prod</code> エイリアスの組織（本番・Sandbox のどちらでも）から、メタデータを取得して、<code>main</code> にコミットしてプッシュします。<strong>Salesforce 組織の内容を正</strong>とします。どのブランチから実行しても、<code>main</code> に切り替えて処理し、終わると元のブランチに戻ります。主に、GitHub Actions からの定期実行を想定しています。</p>
+<pre><code>sf-metasync.sh [-j] [-v]</code></pre>
+<p><code>sf-init</code> で登録した <code>prod</code> エイリアスの組織（本番・Sandbox のどちらでも）から、メタデータを取得して、<code>main</code> にコミットしてプッシュします。<strong>Salesforce 組織の内容を正</strong>とします。どのブランチから実行しても、<code>main</code> に切り替えて処理し、終わると元のブランチに戻ります。主に、GitHub Actions（<code>wf-metasync</code>）からの定期実行を想定しています。</p>
 <div class="box admin">
   <div class="title">管理者専用</div>
-  <p>実行の前に、赤い警告ボックスと確認が表示されます。<code>GITHUB_ACTIONS=true</code> のときは、確認をスキップして自動で実行します。</p>
+  <p>実行の前に、赤い警告ボックスと確認（Y/N）が表示されます。<code>GITHUB_ACTIONS=true</code> のときは、警告も確認もスキップして、自動で実行します。</p>
 </div>
+<p><code>-j</code>（<code>--json</code>）は、組織からの取得（<code>sf project retrieve start</code>）に <code>--json</code> を付けます。<code>-v</code>（<code>--verbose</code>）は、コマンドの応答をコンソールにも表示します。これと <code>-h</code>（<code>--help</code>）以外の引数は、中断します（終了コード 1）。</p>
 <h3>役割</h3>
 <ul>
   <li>組織の最新のメタデータを取得する</li>
   <li>Git へ反映する</li>
   <li>変更があるときだけ、コミットしてプッシュする</li>
   <li>変更がなくても、前回のプッシュが失敗して、送れていないコミットが残っているときは、確認のうえで、プッシュだけ行う</li>
-  <li><code>main</code> へのプッシュは、pre-push フックを通さない（<code>--no-verify</code>。このコマンド専用です。GitHub の保護の設定は、そのまま効きます）</li>
-  <li>プッシュしたときは、<code>branches.txt</code> の <code>main</code> 以外の各ブランチ（<code>staging</code>・<code>develop</code> など）に、<code>main</code> をマージしてプッシュする（こちらのプッシュは、フックを通ります）</li>
+  <li>プッシュしたときは、<code>branches.txt</code> の <code>main</code> 以外の各ブランチ（<code>staging</code>・<code>develop</code> など）に、<code>main</code> をマージしてプッシュする</li>
+  <li><code>main</code> へのプッシュも、ほかのブランチへのプッシュも、pre-push フックを通さない（<code>--no-verify</code>）。pre-push フックは、保護ブランチの上から・保護ブランチへのプッシュを必ず拒否するため、通すと失敗するからです。GitHub の保護の設定（Ruleset）は、そのまま効きます</li>
 </ul>
 <h3>処理の流れ</h3>
 <ol>
-  <li><code>sf</code> の確認。<code>prod</code> エイリアスの組織と、<code>sf-tools/config/metadata.txt</code> があるかを確認する（なければ中断）</li>
-  <li>警告を表示して、続行の確認（Y/N）を取る（GitHub Actions の上では、表示も確認もしません）</li>
+  <li><code>sf</code> の確認（<code>sf --version</code> の終了コードが 0 以外なら中断。成功は 24 時間、確認を省く）。引数の解析は、このあとに行う</li>
+  <li>事前の確認（満たされなければ、何も変更せずに中断する）。<code>prod</code> エイリアスの組織が登録済みであること（確認の出力は、アクセストークンを含むため、表示もログへの記録もしない）・ブランチの上にいること（detached HEAD では中断）・<code>sf-tools/config/metadata.txt</code> があること</li>
+  <li>警告を表示して、続行の確認（Y/N）を取る（GitHub Actions 上では、表示も確認もしない）</li>
   <li><code>main</code> に切り替える。追跡中のファイルに未コミットの変更があれば、いったん退避（<code>git stash</code>）する</li>
-  <li>リモートの最新を取り込む（<code>git pull origin main --rebase</code>）。<code>main</code> に未コミットの変更が残っているときは、中断する</li>
-  <li>差分を解析する（<code>sfdx-git-delta</code> のプラグインが必要）</li>
-  <li>組織からメタデータを取得する（差分の分と、<code>metadata.txt</code> の全種類）</li>
-  <li>変更があれば、一覧を表示して確認を取り、コミットしてプッシュする。変更がなく、前回のプッシュが残っていれば、プッシュだけ行う。どちらもなければ、「変更はありませんでした」と表示して終わる</li>
-  <li>プッシュしたときだけ、ほかのブランチへ伝える。リモートにないブランチは、警告を出して飛ばします。伝えるのに失敗したブランチも、警告を出して飛ばし、次へ進みます</li>
-  <li>終了時（中断したときも）、元のブランチに戻り、退避した変更を戻す</li>
+  <li>リモートの最新を取り込む（<code>git fetch origin</code>（失敗しても続行）→ <code>git pull origin main --rebase</code>。失敗したら <code>git rebase --abort</code> して中断）。その前に、<code>main</code> に未コミットの変更が残っているとき・手元の実行で、追跡していないファイルがあるときは、中断する（下の補足）</li>
+  <li>差分を解析する（<code>sf sgd source delta</code>。<code>sfdx-git-delta</code> のプラグインが必要。失敗したら中断）</li>
+  <li>組織からメタデータを取得する（差分の分と、<code>metadata.txt</code> の全種類。どちらも <code>--ignore-conflicts</code>）。<code>metadata.txt</code> の全種類の取得に失敗したら、中断する</li>
+  <li><code>git add -A</code> でステージし（<code>sf-tools/release/</code> は除く）、変更があれば、一覧を表示して確認（Y/N）を取り、「定期更新: Salesforce変更の自動反映 (YYYY-MM-DD)」でコミットしてプッシュする。変更がなく、<code>origin/main</code> より先のコミットが残っていれば、一覧を表示して確認を取り、プッシュだけ行う。どちらもなければ、「完了: Salesforce 組織側に変更はありませんでした。」と表示して終わる（コミット・プッシュの失敗は、中断）</li>
+  <li>プッシュしたときだけ、ほかのブランチへ伝える（各ブランチで、<code>git pull --rebase</code> → <code>git merge main</code> → <code>git push --no-verify</code>）。リモートにないブランチは、警告を出して飛ばします。伝えるのに失敗したブランチも、取り消して（<code>--abort</code>）、警告を出して飛ばし、次へ進みます</li>
+  <li>終了時（事前の確認より後に中断したときも）、元のブランチに戻り、退避した変更を戻す。差分の解析の一時フォルダを削除する</li>
 </ol>
 <h3>補足</h3>
 <ul>
   <li>終了コードは、成功（同期した・変更がなかった）が <code>0</code>、中断が <code>1</code> です。</li>
-  <li>未コミットの変更の判定と退避は、<strong>追跡中のファイルだけ</strong>が対象です。手元で実行したときは、追跡していない（新しい）ファイル（<code>.gitignore</code> の対象を除く）があると、同期のコミットに無関係なファイルが含まれてしまうため、処理の途中で中断します。GitHub Actions 上では、確認しません。</li>
+  <li>未コミットの変更の判定と退避は、<strong>追跡中のファイルだけ</strong>が対象です。手元で実行したときは、追跡していない（新しい）ファイル（<code>.gitignore</code> の対象と、<code>sf-tools/release/</code> を除く）があると、同期のコミットに無関係なファイルが含まれてしまうため、手順 5 で中断します。GitHub Actions 上では、確認しません。<code>sf-tools/release/</code>（作業用のブランチの作業ファイル）は、確認の対象外で、同期のコミットにも含めません。</li>
+  <li><code>branches.txt</code> がない・ブランチの定義がないときは、警告を表示し、<code>main</code> だけとして扱います（ほかのブランチへは伝えません）。</li>
   <li>完了のメッセージには、実際に伝播できたブランチだけが表示されます。リモートにない・失敗したなどでスキップしたブランチは、警告で一覧されます（終了コードは <code>0</code> のままです）。</li>
+  <li>ログは <code>./sf-tools/logs/sf-metasync.log</code> です（実行のたびに作り直します）。</li>
 </ul>
 
 <h3>取得するメタデータの種類（<code>sf-tools/config/metadata.txt</code>）</h3>
-<p>取得する種類は、各プロジェクトの <code>sf-tools/config/metadata.txt</code> で決まります（<code>sf-init</code> が、雛形から作ります）。設定ファイルだけで調整でき、コードの変更は要りません。</p>
+<p>取得する種類は、各プロジェクトの <code>sf-tools/config/metadata.txt</code> で決まります（<code>sf-init</code> が、雛形から作ります）。コメント行・空行を除いた各行が、取得する種類です。設定ファイルだけで調整でき、コードの変更は要りません。</p>
 <div class="box warn">
   <div class="title">前提</div>
   <p>雛形の標準セットは、<strong>Developer Edition（Sales・Service の標準機能つき）でのみ、リリースと削除を確認</strong>しています。ほかのエディション・製品（Service Cloud・Experience Cloud・業種クラウドなど）で使う場合は、必要な種類を足してください。</p>

@@ -58,6 +58,28 @@ test_out_of_range_number() {
 }
 
 # ------------------------------------------------------------------------------
+# 回帰: 先頭が 0 の番号は 10 進数として扱う（以前は 08・09 が 8 進数として扱われ、[[ -eq ]] がエラーになった）
+# ------------------------------------------------------------------------------
+test_leading_zero_number() {
+    local td mb out ec a
+    td=$(setup_force_dir); mb=$(setup_mock_bin)
+    export MOCK_CALL_LOG="$mb/calls.log"
+    create_all_mocks "$mb"
+
+    out=$(cd "$td" && PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-launcher.sh" 01 2>&1); ec=$?
+    assert_exit_ok $ec "01 → 1 として実行する（exit 0）"
+    for a in 08 09 0000000099999999999; do
+        out=$(cd "$td" && PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-launcher.sh" "$a" 2>&1); ec=$?
+        assert_exit_fail $ec "${a} → 範囲外で exit 1"
+        assert_output_contains "$out" "範囲外" "${a} → 範囲外メッセージが表示された"
+        printf '%s\n' "$out" | grep -qiE "value too great|syntax error|invalid" \
+            && fail "${a} → 算術のエラーが出ない" "$(printf '%s' "$out" | head -3)" \
+            || pass "${a} → 算術のエラーが出ない"
+    done
+    teardown "$td" "$mb"
+}
+
+# ------------------------------------------------------------------------------
 # 数字以外の引数 → exit 1
 # ------------------------------------------------------------------------------
 test_nonnumber_arg() {
@@ -96,6 +118,7 @@ test_quit_interactive() {
 test_not_in_force_dir
 test_direct_number_arg
 test_out_of_range_number
+test_leading_zero_number
 test_nonnumber_arg
 test_quit_interactive
 

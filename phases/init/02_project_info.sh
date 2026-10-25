@@ -10,11 +10,11 @@
 #
 # 【処理の流れ】
 #   1. PROJECT_NAME = SF_INIT_PROJECT（空なら die）、GITHUB_OWNER = SF_INIT_OWNER
-#      （空、または「英数字とハイフンのみ・先頭と末尾は英数字・1〜39 文字」でなければ die）
 #   2. 次の値を決める
 #        REPO_NAME      = force-{PROJECT_NAME}
 #        REPO_FULL_NAME = {GITHUB_OWNER}/force-{PROJECT_NAME}
 #        REPO_DIR       = {PWD}/force-{PROJECT_NAME}
+#      GITHUB_OWNER が空、または「英数字とハイフンのみ・先頭と末尾は英数字・1〜39 文字」でなければ die
 #   3. リポジトリ（REPO_FULL_NAME）とクローン先（REPO_DIR）を表示し、ask_yn で確認する（N / q は die）
 #   4. sf-tools の版を選ぶ（1 / 2 / q。q は die）
 #        1 = 配布版: ENV_TYPE=production・SF_TOOLS_BRANCH=main
@@ -25,7 +25,7 @@
 #          SF_TOOLS_BRANCH と違うときだけ、WARNING と ask_yn（N / q は die）。最新化の確認は、ここでは行わない
 #        - 空: ensure_sf_tools_branch（init-common.sh）を呼ぶ。sf-tools を更新した（戻り値 2）ときは、
 #          状態ファイルを書かずに、終了コード 75 で終了する（sf-init.sh が、更新した sf-tools で、はじめから実行しなおす）
-#   6. 状態ファイルを上書きで作り、次の 7 つを書き出す（chmod 600。Windows では効果なし）
+#   6. 状態ファイルを上書きで作り、次の 7 つを書き出す（書き込みの失敗は die。chmod 600。Windows では効果なし）
 #        GITHUB_OWNER / PROJECT_NAME / REPO_NAME / REPO_FULL_NAME / REPO_DIR / ENV_TYPE / SF_TOOLS_BRANCH
 #
 # 【前提条件】
@@ -43,7 +43,7 @@ PHASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SF_TOOLS_DIR="${SF_TOOLS_DIR:-$(dirname "$(dirname "$PHASE_DIR")")}"
 
 readonly SCRIPT_NAME="sf-init"
-mkdir -p "$HOME/sf-tools/logs" 2>/dev/null || true
+mkdir -p "$HOME/sf-tools/logs" 2>/dev/null || true  # run 不使用: common.sh の読み込み前（run が未定義）
 readonly LOG_FILE="$HOME/sf-tools/logs/${SCRIPT_NAME}.log"
 readonly LOG_MODE="APPEND"  # 司令塔が NEW で初期化済みのため追記
 export SF_INIT_MODE=1
@@ -70,7 +70,7 @@ REPO_NAME="force-${PROJECT_NAME}"
 REPO_FULL_NAME="${GITHUB_OWNER}/${REPO_NAME}"
 REPO_DIR="${PWD}/${REPO_NAME}"
 
-# GitHub オーナー名バリデーション（英数字・ハイフンのみ・先頭末尾はハイフン不可）
+# GitHub オーナー名バリデーション（英数字・ハイフンのみ・先頭末尾はハイフン不可・1〜39 文字）
 if [[ -z "$GITHUB_OWNER" ]] || \
    [[ ! "$GITHUB_OWNER" =~ ^[a-zA-Z0-9]([a-zA-Z0-9-]{0,37}[a-zA-Z0-9])?$ ]]; then
     die "GitHub オーナー名が無効です: \"${GITHUB_OWNER}\"
@@ -90,7 +90,7 @@ echo "  --------------------------------------------------"
 echo ""
 ask_yn "▶ よろしいですか？" || die "セットアップを中断しました。"
 
-# 環境種別の選択
+# sf-tools の版の選択（ENV_TYPE / SF_TOOLS_BRANCH）
 echo ""
 log "INFO" "sf-tools の版を選択してください（Salesforce の本番・Sandbox とは、関係ありません）："
 log "INFO" "  1. 配布版（main）        - 通常は、こちらを選択してください。"
@@ -107,7 +107,7 @@ while true; do
         log "INFO" "  → 配布版（sf-tools: main）"
         break
     fi
-    # 検証環境は未リリースのコードを使うため、誤選択を防ぐ確認を挟む（N なら選択に戻る）
+    # 2（開発版）: 未リリースのコードを使うため、誤選択を防ぐ確認を挟む（N なら選択に戻る。q は ask_yn が die）
     log "WARNING" "開発版は、sf-tools の開発者専用です。リリース前の未検証コード（sf-tools development）が使われます。"
     if ask_yn "▶ 開発版（development）で続行しますか？"; then
         ENV_TYPE="staging"
@@ -132,7 +132,8 @@ else
     [[ $? -eq 2 ]] && exit 75
 fi
 
-# .sf-init.env に変数を書き出す（後続フェーズで source して使用）
+# 状態ファイル（SF_INIT_ENV_FILE）に、上書きで変数を書き出す（後続フェーズで source して使用）
+# run 不使用: ファイルへの書き出し（リダイレクト。失敗は die）
 {
     printf 'GITHUB_OWNER="%s"\n'    "$GITHUB_OWNER"
     printf 'PROJECT_NAME="%s"\n'   "$PROJECT_NAME"
@@ -141,7 +142,7 @@ fi
     printf 'REPO_DIR="%s"\n'       "$REPO_DIR"
     printf 'ENV_TYPE="%s"\n'        "$ENV_TYPE"
     printf 'SF_TOOLS_BRANCH="%s"\n' "$SF_TOOLS_BRANCH"
-} > "$SF_INIT_ENV_FILE"
+} > "$SF_INIT_ENV_FILE" || die "状態ファイルに書き込めません: ${SF_INIT_ENV_FILE}"
 chmod 600 "$SF_INIT_ENV_FILE" 2>/dev/null || true  # run 不使用: ファイル権限保護（Windows は効果なし・意図的エラー無視）
 
 log "SUCCESS" "完了: プロジェクト情報の確認 OK。"

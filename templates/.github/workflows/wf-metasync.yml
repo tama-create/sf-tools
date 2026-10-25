@@ -1,20 +1,65 @@
 # ==============================================================================
 # wf-metasync.yml - Salesforce メタデータ自動同期
 # ==============================================================================
+# main の Salesforce 組織（エイリアス prod）の最新のメタデータを取得し、変更があれば、Git の main ブランチにコミットして push する
+# （Salesforce 組織の内容を正とする）。push したときは、sf-metasync.sh が、branches.txt の main 以外のブランチへ、main を伝播する。
+# Actions の画面での名前は「[metasync] メタ同期」（最上位の name:）。
 #
-# 【概要】
-#   main の Salesforce 組織の最新メタデータを取得し、Git の main ブランチへ自動同期する。
+# 【起動の条件】
+#   - schedule: cron "0 0-10/3 * * 1-5"（UTC の月〜金 0:00・3:00・6:00・9:00 = 日本時間の月〜金 9:00・12:00・15:00・18:00）。
+#     既定のブランチ（main）にあるこのファイルで動く。GitHub の混雑により、開始が遅れることがある
+#   - workflow_dispatch（手動の実行。入力なし）。どのブランチで実行しても、main を取得して同期する
+#     （sf-init のセットアップの最後と、sf-init.sh --verify が、gh workflow run で起動する）
+#   - 起動しない場合: PR・push などのイベント（schedule と workflow_dispatch 以外では、動かない）
 #
-# 【必要な GitHub Secrets（このリポジトリに設定すること）】
-#   SF_PRIVATE_KEY       : 秘密鍵（PEM 形式・全組織共通）
-#   SF_CONSUMER_KEY_PROD : main の組織の Connected App コンシューマーキー
-#   PAT_TOKEN            : GitHub PAT（ブランチ保護ルールのバイパスに使用）
+# 【ジョブ】
+#   1. メタデータ同期（sync）: 条件なしで、常に実行する。同時実行の制御（concurrency。グループ metasync・実行中のものは
+#      取り消さない）で、1 つずつ動く（【補足】参照）
+#   ブランチ保護との関係: 必須チェックではない（PR では動かない）
 #
-# 【必要な GitHub Variables（このリポジトリに設定すること）】
-#   SF_USERNAME_PROD     : main の組織の接続ユーザー名
-#   SF_INSTANCE_URL_PROD : main の組織の接続 URL（https://login.salesforce.com 等）
-#   SF_TOOLS_BRANCH      : clone する sf-tools のブランチ（任意。未設定なら main）
+# 【処理の流れ】
+#   （番号は、本体のコメントの Step の番号と同じ）
+#   1. main を、全履歴（fetch-depth: 0）で、Secret PAT_TOKEN を使って取得する（以降の git push も、この PAT で行う）
+#   2. Node.js 22 を入れる
+#   3. Java 17（temurin）を入れる（以前の手順の名残。sfdx-git-delta の README の前提条件には Java はなく、必要かは未確認）
+#   4. Salesforce CLI を入れる（npm install --global @salesforce/cli）
+#   5. sf のプラグイン sfdx-git-delta を入れる（echo y | sf plugins install。インストールの確認に y を答える）
+#   6. JWT で main の組織にログインする（sf org login jwt。エイリアス prod・既定の組織に設定）。秘密鍵は、Secret SF_PRIVATE_KEY を
+#      base64 -d で /tmp/server.key に戻し（umask 077）、ステップの終了時に必ず消す
+#   7. コミットのユーザーを github-actions[bot]（github-actions[bot]@users.noreply.github.com）にする
+#   8. sf-tools を、公開リポジトリ https://github.com/tama-create/sf-tools.git から、Variable SF_TOOLS_BRANCH のブランチ
+#      （未設定なら main）で、~/sf-tools に clone する（Token は使わない）
+#   9. sf-metasync.sh を、オプションなしで実行する（GitHub Actions 上のため、警告・確認は表示されない）。主な動き:
+#        sf-tools/config/metadata.txt の種類を、組織から取得する → 差分があれば「定期更新: Salesforce変更の自動反映 (YYYY-MM-DD)」で
+#        コミットし、git push --no-verify origin main → push したときは、branches.txt の main 以外の各ブランチへ、main をマージして
+#        push する（失敗したブランチは WARNING でスキップ）。変更がなければ、何もせずに成功する。
+#        詳細と終了コード（0: 同期した・変更なし / 1: 中断）は、sf-metasync.sh の冒頭コメントを参照
+#   どの手順が失敗しても、以降の手順は行わず、ジョブは失敗する（Slack への通知はしない）
 #
+# 【必要な Secrets / Variables】
+#   Secrets（このリポジトリに設定する）:
+#     SF_PRIVATE_KEY       : JWT の秘密鍵（server.key の PEM を、1 行の Base64 にした値。全組織共通。sf-init の Phase 10・
+#                            sf-update-secret.sh が登録する）
+#     SF_CONSUMER_KEY_PROD : main の組織のアプリ（外部クライアントアプリケーション / 接続アプリケーション）のコンシューマー鍵
+#                            （sf-init の Phase 10・sf-update-secret.sh・sf-init.sh --reconnect が登録する）
+#     PAT_TOKEN            : GitHub の PAT（Classic。repo・workflow の権限。sf-init の Phase 6 が登録する）。
+#                            main・staging への push で、Ruleset protect-main / protect-staging（必須チェック）をバイパスする
+#                            （PAT の持ち主が Admin のとき）ために使う
+#   Variables（このリポジトリに設定する。SF_USERNAME_PROD・SF_INSTANCE_URL_PROD の登録元は、SF_CONSUMER_KEY_PROD と同じ）:
+#     SF_USERNAME_PROD     : main の組織の接続ユーザー名
+#     SF_INSTANCE_URL_PROD : main の組織の接続 URL（https://login.salesforce.com 等）
+#     SF_TOOLS_BRANCH      : clone する sf-tools のブランチ（任意。未設定なら main。Phase 9 は development のときだけ登録する）
+#
+# 【補足】
+#   - 同期の push は、pull_request ではないため、wf-release.yml・wf-propagate.yml は動かない（組織へのリリースは行わない。
+#     main 以外のブランチへの伝播は、sf-metasync.sh 自身が行う）
+#   - 同時実行の制御: 定期の実行と、手動の実行が重なっても、並行せず、1 つずつ動く（sf-metasync.sh は、並行して動かせない）。
+#     待機中の実行は、GitHub の仕様で、より新しい実行に置き換えられ、「取り消し」と表示される（新しい実行が、開始の時点の
+#     組織の最新を同期するため、同期の漏れはない）。ローカルの sf-metasync.sh との重なり、および wf-propagate.yml との重なり
+#     （グループが別のため、並行して動ける）は、防げない。main の push が拒まれたとき（ローカルの sf-metasync.sh との重なり）は、
+#     ジョブが失敗する（Slack には通知しない）ので、再実行する。伝播の push が拒まれたとき（wf-propagate.yml との重なり）は、
+#     sf-metasync.sh が WARNING を出してそのブランチをスキップし、ジョブは成功する（ログの WARNING で気づいて、補う）。グループを共通にすると、待機中の実行が置き換えられて、同期か伝播のどちらかが、黙って
+#     取り消されるため、共通にしない
 # ==============================================================================
 name: "[metasync] メタ同期"
 on:
@@ -26,12 +71,18 @@ jobs:
   sync:
     name: メタデータ同期
     runs-on: ubuntu-latest
+    # 同期は、1 つずつ動かす（sf-metasync.sh は、並行して動かせない。定期と手動の実行が重なる場合のため）。
+    #   実行中のものは取り消さない。待機中のものは、GitHub の仕様で、より新しい実行に置き換えられる（取り消される）が、
+    #   新しい実行が、その時点の組織の最新を同期するため、同期の漏れはない
+    concurrency:
+      group: metasync
+      cancel-in-progress: false
     permissions:
       contents: write
 
     steps:
       # --------------------------------------------------------------------------
-      # Step 1: リポジトリの main ブランチを完全な履歴付きでチェックアウト
+      # Step 1: リポジトリの main ブランチを完全な履歴付きでチェックアウト（PAT_TOKEN を使う。以降の git push も、この PAT で行われる）
       # --------------------------------------------------------------------------
       - name: ソースコードを取得
         uses: actions/checkout@v4
@@ -49,7 +100,9 @@ jobs:
           node-version: "22"
 
       # --------------------------------------------------------------------------
-      # Step 3: Java のセットアップ（SGD の実行に必要）
+      # Step 3: Java のセットアップ（以前の手順の名残。sfdx-git-delta の README の前提条件（Node 22 以上。git の実行ファイルは不要）
+      #   には、Java はない（2026-10 時点で確認）。
+      #   ほかに必要とするものがあるかは、未確認のため、残している）
       # --------------------------------------------------------------------------
       - name: Java をインストール（差分抽出ツール用）
         uses: actions/setup-java@v4
@@ -64,13 +117,14 @@ jobs:
         run: npm install --global @salesforce/cli
 
       # --------------------------------------------------------------------------
-      # Step 5: Salesforce Git Delta（SGD）プラグインのインストール
+      # Step 5: Salesforce Git Delta（SGD）プラグインのインストール（sf-metasync.sh の差分の解析 sf sgd source delta に使う。
+      #   echo y は、インストールの確認（署名の確認など）に答えるため）
       # --------------------------------------------------------------------------
       - name: 差分抽出ツール（Salesforce Git Delta）をインストール
         run: echo y | sf plugins install sfdx-git-delta
 
       # --------------------------------------------------------------------------
-      # Step 6: main の Salesforce 組織への認証
+      # Step 6: main の Salesforce 組織への認証（JWT。sf-metasync.sh が使うエイリアス prod で登録する）
       # --------------------------------------------------------------------------
       - name: Salesforce 組織にログイン
         run: |
@@ -96,7 +150,7 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
       # --------------------------------------------------------------------------
-      # Step 8: sf-tools のクローン
+      # Step 8: sf-tools のクローン（公開リポジトリ。Token なし。Variable SF_TOOLS_BRANCH のブランチ、未設定なら main）
       # --------------------------------------------------------------------------
       - name: 自動化ツール（sf-tools）を取得
         run: |
@@ -104,7 +158,8 @@ jobs:
           chmod +x ~/sf-tools/bin/sf-metasync.sh
 
       # --------------------------------------------------------------------------
-      # Step 9: メタデータ取得・Git 同期の実行
+      # Step 9: メタデータ取得・Git 同期の実行（main へのコミット・push と、main 以外のブランチへの伝播まで。
+      #   GitHub Actions 上のため、警告・確認は表示されない）
       # --------------------------------------------------------------------------
       - name: メタデータ取得・Git 同期を実行
         run: ~/sf-tools/bin/sf-metasync.sh

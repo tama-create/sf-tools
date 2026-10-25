@@ -187,9 +187,12 @@ test_runs() {
     _d main staging develop
     assert_file_contains "$OUT" "wf-validate.yml: まだ、実行されていません"                     "実行なし: ？ で表示される"
     _dc
-    export MOCK_GH_RUN_OUT="in_progress  2026-10-11T08:39:33Z"
+    # 実行中: conclusion が空 → gh の --jq が「-」にする（モックは --jq を解釈しないため、その結果の形を返す）
+    export MOCK_GH_RUN_OUT="in_progress - 2026-10-11T08:39:33Z"
+    : > "$MOCK_CALL_LOG"
     _d main staging develop
-    assert_file_contains "$OUT" "実行中、または、待機中です"                                     "実行中: ？ で表示される"
+    assert_file_contains "$OUT" "実行中、または、待機中です（2026-10-11 08:39 UTC）"              "実行中: ？ と日時が表示される（日時が conclusion にずれない）"
+    assert_file_contains "$MOCK_CALL_LOG" 'if (.conclusion // "") == "" then "-" else .conclusion end' "実行中: conclusion が空のときは「-」にする --jq を渡す"
     _dc
 }
 
@@ -249,6 +252,16 @@ test_rulesets() {
     unset MOCK_GH_RULESETS_LIST MOCK_GH_RULESET_CHECKS MOCK_GH_FAIL
 }
 
+# 名前の一致は、固定の文字列として比べる（. を正規表現として扱わない。以前は、wf-metasyncXyml でも「ある」になった）
+test_name_fixed_string() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] 名前の一致は、固定の文字列（. を正規表現として扱わない）${CLR_RST}"
+    _all_ok_env
+    export MOCK_GH_WORKFLOWS=$'wf-metasyncXyml\nwf-propagate.yml\nwf-release.yml\nwf-sequence.yml\nwf-validate.yml'
+    _d main
+    assert_file_contains "$OUT" "ワークフロー wf-metasync.yml がありません"            "wf-metasyncXyml を wf-metasync.yml とみなさない"
+    _dc
+}
+
 test_all_ok
 test_missing
 test_rulesets
@@ -258,6 +271,7 @@ test_tools_branch_optional
 test_org_record
 test_runs
 test_repo_missing
+test_name_fixed_string
 
 teardown "$MB"
 print_summary

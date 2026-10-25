@@ -14,13 +14,18 @@
 #        [1] main / staging / develop  : 標準構成。3 段階のリリース
 #        [2] main / staging            : 2 段階のリリース（開発組織を使わない場合）
 #        [3] main                      : 小規模・単独開発向け
-#   3. branches.txt を書き直す: 既存のファイルの # で始まる行（コメント）だけを残し、空行 1 行のあとに、
-#      選んだブランチを 1 行ずつ書く（一時ファイルに書いてから mv。以前のブランチの行は消える）
-#   4. BRANCH_COUNT（選んだブランチの数: 1〜3）を状態ファイルに追記する
+#   3. branches.txt を書き直す: 既存のファイルの # で始まる行（コメント。先頭の空白は可）だけを残し、空行 1 行のあとに、
+#      選んだブランチを 1 行ずつ書く（一時ファイルに書いてから mv。以前のブランチの行・空行は消える。
+#      sf-tools/config の mkdir・一時ファイルの書き込み・mv の失敗は die。die したときは、一時ファイルを消す（trap）。
+#      branches.txt は、書き直す前のまま）
+#   4. BRANCH_COUNT（選んだブランチの数: 1〜3）を状態ファイルに追記する（追記の失敗は die）
 #
 # 【前提条件】
 #   - Phase 3 で作ったクローン（REPO_DIR）
 #   - 環境変数 SF_TOOLS_DIR（sf-tools のルート。sf-init.sh が export する）
+#
+# 【補足】
+#   - 終了コード: 0 = OK / 1 = die
 # ==============================================================================
 
 # SF_TOOLS_DIR は sf-init.sh（司令塔）から export される
@@ -28,7 +33,7 @@ PHASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SF_TOOLS_DIR="${SF_TOOLS_DIR:-$(dirname "$(dirname "$PHASE_DIR")")}"
 
 readonly SCRIPT_NAME="sf-init"
-mkdir -p "$HOME/sf-tools/logs" 2>/dev/null || true
+mkdir -p "$HOME/sf-tools/logs" 2>/dev/null || true  # run 不使用: common.sh の読み込み前（run が未定義）
 readonly LOG_FILE="$HOME/sf-tools/logs/${SCRIPT_NAME}.log"
 readonly LOG_MODE="APPEND"  # 司令塔が NEW で初期化済みのため追記
 export SF_INIT_MODE=1
@@ -58,10 +63,10 @@ echo "" >&2
 echo -e "  ${CLR_INFO}ブランチ構成を選択してください:${CLR_RESET}" >&2
 echo -e "  ${CLR_INFO}──────────────────────────────────────────────────────${CLR_RESET}" >&2
 echo -e "  ${CLR_INFO}[1]${CLR_RESET} main / staging / develop" >&2
-echo "      標準構成。開発→検証→本番の3段階リリース" >&2
+echo "      標準構成。develop → staging → main の3段階" >&2
 echo "" >&2
 echo -e "  ${CLR_INFO}[2]${CLR_RESET} main / staging" >&2
-echo "      開発組織を使わない場合。検証→本番の2段階" >&2
+echo "      develop を使わない場合。staging → main の2段階" >&2
 echo "" >&2
 echo -e "  ${CLR_INFO}[3]${CLR_RESET} main" >&2
 echo "      小規模プロジェクト・単独開発向け" >&2
@@ -78,10 +83,11 @@ case "$choice" in
     [Qq]) die "中断しました。" ;;
 esac
 
-# branches.txt を更新（既存のコメントヘッダーを保持し、ブランチ行だけ差し替える）
-run mkdir -p "sf-tools/config"
+# branches.txt を更新（既存の # の行（コメント）だけを保持し、ほかの行は、選んだブランチの行に置き換える）
+run mkdir -p "sf-tools/config" || die "sf-tools/config を作成できません: ${REPO_DIR}/sf-tools/config"
 
 TMP_BRANCH_FILE="${BRANCH_LIST_FILE}.tmp"
+# run 不使用: 一時ファイルへの書き出し（リダイレクト。失敗は die）
 {
     if [[ -f "$BRANCH_LIST_FILE" ]]; then
         while IFS= read -r line || [[ -n "$line" ]]; do
@@ -93,15 +99,17 @@ TMP_BRANCH_FILE="${BRANCH_LIST_FILE}.tmp"
     for b in "${BRANCHES[@]}"; do
         echo "$b"
     done
-} > "$TMP_BRANCH_FILE"
-run mv "$TMP_BRANCH_FILE" "$BRANCH_LIST_FILE"
+} > "$TMP_BRANCH_FILE" || die "branches.txt の一時ファイルに書き込めません: ${TMP_BRANCH_FILE}"
+run mv "$TMP_BRANCH_FILE" "$BRANCH_LIST_FILE" || die "branches.txt の更新に失敗しました: ${BRANCH_LIST_FILE}"
 TMP_BRANCH_FILE=""  # mv 成功後はクリア（trap での削除対象から外す）
 
 log "SUCCESS" "branches.txt を更新しました: ${BRANCHES[*]}"
 
-# BRANCH_COUNT を .sf-init.env に追記
+# BRANCH_COUNT を .sf-init.env に追記（再実行のたびに追記する。source すると、最後の行の値になる）
 BRANCH_COUNT="${#BRANCHES[@]}"
-printf 'BRANCH_COUNT="%s"\n' "$BRANCH_COUNT" >> "$SF_INIT_ENV_FILE"
+# run 不使用: 状態ファイルへの追記（リダイレクト。失敗は die）
+printf 'BRANCH_COUNT="%s"\n' "$BRANCH_COUNT" >> "$SF_INIT_ENV_FILE" \
+    || die "状態ファイルに書き込めません: ${SF_INIT_ENV_FILE}"
 
 log "SUCCESS" "完了: ブランチ構成 OK（${BRANCH_COUNT} 階層）。"
 exit $RET_OK

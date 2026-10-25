@@ -26,7 +26,8 @@
 #   2. 接続先組織を決める。優先順位: -t の値 > 環境変数 SF_TARGET_ORG > sf org display の alias
 #      （sf org display は既定で最大 3 回試行）。決まらなければ中断する。
 #   3. GitHub Actions 外（GITHUB_ACTIONS が true 以外）で、接続先が予約名（prod / staging / develop / main）なら、
-#      検証モードでも中断する（【補足】の「共有環境の保護」参照）。
+#      または、本番の組織（sf data query で組織の種類を読み取る）なら、検証モードでも中断する。種類を確認できないときも、
+#      中断する（【補足】の「共有環境の保護」参照）。
 #   4. GitHub Actions 外・--release 指定・SF_DEPLOY_CONFIRMED が 1 以外のとき、確認（Y/N/q）を表示する。
 #      N / q なら中断する。-f も指定されていれば、確認の前に上書きの警告を表示する。
 #   5. sf-tools/release/branch_name.txt からブランチ名を読み、sf-tools/release/<ブランチ名>/ を対象にする。
@@ -69,9 +70,11 @@
 #   - 共有環境の保護: 接続先のエイリアスが予約名（prod / staging / develop / main）の組織（共有環境）には、
 #     ローカルからは実行できない（dry-run を含む）。リリースは、GitHub にコミットし、レビューを通して、
 #     GitHub Actions で行う。個人用の Sandbox / Developer Edition / Scratch Org は、ローカルから実行できる。
-#     予約名以外の名前に付け替えた場合は、動作を保証しない。
+#     名前だけでは、別の名前を付けた本番組織を止められないため、GitHub Actions 外では、組織の種類も確認し（org_local_release_check。
+#     sf data query で Organization を読み取る）、本番の組織、または種類を確認できない組織は、名前にかかわらず、実行できない。
 #   - -h / --help は、1 番目の引数なら、他の処理の前にヘルプを表示して終了する。2 番目以降なら、手順 1 の後の
 #     引数の解析で、そこに到達した時点で表示して終了する（それより前の引数がエラーなら、そのエラーで中断する）。
+#   - sf-check.sh の出力（どの行が、なぜエラーか）は、run を通さずに呼ぶため、-v がなくても画面に出る（sf-release.log には残らない）。
 #   - 終了コード: 成功（対象なしを含む）は 0。中断・失敗は 1。
 # ==============================================================================
 
@@ -98,6 +101,7 @@ if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
     exit 0
 fi
 source "$COMMON_LIB"
+source "${SCRIPT_DIR}/../lib/org.sh"   # org_local_release_check（組織の種類の確認）
 
 # ------------------------------------------------------------------------------
 # 3. 初期チェック
@@ -106,8 +110,6 @@ log "HEADER" "リリース・検証処理を開始します (${SCRIPT_NAME}.sh)"
 
 # sf が終了コードを正しく返すか確認する（npm 版が前提。異常なら中断する）。成功は 24 時間は確認を省略する
 check_sf_cli --cache
-
-trap 'rm -f ./sf-tools/cmd_out_*.tmp 2>/dev/null' EXIT
 
 # デプロイ対象から検出したテストクラス名（phase_generate_manifest → phase_release で共有）
 RUN_TESTS=()
@@ -120,7 +122,6 @@ IS_VALIDATE_MODE=1
 OPEN_BROWSER=1
 IGNORE_CONFLICTS=0
 TARGET_ORG=""
-JSON_OUTPUT=0
 
 JSON_FLAG=()
 
@@ -133,9 +134,9 @@ while [[ "$#" -gt 0 ]]; do
         --force|-f)           IGNORE_CONFLICTS=1 ;;
         --target|-t)
             # 値（組織のエイリアス）が無い、または次のオプションを値として取り込む指定は、受け付けない
-            [[ -n "${2:-}" && "${2:-}" != -* ]] || die "-t / --target には、組織のエイリアスを指定してください。"
+            [[ -n "${2:-}" && "${2:-}" != -* ]] || die "-t / --target の値（組織のエイリアス）がない、または - で始まっています。"
             TARGET_ORG="$2"; shift ;;
-        --json|-j)            JSON_OUTPUT=1; JSON_FLAG=("--json") ;;
+        --json|-j)            JSON_FLAG=("--json") ;;
         --verbose|-v)         : ;;  # SILENT_EXEC は common.sh が設定済み
         --*)
             die "不明なオプションです: $1"
@@ -157,11 +158,18 @@ log "INFO" "接続先組織: ${TARGET_ORG}"
 # ------------------------------------------------------------------------------
 # 5.1 保護組織へのローカル直接実行を禁止
 # ------------------------------------------------------------------------------
-# 共有環境（予約名: prod / staging / develop / main。is_reserved_org_alias）は GitHub Actions 専用。ローカルからは実行不可。
+# 共有環境（予約名: prod / staging / develop / main。is_reserved_org_alias）と、本番の組織（名前は問わない）は、GitHub Actions 専用。ローカルからは実行不可。
 if [[ "${GITHUB_ACTIONS:-false}" != "true" ]]; then
     if is_reserved_org_alias "$TARGET_ORG"; then
-        die "${TARGET_ORG} へのデプロイはローカルから実行できません。PR 経由で GitHub Actions を使用してください。"
+        die "${TARGET_ORG} は共有環境（予約名）のため、ローカルから実行できません。"
     fi
+    # 名前を付け替えた本番組織も止める（組織の種類を調べる。本番、または種類を確認できないときは、中断する）
+    _org_rc=0
+    org_local_release_check "$TARGET_ORG" || _org_rc=$?  # run 不使用: 戻り値で分岐する（run は、戻り値を変える）
+    case "$_org_rc" in
+        1) die "${TARGET_ORG} は本番組織のため、ローカルから実行できません。" ;;
+        2) die "${TARGET_ORG} の組織の種類を確認できないため、ローカルから実行できません。" ;;
+    esac
 fi
 
 # ------------------------------------------------------------------------------
@@ -201,7 +209,6 @@ log "INFO" "リリース処理開始 (Target: ${TARGET_ORG}, Branch: ${BRANCH_NA
 # 【CHECK】対象リストの確認（リリース用ディレクトリを mkdir -p し、deploy-target.txt / remove-target.txt が
 #   なければ中断する（雛形は作らない）。続けて sf-check.sh で構文を検査する）
 phase_check_target() {
-    local created=0
     run mkdir -p "$RELEASE_DIR"
 
     for target in "$DEPLOY_LIST" "$REMOVE_LIST"; do
@@ -209,8 +216,9 @@ phase_check_target() {
     done
 
     # 構文チェック
-    run bash "${SCRIPT_DIR}/sf-check.sh" "$DEPLOY_LIST" "$REMOVE_LIST" \
-        || die "ターゲットファイルに構文エラーがあります。上記のエラーを修正してください。"
+    # run 不使用: sf-check.sh の出力（どの行が、なぜエラーか）を、-v がなくても画面に出すため
+    bash "${SCRIPT_DIR}/sf-check.sh" "$DEPLOY_LIST" "$REMOVE_LIST" \
+        || die "ターゲットファイルの検証（sf-check.sh）でエラーがありました。"
     return $RET_OK
 }
 
@@ -245,7 +253,11 @@ generate_manifest() {
         log "ERROR" "${name}: 生成する対象がありません。"
         return 1
     fi
-    merge_package_xml "${RELEASE_DIR}/${name}" "${parts[@]}"
+    if ! merge_package_xml "${RELEASE_DIR}/${name}" "${parts[@]}"; then  # 条件チェック（失敗したら、統合前の一時ファイルを消して、中断する）
+        rm -f "${parts[@]}"  # run 不使用: 統合前の一時ファイルの除去
+        log "ERROR" "マニフェストの統合（merge_package_xml）に失敗しました: ${name}"
+        return 1
+    fi
     rm -f "${parts[@]}"  # run 不使用: 統合前の一時ファイルの除去
     if ! grep -q '<members>' "${RELEASE_DIR}/${name}" 2>/dev/null; then  # 条件チェック
         log "ERROR" "${name} に、メンバーが 1 つも含まれていません（ターゲットファイルの記述が、マニフェストに反映されていません）。"

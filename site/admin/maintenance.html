@@ -36,20 +36,21 @@
 </table>
 
 <h2 id="org">Salesforce 組織の接続の考え方</h2>
-<p>段階（main / staging / develop）と、組織の種類は、<strong>結びつけていません</strong>。どの段階にも、本番・Sandbox・Developer Edition などを、自由につなげられます（<code>main</code> に Sandbox や Developer Edition をつないでも構いません）。</p>
+<p>段階（main / staging / develop）と、組織の種類は、<strong>結びつけていません</strong>。どの段階にも、Sandbox・Developer Edition などを、自由につなげられます（<code>main</code> に Sandbox や Developer Edition をつないでも構いません）。ただし、本番の組織だけは、次のルールがあります。</p>
 <div class="box warn">
   <div class="title">本番の組織は、main にだけつなげます</div>
-  <p>staging や develop に、本番の組織をつなごうとすると、ログインのあとで組織の種類を確かめて、そこで止まります。本番を、うっかり、開発用の段階につなげないための仕組みです。</p>
+  <p>staging や develop に、本番の組織をつなごうとすると、ログインのあとで組織の種類を確かめて、そこで止まります（既定の方式では、外部クライアントアプリを作る前に止まります）。種類を判定できない組織も、同じように、<code>main</code> 以外にはつなげません。本番を、うっかり、開発用の段階につなげないための仕組みです。最初のセットアップ・段階の追加・付け替えの、どれでも同じです。</p>
 </div>
 
 <h3 id="org-login">ログイン先の選び方</h3>
-<p>段階ごとに、ログイン先を、次の 3 つから選びます（Enter だけなら 2 番です）。組織の種類ではなく、URL で選びます。</p>
+<p>段階ごとに、ログイン先を、次の 3 つから選びます（Enter だけなら 2 番です。<code>q</code> で中断）。組織の種類ではなく、ログインする URL で選びます。</p>
 <ol>
-  <li><code>https://login.salesforce.com</code> — 本番・Developer Edition・Trial など</li>
+  <li><code>https://login.salesforce.com</code> — 本番・Developer Edition・Trial など（<code>main</code> 以外の段階では、「Developer Edition・Trial など（※ Salesforce の本番は、main のみ）」と表示されます）</li>
   <li><code>https://test.salesforce.com</code> — Sandbox（<strong>安全なおすすめ</strong>。本番に影響しません）</li>
-  <li>組織の URL を入力（My Domain。例: <code>https://会社名.my.salesforce.com</code>）</li>
+  <li>組織の URL を入力（My Domain。例: <code>https://会社名.my.salesforce.com</code>）。<code>https://</code> で始まり、<code>salesforce.com</code> か <code>force.com</code> のドメインでないと、入力し直しになります</li>
 </ol>
-<p>ログインすると、組織の ID・名前・種類（本番 / Sandbox / Developer Edition / Trial）を、<strong>組織から読み取って</strong>表示します。読み取った内容は、保存されます。</p>
+<p>選んだあと、ブラウザで Salesforce にログインします（システム管理者のユーザーで。約 2 分で時間切れになります）。ログインすると、組織の ID・名前・種類（本番 / Sandbox / Developer Edition / Trial）を、<strong>組織から読み取ります</strong>。読み取った内容は、GitHub の Variable（<code>SF_ORG_*</code>）に保存され、<a href="#status"><code>--status</code></a> で見られます。</p>
+<p>そのあとの、外部クライアントアプリの自動作成・接続のテスト（最大 約 10 分くり返します）・GitHub への登録は、最初のセットアップと同じです（<a href="setup.html#in-sf">Salesforce の接続</a>）。<code>--legacy-connected-app</code> を付けると、従来の接続アプリケーション（手動の入力）を使います。</p>
 
 <h2 id="add-tier">段階を足す（<code>--add-tier</code>）</h2>
 <p>セットアップのあとで、<code>main</code> だけの構成から、<code>staging</code>・<code>develop</code> へ、段階を足せます。</p>
@@ -70,25 +71,31 @@ sf-init.sh --add-tier develop    # main + staging → main + staging + develop</
   </div>
   <figcaption>段階は、1 つずつ、順番にしか足せません（staging を飛ばして develop は足せません）。</figcaption>
 </figure>
-<p>足すときに、次のことが、この順に、自動で行われます。</p>
+<p>実行すると、次の順に進みます。</p>
 <ol>
-  <li>足す段階の組織に接続して、認証情報（Secret / Variable）を登録する</li>
-  <li>GitHub に、新しいブランチ（<code>staging</code> または <code>develop</code>）を作る（すでにあれば、作りません）</li>
-  <li>作業用のブランチ（<code>system-add-tier-段階-日時</code>）を作り、<code>branches.txt</code> に段階を足して、コミットとプッシュをする</li>
-  <li><code>main</code> に向けて、PR を作る（<code>staging</code> を足すときも <code>develop</code> を足すときも、<code>main</code> には直接プッシュしません。PR をマージすると、段階として有効になります）</li>
+  <li><strong>足せるかを確かめます。</strong>GitHub の最新の <code>main</code> の <code>branches.txt</code>（段階の一覧のファイル）を読んで、すでにある段階を、もう一度足そうとしていないか、<code>develop</code> を足すときに <code>staging</code> があるかを確かめます（手元のファイルではなく、GitHub の <code>main</code> で確かめます）。</li>
+  <li><strong>管理者向けの警告と確認</strong>が出ます。gh にログインしているユーザーが、オーナー本人か、その組織の管理者かを確かめてから、「続行しますか？」（Y/N/q）と聞かれます。<code>GITHUB_ACTIONS=true</code> でも、省略しません。</li>
+  <li><strong>足す段階の組織に接続して、認証情報を登録します。</strong>ログイン先を選んで、ブラウザでログインします（<a href="#org-login">ログイン先の選び方</a>）。<code>staging</code> なら <code>STG</code>、<code>develop</code> なら <code>DEV</code> の名前で、Secret <code>SF_CONSUMER_KEY_*</code> と、Variable <code>SF_USERNAME_*</code>・<code>SF_INSTANCE_URL_*</code>・<code>SF_ORG_*</code> を登録します。</li>
+  <li>GitHub に、新しいブランチ（<code>staging</code> または <code>develop</code>）を作ります（すでにあれば、作りません）。</li>
+  <li>作業用のブランチ（<code>system-add-tier-段階-日時</code>）を作り、<code>branches.txt</code> に段階を足して、コミットとプッシュをします。</li>
+  <li><code>main</code> に向けて、PR を作ります（<code>main</code> には直接プッシュしません）。</li>
+  <li>実行する前のブランチ（管理者用のクローンでは <code>admin</code>）に戻ります。</li>
 </ol>
+<div class="box next">
+  <div class="title">PR をマージすると、段階として有効になります</div>
+  <p>作られた PR を、GitHub でマージしてください。マージするまでは、段階として使われません。<strong>マージする前に、もう一度 <code>--add-tier</code> を実行すると、PR が 2 本できます</strong>（GitHub の <code>main</code> には、まだ段階が入っていないため、重複として止まりません）。<code>staging</code> のブランチ保護（<code>protect-staging</code>）は、最初のセットアップで作ってあるので、足す必要はありません。</p>
+</div>
 <ul>
   <li><code>staging</code> を飛ばして、<code>main</code> から <code>develop</code> を足すことは、できません（エラーになります）。すでに足してある段階を、もう一度足すこともできません。</li>
   <li>最初のセットアップとは、順序が逆です。段階を足すときは、<strong>先に Salesforce に接続して、成功してから、ブランチと PR を作ります</strong>。接続に失敗したときに、GitHub 側を、変更しないためです。ただし、外部クライアントアプリは、接続のテストの前に組織に作るので、失敗しても組織に残ります（自動では消えません）。</li>
   <li>接続のテストに失敗したときに、テストを飛ばして登録する（<code>Y</code>）と答えると、認証情報は登録されます。</li>
-  <li>終わると、実行する前のブランチ（<code>admin</code>）に戻ります。</li>
+  <li>接続のあと（ブランチ・PR を作る途中）で失敗したときは、そこまでに作ったブランチが残り、<code>admin</code> に戻らないことがあります（自動では元に戻しません）。もう一度 <code>--add-tier</code> を実行すると、GitHub に段階のブランチがあれば作らずに進み、新しい作業用のブランチで PR を作ります（Salesforce への接続も、もう一度行います。前の実行で PR まで作れていたときは、PR が 2 本になります）。ただし、作業ツリーに未コミットの変更が残っていると、止まります。</li>
 </ul>
 <div class="box warn">
   <div class="title">実行する前に</div>
   <ul>
     <li>未コミットの変更があると、エラーで止まります。先にコミットするか、取り除いてください。</li>
-    <li>JWT の鍵と証明書（<code>~/.sf-jwt/リポジトリ名/</code>）が、この PC に必要です。<code>sf-init.sh</code> を実行した PC で行ってください。</li>
-    <li>管理者向けの警告と確認（Y/N/q）が表示されます。<code>GITHUB_ACTIONS=true</code> でも省略しません。</li>
+    <li>JWT の鍵（<code>~/.sf-jwt/force-XXXX/server.key</code>。既定の方式では <code>server.crt</code> も）が、この PC に必要です。<code>sf-init.sh</code> を実行した PC で行ってください。</li>
     <li>新しいブランチ（<code>staging</code> / <code>develop</code> と、<code>branches.txt</code> を更新する作業用のブランチ）は、リモートの最新の <code>main</code>（<code>origin/main</code>）から作ります。手元の <code>main</code> が古くても、古い内容からは派生しません（手元の <code>main</code> は、更新しません）。</li>
   </ul>
 </div>
@@ -107,38 +114,66 @@ sf-init.sh --add-tier develop    # main + staging → main + staging + develop</
   <li><p>GitHub の Repository Ruleset を更新します（減らす段階のブランチを、対象から外します）。Ruleset の設定によっては、先に外さないと、ブランチを削除できません。</p></li>
   <li><p><code>branches.txt</code> から、減らす段階を削除して、コミットしてプッシュします。</p></li>
   <li><p>GitHub で、ブランチ（<code>staging</code> / <code>develop</code>）を削除します。</p></li>
-  <li><p>GitHub の Secrets / Variables から、その段階の <code>SF_CONSUMER_KEY_*</code> / <code>SF_USERNAME_*</code> / <code>SF_INSTANCE_URL_*</code> を削除します。</p></li>
+  <li><p>GitHub の Secrets / Variables から、その段階の <code>SF_CONSUMER_KEY_*</code>（Secret）と、<code>SF_USERNAME_*</code> / <code>SF_INSTANCE_URL_*</code> / <code>SF_ORG_*</code>（Variable）を削除します。</p></li>
 </ol>
 
 <h2 id="reconnect">接続先を付け替える（<code>--reconnect</code>）</h2>
 <pre><code>sf-init.sh --reconnect &lt;段階&gt;      # 段階: main / staging / develop</code></pre>
-<p>1 つの段階について、接続先の Salesforce 組織を、別の組織に付け替えます。ログイン先の選び方と、本番は main にだけつなげるというルールは、<a href="#org">最初の章</a>のとおりです。段階は増やしません（増やすときは <code>--add-tier</code>）。鍵やユーザー名の部分的な更新は、<a href="secrets.html#update"><code>sf-update-secret.sh</code></a> で行います。</p>
+<p>1 つの段階について、接続先の Salesforce 組織を、別の組織に付け替えます（「お試しで Sandbox につないだが、本番につなぎたい」「組織を作り直した」ときなど）。最初のセットアップと同じ画面の流れで、外部クライアントアプリの自動作成まで行います。ログイン先の選び方と、本番は main にだけつなげるというルールは、<a href="#org">最初の章</a>のとおりです。段階は増やしません（増やすときは <code>--add-tier</code>）。鍵やユーザー名の部分的な更新は、<a href="secrets.html#update"><code>sf-update-secret.sh</code></a> で行います。</p>
+<ol>
+  <li>いまの接続（ログイン先・組織の種類・ユーザー・組織名・組織の ID）を表示します。</li>
+  <li>管理者向けの警告が出て、gh にログインしているユーザーが、オーナー本人か、その組織の管理者かを確かめてから、「付け替えますか？」（Y/N/q）と聞かれます（<code>N</code> / <code>q</code> で中止）。</li>
+  <li>ログイン先を選んで、ブラウザで、新しい組織にログインします。組織の種類を確かめて、外部クライアントアプリを作り、接続をテストします。</li>
+  <li>Secret <code>SF_CONSUMER_KEY_*</code> と、Variable <code>SF_USERNAME_*</code>・<code>SF_INSTANCE_URL_*</code>・<code>SF_ORG_*</code> を、新しい組織の値に更新します。</li>
+  <li>以前の組織と新しい組織が違うときは、以前の組織に、以前の接続に使ったアプリが残っていることと、削除する場所を表示します。以前の接続の方式は記録していないので、両方を表示します: sf-init が作った外部クライアントアプリ（<code>SF_TOOLS_</code> で始まる名前。外部クライアントアプリマネージャ）と、<code>--legacy-connected-app</code> で手動で作った接続アプリケーション（アプリケーションマネージャ）。<strong>自動では削除しません。</strong>以前の組織の ID が記録されていなかったときは、確かめるよう案内が出ます。</li>
+</ol>
 <ul>
-  <li>最初に、いまの接続（ログイン先・組織の種類・ユーザー・組織名・組織の ID）を表示して、「付け替えますか」と確認します（<code>N</code> / <code>q</code> で中止）。</li>
   <li>段階は、<code>main</code>（<code>prod</code> も <code>main</code> として受け付けます）・<code>staging</code>・<code>develop</code> のいずれかです。<code>staging</code> と <code>develop</code> は、<code>branches.txt</code> にその段階があるときだけ指定できます。</li>
-  <li>JWT の鍵と証明書（<code>~/.sf-jwt/リポジトリ名/</code> の <code>server.key</code> と <code>server.crt</code>）が、この PC に必要です。</li>
-  <li>以前の組織と新しい組織が違うときは、以前の組織に外部クライアントアプリ（<code>SF_TOOLS_</code> で始まる名前）が残っていることと、削除の方法を表示します。<strong>自動では削除しません。</strong></li>
+  <li>JWT の鍵と証明書（<code>~/.sf-jwt/force-XXXX/</code> の <code>server.key</code> と <code>server.crt</code>）が、この PC に必要です（<code>--legacy-connected-app</code> のときも、両方が必要です）。</li>
 </ul>
+<div class="box warn">
+  <div class="title">途中で止まったとき</div>
+  <ul>
+    <li>外部クライアントアプリは、接続のテストの前に、新しい組織に作ります。そのあとで止まると、新しい組織にアプリが残ります（自動では消えません）。</li>
+    <li>接続のテストに失敗しても、テストを飛ばして登録する（<code>Y</code>）と答えると、登録されます。</li>
+    <li>登録は、<code>SF_CONSUMER_KEY_*</code> → <code>SF_USERNAME_*</code> → <code>SF_INSTANCE_URL_*</code> の順に 1 つずつ行います。途中で止まると、新しい組織の値と、以前の組織の値が混ざった状態になります。<strong>もう一度 <code>--reconnect</code> を実行して、そろえてください。</strong></li>
+  </ul>
+</div>
 
 <h2 id="status">セットアップを診断する（<code>--status</code>）</h2>
 <pre><code>sf-init.sh --status</code></pre>
-<p><span class="badge safe">🔍 読み取りのみ</span> 何も変更せずに、いまの状態を調べます。「どこで間違えたか分からない」ときの、最初の手がかりです。</p>
+<p><span class="badge safe">🔍 読み取りのみ</span> 何も変更せずに、いまの状態を調べます。「どこで間違えたか分からない」ときの、最初の手がかりです。管理者向けの警告と確認は、出ません。セットアップが済んだプロジェクトで、オプションなしの <code>sf-init.sh</code> を実行して「[1] いまの Salesforce の接続を見る」を選んでも、同じ表示になります。</p>
+<p>調べる段階は、<code>main</code> と、<code>branches.txt</code> にある <code>staging</code> / <code>develop</code> です。項目ごとに、次の記号で示します。</p>
+<table>
+  <thead><tr><th>記号</th><th>意味</th><th>不足に数えるか</th></tr></thead>
+  <tbody>
+    <tr><td>✓</td><td>できている</td><td>—</td></tr>
+    <tr><td>✗</td><td>足りない。すぐ下に「直し方」（実行するコマンド）を表示します</td><td>数える</td></tr>
+    <tr><td>！</td><td>注意（直近のワークフローが成功していない、組織の種類が記録されていない、など）</td><td>数えない</td></tr>
+    <tr><td>？</td><td>確認できなかった（通信エラー・権限がない・プランが対応していない、まだ実行されていない、など）</td><td>数えない</td></tr>
+  </tbody>
+</table>
+<h3 id="status-items">調べる項目</h3>
+<table>
+  <thead><tr><th>項目</th><th>調べること</th></tr></thead>
+  <tbody>
+    <tr><td>リポジトリ</td><td>GitHub にリポジトリがあるか。段階のブランチがあるか（なければ、直し方は <code>--add-tier</code>）。ワークフロー 5 本（<code>wf-metasync</code>・<code>wf-propagate</code>・<code>wf-release</code>・<code>wf-sequence</code>・<code>wf-validate</code>）があるか（なければ、<a href="workflows.html#sync"><code>sf-sync-wf.sh</code></a>）</td></tr>
+    <tr><td>Secrets</td><td><code>PAT_TOKEN</code>・<code>SLACK_BOT_TOKEN</code>・<code>SF_PRIVATE_KEY</code>・段階ごとの <code>SF_CONSUMER_KEY_*</code> があるか（名前だけを調べます。値は、だれにも読めません）</td></tr>
+    <tr><td>Variables</td><td><code>SLACK_CHANNEL_ID</code>・段階ごとの <code>SF_USERNAME_*</code>・<code>SF_INSTANCE_URL_*</code> があるか。組織の種類の記録（<code>SF_ORG_ID_*</code>）がないときは「！」（以前のバージョンで作ったプロジェクト。<code>--reconnect</code> で記録できます）。<code>SF_TOOLS_BRANCH</code> は、開発版のときだけ使うものなので、なくても不足にしません</td></tr>
+    <tr><td>ブランチ保護</td><td>Ruleset（<code>protect-main</code>・<code>protect-staging</code>）の<strong>必須チェックの名前</strong>が、ワークフローのジョブの名前（<code>対象ファイル確認</code>・<code>デプロイ検証</code>・<code>順序チェック</code>）と、過不足なく合っているか（<a href="troubleshooting.html#required-checks">合っていないと、PR をマージできません</a>）。Ruleset が無い（無料プランの非公開リポジトリなど）・読めないときは、「？」と表示するだけで、不足には数えません</td></tr>
+    <tr><td>直近の実行（参考）</td><td><code>wf-metasync</code>・<code>wf-release</code>・<code>wf-validate</code>・<code>wf-propagate</code> の、直近の 1 回の結果。成功は ✓、成功以外で終わったものは「！」、まだ実行されていない・実行中のものは「？」です（時刻は UTC）</td></tr>
+  </tbody>
+</table>
+<p>最後に、「不足はありません」か「不足が N 件あります」と表示します。</p>
+<h3 id="status-orgs">段階ごとの接続先</h3>
 <ul>
-  <li>リポジトリ・ブランチ・ワークフロー・Secrets・Variables が、そろっているかを調べます。ブランチ保護（Ruleset）の<strong>必須チェックの名前</strong>が、ワークフローの実際の名前（<code>対象ファイル確認</code>・<code>デプロイ検証</code>・<code>順序チェック</code>）と合っているかも調べます（<a href="troubleshooting.html#required-checks">合っていないと、PR をマージできません</a>）。Ruleset が無い（無料プランの非公開リポジトリなど）ときは、「？」と表示するだけで、不足には数えません。足りないものは、直し方もいっしょに表示します。</li>
-  <li>段階ごとの接続先（ログイン先・組織の種類・ユーザー・組織の ID・最後に確かめた日時）の一覧も、表示します。</li>
-  <li>項目ごとに、次の記号で示します。
-    <ul>
-      <li>✓ できている</li>
-      <li>✗ 足りない（直し方を表示）</li>
-      <li>！ 注意</li>
-      <li>？ 確認できなかった</li>
-    </ul>
-    足りないものがある、または、本番の組織が <code>main</code> 以外につながっていると、終了コードは 1 になります。
-  </li>
-  <li>直近のワークフローの実行結果も、参考として表示します。</li>
-  <li>表示する接続先は、GitHub に保存された値です（いま実際にログインして確かめた値ではありません）。以前のバージョンで作ったプロジェクトなど、保存されていないものは、「未確認」と表示されます。</li>
+  <li>段階ごとに、ログイン先（URL）・組織の種類・接続ユーザー・組織名・組織の ID・最後に確かめた日時を表示します。接続の情報がない段階は「（未接続）」と表示します。</li>
+  <li>同じ組織が、複数の段階につながっているときは、警告が出ます（段階を進めても、同じ組織にリリースすることになり、段階で確かめる意味がなくなります）。</li>
+  <li>本番の組織が、<code>main</code> 以外につながっているときは、エラーが出ます。</li>
+  <li>表示する接続先は、GitHub に保存された値です（いま実際にログインして確かめた値ではありません）。以前のバージョンで作ったプロジェクトなど、保存されていないものは、組織が「未確認」、種類が「種類を判定できません」と表示されます。</li>
   <li>Salesforce 側（外部クライアントアプリ・JWT 接続）は、ログインが必要なので、調べません。直近の <code>wf-metasync</code> や <code>wf-release</code> が成功していれば、接続はできています。</li>
 </ul>
+<p>足りないもの（✗）がある、または、本番の組織が <code>main</code> 以外につながっていると、終了コードは 1 になります（スクリプトから、問題を見つけられるようにするためです）。</p>
 
 </main>
 <aside id="toc"></aside>

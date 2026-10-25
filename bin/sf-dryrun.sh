@@ -14,6 +14,7 @@
 #   -v, --verbose       : コマンドの応答（出力）をコンソールにも表示する
 #   -h, --help          : このヘルプを表示して終了する（1 番目の引数のときだけ。【補足】参照）
 #   上記以外も、すべて sf-release.sh へそのまま渡す（-f / -j なども有効。詳細は sf-release.sh --help）。
+#   このスクリプトは引数を検査しない。不明なオプション・引数は、sf-release.sh が中断する。
 #
 # 【処理の流れ】
 #   1. 同じディレクトリの sf-release.sh の存在を確認する。なければ中断する。
@@ -24,10 +25,13 @@
 #
 # 【補足】
 #   - -r / --release を付けると、sf-release.sh がリリースモードになり、実際に組織へリリースする
-#     （GitHub Actions 外では、sf-release.sh の確認（Y/N/q）が表示される）。検証だけが目的なら付けないこと。
+#     （GitHub Actions 外では、環境変数 SF_DEPLOY_CONFIRMED が 1 でない限り、sf-release.sh の確認（Y/N/q）が
+#     表示される）。検証だけが目的なら付けないこと。
 #   - 2 番目以降の -h / --help は sf-release.sh へ渡り、sf-release.sh のヘルプが表示される
 #     （扱いは sf-release.sh --help の【補足】のとおり）。
-#   - ログ: ./sf-tools/logs/sf-dryrun.log（実行のたびに作り直す）
+#   - 終了コード: sf-release.sh がないときは 1。それ以外は sf-release.sh の終了コード。
+#   - ログ: ./sf-tools/logs/sf-dryrun.log（実行のたびに作り直す）。手順 2 以降（sf-release.sh）のログは、
+#     ./sf-tools/logs/sf-release.log
 # ==============================================================================
 
 # ------------------------------------------------------------------------------
@@ -48,7 +52,7 @@ if [[ ! -f "$COMMON_LIB" ]]; then
     exit 1
 fi
 if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    awk '/^# ==/{f++; next} f==2{sub(/^# ?/,""); print} f==3{exit}' "${BASH_SOURCE[0]}"
+    awk '/^# ==/{f++; next} f==2{sub(/^# ?/,""); print} f==3{exit}' "${BASH_SOURCE[0]}"  # run 不使用: common.sh の読み込み前（run が未定義）
     exit 0
 fi
 source "$COMMON_LIB"
@@ -64,4 +68,4 @@ RELEASE_SH="${SCRIPT_DIR}/sf-release.sh"
 # ------------------------------------------------------------------------------
 # 4. sf-release.sh を呼び出す（引数はそのまま渡す。-r がなければ、sf-release.sh の既定の検証モード）
 # ------------------------------------------------------------------------------
-exec bash "$RELEASE_SH" "$@"
+exec bash "$RELEASE_SH" "$@"  # run 不使用: exec で sf-release.sh に置き換える（画面の入出力・終了コードを、そのまま渡す）

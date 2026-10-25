@@ -26,7 +26,7 @@
 #         それを使うかを確認）・ログイン先を決めて、接続テストに成功したら、SF_CONSUMER_KEY_<組織> を登録する
 #      3) ユーザー名: 組織を選び、コンシューマーキー（接続テスト用。登録しない）と新しい接続ユーザー名を入力し、
 #         ログイン先を決めて、接続テストに成功したら、SF_USERNAME_<組織> を登録する
-#      4) すべて: 確認（Y/N）で Y なら、まず SF_PRIVATE_KEY を登録する（接続テストより前）。続けて、組織ごとに、
+#      4) すべて: 確認（Y/N）で Y なら、まず SF_PRIVATE_KEY を登録する（接続テストより前。N なら登録しない）。続けて、組織ごとに、
 #         コンシューマーキー・接続ユーザー名を入力し、ログイン先を決めて、接続テストに成功したら、
 #         SF_CONSUMER_KEY_<組織>・SF_USERNAME_<組織>・SF_INSTANCE_URL_<組織> を登録する
 #   7. 「JWT Secrets の更新が完了しました。」を表示して終了する（手順 6 の確認で N と答えて、登録しなかったときも表示する）
@@ -34,7 +34,7 @@
 # 【前提条件】
 #   - force-* ディレクトリ（フォルダ名が force- で始まる）で実行すること。それ以外では lib/common.sh が終了する（終了コード 1）
 #   - origin が GitHub のリポジトリであること。gh で、そのリポジトリの Secrets / Variables を更新できる権限があること
-#   - Salesforce CLI（sf）は npm 版であること。手順 5 の確認は、成功したら 24 時間は省略する
+#   - Salesforce CLI（sf）は npm 版であること。手順 5 の確認は、成功したら 24 時間は省略する（GitHub Actions 上では、確認しない）
 #
 # 【補足】
 #   - 組織の選択肢: ./sf-tools/config/branches.txt の有効な行数（コメント行・空行を除く。ファイルが無ければ 1）で決まる
@@ -47,7 +47,8 @@
 #     （login / test / URL）があれば、質問しない。メニュー 2・3 では、選んだ URL を接続テストにだけ使い、登録しない
 #   - 接続テスト: sf org login jwt と、組織の情報（Organization）の読み取りを、一時的なホームフォルダの中で実行する
 #     （run_isolated_home）。ユーザーの sf に、エイリアスは増えず、同じユーザーの既存の認証も置き換わらない。
-#     失敗したら、中断する（それより前に登録した値は、そのまま残る）
+#     sf org login jwt が失敗したら、中断する（それより前に登録した値は、そのまま残る）。組織の情報を読み取れなかったときは、
+#     中断せず、種類を判定できない組織として、下の本番組織のガードで扱う
 #   - 本番組織のガード: 接続テストのあと、STG・DEV に、本番組織、または種類を判定できない組織をつなごうとしたら、
 #     登録する前に中断する（PROD で種類を判定できないときは、WARNING を表示して続行する）
 #   - 接続テストで組織の ID を読み取れたら、GitHub Variables の SF_ORG_ID_<組織>・SF_ORG_NAME_<組織>・
@@ -88,10 +89,10 @@ source "${SCRIPT_DIR}/../lib/org.sh"   # ログイン先の選択（種類では
 # ------------------------------------------------------------------------------
 # 3. 必須コマンドのチェック
 # ------------------------------------------------------------------------------
-command -v sf      >/dev/null 2>&1 || die "コマンドが見つかりません: sf"
-command -v gh      >/dev/null 2>&1 || die "コマンドが見つかりません: gh"
-command -v git     >/dev/null 2>&1 || die "コマンドが見つかりません: git"
-command -v openssl >/dev/null 2>&1 || die "コマンドが見つかりません: openssl"
+command -v sf      >/dev/null 2>&1 || die "コマンドが見つかりません: sf"       # 存在確認のため run 不使用
+command -v gh      >/dev/null 2>&1 || die "コマンドが見つかりません: gh"       # 存在確認のため run 不使用
+command -v git     >/dev/null 2>&1 || die "コマンドが見つかりません: git"      # 存在確認のため run 不使用
+command -v openssl >/dev/null 2>&1 || die "コマンドが見つかりません: openssl"  # 存在確認のため run 不使用
 
 # ------------------------------------------------------------------------------
 # 4. force-* ディレクトリかチェック + 管理者向け警告
@@ -106,15 +107,16 @@ fi
 # ------------------------------------------------------------------------------
 # 5. git remote からリポジトリ名を取得
 # ------------------------------------------------------------------------------
+# 以下の REMOTE_URL・REPO_FULL_NAME・REPO_NAME は、VAR=$(cmd) のため run 不使用
 REMOTE_URL=$(git remote get-url origin 2>/dev/null) \
-    || die "git remote の取得に失敗しました。Git リポジトリか確認してください。"
+    || die "git remote（origin）の URL を取得できませんでした。"
 
-REPO_FULL_NAME=$(echo "$REMOTE_URL" \
-    | sed 's|.*github\.com[:/]\(.*\)\.git|\1|' \
-    | sed 's|.*github\.com[:/]\(.*\)$|\1|')
-REPO_NAME=$(basename "$REPO_FULL_NAME")
-
-[[ -z "$REPO_FULL_NAME" ]] && die "リポジトリ名を取得できませんでした。Remote URL: ${REMOTE_URL}"
+# GitHub の URL から「owner repo」を取り出す（parse_github_remote。GitHub 以外の URL・形が違う URL は、ここで中断する。
+# URL に認証情報が入っていることがあるため、メッセージには URL を出さない）
+_remote_pair=$(parse_github_remote "$REMOTE_URL") \
+    || die "origin の URL から、リポジトリ名を取得できませんでした（GitHub のリポジトリではない、または形式が違います）。"
+REPO_FULL_NAME="${_remote_pair%% *}/${_remote_pair#* }"
+REPO_NAME="${_remote_pair#* }"
 
 JWT_DIR="$HOME/.sf-jwt/${REPO_NAME}"
 
@@ -149,7 +151,7 @@ _test_jwt_login() {
     fi
     jwt_out="$SF_ORG_JWT_OUT"
 
-    log "INFO" "  ${jwt_out}"
+    log "INFO" "  ${jwt_out//$consumer_key/***masked***}"  # 成功時の出力にも、コンシューマー鍵が入りうるため、伏せ字にする
     log "SUCCESS" "JWT 接続テスト成功: ${label}"
 
     # 本番組織は main にしか、つなげない（F8）。Secrets を更新する前に確認する（判定できない組織も、main 以外には、つなげない）
@@ -172,7 +174,7 @@ _select_org() {
     local branch_count_file="./sf-tools/config/branches.txt"
     if [[ -f "$branch_count_file" ]]; then
         branch_count=$(grep -v '^[[:space:]]*#' "$branch_count_file" \
-            | grep -v '^[[:space:]]*$' | wc -l | tr -d ' ')
+            | grep -v '^[[:space:]]*$' | wc -l | tr -d ' ')  # VAR=$(cmd) のため run 不使用
     fi
     [[ $branch_count -gt 3 ]] && branch_count=3
 
@@ -330,7 +332,7 @@ _update_all() {
     local branch_count_file="./sf-tools/config/branches.txt"
     if [[ -f "$branch_count_file" ]]; then
         # コメント行・空行を除いた有効行数でブランチ数を判定する
-        local bc; bc=$(grep -v '^[[:space:]]*#' "$branch_count_file" | grep -v '^[[:space:]]*$' | wc -l | tr -d ' ')
+        local bc; bc=$(grep -v '^[[:space:]]*#' "$branch_count_file" | grep -v '^[[:space:]]*$' | wc -l | tr -d ' ')  # VAR=$(cmd) のため run 不使用
         [[ $bc -ge 2 ]] && { suffixes+=("STG");  aliases+=("staging"); labels+=("ステージング組織"); }
         [[ $bc -ge 3 ]] && { suffixes+=("DEV");  aliases+=("develop"); labels+=("開発組織"); }
     fi

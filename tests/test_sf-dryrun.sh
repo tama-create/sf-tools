@@ -56,7 +56,7 @@ test_protected_org_blocked() {
     local ec=$?
 
     assert_exit_fail $ec "保護組織(main) + ローカル → エラー終了"
-    assert_output_contains "$out" "PR 経由で GitHub Actions" "保護組織(main) + ローカル → 適切なエラーメッセージ"
+    assert_output_contains "$out" "共有環境（予約名）のため、ローカルから実行できません" "保護組織(main) + ローカル → 適切なエラーメッセージ"
     teardown "$td" "$mb"
 }
 

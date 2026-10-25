@@ -16,27 +16,38 @@
 #   --no-metasync : 環境の確認のうち、wf-metasync の実行を、省略する（組織からの同期を、いま行いたくないとき）
 #   --cleanup   : 削除のみを行う（リリースの途中で止まって、組織に Hello World が残ったときの後始末）。
 #                 対象は、固定名のクラス（SfToolsE2eHello / SfToolsE2eHelloTest）だけ。ほかのクラスには、触れない
+#                 （--components と一緒のときは、サンプルが対象）。すべての段階に削除の PR を出し、remove-target.txt に
+#                 # @ignore-missing を付けて、組織にない削除対象をエラーにしない
 #   --components : Hello World の代わりに、パターン別のサンプル（Apex・トリガー・LWC・Aura・Flow・権限セット・Layout・
 #                 メール テンプレート・カスタム表示ラベル・オブジェクト・項目）を、develop の組織だけに、リリースして、削除する
 #                 （lib/verify-samples.sh。リリースと削除の通しでは、オブジェクト系は --with-objects のときだけ、Flow は含めない。
 #                 --validate-only では、すべて含める）。ターゲットファイルの書式（[files] / [members]）・パス・名前の書き方が、種類ごとに
 #                 違っても、リリースの仕組みが動くことの確認。develop の組織がある構成（3 層）だけで、実行できる。
 #                 削除は、段階 1（ほかから参照されないもの）。--with-objects のときは、続けて段階 2（項目・オブジェクト）も行う
-#   --with-objects : （--components と一緒に）オブジェクト系（ApexTrigger とそのテスト・Layout・CustomObject・CustomField）も、
+#                 --components で、develop に、サンプル以外のラベルを含む labels のファイル（CustomLabels）がすでにあるときは、
+#                 上書きを避けるため、CustomLabels をサンプルに含めない
+#   --with-objects : （--components と一緒に。なければ die）オブジェクト系（ApexTrigger とそのテスト・Layout・CustomObject・CustomField）も、
 #                 リリースして、削除する（削除は 2 段階）。既定では、含めない: カスタムオブジェクトは、削除すると、15 日間、
 #                 削除済みの状態で名前が予約され、同じ API 名を再作成できない（ごみ箱から消すまで）ため。--validate-only は、
 #                 何も作らないため、常に含める（オブジェクトへの依存関係まで、実際の組織で検証する）
 #   （Flow は、接続ユーザーに、API で削除する権限がない場合があるため、通しには含めず、--validate-only だけで検証する。
 #     --cleanup は、リポジトリの Flow のファイルを削除する。組織に残った Flow は、画面（設定 → フロー）で、手動で削除する）
-#   --validate-only : （--components と一緒に）検証だけを行う。サンプルの PR を develop 向けに出し、wf-validate（dry-run）の
-#                 成功を確認して、PR は、マージせずに閉じる。組織には、何も反映しない
-#   -h, --help  : このヘルプを表示する
+#   --validate-only : （--components と一緒に。なければ die。--cleanup とは一緒に指定できない）検証だけを行う。
+#                 サンプルの PR を develop 向けに出し、wf-validate（dry-run）の成功を確認して、PR は、マージせずに閉じる。
+#                 組織には、何も反映しない
+#   -h, --help  : このヘルプを表示して終了する（第 1 引数に指定したときのみ。sf-init.sh --verify -h では、sf-init.sh の
+#                 ヘルプが出る）
+#   ※ そのほかの引数は、「不明なオプションです」で終了する（終了コード 1）
 #
 # 【処理の流れ】
-#   0. 前提の確認    : GITHUB_ACTIONS=true なら die。カレントのフォルダ名が force- で始まらなければ die。check_gh_owner。
-#                      段階は、リモートのブランチから決める（main は必須。staging があれば staging、develop と staging の
-#                      両方があれば develop も。--components のときは develop だけで、develop がなければ die）
-#   1. 診断          : セットアップの状態（sf-init.sh --status と同じ診断）。不足があれば die。
+#   0. 前提の確認    : オプションの組み合わせが不正なら die。GITHUB_ACTIONS=true なら die。カレントのフォルダ名が force- で
+#                      始まらなければ die。origin の URL からリポジトリ名（OWNER/REPO）を求める（parse_github_remote。
+#                      origin がない・GitHub の URL でなければ die）。check_gh_owner。
+#                      段階は、リモートのブランチから決める（一覧を取得できない・main がなければ die。staging があれば staging、
+#                      develop と staging の両方があれば develop も。--components のときは develop だけで、develop がなければ die）。
+#                      --components では、develop の labels のファイルを確かめる（【オプション】--components）
+#   1. 診断          : セットアップの状態（sf-init.sh --status と同じ lib/diag.sh の診断。対象は、手順 0 で決めた段階だけ）。
+#                      不足があれば die。
 #                      --cleanup 以外では、検証用と同じパスのファイルが、いずれかの段階のブランチにすでにあれば die
 #   2. 実行内容の表示 : リポジトリ・段階ごとの組織の名前と種類・実行する内容・目安の時間。本番（または種類を判定できない）
 #                      組織は、赤く表示する。--plan は、ここで終了する
@@ -50,22 +61,30 @@
 #                        ・ローカルのログ（~/sf-tools/logs/*.log）に、Token・認証 URL が残っていない
 #                        ・wf-metasync（Salesforce → Git の同期）を、手動で 1 回実行し、成功する（--no-metasync で省略）
 #                          （JWT ログイン・sf-tools の取得を含む。main の組織の変更が、main にコミットされることがある）
-#   4. リリース      : --cleanup 以外のとき。同じブランチから、develop → staging → main の順（ない段階は、とばす）に、
-#                      段階ごとの PR を出して、wf-validate（検証）→ マージ → wf-release（リリース）。段階ごとに、次を確認する:
+#   4. リリース      : --cleanup 以外のとき。リリース用のブランチ（main の先頭から作り、検証用のファイルと、リリース対象を置く）
+#                      1 本から、develop → staging → main の順（ない段階は、とばす）に、段階ごとの PR を出して、
+#                      wf-validate（検証）→ マージ → wf-release（リリース）。wf-validate・wf-release・wf-propagate が
+#                      失敗したときは、ログの末尾を表示して、1 回だけ再実行する。段階ごとに、次を確認する:
 #                        ・その段階の組織への JWT ログインが成功した
-#                        ・ほかの段階のログインのステップは、実行されていない（別の組織に、ログインしていない）
+#                        ・ほかの段階のログインのステップは、実行されていない（別の組織に、ログインしていない。
+#                          ステップが見つからないときは、注意の表示のみ）
 #                        ・接続ユーザー（SF_USERNAME_*）が登録されていて、ログに、そのユーザーが出ている
 #                        ・ログに、Hello World のクラス名が出ている
-#                      main へのマージのあとは、wf-propagate も確認する。
+#                        ・（参考）Slack への通知の成功。確認できなくても、注意の表示のみで、成否に含めない
+#                      main へのマージのあとは、wf-propagate も確認する（失敗しても、続きを進める）。
+#                      上の確認の失敗は、記録して続ける（削除まで行って、組織を元に戻すため）。PR の作成・ワークフローの
+#                      実行・マージなど、流れそのものが失敗したときは、そこで止めて、案内を表示し、終了コード 1 で終わる。
 #                      --validate-only は、wf-validate の成功を確認して、PR をマージせずに閉じる（手順 5 は行わない）
-#   5. 削除          : 削除用のブランチ（remove-target.txt と、リポジトリのクラスのファイルの削除）から、同じ順に、各段階へ PR →
-#                      マージ → wf-release。組織のクラスと、リポジトリのファイルの両方が、消える
-#                      （--components は develop の先頭から作り、--with-objects のときは、2 段階で削除する）
+#   5. 削除          : 削除用のブランチ（main の先頭から作る。remove-target.txt と、リポジトリのクラスのファイルの削除）から、
+#                      同じ順に、各段階へ PR → wf-validate → マージ → wf-release（main のあとは wf-propagate も）。
+#                      段階ごとに、手順 4 と同じ確認を行う。組織のクラスと、リポジトリのファイルの両方が、消える
+#                      （--components は develop の先頭から作り、--with-objects のときは、2 段階で削除する。段階 2 では、
+#                      ログに、サンプルのオブジェクトの名前が出ていることを確認する）
 #   5b. 後始末       : 今回作った作業用ブランチを、削除する（verify-hello-HHMMSS / verify-hello-delete-HHMMSS。
 #                      --components では verify-comp-HHMMSS / verify-comp-delete-HHMMSS / verify-comp-delete2-HHMMSS）。
 #                      名前がこの形式でないもの・開いている PR がある（または確認できない）ものは、削除しない。
 #                      PR の履歴は、PR の番号で残る。途中で止めたときは、調査のために、残す。削除の失敗は、検証の成否に含めない
-#   6. 結果の表示    : 確認の成功・失敗の件数
+#   6. 結果の表示    : 確認の成功・失敗の件数（再実行で成功したワークフローがあれば、その件数も）
 #
 # 【前提条件】
 #   - force-* ディレクトリ（origin が GitHub のリポジトリ）の中で実行すること
@@ -89,13 +108,13 @@ PHASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SF_TOOLS_DIR="${SF_TOOLS_DIR:-$(dirname "$(dirname "$PHASE_DIR")")}"
 
 if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    awk '/^# ==/{f++; next} f==2{sub(/^# ?/,""); print} f==3{exit}' "${BASH_SOURCE[0]}"
+    awk '/^# ==/{f++; next} f==2{sub(/^# ?/,""); print} f==3{exit}' "${BASH_SOURCE[0]}"  # run 不使用: common.sh の読み込み前（run が未定義）
     exit 0
 fi
 
 # ログは、sf-init.log とは別のファイルに書く（sf-init.sh のステップ 9 から呼ばれたとき、sf-init のログを、上書きしないため）
 readonly SCRIPT_NAME="verify"
-mkdir -p "$HOME/sf-tools/logs" 2>/dev/null || true  # run 不使用: ログフォルダの準備（log が使える前の処理）
+mkdir -p "$HOME/sf-tools/logs" 2>/dev/null || true  # run 不使用: common.sh の読み込み前（run が未定義）
 readonly LOG_FILE="$HOME/sf-tools/logs/${SCRIPT_NAME}.log"
 readonly LOG_MODE="NEW"
 export SF_INIT_MODE=1   # sf-init.sh の一部として動く（force-* のチェックは、下で行う）
@@ -157,9 +176,11 @@ _WHAT="Hello World"
 check_force_dir || die "このスクリプトは 'force-*' ディレクトリ内で実行してください。"
 
 remote_url=$(git remote get-url origin 2>/dev/null) || die "git remote を取得できません。"  # VAR=$(cmd) のため run 不使用
-REPO=$(echo "$remote_url" | sed 's|.*github\.com[:/]\(.*\)\.git|\1|; s|.*github\.com[:/]\(.*\)|\1|')  # VAR=$(cmd) のため run 不使用
-[[ "$REPO" == */* ]] || die "リポジトリ名を取得できません。"
-OWNER="${REPO%%/*}"
+# GitHub の URL だけを受け付ける（parse_github_remote: lib/project.sh。出力は「owner repo」）。GitHub 以外は die
+_owner_repo=$(parse_github_remote "$remote_url") \
+    || die "origin が GitHub のリポジトリではありません: $(git_origin_redacted .)"  # VAR=$(cmd) のため run 不使用
+OWNER="${_owner_repo%% *}"
+REPO="${OWNER}/${_owner_repo#* }"
 
 log "HEADER" "リポジトリの検証（${REPO}）"
 check_gh_owner "$OWNER"
@@ -167,14 +188,15 @@ check_gh_owner "$OWNER"
 # 段階: リモートのブランチから判定する（develop → staging → main の順に、リリースする）
 branches=$(verify_gh api "repos/${REPO}/branches" --paginate --jq '.[].name' 2>/dev/null | tr -d '\r') \
     || die "ブランチの一覧を取得できません。"  # VAR=$(cmd) のため run 不使用
-grep -qx "main" <<< "$branches" || die "ブランチ main が見つかりません。"
+grep -qx "main" <<< "$branches" || die "ブランチ main が見つかりません。"  # 条件チェックのため run 不使用
 TIERS=()
-grep -qx "develop" <<< "$branches" && grep -qx "staging" <<< "$branches" && TIERS+=("develop")
-grep -qx "staging" <<< "$branches" && TIERS+=("staging")
+grep -qx "develop" <<< "$branches" && grep -qx "staging" <<< "$branches" && TIERS+=("develop")  # 条件チェックのため run 不使用
+grep -qx "staging" <<< "$branches" && TIERS+=("staging")  # 条件チェックのため run 不使用
 TIERS+=("main")
 
 # --components: サンプルは、develop の組織だけに入れる（本番・staging には、入れない）。develop がない構成では、実行しない
 if [[ $COMPONENTS -eq 1 ]]; then
+    # 条件チェックのため run 不使用（develop がなければ die）
     printf '%s\n' "${TIERS[@]}" | grep -qx "develop" \
         || die "--components は、develop の組織がある構成（develop・staging・main の 3 層）だけで、実行できます（サンプルを、staging・本番の組織には、入れません）。"
     TIERS=("develop")
@@ -223,11 +245,11 @@ echo -e "  ${CLR_WARNING}【これから行うこと】${CLR_RESET}" >&2
 echo "    リポジトリ : ${REPO}" >&2
 echo "    段階（リリースの順）:" >&2
 for t in "${TIERS[@]}"; do
-    sfx=$(_suffix_of "$t")
-    kind=$(_var "SF_ORG_KIND_${sfx}")
-    oname=$(_var "SF_ORG_NAME_${sfx}")
-    user=$(_var "SF_USERNAME_${sfx}")
-    label=$(org_kind_label "${kind:-unknown}")
+    sfx=$(_suffix_of "$t")                     # VAR=$(cmd) のため run 不使用
+    kind=$(_var "SF_ORG_KIND_${sfx}")          # VAR=$(cmd) のため run 不使用
+    oname=$(_var "SF_ORG_NAME_${sfx}")         # VAR=$(cmd) のため run 不使用
+    user=$(_var "SF_USERNAME_${sfx}")          # VAR=$(cmd) のため run 不使用
+    label=$(org_kind_label "${kind:-unknown}") # VAR=$(cmd) のため run 不使用
     case "$kind" in
         developer|sandbox|trial) mark="" ;;
         *) mark="  ← 本番（または、種類を判定できない）組織"; NEED_PROD_CONFIRM=1 ;;
@@ -245,13 +267,17 @@ if [[ $COMPONENTS -eq 1 && $VALIDATE_ONLY -eq 1 ]]; then
 elif [[ $COMPONENTS -eq 1 && $CLEANUP_ONLY -eq 1 ]]; then
     echo "    内容       : 削除のみ（サンプルを、develop の組織から消す。${_DEL_PRS} 本の PR）" >&2
 elif [[ $COMPONENTS -eq 1 ]]; then
+    # 含める種類の表示は、実際の内容に合わせる（表示ラベルは VERIFY_SAMPLE_LABELS=1 のときだけ。リリースと削除の通しでは、
+    # Flow は含めない: VERIFY_SAMPLE_FLOW=0）
+    _labels_kind=""
+    [[ "${VERIFY_SAMPLE_LABELS:-1}" == "1" ]] && _labels_kind="・表示ラベル"
     if [[ $VERIFY_SAMPLE_OBJECTS -eq 1 ]]; then
-        echo "    内容       : サンプル（$(verify_set_paths all | wc -l | tr -d ' ') ファイル。Apex・トリガー・LWC・Aura・Flow・権限セット・Layout・メール テンプレート・" >&2
-        echo "                 オブジェクト・項目など）を、develop の組織にリリースして、削除する（develop のみ）" >&2
+        echo "    内容       : サンプル（$(verify_set_paths all | wc -l | tr -d ' ') ファイル。Apex・トリガー・LWC・Aura・権限セット・Layout・メール テンプレート${_labels_kind}・" >&2
+        echo "                 オブジェクト・項目）を、develop の組織にリリースして、削除する（develop のみ。Flow は、含めません: 検証のみ（--validate-only）で検証します）" >&2
         echo "                 PR を 3 本（リリース 1・削除 2: 段階 1 → 段階 2）作成してマージする。組織と、リポジトリのファイルは、最後に消える" >&2
         echo -e "                 ${CLR_WARNING}※ 削除したカスタムオブジェクトの名前は、15 日間、予約されます（再作成には、ごみ箱から消す必要があります）${CLR_RESET}" >&2
     else
-        echo "    内容       : サンプル（$(verify_set_paths all | wc -l | tr -d ' ') ファイル。Apex・LWC・Aura・権限セット・メール テンプレート・表示ラベル）を、" >&2
+        echo "    内容       : サンプル（$(verify_set_paths all | wc -l | tr -d ' ') ファイル。Apex・LWC・Aura・権限セット・メール テンプレート${_labels_kind}）を、" >&2
         echo "                 develop の組織にリリースして、削除する（develop のみ。オブジェクト系・Flow は、含めません: 検証のみ（--validate-only）で検証します）" >&2
         echo "                 PR を 2 本（リリース 1・削除 1）作成してマージする。組織と、リポジトリのファイルは、最後に消える" >&2
     fi
@@ -341,7 +367,8 @@ _vchk() {
     return 1
 }
 
-_slack_ok() { verify_gh run view "$1" -R "$REPO" --log 2>/dev/null | grep -F "Slack response" | grep -q '"ok":true'; }
+# Slack への通知が成功したか（ログに、Slack の応答 "ok":true があるか）。引数: 実行 ID
+_slack_ok() { verify_gh run view "$1" -R "$REPO" --log 2>/dev/null | grep -F "Slack response" | grep -q '"ok":true'; }  # 戻り値で判定するため run 不使用
 
 # 実行が成功したか。失敗したら、ログを表示し、1 回だけ再実行する（一時的な失敗への対策）。引数: 実行 ID ラベル
 _run_ok() {
@@ -369,7 +396,9 @@ _login_step_names() {
     esac
 }
 # 段階のログインのステップの結果（success / skipped など）。見つからなければ、空。引数: 実行 ID 段階
-#   名前の候補を、順に探す（見つからないものを、何度も待たないよう、1 回ずつ。全部なければ、反映の遅れに備えて、1 回だけ待って探す）
+#   名前の候補を、順に探す（見つからないものを、何度も待たないよう、各候補を 1 回ずつ読む）。どの候補も見つからなければ、
+#   反映の遅れに備えて、最初の候補名（新しい名前）だけを、verify_step_conclusion の既定の回数（VERIFY_CONCLUSION_TRIES。
+#   既定 6 回）まで、間隔（_sfv_poll。既定 5 秒）をあけて読み直す
 _login_conclusion() {
     local id="$1" t="$2" name c
     while IFS= read -r name; do
@@ -385,9 +414,11 @@ _login_conclusion() {
 #   2. ほかの段階のログインのステップは、実行されていない（skipped）。別の組織に、ログインしていない
 #   3. 接続ユーザー（SF_USERNAME_*）が登録されていて、ログに、そのユーザーが出ている
 #   4. ログに、Hello World のクラス名が出ている
+#   ほかに、Slack への通知の成功（ok:true）を見る（確認できなくても、注意の表示のみ。件数に含めない）。
+#   2 のステップが見つからない段階（古いワークフロー）も、注意の表示のみ
 _evidence() {
     local t="$1" id="$2" kind="$3" user u c
-    user=$(_var "SF_USERNAME_$(_suffix_of "$t")")
+    user=$(_var "SF_USERNAME_$(_suffix_of "$t")")  # VAR=$(cmd) のため run 不使用
     _vchk "${kind}（${t}）: ${t} の組織への JWT ログインが成功した" test "$(_login_conclusion "$id" "$t")" == "success"
     for u in develop staging main; do
         [[ "$u" == "$t" ]] && continue
@@ -420,8 +451,10 @@ _guidance() {
 }
 
 # PR → wf-validate → マージ → wf-release →（main のときだけ）wf-propagate。
-#   成功したら、リリース（または削除）の実行 ID を FLOW_RUN に入れる。
-#   引数: ラベル ブランチ タイトル 先の段階 種類（release / delete。release のとき、マージした時点で、その段階を LEFT に入れる）
+#   種類が validate のときは、PR → wf-validate → PR を閉じる（マージしない。FLOW_RUN は、変えない）。
+#   wf-release の完了を確認した時点で、その実行 ID を FLOW_RUN に入れる（成否の確認の前）。
+#   戻り値: 0 = 流れが最後まで進んだ（wf-propagate の失敗は、記録だけして 0）/ 1 = 途中で失敗した
+#   引数: ラベル ブランチ タイトル 先の段階 種類（release / delete / validate。release のとき、マージした時点で、その段階を LEFT に入れる）
 FLOW_RUN=""
 _pr_flow() {
     local label="$1" br="$2" title="$3" base="$4" mode="$5" prn runid b_val b_rel b_pro pid
@@ -455,7 +488,7 @@ _pr_flow() {
     return 0
 }
 
-# リリース用のブランチを作る（main の先頭から。クラスのファイルと、リリース対象）。引数: ブランチ
+# リリース用のブランチを作る（main の先頭から。クラスのファイルと、リリース対象・空の削除対象）。引数: ブランチ
 _make_release_branch() {
     local br="$1" sha p
     sha=$(verify_branch_sha "$REPO" main)  # VAR=$(cmd) のため run 不使用
@@ -490,7 +523,7 @@ _logs_clean() {
     local f found=0
     for f in "$HOME"/sf-tools/logs/*.log; do
         [[ -f "$f" ]] || continue
-        if grep -qE 'ghp_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|xox[bp]-[0-9A-Za-z-]{20,}|force://[^[:space:]]*:[^[:space:]]*:[^@[:space:]]{20,}@' "$f" 2>/dev/null; then
+        if grep -qE 'ghp_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|xox[bp]-[0-9A-Za-z-]{20,}|force://[^[:space:]]*:[^[:space:]]*:[^@[:space:]]{20,}@' "$f" 2>/dev/null; then  # 条件チェックのため run 不使用
             log "ERROR" "    Token（または認証 URL）らしい文字列が、ログに残っています: ${f}"
             found=1
         fi
@@ -622,9 +655,10 @@ fi   # VALIDATE_ONLY
 
 # ------------------------------------------------------------------------------
 # 5b. 後始末: 今回作った作業用ブランチを削除する
-#   リリースと削除の PR は、すべてマージ済み（ここに来るのは、途中で止まらなかったときだけ。止めたときは、調査のために、
+#   リリースと削除の PR は、すべてマージ済み（--validate-only では、検証の PR は、閉じ済み。ここに来るのは、途中で止まらなかったときだけ。止めたときは、調査のために、
 #   ブランチを残す）。PR の履歴は、PR の番号で残る。次の場合は、削除しない（警告のみ。検証の成否には、含めない）:
-#     ・名前が、想定の形式（verify-hello-HHMMSS / verify-hello-delete-HHMMSS）でない
+#     ・名前が、想定の形式（verify-hello-HHMMSS / verify-hello-delete-HHMMSS / verify-comp-HHMMSS /
+#       verify-comp-delete-HHMMSS / verify-comp-delete2-HHMMSS）でない
 #     ・そのブランチを head とする、開いている PR がある（確認できなかったときも、同じ）
 # ------------------------------------------------------------------------------
 _delete_job_branches() {

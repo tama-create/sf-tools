@@ -145,7 +145,7 @@ cat > "$MB/git" << 'GITEOF'
 #!/bin/bash
 echo "git $*" >> "${MOCK_CALL_LOG:-/dev/null}"
 case "$1 $2" in
-    "remote get-url") echo "https://github.com/tamashimon/force-testproject.git" ;;
+    "remote get-url") echo "${MOCK_GIT_REMOTE_URL:-https://github.com/tamashimon/force-testproject.git}" ;;
 esac
 exit 0
 GITEOF
@@ -202,6 +202,12 @@ test_guards() {
     assert_file_contains "$OUT" "'force-*' ディレクトリ内で実行してください" "force-* の外: 理由が表示される"
     _run "" --unknown
     assert_exit_fail "$RC" "不明なオプションは、中断する"
+    # 回帰: origin が GitHub 以外 → 中断する（以前は、sed だけで解析し、owner/repo の形なら、GitHub 以外でも進んだ）
+    _env
+    MOCK_GIT_REMOTE_URL="https://gitlab.com/tamashimon/force-testproject.git" _run "" --plan
+    assert_exit_fail "$RC" "origin が GitHub 以外 → 中断する"
+    assert_file_contains "$OUT" "origin が GitHub のリポジトリではありません" "origin が GitHub 以外 → 理由が表示される"
+    assert_file_not_contains "$MOCK_CALL_LOG" "gh api repos/" "origin が GitHub 以外 → GitHub に問い合わせない"
 }
 
 test_entry() {
@@ -533,6 +539,12 @@ test_components() {
     assert_file_not_contains "$OUT" "staging → TAMA_STAGING" "--plan: staging は、対象にしない"
     assert_file_not_contains "$OUT" "main → TAMA_PROD" "--plan: main（本番）は、対象にしない"
     assert_file_not_contains "$MOCK_CALL_LOG" "pr create" "--plan: PR を作らない"
+    assert_file_contains     "$OUT" "メール テンプレート・表示ラベル）を" "--plan: 既存の labels がなければ、表示ラベルを含むと表示する"
+    # --with-objects の --plan: リリースと削除の通しには Flow を含めない（VERIFY_SAMPLE_FLOW=0）ため、Flow を含むと表示しない
+    _env
+    _run "" --components --with-objects --plan
+    assert_file_contains     "$OUT" "オブジェクト・項目）を" "--with-objects --plan: オブジェクト・項目を含むと表示する"
+    assert_file_not_contains "$OUT" "Aura・Flow・" "--with-objects --plan: Flow を含むと表示しない（回帰: 以前は含むと表示した）"
 
     # 通し（既定）: オブジェクト系を含めない。リリース 1 本 + 削除 1 本。すべて develop 向け。develop の先頭から削除用のブランチを作る
     _env
@@ -660,6 +672,8 @@ test_components() {
     _run "\n" --components
     assert_exit_ok "$RC" "既存の labels あり: 正常終了する"
     assert_file_contains "$OUT" "CustomLabels は、サンプルに含めません" "既存の labels あり: 理由が表示される"
+    # 回帰: 表示ラベルを含めないときは、実行内容の表示にも「表示ラベル」を出さない（以前は、常に含むと表示した）
+    assert_file_not_contains "$OUT" "・表示ラベル" "既存の labels あり: 実行内容に、表示ラベルを含むと表示しない"
     assert_equals "$(grep -c -- "-X [A-Z]* repos/.*labels/CustomLabels" "$MOCK_CALL_LOG")" "0" "既存の labels あり: そのファイルを、追加・削除しない（確認の読み取りのみ）"
     _env
 
@@ -836,7 +850,21 @@ test_lib() {
         # 基準と同じ ID の実行は、対象にしない
         VERIFY_RUN_FIND_TRIES=2 verify_wait_pr_run tamashimon/force-testproject wf-validate.yml br 1001 >/dev/null && echo "WAIT_SAME=found" || echo "WAIT_SAME=none"
         VERIFY_RUN_FIND_TRIES=2 verify_wait_pr_run tamashimon/force-testproject wf-validate.yml br 1000 >/dev/null && echo "WAIT_NEW=found" || echo "WAIT_NEW=none"
+        # PR の作成: 番号が取れれば戻り値 0。作成できても番号が取れなければ戻り値 1（以前は、空のまま 0）
+        n=$(verify_pr_create tamashimon/force-testproject br t); echo "PR_OK=[$n] RC=$?"
+        verify_gh() { printf 'https://github.com/o/r/pull/12\r\n'; }   # 行末に CR がある出力
+        n=$(verify_pr_create tamashimon/force-testproject br t); echo "PR_CR=[$n] RC=$?"
+        verify_gh() { echo "created"; }   # 番号を含まない出力
+        n=$(verify_pr_create tamashimon/force-testproject br t); echo "PR_NONUM=[$n] RC=$?"
+        # 本文: 末尾が .cls-meta.xml のパスは、クラス名を問わず、メタデータ。それ以外は戻り値 1
+        verify_hello_content_for "x/Other.cls-meta.xml" | grep -q "<ApexClass" && echo "META_ANY=ok"
+        verify_hello_content_for "x/Other.cls" > /dev/null; echo "OTHER_RC=$?"
     ) 2>&1 )
+    [[ "$out" == *"PR_CR=[12] RC=0"* ]]  && pass "PR の作成: 行末に CR があっても、番号を返す" || fail "PR の作成: 行末に CR があっても、番号を返す" "$out"
+    [[ "$out" == *"PR_NONUM=[] RC=1"* ]] && pass "PR の作成: 番号が取れなければ、戻り値 1" || fail "PR の作成: 番号が取れなければ、戻り値 1" "$out"
+    assert_output_contains "$out" "META_ANY=ok"      "本文: 末尾が .cls-meta.xml のパスは、メタデータの本文"
+    assert_output_contains "$out" "OTHER_RC=1"       "本文: それ以外のパスは、戻り値 1"
+    [[ "$out" =~ PR_OK=\[[0-9]+\]\ RC=0 ]] && pass "PR の作成: 番号を返し、戻り値 0" || fail "PR の作成: 番号を返し、戻り値 0" "$out"
     assert_output_contains "$out" "PATHS=4"        "クラスのファイルは 4 つ"
     assert_output_contains "$out" "DEPLOY=2"       "リリース対象に、クラスが 2 つ"
     assert_output_contains "$out" "REMOVE=2"       "削除対象に、クラスが 2 つ"

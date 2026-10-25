@@ -22,7 +22,7 @@
 #        - スコープに repo と workflow があること
 #        - repos/{REPO_FULL_NAME} の permissions.admin が true であること（リポジトリの管理者の Token）
 #   5. Secret PAT_TOKEN に登録する（失敗は die）
-#   6. PAT_TOKEN_VALUE を状態ファイルに追記する（Phase 8 の push で使う）
+#   6. PAT_TOKEN_VALUE を状態ファイルに追記する（Phase 8 の push で使う。追記の失敗は die）
 #
 # 【前提条件】
 #   - Phase 2 が書き出した状態ファイル（REPO_FULL_NAME・PROJECT_NAME。空なら die）
@@ -32,6 +32,7 @@
 #   - Token は、コマンドの引数に含めない（検証は環境変数 GH_TOKEN で gh に渡し、登録は標準入力で渡す）
 #   - PAT_TOKEN_VALUE の行は、Phase 8 が push のあとに状態ファイルから削除する
 #   - PAT_TOKEN は、force-*（プロジェクト側）のリポジトリのための Token であり、sf-tools（公開リポジトリ）とは関係ない
+#   - 終了コード: 0 = OK / 1 = die
 # ==============================================================================
 
 # SF_TOOLS_DIR は sf-init.sh（司令塔）から export される
@@ -39,7 +40,7 @@ PHASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SF_TOOLS_DIR="${SF_TOOLS_DIR:-$(dirname "$(dirname "$PHASE_DIR")")}"
 
 readonly SCRIPT_NAME="sf-init"
-mkdir -p "$HOME/sf-tools/logs" 2>/dev/null || true
+mkdir -p "$HOME/sf-tools/logs" 2>/dev/null || true  # run 不使用: common.sh の読み込み前（run が未定義）
 readonly LOG_FILE="$HOME/sf-tools/logs/${SCRIPT_NAME}.log"
 readonly LOG_MODE="APPEND"  # 司令塔が NEW で初期化済みのため追記
 export SF_INIT_MODE=1
@@ -151,7 +152,9 @@ echo "$PAT_TOKEN_VALUE" | run gh secret set PAT_TOKEN -R "$REPO_FULL_NAME" \
     || die "PAT_TOKEN の登録に失敗しました。"
 
 # PAT_TOKEN_VALUE を .sf-init.env に書き出す（Phase 8 の push で使用）
-printf 'PAT_TOKEN_VALUE="%s"\n' "$PAT_TOKEN_VALUE" >> "$SF_INIT_ENV_FILE"
+# run 不使用: 状態ファイルへの追記（リダイレクト。Token の値をコマンドのログに残さないため。失敗は die）
+printf 'PAT_TOKEN_VALUE="%s"\n' "$PAT_TOKEN_VALUE" >> "$SF_INIT_ENV_FILE" \
+    || die "状態ファイルに書き込めません: ${SF_INIT_ENV_FILE}"
 
 log "SUCCESS" "完了: PAT_TOKEN の設定 OK。"
 exit $RET_OK

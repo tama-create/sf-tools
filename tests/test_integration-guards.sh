@@ -72,7 +72,7 @@ test_X6_1b() {
         it_calls_clear
         it_run "$CL" -i 'Y\n' bash "$IT_HOME/sf-tools/bin/${_sp[0]}" "${_sp[@]:1}"
         assert_exit_fail "$IT_RC" "X6-1b: prod に接続中は、${spec} が拒否される"
-        it_out_has "GitHub Actions を使用" && pass "X6-1b: ${spec}: PR 経由の案内が出る" || fail "X6-1b: ${spec}: PR 経由の案内が出る"
+        it_out_has "共有環境（予約名）のため、ローカルから" && pass "X6-1b: ${spec}: 共有環境のため拒否した旨が出る" || fail "X6-1b: ${spec}: 共有環境のため拒否した旨が出る"
         assert_equals "$(it_calls sf | grep -c 'project deploy start')" "0" "X6-1b: prod に接続中の ${spec} は、デプロイを呼ばない"
     done
     echo "itorg" > "$IT_STATE/sf.alias"

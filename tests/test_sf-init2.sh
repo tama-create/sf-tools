@@ -4,7 +4,7 @@
 # ==============================================================================
 # sf-init.sh のテストは、時間がかかる（Windows の CI で約 10 分）ため、3 つのファイル（test_sf-init.sh・test_sf-init2.sh・
 # test_sf-init3.sh）に分け、並列に動かす。共通の部品は tests/init-test-lib.sh。関数の分け方は、実測の所要時間で、均等になるようにした。
-# どのテストが、どのファイルにあるかは、下の一覧（関数名）を参照。全部で 49 の関数（件数は、3 つの合計）。
+# どのテストが、どのファイルにあるかは、下の一覧（関数名）を参照。全部で 53 の関数（件数は、3 つの合計）。
 #
 # 【このファイルのテスト関数】
 #   test_repo_create_failure
@@ -24,6 +24,7 @@
 #   test_completed_by_clone
 #   test_sf_tools_autoupdate
 #   test_org_connection
+#   test_non_github_origin
 # ==============================================================================
 source "$(dirname "${BASH_SOURCE[0]}")/init-test-lib.sh"
 
@@ -378,6 +379,7 @@ echo "git $*" >> "${MOCK_CALL_LOG:-/dev/null}"
 case "$1 $2" in
     "remote get-url") echo "https://github.com/tamashimon/force-testproject.git" ;;
     "symbolic-ref --short") echo "admin" ;;  # 管理者用のクローンは、admin ブランチにいる（実行後に、ここへ戻る）
+    "show origin/main:sf-tools/config/branches.txt") printf '# 段階\nmain\n' ;;  # origin/main の branches.txt（確認・追記の元）
     "ls-remote --exit-code") exit 1 ;;  # ブランチ未存在
     *) exit 0 ;;
 esac
@@ -400,11 +402,14 @@ GITEOF
     assert_file_contains "$MOCK_CALL_LOG" "gh variable set SF_INSTANCE_URL_STG"     "SF_INSTANCE_URL_STG が登録される"
     assert_file_contains "$MOCK_CALL_LOG" "gh variable set SF_ORG_KIND_STG --body sandbox" "組織の種類（Sandbox）が保存される"
     assert_file_contains "$force_dir/sf-tools/config/branches.txt" "staging"        "branches.txt に staging が追記される"
+    # 書き出す内容は、origin/main の branches.txt（コメントを含む全行）+ staging
+    assert_equals "$(cat "$force_dir/sf-tools/config/branches.txt")" "$(printf '# 段階\nmain\nstaging')" "branches.txt は、origin/main の内容の末尾に staging を足したもの"
+    assert_file_contains "$MOCK_CALL_LOG" "git show origin/main:sf-tools/config/branches.txt" "origin/main の branches.txt で確認する"
     # main への直接 push は、しない（PR を作成する）
     grep -Eq 'git push .*origin main' "$MOCK_CALL_LOG"         && fail "main への直接 push をしない" "main への push が呼ばれた"         || pass "main への直接 push をしない"
     # 回帰: 新しいブランチは、リモートの最新の main（origin/main）から作る（以前は、手元の main から作り、古いと古い内容から派生した）
     assert_file_contains "$MOCK_CALL_LOG" "git fetch origin main"                   "origin/main を取得する"
-    assert_file_contains "$MOCK_CALL_LOG" "git checkout -b staging origin/main"     "staging ブランチは、origin/main から作る"
+    assert_file_contains "$MOCK_CALL_LOG" "git checkout -B staging origin/main"     "staging ブランチは、origin/main から作る"
     grep -Eq 'git checkout -b system-add-tier-staging-[0-9]+ origin/main' "$MOCK_CALL_LOG"         && pass "作業用のブランチは、origin/main から作る"         || fail "作業用のブランチは、origin/main から作る" "$(grep 'git checkout' "$MOCK_CALL_LOG" | head -5)"
     assert_file_contains "$MOCK_CALL_LOG" "gh pr create --base main"                "PR を作成する"
     assert_file_contains "$MOCK_CALL_LOG" "git checkout admin"                      "終わったら、実行前のブランチ（管理者用の admin）に戻る（main に居座らない）"
@@ -752,8 +757,25 @@ GITEOF
     assert_file_contains      "$out" "組織       : Acme Sandbox（ID 00D0000000SBX001）"         "いまの接続（組織）が表示される"
     assert_file_contains      "$MOCK_CALL_LOG" "gh variable set SF_INSTANCE_URL_PROD --body https://login.salesforce.com" "新しいログイン先が登録される"
     assert_file_contains      "$MOCK_CALL_LOG" "gh variable set SF_ORG_ID_PROD --body 00D0000000DE0001"                   "新しい組織 ID が保存される"
-    assert_file_contains      "$out" "古い組織（Acme Sandbox / ID 00D0000000SBX001）には、外部クライアントアプリ"          "古い組織に残るものが、案内される"
+    assert_file_contains      "$out" "古い組織（Acme Sandbox / ID 00D0000000SBX001）には、以前の接続に使ったアプリが、残っています" "古い組織に残るものが、案内される"
+    assert_file_contains      "$out" "外部クライアントアプリ「SF_TOOLS_force_testproject」"        "外部クライアントアプリの名前と、削除の場所が案内される"
     assert_file_contains      "$out" "自動では、削除しません"                                    "古いアプリは、自動では削除しない"
+
+    # --- C2. --reconnect main（従来の接続アプリケーション）: 古い組織に残るものを、外部クライアントアプリと断定しない ---
+    #   回帰: 以前は、--legacy-connected-app でも「外部クライアントアプリ「…」が残っています」と断定していた
+    : > "$MOCK_CALL_LOG"
+    printf 'Y\nfake_key\nuser@example.com\n' \
+        | ( cd "$force_dir" && HOME="$mock_home" PATH="$mb:$PATH" MOCK_SF_ORG_INFO="$DE_JSON" \
+              SF_INIT_LOGIN_URL_PROD=login SF_INIT_LEGACY_CONNECTED_APP=1 \
+              MOCK_GH_VAR_SF_INSTANCE_URL_PROD=https://test.salesforce.com MOCK_GH_VAR_SF_USERNAME_PROD=old@example.com \
+              MOCK_GH_VAR_SF_ORG_KIND_PROD=sandbox MOCK_GH_VAR_SF_ORG_ID_PROD=00D0000000SBX001 MOCK_GH_VAR_SF_ORG_NAME_PROD="Acme Sandbox" \
+              bash "$mock_home/sf-tools/bin/sf-init.sh" --reconnect main ) > "$out" 2>&1
+    exit_code=$?
+    assert_exit_ok            "$exit_code"                                                    "--reconnect main（従来の接続アプリ）: 正常終了する"
+    assert_file_not_contains  "$out" "外部クライアントアプリ「SF_TOOLS_force_testproject」が残っています" "従来の接続アプリ: 外部クライアントアプリが残っていると断定しない"
+    assert_file_contains      "$out" "以前の接続に使ったアプリが、残っています"                    "従来の接続アプリ: 以前の接続に使ったアプリが残ることを案内する"
+    assert_file_contains      "$out" "手動で作った接続アプリケーション"                            "従来の接続アプリ: 接続アプリケーションの削除の場所も案内する"
+    assert_file_not_contains  "$MOCK_CALL_LOG" "sf project deploy start"                       "従来の接続アプリ: 外部クライアントアプリは作らない"
 
     # --- D. --reconnect staging に、本番をつなごうとする → 拒否（何も登録しない）---
     : > "$MOCK_CALL_LOG"
@@ -880,6 +902,51 @@ echo -e "${CLR_HEAD}========================================"
 echo "  sf-init.sh テスト（2/3）"
 echo -e "========================================${CLR_RST}"
 
+# ==============================================================================
+# テスト: origin が GitHub 以外 → --status / --reconnect / --add-tier は、中断する（parse_github_remote）
+#   回帰: 以前は、sed だけで解析し、GitHub 以外の URL が、そのまま REPO_FULL_NAME に入って、先へ進んだ
+# ==============================================================================
+test_non_github_origin() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] origin が GitHub 以外 → --status / --reconnect / --add-tier は中断する${CLR_RST}"
+
+    local mb mock_home base force_dir out exit_code args
+    mb=$(setup_mock_bin)
+    export MOCK_CALL_LOG="$mb/calls.log"
+    mock_home=$(setup_mock_home)
+    create_all_mocks "$mb"
+    create_mock_gh_for_init "$mb"
+    out="$mb/out.log"
+    base=$(mktemp -d "${TMPDIR:-/tmp}/test-nongh-XXXX")
+    force_dir="$base/force-testproject"
+    mkdir -p "$force_dir/sf-tools/config"
+    printf 'main\nstaging\n' > "$force_dir/sf-tools/config/branches.txt"
+    cat > "$mb/git" << 'GITEOF'
+#!/bin/bash
+echo "git $*" >> "${MOCK_CALL_LOG:-/dev/null}"
+case "$1 $2" in
+    "remote get-url") echo "https://gitlab.com/tamashimon/force-testproject.git" ;;
+    *) exit 0 ;;
+esac
+GITEOF
+    chmod +x "$mb/git"
+
+    for args in "--status" "--reconnect main" "--add-tier staging"; do
+        : > "$MOCK_CALL_LOG"
+        # shellcheck disable=SC2086  # args は、オプションと値に分けて渡す
+        printf 'Y\n' | ( cd "$force_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
+            bash "$mock_home/sf-tools/bin/sf-init.sh" $args ) > "$out" 2>&1
+        exit_code=$?
+        assert_exit_fail         "$exit_code"                                    "${args}: GitHub 以外の origin → 中断する"
+        assert_file_contains     "$out" "origin が GitHub のリポジトリではありません" "${args}: 理由が表示される"
+        assert_file_not_contains "$MOCK_CALL_LOG" "gitlab.com/tamashimon/force-testproject.git/" "${args}: URL をリポジトリ名として使わない"
+        assert_file_not_contains "$MOCK_CALL_LOG" "gh variable set"                "${args}: 何も登録しない"
+    done
+
+    teardown "$mb" "$mock_home"
+    rm -rf "$base"
+}
+
 test_repo_create_failure
 test_sf_login_failure
 test_invalid_owner_folder
@@ -897,5 +964,6 @@ test_sf_cli_check
 test_completed_by_clone
 test_sf_tools_autoupdate
 test_org_connection
+test_non_github_origin
 
 print_summary

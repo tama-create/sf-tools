@@ -23,7 +23,8 @@
 #   3. Ruleset protect-staging: 対象を refs/heads/staging にして、手順 2 と同じ内容で作成する。
 #      ブランチ構成（BRANCH_COUNT）に関係なく作成する
 #   4. SF_TOOLS_BRANCH が development のときだけ、Variable SF_TOOLS_BRANCH=development を登録する（失敗は WARNING）。
-#      main のときは、登録しない
+#      main のときは、登録しない（登録しない旨を表示する）
+#   進捗は [1/4]〜[4/4] と表示する（手順 4 は、登録しないときも表示する）
 #
 # 【前提条件】
 #   - Phase 2 が書き出した状態ファイル（REPO_FULL_NAME。空なら die。SF_TOOLS_BRANCH は、未設定なら main として扱う）
@@ -32,9 +33,10 @@
 # 【補足】
 #   - 失敗を WARNING にする理由: 無料プランの Private リポジトリなど、Ruleset が使えない場合があるため。
 #     手順 1〜4 のどれが失敗しても、終了コードは 0
-#   - delete_existing_ruleset（init-common.sh）: 同名の Ruleset の ID を取得して削除する（再実行のため）。
-#     ID は数字のときだけ有効とみなす（gh api が失敗すると、エラーの応答本文が標準出力に出るため）。
-#     確認できなかった場合は WARNING を表示して削除しない。削除の成否は、そのまま表示する
+#   - delete_existing_ruleset（init-common.sh）: 同名の Ruleset の ID を取得して削除する（再実行のため。同名が複数あれば、
+#     すべて削除する）。一覧の取得（gh api）が失敗したとき（出力の有無を問わない）・数字以外の行があるときは、
+#     「確認できなかった」の WARNING を表示して削除しない（成功して出力が空なら、同名なし）。削除の成否は、そのまま表示する
+#   - 終了コード: 0 = OK（上の WARNING の場合を含む）/ 1 = die（REPO_FULL_NAME が空のとき）
 # ==============================================================================
 
 # SF_TOOLS_DIR は sf-init.sh（司令塔）から export される
@@ -42,7 +44,7 @@ PHASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SF_TOOLS_DIR="${SF_TOOLS_DIR:-$(dirname "$(dirname "$PHASE_DIR")")}"
 
 readonly SCRIPT_NAME="sf-init"
-mkdir -p "$HOME/sf-tools/logs" 2>/dev/null || true
+mkdir -p "$HOME/sf-tools/logs" 2>/dev/null || true  # run 不使用: common.sh の読み込み前（run が未定義）
 readonly LOG_FILE="$HOME/sf-tools/logs/${SCRIPT_NAME}.log"
 readonly LOG_MODE="APPEND"  # 司令塔が NEW で初期化済みのため追記
 export SF_INIT_MODE=1
@@ -62,7 +64,7 @@ SF_INIT_ENV_FILE="${SF_INIT_ENV_FILE:-${PWD}/.sf-init.env}"
 log "HEADER" "GitHub リポジトリ設定・Ruleset の適用"
 
 # --- 1. リポジトリ基本設定 ---
-log "INFO" "[1/3] リポジトリ基本設定を適用中..."
+log "INFO" "[1/4] リポジトリ基本設定を適用中..."
 
 if run gh repo edit "$REPO_FULL_NAME" \
     --default-branch main \
@@ -90,7 +92,7 @@ done < <(required_status_check_names)
 unset _check_name
 
 # --- 2. Ruleset: protect-main ---
-log "INFO" "[2/3] Ruleset: protect-main を作成中..."
+log "INFO" "[2/4] Ruleset: protect-main を作成中..."
 
 # 既存の protect-main を削除（冪等性確保）
 delete_existing_ruleset "$REPO_FULL_NAME" "protect-main"
@@ -137,7 +139,7 @@ else
 fi
 
 # --- 3. Ruleset: protect-staging ---
-log "INFO" "[3/3] Ruleset: protect-staging を作成中..."
+log "INFO" "[3/4] Ruleset: protect-staging を作成中..."
 
 # 既存の protect-staging を削除（冪等性確保）
 delete_existing_ruleset "$REPO_FULL_NAME" "protect-staging"
@@ -185,13 +187,15 @@ fi
 
 # --- 4. SF_TOOLS_BRANCH GitHub Variable 登録（開発版 = SF_TOOLS_BRANCH=development のときのみ）---
 if [[ "${SF_TOOLS_BRANCH:-main}" == "development" ]]; then
-    log "INFO" "SF_TOOLS_BRANCH=development を GitHub Variable に登録中..."
+    log "INFO" "[4/4] SF_TOOLS_BRANCH=development を GitHub Variable に登録中..."
     if run gh variable set SF_TOOLS_BRANCH --body "development" -R "$REPO_FULL_NAME"; then
         log "SUCCESS" "SF_TOOLS_BRANCH=development を登録しました。GitHub Actions は sf-tools development ブランチを使用します。"
     else
         log "WARNING" "SF_TOOLS_BRANCH の登録に失敗しました。手動で設定してください:"
         log "WARNING" "  gh variable set SF_TOOLS_BRANCH --body \"development\" -R \"${REPO_FULL_NAME}\""
     fi
+else
+    log "INFO" "[4/4] SF_TOOLS_BRANCH: 配布版（main）のため、登録しません。"
 fi
 
 log "SUCCESS" "完了: GitHub リポジトリ設定・Ruleset の適用 OK。"

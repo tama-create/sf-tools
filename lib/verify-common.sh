@@ -6,13 +6,35 @@
 # verify.sh（管理者が、実際のリポジトリで実行する）と、tests/e2e（開発者の通し検証）が、同じ部品を使う。
 # ここの関数は、リポジトリを、引数で受け取る。「どのリポジトリを操作してよいか」の安全ガードは、呼び出し側が行う。
 #
+# 【前提・読み込み】
+#   呼び出し側が、lib/common.sh を source 済みであること（verify_gh が、platform.sh の run_with_timeout を使う）。
+#   使う側: phases/init/verify.sh・bin/sf-init.sh（最初のメタデータの同期）・tests/e2e/lib.sh。
+#   読み込むと、同じフォルダの lib/verify-samples.sh も source する。
+#   gh は run を通さずに呼ぶ（verify_gh。時間の上限つき・標準入力は /dev/null）。失敗は、戻り値・空の出力で返す（die しない）
+#
+# 【提供する関数】（「引数: リポジトリ」は owner/name）
+#   本文      : verify_hello_cls / verify_hello_test_cls / verify_apex_meta / verify_hello_paths / verify_hello_content_for PATH /
+#               verify_hello_deploy_target_text / verify_hello_remove_target_text / verify_empty_target_text
+#   サンプル  : verify_set_paths [stage1|stage2|all] / verify_set_content_for PATH / verify_set_deploy_target_text /
+#               verify_set_remove_target_text [stage1|stage2]（VERIFY_SET で、hello と components を切り替える）
+#   gh        : verify_gh ARGS...
+#   PR        : verify_pr_create / verify_pr_merge / verify_pr_close
+#   実行      : verify_latest_run_id / verify_wait_pr_run / verify_run_conclusion / verify_step_conclusion /
+#               verify_rerun_and_wait / verify_dispatch_workflow / verify_wait_run / verify_run_log_has
+#   API       : verify_branch_sha / verify_branch_create / verify_branch_delete / verify_branch_has_open_pr /
+#               verify_file_sha / verify_file_put / verify_file_delete
+#   （内部用: _sfv_poll / _sfv_tries / _verify_urlpath）
+#   定数      : VERIFY_APEX_HELLO（SfToolsE2eHello）/ VERIFY_APEX_HELLO_TEST（SfToolsE2eHelloTest）
+#
 # 【環境変数（任意）】
+#   VERIFY_SET             確認に使うサンプル（hello = Hello World の Apex のみ（既定）/ components = lib/verify-samples.sh）
 #   VERIFY_GH_TIMEOUT      gh 1 回の時間の上限（秒。既定 120。E2E_GH_TIMEOUT も使える）
 #   VERIFY_POLL_SEC        確認の間隔（秒。既定 5。E2E_POLL_SEC も使える）
 #   VERIFY_WF_TIMEOUT      ワークフローの完了を待つ上限（秒。既定 1200。E2E_WF_TIMEOUT も使える）
 #   VERIFY_RUN_FIND_TRIES  ワークフローの起動を待つ回数（既定 24。E2E_RUN_FIND_TRIES も使える）
 #   VERIFY_CONCLUSION_TRIES 結果の読み取りのやり直しの回数（既定 6。E2E_CONCLUSION_TRIES も使える）
-#   VERIFY_DISPATCH_TRIES  ワークフローの手動起動の、やり直しの回数（既定 12。起動直後は、認識まで少しかかる）
+#   VERIFY_DISPATCH_TRIES  ワークフローの手動起動・起動した実行の検索の、それぞれの回数（既定 12。登録直後は、認識まで少しかかる。
+#                          E2E_ の代わりの名前はない）
 # ==============================================================================
 
 # Hello World の Apex のクラス名（誰も使わない、単純なもの。リリースして、すぐ削除する）
@@ -53,7 +75,11 @@ verify_hello_paths() {
         "force-app/main/default/classes/${VERIFY_APEX_HELLO_TEST}.cls" \
         "force-app/main/default/classes/${VERIFY_APEX_HELLO_TEST}.cls-meta.xml"
 }
-# パスに対応する本文
+# パスに対応する本文を、標準出力に出す。上から順に、最初に一致したものを使う:
+#   末尾が /SfToolsE2eHelloTest.cls（VERIFY_APEX_HELLO_TEST）のパス → テストクラスの本文
+#   末尾が /SfToolsE2eHello.cls（VERIFY_APEX_HELLO）のパス         → クラスの本文
+#   末尾が .cls-meta.xml のパス（クラス名・フォルダを問わない）      → Apex のメタデータの本文
+#   それ以外のパスは、何も出さず、戻り値 1
 verify_hello_content_for() {
     case "$1" in
         *"/${VERIFY_APEX_HELLO_TEST}.cls")      verify_hello_test_cls ;;
@@ -93,13 +119,15 @@ verify_set_content_for() {
 verify_set_deploy_target_text() {
     if [[ "$VERIFY_SET" == "components" ]]; then verify_sample_deploy_target_text; else verify_hello_deploy_target_text; fi
 }
-# 引数: stage1 | stage2（hello のときは、段階を分けない）
+# 引数: stage1 | stage2（既定 stage1。hello のときは、段階を分けない）
 verify_set_remove_target_text() {
     if [[ "$VERIFY_SET" == "components" ]]; then verify_sample_remove_target_text "${1:-stage1}"; else verify_hello_remove_target_text; fi
 }
 
 # ------------------------------------------------------------------------------
 # gh（時間の上限つき。標準入力は読ませない）
+#   上限は VERIFY_GH_TIMEOUT（または E2E_GH_TIMEOUT。既定 120 秒）。時間切れは 124。run を通さない（ログに残さない）
+#   _sfv_poll / _sfv_tries: 確認の間隔（秒）・結果の読み取りの回数を、標準出力に返す（上の環境変数の既定値の解決）
 # ------------------------------------------------------------------------------
 verify_gh() {
     local t="${VERIFY_GH_TIMEOUT:-${E2E_GH_TIMEOUT:-120}}"
@@ -112,11 +140,16 @@ _sfv_tries() { printf '%s' "${VERIFY_CONCLUSION_TRIES:-${E2E_CONCLUSION_TRIES:-6
 # ------------------------------------------------------------------------------
 # PR の作成・マージ
 # ------------------------------------------------------------------------------
-# PR を作成し、番号を標準出力に返す。失敗したら、戻り値 1。引数: リポジトリ head ブランチ タイトル [本文] [base（既定 main）]
+# PR を作成し、番号を標準出力に返す。引数: リポジトリ head ブランチ タイトル [本文] [base（既定 main）]
+#   番号は、gh pr create の出力（PR の URL）の末尾の数字（行末の CR は除く）。
+#   戻り値: 0 = 作成し、番号を出した / 1 = 作成に失敗した、または、作成できても番号が取れなかった（何も出さない。
+#   以前は、番号が取れないと、空のまま戻り値 0 だった。呼び出し側は「|| 空にする」→「空なら失敗」で扱っている）
 verify_pr_create() {
-    local repo="$1" head="$2" title="$3" body="${4:-sf-tools の検証（自動作成）。}" base="${5:-main}" out
+    local repo="$1" head="$2" title="$3" body="${4:-sf-tools の検証（自動作成）。}" base="${5:-main}" out n
     out=$(verify_gh pr create -R "$repo" --base "$base" --head "$head" --title "$title" --body "$body" 2>/dev/null) || return 1  # VAR=$(cmd) のため run 不使用
-    printf '%s\n' "$out" | grep -oE '[0-9]+$' | tail -1
+    n=$(printf '%s\n' "$out" | tr -d '\r' | grep -oE '[0-9]+$' | tail -1)  # VAR=$(cmd) のため run 不使用（URL の末尾の数字）
+    [[ -n "$n" ]] || return 1
+    printf '%s\n' "$n"
 }
 # PR をマージする（マージコミット。ブランチは削除しない）。引数: リポジトリ PR 番号
 verify_pr_merge() { verify_gh pr merge "$2" -R "$1" --merge >/dev/null 2>&1; }  # 戻り値で判定するため run 不使用
@@ -137,7 +170,8 @@ verify_latest_run_id() {
 }
 # PR のイベントで起動したワークフローの実行が、完了するまで待ち、実行 ID を標準出力に返す。
 #   引数: リポジトリ ワークフロー名 ブランチ名 [この ID より新しい実行だけを対象にする（既定 0）]
-#   上限（VERIFY_WF_TIMEOUT 秒）以内に完了しなければ、戻り値 1
+#   起動を VERIFY_RUN_FIND_TRIES 回（間隔 VERIFY_POLL_SEC 秒）待っても見つからない、または、上限（VERIFY_WF_TIMEOUT 秒）
+#   以内に完了しなければ、戻り値 1
 verify_wait_pr_run() {
     local repo="$1" wf="$2" br="$3" after="${4:-0}" i id status waited=0
     local timeout="${VERIFY_WF_TIMEOUT:-${E2E_WF_TIMEOUT:-1200}}" poll
@@ -157,7 +191,7 @@ verify_wait_pr_run() {
     return 1
 }
 # 実行の結果（success / failure ...）を、標準出力に返す。空のときだけ、やり直す（完了直後の反映の遅れ・gh の一時的な失敗への対策）
-#   引数: リポジトリ 実行 ID
+#   引数: リポジトリ 実行 ID。VERIFY_CONCLUSION_TRIES 回読んでも空なら、空を返す（戻り値 0）
 verify_run_conclusion() {
     local out="" i n
     n=$(_sfv_tries)
@@ -169,6 +203,7 @@ verify_run_conclusion() {
     printf '%s' "$out"
 }
 # 実行の中のステップの結果を、標準出力に返す。空のときだけ、やり直す。引数: リポジトリ 実行 ID ステップ名
+#   同じ名前のステップが複数のジョブにあれば、最初のもの。見つからなければ、空を返す（戻り値 0）
 verify_step_conclusion() {
     local out="" i n
     n=$(_sfv_tries)
@@ -180,7 +215,9 @@ verify_step_conclusion() {
     done
     printf '%s' "$out"
 }
-# 失敗した実行を、1 回だけ再実行して、完了を待つ（試行番号が増え、完了するまで）。引数: リポジトリ 実行 ID
+# 失敗した実行を、1 回だけ再実行して（gh run rerun --failed: 失敗したジョブだけ）、完了を待つ（試行番号が増え、完了するまで）。
+#   引数: リポジトリ 実行 ID。戻り値: 0 = 再実行が完了した（結果は、verify_run_conclusion で読む）/
+#   1 = 試行番号を読めない・再実行の呼び出しに失敗・上限（VERIFY_WF_TIMEOUT 秒）までに完了しない
 verify_rerun_and_wait() {
     local repo="$1" id="$2" a0 a st waited=0 poll timeout="${VERIFY_WF_TIMEOUT:-${E2E_WF_TIMEOUT:-1200}}"
     poll=$(_sfv_poll)
@@ -197,7 +234,8 @@ verify_rerun_and_wait() {
 }
 # ワークフローを手動で起動し、起動した実行の ID を、標準出力に返す（完了は待たない）。
 #   起動の前の、最新の実行 ID を覚え、それより新しい実行だけを、起動した実行とみなす（古い実行を、取り違えないため）。
-#   起動の呼び出しが、すべて失敗したら、戻り値 1。引数: リポジトリ ワークフローのファイル名 [ブランチ（既定 main）]
+#   起動の呼び出しが、VERIFY_DISPATCH_TRIES 回すべて失敗した、または、起動後に同じ回数探しても新しい実行が見つからなければ、
+#   戻り値 1。引数: リポジトリ ワークフローのファイル名 [ブランチ（既定 main）]
 verify_dispatch_workflow() {
     local repo="$1" wf="$2" ref="${3:-main}" i id before dispatched=0 tries poll
     tries="${VERIFY_DISPATCH_TRIES:-12}"; poll=$(_sfv_poll)
@@ -226,18 +264,18 @@ verify_wait_run() {
     done
     return 1
 }
-# 実行のログに、文字列（固定）が含まれるか。引数: リポジトリ 実行 ID 文字列
-verify_run_log_has() { verify_gh run view "$2" -R "$1" --log 2>/dev/null | grep -qF -- "$3"; }
+# 実行のログに、文字列（固定）が含まれるか（含まれれば戻り値 0）。引数: リポジトリ 実行 ID 文字列
+verify_run_log_has() { verify_gh run view "$2" -R "$1" --log 2>/dev/null | grep -qF -- "$3"; }  # 戻り値で判定するため run 不使用（ログ全体を、画面・ログファイルに出さない）
 
 # ------------------------------------------------------------------------------
 # GitHub の API で、ブランチの作成・ファイルの追加・削除を行う（ローカルに clone しない。フックにも影響されない）
 # ------------------------------------------------------------------------------
-# ブランチの先頭のコミット SHA を、標準出力に返す。引数: リポジトリ ブランチ
-verify_branch_sha() { verify_gh api "repos/${1}/git/ref/heads/${2}" --jq .object.sha 2>/dev/null; }
-# ブランチを作る。引数: リポジトリ 新しいブランチ 元の SHA
-verify_branch_create() { verify_gh api -X POST "repos/${1}/git/refs" -f "ref=refs/heads/${2}" -f "sha=${3}" >/dev/null 2>&1; }
-# ブランチ（リモート）を削除する。引数: リポジトリ ブランチ
-verify_branch_delete() { verify_gh api -X DELETE "repos/${1}/git/refs/heads/${2}" >/dev/null 2>&1; }
+# ブランチの先頭のコミット SHA を、標準出力に返す（戻り値は gh のもの）。引数: リポジトリ ブランチ
+verify_branch_sha() { verify_gh api "repos/${1}/git/ref/heads/${2}" --jq .object.sha 2>/dev/null; }  # 出力（SHA）を、そのまま返すため run 不使用
+# ブランチを作る（戻り値は gh のもの。すでにあれば失敗）。引数: リポジトリ 新しいブランチ 元の SHA
+verify_branch_create() { verify_gh api -X POST "repos/${1}/git/refs" -f "ref=refs/heads/${2}" -f "sha=${3}" >/dev/null 2>&1; }  # 戻り値で判定するため run 不使用
+# ブランチ（リモート）を削除する（戻り値は gh のもの）。引数: リポジトリ ブランチ
+verify_branch_delete() { verify_gh api -X DELETE "repos/${1}/git/refs/heads/${2}" >/dev/null 2>&1; }  # 戻り値で判定するため run 不使用
 # そのブランチを head とする、開いている PR があるか（あれば戻り値 0）。引数: リポジトリ ブランチ
 #   取得できなかったときは、「ある」として扱う（安全側。PR が開いているブランチを、消さないため）
 verify_branch_has_open_pr() {
@@ -246,7 +284,7 @@ verify_branch_has_open_pr() {
     [[ "${n:-1}" != "0" ]]
 }
 # contents API のパスを、URL エンコードする（% → %25 を先に、空白 → %20）。ファイル名に空白・% を含むもの（Layout など）に備える
-_verify_urlpath() { printf '%s' "$1" | sed 's/%/%25/g; s/ /%20/g'; }
+_verify_urlpath() { printf '%s' "$1" | sed 's/%/%25/g; s/ /%20/g'; }  # 変換した文字列を返す部品のため run 不使用
 # ファイルの SHA（ブランチ上）を、標準出力に返す。なければ、戻り値 1。引数: リポジトリ ブランチ パス
 verify_file_sha() {
     local s
@@ -255,18 +293,19 @@ verify_file_sha() {
     printf '%s' "$s"
 }
 # ファイルを追加（または更新）する。本文は、標準入力。引数: リポジトリ ブランチ パス コミットメッセージ
+#   ファイルがあれば、その SHA を付けて更新する。戻り値は gh（contents API の PUT）のもの
 verify_file_put() {
     local repo="$1" br="$2" path="$3" msg="$4" b64 sha
-    b64=$(base64 | tr -d '\n\r')  # 標準入力の本文を、base64 にする（パイプのみ）
+    b64=$(base64 | tr -d '\n\r')  # VAR=$(cmd) のため run 不使用（標準入力の本文を、改行なしの base64 にする）
     if sha=$(verify_file_sha "$repo" "$br" "$path"); then  # 条件チェック
-        verify_gh api -X PUT "repos/${repo}/contents/$(_verify_urlpath "$path")" -f "message=${msg}" -f "content=${b64}" -f "branch=${br}" -f "sha=${sha}" >/dev/null 2>&1
+        verify_gh api -X PUT "repos/${repo}/contents/$(_verify_urlpath "$path")" -f "message=${msg}" -f "content=${b64}" -f "branch=${br}" -f "sha=${sha}" >/dev/null 2>&1  # 戻り値で判定するため run 不使用（本文の base64 をログに残さない）
     else
-        verify_gh api -X PUT "repos/${repo}/contents/$(_verify_urlpath "$path")" -f "message=${msg}" -f "content=${b64}" -f "branch=${br}" >/dev/null 2>&1
+        verify_gh api -X PUT "repos/${repo}/contents/$(_verify_urlpath "$path")" -f "message=${msg}" -f "content=${b64}" -f "branch=${br}" >/dev/null 2>&1  # 同上
     fi
 }
 # ファイルを削除する（なければ、何もせず、成功）。引数: リポジトリ ブランチ パス コミットメッセージ
 verify_file_delete() {
     local repo="$1" br="$2" path="$3" msg="$4" sha
     sha=$(verify_file_sha "$repo" "$br" "$path") || return 0  # ファイルがなければ、何もしない
-    verify_gh api -X DELETE "repos/${repo}/contents/$(_verify_urlpath "$path")" -f "message=${msg}" -f "sha=${sha}" -f "branch=${br}" >/dev/null 2>&1
+    verify_gh api -X DELETE "repos/${repo}/contents/$(_verify_urlpath "$path")" -f "message=${msg}" -f "sha=${sha}" -f "branch=${br}" >/dev/null 2>&1  # 戻り値で判定するため run 不使用
 }

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>sf-tools ドキュメント</title>
-<meta name="description" content="sf-tools は、Salesforce の変更を、安全に、決まった手順で本番に届けるための道具です。">
+<meta name="description" content="sf-tools は、Git で管理する普通の開発の流れの中で、Salesforce の検証から本番へのリリースまでを、自動でつなげる道具です。">
 <link rel="stylesheet" href="assets/style.css">
 </head>
 <body data-root="">
@@ -15,15 +15,185 @@
 
 <div class="hero">
   <h1>🚀 sf-tools</h1>
-  <p class="lead">Salesforce の変更を、安全に、決まった手順で、本番に届けるための道具です。</p>
-  <p>「変更を作る → 確かめる → 本番に反映する」という毎日のくり返しを、コマンドと自動の仕組みに任せられます。変更は、本番に出る前に、自動でチェックされます。うっかりミスや、反映のし忘れを防げます。</p>
+  <p class="lead">ソースコードを Git で管理する、普通の開発の流れの中で、Salesforce の検証から本番へのリリースまでを、自動でつなげる道具です。</p>
   <ul>
     <li>🔑 <strong>最初の準備</strong>（プロジェクトのリポジトリ作り）は、プロジェクト管理者が、<strong>先に</strong> 1 回だけ行います。そのあとは、ときどきの保守だけです。</li>
     <li>💻 <strong>毎日の作業</strong>で使うのは、おもに開発者です。管理者の準備が終わってから始めます。コマンドは、<strong>ランチャー</strong>（番号で選ぶメニュー）から使うのがおすすめです。</li>
     <li>👀 業務担当の方が、コマンドを使う必要は、ほとんどありません。Slack に届く結果の通知を見る形で、関わります。</li>
   </ul>
-  <p>しくみは、シェルスクリプト（コマンド）の集まりです。パソコンの <code>~/sf-tools</code> に置いて、各プロジェクトのフォルダから呼び出します。共有の環境（本番など）への検証とリリースは、GitHub Actions（GitHub 上の自動処理）が行います。手元のパソコンから試せるのは、自分用の組織（個人の Sandbox など）だけです。</p>
 </div>
+
+<h2 id="position">sf-tools の位置づけ</h2>
+<p>Salesforce の組織は、そのままでは、Git で管理されていません。変更の履歴が残らず、誰が、いつ、何を変えたかを、あとから追いにくい状態です。</p>
+<p>sf-tools は、<strong>ソースコードを Git で管理する、普通の開発の流れ</strong>（手元で開発 → commit・push → PR → マージ）の中で、<strong>検証から本番へのリリースまでを、自動でつなげます</strong>。共有の環境へのリリースは、組織に向けて直接コマンドを打つのではなく、<strong>Git への変更の取り込み（マージ）の結果として起きます</strong>。自分用の組織には、手元から試せます。</p>
+<figure class="diagram" id="fig-git-flow">
+  <p class="lane-label">Git の流れの中で、リリースまで</p>
+  <div class="phases linked">
+    <div class="phase p1">
+      <p class="ph-title">💻 手元のパソコン（開発者）</p>
+      <ol>
+        <li class="you"><span class="n">1</span>作る（Apex・LWC・設定など）</li>
+        <li class="you"><span class="n">2</span>自分用の組織で試す（Dryrun・Deploy）</li>
+        <li class="you"><span class="n">3</span>commit・push（Push）</li>
+      </ol>
+    </div>
+    <div class="phase p2">
+      <p class="ph-title">🐙 GitHub</p>
+      <ol>
+        <li class="you"><span class="n">4</span>PR を出す（Next）</li>
+        <li><span class="n">5</span>自動で検証（ターゲットファイル・dry-run・マージの順序）</li>
+        <li class="you"><span class="n">6</span>レビューして、マージ</li>
+      </ol>
+    </div>
+    <div class="phase p3">
+      <p class="ph-title">🤖 共有の環境へ、自動でリリース</p>
+      <ol>
+        <li><span class="n">7</span>develop の組織</li>
+        <li><span class="n">8</span>staging の組織</li>
+        <li><span class="n">9</span>main（本番）の組織</li>
+      </ol>
+    </div>
+  </div>
+  <div class="say">共有の環境の組織には、直接コマンドを打ちません。マージが、リリースの合図です。</div>
+  <figcaption>👆 は、人が行う操作です（カッコの中は、ランチャーのメニューの名前）。4〜6 を、develop → staging → main の順に、段階ごとにくり返すと、マージした段階の組織へ、自動でリリースされます。段階の数は、プロジェクトの構成（1〜3 段階）で決まります。</figcaption>
+</figure>
+<p>変更セットでリリースするやり方とは、<strong>別のアプローチ</strong>です。どちらかが正しい、ということではありません。sf-tools は、Git を中心にして開発したいチームのための道具です。</p>
+<figure class="diagram">
+  <p class="lane-label">従来のやり方と、sf-tools のやり方</p>
+  <div class="compare">
+    <div class="phase">
+      <p class="ph-title">🏢 変更セット・組織での直接の修正<small>組織が中心（Git では管理しない）</small></p>
+      <ul>
+        <li><span class="i">🖱️</span>組織の画面で、変更して、リリースする</li>
+        <li><span class="i">🗂️</span>変更の中身は、組織の中にある</li>
+        <li><span class="i">🕓</span>Git のような変更の履歴は、残らない</li>
+        <li><span class="i">✋</span>追加の道具なしで、すぐに始められる</li>
+      </ul>
+    </div>
+    <div class="phase p1">
+      <p class="ph-title">🌿 sf-tools<small>Git が中心（変更は、Git を通って組織へ）</small></p>
+      <ul>
+        <li><span class="i">📜</span>変更の履歴が、Git に残る（誰が・いつ・何を）</li>
+        <li><span class="i">👀</span>PR で、レビューできる</li>
+        <li><span class="i">🤖</span>反映の前に、自動でチェックされる</li>
+        <li><span class="i">🔢</span>操作は、ランチャーの番号を選ぶだけ</li>
+      </ul>
+    </div>
+  </div>
+  <figcaption>どちらが良い・悪い、ではなく、別のアプローチです。左は、組織を中心に、右は、Git を中心に、変更を進めます。</figcaption>
+</figure>
+<p>内部では、Salesforce CLI（<code>sf</code>）を使っています。CLI は強力ですが、使いこなすのが難しいため、sf-tools が包んで、日々の作業を「<strong>番号を選ぶだけ</strong>」にしました。コマンドの寄せ集めではなく、開発の流れと、自動の仕組み（GitHub Actions）が、一続きでつながる仕組みです。</p>
+<p>技術的には、パソコンの <code>~/sf-tools</code> に置いたスクリプト（Bash）を、各プロジェクトのフォルダから呼び出す作りです。共有の環境（本番など）への検証とリリースは、GitHub Actions（GitHub 上の自動処理）が行います。手元のパソコンから試せるのは、自分用の組織（個人の Sandbox など）だけです。</p>
+
+<h2 id="features">sf-tools の特長（4 つ）</h2>
+<div class="cards">
+  <a class="card" href="#f-setup">
+    <span class="tag">特長 1</span>
+    <h3>土台を、コマンド 1 つで作れる</h3>
+    <p>sf-init.sh が、対話しながら順に案内して、リポジトリから接続・自動処理までを用意します。</p>
+  </a>
+  <a class="card" href="#f-git">
+    <span class="tag">特長 2</span>
+    <h3>リリースが、Git の流れの中で起きる</h3>
+    <p>PR とマージの流れの中で、検証から本番へのリリースまでが、自動でつながります。</p>
+  </a>
+  <a class="card" href="#f-sync">
+    <span class="tag">特長 3</span>
+    <h3>本番の変更を、定期的に Git へ取り込む</h3>
+    <p>sf-tools を通らない変更があっても、Git は、あとで本番に追いつきます。</p>
+  </a>
+  <a class="card" href="#f-os">
+    <span class="tag">特長 4</span>
+    <h3>Windows・Mac・WSL のどれでも動く</h3>
+    <p>追加のインストールなしで、どの環境でも、同じように使えます。</p>
+  </a>
+</div>
+
+<h3 id="f-setup">土台を、コマンド 1 つで作れる</h3>
+<p>管理者が <code>sf-init.sh</code> を実行すると、<strong>対話しながら、順に案内します</strong>（ウィザード）。GitHub のリポジトリの作成から、ワークフローの配置まで、手作業の設定は、ほぼ要りません。かかる時間の目安は、30〜60 分です（ブラウザでの作業と、Salesforce の反映待ちを含みます）。</p>
+<figure class="diagram">
+  <p class="lane-label">土台を、コマンド 1 つで</p>
+  <div class="flow">
+    <div class="node admin"><span class="who">🔑 管理者</span><strong>sf-init.sh</strong><small>コマンドは、これ 1 つ</small></div>
+  </div>
+  <div class="down">↓<small>対話しながら、順に案内する</small></div>
+  <div class="tiles c3">
+    <div class="node auto"><span class="who">🐙</span><strong>GitHub リポジトリ</strong><small>作成と、雛形の配置</small></div>
+    <div class="node auto"><span class="who">🌿</span><strong>ブランチ構成と保護</strong><small>1〜3 段階から選ぶ。保護のルール（Ruleset）も</small></div>
+    <div class="node auto"><span class="who">☁️</span><strong>Salesforce への接続</strong><small>段階ごとの組織（JWT 認証）</small></div>
+    <div class="node auto"><span class="who">💬</span><strong>Slack</strong><small>リリースの結果の通知</small></div>
+    <div class="node auto"><span class="who">🔐</span><strong>認証情報</strong><small>GitHub の Secrets・Variables に登録</small></div>
+    <div class="node auto"><span class="who">⚙️</span><strong>ワークフロー</strong><small>GitHub Actions の自動処理</small></div>
+  </div>
+  <div class="say">人がやるのは、おもに、ブラウザでの作業（Salesforce へのログイン・GitHub のトークン（PAT）の発行・Slack の Bot Token とチャンネル ID の用意）と、画面への貼り付けです。手順は、画面に案内が出ます。</div>
+  <figcaption>点線の箱は、sf-init.sh が、自動で用意するものです。ブランチの保護は、GitHub のプランによっては、設定できないことがあります（<a href="admin/setup.html">最初のセットアップ</a>）。</figcaption>
+</figure>
+
+<h3 id="f-git">リリースが、Git の流れの中で起きる</h3>
+<p>手元で開発して Git に収め、PR とマージの流れの中で、検証から本番へのリリースまでが、自動でつながります（流れの全体は、<a href="#fig-git-flow">位置づけの図</a>）。</p>
+<figure class="diagram">
+  <p class="lane-label">Git の流れにのせると、手に入るもの</p>
+  <div class="tiles">
+    <div class="node ok"><span class="who">📜</span><strong>変更の履歴が残る</strong><small>誰が・いつ・何を変えたか</small></div>
+    <div class="node ok"><span class="who">👀</span><strong>PR でレビュー</strong><small>マージの前に、人が確かめる</small></div>
+    <div class="node ok"><span class="who">🤖</span><strong>反映の前に自動チェック</strong><small>ターゲットファイル・dry-run・順序</small></div>
+    <div class="node ok"><span class="who">🪜</span><strong>決まった順序で進む</strong><small>develop → staging → main</small></div>
+  </div>
+  <figcaption>共有の環境へは、決まった順序で進みます。順序を飛ばした PR には警告が出て、環境のブランチどうしの直接の PR は、エラーになります（<a href="design/cicd.html#order">マージの順序</a>）。</figcaption>
+</figure>
+
+<h3 id="f-sync">本番の変更を、定期的に Git へ取り込む</h3>
+<p>本番（<code>prod</code> の名前で接続した、<code>main</code> の組織）の最新のメタデータを、<strong>平日に 1 日 4 回（3 時間おき）</strong>、Git の <code>main</code> へ取り込み、ほかの段階のブランチにも伝えます。sf-tools を使わないリリース（変更セット・本番の直接の修正）があっても、Git は、あとで本番に追いつきます。</p>
+<figure class="diagram">
+  <p class="lane-label">本番の変更も、Git に追いつく</p>
+  <div class="flow">
+    <div class="node warn"><span class="who">sf-tools を通らない変更</span><strong>変更セット・直接の修正</strong><small>本番の組織で、直接行ったもの</small></div>
+    <div class="arrow labeled"><span class="g">⇢</span><span class="lb">直接の変更</span></div>
+    <div class="node admin"><span class="who">Salesforce</span><strong>本番の組織</strong><small>prod の名前で接続した、main の組織</small></div>
+    <div class="arrow labeled"><span class="g">→</span><span class="lb">取り込み（平日 3 時間おき）</span><span class="g">←</span><span class="lb">リリース（PR のマージ）</span></div>
+    <div class="node dev"><span class="who">Git</span><strong>main ブランチ</strong><small>本番の最新の状態</small></div>
+    <div class="arrow labeled"><span class="g">→</span><span class="lb">伝える</span></div>
+    <div class="node ok"><span class="who">Git</span><strong>ほかの段階のブランチ</strong><small>staging・develop</small></div>
+  </div>
+  <figcaption>点線は、sf-tools を通らない変更です。取り込みは、日本時間の平日 9・12・15・18 時です。伝えるのは Git の上だけで、ほかの段階の組織には、反映しません。取り込むのは、各プロジェクトの sf-tools/config/metadata.txt に書いた種類だけです。</figcaption>
+</figure>
+<p>その上で開発するので、古い状態を土台にした作業や、気づかない上書きを、避けやすくなります。重なった変更は、早い段階で（<code>sf-push.sh</code> が <code>main</code> を取り込むときや、PR の時点で）見つかり、止まります。</p>
+
+<h3 id="f-os">Windows・Mac・WSL のどれでも動く</h3>
+<p>Bash の入れ直しなどの、追加のインストールなしで、どの環境でも、同じように使えます（Windows は Git Bash、Mac は標準のターミナルと標準の Bash のまま）。確かめた内容は、<a href="guide/install.html#env">動作環境</a>にあります。</p>
+<figure class="diagram">
+  <p class="lane-label">どの環境でも、同じように</p>
+  <div class="tiles">
+    <div class="node dev"><span class="who">💻 手元</span><strong>Windows</strong><small>Git Bash</small></div>
+    <div class="node dev"><span class="who">💻 手元</span><strong>Mac</strong><small>標準のターミナル・標準の Bash</small></div>
+    <div class="node dev"><span class="who">💻 手元</span><strong>WSL</strong><small>Windows の中で動く Ubuntu</small></div>
+  </div>
+  <div class="down">↓<small>同じコマンド・同じメニュー</small></div>
+  <div class="flow">
+    <div class="node ok"><span class="who">🔢 ランチャー</span><strong>sf-launcher.sh</strong><small>番号を選ぶだけのメニュー</small></div>
+  </div>
+  <div class="down">↓<small>push・PR・マージ</small></div>
+  <div class="flow">
+    <div class="node auto"><span class="who">🤖 自動（人は触りません）</span><strong>GitHub Actions（Linux のサーバー）</strong><small>検証・リリース・メタデータの取り込み</small></div>
+  </div>
+  <figcaption>Linux は、GitHub Actions のサーバーとして、自動で動く部分だけで使います（手元の Linux のパソコンは、想定していません）。自動テストは、Linux・Mac・Windows の 3 つの環境で、変更のたびに実行しています。</figcaption>
+</figure>
+
+<div class="box">
+  <div class="title">AI にコードを書かせる開発とも、相性がよい</div>
+  <p>AI でコードを作る開発でも、手元で作って、Git で管理し、GitHub に集める流れは、変わりません。sf-tools は、その流れの中で、検証からリリースまでを、番号を選ぶだけの操作でつなぎます。Git や GitHub に詳しくない方でも使えるように、画面の操作（変更セットなど）の代わりに、決まったコマンドを用意しています。</p>
+</div>
+
+<h2 id="scope">確認の範囲</h2>
+<figure class="diagram">
+  <p class="lane-label">どこまで確かめたか</p>
+  <div class="tiles">
+    <div class="node ok"><span class="who">✅ 確認した</span><strong>Developer Edition</strong><small>Sales・Service の標準機能つきの組織。メタデータの種類ごとの、リリース・削除の確認も（API 64.0）</small></div>
+    <div class="node warn"><span class="who">❓ 確認していない</span><strong>製品ごと・ほかのエディション</strong><small>Sales Cloud・Service Cloud・Experience Cloud など、特定の製品を前提にした確認。Enterprise などのエディション・Sandbox</small></div>
+    <div class="node dev"><span class="who">➕ 種類を増やすには</span><strong>metadata.txt に書き足す</strong><small>CLI が対応している種類なら、原則として、リリースできる見込み（確認は、自分用の組織で）</small></div>
+  </div>
+  <figcaption>組織や権限によって、結果が変わることもあります。本番に使う前に、自分用の組織で確かめることをお勧めします（くわしくは、<a href="guide/install.html#scope">確認の範囲</a>）。</figcaption>
+</figure>
 
 <h2 id="flow">まず、全体の流れ</h2>
 <div class="box warn">

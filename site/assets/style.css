@@ -273,12 +273,51 @@ figure.diagram figcaption { margin-top: .8rem; font-size: .85rem; color: var(--f
   font-family: var(--mono); font-size: .85rem; line-height: 1.7; overflow-x: auto; white-space: pre; border: 1px solid #33404c;
 }
 .term .dim { color: #8895a3; } .term .num { color: #6cb2f2; font-weight: 700; } .term .hl { color: #f2c46c; }
+/* 図の部品（続き）
+ *   .phases.linked … 段と段の間に、矢印を付ける（狭い画面では、下向き）
+ *   .arrow.labeled > .g + .lb … 説明つきの矢印（.g が矢印の記号、.lb が説明）
+ *   .down … 縦の矢印（説明つき。<small> が説明）  .say … 吹き出し（図の中の、ひとこと）
+ *   .tiles … 箱を、幅に合わせて並べる（.c3 は 3 列）  .compare … 2 列の対比（中は .phase） */
+.phases.linked { gap: 1.4rem; }
+.phases.linked > .phase { position: relative; }
+.phases.linked > .phase + .phase::before {
+  content: "→"; position: absolute; left: calc(-1.4rem - 2px); width: 1.4rem; top: 50%; margin-top: -.75rem;
+  text-align: center; font-size: 1.3rem; line-height: 1.5rem; color: var(--fg-soft);
+}
+.diagram .arrow.labeled { display: flex; flex-direction: column; align-items: center; gap: .15rem; max-width: 7.5rem; }
+.diagram .arrow .lb { font-size: .7rem; line-height: 1.35; text-align: center; color: var(--fg-soft); }
+.diagram .down { text-align: center; color: var(--fg-soft); font-size: 1.3rem; line-height: 1.2; margin: -.3rem 0 .5rem; }
+.diagram .down small { display: block; font-size: .76rem; }
+.diagram .say {
+  position: relative; max-width: 36rem; margin: .7rem auto .8rem; padding: .5rem .9rem; text-align: center;
+  font-size: .88rem; line-height: 1.6; border: 2px solid var(--warn-line); background: var(--warn); border-radius: .8rem;
+}
+.diagram .say::before {
+  content: ""; position: absolute; top: -.6rem; left: 50%; margin-left: -.5rem; width: 0; height: 0;
+  border-left: .5rem solid transparent; border-right: .5rem solid transparent; border-bottom: .55rem solid var(--warn-line);
+}
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr)); gap: .5rem; margin: 0 0 .8rem; }
+.tiles.c3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.compare { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .8rem; margin: 0 0 .8rem; }
+.compare ul { list-style: none; margin: 0; padding: 0; font-size: .88rem; line-height: 1.5; }
+.compare .phase li { padding-left: 1.6rem; }
+.compare li .i { position: absolute; left: 0; top: 0; }
+.compare .ph-title small { display: block; font-weight: 400; color: var(--fg-soft); font-size: .78rem; }
 @media (max-width: 700px) {
   .flow { flex-direction: column; }
   .flow .arrow { transform: rotate(90deg); }
+  .flow .arrow.labeled { transform: none; max-width: none; flex-direction: row; gap: .5rem; }
+  .flow .arrow.labeled .g { display: inline-block; transform: rotate(90deg); }
+  .flow .arrow.labeled .lb { text-align: left; }
   .fan { flex-direction: column; align-items: stretch; }
   .fan > .node { flex: 0 0 auto; }
   .phases { grid-template-columns: 1fr; }
+  .phases.linked > .phase + .phase::before { content: "↓"; left: 0; right: 0; width: auto; top: -1.45rem; margin-top: 0; }
+  .tiles.c3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .compare { grid-template-columns: 1fr; }
+}
+@media (max-width: 420px) {
+  .tiles.c3 { grid-template-columns: 1fr; }
 }
 
 /* ---- 前へ・次へ ---- */

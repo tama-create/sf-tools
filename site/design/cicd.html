@@ -18,14 +18,75 @@
 
 <div class="box">
   <div class="title">ひとことで言うと</div>
-  <p>変更は、開発用 → 検証用 → 本番の順に、1 段ずつ進みます。各段で、自動のチェックが入るので、確かめないまま、本番に出ることはありません。本番の組織で直接加えられた変更は、定期的に（平日の 3 時間おきに）Git に取り込まれ、ほかの段にも広がります。</p>
+  <p>変更は、開発用 → 検証用 → 本番の順に、1 段ずつ進みます。各段で、自動のチェックが入るので、確かめないまま、本番に出ることを防げます。本番の組織で直接加えられた変更は、定期的に（平日の 3 時間おきに）Git に取り込まれ、ほかの段にも広がります。</p>
   <p>（CI/CD は、変更の確認と反映を自動で行う仕組みのことです。）</p>
 </div>
+
+<h2 id="position">sf-tools の位置づけ</h2>
+<p>Salesforce の組織は、そのままでは、Git で管理されていません。変更の履歴が残らず、誰が、いつ、何を変えたかを、あとから追いにくい状態です。</p>
+<p>sf-tools は、<strong>ソースコードを Git で管理する、普通の開発の流れ</strong>（手元で開発 → commit・push → PR → マージ）の中で、<strong>検証から本番へのリリースまでを、自動でつなげる道具</strong>です。共有の環境へのリリースは、組織に向けて直接コマンドを打つのではなく、<strong>Git への変更の取り込み（マージ）の結果として起きます</strong>。自分用の組織には、手元から試せます（<a href="#local">手元での検証と、共有の環境の保護</a>）。</p>
+<figure class="diagram">
+  <p class="lane-label">Git の流れの中で、リリースまで</p>
+  <div class="phases linked">
+    <div class="phase p1">
+      <p class="ph-title">💻 手元のパソコン（開発者）</p>
+      <ol>
+        <li class="you"><span class="n">1</span>作る（Apex・LWC・設定など）</li>
+        <li class="you"><span class="n">2</span>自分用の組織で試す（Dryrun・Deploy）</li>
+        <li class="you"><span class="n">3</span>commit・push（Push）</li>
+      </ol>
+    </div>
+    <div class="phase p2">
+      <p class="ph-title">🐙 GitHub</p>
+      <ol>
+        <li class="you"><span class="n">4</span>PR を出す（Next）</li>
+        <li><span class="n">5</span>自動で検証（ターゲットファイル・dry-run・マージの順序）</li>
+        <li class="you"><span class="n">6</span>レビューして、マージ</li>
+      </ol>
+    </div>
+    <div class="phase p3">
+      <p class="ph-title">🤖 共有の環境へ、自動でリリース</p>
+      <ol>
+        <li><span class="n">7</span>develop の組織</li>
+        <li><span class="n">8</span>staging の組織</li>
+        <li><span class="n">9</span>main（本番）の組織</li>
+      </ol>
+    </div>
+  </div>
+  <div class="say">共有の環境の組織には、直接コマンドを打ちません。マージが、リリースの合図です。</div>
+  <figcaption>👆 は、人が行う操作です（カッコの中は、ランチャーのメニューの名前）。4〜6 を、develop → staging → main の順に、段階ごとにくり返すと、マージした段階の組織へ、自動でリリースされます（<a href="#release">リリースの流れ</a>）。</figcaption>
+</figure>
+<p>Salesforce には、変更セットや DevOps Center など、リリースのための仕組みが、標準で用意されています。sf-tools は、それらとは<strong>別のアプローチ</strong>で、Git（と GitHub）を中心に置き、開発の流れと、自動の仕組み（GitHub Actions）を、一続きにつなぎます。どちらが正しい、ということではなく、Git を中心にして開発したいチームのための選択肢です。</p>
+<figure class="diagram">
+  <p class="lane-label">従来のやり方と、sf-tools のやり方</p>
+  <div class="compare">
+    <div class="phase">
+      <p class="ph-title">🏢 変更セット・組織での直接の修正<small>組織が中心（Git では管理しない）</small></p>
+      <ul>
+        <li><span class="i">🖱️</span>組織の画面で、変更して、リリースする</li>
+        <li><span class="i">🗂️</span>変更の中身は、組織の中にある</li>
+        <li><span class="i">🕓</span>Git のような変更の履歴は、残らない</li>
+        <li><span class="i">✋</span>追加の道具なしで、すぐに始められる</li>
+      </ul>
+    </div>
+    <div class="phase p1">
+      <p class="ph-title">🌿 sf-tools<small>Git が中心（変更は、Git を通って組織へ）</small></p>
+      <ul>
+        <li><span class="i">📜</span>変更の履歴が、Git に残る（誰が・いつ・何を）</li>
+        <li><span class="i">👀</span>PR で、レビューできる</li>
+        <li><span class="i">🤖</span>反映の前に、自動でチェックされる</li>
+        <li><span class="i">🔢</span>操作は、ランチャーの番号を選ぶだけ</li>
+      </ul>
+    </div>
+  </div>
+  <figcaption>どちらが良い・悪い、ではなく、別のアプローチです。左は、組織を中心に、右は、Git を中心に、変更を進めます。</figcaption>
+</figure>
+<p>内部では、Salesforce CLI（<code>sf</code>）を使っています。CLI は強力ですが、使いこなすのが難しいため、sf-tools が包んで、日々の作業を「番号を選ぶだけ」にしました。コマンドの寄せ集めではなく、開発の流れと、自動の仕組みが、一続きでつながる仕組みです。このページでは、その仕組みの中身を説明します。</p>
 
 <h2 id="pillars">設計の 3 つの柱</h2>
 <p>Salesforce のメタデータは、変更した部分だけを、差分として扱えます。この特性を活かして、Git（変更の履歴）と各組織（本番・ステージング・開発）の内容を、いつもそろえます。</p>
 <ol class="steps">
-  <li><p><strong>本番が正（原本）</strong> — 本番の組織を、いつも「原本」として扱います。本番で起きた変更は、平日の 3 時間おきに、自動で見つけて Git に取り込み、Git 上のほかの段階のブランチへも広げます。人が何もしなくても、ずれが、自動でそろい直る仕組みです。</p></li>
+  <li><p><strong>本番が正（原本）</strong> — 本番の組織を、いつも「原本」として扱います。本番で起きた変更は、平日の 3 時間おきに、自動で見つけて Git に取り込み、Git 上のほかの段階のブランチへも広げます。人が何もしなくても、ずれを、自動でそろえ直す仕組みです（取り込むのは、<code>sf-tools/config/metadata.txt</code> に書いた種類だけです）。</p></li>
   <li><p><strong>作業用のブランチから、各環境へ、1 本ずつ届ける</strong>（スター型のプロモート） — 作業用のブランチから、各環境へ向けて、<strong>それぞれ別に PR</strong>（取り込みの依頼）を出します。環境のブランチどうしを、直接つなぐことは、禁止です。</p></li>
   <li><p><strong>自己完結型のワークフロー</strong> — 自動で動く処理（ワークフロー）の定義（いつ・何を動かすか）を、各プロジェクト（<code>force-*</code>）の中に含めます。雛形は sf-tools が持っていて、プロジェクトを作るときに、コピーします。処理の中身のスクリプト（<code>sf-release.sh</code>・<code>sf-metasync.sh</code>）は、ワークフローが動くたびに、公開されている sf-tools から取ってきて使います（<a href="#workflows">ワークフローの全体像</a>）。</p></li>
 </ol>
@@ -232,7 +293,7 @@ templates/.github/workflows/  ─ sf-init →   .github/workflows/
     <tr><td>自己完結のワークフローと、雛形の一元管理</td><td>ワークフローの定義が、sf-tools の定義を呼び出さずに、各プロジェクトの中だけで動くようにするため。処理の中身（<code>sf-release.sh</code>・<code>sf-metasync.sh</code>）は、動くたびに sf-tools から取ってくるので、スクリプトの修正は、すぐ全プロジェクトに届く。ワークフローの定義の変更は、<code>sf-sync-wf.sh</code> で、管理者が反映する</td></tr>
     <tr><td>ツールの更新は、24 時間に 1 回</td><td>毎回 <code>sf-start.sh</code> で更新すると、起動が遅くなるため（<code>sf-install.sh</code> が、前回から 24 時間以上たっていれば、<code>sf-upgrade.sh</code> を裏で動かす）</td></tr>
     <tr><td>下流への伝播のコンフリクトは、自動で解決しない</td><td>本番と開発で、同じ箇所が変わった状況は、人間が判断すべきため。Slack の通知で気づき、手動で対応する</td></tr>
-    <tr><td>本番の変更を、定期的に（平日の 3 時間おきに）全環境へ伝える</td><td>古いコードをもとにした開発による、デグレを防ぐため</td></tr>
+    <tr><td>本番の変更を、定期的に（平日の 3 時間おきに）全環境へ伝える</td><td>古いコードをもとにした開発による、デグレを避けやすくするため（重なった変更は、<code>main</code> の取り込みや PR の時点で、見つかる）</td></tr>
     <tr><td>ブランチ保護の必須チェックは、ジョブ名だけで登録する</td><td>GitHub の必須チェックの名前は、ワークフロー名を含まない、ジョブ名だけのため（ワークフロー名つきで登録すると、条件が満たされず、PR をマージできない）。実際の GitHub で確かめた</td></tr>
     <tr><td><code>branches.txt</code> で、ブランチ構成を変えられるようにした</td><td>プロジェクトの規模に応じて、1〜3 階層を選べるようにするため</td></tr>
     <tr><td><code>sf-next.sh</code> で、次の PR 先を自動で判定する</td><td>マージ順序の間違いを防ぐ。ブラウザで PR の作成画面を、直接開ける</td></tr>

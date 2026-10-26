@@ -352,7 +352,11 @@ sf-job.sh</code></pre>
     <pre><code>  [1] Check      ターゲットファイルの構文チェック
   [2] Push       変更をコミット &amp; プッシュ
   [3] Next       次の PR 先ブランチを確認
-  ……</code></pre>
+  [4] Dryrun     現在接続中の組織へリリース検証
+  [5] Deploy     現在接続中の組織へリリース
+  [6] Start      開発環境を起動（VS Code のターミナルでは出ません）
+  [7] Restart    接続組織を切り替えて Start 実行（同上）</code></pre>
+    <p>ふだんの順番は、<code>[1]</code> Check → <code>[4]</code> Dryrun（自分の組織で試す）→ <code>[2]</code> Push（送る）→ <code>[3]</code> Next（PR を出す先を確認）です。番号は、並び順と、使う順が、違います。</p>
     <p>コマンドに慣れている方は、<code>sf-push.sh</code> のように、直接打つこともできます。メニューを出し直したいときは、<code>sf-launcher.sh</code> と打ちます（くわしくは<a href="guide/daily.html#launcher">日々の開発の流れ</a>）。</p>
   </li>
 </ol>

@@ -61,7 +61,7 @@
 </ul>
 
 <h2 id="force">force-* プロジェクトの構成</h2>
-<p>雛形のファイルは、<code>sf-init.sh</code> の Phase 3 が、sf-tools の <code>templates/</code> からコピーします（<code>.gitmessage</code> と、<code>sf-tools/release/</code> の中は、<code>sf-install.sh</code> が作ります）。★ は、sf-tools 独自のもの（または、sf-tools 用に設定したもの）で、それ以外は、<code>sf project generate</code> が作る標準の構成と同じものです。☆ は、git の対象外で、それぞれのクローンで作られるものです。</p>
+<p>雛形のファイルは、<code>sf-init.sh</code> の Phase 3（<a href="../admin/setup.html#phase-map">ステップとの対応</a>） が、sf-tools の <code>templates/</code> からコピーします（<code>.gitmessage</code> と、<code>sf-tools/release/</code> の中は、<code>sf-install.sh</code> が作ります）。★ は、sf-tools 独自のもの（または、sf-tools 用に設定したもの）で、それ以外は、<code>sf project generate</code> が作る標準の構成と同じものです。☆ は、git の対象外で、それぞれのクローンで作られるものです。</p>
 <pre><code>force-XXXX/
 ├── .forceignore
 ├── .gitattributes                       ★ 改行コードの設定

@@ -27,7 +27,7 @@
 
 <h2 id="sf-install"><code>sf-install.sh</code></h2>
 <pre><code>sf-install.sh [-v]</code></pre>
-<p><code>~/sf-tools</code> 自体の更新と、プロジェクト側の準備（Git フック・リリース用フォルダなど）を行います。通常は、<code>sf-start.sh</code> がバックグラウンドで、<code>sf-init.sh</code> が Phase 4 で、自動で実行します。<code>force-*</code> フォルダの中で、単独でも実行できます。</p>
+<p><code>~/sf-tools</code> 自体の更新と、プロジェクト側の準備（Git フック・リリース用フォルダなど）を行います。通常は、<code>sf-start.sh</code> がバックグラウンドで、<code>sf-init.sh</code> が Phase 4（<a href="../admin/setup.html#phase-map">ステップとの対応</a>） で、自動で実行します。<code>force-*</code> フォルダの中で、単独でも実行できます。</p>
 <p><code>-v</code>（<code>--verbose</code>）は、コマンドの応答をコンソールにも表示します（<code>sf-hook.sh</code> にも渡し、<code>sf-upgrade.sh</code> には渡しません）。<code>-h</code>（<code>--help</code>。1 つ目の引数のときだけ）以外の、ほかの引数は、「不明なオプションです」で中断します。</p>
 <h3>主な処理（この順序）</h3>
 <ol>

@@ -25,7 +25,14 @@
 
 <h2 id="overview">全体の構成（登場人物と、使っているもの）</h2>
 <p>sf-tools には、3 種類の人が関わり、4 つの場所（手元のパソコン・GitHub・Salesforce の組織・Slack）を使います。まず、全体を、1 枚の図で見てください。</p>
-<p><strong>この図の見方:</strong> 上から下へ読みます（人 → 手元のパソコン → GitHub → Salesforce の組織 → Slack → 業務担当）。実線の矢印（↓）と実線の箱は、人が行うこと、点線の矢印（⇣）と点線の箱は、自動で動くことです。</p>
+<p><strong>この図の見方:</strong> 上から下へ読みます（人 → 手元のパソコン → GitHub → Salesforce の組織 → Slack → 業務担当）。①②の番号は、作業の順番です。管理者が先に準備し、そのあとで、開発者が始めます。</p>
+<figure class="photo" id="fig-overview-image">
+  <a href="assets/system-overview.png"><img src="assets/system-overview.png" width="1024" height="1536" loading="lazy" alt="システム構成図。上から順に、①管理者（sf-init.sh で土台を作る・保守する）、②開発者（sf-job.sh で始めて、ランチャーで進める。手元のパソコンの中に、sf-tools のスクリプト集と作業用のフォルダ、Git・VS Code・Salesforce CLI・GitHub CLI・Node.js がある）、GitHub（リポジトリ force-XXXX。ブランチ・PR・保護のルール・認証情報と、GitHub Actions の 5 つのワークフロー）、Salesforce の組織（共有の環境 develop・staging・main は Actions が JWT 認証で接続し、手元からは反映できない。自分用の組織は手元から直接試す）、Slack（結果の通知）、業務担当（通知を見る）。GitHub から Salesforce へは、マージするとリリース。Salesforce の本番から GitHub の main へは、平日 3 時間おきに変更を取り込む。"></a>
+  <figcaption>画像をクリックすると、大きく表示します。下の「文字で読む版」は、同じ内容です（色の凡例つき）。</figcaption>
+</figure>
+<details>
+<summary>文字で読む版（同じ内容。色の凡例つき）</summary>
+<p>実線の矢印（↓）と実線の箱は、人が行うこと、点線の矢印（⇣）と点線の箱は、自動で動くことです。</p>
 <figure class="diagram" id="fig-overview">
   <p class="lane-label">誰が、どこで、何を使って、何が自動で動くのか</p>
   <p class="legend"><span class="sw admin"></span>管理者が用意・操作する<span class="sw dev"></span>開発者が使う<span class="sw ok"></span>業務担当<span class="sw auto"></span>自動で動く</p>
@@ -76,6 +83,7 @@
   </div>
   <figcaption>実線は人が行うこと、点線は自動で動くことです。管理者の準備（sf-init.sh）が終わってから、開発者が始めます（並行しては進められません）。共有の環境の組織へは、手元からではなく、GitHub Actions だけが反映します。</figcaption>
 </figure>
+</details>
 
 <h3 id="overview-people">登場人物</h3>
 <table>

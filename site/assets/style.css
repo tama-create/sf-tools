@@ -375,3 +375,9 @@ footer.site a { color: var(--fg-soft); }
   .layout { display: block; }
   .doc { max-width: none; padding: 0; }
 }
+
+/* 画像の図（site/assets/system-overview.png など）。白い背景のまま、ダークモードでも読めるように、枠で囲む */
+figure.photo { margin: 1.2rem 0; text-align: center; }
+figure.photo a { display: inline-block; }
+figure.photo img { max-width: 100%; height: auto; background: #fff; border: 1px solid var(--line); border-radius: 12px; }
+figure.photo figcaption { font-size: .85rem; opacity: .8; margin-top: .4rem; }

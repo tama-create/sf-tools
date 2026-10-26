@@ -169,7 +169,7 @@ test_site_figures() {
     echo ""; echo -e "${CLR_HEAD}[TEST] 図（説明文がある・色の種類が決まっている）${CLR_RST}"
     local p nf nc r bad="" kinds="" total=0
     while IFS= read -r p; do
-        nf=$(grep -c '<figure class="diagram"' "$SITE/$p")  # VAR=$(cmd) のため run 不使用
+        nf=$(grep -cE '<figure class="(diagram|photo)"' "$SITE/$p")  # VAR=$(cmd) のため run 不使用（HTML/CSS の図 diagram と、画像の図 photo）
         nc=$(grep -c '<figcaption>' "$SITE/$p")  # VAR=$(cmd) のため run 不使用
         total=$((total + nf))
         [[ "$nf" == "$nc" ]] || bad="$bad
@@ -181,6 +181,14 @@ $r"
     done < <(_pages)
     [[ $total -gt 0 ]] && pass "図が ${total} 個ある" || fail "図が 1 個以上ある"
     [[ -z "$bad" ]] && pass "すべての図に、説明文（figcaption）がある" || fail "説明文のない図がある" "$bad"
+    # 画像（img）には、代替文字（alt）が要る（画像が見えない人・読み込めないときのため。空の alt は不可）
+    local noalt=""
+    while IFS= read -r p; do
+        r=$(grep -o '<img [^>]*>' "$SITE/$p" | grep -vE ' alt="[^"]+"' | awk -v f="$p" '{ print "  " f ": " $0 }')  # VAR=$(cmd) のため run 不使用
+        [[ -z "$r" ]] || noalt="$noalt
+$r"
+    done < <(_pages)
+    [[ -z "$noalt" ]] && pass "すべての画像（img）に、代替文字（alt）がある" || fail "代替文字のない画像がある" "$noalt"
     [[ -z "$kinds" ]] && pass "流れ図の箱の色は、決まったもの（admin・dev・auto・ok・warn）だけ" || fail "決まっていない色の箱がある" "$kinds"
     assert_file_contains "$SITE/assets/style.css" 'figure.diagram' "style.css: 図のスタイルがある"
 }

@@ -25,37 +25,7 @@
 <h2 id="position">sf-tools の位置づけ</h2>
 <p>Salesforce の組織は、そのままでは、Git で管理されていません。変更の履歴が残らず、誰が、いつ、何を変えたかを、あとから追いにくい状態です。</p>
 <p>sf-tools は、<strong>ソースコードを Git で管理する、普通の開発の流れ</strong>（手元で開発 → commit・push → PR → マージ）の中で、<strong>検証から本番へのリリースまでを、自動でつなげる道具</strong>です。共有の環境へのリリースは、組織に向けて直接コマンドを打つのではなく、<strong>Git への変更の取り込み（マージ）の結果として起きます</strong>。自分用の組織には、手元から試せます（<a href="#local">手元での検証と、共有の環境の保護</a>）。</p>
-<figure class="diagram">
-  <p class="lane-label">Git の流れの中で、リリースまで</p>
-  <div class="phases linked">
-    <div class="phase p1">
-      <p class="ph-title">💻 手元のパソコン（開発者）</p>
-      <ol>
-        <li class="you"><span class="n">1</span>作る（Apex・LWC・設定など）</li>
-        <li class="you"><span class="n">2</span>自分用の組織で試す（Dryrun・Deploy）</li>
-        <li class="you"><span class="n">3</span>commit・push（Push）</li>
-      </ol>
-    </div>
-    <div class="phase p2">
-      <p class="ph-title">🐙 GitHub</p>
-      <ol>
-        <li class="you"><span class="n">4</span>PR を出す（Next）</li>
-        <li><span class="n">5</span>自動で検証（ターゲットファイル・dry-run・マージの順序）</li>
-        <li class="you"><span class="n">6</span>レビューして、マージ</li>
-      </ol>
-    </div>
-    <div class="phase p3">
-      <p class="ph-title">🤖 共有の環境へ、自動でリリース</p>
-      <ol>
-        <li><span class="n">7</span>develop の組織</li>
-        <li><span class="n">8</span>staging の組織</li>
-        <li><span class="n">9</span>main（本番）の組織</li>
-      </ol>
-    </div>
-  </div>
-  <div class="say">共有の環境の組織には、直接コマンドを打ちません。マージが、リリースの合図です。</div>
-  <figcaption>👆 は、人が行う操作です（カッコの中は、ランチャーのメニューの名前）。4〜6 を、develop → staging → main の順に、段階ごとにくり返すと、マージした段階の組織へ、自動でリリースされます（<a href="#release">リリースの流れ</a>）。</figcaption>
-</figure>
+<p>リリースの流れ（作業用のブランチから、各環境へ、別々に PR を出す形）は、<a href="#release">リリースの流れ</a>の図にあります。</p>
 <p>Salesforce には、変更セットや DevOps Center など、リリースのための仕組みが、標準で用意されています。sf-tools は、それらとは<strong>別のアプローチ</strong>で、Git（と GitHub）を中心に置き、開発の流れと、自動の仕組み（GitHub Actions）を、一続きにつなぎます。どちらが正しい、ということではなく、Git を中心にして開発したいチームのための選択肢です。</p>
 <figure class="diagram">
   <p class="lane-label">従来のやり方と、sf-tools のやり方</p>

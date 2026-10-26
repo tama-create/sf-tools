@@ -12,9 +12,7 @@ sf-tools は、**ソースコードを Git で管理する、普通の開発の�
 
 内部では、Salesforce CLI を使っています。CLI は強力ですが、使いこなすのが難しいため、sf-tools が包んで、日々の作業を「**番号を選ぶだけ**」にしました。開発の流れと、自動の仕組み（GitHub Actions）が、一続きでつながる仕組みです。
 
-**全体の構成**（上から下へ読みます。①②の番号は、作業の順番です。管理者が先に準備し、そのあとで、開発者が始めます。各ツールの用途は、[文書サイトのトップページ](https://tama-create.github.io/sf-tools/)の表にあります）
-
-![システム構成図。上から順に、①管理者（sf-init.sh で土台を作る・保守する）、②開発者（sf-job.sh で始めて、ランチャーで進める。手元のパソコンの中に、sf-tools のスクリプト集と作業用のフォルダ、Git・VS Code・Salesforce CLI・GitHub CLI・Node.js がある）、GitHub（ブランチ・PR・保護のルール・認証情報と、GitHub Actions）、Salesforce の組織（共有の環境は Actions が JWT 認証で接続し、手元からは反映できない。自分用の組織は手元から直接試す）、Slack（結果の通知）、業務担当（通知を見る）。マージするとリリース。本番の変更は、平日 3 時間おきに main へ取り込む。](site/assets/system-overview.png)
+**全体の構成**（誰が、どこで、何を使うのか）は、**[文書サイトのトップページ](https://tama-create.github.io/sf-tools/)** の図にあります。登場人物（管理者・開発者・業務担当）と、使っているもの（手元のパソコン・GitHub・Salesforce の組織・Slack）を、1 枚の図で見られます。
 
 ### 1.1 特長（4 つ）
 

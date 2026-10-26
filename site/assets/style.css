@@ -303,6 +303,27 @@ figure.diagram figcaption { margin-top: .8rem; font-size: .85rem; color: var(--f
 .compare .phase li { padding-left: 1.6rem; }
 .compare li .i { position: absolute; left: 0; top: 0; }
 .compare .ph-title small { display: block; font-weight: 400; color: var(--fg-soft); font-size: .78rem; }
+/* 図の部品（全体の構成の図）
+ *   .phase.layer … 上から下へ積む層（場所ごとの箱。中に .tiles）  .uses … 層の中の、小さな補足
+ *   .updown … 横に並べた 2 本の縦の矢印（行きと帰り）  .legend > .sw … 凡例の色見本（admin / dev / ok / auto） */
+.diagram .phase.layer { margin: 0 0 .6rem; }
+.phase.layer .tiles { margin: 0; }
+.phase.layer .ph-title small { font-weight: 400; color: var(--fg-soft); font-size: .78rem; margin-left: .5rem; }
+.phase.layer .uses { margin: .45rem 0 0; font-size: .78rem; color: var(--fg-soft); line-height: 1.5; }
+.diagram .updown { display: flex; justify-content: center; gap: 2rem; }
+.diagram .updown .down { flex: 0 1 14rem; }
+.diagram .legend { margin: 0 0 .7rem; font-size: .78rem; color: var(--fg-soft); line-height: 1.8; }
+.legend .sw { display: inline-block; width: .9rem; height: .9rem; margin: 0 .3rem 0 .8rem; vertical-align: -.15rem; border: 2px solid var(--line); border-radius: .25rem; background: var(--bg); }
+.legend .sw:first-child { margin-left: 0; }
+.legend .sw.admin { border-color: var(--admin-line); background: var(--admin); }
+.legend .sw.dev { border-color: var(--note-line); background: var(--note); }
+.legend .sw.ok { border-color: var(--ok-line); background: var(--ok); }
+.legend .sw.auto { border-style: dashed; }
+/* 折りたたみ（細かい補足を、開いたときだけ見せる）*/
+.doc details { margin: 0 0 1.1rem; padding: .5rem .9rem; border: 1px solid var(--line); border-radius: .5rem; background: var(--bg-soft); }
+.doc details > summary { cursor: pointer; font-weight: 700; }
+.doc details[open] > summary { margin-bottom: .6rem; }
+.doc details > :last-child { margin-bottom: 0; }
 @media (max-width: 700px) {
   .flow { flex-direction: column; }
   .flow .arrow { transform: rotate(90deg); }

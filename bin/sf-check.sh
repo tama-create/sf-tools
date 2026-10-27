@@ -140,46 +140,65 @@ fi
 # ------------------------------------------------------------------------------
 CAPABILITY_FILE="${SF_CHECK_CAPABILITY_FILE:-${SCRIPT_DIR}/../config/metadata-capability.txt}"
 
-# 種類の可否を返す。引数: 種類 release|delete → 表の値（ok / ng / limited / unknown）。表にない・表のファイルがないときは、空
-capability_status() {
+# 可否の表を、最初に 1 回だけ読み込む（1 行ごとに awk を起動すると、プロセスの起動が遅い Windows の Git Bash で、
+#   行数に比例して遅くなるため）。_CAP_TABLE は、改行で始まり、改行で終わる文字列で、1 行が「種類<タブ>release<タブ>delete<タブ>備考」
+#   （コメント行を除く。CR を除く。4 列に整える）
+_CAP_TABLE=""
+_CAP_LOADED=0
+load_capability_table() {
+    [[ "$_CAP_LOADED" -eq 1 ]] && return 0
+    _CAP_LOADED=1
     [[ -f "$CAPABILITY_FILE" ]] || return 0
-    awk -F'\t' -v t="$1" -v c="$2" '$0 !~ /^#/ && $1 == t { v = (c == "release") ? $2 : $3; gsub(/\r/, "", v); print v; exit }' "$CAPABILITY_FILE"  # 値の取得（呼び出し側が VAR=$(cmd) で受け取る）のため run 不使用
-}
-# 種類の備考（4 列目）を返す。引数: 種類。表にない・表のファイルがないときは、空
-capability_note() {
-    [[ -f "$CAPABILITY_FILE" ]] || return 0
-    awk -F'\t' -v t="$1" '$0 !~ /^#/ && $1 == t { v = $4; gsub(/\r/, "", v); print v; exit }' "$CAPABILITY_FILE"  # 値の取得（呼び出し側が VAR=$(cmd) で受け取る）のため run 不使用
+    local _cap_out
+    _cap_out=$(awk -F'\t' '$0 !~ /^#/ { for (i = 1; i <= 4; i++) { v[i] = $i; gsub(/\r/, "", v[i]) } print v[1] "\t" v[2] "\t" v[3] "\t" v[4] }' "$CAPABILITY_FILE")  # 表の読み込み（1 回だけ）のため run 不使用
+    _CAP_TABLE=$'\n'"${_cap_out}"$'\n'
 }
 
-# [files] のパスから、種類を推定する（確認済みの NG がありうる主な種類だけ）。分からなければ、空
+# 種類の可否を引く。引数: 種類。結果は _CAP_REL（release）・_CAP_DEL（delete）・_CAP_NOTE（備考）に入る。
+#   表にない・表のファイルがないときは、すべて空。最初に見つかった行を使う（プロセスは起動しない）
+lookup_capability() {
+    local _lc_type="$1" _lc_rest _lc_row
+    _CAP_REL=""; _CAP_DEL=""; _CAP_NOTE=""
+    load_capability_table
+    [[ -n "$_CAP_TABLE" ]] || return 0
+    _lc_rest="${_CAP_TABLE#*$'\n'"${_lc_type}"$'\t'}"
+    [[ "$_lc_rest" == "$_CAP_TABLE" ]] && return 0
+    _lc_row="${_lc_rest%%$'\n'*}"
+    _CAP_REL="${_lc_row%%$'\t'*}"
+    _lc_row="${_lc_row#*$'\t'}"
+    _CAP_DEL="${_lc_row%%$'\t'*}"
+    _CAP_NOTE="${_lc_row#*$'\t'}"
+}
+
+# [files] のパスから、種類を推定する（確認済みの NG がありうる主な種類だけ）。結果は _TYPE に入る。分からなければ、空
+#   （$(type_of_path ...) の形は、1 回ごとにサブシェルを作るため、使わない）
 type_of_path() {
     case "$1" in
-        */flows/*.flow-meta.xml)        echo "Flow" ;;
-        */classes/*.cls)                echo "ApexClass" ;;
-        */triggers/*.trigger)           echo "ApexTrigger" ;;
-        */lwc/*)                        echo "LightningComponentBundle" ;;
-        */aura/*)                       echo "AuraDefinitionBundle" ;;
-        */servicePresenceStatuses/*)    echo "ServicePresenceStatus" ;;
-        */standardValueSets/*)          echo "StandardValueSet" ;;
-        *) ;;
+        */flows/*.flow-meta.xml)        _TYPE="Flow" ;;
+        */classes/*.cls)                _TYPE="ApexClass" ;;
+        */triggers/*.trigger)           _TYPE="ApexTrigger" ;;
+        */lwc/*)                        _TYPE="LightningComponentBundle" ;;
+        */aura/*)                       _TYPE="AuraDefinitionBundle" ;;
+        */servicePresenceStatuses/*)    _TYPE="ServicePresenceStatus" ;;
+        */standardValueSets/*)          _TYPE="StandardValueSet" ;;
+        *)                              _TYPE="" ;;
     esac
 }
 
 # 種類の可否の確認（エラーなら、戻り値 1）。引数: ラベル 行番号 行の内容 種類
 #   ラベルが deploy-target.txt のときは release を、remove-target.txt のときは delete を、確認する
 check_capability() {
-    local label="$1" lineno="$2" content="$3" type="$4" which="release" what="リリース" st note
+    local label="$1" lineno="$2" content="$3" type="$4" what="リリース" st note
     [[ -n "$type" ]] || return 0
     [[ "${SF_CHECK_IGNORE_CAPABILITY:-}" == "1" ]] && return 0
-    if [[ "$label" == remove* ]]; then which="delete"; what="削除"; fi
-    st=$(capability_status "$type" "$which")  # VAR=$(cmd) のため run 不使用
+    lookup_capability "$type"
+    st="$_CAP_REL"; note="$_CAP_NOTE"
+    if [[ "$label" == remove* ]]; then st="$_CAP_DEL"; what="削除"; fi
     case "$st" in
         ng)
-            note=$(capability_note "$type")  # VAR=$(cmd) のため run 不使用
             print_gcc_message "error" "$label" "$lineno" "$content" "「${type}」は、API で${what}できないことを確認済みです${note:+（${note}）}。組織の権限で、できる場合は、SF_CHECK_IGNORE_CAPABILITY=1 で、この確認を省略できます"
             return 1 ;;
         limited)
-            note=$(capability_note "$type")  # VAR=$(cmd) のため run 不使用
             print_gcc_message "warning" "$label" "$lineno" "$content" "「${type}」は、条件によって、${what}できないことがあります${note:+（${note}）}" ;;
         *) ;;
     esac
@@ -274,7 +293,7 @@ check_target_file() {
                 #   classes や . のような、多数のメタデータを含むフォルダを書くと、リリース・削除の対象が、意図より広がるため
                 #   （remove-target.txt では、組織のメタデータが、広範囲に削除される）
                 if [[ "$clean" =~ (^|/)(lwc|aura|objects)/[^/]+/?$ ]]; then
-                    check_capability "$label" "$lineno" "$clean" "$(type_of_path "$clean")" || error_count=$(( error_count + 1 ))
+                    type_of_path "$clean"; check_capability "$label" "$lineno" "$clean" "$_TYPE" || error_count=$(( error_count + 1 ))
                 else
                     print_gcc_message "error" "$label" "$lineno" "$clean" "フォルダは、LWC・Aura のコンポーネントとオブジェクト（lwc/<名前>・aura/<名前>・objects/<名前>）だけ指定できます。それ以外は、ファイルのパスを書いてください"
                     error_count=$(( error_count + 1 ))
@@ -283,7 +302,7 @@ check_target_file() {
                 print_gcc_message "error" "$label" "$lineno" "$clean" "パスが存在しません"
                 error_count=$(( error_count + 1 ))
             else
-                check_capability "$label" "$lineno" "$clean" "$(type_of_path "$clean")" || error_count=$(( error_count + 1 ))
+                type_of_path "$clean"; check_capability "$label" "$lineno" "$clean" "$_TYPE" || error_count=$(( error_count + 1 ))
             fi
         else
             # [members]: 「種別名:メンバー名」形式チェック（コロン必須・先頭と末尾がコロンでない）
@@ -310,6 +329,57 @@ check_target_file() {
     return 0
 }
 
+# ファイルの本文を、変数に読み込む（組み込みの read だけを使い、プロセスを起動しない）。読めなければ、失敗
+# 引数: $1 = 出力変数名（set_var で代入）, $2 = ファイルのパス
+read_text() {
+    local _rt_text=""
+    [[ -r "$2" ]] || return 1
+    IFS= read -r -d '' _rt_text < "$2" || true  # 区切りの NUL がないため、最後まで読むと失敗を返す（読めた分は、入っている）
+    set_var "$1" "$_rt_text"
+}
+
+# 本文に @isTest を含むか（大文字と小文字は、区別しない。grep -qi と同じ）。プロセスを起動しない
+text_has_istest() {
+    local _hi_rc=1 _hi_had=0
+    shopt -q nocasematch && _hi_had=1
+    shopt -s nocasematch
+    [[ "$1" == *"@isTest"* ]] && _hi_rc=0
+    [[ "$_hi_had" -eq 1 ]] || shopt -u nocasematch
+    return "$_hi_rc"
+}
+
+# リポジトリの中の @isTest を含む .cls（大文字と小文字を区別する）と、その本文を、最初に 1 回だけ読み込む。
+#   クラスごとに、リポジトリ全体を grep し直すと、クラス数に比例して遅くなる（Windows の Git Bash では、特に）ため。
+#   ファイル名は NUL 区切り（--null。GNU・BSD の grep の共通の書き方。-Z は BSD では別の意味）で受け取る。
+#   一覧の順番は、grep -r の順番のまま（最初に見つかったテストクラスを使うため）
+_TEST_PATHS=()
+_TEST_TEXTS=()
+_TESTS_LOADED=0
+load_test_files() {
+    [[ "$_TESTS_LOADED" -eq 1 ]] && return 0
+    _TESTS_LOADED=1
+    local _lt_path _lt_text
+    while IFS= read -r -d '' _lt_path; do
+        _lt_text=""
+        read_text _lt_text "$_lt_path" || true
+        _TEST_PATHS+=("$_lt_path")
+        _TEST_TEXTS+=("$_lt_text")
+    done < <(grep -rl --null --include="*.cls" "@isTest" . 2>/dev/null || true)  # プロセス置換で一覧を渡すため run 不使用（見つからなくても続行）
+}
+
+# 本文に、クラス名が「単語として」含まれるか（grep -qw と同じ。単語の文字は、英数字と _）。プロセスを起動しない
+#   クラス名が、英数字と _ だけでないとき（grep の正規表現として、特別な意味の文字を含みうる）は、grep をそのまま使う
+# 引数: $1 = クラス名, $2 = 本文, $3 = ファイルのパス（grep を使うときに読む）
+text_has_word() {
+    local _hw_re
+    if [[ "$1" =~ ^[A-Za-z0-9_]+$ ]]; then
+        _hw_re="(^|[^[:alnum:]_])${1}([^[:alnum:]_]|\$)"  # 正規表現は、変数に入れて渡す（Bash 3.2 でも、同じに解釈されるため）
+        [[ "$2" =~ $_hw_re ]]
+    else
+        grep -qw -- "$1" "$3" 2>/dev/null  # 条件チェックのため run 不使用
+    fi
+}
+
 # Apex クラスに対応するテストクラスが deploy-target.txt に含まれているか検証
 # 不足している場合は WARNING を表示（エラーにはしない）
 check_missing_tests() {
@@ -332,17 +402,33 @@ check_missing_tests() {
     log "INFO" "テストクラス不足チェックを実行します..."
     local warning_count=0
 
+    # deploy-target.txt の行（先頭の ./ を除いたもの）を、改行で区切って並べた文字列（含まれるかを、ループなしで調べるため）
+    local deployed_set=$'\n' df
+    for df in "${deployed_files[@]}"; do
+        deployed_set="${deployed_set}${df#./}"$'\n'
+    done
+
+    local filepath
     for filepath in "${deployed_files[@]}"; do
         [[ ! -f "$filepath" ]] && continue
         # @isTest があればテストクラス自身なのでスキップ
-        grep -qi "@isTest" "$filepath" 2>/dev/null && continue  # 条件チェック
+        local file_text=""
+        read_text file_text "$filepath" || true
+        text_has_istest "$file_text" && continue
 
+        # basename / dirname は、プロセスを起動せずに求める（パスの文字の操作だけでよいため）
         local classname class_dir
-        classname=$(basename "$filepath" .cls)  # VAR=$(cmd) のため run 不使用
-        class_dir=$(dirname "$filepath")         # VAR=$(cmd) のため run 不使用
+        classname="${filepath##*/}"
+        classname="${classname%.cls}"
+        if [[ "$filepath" == */* ]]; then
+            class_dir="${filepath%/*}"
+            [[ -n "$class_dir" ]] || class_dir="/"
+        else
+            class_dir="."
+        fi
 
         # Step A: 命名規則（同一ディレクトリ内で MyClassTest.cls / MyClass_Test.cls を探す）
-        local found_test=""
+        local found_test="" candidate
         for candidate in "${class_dir}/${classname}Test.cls" "${class_dir}/${classname}_Test.cls"; do
             if [[ -f "$candidate" ]]; then
                 found_test="$candidate"
@@ -351,16 +437,16 @@ check_missing_tests() {
         done
 
         # Step B: 命名規則で見つからなければ @isTest ファイルをコンテンツ検索
-        #   ファイル名は NUL 区切り（--null。GNU・BSD の grep の共通の書き方。-Z は BSD では別の意味）で受け取り、
-        #   while read で 1 つずつ調べる（以前の xargs は、空白を含むパスを分割して、正しく動かなかった）
+        #   （@isTest を含むファイルの一覧と本文は、最初の 1 回だけ読み込む: load_test_files）
         if [[ -z "$found_test" ]]; then
-            local candidate_b
-            while IFS= read -r -d '' candidate_b; do
-                if grep -qw -- "$classname" "$candidate_b" 2>/dev/null; then  # 条件チェックのため run 不使用
-                    found_test="$candidate_b"
+            load_test_files
+            local i
+            for (( i = 0; i < ${#_TEST_PATHS[@]}; i++ )); do
+                if text_has_word "$classname" "${_TEST_TEXTS[i]}" "${_TEST_PATHS[i]}"; then
+                    found_test="${_TEST_PATHS[i]}"
                     break
                 fi
-            done < <(grep -rl --null --include="*.cls" "@isTest" . 2>/dev/null || true)  # プロセス置換で一覧を渡すため run 不使用（見つからなくても続行）
+            done
         fi
 
         [[ -z "$found_test" ]] && continue
@@ -368,9 +454,7 @@ check_missing_tests() {
 
         # 見つかったテストクラスが deploy-target.txt に含まれているか確認（deploy-target.txt の行も、先頭の ./ を除いて比べる）
         local in_deploy=false
-        for df in "${deployed_files[@]}"; do
-            [[ "${df#./}" == "$found_test" ]] && in_deploy=true && break
-        done
+        [[ "$deployed_set" == *$'\n'"${found_test}"$'\n'* ]] && in_deploy=true
 
         if [[ "$in_deploy" == false ]]; then
             print_gcc_message "warning" "$deploy_list" "" "$found_test" \

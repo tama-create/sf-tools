@@ -30,6 +30,8 @@
 #   _strip_term_codes         ... _strip_ansi に加えて、絵文字も除く
 #   （上の 3 つは、名前が _ で始まるが、外からも使ってよい（phases/init/verify.sh・tests/e2e/ が使う。sed の \x1b などを
 #     直書きせず、これらを使う: CLAUDE.md 2.2）。内部用: _display_width（print_admin_warning の幅の計算）
+#   内部用（run と log が使う）: _mask_secrets_var / _now_ts / _has_term_codes / _prefix_lines。1 回ごとに外部のプログラム
+#     （sed・date）を起動しないための部品。プロセスの起動が遅い Windows の Git Bash で、1 回の run が約 600ms → 約 200ms になる
 #
 #   以下は、責務ごとのファイルに分けてあり、この common.sh が source する（呼び出し側は、common.sh だけでよい）。
 #   主な関数を挙げる。一覧は、各ファイルの冒頭の【提供する関数】を参照:
@@ -183,7 +185,7 @@ reject_unknown_args() {
 log() {
     local level="$1" message="$2" dest="${3:-BOTH}"
     local ts
-    ts=$(date +'%Y-%m-%d %H:%M:%S')  # VAR=$(cmd) のため run 不使用（run は log を呼ぶ）
+    _now_ts ts  # 時刻は、プロセスを起動せずに求める（_now_ts。date は、Windows の Git Bash では、1 回 約 65ms かかる）
 
     # A. ログファイル出力 (色コードなし)
     if [[ "$dest" == "BOTH" || "$dest" == "FILE" ]]; then
@@ -240,6 +242,34 @@ _mask_secrets() {
         -e 's/(xox[abprs]-)[A-Za-z0-9-]+/\1***masked***/g'
 }
 
+# _mask_secrets_var - _mask_secrets の結果を、変数に入れる（run が、1 回ごとに呼ぶため、速くする）
+# ------------------------------------------------------------------------------
+# 【使い方】 _mask_secrets_var 出力変数名 文字列        （set_var で代入）
+# 【理由】   $(_mask_secrets …) は、サブシェルと sed を、1 回ごとに起動する（Windows の Git Bash では、約 130ms）。
+#           Token らしい文字列を含まない文字列（ほとんどすべて）は、そのまま返す。含むときだけ、_mask_secrets（sed）を使う。
+#           この判定は、_mask_secrets の 3 つの置換が、必ず含む文字列（gh?_・github_pat_・xox?-）と同じ（含まなければ、置換は起きない）
+# ------------------------------------------------------------------------------
+_mask_secrets_var() {
+    local _ms_text="$2"
+    case "$_ms_text" in
+        *gh[pousr]_*|*github_pat_*|*xox[abprs]-*) _ms_text=$(_mask_secrets "$_ms_text") ;;  # VAR=$(cmd) のため run 不使用（Token らしい文字列を含むときだけ）
+    esac
+    set_var "$1" "$_ms_text"
+}
+
+# _now_ts - 現在の時刻（YYYY-MM-DD HH:MM:SS）を、変数に入れる
+# ------------------------------------------------------------------------------
+# 【使い方】 _now_ts 出力変数名                          （set_var は使わない: log が、1 回ごとに呼ぶため）
+# 【理由】   date は、プロセスの起動が遅い Windows の Git Bash で、1 回 約 65ms かかる。Bash 4.2 以上の printf '%(...)T' は、
+#           組み込みで、プロセスを起動しない。Bash 3.2（macOS 標準）には、これがないため、date を使う（起動時に、どちらかを定義する）
+# 【注意】   呼び出し元の関数に、同じ名前の local 変数があると、そちらに代入される（set_var と同じ。名前の衝突に注意）
+# ------------------------------------------------------------------------------
+if (( BASH_VERSINFO[0] > 4 || ( BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 2 ) )); then
+    _now_ts() { printf -v "$1" '%(%Y-%m-%d %H:%M:%S)T' -1; }
+else
+    _now_ts() { printf -v "$1" '%s' "$(date +'%Y-%m-%d %H:%M:%S')"; }  # VAR=$(cmd) のため run 不使用（Bash 3.2: 組み込みの時刻の書式がない）
+fi
+
 # ------------------------------------------------------------------------------
 # 端末の制御コードの除去（標準入力 → 標準出力。GNU / BSD の sed の、どちらでも動く）
 #   BSD の sed（macOS）は、\x1b のような 16 進の表記を解釈しない。そのため、Bash が、実際の文字に展開してから、sed に渡す。
@@ -256,6 +286,36 @@ _strip_ansi() {
 _strip_term_codes() {
     local esc=$'\033' b_f0=$'\xf0' b_e2=$'\xe2' b_ef=$'\xef' b_b8=$'\xb8' b_8f=$'\x8f'
     LC_ALL=C sed "s/${esc}\[[0-9;?]*[a-zA-Z]//g; s/${b_f0}...//g; s/${b_e2}..//g; s/${b_ef}${b_b8}${b_8f}//g"
+}
+
+# _has_term_codes - 本文に、_strip_term_codes が除くものが、ありうるか（ESC・絵文字の先頭のバイトを含むか）
+# ------------------------------------------------------------------------------
+# 【使い方】 _has_term_codes 本文        戻り値 0 = ありうる（sed で除く） / 1 = ない（そのまま記録してよい）
+# 【判定】   ESC（0x1b）・0xf0・0xe2・0xef のバイトを含むか。_strip_term_codes の 4 つの置換が、必ず含むバイトと同じ
+#           （含まなければ、置換は起きない）。0xe2・0xef は、… — → や全角の記号の先頭でもあるため、含むときは、除かれない文字
+#           だけでも「ありうる」と判定する（sed に回るだけで、結果は同じ）
+# 【注意】   バイトで比べるため、local LC_ALL=C にする（UTF-8 のままでは、文字の途中のバイトに、一致しない）
+# ------------------------------------------------------------------------------
+_has_term_codes() {
+    local LC_ALL=C
+    [[ "$1" == *$'\033'* || "$1" == *$'\xf0'* || "$1" == *$'\xe2'* || "$1" == *$'\xef'* ]]
+}
+
+# _prefix_lines - 標準入力の各行に、接頭辞を付けて、標準出力へ出す（空行には付けない。空行は、そのまま出す）
+# ------------------------------------------------------------------------------
+# 【使い方】 _prefix_lines 接頭辞 < ファイル
+# 【理由】   sed "/./s/^/接頭辞/" と同じ結果を、プロセスを起動せずに得る（組み込みの read と printf だけ）。
+#           最後の行に改行がなくても、改行を付けて出す（sed は、GNU 版は付けず、BSD 版は付ける。付けないと、次のログが、同じ行に続く）
+# ------------------------------------------------------------------------------
+_prefix_lines() {
+    local _pl_prefix="$1" _pl_line
+    while IFS= read -r _pl_line || [[ -n "$_pl_line" ]]; do
+        if [[ -n "$_pl_line" ]]; then
+            printf '%s%s\n' "$_pl_prefix" "$_pl_line"
+        else
+            printf '\n'
+        fi
+    done
 }
 
 # ------------------------------------------------------------------------------
@@ -292,6 +352,8 @@ _strip_term_codes() {
 #   失敗（RET_NG）のときは、LOG_FILE と同じフォルダの error.log にも、見出しの行とコマンドの出力を追記します
 #   （見出しの行のコマンドは、_mask_secrets で伏せ字にする。コマンドの出力は、伏せ字にしない）。
 #   出力は、一時ファイル（${TMPDIR:-/tmp} の下の cmd_out.*）に受けてから処理し、最後に削除します。
+#   色・絵文字を含まない出力（ほとんどすべて）は、sed を起動せず、組み込みの read で記録します（_prefix_lines）。
+#   最後の行に改行がない出力も、改行を付けて記録します（次のログが、同じ行に続かないように）。
 #
 # 【成功判定のルール】
 #   終了コードが 0 であれば成功とします（終了コードのみを信頼する。出力の文字列では判定しない）。
@@ -321,7 +383,9 @@ run() {
         || tmp_out="${_run_tmpdir}/cmd_out_$$_${RANDOM}.tmp"  # run 不使用: 変数代入・mktemp フォールバック
     local status
 
-    log "CMD" "[${SCRIPT_NAME}.sh] $(_mask_secrets "${cmd[*]}")"
+    local _run_masked
+    _mask_secrets_var _run_masked "${cmd[*]}"
+    log "CMD" "[${SCRIPT_NAME}.sh] ${_run_masked}"
 
     if [[ "${SILENT_EXEC:-}" != "1" ]]; then
         # リアルタイム表示: stderr に流しつつ tmp に保存（命令置換の stdout には影響しない）
@@ -338,8 +402,18 @@ run() {
     fi
 
     local is_success=$RET_NG
+    # 出力の全文を、組み込みの read で読む（grep を起動しない。Windows の Git Bash では、1 回 約 65ms かかる）。
+    #   read は、区切り（NUL）を見つけたときだけ成功を返す。NUL がなければ、最後まで読んで、失敗を返す（読めた分は、入っている）。
+    #   NUL を含む出力は、全文を読めないため、従来どおり grep を使う
+    local _run_text="" _run_nul=0 _run_nothing=0
+    IFS= read -r -d '' _run_text < "$tmp_out" && _run_nul=1
+    if [[ "$_run_nul" -eq 0 ]]; then
+        [[ "$_run_text" == *NothingToDeploy* || "$_run_text" == *"No local changes to deploy"* ]] && _run_nothing=1
+    elif grep -qE "NothingToDeploy|No local changes to deploy" "$tmp_out"; then  # 条件チェックのため run 不使用（NUL を含む出力だけ）
+        _run_nothing=1
+    fi
     # A. 変更なし（NothingToDeploy）の検知（終了コードより優先）
-    if grep -qE "NothingToDeploy|No local changes to deploy" "$tmp_out"; then  # 条件チェックのため run 不使用
+    if [[ "$_run_nothing" -eq 1 ]]; then
         log "WARNING" "組織との差分が検出されませんでした (NothingToDeploy)。ローカルのソースはすでに組織と一致しています。"
         is_success=$RET_NO_CHANGE
     # B. 成功判定（終了コードのみを信頼する）
@@ -348,17 +422,29 @@ run() {
     fi
 
     local log_ts
-    log_ts=$(date +'%Y-%m-%d %H:%M:%S')  # VAR=$(cmd) のため run 不使用
-    # ANSI エスケープコード・絵文字を除去してから記録（_strip_term_codes（上）が除く）
-    _strip_term_codes < "$tmp_out" | sed "/./s/^/[${log_ts}] [OUT] /" >> "$LOG_FILE"
+    _now_ts log_ts  # 時刻は、プロセスを起動せずに求める（_now_ts）
+    # ANSI エスケープコード・絵文字を除去してから記録（_strip_term_codes（上）が除く）。
+    #   除去するものがない出力（ほとんどすべて）は、sed を起動せず、組み込みの read で、行ごとに記録する（_prefix_lines）。
+    #   NUL を含む出力と、除去するものがありうる出力（ESC・絵文字の先頭のバイトを含む）は、従来どおり sed を使う
+    local _run_plain=0
+    if [[ "$_run_nul" -eq 0 ]] && ! _has_term_codes "$_run_text"; then _run_plain=1; fi
+    if [[ "$_run_plain" -eq 1 ]]; then
+        _prefix_lines "[${log_ts}] [OUT] " < "$tmp_out" >> "$LOG_FILE"
+    else
+        _strip_term_codes < "$tmp_out" | sed "/./s/^/[${log_ts}] [OUT] /" >> "$LOG_FILE"
+    fi
 
     # 失敗時は error.log にも記録（前回エラーとの区切りが明確になるよう都度追記）
     if [[ $is_success -eq $RET_NG ]] && [[ -n "${LOG_FILE:-}" ]]; then
         local err_log
-        err_log="$(dirname "$LOG_FILE")/error.log"
+        err_log="$(dirname "$LOG_FILE")/error.log"  # VAR=$(cmd) のため run 不使用（失敗したときだけ）
         {
-            echo "====== [${log_ts}] ERROR: [${SCRIPT_NAME}] $(_mask_secrets "${cmd[*]}") ======"
-            _strip_term_codes < "$tmp_out" | sed "/./s/^/  /"
+            echo "====== [${log_ts}] ERROR: [${SCRIPT_NAME}] ${_run_masked} ======"
+            if [[ "$_run_plain" -eq 1 ]]; then
+                _prefix_lines "  " < "$tmp_out"
+            else
+                _strip_term_codes < "$tmp_out" | sed "/./s/^/  /"
+            fi
         } >> "$err_log"
     fi
 

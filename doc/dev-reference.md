@@ -275,6 +275,8 @@ source 時の動作: Bash 3.2 未満なら `exit 1` → `LOG_FILE` の確認 →
 
 **JWT 接続テストの隔離:** `sf` の認証はユーザー名単位なので、JWT 接続テスト（`sf org login jwt`）をそのまま実行すると、エイリアス（`prod` / `staging` / `develop`）が増え、同じユーザーの既存の認証が JWT の認証に置き換わる（その鍵・アプリを後で消すと、そのユーザーの `sf` が使えなくなる）。そのため、JWT 接続テスト（`init-common.sh` の `register_jwt_secret` / `register_jwt_secret_eca`、`sf-update-secret.sh`。`register_jwt_secret` と `sf-update-secret.sh` は `org_jwt_test`（`lib/org.sh`）経由）は `run_isolated_home`（一時的なホームフォルダ）の中で実行する。ほかの場所では、この JWT 用のエイリアスは使われない（`sf-start.sh` は、ユーザーが指定したエイリアスで `sf org login web` をする）。JWT 接続テストの成否は、`run_isolated_home` の戻り値（`sf org login jwt` の終了コード）で判定する。
 
+**`run` と `log` の速度の設計（2026-10-28）:** `run` は、ほぼすべてのコマンドの実行で使うため、1 回の呼び出しで外部のプログラムを起動すると、Windows の Git Bash（プロセスの起動が遅い）で、全体が極端に遅くなる。実測（Windows の Git Bash）: 変更前は `log` 68ms・`run true` 595ms（WSL は 3ms・20ms）。変更後は `log` 3ms・`run true` 198ms。起動を減らした箇所は、①時刻（`date` → 組み込みの `printf '%(...)T'`。Bash 4.2 以上。Bash 3.2 は `date`。`_now_ts`）、②`NothingToDeploy` の検知（`grep` → 組み込みの `read` と文字列の比較。NUL を含む出力だけ `grep`）、③Token の伏せ字（`_mask_secrets_var`。Token らしい文字列を含むときだけ `sed`）、④ログへの記録（色・絵文字を含まない出力は、`sed` を使わず、`_prefix_lines`。ESC・`0xe2`・`0xef`・`0xf0` のバイトを含むときは、従来どおり `_strip_term_codes` と `sed`。`_has_term_codes`）。残る起動は、`mktemp`（一時ファイルを 0600 で作るため）・`tee`（画面に流しながら記録するため）・`rm`。旧版と新版の出力（画面・戻り値・ログ・`error.log`）を、色・絵文字・日本語・CRLF・末尾の改行なし・Token・失敗・NUL などの 19 ケースで比べて、1 点を除いて一致した。差は、**最後の行に改行がない出力**: 旧版（GNU の sed）は、改行を付けず、次のログが同じ行に続いていた（BSD の sed は付ける）。新版は、どちらも付ける。回帰テストは `tests/test_common.sh` の `test_run_fast_paths`。
+
 ### 3.4 安全ガードパターン
 
 管理者向けコマンドには2種類の安全ガードを組み合わせて使う。

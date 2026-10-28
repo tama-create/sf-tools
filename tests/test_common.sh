@@ -916,6 +916,56 @@ test_merge_package_xml() {
 }
 
 # ------------------------------------------------------------------------------
+# run / log の高速化（プロセスを起動しない書き方）の回帰テスト
+#   _now_ts（date を使わない時刻）・_mask_secrets_var（Token らしい文字列を含むときだけ sed）・_has_term_codes・
+#   _prefix_lines（sed "/./s/^/接頭辞/" と同じ結果）。run が、色・絵文字を含まない出力も、含む出力も、NUL を含む出力も、
+#   従来と同じにログへ記録し、NothingToDeploy を検知すること
+# ------------------------------------------------------------------------------
+test_run_fast_paths() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] run / log の高速化（_now_ts・_mask_secrets_var・_has_term_codes・_prefix_lines）${CLR_RST}"
+    local td out exp
+    td=$(mktemp -d "${TMPDIR:-/tmp}/test-runfast-XXXX")
+    mkdir -p "$td/logs"
+    _pf() {   # 引数: 実行する式（common.sh を読み込んだ子プロセスで評価する。ログは $td/logs）
+        ( export SF_INIT_MODE=1; readonly SCRIPT_NAME=pf LOG_FILE="$td/logs/pf.log" LOG_MODE=NEW
+          source "$SF_TOOLS_DIR/lib/common.sh"
+          eval "$1" ) 2>/dev/null
+    }
+
+    # _now_ts: 書式（YYYY-MM-DD HH:MM:SS）。date と、同じ秒（前後 2 秒以内）の時刻
+    out=$(_pf '_now_ts t; echo "$t"')
+    [[ "$out" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}\ [0-9]{2}:[0-9]{2}:[0-9]{2}$ ]] && pass "_now_ts: YYYY-MM-DD HH:MM:SS の書式" || fail "_now_ts: YYYY-MM-DD HH:MM:SS の書式" "$out"
+    [[ "${out%% *}" == "$(date +%Y-%m-%d)" || "${out%% *}" == "$(date -d yesterday +%Y-%m-%d 2>/dev/null)" ]] && pass "_now_ts: 日付が、date と同じ" || fail "_now_ts: 日付が、date と同じ" "$out"
+
+    # _mask_secrets_var: _mask_secrets と同じ結果（Token を含む・含まない）
+    out=$(_pf 'a="x ghp_ABC123 y xoxb-1-2-Ab z github_pat_11AA_bb p"; _mask_secrets_var m "$a"; [[ "$m" == "$(_mask_secrets "$a")" ]] && echo SAME; b="plain text 日本語 ghp xox- github"; _mask_secrets_var n "$b"; [[ "$n" == "$b" && "$n" == "$(_mask_secrets "$b")" ]] && echo SAME2')
+    assert_equals "$(echo "$out" | tr '\n' ',')" "SAME,SAME2," "_mask_secrets_var: Token を含むと含まないの、どちらも _mask_secrets と同じ結果"
+
+    # _has_term_codes: ESC・絵文字・— → は「ありうる」。ASCII と日本語（0xe3〜0xe9 始まり）は「ない」
+    out=$(_pf 'for s in "plain ascii" "日本語のテスト" $'"'"'a\033[31mb'"'"' "ok ✅" "a — b" "ok 🚀"; do _has_term_codes "$s" && echo Y || echo N; done')
+    assert_equals "$(echo "$out" | tr '\n' ',')" "N,N,Y,Y,Y,Y," "_has_term_codes: ASCII・日本語は N、ESC・絵文字・— は Y"
+
+    # _prefix_lines: sed "/./s/^/P /" と同じ（空行は、そのまま）。最後の改行がなくても、改行を付ける
+    printf 'a\n\nb\n\n日本語\n' > "$td/in.txt"
+    exp=$(sed "/./s/^/P /" "$td/in.txt")
+    out=$(_pf "_prefix_lines 'P ' < '$td/in.txt'")
+    assert_equals "$out" "$exp" "_prefix_lines: sed と同じ結果（空行はそのまま）"
+    printf 'x\ny' > "$td/in2.txt"
+    out=$(_pf "_prefix_lines 'P ' < '$td/in2.txt'; echo END")
+    assert_equals "$(echo "$out" | tr '\n' ',')" "P x,P y,END," "_prefix_lines: 最後の行に改行がなくても、改行を付ける（次のログが、同じ行に続かない）"
+
+    # run: 色・絵文字なしの出力（組み込みで記録）／色つき（sed で除く）／絵文字／NUL を含む出力（grep で NothingToDeploy を検知）
+    : > "$td/logs/pf.log"
+    _pf 'run echo hello; run printf "a\n\nb\n"; run printf "\033[31mred\033[0m ok ✅ done\n"; run bash -c "printf \"a\\0NothingToDeploy\\n\""; echo "RC=$?" > '"$td"'/rc.txt'
+    assert_file_contains "$td/logs/pf.log" "[OUT] hello" "run: 色・絵文字なしの出力が、[OUT] で記録される"
+    assert_file_contains "$td/logs/pf.log" "[OUT] red ok  done" "run: 色の指定と絵文字を除いて記録される（従来どおり）"
+    assert_file_contains "$td/rc.txt" "RC=2" "run: NUL を含む出力でも、NothingToDeploy を検知する（RET_NO_CHANGE = 2）"
+    # 空行を挟んだ出力（a・空行・b）の、空でない行だけに [OUT] が付く（a と b の 2 行）。NUL を含む出力の先頭の a（1 行）を足して 3 行
+    out=$(grep -c '\[OUT\] [ab]$' "$td/logs/pf.log")
+    assert_equals "$out" "3" "run: 空行を挟んだ出力の、空でない行だけに、[OUT] が付く"
+    rm -rf "$td"
+}
+
 # sed_inplace / _strip_ansi / _strip_term_codes のテスト（GNU / BSD の sed の、どちらでも動くこと）
 #   BSD の sed（macOS）は、`sed -i SCRIPT FILE` と、\x1b などの 16 進の表記を、解釈しない。
 # ------------------------------------------------------------------------------
@@ -1290,6 +1340,7 @@ test_read_secret
 test_read_key_and_press_enter
 test_get_target_org
 test_mask_secrets
+test_run_fast_paths
 test_is_gitbash
 test_is_reserved_org_alias
 test_open_browser_gitbash

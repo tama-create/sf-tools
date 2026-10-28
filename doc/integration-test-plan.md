@@ -736,3 +736,9 @@ Actions 上の実行は、コマンドによって扱いが違う。「全部拒
 - **やったこと**: 手元で、テスト関数ごとの所要時間を測り（`test_verify.sh` は `test_review_fixes` 581・`test_environment` 526・`test_components` 667・`test_branch_cleanup` 405 が大きい）、`test_verify.sh`・`test_verify2.sh`（review_fixes・environment）・`test_verify3.sh`（branch_cleanup・components）の 3 つ、`test_e2e.sh`（1〜24 と 32）・`test_e2e2.sh`（実行を伴うシナリオ 25〜31・33〜35）の 2 つに分けた。共通の部品（モック・`_env`・`_run`・各種ヘルパー）は、`tests/verify-test-lib.sh`・`tests/e2e-test-lib.sh` に移した。`tests/run_tests.sh` の `TEST_FILES`・重み・`--changed` の対応も直した。
 - **確認**: 分ける前後で、成功の件数が一致すること（分割前の件数との比較）。
 - **効果**: GitHub 上の実測は、次の CI で記録する。重みは目安（`test_verify*.sh` 各 215・`test_e2e*.sh` 各 255）。
+
+### 12.13 macOS の全件テストを 2 つに分割（2026-10-28）
+
+- **目的**: 12.12 のあと、CI 全体の長さを決めるのは macOS の全件テスト（1 ジョブで約 8 分）になったため、Windows と同じ `--shard` で 2 つに分ける。
+- **やったこと**: `test.yml` の macOS を `test-macos-shard`（matrix: 組 1/2・2/2）にした。必須チェックの名前 `全件テスト（macOS）` を変えない（Ruleset の更新を避ける）ため、組の結果を集める `test-macos`（`needs: test-macos-shard`・`if: always()`）を残した。組が成功以外（失敗・取り消し・スキップ）のときは、失敗にする。
+- **効果**: GitHub 上の実測は、次の CI で記録する。

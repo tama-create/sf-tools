@@ -60,10 +60,17 @@ jobs:
   # 2026-10-14: macOS・Windows とも、全件が成功するようになったため、失敗扱いにした（continue-on-error を外した）。
   # 以前は、導入の初期として、結果の表示のみ（continue-on-error: true）にしていた。
   # --------------------------------------------------------------------------
-  test-macos:
-    name: 全件テスト（macOS）
+  # macOS も、全件を 2 つのジョブに分けて、並列に動かす（tests/run_tests.sh --shard I/N。Windows と同じ分け方）。2026-10-28 の実測:
+  # 1 つのジョブで約 8 分 → 2 つで約 4〜5 分。分けたジョブの名前（全件テスト（macOS 1/2））は、必須チェックにしない。
+  # 必須チェックの名前「全件テスト（macOS）」は、下の集約のジョブ（test-macos）が受け持つ（Ruleset の必須チェックの名前を変えずに、分けるため）。
+  test-macos-shard:
+    name: 全件テスト（macOS ${{ matrix.shard }}/${{ strategy.job-total }}）
     runs-on: macos-latest
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
     env:
       SF_TEST_SKIP_INTEGRATION: "1"   # 結合テストは、別のジョブ（integration）で動かす
     steps:
@@ -72,11 +79,26 @@ jobs:
 
       # macOS 標準の Bash（/bin/bash = 3.2）のまま実行する。sf-tools は、追加のインストールなしで、macOS で動くことが前提
       # （Bash 4 以降の機能を使うと、ここで失敗する）。sed などの標準コマンドも、BSD 版のまま使う（GNU 版は、入れない）
-      - name: テストを実行（macOS 標準の Bash 3.2）
+      - name: テストを実行（macOS 標準の Bash 3.2。組 ${{ matrix.shard }}/${{ strategy.job-total }}）
         run: |
           /bin/bash --version | head -1
           sed --version 2>&1 | head -1 || true
-          /bin/bash tests/run_tests.sh
+          /bin/bash tests/run_tests.sh --shard ${{ matrix.shard }}/${{ strategy.job-total }}
+
+  # 集約: macOS の組が、すべて成功したときだけ成功する（必須チェック「全件テスト（macOS）」）。組が失敗・取り消し・スキップのときは失敗にする
+  test-macos:
+    name: 全件テスト（macOS）
+    runs-on: ubuntu-latest
+    needs: test-macos-shard
+    if: ${{ always() }}
+    timeout-minutes: 5
+    steps:
+      - name: macOS の組の結果を確認
+        env:
+          SHARDS_RESULT: ${{ needs.test-macos-shard.result }}
+        run: |
+          echo "macOS の組の結果: ${SHARDS_RESULT}"
+          [ "${SHARDS_RESULT}" = "success" ]
 
   # Windows（Git Bash）は、テストの 1 つ 1 つが、プロセスの起動が多く、遅い（2026-10-20 の実測: 全件が約 21 分、結合テスト L1 が約 10 分）。
   # そこで、全件（結合テスト L1 を含む）を、6 つのジョブに分けて、並列に動かす（tests/run_tests.sh --shard I/N。重いファイルから、

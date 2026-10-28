@@ -193,7 +193,7 @@
 # ------------------------------------------------------------------------------
 # 1. 共通ライブラリの必須設定
 # ------------------------------------------------------------------------------
-readonly SCRIPT_NAME=$(basename "$0" .sh)
+SCRIPT_NAME="${0##*/}"; readonly SCRIPT_NAME="${SCRIPT_NAME%.sh}"
 # sf-init.sh はプロジェクト外から実行するため、ログは sf-tools 配下に記録する
 mkdir -p "$HOME/sf-tools/logs" 2>/dev/null || true  # run 不使用: common.sh（run）の読み込み前の準備（意図的エラー無視）
 readonly LOG_FILE="$HOME/sf-tools/logs/${SCRIPT_NAME}.log"
@@ -205,7 +205,8 @@ readonly LOG_MODE="NEW"  # 司令塔が起動のたびにログをリセット�
 # sf-init.sh はプロジェクト外から実行するため、force-* チェックをバイパスする
 export SF_INIT_MODE=1
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="${BASH_SOURCE[0]%/*}"
+[[ "$SCRIPT_DIR/" == /* && "$SCRIPT_DIR/" != *//* && "$SCRIPT_DIR/" != */./* && "$SCRIPT_DIR/" != */../* ]] || SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 COMMON_LIB="${SCRIPT_DIR}/../lib/common.sh"
 
 if [[ ! -f "$COMMON_LIB" ]]; then

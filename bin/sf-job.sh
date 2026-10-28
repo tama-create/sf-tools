@@ -70,7 +70,7 @@
 # ------------------------------------------------------------------------------
 # 1. 共通ライブラリの必須設定
 # ------------------------------------------------------------------------------
-readonly SCRIPT_NAME=$(basename "$0" .sh)
+SCRIPT_NAME="${0##*/}"; readonly SCRIPT_NAME="${SCRIPT_NAME%.sh}"
 mkdir -p "$HOME/sf-tools/logs" 2>/dev/null || true  # run 不使用: common.sh（run）の読み込み前の準備（意図的エラー無視）
 readonly LOG_FILE="$HOME/sf-tools/logs/${SCRIPT_NAME}.log"
 readonly LOG_MODE="NEW"
@@ -80,7 +80,8 @@ readonly LOG_MODE="NEW"
 # ------------------------------------------------------------------------------
 export SF_INIT_MODE=1   # force-* チェックをバイパス（export のため、子の sf-start.sh・sf-launcher.sh とその先にも引き継がれる）
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="${BASH_SOURCE[0]%/*}"
+[[ "$SCRIPT_DIR/" == /* && "$SCRIPT_DIR/" != *//* && "$SCRIPT_DIR/" != */./* && "$SCRIPT_DIR/" != */../* ]] || SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 COMMON_LIB="${SCRIPT_DIR}/../lib/common.sh"
 
 if [[ ! -f "$COMMON_LIB" ]]; then

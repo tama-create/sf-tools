@@ -54,7 +54,7 @@
 # ------------------------------------------------------------------------------
 # 1. 共通ライブラリの必須設定
 # ------------------------------------------------------------------------------
-readonly SCRIPT_NAME=$(basename "$0" .sh)  # run 不使用: common.sh の読み込み前（run が未定義）
+SCRIPT_NAME="${0##*/}"; readonly SCRIPT_NAME="${SCRIPT_NAME%.sh}"  # run 不使用: common.sh の読み込み前（run が未定義）
 readonly LOG_FILE="./sf-tools/logs/${SCRIPT_NAME}.log"
 readonly LOG_MODE="APPEND"
 
@@ -62,7 +62,8 @@ readonly LOG_MODE="APPEND"
 # ------------------------------------------------------------------------------
 # 2. 共通ライブラリの読み込み
 # ------------------------------------------------------------------------------
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"  # run 不使用: common.sh の読み込み前（run が未定義）
+SCRIPT_DIR="${BASH_SOURCE[0]%/*}"  # run 不使用: common.sh の読み込み前（run が未定義）
+[[ "$SCRIPT_DIR/" == /* && "$SCRIPT_DIR/" != *//* && "$SCRIPT_DIR/" != */./* && "$SCRIPT_DIR/" != */../* ]] || SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"  # run 不使用: common.sh の読み込み前（run が未定義）
 COMMON_LIB="${SCRIPT_DIR}/../lib/common.sh"
 
 if [[ ! -f "$COMMON_LIB" ]]; then

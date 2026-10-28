@@ -33,7 +33,8 @@
 #     つながっている（die のときも 1）
 # ==============================================================================
 
-PHASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PHASE_DIR="${BASH_SOURCE[0]%/*}"
+[[ "$PHASE_DIR/" == /* && "$PHASE_DIR/" != *//* && "$PHASE_DIR/" != */./* && "$PHASE_DIR/" != */../* ]] || PHASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SF_TOOLS_DIR="${SF_TOOLS_DIR:-$(dirname "$(dirname "$PHASE_DIR")")}"
 
 readonly SCRIPT_NAME="sf-init"

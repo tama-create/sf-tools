@@ -104,7 +104,8 @@
 #   ・終了コード: 0 = すべての確認が成功（--plan・--help を含む）/ 1 = 失敗した確認がある・途中で止めた・die
 # ==============================================================================
 
-PHASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PHASE_DIR="${BASH_SOURCE[0]%/*}"
+[[ "$PHASE_DIR/" == /* && "$PHASE_DIR/" != *//* && "$PHASE_DIR/" != */./* && "$PHASE_DIR/" != */../* ]] || PHASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SF_TOOLS_DIR="${SF_TOOLS_DIR:-$(dirname "$(dirname "$PHASE_DIR")")}"
 
 if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then

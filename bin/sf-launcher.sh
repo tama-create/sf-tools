@@ -40,7 +40,8 @@
 #   - メニュー・fzf モードでは、実行したコマンドが失敗しても、ランチャーは終了しない
 # ==============================================================================
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="${BASH_SOURCE[0]%/*}"
+[[ "$SCRIPT_DIR/" == /* && "$SCRIPT_DIR/" != *//* && "$SCRIPT_DIR/" != */./* && "$SCRIPT_DIR/" != */../* ]] || SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # --help / -h: 冒頭コメントを表示して終了
 if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then

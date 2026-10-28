@@ -277,6 +277,8 @@ source 時の動作: Bash 3.2 未満なら `exit 1` → `LOG_FILE` の確認 →
 
 **`run` と `log` の速度の設計（2026-10-28）:** `run` は、ほぼすべてのコマンドの実行で使うため、1 回の呼び出しで外部のプログラムを起動すると、Windows の Git Bash（プロセスの起動が遅い）で、全体が極端に遅くなる。実測（Windows の Git Bash）: 変更前は `log` 68ms・`run true` 595ms（WSL は 3ms・20ms）。変更後は `log` 3ms・`run true` 198ms。起動を減らした箇所は、①時刻（`date` → 組み込みの `printf '%(...)T'`。Bash 4.2 以上。Bash 3.2 は `date`。`_now_ts`）、②`NothingToDeploy` の検知（`grep` → 組み込みの `read` と文字列の比較。NUL を含む出力だけ `grep`）、③Token の伏せ字（`_mask_secrets_var`。Token らしい文字列を含むときだけ `sed`）、④ログへの記録（色・絵文字を含まない出力は、`sed` を使わず、`_prefix_lines`。ESC・`0xe2`・`0xef`・`0xf0` のバイトを含むときは、従来どおり `_strip_term_codes` と `sed`。`_has_term_codes`）。残る起動は、`mktemp`（一時ファイルを 0600 で作るため）・`tee`（画面に流しながら記録するため）・`rm`。旧版と新版の出力（画面・戻り値・ログ・`error.log`）を、色・絵文字・日本語・CRLF・末尾の改行なし・Token・失敗・NUL などの 19 ケースで比べて、1 点を除いて一致した。差は、**最後の行に改行がない出力**: 旧版（GNU の sed）は、改行を付けず、次のログが同じ行に続いていた（BSD の sed は付ける）。新版は、どちらも付ける。回帰テストは `tests/test_common.sh` の `test_run_fast_paths`。
 
+**起動時の外部プログラムの削減（2026-10-28）:** コマンドの起動のたびに走る部分でも、`basename`・`dirname`・`$(cd … && pwd)`・`mkdir`・`chmod` を、文字列の加工（パラメータ展開）に置き換えた（Windows の Git Bash は、外部プログラムの起動と `$( )` のサブシェルが、1 回 約 60ms）。対象は、①`lib/common.sh` の読み込み（`${PWD##*/}` で force-* の確認、ログフォルダは `${LOG_FILE%/*}`。フォルダがあれば `mkdir` を省き、`chmod 700` は Windows では効果がないため省く）、②`bin/sf-*.sh` の `SCRIPT_NAME`（`${0##*/}` と `%.sh`）、③`SCRIPT_DIR`・`PHASE_DIR`・`_COMMON_LIB_DIR`（`${BASH_SOURCE[0]%/*}`。**`/` で始まり、`//`・`/./`・`/../` を含まないときだけ**この近道を使い、それ以外（相対パス・`C:/…`・`..` を含む）は、従来の `cd + pwd`）。実測（Windows の Git Bash、同じ条件で並べて計測）: `sf-check.sh`（引数なし）の起動から終了まで 約 1000ms → 約 510ms。回帰テストは `tests/test_common.sh` の `test_startup_fast_paths`（`bin/sf-check.sh` の実物の 2 行を取り出して、絶対・相対・`./`・`..`・`//` の呼び出しで、`cd + pwd` と同じ結果になることを確認する）。
+
 ### 3.4 安全ガードパターン
 
 管理者向けコマンドには2種類の安全ガードを組み合わせて使う。

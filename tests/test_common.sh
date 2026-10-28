@@ -966,6 +966,31 @@ test_run_fast_paths() {
     rm -rf "$td"
 }
 
+# 起動時の、外部プログラムを起動しない近道（SCRIPT_DIR・SCRIPT_NAME・ログフォルダ）
+#   bin/sf-check.sh の実物の 2 行を取り出して、旧来の求め方（cd + pwd・basename）と同じ結果になることを確かめる。
+#   近道に入らない形（相対・'.'・'..'・二重スラッシュ）は、従来の求め方に戻るので、これも同じ結果になること。
+test_startup_fast_paths() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] 起動時の近道（SCRIPT_DIR・SCRIPT_NAME）が、cd + pwd・basename と同じ結果${CLR_RST}"
+    local td snip1 snip2 case_ got exp
+    td=$(mktemp -d "${TMPDIR:-/tmp}/test-startfast-XXXX")
+    mkdir -p "$td/a/b"
+    # 実物の 2 行（SCRIPT_DIR の近道と、近道に入らないときの従来の求め方）を、sf-check.sh から取り出す
+    snip1=$(grep -m1 '^SCRIPT_DIR="${BASH_SOURCE\[0\]%/\*}"' "$SF_TOOLS_DIR/bin/sf-check.sh")
+    snip2=$(grep -m1 '^\[\[ "\$SCRIPT_DIR/" == /\*' "$SF_TOOLS_DIR/bin/sf-check.sh")
+    [[ -n "$snip1" && -n "$snip2" ]] && pass "sf-check.sh から、SCRIPT_DIR の 2 行を取り出せる" || fail "sf-check.sh から、SCRIPT_DIR の 2 行を取り出せる" "$snip1 / $snip2"
+    printf '%s\n%s\nprintf "%%s\\n" "$SCRIPT_DIR"\n' "$snip1" "$snip2" > "$td/a/b/t.sh"
+    # 呼び出し方ごとに、期待値（その時点で cd + pwd した結果）と比べる
+    for case_ in "abs:$td/a/b/t.sh" "rel:a/b/t.sh" "dot:./a/b/t.sh" "dotdot:a/../a/b/t.sh" "slashes:$td//a/b/t.sh"; do
+        got=$(cd "$td" && bash "${case_#*:}")
+        exp=$(cd "$td/a/b" && pwd)
+        [[ "$got" == "$exp" || "$got" == "$td/a/b" ]] && pass "SCRIPT_DIR: ${case_%%:*} 指定で、cd + pwd と同じ" || fail "SCRIPT_DIR: ${case_%%:*} 指定で、cd + pwd と同じ" "got=$got exp=$exp"
+    done
+    # SCRIPT_NAME: パスと拡張子を除いた名前
+    got=$(bash -c 'SCRIPT_NAME="${0##*/}"; readonly SCRIPT_NAME="${SCRIPT_NAME%.sh}"; echo "$SCRIPT_NAME"' /x/y/sf-abc.sh)
+    assert_equals "$got" "sf-abc" "SCRIPT_NAME: basename \"\$0\" .sh と同じ"
+    rm -rf "$td"
+}
+
 # sed_inplace / _strip_ansi / _strip_term_codes のテスト（GNU / BSD の sed の、どちらでも動くこと）
 #   BSD の sed（macOS）は、`sed -i SCRIPT FILE` と、\x1b などの 16 進の表記を、解釈しない。
 # ------------------------------------------------------------------------------
@@ -1341,6 +1366,7 @@ test_read_key_and_press_enter
 test_get_target_org
 test_mask_secrets
 test_run_fast_paths
+test_startup_fast_paths
 test_is_gitbash
 test_is_reserved_org_alias
 test_open_browser_gitbash

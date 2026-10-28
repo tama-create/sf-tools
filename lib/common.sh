@@ -80,12 +80,22 @@ fi
 # SF_INIT_MODE=1 の場合はチェックをスキップする（force-* の外で動く sf-init.sh とその phases/init/・sf-job.sh・
 # sf-typecheck.sh・tests/e2e/ が export する）
 if [[ "${SF_INIT_MODE:-0}" != "1" ]]; then
-    [[ "$(basename "$PWD")" =~ ^force- ]] \
+    [[ "${PWD##*/}" =~ ^force- ]] \
         || { echo "[ERROR] このスクリプトは 'force-*' ディレクトリ内で実行してください。" >&2; exit 1; }  # 条件チェックのため run 不使用（run の定義前）
 fi
 
-mkdir -p "$(dirname "$LOG_FILE")"  # run 不使用: run の定義前（ログファイルのフォルダの準備）
-chmod 700 "$(dirname "$LOG_FILE")" 2>/dev/null || true  # run 不使用: Windows では効果なし・意図的エラー無視
+# ログフォルダ（dirname の代わりに文字列の加工で求める。Windows の Git Bash は外部プログラムの起動が 1 回 約 60ms かかるため、
+# 起動のたびに走るこの部分では、外部プログラムを起動しない。フォルダがあれば mkdir も省く。chmod は Windows では効果がないので省く）
+case "$LOG_FILE" in
+    */*) _sf_log_dir="${LOG_FILE%/*}"; _sf_log_dir="${_sf_log_dir:-/}" ;;
+    *)   _sf_log_dir="." ;;
+esac
+[[ -d "$_sf_log_dir" ]] || mkdir -p "$_sf_log_dir"  # run 不使用: run の定義前（ログファイルのフォルダの準備）
+case "${OSTYPE:-}" in
+    msys*|cygwin*) ;;  # Windows では chmod は効果なし
+    *) chmod 700 "$_sf_log_dir" 2>/dev/null || true ;;  # run 不使用: run の定義前・意図的エラー無視
+esac
+unset _sf_log_dir
 [[ "${LOG_MODE:-}" == "NEW" ]] && : > "$LOG_FILE"  # run 不使用: run の定義前（ログファイルを空にする）
 
 # SILENT_EXEC: --verbose / -v が指定されていれば 0（応答表示あり）、デフォルト 1（応答表示なし）
@@ -606,7 +616,8 @@ readonly SF_RESERVED_ORG_ALIASES="prod staging develop main"
 #   読み込みの順は input.sh → platform.sh → project.sh（関数は、呼ばれる時点で定義済みであればよい。
 #   input.sh の read_or_quit などが使う set_var は、platform.sh にある）
 # ------------------------------------------------------------------------------
-_COMMON_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_COMMON_LIB_DIR="${BASH_SOURCE[0]%/*}"
+[[ "$_COMMON_LIB_DIR/" == /* && "$_COMMON_LIB_DIR/" != *//* && "$_COMMON_LIB_DIR/" != */./* && "$_COMMON_LIB_DIR/" != */../* ]] || _COMMON_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${_COMMON_LIB_DIR}/input.sh"
 source "${_COMMON_LIB_DIR}/platform.sh"
 source "${_COMMON_LIB_DIR}/project.sh"

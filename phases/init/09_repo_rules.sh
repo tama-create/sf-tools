@@ -40,7 +40,8 @@
 # ==============================================================================
 
 # SF_TOOLS_DIR は sf-init.sh（司令塔）から export される
-PHASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PHASE_DIR="${BASH_SOURCE[0]%/*}"
+[[ "$PHASE_DIR/" == /* && "$PHASE_DIR/" != *//* && "$PHASE_DIR/" != */./* && "$PHASE_DIR/" != */../* ]] || PHASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SF_TOOLS_DIR="${SF_TOOLS_DIR:-$(dirname "$(dirname "$PHASE_DIR")")}"
 
 readonly SCRIPT_NAME="sf-init"

@@ -729,3 +729,10 @@ Actions 上の実行は、コマンドによって扱いが違う。「全部拒
 - **効果**: GitHub 上の実測は、次の `e2e` の実行で記録する。
 - **未実施（判断待ち）**: 第 2 段階 = macOS で、Windows が作ったリポジトリを使い、日常の流れ全体（`sf-job` → `sf-push` → PR → Actions）を動かす。第 3 段階 = 逆向き（macOS が作ったリポジトリを、Windows で動かす）。
 
+
+### 12.12 `test_verify.sh` を 3 つ、`test_e2e.sh` を 2 つに分割（2026-10-28）
+
+- **目的**: 12.10 で残った下限（`test_verify.sh` 約 640 秒・`test_e2e.sh` 約 510 秒）を縮め、Windows の CI の最も長いジョブ（6 分割のうち 9 分）を短くする。
+- **やったこと**: 手元で、テスト関数ごとの所要時間を測り（`test_verify.sh` は `test_review_fixes` 581・`test_environment` 526・`test_components` 667・`test_branch_cleanup` 405 が大きい）、`test_verify.sh`・`test_verify2.sh`（review_fixes・environment）・`test_verify3.sh`（branch_cleanup・components）の 3 つ、`test_e2e.sh`（1〜24 と 32）・`test_e2e2.sh`（実行を伴うシナリオ 25〜31・33〜35）の 2 つに分けた。共通の部品（モック・`_env`・`_run`・各種ヘルパー）は、`tests/verify-test-lib.sh`・`tests/e2e-test-lib.sh` に移した。`tests/run_tests.sh` の `TEST_FILES`・重み・`--changed` の対応も直した。
+- **確認**: 分ける前後で、成功の件数が一致すること（分割前の件数との比較）。
+- **効果**: GitHub 上の実測は、次の CI で記録する。重みは目安（`test_verify*.sh` 各 215・`test_e2e*.sh` 各 255）。

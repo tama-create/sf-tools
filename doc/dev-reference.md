@@ -65,7 +65,7 @@
 | `test_common.sh` | lib/common.sh・input.sh・platform.sh・project.sh（`check_gh_owner`・入力関数（`read_secret` / `read_key` / `press_enter`）・`_mask_secrets`・`is_gitbash`・`open_browser`・`is_reserved_org_alias`・`is_protected_branch`・`check_sf_cli`・`print_admin_warning`・`run_isolated_home`・`ensure_sf_tools_latest`・`merge_package_xml`・`sed_inplace` など・Bash 3.2 対応（`test_bash32_compat`。1.1）・`ensure_admin_branch` / `push_admin_branch`・`get_target_org`。`json_get`: 基本・先頭のドット・配列・日本語や引用符・警告つき・不正な JSON・`node` がない・`set -e` を含む。`node -e` だけは、モックではなく本物の node に渡す: `test_helper.sh`） |
 | `test_init-common.sh` | phases/init/init-common.sh（`ensure_sf_tools_branch`・JWT 用の証明書の発行先（subject）。実際の Git と一時 bare リポジトリを使用） |
 | `test_org.sh` | lib/org.sh（ログイン先の 3 択・環境変数の指定・組織の種類の判定・本番は main のみのガード・保存） |
-| `test_verify.sh` | phases/init/verify.sh と lib/verify-common.sh（実行できない場所・--plan・診断の不足・確認（N / q / EOF・本番の明示）・1 層・3 層（develop → staging → main の順）・失敗（マージしない・案内）・取り違えの検出・--cleanup・部品） |
+| `test_verify.sh`・`test_verify2.sh`・`test_verify3.sh` | phases/init/verify.sh と lib/verify-common.sh（テスト関数を、3 つのファイルに、所要時間でほぼ均等に分けた。並列に動かすため。共通の部品は `tests/verify-test-lib.sh`。各ファイルの冒頭に一覧がある）（実行できない場所・--plan・診断の不足・確認（N / q / EOF・本番の明示）・1 層・3 層（develop → staging → main の順）・失敗（マージしない・案内）・取り違えの検出・--cleanup・部品） |
 | `test_diag.sh` | lib/diag.sh（セットアップの診断: すべてそろっている・不足と直し方・一覧を取得できない（？。不足に数えない）・段階の数に応じた確認・組織の種類の記録がない（！）・直近の実行・読み取りのみ） |
 | `test_wizard.sh` | lib/wizard.sh（ウィザード形式の画面の部品: 現在地・チェックリスト・確認・失敗・完了） |
 | `test_sf-unhook.sh` | sf-unhook.sh |
@@ -84,7 +84,7 @@
 | `test_sf-next.sh` | sf-next.sh |
 | `test_sf-launcher.sh` | sf-launcher.sh（`common.sh` を読み込まない standalone のランチャー） |
 | `test_security.sh` | セキュリティ修正の退行の検出（静的解析: `run` 経由の `sf org display --verbose` の禁止・`run` の一時ファイルの置き場所など。実行時: ログに `sfdxAuthUrl` が残らない・ログのフォルダが 700） |
-| `test_e2e.sh` | tests/e2e/ の安全ガードと部品（gh / sf はモック。実環境には接続しない。名前の判定・Actions 上のガード・削除関数・鍵一式の読み込み・`cleanup.sh` の既定など） |
+| `test_e2e.sh`・`test_e2e2.sh` | tests/e2e/ の安全ガードと部品（テスト関数を、2 つのファイルに、所要時間でほぼ均等に分けた。並列に動かすため。共通の部品は `tests/e2e-test-lib.sh`。実行を伴うシナリオ（manual-delete 以降）が test_e2e2.sh）（gh / sf はモック。実環境には接続しない。名前の判定・Actions 上のガード・削除関数・鍵一式の読み込み・`cleanup.sh` の既定など） |
 | `test_run-tests.sh` | tests/run_tests.sh の `--shard`（`SF_TEST_LIST_ONLY=1` で分け方だけを確かめる: 漏れ・重複がない・いつも同じ分け方・不正な指定は終了コード 2） |
 | `test_cli_args.sh` | 全 `bin/sf-*.sh` の引数: 冒頭コメントの【オプション】を 1 つずつ値なしで渡し、15 秒以内に終わる・「不明なオプションです」と言われない。文書にないオプションでも止まらない |
 | `test_sf-check.sh` | sf-check.sh（種類の可否の判定・同梱の表 `config/metadata-capability.txt` の形式を含む） |
@@ -113,7 +113,7 @@
 | `test_sf-sync-wf.sh` | sf-sync-wf.sh |
 | `test_wf-sequence.sh` | templates/.github/workflows/wf-sequence.yml（YAML の判定スクリプトを取り出して、実際の git リポジトリで、順序どおり・順序外・最下位・環境ブランチからの PR を確認） |
 
-> テスト以外の部品: `tests/test_helper.sh`（2.2）・`tests/init-test-lib.sh`（sf-init のテストの共通部品）・`tests/integration/lib.sh`・`init-lib.sh`（2.1.2）・`tests/docs-stamp.sh`（文書の見直しの印の確認・付け直し）・`tests/docs-facts-allow.txt`（`test_docs_facts.sh` の例外）。
+> テスト以外の部品: `tests/test_helper.sh`（2.2）・`tests/init-test-lib.sh`（sf-init のテストの共通部品）・`tests/verify-test-lib.sh`（verify のテストの共通部品）・`tests/e2e-test-lib.sh`（e2e の部品のテストの共通部品）・`tests/integration/lib.sh`・`init-lib.sh`（2.1.2）・`tests/docs-stamp.sh`（文書の見直しの印の確認・付け直し）・`tests/docs-facts-allow.txt`（`test_docs_facts.sh` の例外）。
 > 実環境の e2e（`tests/e2e/`: `run.sh`・`scenario.sh`・`doctor.sh`・`cleanup.sh`・`bootstrap.sh`・`lib.sh`・`ci-fixture.sh` / `ci-mask.sh` / `ci-notify.sh`・`shims/`（`sf org login web`・ブラウザなどの差し替え）・`fixture.example.env`）は、`run_tests.sh` に含めない。詳細は 9.6。
 
 #### 2.1.1 テストの実行方式と CI
@@ -867,7 +867,7 @@ sf-init.sh --add-tier develop    # main+staging → main+staging+develop
 - 作業用ブランチ: `verify-comp-HHMMSS` / `verify-comp-delete-HHMMSS` / `verify-comp-delete2-HHMMSS`（`--with-objects` のときだけ。最後に削除。`_delete_job_branches` の形式の確認は `^verify-(hello|comp)(-delete2?)?-[0-9]{6}$`）。
 - 実際の組織での受理（Flow の最小の XML・削除の順序など）は、モックでは確認できない。最初は、develop で実行して、エラーを見ながら直す。
 
-テスト: `tests/test_verify.sh`（状態つきの gh のモック）。e2e（`tests/e2e/lib.sh`）は、PR・実行の待ち・結果の読み取り・Hello World の本文を、`lib/verify-common.sh` に委譲する。
+テスト: `tests/test_verify.sh`・`test_verify2.sh`・`test_verify3.sh`（状態つきの gh のモック。`tests/verify-test-lib.sh`）。e2e（`tests/e2e/lib.sh`）は、PR・実行の待ち・結果の読み取り・Hello World の本文を、`lib/verify-common.sh` に委譲する。
 
 ---
 

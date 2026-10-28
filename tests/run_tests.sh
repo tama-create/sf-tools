@@ -152,7 +152,7 @@ if [[ -n "$SHARD" ]]; then
 fi
 
 # 時間のかかるファイル（先に起動する。最後に長いものが残って、全体が伸びるのを避ける）
-HEAVY_FIRST=(test_integration-init.sh test_integration-init2.sh test_integration-init3.sh test_integration.sh test_integration-git.sh test_sf-init.sh test_sf-init2.sh test_sf-init3.sh test_e2e.sh test_verify.sh test_sf-release.sh test_sf-install.sh)
+HEAVY_FIRST=(test_integration-init.sh test_integration-init2.sh test_integration-init3.sh test_integration.sh test_integration-git.sh test_sf-init.sh test_sf-init2.sh test_sf-init3.sh test_e2e.sh test_e2e2.sh test_verify.sh test_verify2.sh test_verify3.sh test_sf-release.sh test_sf-install.sh)
 
 # ファイルごとの所要時間の目安（秒。--shard が、組に分けるときの重み。未登録は 10）。
 #   値は、GitHub Actions の Windows での実測（2026-10-20・コミット 5eb8c6f の SF_TEST_TIMES=1 の [TIME] 行。ジョブの中で並列に動かした値）
@@ -160,8 +160,8 @@ HEAVY_FIRST=(test_integration-init.sh test_integration-init2.sh test_integration
 _weight() {   # 結果は、変数 _W に入れる（$(...) で呼ぶと、Windows の Git Bash では、ファイルごとにプロセスを起動して遅い）
     case "$1" in
         test_sf-init.sh|test_sf-init2.sh|test_sf-init3.sh) _W=320 ;;   # 元は 1 ファイルで 960 秒（Actions の Windows）。3 つに均等に分けた
-        test_verify.sh) _W=640 ;;
-        test_e2e.sh) _W=510 ;;
+        test_verify.sh|test_verify2.sh|test_verify3.sh) _W=215 ;;   # 元は 1 ファイルで 640 秒。3 つに、ほぼ均等に分けた
+        test_e2e.sh|test_e2e2.sh) _W=255 ;;   # 元は 1 ファイルで 510 秒。2 つに、ほぼ均等に分けた
         test_integration-init.sh) _W=370 ;;
         test_integration-init2.sh) _W=330 ;;
         test_integration-init3.sh) _W=270 ;;
@@ -188,6 +188,8 @@ TEST_FILES=(
     test_org.sh
     test_diag.sh
     test_verify.sh
+    test_verify2.sh
+    test_verify3.sh
     test_init-common.sh
     test_sf-unhook.sh
     test_sf-hook.sh
@@ -213,6 +215,7 @@ TEST_FILES=(
     test_sf-precommit.sh
     test_security.sh
     test_e2e.sh
+    test_e2e2.sh
     test_sf-sync-wf.sh
     test_wf-sequence.sh
     test_project-identity.sh
@@ -335,11 +338,8 @@ if [[ "${1:-}" == "--changed" ]]; then
             config/metadata-capability.txt)
                 _changed_tests+=("test_sf-check.sh")
                 ;;
-            lib/verify-common.sh|lib/verify-samples.sh)
-                _changed_tests+=("test_verify.sh")
-                ;;
-            phases/init/verify.sh)
-                _changed_tests+=("test_verify.sh")
+            lib/verify-common.sh|lib/verify-samples.sh|phases/init/verify.sh|tests/verify-test-lib.sh)
+                _changed_tests+=("test_verify.sh" "test_verify2.sh" "test_verify3.sh")   # verify のテストは、3 つのファイルに分けてある（共通の部品: tests/verify-test-lib.sh）
                 ;;
             phases/init/*|tests/init-test-lib.sh)
                 _changed_tests+=("test_sf-init.sh" "test_sf-init2.sh" "test_sf-init3.sh")   # sf-init のテストは、3 つのファイルに分けてある（共通の部品: tests/init-test-lib.sh）
@@ -347,8 +347,8 @@ if [[ "${1:-}" == "--changed" ]]; then
             hooks/pre-push)
                 _changed_tests+=("test_sf-prepush.sh")
                 ;;
-            tests/e2e/*)
-                _changed_tests+=("test_e2e.sh")
+            tests/e2e/*|tests/e2e-test-lib.sh)
+                _changed_tests+=("test_e2e.sh" "test_e2e2.sh")   # e2e のテストは、2 つのファイルに分けてある（共通の部品: tests/e2e-test-lib.sh）
                 ;;
             *.md|tests/test_docs.sh)
                 _changed_tests+=("test_docs.sh")

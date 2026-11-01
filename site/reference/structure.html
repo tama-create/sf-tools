@@ -137,6 +137,7 @@
 │   ├── diag.sh                 ← セットアップの診断（sf-init.sh --status と --verify で使用。読み取りのみ）
 │   ├── verify-common.sh        ← Hello World の本文・PR とワークフローの実行の部品（phases/init/verify.sh と e2e で共有）
 │   ├── verify-samples.sh       ← リリースの仕組みの確認用サンプル（パターン別のコンポーネント。sf-init.sh --verify --components が使う）
+│   ├── metasync.js             ← 組織から取得した内容と main を比べて、追加・変更・削除の計画を作り、反映する（sf-metasync.sh が呼ぶ。Node の標準機能のみ）
 │   └── typecheck.js            ← メタデータの種類ごとに、リリース・削除ができるかを確かめる（sf-typecheck.sh が呼ぶ。Node の標準機能のみ）
 ├── phases/
 │   └── init/                   ← sf-init.sh のフェーズスクリプト
@@ -179,6 +180,7 @@
 │       ├── config/             ← metadata.txt / branches.txt 雛形
 │       └── release/__BRANCH__/ ← deploy-target.txt / remove-target.txt 雛形
 ├── config/                     ← sf-tools 自身の設定・データ（force-* には配布されない）
+│   ├── metadata-dirs.txt       ← メタデータの種類 → フォルダ名の表（sf-metasync.sh が、同期の対象のフォルダを決めるために参照）
 │   ├── metadata-capability.txt ← メタデータの種類ごとの、リリース・削除の可否の表（sf-typecheck.sh が確認。sf-check.sh が参照）
 │   └── changeset-types.txt     ← 変更セットで扱える種類の一覧（公式の Metadata Coverage Report。sf-typecheck.sh --coverage が参照）
 ├── site/                       ← この文書サイト（HTML。GitHub Pages で公開）

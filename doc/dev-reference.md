@@ -75,7 +75,8 @@
 | `test_sf-install.sh` | sf-install.sh |
 | `test_sf-start.sh` | sf-start.sh |
 | `test_sf-restart.sh` | sf-restart.sh |
-| `test_sf-metasync.sh` | sf-metasync.sh |
+| `test_sf-metasync.sh` | sf-metasync.sh（鏡像: 取得 → 計画 → 反映・削除・取得の失敗とやり直し・`--dry-run`・保留と終了コード 3・コミット前の中断の復元） |
+| `test_metasync-js.sh` | lib/metasync.js（plan: 追加・変更・削除・CRLF・残すファイル・S2〜S5 の境界・S1/S8。apply: 反映・保留・根の外のパスの拒否） |
 | `test_sf-release.sh` | sf-release.sh |
 | `test_sf-deploy.sh` | sf-deploy.sh |
 | `test_sf-dryrun.sh` | sf-dryrun.sh |
@@ -240,6 +241,7 @@ source 時の動作: Bash 3.2 未満なら `exit 1` → `LOG_FILE` の確認 →
 | （`lib/diag.sh`） | `diag_run REPO 段階...`（結果の不足の数は `DIAG_NG`） | セットアップの診断（`sf-init.sh --status`・`--verify` が使う）。リポジトリ・ブランチ・ワークフロー・Secrets・Variables・ブランチ保護（Ruleset の必須チェックの名前が `required_status_check_names` と合うか）・直近の実行を、GitHub から読み取って、✓ / ✗（直し方つき）/ ！ / ？ で表示する。読み取りのみ。一覧を取得できないものは「？」とし、不足に数えない |
 | （`lib/verify-common.sh`） | `verify_gh` / `verify_pr_create` / `verify_pr_merge` / `verify_pr_close` / `verify_latest_run_id` / `verify_wait_pr_run`（基準の ID より新しい実行だけを対象にする）/ `verify_run_conclusion` / `verify_step_conclusion` / `verify_rerun_and_wait` / `verify_dispatch_workflow` / `verify_wait_run` / `verify_run_log_has` / `verify_branch_sha` / `verify_branch_create` / `verify_branch_delete` / `verify_branch_has_open_pr` / `verify_file_sha` / `verify_file_put` / `verify_file_delete` / `verify_hello_*` / `verify_set_*` | 実際のリポジトリの検証（`phases/init/verify.sh`）・`sf-init.sh`（最初のメタデータの同期）・e2e（`tests/e2e/lib.sh`）が共有する部品。GitHub の API（ブランチ・ファイルの追加・削除）と PR・ワークフローの実行の待ち、Hello World の本文。`gh` は `run` を通さず `verify_gh`（時間の上限つき・標準入力は `/dev/null`）で呼び、失敗は戻り値・空の出力で返す（`die` しない）。リポジトリは引数で受け取り、操作してよいリポジトリの安全ガードは、呼び出し側が行う（e2e: `_e2e_check_repo`）。環境変数 `VERIFY_*`（多くは `E2E_*` も使える）。`VERIFY_SET=components` で、サンプルを `lib/verify-samples.sh` に切り替える |
 | （`lib/verify-samples.sh`） | `verify_sample_paths [stage1\|stage2\|all]` / `verify_sample_content_for PATH` / `verify_sample_deploy_target_text` / `verify_sample_remove_target_text [stage1\|stage2]` / `verify_sample_labels_file_is_ours` | `sf-init.sh --verify --components` のサンプル（書き方のパターンごとに最小のもの。名前は `SfToolsE2eHello` 系）。`verify-common.sh` が `source` する。`VERIFY_SAMPLE_LABELS` / `_OBJECTS` / `_FLOW` で含めるものが変わる |
+| （`lib/metasync.js`） | `node lib/metasync.js plan --repo DIR --fetched DIR --types-file F --dirs-table F --out PLAN [--recent-files F] [--retrieve-json F] [--allow-mass-delete]` / `apply --plan PLAN --repo DIR --fetched DIR` / `root --repo DIR` | 組織から取得した内容と手元の main を比べて計画を作り、反映する（`bin/sf-metasync.sh` から呼ぶ。Node の標準機能のみ）。終了コード: 0=保留なし（S5 だけも）/ 3=保留あり / 1=中断 |
 | （`lib/typecheck.js`） | `node lib/typecheck.js --list` / `--org ALIAS --work DIR [--mode full\|validate] [--only ...] [--out FILE]` | メタデータの種類ごとの「リリース・削除」の可否を、実際の組織で確かめる（`bin/sf-typecheck.sh` から呼ぶ）。実行する sf は `project deploy start` / `validate` だけ・書くファイルと削除するメンバーは `SfToolsE2eMin`（LWC は `sfToolsE2eMin`）を含むものだけ・予約名の組織は中断。終了コード 0 / 3（ng がある）/ 1（中断） |
 | `ensure_sf_tools_latest` | `ensure_sf_tools_latest [--no-update] [DIR]`（DIR の省略時は `$SF_TOOLS_DIR`） | sf-tools（DIR）が origin の最新か確認し、遅れていれば確認のうえ `git pull --ff-only` で更新する。戻り値: 0=最新（または判定できない: Git リポジトリでない・HEAD がブランチでない・origin に同じブランチがない。WARNING を出す）／2=更新した（呼び出し側は、更新した sf-tools で、再実行すること）。die: origin に接続できない・fetch 失敗・遅れていて未コミットの変更または未プッシュのコミットがある・更新を断った・pull 失敗・`--no-update` で遅れている |
 | `is_gitbash` | `if is_gitbash; then ...` | Windows の Git Bash か判定（`$OSTYPE` が `msys*` / `mingw*` / `cygwin*`） |
@@ -398,7 +400,12 @@ check_gh_owner "$GITHUB_OWNER"   # 認証ユーザーの一致確認
 
 - `prod` エイリアスの組織（**本番・Sandbox のどちらでもよい**）から、メタデータを取得し、`main` にコミットして `push` する（**PR は作らない**）。push したときは、`branches.txt` の `main` 以外の各ブランチへ、`main` をマージして push する（伝播）
 - どのブランチから実行しても、`main` に切り替えて処理し、終了時に元のブランチへ戻る（追跡中のファイルに未コミットの変更があれば、`git stash` で退避して、戻すときに `stash pop`）
-- `sf sgd source delta` で差分を求め、`metadata.txt` の全種類を `retrieve` する
+- **鏡像方式（2026-11-01。設計: `doc/sf-metasync-redesign.md`）**: `metadata.txt` の全種類を、**一時プロジェクト**（`${TMPDIR:-/tmp}/sf-metasync-XXXXXX`）へ `sf project retrieve start --json` で取得し（一時的なエラー（`MetadataTransferError` など）は 60 秒待って 1 回だけやり直す。環境変数 `SF_METASYNC_RETRY_WAIT` で秒数を変えられる）、`lib/metasync.js plan` で、手元の `main` の「同期の対象のフォルダ」と比べて、追加・変更・**削除**を決め、`apply` で作業ツリーに反映してから、コミット・push する。取得が失敗しても、作業ツリーは変わらない。**以前の `sf sgd source delta`（sfdx-git-delta）は廃止した**（比べるのは Git のコミットどうしで、組織を見ないため、`pull --rebase` の直後は常に空で、効果がなかった。公式サポート外のプラグインでもある）
+- **同期の対象のフォルダ**: `<packageDirectories の path>/main/default` の下の、`config/metadata-dirs.txt`（種類 → フォルダ名の表）で `metadata.txt` の種類に当たるフォルダと、取得結果にあるフォルダ。それ以外は触らない。フォルダを共有する種類（`objects/` など）は、フォルダ単位で同じにする（`metadata.txt` から種類を外すと、そのファイルは削除になる）。残すファイル: `.gitkeep` と、`.forceignore` の行に当たるファイル（否定の `!` は解釈しない）。`packageDirectories` が 1 つでなければ中断する（S8）
+- **削除の守り（`lib/metasync.js` の冒頭に詳細）**: 当たった削除は保留（ファイルは残す）にして、追加・変更だけを反映する。S1 取得の応答の `status` が 0 以外 → 中断 ／ S2 応答に問題の報告 → 種類が読めればそのフォルダ、読めなければ全削除を保留 ／ S3 手元にあったフォルダが取得結果で 0 件 ／ S4 削除が max(100, 手元の対象の 10%) を超える ／ S5 直近 24 時間に、同期以外のコミット（PR のマージ）で変わったファイル（組織にまだリリースされていない部品を消さないため）。S3・S4 は、手元で `--allow-mass-delete` で解ける（Actions 上では指定できない）。S2〜S4 の保留があると、追加・変更の同期と伝播のあと、**終了コード 3**（Actions ではジョブが失敗として表示される）
+- **オプション**: `-n`/`--dry-run`（取得して計画を表示するだけ。作業ツリー・commit・push・伝播をしない）・`-y`（`--dry-run` のときだけ、続行の確認を省く）・`--allow-mass-delete`・`-j`（取得の応答の先頭をログに記録）・`-v`
+- **初回の移行**: これまでにたまった「組織にない古いファイル」が、一度に削除の対象になる。件数が多いと S4 で保留になる。各 force-* の管理者が、手元で `--dry-run` で確かめてから `--allow-mass-delete` で実行する
+- **途中で中断したとき**: 計画を反映したあと、コミットの前に中断したときは、同期の対象のパッケージのフォルダを HEAD に戻す（`git reset -q HEAD --`・`git checkout HEAD --`・`git clean -fdq --`。`reset` がないと、`git add` 済みの新規ファイルがインデックスに残る。結合テスト M10 で見つけた）
 - 事前の確認（何も変更せずに中断）: `sf org display --target-org prod --json` が成功すること（出力はアクセストークンを含むため、表示もログへの記録もしない）・detached HEAD でないこと・`metadata.txt` があること
 - 差分がなくても、未プッシュのコミット（前回の push の失敗で残った）があれば、コミットの一覧（`git log --oneline`）を表示し、確認のうえ（`GITHUB_ACTIONS=true` では確認なし）、push だけ行う（`git rev-list --count origin/main..HEAD`）。差分も未プッシュのコミットもなければ、伝播は行わずに終了する
 - `main` への push と、伝播の push は、どちらも `git push --no-verify`（このコマンド専用。pre-push フック（sf-prepush.sh）は、保護ブランチの上からの push・保護ブランチへの push を必ず拒否するため、手元で実行すると、伝播の push がすべて失敗する。サーバー側の保護（Ruleset）は、そのまま効く。結合テスト M0・M4 で見つかった）
@@ -407,7 +414,7 @@ check_gh_owner "$GITHUB_OWNER"   # 認証ユーザーの一致確認
 
 **安全ガード（セクション 3.4）:**
 - sf の確認と事前の確認のあと（`main` への切り替えより前）に、赤い警告ボックス（`print_admin_warning`）+ `ask_yn || die`（`GITHUB_ACTIONS=true` 時はスキップ）
-- `phase_git_sync` のコミット直前: `GITHUB_ACTIONS=true` でなければ `git status --short` を表示し `ask_yn || die` で確認（push だけのときは、`git log --oneline` を表示して同様に確認）
+- 手元の確認は、計画の要約を見せたあとの 1 回（`ask_yn`。変更があるときだけ）。N・q で中断する。コミットは、その後に確認なしで行う（push だけのときは、`git log --oneline` を表示して確認）
 
 ### 4.4 sf-install.sh
 

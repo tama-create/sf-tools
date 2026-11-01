@@ -173,6 +173,7 @@ _weight() {   # 結果は、変数 _W に入れる（$(...) で呼ぶと、Windo
         test_common.sh|test_integration-metasync.sh|test_sf-release.sh) _W=120 ;;
         test_integration-next.sh|test_integration-guards.sh) _W=85 ;;
         test_project-identity.sh|test_sf-metasync.sh|test_integration-coverage.sh) _W=75 ;;
+        test_metasync-js.sh) _W=40 ;;   # 手元の Windows で 約 22 秒
         test_integration-rerun.sh|test_init-common.sh|test_sf-deploy.sh) _W=62 ;;
         test_sf-job.sh|test_sf-sync-wf.sh|test_sf-next.sh|test_sf-prepush.sh|test_sf-start.sh|test_wf-sequence.sh) _W=50 ;;
         test_integration-secrets.sh|test_sf-hook.sh) _W=40 ;;
@@ -201,6 +202,7 @@ TEST_FILES=(
     test_sf-start.sh
     test_sf-restart.sh
     test_sf-metasync.sh
+    test_metasync-js.sh
     test_sf-release.sh
     test_sf-deploy.sh
     test_sf-dryrun.sh
@@ -334,6 +336,9 @@ if [[ "${1:-}" == "--changed" ]]; then
                 ;;
             config/changeset-types.txt)
                 _changed_tests+=("test_sf-typecheck.sh")
+                ;;
+            lib/metasync.js|config/metadata-dirs.txt|tests/test_metasync-js.sh)
+                _changed_tests+=("test_metasync-js.sh" "test_sf-metasync.sh")   # 鏡像の部品（lib/metasync.js）と、それを呼ぶ sf-metasync.sh
                 ;;
             config/metadata-capability.txt)
                 _changed_tests+=("test_sf-check.sh")

@@ -1,5 +1,9 @@
 # sf-tools — Salesforce 開発自動化ツールキット
 
+> ⚠️ **開発中です（Work in Progress）。** まだ、安定して使える状態ではありません。動作や仕様は、予告なく変わり、**動作の保証はありません**。
+> このツールは、**Salesforce の組織のメタデータを変更・削除できます**。試すときは、必ず **Sandbox か Developer Edition** で行い、本番の組織では使わないでください。利用は自己責任です（ライセンスは [The Unlicense](LICENSE)。無保証・現状のままの提供）。
+> 不具合や要望は Issues に書いていただけますが、対応は約束できません。セキュリティの報告は [SECURITY.md](SECURITY.md) を見てください。
+
 > **この README は概要です。** 詳しい使い方・管理者向けの手順・コマンドの説明は、**[文書サイト](https://tama-create.github.io/sf-tools/)** にあります（手元では、`site/index.html` をブラウザで開いても読めます）。
 
 ---

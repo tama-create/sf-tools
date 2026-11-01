@@ -120,7 +120,7 @@ case "$*" in
         for _u in ${MOCK_GH_LOG_USERS:-}; do echo "Successfully authorized ${_u} with org ID 00D000000000001"; done
         echo "Deployed Source: SfToolsE2eHello"
         echo "Deleted Source: SfToolsE2eHello__c"
-        echo 'Slack response: {"ok":true}'
+        echo 'Slack の応答: {"ok":true}'
         exit 0 ;;
 esac
 exit 0

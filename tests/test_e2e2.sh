@@ -384,7 +384,7 @@ test_e2e_scenario_propagate_fail() {
     echo ""; echo -e "${CLR_HEAD}[TEST] scenario.sh propagate-fail（main・staging に衝突を作る → wf-propagate が失敗 → 削除して戻す）${CLR_RST}"
     _mk_cleanup_env
     local rc f="e2e-propagate-conflict.txt"
-    local ok_log=$'##[error]コンフリクト: main → staging のマージでコンフリクトが発生しました\nSlack response: {"ok":true}'
+    local ok_log=$'##[error]コンフリクト: main → staging のマージでコンフリクトが発生しました\nSlack の応答: {"ok":true}'
     export E2E_CONCLUSION_TRIES=1 VERIFY_DISPATCH_TRIES=2
     _reset_pf() {
         rm -f "$MB/disp.cnt" "$MB/concl.cnt" "$MB/stg.cnt"

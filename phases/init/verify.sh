@@ -369,7 +369,8 @@ _vchk() {
 }
 
 # Slack への通知が成功したか（ログに、Slack の応答 "ok":true があるか）。引数: 実行 ID
-_slack_ok() { verify_gh run view "$1" -R "$REPO" --log 2>/dev/null | grep -F "Slack response" | grep -q '"ok":true'; }  # 戻り値で判定するため run 不使用
+#   ワークフローの見出しは「Slack の応答:」（以前は「Slack response:」。どちらも読む）
+_slack_ok() { verify_gh run view "$1" -R "$REPO" --log 2>/dev/null | grep -E "Slack (の応答|response)" | grep -q '"ok":true'; }  # 戻り値で判定するため run 不使用
 
 # 実行が成功したか。失敗したら、ログを表示し、1 回だけ再実行する（一時的な失敗への対策）。引数: 実行 ID ラベル
 _run_ok() {

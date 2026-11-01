@@ -330,7 +330,7 @@ conclusion=%s
             .status) sed -n "s/^status=//p" "$IT_STATE/runs/$_id" ;;
             .conclusion) sed -n "s/^conclusion=//p" "$IT_STATE/runs/$_id" ;;
             .attempt) echo 1 ;;
-            *) echo "Slack response: {\"ok\":true}" ;;
+            *) echo "Slack の応答: {\"ok\":true}" ;;
         esac; exit 0 ;;
     "run cancel"|"run rerun") exit 0 ;;
     "secret set")   mkdir -p "$IT_STATE/secrets"; cat > "$IT_STATE/secrets/$3"; exit 0 ;;   # 値は、標準入力から読み、state/secrets にだけ置く（呼び出しの記録には、値を残さない）

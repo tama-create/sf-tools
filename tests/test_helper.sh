@@ -53,6 +53,7 @@ setup_force_dir() {
     mkdir -p "$dir/logs" "$dir/.git/hooks" "$dir/.sf" "$dir/.sfdx" \
              "$dir/sf-tools/config" "$dir/sf-tools/release" "$dir/sf-tools/logs"
     echo "ApexClass" > "$dir/sf-tools/config/metadata.txt"
+    echo '{"packageDirectories":[{"path":"force-app","default":true}],"sourceApiVersion":"66.0"}' > "$dir/sfdx-project.json"
     printf 'main\nstaging\ndevelop\n' > "$dir/sf-tools/config/branches.txt"
     echo "$dir"
 }
@@ -192,7 +193,7 @@ case "$1" in
                  "$_dest/sf-tools/release" "$_dest/sf-tools/logs" "$_dest/logs"
         exit "${MOCK_GIT_CLONE_EXIT:-0}" ;;
     add)            exit 0 ;;
-    commit)         exit 0 ;;
+    commit)         exit "${MOCK_GIT_COMMIT_EXIT:-0}" ;;
     diff-index)
         if [[ -n "${MOCK_GIT_DIFF_EXIT_2ND:-}" ]]; then
             _cnt_file="${MOCK_CALL_LOG%/*}/diffidx.cnt"
@@ -306,6 +307,20 @@ case "$1 $2" in
             printf '<ExtlClntAppGlobalOauthSettings>\n    <consumerKey>%s</consumerKey>\n</ExtlClntAppGlobalOauthSettings>\n' \
                 "${MOCK_SF_CONSUMER_KEY:-3MVGMOCKCONSUMERKEY}" > "$_d/${_nm}.ecaGlblOauth-meta.xml"
         fi
+        # sf-metasync の取得を再現: MOCK_SF_RETRIEVE_FILES=<パス|内容>（複数は改行区切り）を、カレント（取得先の一時プロジェクト）に書く。
+        #   MOCK_SF_RETRIEVE_EXIT=<コード>: その終了コードで失敗する（MOCK_SF_RETRIEVE_ERR=<文言> を標準エラーに出す）
+        #   MOCK_SF_RETRIEVE_JSON=<JSON>: 標準出力に出す応答
+        if [[ -n "${MOCK_SF_RETRIEVE_EXIT:-}" ]]; then
+            _rcnt="${MOCK_CALL_LOG%/*}/retrieve.cnt"; _rn=$(( $(cat "$_rcnt" 2>/dev/null || echo 0) + 1 )); echo "$_rn" > "$_rcnt"
+            # MOCK_SF_RETRIEVE_FAIL_ONCE=1: 1 回目だけ失敗する（やり直しの確認）
+            if [[ -z "${MOCK_SF_RETRIEVE_FAIL_ONCE:-}" || "$_rn" -eq 1 ]]; then
+                echo "${MOCK_SF_RETRIEVE_ERR:-}" >&2; exit "$MOCK_SF_RETRIEVE_EXIT"
+            fi
+        fi
+        if [[ -n "${MOCK_SF_RETRIEVE_FILES:-}" ]]; then
+            while IFS="|" read -r _fp _fc; do [[ -n "$_fp" ]] || continue; mkdir -p "${_fp%/*}"; printf '%s\n' "$_fc" > "$_fp"; done <<< "$MOCK_SF_RETRIEVE_FILES"
+        fi
+        [[ -n "${MOCK_SF_RETRIEVE_JSON:-}" ]] && echo "$MOCK_SF_RETRIEVE_JSON"
         exit 0 ;;
     "project generate")
         # sf project generate manifest の再現:
@@ -426,7 +441,8 @@ touch_ago() {
 #   （JSON の読み取りを、モックで偽装しない。呼び出しの記録にも、残さない）。それ以外は、バージョンを返すだけ
 #   本物の node の場所は、モックを PATH に置く前（このファイルの読み込み時）に控える。
 #   WSL（run_tests.sh は Git Bash から WSL に移って実行する）には node がなく、Windows 側の node.exe だけがある場合がある
-REAL_NODE_PATH="${REAL_NODE_PATH:-$(command -v node 2>/dev/null || command -v node.exe 2>/dev/null || true)}"  # 存在確認・値の取得のため run 不使用
+REAL_NODE_PATH="${REAL_NODE_PATH:-$(command -v node 2>/dev/null || command -v node.exe 2>/dev/null || true)}"
+export SF_METASYNC_NODE="${SF_METASYNC_NODE:-$REAL_NODE_PATH}"   # sf-metasync.sh が起動する node（モックの node は -e 以外を処理しないため、本物を渡す）  # 存在確認・値の取得のため run 不使用
 create_mock_node() {
     local bin_dir="$1"
     {

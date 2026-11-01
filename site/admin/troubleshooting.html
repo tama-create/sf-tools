@@ -32,7 +32,7 @@
   <tbody>
     <tr><td><code>sf-init.sh</code> が途中で止まった・中断したい</td><td><a href="#init">sf-init が止まった・中断したい</a></td></tr>
     <tr><td><code>main</code> / <code>staging</code> への PR が、いつまでもマージできない</td><td><a href="#required-checks">必須チェックの名前の食い違い</a></td></tr>
-    <tr><td><code>wf-metasync</code> / <code>wf-propagate</code> が失敗する</td><td><a href="#pat">PAT_TOKEN</a>・<a href="#propagate-conflict">伝播のコンフリクト</a></td></tr>
+    <tr><td><code>wf-metasync</code> / <code>wf-propagate</code> が失敗する</td><td><a href="#pat">PAT_TOKEN</a>・<a href="#propagate-conflict">伝播のコンフリクト</a>・<a href="#metasync-hold">削除の保留</a></td></tr>
     <tr><td><code>wf-validate</code> / <code>wf-sequence</code> が動かない・失敗する</td><td><a href="#wf-missing">検証のワークフロー</a></td></tr>
     <tr><td>マージしたのに、組織にリリースされない</td><td><a href="#release-skip">リリースされない</a></td></tr>
     <tr><td><code>sf-sync-wf.sh</code> が止まる</td><td><a href="#sync-wf">sf-sync-wf が止まる</a></td></tr>
@@ -83,6 +83,24 @@
   <p><code>wf-metasync</code> は、成功も失敗も通知しません。<code>wf-propagate</code> が通知するのは、コンフリクトのときだけです。Actions の画面か、<a href="maintenance.html#status"><code>sf-init.sh --status</code></a> の「直近の実行」で、ときどき確かめてください。</p>
 </div>
 <p>手元で <code>sf-metasync.sh</code> を実行した時刻と重なって、<code>wf-metasync</code> のプッシュが拒まれることもあります。このときは、Actions の画面から、もう一度実行してください。</p>
+
+<h3 id="metasync-hold"><code>wf-metasync</code> が、削除の保留で失敗する</h3>
+<p><code>wf-metasync</code> は、組織で削除されたものを、<code>main</code> からも消します。ただし、次のときは、<strong>削除だけを保留</strong>にして（ファイルは残します）、追加・変更の同期とほかのブランチへの伝播は済ませたうえで、ジョブを失敗（終了コード 3）として表示します。</p>
+<table>
+  <thead><tr><th>保留の理由</th><th>意味</th></tr></thead>
+  <tbody>
+    <tr><td>取得の応答に、問題の報告がある</td><td>その組織で使えない種類を、<code>metadata.txt</code> に書いている、取得の一部が失敗した、など。取得が不完全なときに、まとめて消さないための守りです</td></tr>
+    <tr><td>手元にあったフォルダが、取得結果で空</td><td>種類ごとのフォルダ（例: <code>classes</code>）の中身が、すべて組織にない。取得の失敗か、本当にすべて削除されたかを、確かめてください</td></tr>
+    <tr><td>削除が多い</td><td>削除が、max(100 件, 手元の対象のファイルの 10%) を超えた。初回や、組織で大量に削除したときに起きます</td></tr>
+  </tbody>
+</table>
+<p>直近 24 時間に <code>main</code> へマージされたファイルの削除は、組織へのリリースが終わっていない可能性があるため、別の理由（S5）で保留されます。これは、時間がたてば解けて、ジョブは<strong>失敗になりません</strong>。</p>
+<p>対処は、管理者のクローン（<code>admin</code> ブランチ）で、次のようにします。</p>
+<ol>
+  <li><code>bash ~/sf-tools/bin/sf-metasync.sh --dry-run</code> で、削除の一覧と、保留の理由を見ます（組織から取得して表示するだけで、何も変えません）。</li>
+  <li>削除してよいと判断できたら、<code>bash ~/sf-tools/bin/sf-metasync.sh --allow-mass-delete</code> で実行します（手元だけ。確認が出ます）。削除してはいけないものがあるときは、<code>metadata.txt</code> や組織の状態を直してから、もう一度実行してください。</li>
+</ol>
+<p>これまでの動作では、組織で削除されたものが <code>main</code> に残り続けていたため、<strong>初回は、たまっていた古いファイルが一度に削除の対象になります</strong>。上の手順で、1 回確かめてください。</p>
 
 <h3 id="propagate-conflict"><code>wf-propagate</code> が、コンフリクトで失敗する</h3>
 <p><code>main</code> へのマージのあと、<code>main</code> を <code>staging</code> / <code>develop</code> へ伝えるときに、同じ場所が別々に変更されていると、コンフリクト（衝突）します。このときは、そのブランチへのマージを取り消して（ブランチは変わりません）、Slack に、コンフリクトしたブランチ・PR・ログの URL を通知し、失敗で終わります。</p>

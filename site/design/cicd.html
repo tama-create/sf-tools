@@ -242,11 +242,11 @@ templates/.github/workflows/  ─ sf-init →   .github/workflows/
 <h3 id="metasync">wf-metasync（本番の自動同期）</h3>
 <p>平日の日本時間 9:00 / 12:00 / 15:00 / 18:00 に、本番の組織の最新の状態を、<code>main</code> に反映します。手動でも実行できます（セットアップの最後と、<code>sf-init.sh --verify</code> が、手動の実行で動かします）。同時には 1 つずつしか動きません。</p>
 <ol>
-  <li><code>main</code> を、全履歴つきでチェックアウトする（差分の計算に、全履歴が必要なため）</li>
-  <li>Node.js・Java・Salesforce CLI と、差分を計算する sf のプラグイン（sfdx-git-delta）を入れる</li>
+  <li><code>main</code> を、全履歴つきでチェックアウトする（直近のマージの確認に、履歴が必要なため）</li>
+  <li>Node.js と Salesforce CLI を入れる（sf のプラグインは、入れません）</li>
   <li>本番の組織に、JWT 認証でログインする</li>
   <li>sf-tools を取ってきて、<code>sf-metasync.sh</code> を実行する</li>
-  <li>差分を求め、<code>sf-tools/config/metadata.txt</code> に書かれた種類のメタデータを取得する（<a href="../reference/commands-auto.html#sf-metasync">取得する種類</a>）</li>
+  <li><code>sf-tools/config/metadata.txt</code> に書かれた種類のメタデータを、一時的な場所へ取得し、<code>main</code> の同期の対象のフォルダを、取得した内容と同じにする（追加・変更・<strong>削除</strong>。削除には安全の守りがあり、当たったものは保留にして、終了コード 3 で知らせます）（<a href="../reference/commands-auto.html#sf-metasync">取得する種類</a>）</li>
   <li>変更があれば、コミットして、<code>main</code> へ直接 push し、<code>branches.txt</code> のほかのブランチ（staging・develop）へ伝える（伝えられなかったブランチは、警告を出して飛ばす）。変更がなければ、何もせず、正常に終わる</li>
 </ol>
 

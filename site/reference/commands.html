@@ -83,7 +83,7 @@
     <tr><td><code>sf-update-secret.sh</code></td><td>「続行しますか？」（Y / N / q）</td><td>警告・確認を省略して実行する</td><td>する</td></tr>
     <tr><td><code>sf-sync-wf.sh</code></td><td>「続行しますか？」（Y / N / q）と、上書きの直前の確認。<code>--check</code> は、警告・確認を出しません（何も変更しません）。<code>--remove</code> は、削除の直前に、もう一度確認します</td><td>省略しない</td><td>しない</td></tr>
     <tr><td><code>sf-typecheck.sh</code></td><td>「続行しますか？」（Y / N / q）。<code>-y</code> で確認だけを省略できます（警告ボックスは表示します）。<code>--list</code>・<code>--coverage</code> も同じです</td><td>実行を拒否する（<code>--list</code>・<code>--coverage</code> は実行できます。確認に答えられないため、<code>-y</code> を付けます）</td><td>しない</td></tr>
-    <tr><td><code>sf-metasync.sh</code></td><td>「続行しますか？」（Y / N / q）。<code>main</code> にプッシュする前にも、変更（またはコミット）の一覧を表示して、もう一度確認します</td><td>警告・確認を省略して実行する（<code>wf-metasync</code> の通常の動き）</td><td>しない</td></tr>
+    <tr><td><code>sf-metasync.sh</code></td><td>「続行しますか？」（Y / N / q）。<code>main</code> にプッシュする前にも、計画（追加・変更・削除）の一覧を表示して、もう一度確認します（<code>--dry-run -y</code> は、取得と計画の表示だけで、確認を省きます）</td><td>警告・確認を省略して実行する（<code>wf-metasync</code> の通常の動き）</td><td>しない</td></tr>
   </tbody>
 </table>
 <ul>

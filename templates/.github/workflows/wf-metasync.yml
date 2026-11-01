@@ -21,19 +21,20 @@
 #   （番号は、本体のコメントの Step の番号と同じ）
 #   1. main を、全履歴（fetch-depth: 0）で、Secret PAT_TOKEN を使って取得する（以降の git push も、この PAT で行う）
 #   2. Node.js 22 を入れる
-#   3. Java 17（temurin）を入れる（以前の手順の名残。sfdx-git-delta の README の前提条件には Java はなく、必要かは未確認）
-#   4. Salesforce CLI を入れる（npm install --global @salesforce/cli）
-#   5. sf のプラグイン sfdx-git-delta を入れる（echo y | sf plugins install。インストールの確認に y を答える）
-#   6. JWT で main の組織にログインする（sf org login jwt。エイリアス prod・既定の組織に設定）。秘密鍵は、Secret SF_PRIVATE_KEY を
+#   3. Salesforce CLI を入れる（npm install --global @salesforce/cli）。sf のプラグインは入れない
+#      （以前入れていた sfdx-git-delta と Java は、sf-metasync.sh が使わなくなったため、外した。古い雛形のままでも、動く）
+#   4. JWT で main の組織にログインする（sf org login jwt。エイリアス prod・既定の組織に設定）。秘密鍵は、Secret SF_PRIVATE_KEY を
 #      base64 -d で /tmp/server.key に戻し（umask 077）、ステップの終了時に必ず消す
-#   7. コミットのユーザーを github-actions[bot]（github-actions[bot]@users.noreply.github.com）にする
-#   8. sf-tools を、公開リポジトリ https://github.com/tama-create/sf-tools.git から、Variable SF_TOOLS_BRANCH のブランチ
+#   5. コミットのユーザーを github-actions[bot]（github-actions[bot]@users.noreply.github.com）にする
+#   6. sf-tools を、公開リポジトリ https://github.com/tama-create/sf-tools.git から、Variable SF_TOOLS_BRANCH のブランチ
 #      （未設定なら main）で、~/sf-tools に clone する（Token は使わない）
-#   9. sf-metasync.sh を、オプションなしで実行する（GitHub Actions 上のため、警告・確認は表示されない）。主な動き:
-#        sf-tools/config/metadata.txt の種類を、組織から取得する → 差分があれば「定期更新: Salesforce変更の自動反映 (YYYY-MM-DD)」で
+#   7. sf-metasync.sh を、オプションなしで実行する（GitHub Actions 上のため、警告・確認は表示されない）。主な動き:
+#        sf-tools/config/metadata.txt の種類を、組織から一時プロジェクトへ取得する → main の「同期の対象のフォルダ」を、取得した内容と
+#        同じにする（追加・変更・削除。削除には、安全の守りがある）→ 差分があれば「定期更新: Salesforce変更の自動反映 (YYYY-MM-DD)」で
 #        コミットし、git push --no-verify origin main → push したときは、branches.txt の main 以外の各ブランチへ、main をマージして
 #        push する（失敗したブランチは WARNING でスキップ）。変更がなければ、何もせずに成功する。
-#        詳細と終了コード（0: 同期した・変更なし / 1: 中断）は、sf-metasync.sh の冒頭コメントを参照
+#        詳細と終了コード（0: 同期した・変更なし / 1: 中断 / 3: 同期したが、削除の保留がある）は、sf-metasync.sh の冒頭コメントを参照。
+#        終了コード 3 のとき、ジョブは失敗として表示される（追加・変更の同期と、伝播は済んでいる）
 #   どの手順が失敗しても、以降の手順は行わず、ジョブは失敗する（Slack への通知はしない）
 #
 # 【必要な Secrets / Variables】
@@ -100,31 +101,13 @@ jobs:
           node-version: "22"
 
       # --------------------------------------------------------------------------
-      # Step 3: Java のセットアップ（以前の手順の名残。sfdx-git-delta の README の前提条件（Node 22 以上。git の実行ファイルは不要）
-      #   には、Java はない（2026-10 時点で確認）。
-      #   ほかに必要とするものがあるかは、未確認のため、残している）
-      # --------------------------------------------------------------------------
-      - name: Java をインストール（差分抽出ツール用）
-        uses: actions/setup-java@v4
-        with:
-          distribution: "temurin"
-          java-version: "17"
-
-      # --------------------------------------------------------------------------
-      # Step 4: Salesforce CLI のインストール
+      # Step 3: Salesforce CLI のインストール
       # --------------------------------------------------------------------------
       - name: Salesforce CLI をインストール
         run: npm install --global @salesforce/cli
 
       # --------------------------------------------------------------------------
-      # Step 5: Salesforce Git Delta（SGD）プラグインのインストール（sf-metasync.sh の差分の解析 sf sgd source delta に使う。
-      #   echo y は、インストールの確認（署名の確認など）に答えるため）
-      # --------------------------------------------------------------------------
-      - name: 差分抽出ツール（Salesforce Git Delta）をインストール
-        run: echo y | sf plugins install sfdx-git-delta
-
-      # --------------------------------------------------------------------------
-      # Step 6: main の Salesforce 組織への認証（JWT。sf-metasync.sh が使うエイリアス prod で登録する）
+      # Step 4: main の Salesforce 組織への認証（JWT。sf-metasync.sh が使うエイリアス prod で登録する）
       # --------------------------------------------------------------------------
       - name: Salesforce 組織にログイン
         run: |
@@ -142,7 +125,7 @@ jobs:
           rm -f /tmp/server.key
 
       # --------------------------------------------------------------------------
-      # Step 7: Git コミット用ユーザー情報の設定
+      # Step 5: Git コミット用ユーザー情報の設定
       # --------------------------------------------------------------------------
       - name: Git ユーザー情報を設定
         run: |
@@ -150,7 +133,7 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
       # --------------------------------------------------------------------------
-      # Step 8: sf-tools のクローン（公開リポジトリ。Token なし。Variable SF_TOOLS_BRANCH のブランチ、未設定なら main）
+      # Step 6: sf-tools のクローン（公開リポジトリ。Token なし。Variable SF_TOOLS_BRANCH のブランチ、未設定なら main）
       # --------------------------------------------------------------------------
       - name: 自動化ツール（sf-tools）を取得
         run: |
@@ -158,7 +141,7 @@ jobs:
           chmod +x ~/sf-tools/bin/sf-metasync.sh
 
       # --------------------------------------------------------------------------
-      # Step 9: メタデータ取得・Git 同期の実行（main へのコミット・push と、main 以外のブランチへの伝播まで。
+      # Step 7: メタデータ取得・Git 同期の実行（main へのコミット・push と、main 以外のブランチへの伝播まで。
       #   GitHub Actions 上のため、警告・確認は表示されない）
       # --------------------------------------------------------------------------
       - name: メタデータ取得・Git 同期を実行

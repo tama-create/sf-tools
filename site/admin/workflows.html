@@ -137,11 +137,12 @@
 </ul>
 
 <h3 id="wf-metasync">wf-metasync（メタ同期）</h3>
-<p><code>main</code> の組織（<code>prod</code> の名前で接続した組織。本番とは限りません）から、最新のメタデータを取得し、変更があれば、<code>main</code> ブランチにコミットしてプッシュします（Salesforce の組織の内容を正とします）。処理の中身は <a href="../reference/commands-auto.html#sf-metasync"><code>sf-metasync.sh</code></a> です。</p>
+<p><code>main</code> の組織（<code>prod</code> の名前で接続した組織。本番とは限りません）から、最新のメタデータを取得し、<code>main</code> の「同期の対象のフォルダ」を、取得した内容と同じにして（追加・変更・<strong>削除</strong>）、変更があれば、コミットしてプッシュします（Salesforce の組織の内容を正とします）。処理の中身は <a href="../reference/commands-auto.html#sf-metasync"><code>sf-metasync.sh</code></a> です。</p>
 <ul>
   <li>プッシュしたときは、<code>sf-metasync.sh</code> 自身が、<code>main</code> を <code>staging</code> / <code>develop</code> へ伝えます（<code>wf-propagate</code> は動きません）。伝えるのに失敗したブランチは、警告を出して飛ばし、ジョブは成功で終わります（ログの警告で気づいて、補います）。</li>
   <li>このプッシュは PR ではないので、<code>wf-release</code> は動かず、組織へのリリースは行われません。</li>
   <li>変更がなければ、何もせずに成功します。</li>
+  <li><strong>削除の安全の守り:</strong> 組織で削除されたものは、<code>main</code> からも消えます。ただし、削除が多すぎるとき・フォルダごと消えたとき・取得に問題の報告があったときは、削除だけを<strong>保留</strong>（ファイルを残す）にして、追加・変更だけを反映し、ジョブを<strong>失敗として表示</strong>します（<a href="troubleshooting.html#metasync-hold">対処</a>）。</li>
   <li><strong>Slack には、成功・失敗のどちらも通知しません。</strong>失敗に気づくには、Actions の画面か、<a href="maintenance.html#status"><code>sf-init.sh --status</code></a> の「直近の実行」を見ます。</li>
   <li>定期の実行と手動の実行が重なっても、1 つずつ動きます（待っている実行は、新しい実行に置き換えられます）。手元で実行した <code>sf-metasync.sh</code> と重なってプッシュが拒まれたときは、失敗するので、もう一度実行してください。</li>
 </ul>

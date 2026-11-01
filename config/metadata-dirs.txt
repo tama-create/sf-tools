@@ -1,0 +1,79 @@
+# ==============================================================================
+# config/metadata-dirs.txt - メタデータの種類 → force-app/main/default の下のフォルダ名の表
+# ==============================================================================
+# lib/metasync.js（sf-metasync.sh の鏡像）が、「同期の対象のフォルダ」を決めるために読む。
+# 書式: 1 行に「種類名 フォルダ名」（空白区切り）。# で始まる行と空行は無視する。
+# 同じフォルダを共有する種類は、同じフォルダ名を書く（例: CustomObject・CustomField は objects）。
+# 設計: doc/sf-metasync-redesign.md 付録 A。「要確認」は、Developer Edition の取得結果で、フォルダ名を確かめる必要があるもの。
+# 表にない種類でも、取得結果にフォルダが現れれば、そのフォルダは同期の対象になる（lib/metasync.js）。
+# ==============================================================================
+ApexClass classes
+ApexTrigger triggers
+ApexPage pages
+ApexComponent components
+ApexTestSuite testSuites
+LightningComponentBundle lwc
+AuraDefinitionBundle aura
+FlexiPage flexipages
+CustomObject objects
+CustomField objects
+CustomMetadata customMetadata
+CustomTab tabs
+CustomHelpMenuSection customHelpMenuSections
+CustomPageWebLink weblinks
+Layout layouts
+HomePageComponent homePageComponents
+HomePageLayout homePageLayouts
+QuickAction quickActions
+GlobalValueSet globalValueSets
+CustomLabels labels
+CustomNotificationType notificationtypes
+CustomPermission customPermissions
+CustomApplication applications
+ApprovalProcess approvalProcesses
+Workflow workflows
+WorkflowAlert workflows
+WorkflowFieldUpdate workflows
+WorkflowRule workflows
+PermissionSet permissionsets
+PermissionSetGroup permissionsetgroups
+Profile profiles
+SharingRules sharingRules
+SharingCriteriaRule sharingRules
+SharingOwnerRule sharingRules
+Report reports
+ReportFolder reports
+ReportType reportTypes
+Dashboard dashboards
+DashboardFolder dashboards
+EmailTemplate email
+EmailFolder email
+EmailServicesFunction emailservices
+Letterhead letterhead
+NamedCredential namedCredentials
+ExternalCredential externalCredentials
+RemoteSiteSetting remoteSiteSettings
+CorsWhitelistOrigin corsWhitelistOrigins
+CspTrustedSite cspTrustedSites
+ExternalDataSource dataSources
+ExternalServiceRegistration externalServiceRegistrations
+PlatformEventChannel platformEventChannels
+PlatformEventChannelMember platformEventChannelMembers
+LightningMessageChannel messageChannels
+Queue queues
+Document documents
+DocumentFolder documents
+ContentAsset contentassets
+AuthProvider authproviders  # 要確認
+DuplicateRule duplicateRules  # 要確認
+StandardValueSet standardValueSets  # 要確認
+AssignmentRules assignmentRules  # 要確認
+AutoResponseRules autoResponseRules  # 要確認
+EscalationRules escalationRules  # 要確認
+MatchingRules matchingRules  # 要確認
+ApexEmailNotifications apexEmailNotifications  # 要確認
+CustomObjectTranslation objectTranslations  # 要確認
+Flow flows  # 要確認
+FlowDefinition flowDefinitions  # 要確認
+ConnectedApp connectedApps  # 要確認
+Settings settings  # 要確認

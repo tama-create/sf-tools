@@ -275,13 +275,13 @@ develop / staging で並行開発中の変更と main の変更が同じ箇所�
 **実行スケジュール:** `cron: "0 0-10/3 * * 1-5"`（UTC 0:00 / 3:00 / 6:00 / 9:00 = JST 9:00 / 12:00 / 15:00 / 18:00、平日のみ、3 時間おき）。手動の workflow_dispatch もある（`sf-init` のセットアップの最後と、`sf-init.sh --verify` が起動する）。同時実行は、1 つずつ（concurrency `metasync`）。
 
 **処理フロー:**
-1. main ブランチを全履歴付きでチェックアウト（SGD が全履歴を必要とするため。`PAT_TOKEN` で checkout することで、後続の push が Ruleset `protect-main` / `protect-staging` をバイパス可能。PAT の持ち主が Admin のとき）
-2. Node.js / Java / Salesforce CLI / sf のプラグイン sfdx-git-delta（SGD）をインストール
+1. main ブランチを全履歴付きでチェックアウト（直近のマージの確認（`git log --since`。削除の守り S5）に、履歴が要るため。`PAT_TOKEN` で checkout することで、後続の push が Ruleset `protect-main` / `protect-staging` をバイパス可能。PAT の持ち主が Admin のとき）
+2. Node.js / Salesforce CLI をインストール（以前入れていた Java と sf のプラグイン sfdx-git-delta は、使わなくなったため外した）
 3. 本番組織（エイリアス `prod`）に JWT Bearer Flow で認証（`SF_PRIVATE_KEY` / `SF_CONSUMER_KEY_PROD` / `SF_USERNAME_PROD` / `SF_INSTANCE_URL_PROD`）
 4. sf-tools をクローンして sf-metasync.sh を実行
-5. `git pull origin main --rebase` のあと、SGD（`sf sgd source delta --from origin/main --to HEAD`）で差分の `package.xml` を生成
-6. 差分取得（package.xml があれば）+ `sf-tools/config/metadata.txt` に定義されたメタデータタイプを一括 retrieve
-7. 変更がある場合: git commit → push（main へ直接 push。`--no-verify`）→ branches.txt の main 以外の各ブランチへ伝播（失敗したブランチは WARNING でスキップ）
+5. `git pull origin main --rebase` のあと、組織から一時プロジェクトへ取得する準備（`sfdx-project.json` の確認など）
+6. `sf-tools/config/metadata.txt` に定義されたメタデータタイプを、一時プロジェクトへ一括 retrieve（一時的なエラーは 1 回だけやり直す）→ `lib/metasync.js` で、main の「同期の対象のフォルダ」を、取得結果と同じにする（追加・変更・**削除**。削除には安全の守り S2〜S5 があり、当たったものは保留）。設計: `doc/sf-metasync-redesign.md`
+7. 変更がある場合: git commit → push（main へ直接 push。`--no-verify`）→ branches.txt の main 以外の各ブランチへ伝播（失敗したブランチは WARNING でスキップ）。削除の保留（S2〜S4）があるときは、これらを行ったあと終了コード 3（ジョブは失敗として表示される）
 8. 変更がない場合: 何もせず正常終了
 
 詳細は `sf-metasync.sh` の冒頭コメントと `doc/dev-reference.md` の 4.3。

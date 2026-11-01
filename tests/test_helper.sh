@@ -264,7 +264,35 @@ case "$1 $2" in
         fi
         [[ "${MOCK_SF_LOGIN_EXIT:-0}" -eq 0 ]] && echo "Successfully authorized fake@example.com with org ID 00D000000000001AAA"
         exit "${MOCK_SF_LOGIN_EXIT:-0}" ;;
+    "org list")
+        # sf-metasync の変更の検知（lib/metasync.js detect）の一覧: sf org list metadata --metadata-type 種類 [--folder フォルダ]。
+        #   応答は、ディレクトリ MOCK_SF_LIST_DIR の <種類>.json（フォルダ付きは <種類>__<フォルダ>.json。$ や / は _ に置換）の
+        #   「result」の中身（配列）。ファイルがなければ、空の一覧。MOCK_SF_LIST_FAIL=<種類> で、その種類の一覧が失敗する
+        if [[ "$3" == "metadata" ]]; then
+            _lt=""; _lf=""; _prev=""
+            for _a in "$@"; do
+                [[ "$_prev" == "--metadata-type" ]] && _lt="$_a"
+                [[ "$_prev" == "--folder" ]] && _lf="$_a"
+                _prev="$_a"
+            done
+            [[ -n "${MOCK_SF_LIST_FAIL:-}" && "$_lt" == "$MOCK_SF_LIST_FAIL" ]] && { echo '{"status":1,"message":"list failed"}'; exit 1; }
+            _key="$_lt"; [[ -n "$_lf" ]] && _key="${_lt}__${_lf//[\$\/]/_}"
+            if [[ -f "${MOCK_SF_LIST_DIR:-/nonexistent}/${_key}.json" ]]; then
+                echo "{\"status\":0,\"result\":$(cat "${MOCK_SF_LIST_DIR}/${_key}.json")}"
+            else
+                echo '{"status":0,"result":[]}'
+            fi
+            exit 0
+        fi
+        exit 0 ;;
     "data query")
+        # 設定変更の履歴の件数（sf-metasync の変更の検知）: SELECT COUNT() FROM SetupAuditTrail。
+        #   MOCK_SF_AUDIT_COUNT=<件数>（既定 0）／ MOCK_SF_AUDIT_EXIT=1 で、問い合わせの失敗を再現する
+        if [[ "$*" == *"SetupAuditTrail"* ]]; then
+            [[ "${MOCK_SF_AUDIT_EXIT:-0}" -ne 0 ]] && { echo '{"status":1,"message":"query failed"}'; exit 1; }
+            echo "{\"status\":0,\"result\":{\"totalSize\":${MOCK_SF_AUDIT_COUNT:-0},\"done\":true,\"records\":[]}}"
+            exit 0
+        fi
         # 組織の種類の取得（org_read_info: SELECT ... FROM Organization）。
         #   MOCK_SF_ORG_INFO=<JSON> で応答を差し替える。既定は Sandbox（Enterprise Edition）
         #   MOCK_SF_ORG_QUERY_EXIT=1 で、取得の失敗を再現する

@@ -6,8 +6,11 @@
 # Actions の画面での名前は「[metasync] メタ同期」（最上位の name:）。
 #
 # 【起動の条件】
-#   - schedule: cron "0 0-10/3 * * 1-5"（UTC の月〜金 0:00・3:00・6:00・9:00 = 日本時間の月〜金 9:00・12:00・15:00・18:00）。
-#     既定のブランチ（main）にあるこのファイルで動く。GitHub の混雑により、開始が遅れることがある
+#   - schedule: cron "0 0 * * 1-5"（UTC の月〜金 0:00 = 日本時間の月〜金 9:00。毎日 1 回。--full 付き）と、
+#     cron "0 3-10/3 * * 1-5"（UTC の月〜金 3:00・6:00・9:00 = 日本時間の月〜金 12:00・15:00・18:00）。
+#     既定のブランチ（main）にあるこのファイルで動く。GitHub の混雑により、開始が遅れることがある。
+#     --full は、変更の検知（Variable SF_METASYNC_DETECT が shadow・on のとき）が「変更なし」でも、全件取得する指定
+#     （検知できない種類（区分 C）の変更を、毎日 1 回は反映するため）。手動の実行にも付く
 #   - workflow_dispatch（手動の実行。入力なし）。どのブランチで実行しても、main を取得して同期する
 #     （sf-init のセットアップの最後と、sf-init.sh --verify が、gh workflow run で起動する）
 #   - 起動しない場合: PR・push などのイベント（schedule と workflow_dispatch 以外では、動かない）
@@ -28,7 +31,9 @@
 #   5. コミットのユーザーを github-actions[bot]（github-actions[bot]@users.noreply.github.com）にする
 #   6. sf-tools を、公開リポジトリ https://github.com/tama-create/sf-tools.git から、Variable SF_TOOLS_BRANCH のブランチ
 #      （未設定なら main）で、~/sf-tools に clone する（Token は使わない）
-#   7. sf-metasync.sh を、オプションなしで実行する（GitHub Actions 上のため、警告・確認は表示されない）。主な動き:
+#   7. sf-metasync.sh を実行する（GitHub Actions 上のため、警告・確認は表示されない）。オプションは、毎日 1 回の cron と
+#      手動の実行のときだけ --full、それ以外はなし。環境変数 SF_METASYNC_DETECT に、Variable SF_METASYNC_DETECT（未設定なら off）を渡す。
+#      主な動き（SF_METASYNC_DETECT が off のとき。shadow・on の検知は、sf-metasync.sh の冒頭コメントを参照）:
 #        sf-tools/config/metadata.txt の種類を、組織から一時プロジェクトへ取得する → main の「同期の対象のフォルダ」を、取得した内容と
 #        同じにする（追加・変更・削除。削除には、安全の守りがある）→ 差分があれば「定期更新: Salesforce変更の自動反映 (YYYY-MM-DD)」で
 #        コミットし、git push --no-verify origin main → push したときは、branches.txt の main 以外の各ブランチへ、main をマージして
@@ -50,6 +55,7 @@
 #     SF_USERNAME_PROD     : main の組織の接続ユーザー名
 #     SF_INSTANCE_URL_PROD : main の組織の接続 URL（https://login.salesforce.com 等）
 #     SF_TOOLS_BRANCH      : clone する sf-tools のブランチ（任意。未設定なら main。Phase 9 は development のときだけ登録する）
+#     SF_METASYNC_DETECT   : 変更の検知のモード（任意。off / shadow / on。未設定なら off = 従来どおり、毎回、全件取得）
 #
 # 【補足】
 #   - 同期の push は、pull_request ではないため、wf-release.yml・wf-propagate.yml は動かない（組織へのリリースは行わない。
@@ -65,7 +71,8 @@
 name: "[metasync] メタ同期"
 on:
   schedule:
-    - cron: "0 0-10/3 * * 1-5"
+    - cron: "0 0 * * 1-5"
+    - cron: "0 3-10/3 * * 1-5"
   workflow_dispatch:
 
 jobs:
@@ -145,4 +152,7 @@ jobs:
       #   GitHub Actions 上のため、警告・確認は表示されない）
       # --------------------------------------------------------------------------
       - name: メタデータ取得・Git 同期を実行
-        run: ~/sf-tools/bin/sf-metasync.sh
+        env:
+          SF_METASYNC_DETECT: ${{ vars.SF_METASYNC_DETECT || 'off' }}
+        # --full: 毎日 1 回の cron（0 0 * * 1-5）と、手動の実行では、変更の検知が「変更なし」でも、全件取得する
+        run: ~/sf-tools/bin/sf-metasync.sh ${{ (github.event_name != 'schedule' || github.event.schedule == '0 0 * * 1-5') && '--full' || '' }}

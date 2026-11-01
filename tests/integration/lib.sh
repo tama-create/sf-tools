@@ -353,7 +353,12 @@ _it_fault sf "$*"
 _alias=$(cat "$IT_STATE/sf.alias" 2>/dev/null || true)
 [[ "$1" == "--version" ]] && { echo "@salesforce/cli/2.0.0 linux-x64 node-v20.0.0"; exit 0; }
 case "$1 $2" in
+    "org list")
+        # sf-metasync の変更の検知の一覧（sf org list metadata ...）: 空の一覧。変更の有無は、履歴の件数（state/sf.audit）で動かす
+        [[ "$3" == "metadata" ]] && { echo '{"status":0,"result":[]}'; exit 0; } ;;
     "data query")
+        # 設定変更の履歴の件数（sf-metasync の変更の検知）: state/sf.audit の数（なければ 0）
+        case "$*" in *"SetupAuditTrail"*) echo "{\"status\":0,\"result\":{\"totalSize\":$(cat "$IT_STATE/sf.audit" 2>/dev/null || echo 0),\"done\":true,\"records\":[]}}"; exit 0 ;; esac
         case "$*" in *"Profile.Name"*) echo "{\"status\":0,\"result\":{\"records\":[{\"Profile\":{\"Name\":\"System Administrator\"}}],\"totalSize\":1}}"; exit 0 ;; esac
         echo "{\"status\":0,\"result\":{\"records\":[{\"Id\":\"00D000000000001AAA\",\"Name\":\"IT Org\",\"IsSandbox\":false,\"OrganizationType\":\"Developer Edition\",\"TrialExpirationDate\":null}],\"totalSize\":1}}"; exit 0 ;;
     "sgd source")

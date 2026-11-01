@@ -110,13 +110,13 @@
 </ul>
 
 <h2 id="sf-metasync"><code>sf-metasync.sh</code></h2>
-<pre><code>sf-metasync.sh [-n] [-y] [--allow-mass-delete] [-j] [-v]</code></pre>
+<pre><code>sf-metasync.sh [-n] [-y] [--full] [--allow-mass-delete] [-j] [-v]</code></pre>
 <p><code>sf-init</code> で登録した <code>prod</code> エイリアスの組織（本番・Sandbox のどちらでも）から、メタデータを取得して、<code>main</code> にコミットしてプッシュします。<strong>Salesforce 組織の内容を正</strong>とします。どのブランチから実行しても、<code>main</code> に切り替えて処理し、終わると元のブランチに戻ります。主に、GitHub Actions（<code>wf-metasync</code>）からの定期実行を想定しています。</p>
 <div class="box admin">
   <div class="title">管理者専用</div>
   <p>実行の前に、赤い警告ボックスと確認（Y/N）が表示されます。<code>GITHUB_ACTIONS=true</code> のときは、警告も確認もスキップして、自動で実行します。</p>
 </div>
-<p><code>-n</code>（<code>--dry-run</code>）は、組織から取得して、計画（追加・変更・削除・保留の件数と一覧）を表示するだけで終わります（作業ツリーの変更・コミット・プッシュ・伝播は行いません）。<code>-y</code>（<code>--yes</code>）は、<code>--dry-run</code> のときだけ、最初の確認を省きます。<code>--allow-mass-delete</code> は、削除の保留のうち、<strong>消えたフォルダ</strong>と<strong>削除が多い</strong>ものを解きます（手元で実行したときだけ。GitHub Actions 上では指定できません）。<code>-j</code>（<code>--json</code>）は、組織からの取得の応答（JSON）の先頭を、ログにも記録します。<code>-v</code>（<code>--verbose</code>）は、コマンドの応答をコンソールにも表示します。これと <code>-h</code>（<code>--help</code>）以外の引数は、中断します（終了コード 1）。</p>
+<p><code>-n</code>（<code>--dry-run</code>）は、組織から取得して、計画（追加・変更・削除・保留の件数と一覧）を表示するだけで終わります（作業ツリーの変更・コミット・プッシュ・伝播は行いません）。<code>-y</code>（<code>--yes</code>）は、<code>--dry-run</code> のときだけ、最初の確認を省きます。<code>--full</code> は、変更の検知（下の補足）が「変更なし」でも、取得を省かずに、全件取得します。<code>--allow-mass-delete</code> は、削除の保留のうち、<strong>消えたフォルダ</strong>と<strong>削除が多い</strong>ものを解きます（手元で実行したときだけ。GitHub Actions 上では指定できません）。<code>-j</code>（<code>--json</code>）は、組織からの取得の応答（JSON）の先頭を、ログにも記録します。<code>-v</code>（<code>--verbose</code>）は、コマンドの応答をコンソールにも表示します。これと <code>-h</code>（<code>--help</code>）以外の引数は、中断します（終了コード 1）。</p>
 <h3>役割</h3>
 <ul>
   <li>組織の最新のメタデータを取得する</li>
@@ -133,12 +133,12 @@
   <li>警告を表示して、続行の確認（Y/N）を取る（GitHub Actions 上では、表示も確認もしない）</li>
   <li><code>main</code> に切り替える。追跡中のファイルに未コミットの変更があれば、いったん退避（<code>git stash</code>）する</li>
   <li>リモートの最新を取り込む（<code>git fetch origin</code>（失敗しても続行）→ <code>git pull origin main --rebase</code>。失敗したら <code>git rebase --abort</code> して中断）。その前に、<code>main</code> に未コミットの変更が残っているとき・手元の実行で、追跡していないファイルがあるときは、中断する（下の補足）</li>
-  <li>取得先の一時プロジェクトを準備する（<code>sfdx-project.json</code> の <code>packageDirectories</code> が 1 つでなければ中断）。作業ツリーには、まだ何も書かない</li>
+  <li>取得先の一時プロジェクトを準備する（<code>sfdx-project.json</code> の <code>packageDirectories</code> が 1 つでなければ中断）。作業ツリーには、まだ何も書かない。続けて、環境変数 <code>SF_METASYNC_DETECT</code> が <code>shadow</code> または <code>on</code> のときは、<strong>変更の検知</strong>を行う（読み取りのみ）。<code>on</code> で「変更なし」なら、次以降を行わずに終了する（コミット・プッシュ・伝播もしない）。検知の失敗・不明・変更ありは、すべて、次の全件取得に進む</li>
   <li>組織からメタデータを、一時プロジェクトへ取得する（<code>metadata.txt</code> の全種類。<code>--ignore-conflicts</code>・<code>--json</code>）。一時的なエラー（<code>MetadataTransferError</code>・<code>ERROR_HTTP_404</code>・接続の切断など）なら、60 秒待って 1 回だけやり直す。それでも失敗したら中断する（作業ツリーは変わらない）</li>
   <li>直近 24 時間に、同期以外のコミット（PR のマージなど）で変わったファイルの一覧を作る（削除の守り S5 に使う）</li>
   <li>計画を作る: 同期の対象のフォルダごとに、手元と取得結果を比べて、追加・変更・削除を決める。次に当たる削除は<strong>保留</strong>にして、ファイルを残す。S2 取得の応答に問題の報告がある ／ S3 手元に 1 件以上あったフォルダが、取得結果で 0 件 ／ S4 削除が max(100 件, 手元の対象の 10%) を超える ／ S5 直近にマージされたファイル。取得の応答が失敗（S1）なら、中断する。計画の要約を表示し、手元では、変更があるときに確認（Y/N）を取る。<code>--dry-run</code> は、ここで終了する</li>
   <li>計画を作業ツリーに反映する</li>
-  <li>同期の対象のパッケージのフォルダをステージし（<code>sf-tools/release/</code> は含めない）、変更があれば、「定期更新: Salesforce変更の自動反映 (YYYY-MM-DD)」でコミットしてプッシュする（本文に件数）。変更がなく、<code>origin/main</code> より先のコミットが残っていれば、一覧を表示して確認を取り、プッシュだけ行う。どちらもなければ、「完了: Salesforce 組織側に変更はありませんでした。」と表示して終わる（コミット・プッシュの失敗は、中断）</li>
+  <li>（検知が「変更あり」「不明」だったときは、検知の状態を <code>sf-tools/metasync/state.json</code> に書く。）同期の対象のパッケージのフォルダ（と、書いたときは状態ファイル）をステージし（<code>sf-tools/release/</code> は含めない）、変更があれば、「定期更新: Salesforce変更の自動反映 (YYYY-MM-DD)」でコミットしてプッシュする（本文に件数）。変更がなく、<code>origin/main</code> より先のコミットが残っていれば、一覧を表示して確認を取り、プッシュだけ行う。どちらもなければ、「完了: Salesforce 組織側に変更はありませんでした。」と表示して終わる（コミット・プッシュの失敗は、中断）</li>
   <li>プッシュしたときだけ、ほかのブランチへ伝える（各ブランチで、<code>git pull --rebase</code> → <code>git merge main</code> → <code>git push --no-verify</code>）。リモートにないブランチは、警告を出して飛ばします。伝えるのに失敗したブランチも、取り消して（<code>--abort</code>）、警告を出して飛ばし、次へ進みます</li>
   <li>終了時（事前の確認より後に中断したときも）、計画を反映したあと、コミットの前に中断したときは、同期の対象のパッケージのフォルダを元に戻す。そのあと、元のブランチに戻り、退避した変更を戻し、一時プロジェクトを削除する</li>
 </ol>
@@ -147,6 +147,7 @@
   <li>終了コードは、成功（同期した・変更がなかった）が <code>0</code>、中断が <code>1</code>、<strong>削除の保留（S2・S3・S4）があるとき</strong>が <code>3</code> です。<code>3</code> のときも、追加・変更のコミット・プッシュと、ほかのブランチへの伝播は済んでいます（GitHub Actions では、ジョブが失敗として表示されます）。S5（直近にマージされたファイル）の保留だけのときは <code>0</code> です。</li>
   <li><strong>同期の対象のフォルダ</strong>は、<code>force-app/main/default</code> の下の、<code>metadata.txt</code> の種類に当たるフォルダ（種類とフォルダ名の対応は、sf-tools の <code>config/metadata-dirs.txt</code>）と、取得結果にあるフォルダです。それ以外（<code>metadata.txt</code> にない種類のフォルダなど）は触りません。<code>objects</code> のように、複数の種類が共有するフォルダは、フォルダ単位で同じにします。</li>
   <li>削除しないファイル: <code>.gitkeep</code> と、<code>.forceignore</code> の行に当たるファイル。</li>
+  <li><strong>変更の検知</strong>（環境変数 <code>SF_METASYNC_DETECT</code>。<code>off</code> が既定）: 組織に変更があるかを、全件取得の前に調べて、変更がなければ取得を省きます。<code>off</code> = 行わない（従来どおり、毎回、全件取得）／ <code>shadow</code> = 検知はするが、取得は常に行う（検知が「変更なし」なのに、実際は変更があったときは、警告で一覧を出す。運用の前の確かめ用）／ <code>on</code> = 「変更なし」なら取得を省く。種類ごとに、設定変更の履歴（A）か、更新日時の一覧（B）で調べます（sf-tools の <code>config/metasync-detect.txt</code>）。表にない種類は、検知できないため、毎日 1 回の全件取得（<code>--full</code>）でだけ反映されます（最大約 1 日の遅れ）。検知の状態は <code>sf-tools/metasync/state.json</code> に持ち、変更あり・不明の回にだけ更新します（状態だけが変わるコミットは、ほかのブランチへ伝えません）。検知は取得を省く手がかりで、失敗や不明のときは、必ず全件取得します。接続ユーザーに「設定・定義の参照」の権限がないと、履歴の問い合わせが失敗し、毎回、全件取得になります。</li>
   <li><strong>以前の動作との違い:</strong> 以前は、組織で削除されたものが <code>main</code> に残り続け、差分の解析に sfdx-git-delta（公式サポート外のプラグイン）を使っていました。今は、削除が反映され、プラグインは使いません。初回は、たまっていた古いファイルが一度に削除の対象になり、保留（終了コード 3）になることがあります。手元で <code>--dry-run</code> で確かめてから <code>--allow-mass-delete</code> で実行してください。</li>
   <li>未コミットの変更の判定と退避は、<strong>追跡中のファイルだけ</strong>が対象です。手元で実行したときは、追跡していない（新しい）ファイル（<code>.gitignore</code> の対象と、<code>sf-tools/release/</code> を除く）があると、同期のコミットに無関係なファイルが含まれてしまうため、手順 5 で中断します。GitHub Actions 上では、確認しません。<code>sf-tools/release/</code>（作業用のブランチの作業ファイル）は、確認の対象外で、同期のコミットにも含めません。</li>
   <li><code>branches.txt</code> がない・ブランチの定義がないときは、警告を表示し、<code>main</code> だけとして扱います（ほかのブランチへは伝えません）。</li>

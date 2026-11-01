@@ -488,6 +488,152 @@ test_apply_confirm_no_aborts() {
     _ms_unset; teardown "$td" "$mb"
 }
 
+# ------------------------------------------------------------------------------
+# 変更の検知（SF_METASYNC_DETECT。設計: doc/sf-metasync-redesign.md 15 章）のテスト
+# ------------------------------------------------------------------------------
+# 検知の準備: 状態ファイル（前回の全件取得の記録）と、sf のモック（lib/metasync.js が SF_METASYNC_SF で使う）を用意する。
+#   引数: 履歴の件数（MOCK_SF_AUDIT_COUNT）。状態は、「一覧が空・A の種類あり」の組を、検知自身に作らせる（1 回目は不明）
+_det_env() {
+    mkdir -p "$td/sf-tools/config" "$td/sf-tools/metasync"
+    export SF_METASYNC_SF="bash $mb/sf" MOCK_SF_LIST_DIR="$td/lists" MOCK_SF_AUDIT_COUNT="${1:-0}"
+    mkdir -p "$td/lists"
+}
+_det_unset() { unset SF_METASYNC_SF MOCK_SF_LIST_DIR MOCK_SF_AUDIT_COUNT MOCK_SF_AUDIT_EXIT SF_METASYNC_DETECT; }
+# 現在の種類の一覧（setup_std_env が作る sf-tools/config/metadata.txt）で、検知が書く状態を、あらかじめ作る
+_det_state() {
+    local types="$td/sf-tools/config/metadata.txt"
+    SF_METASYNC_SF="bash $mb/sf" MOCK_SF_LIST_DIR="$td/lists" "$SF_METASYNC_NODE" "$SF_TOOLS_DIR/lib/metasync.js" detect --org prod \
+        --types-file "$types" --table "$SF_TOOLS_DIR/config/metasync-detect.txt" --state "$td/none.json" \
+        --out-state "$td/sf-tools/metasync/state.json" --now 2026-11-01T00:00:00Z > /dev/null 2>&1
+}
+
+# off（既定）: 検知を行わない（履歴・一覧を問い合わせない）。従来どおり、取得する
+test_detect_off_default() {
+    local td mb mh; _ms_env td mb mh; _det_env 0
+    _ms_run 'Y\nY\n'
+    assert_exit_ok "$_MS_RC" "検知 off: 正常終了"
+    assert_file_contains "$MOCK_CALL_LOG" "sf project retrieve start" "検知 off: 取得する"
+    assert_file_not_contains "$MOCK_CALL_LOG" "SetupAuditTrail" "検知 off: 履歴は問い合わせない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "org list metadata" "検知 off: 一覧は問い合わせない"
+    [[ ! -f "$td/sf-tools/metasync/state.json" ]] && pass "検知 off: 状態ファイルを作らない" || fail "検知 off: 状態ファイルを作らない"
+    _ms_unset; _det_unset; teardown "$td" "$mb"
+}
+
+# 不正なモード → 中断
+test_detect_bad_mode() {
+    local td mb mh; _ms_env td mb mh
+    SF_METASYNC_DETECT=maybe _ms_run 'Y\nY\n'
+    assert_exit_fail "$_MS_RC" "検知のモードが不正 → 中断"
+    assert_output_contains "$_MS_OUT" "off / shadow / on" "検知のモードが不正 → 使える値が出る"
+    _ms_unset; _det_unset; teardown "$td" "$mb"
+}
+
+# on・状態なし → 不明 → 全件取得し、状態ファイルを作ってコミットする（ファイルの変更がなくても、状態だけのコミット。伝播しない）
+test_detect_on_first_run_writes_state() {
+    local td mb mh; _ms_env td mb mh; _det_env 0
+    export MOCK_GIT_DIFF_EXIT_2ND=1
+    SF_METASYNC_DETECT=on _ms_run 'Y\nY\n'
+    assert_exit_ok "$_MS_RC" "検知 on・状態なし: 正常終了"
+    assert_file_contains "$MOCK_CALL_LOG" "sf project retrieve start" "検知 on・状態なし（不明）: 全件取得する"
+    [[ -f "$td/sf-tools/metasync/state.json" ]] && pass "検知 on・状態なし: 状態ファイルを書く" || fail "検知 on・状態なし: 状態ファイルを書く"
+    assert_file_contains "$MOCK_CALL_LOG" "git add -A -- force-app sf-tools/metasync/state.json" "状態ファイルも、ステージする"
+    assert_file_contains "$MOCK_CALL_LOG" "検知の状態の更新のみ" "メタデータの変更がなければ、コミットの本文に「状態の更新のみ」と書く"
+    assert_output_contains "$_MS_OUT" "下流ブランチへの伝播は行いません" "状態ファイルの更新だけのコミットは、下流へ伝播しない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "git merge" "状態ファイルの更新だけのコミットは、merge しない"
+    _ms_unset; _det_unset; teardown "$td" "$mb"
+}
+
+# on・変更なし → 取得を省いて終了（コミット・push しない）。状態ファイルは変わらない
+test_detect_on_unchanged_skips_retrieve() {
+    local td mb mh; _ms_env td mb mh; _det_env 0
+    _det_state
+    cp "$td/sf-tools/metasync/state.json" "$td/state.before"
+    SF_METASYNC_DETECT=on _ms_run 'Y\nY\n'
+    assert_exit_ok "$_MS_RC" "検知 on・変更なし: 正常終了"
+    assert_output_contains "$_MS_OUT" "全件取得を省きました" "検知 on・変更なし: 取得を省いたと表示される"
+    assert_file_not_contains "$MOCK_CALL_LOG" "sf project retrieve" "検知 on・変更なし: 取得しない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "git commit" "検知 on・変更なし: commit しない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "git push" "検知 on・変更なし: push しない"
+    cmp -s "$td/sf-tools/metasync/state.json" "$td/state.before" && pass "検知 on・変更なし: 状態ファイルは変わらない" || fail "検知 on・変更なし: 状態ファイルは変わらない"
+    _ms_unset; _det_unset; teardown "$td" "$mb"
+}
+
+# on・変更なしでも、--full なら取得する（毎日の全件取得）。変更もなければ、状態は更新しない
+test_detect_on_full_option() {
+    local td mb mh; _ms_env td mb mh; _det_env 0
+    _det_state
+    cp "$td/sf-tools/metasync/state.json" "$td/state.before"
+    SF_METASYNC_DETECT=on _ms_run 'Y\nY\n' --full
+    assert_exit_ok "$_MS_RC" "検知 on・--full: 正常終了"
+    assert_file_contains "$MOCK_CALL_LOG" "sf project retrieve start" "検知 on・変更なし・--full: 取得する"
+    assert_output_contains "$_MS_OUT" "full が指定されているため" "--full: 取得する理由が出る"
+    cmp -s "$td/sf-tools/metasync/state.json" "$td/state.before" && pass "--full・検知は変更なし: 状態は更新しない（毎日、状態だけのコミットを作らない）" || fail "--full・検知は変更なし: 状態は更新しない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "git commit" "--full・変更なし: commit しない"
+    _ms_unset; _det_unset; teardown "$td" "$mb"
+}
+
+# on・履歴に記録がある → 変更あり → 取得し、状態を更新してコミットする。--dry-run は、検知が変更なしでも取得し、書かない
+test_detect_on_changed_and_dry_run() {
+    local td mb mh; _ms_env td mb mh; _det_env 0
+    _det_state
+    export MOCK_SF_AUDIT_COUNT=2 MOCK_GIT_DIFF_EXIT_2ND=1
+    export MOCK_SF_RETRIEVE_FILES='force-app/main/default/classes/New.cls|x'
+    SF_METASYNC_DETECT=on _ms_run 'Y\nY\n'
+    assert_exit_ok "$_MS_RC" "検知 on・履歴あり: 正常終了"
+    assert_output_contains "$_MS_OUT" "履歴に 2 件" "検知 on・履歴あり: 変更ありの理由が出る"
+    assert_file_contains "$MOCK_CALL_LOG" "sf project retrieve start" "検知 on・履歴あり: 取得する"
+    assert_file_contains "$MOCK_CALL_LOG" "検知の状態も更新" "メタデータの変更があるときは、本文に「検知の状態も更新」と書く"
+    assert_file_contains "$MOCK_CALL_LOG" "git merge" "メタデータの変更があるときは、下流へ伝播する"
+    _ms_unset; _det_unset; teardown "$td" "$mb"
+    # --dry-run
+    local td mb mh; _ms_env td mb mh; _det_env 0
+    _det_state
+    SF_METASYNC_DETECT=on _ms_run '' --dry-run -y
+    assert_exit_ok "$_MS_RC" "検知 on・--dry-run: 正常終了"
+    assert_file_contains "$MOCK_CALL_LOG" "sf project retrieve start" "検知 on・--dry-run: 検知が変更なしでも、取得して計画を作る"
+    assert_output_contains "$_MS_OUT" "dry-run のため、検知の結果にかかわらず" "--dry-run: 取得する理由が出る"
+    assert_file_not_contains "$MOCK_CALL_LOG" "git commit" "--dry-run: commit しない"
+    _ms_unset; _det_unset; teardown "$td" "$mb"
+}
+
+# 履歴の問い合わせの失敗 → 不明 → 全件取得（検知の失敗が、取りこぼしにならない）
+test_detect_failure_falls_back_to_full() {
+    local td mb mh; _ms_env td mb mh; _det_env 0
+    _det_state
+    export MOCK_SF_AUDIT_EXIT=1
+    SF_METASYNC_DETECT=on _ms_run 'Y\nY\n'
+    assert_exit_ok "$_MS_RC" "検知の失敗: 正常終了"
+    assert_output_contains "$_MS_OUT" "履歴の問い合わせに失敗" "検知の失敗: 理由が出る"
+    assert_file_contains "$MOCK_CALL_LOG" "sf project retrieve start" "検知の失敗: 全件取得に倒れる"
+    _ms_unset; _det_unset; teardown "$td" "$mb"
+}
+
+# shadow: 検知が変更なしでも取得する。実際に変更があれば、食い違いの WARNING を出す
+test_detect_shadow_reports_mismatch() {
+    local td mb mh; _ms_env td mb mh; _det_env 0
+    _det_state
+    export MOCK_GIT_DIFF_EXIT_2ND=1
+    export MOCK_SF_RETRIEVE_FILES='force-app/main/default/classes/New.cls|x'
+    SF_METASYNC_DETECT=shadow _ms_run 'Y\nY\n'
+    assert_exit_ok "$_MS_RC" "検知 shadow: 正常終了"
+    assert_file_contains "$MOCK_CALL_LOG" "sf project retrieve start" "検知 shadow: 検知が変更なしでも、取得する"
+    assert_output_contains "$_MS_OUT" "検知は「変更なし」でしたが、実際は 1 件の変更がありました" "検知 shadow: 食い違いの WARNING が出る"
+    assert_output_contains "$_MS_OUT" "A force-app/main/default/classes/New.cls" "検知 shadow: 食い違いの一覧が出る"
+    _ms_unset; _det_unset; teardown "$td" "$mb"
+}
+
+# 状態ファイルを書いたが、コミットの前に中断（commit の失敗）→ 状態ファイルも戻す
+test_detect_state_restored_on_failure() {
+    local td mb mh; _ms_env td mb mh; _det_env 0
+    export MOCK_GIT_DIFF_EXIT_2ND=1 MOCK_GIT_COMMIT_EXIT=1
+    SF_METASYNC_DETECT=on _ms_run 'Y\nY\n'
+    assert_exit_fail "$_MS_RC" "commit の失敗 → 中断"
+    assert_file_contains "$MOCK_CALL_LOG" "git reset -q HEAD -- sf-tools/metasync/state.json" "中断 → 状態ファイルを、インデックスから外す"
+    assert_file_contains "$MOCK_CALL_LOG" "git checkout HEAD -- sf-tools/metasync/state.json" "中断 → 状態ファイルを HEAD に戻す"
+    # （HEAD にない状態ファイルが消えること = checkout が失敗したときの rm は、モックの git では確かめられない。結合テストで確かめる）
+    _ms_unset; _det_unset; teardown "$td" "$mb"
+}
+
 test_mirror_basic
 test_mirror_deletes
 test_retrieve_failure_and_retry
@@ -497,5 +643,14 @@ test_two_package_directories
 test_hold_exit_code_3
 test_restore_after_apply_on_failure
 test_apply_confirm_no_aborts
+test_detect_off_default
+test_detect_bad_mode
+test_detect_on_first_run_writes_state
+test_detect_on_unchanged_skips_retrieve
+test_detect_on_full_option
+test_detect_on_changed_and_dry_run
+test_detect_failure_falls_back_to_full
+test_detect_shadow_reports_mismatch
+test_detect_state_restored_on_failure
 
 print_summary

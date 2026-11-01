@@ -55,7 +55,7 @@
     <tr><td><code>wf-sequence.yml</code></td><td>[sequence] マージ順序チェック</td><td><code>main</code> / <code>staging</code> への PR の作成・更新・再オープンのとき</td><td>できない</td></tr>
     <tr><td><code>wf-release.yml</code></td><td>[release] デプロイ</td><td><code>main</code> / <code>staging</code> / <code>develop</code> への PR をマージしたあと</td><td>できる（<code>main</code> / <code>staging</code> / <code>develop</code> で実行したときだけ、リリースする）</td></tr>
     <tr><td><code>wf-propagate.yml</code></td><td>[propagate] ブランチ伝播</td><td><code>main</code> への PR をマージしたあと</td><td>できる（<code>main</code> で実行したときだけ、伝える）</td></tr>
-    <tr><td><code>wf-metasync.yml</code></td><td>[metasync] メタ同期</td><td>平日（月〜金）の日本時間 9:00 / 12:00 / 15:00 / 18:00（3 時間おき）に自動で。GitHub の混雑で、開始が遅れることがあります</td><td>できる（どのブランチで実行しても、<code>main</code> を同期する）</td></tr>
+    <tr><td><code>wf-metasync.yml</code></td><td>[metasync] メタ同期</td><td>平日（月〜金）の日本時間 9:00 / 12:00 / 15:00 / 18:00（3 時間おき）に自動で。9:00 の回は、毎日 1 回の全件取得（<code>--full</code>）です。GitHub の混雑で、開始が遅れることがあります。変更の検知を使うときは、Variable <code>SF_METASYNC_DETECT</code>（<code>off</code> / <code>shadow</code> / <code>on</code>。未設定は <code>off</code>）を設定します</td><td>できる（どのブランチで実行しても、<code>main</code> を同期する）</td></tr>
   </tbody>
 </table>
 <ul>

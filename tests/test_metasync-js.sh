@@ -12,6 +12,8 @@
 #   4. 削除の守り: S2（取得の問題の報告）・S3（消えたフォルダ）・S4（件数のしきい値の境界）・S5（直近のマージ）
 #   5. S1（取得の応答の status）・S8（packageDirectories が 2 つ以上）・引数の誤り・--allow-mass-delete
 #   6. apply: A・M・D の反映・H は何もしない・空になったフォルダを消す・根の外のパスは、何も変えずに中断する
+#   7. detect（変更の検知）: 状態なし・変更なし・履歴あり・区分 B の変化（更新日時・件数・名前・フォルダ型）・履歴の失敗・
+#      一覧の失敗・状態の破損や設定の不一致・区分 A がないときは履歴を問い合わせない・引数の誤り／区分の表の整合
 # ==============================================================================
 source "$(dirname "${BASH_SOURCE[0]}")/test_helper.sh"
 echo -e "${CLR_HEAD}=== lib/metasync.js ===${CLR_RST}"
@@ -227,11 +229,130 @@ test_apply() {
     rm -rf "$_TD"
 }
 
+# --- 7. detect（変更の検知）---
+#   sf は、モック（SF_METASYNC_SF で差し替え。一覧は MOCK_SF_LIST_DIR の JSON、履歴の件数は MOCK_SF_AUDIT_COUNT）。
+#   種類の表は、本物（config/metasync-detect.txt）を使う: ApexClass = A（履歴）／ ReportType・Report = B（一覧。Report はフォルダ型）
+DETECT_TABLE="$SF_TOOLS_DIR/config/metasync-detect.txt"
+# 準備: 作業フォルダ（$_DD）に、モックの sf・種類の一覧・一覧の JSON のフォルダ（lists）を作る
+_det_mk() {
+    _DD=$(mktemp -d "${TMPDIR:-/tmp}/test-msdet-XXXX")
+    mkdir -p "$_DD/bin" "$_DD/lists"
+    create_mock_sf "$_DD/bin"
+    printf 'ApexClass\nReportType\nReport\nCustomLabels\n' > "$_DD/types.txt"
+    echo '[{"fullName":"RT1","lastModifiedDate":"2026-11-01T01:00:00.000Z"}]' > "$_DD/lists/ReportType.json"
+    echo '[{"fullName":"F1","lastModifiedDate":"2026-11-01T01:00:00.000Z"}]' > "$_DD/lists/ReportFolder.json"
+    echo '[{"fullName":"F1/R1","lastModifiedDate":"2026-11-01T02:00:00.000Z"}]' > "$_DD/lists/Report__F1.json"
+    echo '[]' > "$_DD/lists/Report__unfiled__public.json"
+}
+# detect を実行する。引数: 追加のオプション。環境変数 MOCK_SF_*（呼び出し側で指定）。結果: $_OUT・$_RC・$_DD/new.json
+_det() {
+    rm -f "$_DD/new.json"
+    _OUT=$(SF_METASYNC_SF="bash $_DD/bin/sf" MOCK_SF_LIST_DIR="$_DD/lists" MOCK_CALL_LOG="$_DD/calls.log" \
+        node "$MJS" detect --org prod --types-file "$_DD/types.txt" --table "$DETECT_TABLE" --state "$_DD/state.json" \
+        --out-state "$_DD/new.json" --now 2026-11-02T00:00:00Z "$@" 2>&1)
+    _RC=$?
+}
+
+test_detect() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] metasync.js: detect（変更の検知）${CLR_RST}"
+    _det_mk
+    # 状態がない → 不明（11）。今回の状態を書く（区分 B の記録を含む）
+    _det
+    assert_equals "$_RC" "11" "状態がない → 不明（終了コード 11）"
+    assert_output_contains "$_OUT" "前回の状態がありません" "状態がない理由が出る"
+    assert_output_contains "$_OUT" "A 1 種類（履歴）/ B 2 種類（更新日時の一覧）/ C 1 種類" "区分ごとの種類の数が出る（CustomLabels は表にない = C）"
+    assert_file_contains "$_DD/new.json" '"lastFullSyncAt": "2026-11-02T00:00:00Z"' "今回の状態に、開始時刻が入る"
+    assert_file_contains "$_DD/new.json" '"ReportType"' "今回の状態に、区分 B の種類が入る"
+    assert_file_contains "$_DD/new.json" '"count": 2' "フォルダ型（Report）は、フォルダ自身と、中の部品を合わせて数える"
+
+    # 前回と同じ → 変更なし（0）。状態は書かない。履歴の問い合わせは 1 回
+    cp "$_DD/new.json" "$_DD/state.json"
+    _det
+    assert_equals "$_RC" "0" "前回と同じ・履歴 0 件 → 変更なし（終了コード 0）"
+    assert_output_contains "$_OUT" "変更なし" "変更なしと表示される"
+    [[ ! -f "$_DD/new.json" ]] && pass "変更なしのときは、状態を書かない" || fail "変更なしのときは、状態を書かない"
+    assert_equals "$(grep -c 'SetupAuditTrail' "$_DD/calls.log")" "1" "履歴の問い合わせは 1 回"
+    assert_file_contains "$_DD/calls.log" "2026-11-01T23:50:00Z" "履歴の基準は、前回の開始時刻の 10 分前"
+
+    # 履歴に記録がある → 変更あり（10）
+    MOCK_SF_AUDIT_COUNT=3 _det
+    assert_equals "$_RC" "10" "履歴に記録がある → 変更あり（終了コード 10）"
+    assert_output_contains "$_OUT" "履歴に 3 件" "履歴の件数が理由に出る"
+    [[ -f "$_DD/new.json" ]] && pass "変更ありのときは、状態を書く" || fail "変更ありのときは、状態を書く"
+
+    # 区分 B: 更新日時が進んだ・件数が変わった・名前が変わった → 変更あり
+    echo '[{"fullName":"RT1","lastModifiedDate":"2026-11-01T05:00:00.000Z"}]' > "$_DD/lists/ReportType.json"
+    _det
+    assert_equals "$_RC" "10" "区分 B の更新日時が進んだ → 変更あり"
+    assert_output_contains "$_OUT" "ReportType: 更新日時が変わりました" "更新日時の変化が理由に出る"
+    echo '[{"fullName":"RT1","lastModifiedDate":"2026-11-01T01:00:00.000Z"},{"fullName":"RT2","lastModifiedDate":"2026-10-01T00:00:00.000Z"}]' > "$_DD/lists/ReportType.json"
+    _det
+    assert_output_contains "$_OUT" "ReportType: 件数が変わりました（1 → 2）" "件数の変化が理由に出る"
+    echo '[{"fullName":"RT9","lastModifiedDate":"2026-11-01T01:00:00.000Z"}]' > "$_DD/lists/ReportType.json"
+    _det
+    assert_output_contains "$_OUT" "ReportType: 名前が変わりました" "名前の変化（件数・更新日時は同じ）が理由に出る"
+    echo '[{"fullName":"RT1","lastModifiedDate":"2026-11-01T01:00:00.000Z"}]' > "$_DD/lists/ReportType.json"
+
+    # フォルダ型: フォルダの中の部品が変わった → 変更あり
+    echo '[{"fullName":"F1/R1","lastModifiedDate":"2026-11-01T09:00:00.000Z"}]' > "$_DD/lists/Report__F1.json"
+    _det
+    assert_equals "$_RC" "10" "フォルダの中の部品の更新日時が進んだ → 変更あり"
+    assert_output_contains "$_OUT" "Report: 更新日時が変わりました" "フォルダ型の変化が理由に出る"
+    echo '[{"fullName":"F1/R1","lastModifiedDate":"2026-11-01T02:00:00.000Z"}]' > "$_DD/lists/Report__F1.json"
+
+    # 履歴の問い合わせの失敗 → 不明（11）。一覧は取れているので、状態は書く
+    MOCK_SF_AUDIT_EXIT=1 _det
+    assert_equals "$_RC" "11" "履歴の問い合わせの失敗 → 不明（終了コード 11）"
+    assert_output_contains "$_OUT" "履歴の問い合わせに失敗" "失敗の理由が出る"
+    [[ -f "$_DD/new.json" ]] && pass "履歴の失敗でも、一覧が取れていれば状態を書く（全件取得の基準にする）" || fail "履歴の失敗でも、一覧が取れていれば状態を書く"
+
+    # 一覧の失敗 → 不明（11）。状態は書かない
+    MOCK_SF_LIST_FAIL=ReportType _det
+    assert_equals "$_RC" "11" "一覧の取得の失敗 → 不明（終了コード 11）"
+    assert_output_contains "$_OUT" "更新日時の一覧を取得できませんでした" "一覧の失敗の理由が出る"
+    [[ ! -f "$_DD/new.json" ]] && pass "一覧が取れないときは、状態を書かない" || fail "一覧が取れないときは、状態を書かない"
+
+    # 状態が使えない（壊れている・設定が違う）→ 不明
+    echo '{broken' > "$_DD/state.json"; _det
+    assert_equals "$_RC" "11" "状態が壊れている → 不明"
+    assert_output_contains "$_OUT" "読めません" "壊れている理由が出る"
+    cp "$_DD/new.json" "$_DD/state.json"
+    printf 'ApexClass\nReportType\n' > "$_DD/types.txt"; _det
+    assert_equals "$_RC" "11" "種類の一覧（metadata.txt）が変わった → 不明（設定のハッシュが合わない）"
+    assert_output_contains "$_OUT" "版または設定" "設定の不一致の理由が出る"
+
+    # 区分 A の種類がなければ、履歴は問い合わせない
+    printf 'ReportType\n' > "$_DD/types.txt"; rm -f "$_DD/state.json"; _det; cp "$_DD/new.json" "$_DD/state.json"
+    : > "$_DD/calls.log"; _det
+    assert_equals "$_RC" "0" "区分 A の種類がなく、B も同じ → 変更なし"
+    assert_equals "$(grep -c 'SetupAuditTrail' "$_DD/calls.log")" "0" "区分 A の種類がなければ、履歴は問い合わせない"
+
+    # 引数の誤り
+    out=$(node "$MJS" detect --org prod 2>&1); assert_equals "$?" "1" "detect の必須オプションがない → 中断（終了コード 1）"
+    out=$(node "$MJS" detect --org prod --types-file "$_DD/types.txt" --table "$DETECT_TABLE" --state "$_DD/state.json" --out-state "$_DD/n.json" --now bad 2>&1)
+    assert_equals "$?" "1" "--now が日時でない → 中断"
+    rm -rf "$_DD"
+}
+
+# 区分の表（config/metasync-detect.txt）の整合: 書式が正しく、A・B に重複がなく、metadata-dirs.txt にない種類を書いていない
+test_detect_table() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] config/metasync-detect.txt: 書式と整合${CLR_RST}"
+    local bad dup unknown
+    bad=$(grep -v -E '^\s*(#.*)?$' "$DETECT_TABLE" | grep -v -E '^[AB] [A-Za-z0-9_]+\s*(#.*)?$')
+    [[ -z "$bad" ]] && pass "すべての行が「A|B 種類名」の書式" || fail "書式が正しくない行: $bad"
+    dup=$(grep -E '^[AB] ' "$DETECT_TABLE" | awk '{print $2}' | sort | uniq -d)
+    [[ -z "$dup" ]] && pass "同じ種類が、2 回書かれていない" || fail "重複: $dup"
+    unknown=$(grep -E '^[AB] ' "$DETECT_TABLE" | awk '{print $2}' | while read -r t; do grep -q "^$t " "$DIRS_TABLE" || echo "$t"; done)
+    [[ -z "$unknown" ]] && pass "表の種類は、すべて metadata-dirs.txt にある" || fail "metadata-dirs.txt にない種類: $unknown"
+}
+
 test_basic_ops
 test_keep_files
 test_scope
 test_guards
 test_aborts
 test_apply
+test_detect
+test_detect_table
 
 print_summary

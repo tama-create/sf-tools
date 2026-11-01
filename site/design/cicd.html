@@ -240,7 +240,7 @@ templates/.github/workflows/  ─ sf-init →   .github/workflows/
 </ul>
 
 <h3 id="metasync">wf-metasync（本番の自動同期）</h3>
-<p>平日の日本時間 9:00 / 12:00 / 15:00 / 18:00 に、本番の組織の最新の状態を、<code>main</code> に反映します。手動でも実行できます（セットアップの最後と、<code>sf-init.sh --verify</code> が、手動の実行で動かします）。同時には 1 つずつしか動きません。</p>
+<p>平日の日本時間 9:00 / 12:00 / 15:00 / 18:00 に、本番の組織の最新の状態を、<code>main</code> に反映します。9:00 の回は、毎日 1 回の全件取得です。ほかの回は、変更の検知（Variable <code>SF_METASYNC_DETECT</code> を <code>shadow</code> / <code>on</code> にしたとき）で、組織に変更がなければ、取得そのものを省けます（既定は、検知を行わず、毎回、全件取得です）。手動でも実行できます（セットアップの最後と、<code>sf-init.sh --verify</code> が、手動の実行で動かします）。同時には 1 つずつしか動きません。</p>
 <ol>
   <li><code>main</code> を、全履歴つきでチェックアウトする（直近のマージの確認に、履歴が必要なため）</li>
   <li>Node.js と Salesforce CLI を入れる（sf のプラグインは、入れません）</li>

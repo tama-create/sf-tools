@@ -816,9 +816,9 @@ node lib/metasync.js apply --plan PLAN --repo DIR --fetched DIR
 
 ### 15.7 段階
 
-1. **15.8 の未測定の種類を測る**（`CspTrustedSite` ほか）。区分の表（`config/metasync-detect.txt`）の初期値を決める。
-2. **検知だけを作る**（15.3・15.4。部分取得は作らない）。テスト: 単体（モックの履歴・一覧）・結合 L1（実 git ＋ fake）・e2e（`wf-metasync` が、変更なしの回に、取得を省くこと）。
-3. 実際の運用（Developer Edition）で、検知の結果と全件取得の結果が一致するかを、数日見る（影の比較: 検知が「変更なし」でも、全件取得を行い、食い違いを記録する）。
+1. **（済み。15.10）** **15.8 の未測定の種類を測る**（`CspTrustedSite` ほか）。区分の表（`config/metasync-detect.txt`）の初期値を決める。
+2. **（実装済み。15.11。単体テストまで。結合 L1・e2e は未）** **検知だけを作る**（15.3・15.4。部分取得は作らない）。テスト: 単体（モックの履歴・一覧）・結合 L1（実 git ＋ fake）・e2e（`wf-metasync` が、変更なしの回に、取得を省くこと）。
+3. **（未実施）** 実際の運用（Developer Edition）で、検知の結果と全件取得の結果が一致するかを、数日見る（影の比較: 検知が「変更なし」でも、全件取得を行い、食い違いを記録する）。
 
 ### 15.8 未測定・未確認のこと
 
@@ -860,3 +860,30 @@ node lib/metasync.js apply --plan PLAN --repo DIR --fetched DIR
 - 規模が大きいほど効果が増えるかは、**重い種類が多い組織で測るまで分からない**。この測定の範囲（8404 ファイル）では、全件取得が 2 分前後で収まっており、**「変更がない回は数秒」**が主な利点になる。
 - 部分取得（15.3 の最後の段落で見送った段階）は、**20 件の変更なら 10 秒**で済むことが確かめられた。許可リストの検証（4.3）を済ませたあとの段階として、有望。
 - 全件取得の時間が、実行ごとに ±50% ばらつくため、**速度の評価は、複数回の平均で行う**（1 回の比較では、判断を誤る）。
+
+### 15.10 測定 3: 種類ごとの検知の信頼性（2026-11-01・`develop` の組織）
+
+`lib/typecheck.js` のサンプルを使い、30 種類を、作成 → 変更 → 削除した。作成・変更のたびに、設定変更の履歴（`SetupAuditTrail`）と、更新日時の一覧（`listMetadata`）を調べた（後始末は完了。組織に残ったのは、10/16 の古い `…Sh1__c` 2 件だけ）。
+
+| 結果 | 種類 |
+|---|---|
+| **履歴に、作成と変更の両方が記録された** | `Profile`・`PermissionSet`・`PermissionSetGroup`・`ApexClass`・`ApexTrigger`・`ApexPage`・`ApexComponent`・`LightningComponentBundle`・`AuraDefinitionBundle`・`FlexiPage`・`QuickAction`・`CustomObject`（項目を含む）・`CustomApplication`・`CustomTab`・`Queue`・`NamedCredential`・`CustomPermission`・`ExternalDataSource`・`ApprovalProcess`・`Workflow`（ルール）・`GlobalValueSet`・`CustomMetadata`・`Flow` |
+| **履歴に出ないが、更新日時の一覧が、作成・変更・削除に追従した（未測定だった 4 種類）** | `CspTrustedSite`・`CorsWhitelistOrigin`・`CustomNotificationType`・`CustomHelpMenuSection` |
+| どちらも信頼できない／確かめられなかった | `CustomLabel`（履歴にも一覧にも出ない）・`HomePageLayout`（履歴に出ない。変更のサンプルが誤りで、一覧の変更への追従は未確認）・`RemoteSiteSetting`（作成は記録されず、変更だけ記録される） |
+| 更新日時が、変更で進まなかった | `Workflow` の本体（1970 年のまま）・`CustomMetadata`（1970 年）・`GlobalValueSet`・`Layout` |
+
+- **履歴の `Action` は、種類ごとに名前が違う**（`changedApexClass`・`profileDescriptionChanged` など）。15.2 のとおり、`Action`・分類名で種類を絞らず、「前回より後に記録が 1 件でもあるか」だけで判定するのが正しい。
+- **更新日時が進まない種類は、一覧だけに頼れない**（`Workflow`・`CustomMetadata`・`GlobalValueSet`・`Layout`）。履歴で見るもの（`Workflow`・`CustomMetadata`・`GlobalValueSet`）は A、確認がないもの（`Layout`）は C。
+- `Flow` は、測定に使った最小のサンプルが不完全な下書きになり、メタデータの削除ができず、Tooling API で消した。履歴の記録は確認できたが、参考値。
+- 区分の表の初期値は、`config/metasync-detect.txt`（A 25 種類・B 10 種類。表にない種類は C）。確認が済んだ種類だけを入れる。
+
+### 15.11 実装（フェーズ 2。2026-11-01）
+
+- **場所:** `lib/metasync.js` の `detect`（読み取りのみ。sf の呼び出しは同時に 4 つまで）、`bin/sf-metasync.sh` の検知フェーズ（手順 5 の中）、`config/metasync-detect.txt`（区分の表）、`templates/.github/workflows/wf-metasync.yml`（cron と `--full`）。
+- **接続方法:** 15.6 の案 a（`sf data query` と `sf org list metadata`）。`@salesforce/core` は使わない。
+- **モード（環境変数 `SF_METASYNC_DETECT`。Actions では Variable）:** `off`（既定。従来どおり、毎回、全件取得）／ `shadow`（検知はするが、取得は常に行う。検知が「変更なし」なのに実際は変更があれば、WARNING で一覧を出す）／ `on`（「変更なし」なら取得を省く）。段階 3（影の比較）で問題がなければ、既定を `on` にする。
+- **`--full`:** 検知が「変更なし」でも、取得する。毎日 1 回の cron（UTC 0:00）と、手動の実行に付ける。区分 C の種類の変更を、毎日 1 回は反映するため（最大約 1 日の遅れ）。
+- **状態ファイルの更新の規則（15.4 の見直し）:** 状態を書くのは、**検知が「変更あり」または「不明」だったときだけ**（全件取得と反映が成功したあと）。変更なしの回は書かない。これで、毎日の `--full` が「変更なし」なら、状態だけのコミットを作らない。検知が変更ありなのにファイルが変わらなかったとき（組織の管理の操作の記録など）は、基準の時刻を進めるために、状態だけのコミットになる。このコミットは、下流のブランチへ伝播しない。
+- **基準の時刻:** `lastFullSyncAt` = 検知の開始時刻（取得の前）。取得の最中の変更は、次の回に検知される。履歴の問い合わせは、この時刻の 10 分前を基準にする。
+- **失敗の扱い:** 一覧・履歴の失敗、状態の破損や設定（種類の一覧・区分の表）の不一致は、すべて「不明」→ 全件取得。検知は、取得を省くための手がかりで、正しさの根拠にしない。削除の判定には使わない（削除は、これまでどおり、全件取得の結果と S1〜S8 で決める）。
+- **未プッシュのコミットがあるとき・`--dry-run`・`--full`:** 検知が「変更なし」でも、取得する。

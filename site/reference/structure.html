@@ -181,6 +181,7 @@
 │       └── release/__BRANCH__/ ← deploy-target.txt / remove-target.txt 雛形
 ├── config/                     ← sf-tools 自身の設定・データ（force-* には配布されない）
 │   ├── metadata-dirs.txt       ← メタデータの種類 → フォルダ名の表（sf-metasync.sh が、同期の対象のフォルダを決めるために参照）
+│   ├── metasync-detect.txt     ← メタデータの種類ごとの、変更の検知の区分の表（sf-metasync.sh の変更の検知が参照。A = 履歴 / B = 更新日時の一覧）
 │   ├── metadata-capability.txt ← メタデータの種類ごとの、リリース・削除の可否の表（sf-typecheck.sh が確認。sf-check.sh が参照）
 │   └── changeset-types.txt     ← 変更セットで扱える種類の一覧（公式の Metadata Coverage Report。sf-typecheck.sh --coverage が参照）
 ├── site/                       ← この文書サイト（HTML。GitHub Pages で公開）

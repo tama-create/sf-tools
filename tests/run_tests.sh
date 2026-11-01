@@ -337,7 +337,7 @@ if [[ "${1:-}" == "--changed" ]]; then
             config/changeset-types.txt)
                 _changed_tests+=("test_sf-typecheck.sh")
                 ;;
-            lib/metasync.js|config/metadata-dirs.txt|tests/test_metasync-js.sh)
+            lib/metasync.js|config/metadata-dirs.txt|config/metasync-detect.txt|tests/test_metasync-js.sh)
                 _changed_tests+=("test_metasync-js.sh" "test_sf-metasync.sh")   # 鏡像の部品（lib/metasync.js）と、それを呼ぶ sf-metasync.sh
                 ;;
             config/metadata-capability.txt)

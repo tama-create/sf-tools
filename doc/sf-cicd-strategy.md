@@ -272,7 +272,7 @@ develop / staging で並行開発中の変更と main の変更が同じ箇所�
 
 ### 5.5 wf-metasync（本番組織の自動同期）
 
-**実行スケジュール:** `cron: "0 0-10/3 * * 1-5"`（UTC 0:00 / 3:00 / 6:00 / 9:00 = JST 9:00 / 12:00 / 15:00 / 18:00、平日のみ、3 時間おき）。手動の workflow_dispatch もある（`sf-init` のセットアップの最後と、`sf-init.sh --verify` が起動する）。同時実行は、1 つずつ（concurrency `metasync`）。
+**実行スケジュール:** `cron: "0 0 * * 1-5"`（UTC 0:00 = JST 9:00、平日、毎日 1 回。`--full` 付き）と `cron: "0 3-10/3 * * 1-5"`（UTC 3:00 / 6:00 / 9:00 = JST 12:00 / 15:00 / 18:00、平日のみ、3 時間おき）。変更の検知（Variable `SF_METASYNC_DETECT` が shadow・on のとき）が「変更なし」なら、全件取得を省く（`--full` の回と手動の実行は、省かない）。手動の workflow_dispatch もある（`sf-init` のセットアップの最後と、`sf-init.sh --verify` が起動する）。同時実行は、1 つずつ（concurrency `metasync`）。
 
 **処理フロー:**
 1. main ブランチを全履歴付きでチェックアウト（直近のマージの確認（`git log --since`。削除の守り S5）に、履歴が要るため。`PAT_TOKEN` で checkout することで、後続の push が Ruleset `protect-main` / `protect-staging` をバイパス可能。PAT の持ち主が Admin のとき）

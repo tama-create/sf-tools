@@ -15,11 +15,15 @@
 #   bash tests/docs-stamp.sh --check               # 印が合っているかを調べる（問題があれば、一覧を出して終了コード 1）
 #   bash tests/docs-stamp.sh --list                # 印の一覧を表示する
 #   bash tests/docs-stamp.sh --diff <文書>         # その文書の基になるコードの冒頭コメントの、前回の見直しからの変更を表示する
-#   bash tests/docs-stamp.sh --update <文書> [-y]  # 文書を読み直したあとで、印を付け直す（確認つき。-y で確認を省略）
+#   bash tests/docs-stamp.sh --update <文書> [<コード>] [-y]
+#                                                  # 文書を読み直したあとで、印を付け直す（確認つき。-y で確認を省略）。
+#                                                  # <コード> を付けると、その 1 本の印だけを付け直す（読んでいないものの印は、残る）
 #
 # 【冒頭コメントの範囲】 シェル・JS とも、2 つ目と 3 つ目の区切り行（# ==== / // ====）の間
 #
 # 【補足】
+#   - <コード> を付けずに --update すると、その文書の、すべてのコードの印が付け直される。冒頭コメントが変わったコードが
+#     複数あるときは、1 本ずつ読んで、<コード> を付けて付け直すと、読み残しが、検出され続ける。
 #   - 印を付け直す（--update）のは、「文書を読み直して、必要な修正をした」という意味。冒頭コメントの変更が、
 #     文書に影響しないとき（誤字の修正など）も、読み直したうえで、付け直してよい。
 #   - bin/sf-*.sh が、1 つも文書の基になっていないとき、--check は失敗する（新しいコマンドの文書を、忘れないため）。
@@ -99,9 +103,17 @@ cmd_diff() {
 
 # 印を付け直す
 cmd_update() {
-    local page="$1" yes="${2:-}" line p src stamp commit found=0 head ans tmp
-    [[ -n "$page" ]] || { echo "使い方: docs-stamp.sh --update <文書> [-y]" >&2; return 1; }
-    stamp_lines | awk -F'|' -v p="$page" '$1 == p {f = 1} END {exit !f}' || { echo "doc/doc-stamps.txt に、${page} の行がありません" >&2; return 1; }
+    local page="${1:-}" only="" yes="" a line p src stamp commit found=0 head ans tmp
+    shift || true
+    for a in "$@"; do
+        case "$a" in
+            -y) yes="-y" ;;
+            *)  only="$a" ;;
+        esac
+    done
+    [[ -n "$page" ]] || { echo "使い方: docs-stamp.sh --update <文書> [<コード>] [-y]" >&2; return 1; }
+    stamp_lines | awk -F'|' -v p="$page" -v o="$only" '$1 == p && (o == "" || $2 == o) {f = 1} END {exit !f}' \
+        || { echo "doc/doc-stamps.txt に、${page}${only:+ と ${only}} の行がありません" >&2; return 1; }
     if [[ "$yes" != "-y" ]]; then
         cmd_diff "$page"
         printf '\n%s を読み直して、必要な修正をしましたか？ 印を付け直します [y/N]: ' "$page"
@@ -118,7 +130,7 @@ cmd_update() {
         esac
         p=$(echo "$line" | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/, "", $1); print $1}')
         src=$(echo "$line" | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/, "", $2); print $2}')
-        if [[ "$p" == "$page" ]]; then
+        if [[ "$p" == "$page" && ( -z "$only" || "$src" == "$only" ) ]]; then
             printf '%s | %s | %s | %s\n' "$p" "$src" "$(stamp_of "$src")" "$head" >> "$tmp"
         else
             printf '%s\n' "$line" >> "$tmp"
@@ -132,7 +144,7 @@ case "${1:-}" in
     --check)  cmd_check ;;
     --list)   cmd_list ;;
     --diff)   cmd_diff "${2:-}" ;;
-    --update) cmd_update "${2:-}" "${3:-}" ;;
+    --update) shift; cmd_update "$@" ;;
     -h|--help|"") awk '/^# ==/{f++; next} f==2{sub(/^# ?/,""); print} f==3{exit}' "${BASH_SOURCE[0]}" ;;
     *) echo "不明なオプションです: $1" >&2; exit 1 ;;
 esac

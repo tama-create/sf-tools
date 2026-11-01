@@ -10,7 +10,7 @@
 # 【オプション】
 #   -v, --verbose       : コマンドの応答（出力）をコンソールにも表示する
 #   -h, --help          : このヘルプを表示して終了する（1 番目の引数のときだけ）
-#   引数の解析はしない。上記以外の引数（2 番目以降の -h / --help を含む）は無視し、削除を実行する。
+#   上記以外の引数（2 番目以降の -h / --help を含む）は、「不明なオプションです」と表示して中断する（何も削除しない）。
 #
 # 【処理の流れ】
 #   1. カレントディレクトリに .git ディレクトリがなければ中断する。
@@ -25,6 +25,7 @@
 # 【補足】
 #   - .git/hooks/pre-commit（sf-hook.sh がインストールする）は残る。
 #   - sf-hook.sh が削除した core.hooksPath（husky の設定）は、元に戻さない。
+#   - 削除しなかったとき（sf-tools が管理するフックではない）は、最後に「状態は変わっていません」と表示する。
 #   - 終了コード: 成功（削除しなかった場合を含む）は 0。中断・失敗は 1。
 #   - ログ: ./sf-tools/logs/sf-unhook.log（実行のたびに作り直す）
 # ==============================================================================
@@ -32,7 +33,7 @@
 # ------------------------------------------------------------------------------
 # 1. 共通ライブラリの必須設定
 # ------------------------------------------------------------------------------
-readonly SCRIPT_NAME=$(basename "$0" .sh)
+SCRIPT_NAME="${0##*/}"; readonly SCRIPT_NAME="${SCRIPT_NAME%.sh}"
 readonly LOG_FILE="./sf-tools/logs/${SCRIPT_NAME}.log"
 readonly LOG_MODE="NEW"
 
@@ -40,7 +41,8 @@ readonly LOG_MODE="NEW"
 # ------------------------------------------------------------------------------
 # 2. 共通ライブラリの読み込み
 # ------------------------------------------------------------------------------
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="${BASH_SOURCE[0]%/*}"
+[[ "$SCRIPT_DIR/" == /* && "$SCRIPT_DIR/" != *//* && "$SCRIPT_DIR/" != */./* && "$SCRIPT_DIR/" != */../* ]] || SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 COMMON_LIB="${SCRIPT_DIR}/../lib/common.sh"
 
 if [[ ! -f "$COMMON_LIB" ]]; then
@@ -72,7 +74,7 @@ phase_check_environment() {
 
     # Git リポジトリのルートであることを確認
     if [[ ! -d ".git" ]]; then
-        die "Gitリポジトリのルートで実行してください（.git ディレクトリが見つかりません）。"
+        die "カレントフォルダに .git ディレクトリがありません（Git リポジトリのルートではありません）。"
     fi
 
     return $RET_OK
@@ -87,9 +89,9 @@ phase_remove_hook() {
     fi
 
     # sf-tools が管理するフックでない場合は誤削除を防ぐためスキップ
-    if ! grep -qF "$SF_HOOK_MARKER" "$HOOK_DEST" 2>/dev/null; then
+    if ! grep -qF "$SF_HOOK_MARKER" "$HOOK_DEST" 2>/dev/null; then  # 条件チェックのため run 不使用
         log "WARNING" "sf-tools が管理するフックではないためスキップしました: $HOOK_DEST"
-        return $RET_OK
+        return $RET_NO_CHANGE
     fi
 
     log "INFO" "Git Hook を削除中..."
@@ -107,10 +109,15 @@ log "HEADER" "Git Hook (pre-push) の無効化を開始します (${SCRIPT_NAME}
 phase_check_environment || die "初期チェックに失敗しました。"
 log "SUCCESS" "環境確認完了。"
 
-phase_remove_hook || die "フックの削除に失敗しました。"
+phase_remove_hook; _remove_rc=$?
+[[ $_remove_rc -eq $RET_NG ]] && die "フックの削除に失敗しました。"
 
 echo "--------------------------------------------------------"
-log "INFO" "次回以降の git push 時には、自動検証は行われません。"
+if [[ $_remove_rc -eq $RET_NO_CHANGE ]]; then
+    log "INFO" "フックは、削除しなかったため、状態は変わっていません。"
+else
+    log "INFO" "次回以降の git push 時には、自動検証は行われません。"
+fi
 log "HEADER" "処理が完了しました"
 
 exit $RET_OK

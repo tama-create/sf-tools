@@ -206,6 +206,31 @@ test_typecheck_js_syntax_and_safety() {
     local out; out=$(node "$SF_TOOLS_DIR/lib/typecheck.js" --org prod --work "${TMPDIR:-/tmp}/tc-test-x" 2>&1)
     assert_exit_fail "$?" "lib/typecheck.js 単体でも、予約名は拒否する"
     assert_output_contains "$out" "予約名" "lib/typecheck.js: 予約名の拒否の理由が表示された"
+
+    # 引数の検査は、--list より先（以前は、--list が先に終了し、--mode x でも 0 だった）
+    node "$SF_TOOLS_DIR/lib/typecheck.js" --list > /dev/null 2>&1
+    assert_exit_ok "$?" "lib/typecheck.js --list: 終了コード 0"
+    out=$(node "$SF_TOOLS_DIR/lib/typecheck.js" --list --mode x 2>&1)
+    assert_exit_fail "$?" "lib/typecheck.js --list --mode x: --mode の誤りは、エラー"
+    assert_output_contains "$out" "mode は full または validate" "lib/typecheck.js --list --mode x: 理由が表示された"
+    out=$(node "$SF_TOOLS_DIR/lib/typecheck.js" --list --bogus 2>&1)
+    assert_exit_fail "$?" "lib/typecheck.js --list --bogus: 不明なオプションは、エラー"
+    out=$(node "$SF_TOOLS_DIR/lib/typecheck.js" --list --mode 2>&1)
+    assert_exit_fail "$?" "lib/typecheck.js --list --mode（値なし）: エラー"
+    assert_output_contains "$out" "mode の値がありません" "lib/typecheck.js: 値のないオプションの理由が表示された"
+    out=$(node "$SF_TOOLS_DIR/lib/typecheck.js" --org --work "${TMPDIR:-/tmp}/tc-test-x" 2>&1)
+    assert_exit_fail "$?" "lib/typecheck.js --org（値なし）: 次の --work を値として取らず、エラー"
+
+    # sf に渡す引数の引用（POSIX）: ' を '\'' にする（以前は ''' になり、' を含む引数が壊れた）。quote 関数を取り出して確かめる
+    out=$(node -e '
+        const src = require("fs").readFileSync(process.argv[1], "utf8");
+        const m = src.match(/function quote\(a\) \{[\s\S]*?\n\}/);
+        Object.defineProperty(process, "platform", { value: "linux" });
+        const quote = eval("(" + m[0] + ")");
+        process.stdout.write(quote("a" + String.fromCharCode(39) + "b c"));
+    ' "$SF_TOOLS_DIR/lib/typecheck.js" 2>&1)
+    assert_equals "$out" "'a'\\''b c'" "quote（POSIX）: ' を '\\'' にして、単引用符で囲む"
+    assert_equals "$(eval "printf '%s' $out")" "a'b c" "quote（POSIX）: シェルで、元の文字列に戻る"
 }
 
 test_typecheck_help_and_list

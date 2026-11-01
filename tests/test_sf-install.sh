@@ -232,7 +232,7 @@ test_sf_cli_warning_only() {
 
 
 # sf-init.sh から呼ばれた場合（SF_INIT_RUNNING=1）は、package.json があっても npm install をスキップする
-#   （admin フォルダは、設定とプッシュだけに使い、最後に削除する一時フォルダのため。約 90 秒の短縮）
+#   （sf-init が、このクローンで行うのは、ファイルの準備とプッシュだけで、node_modules を使わないため。約 90 秒の短縮）
 test_npm_install_skipped_when_sf_init_running() {
     local td mb mh
     setup_std_env td mb mh
@@ -241,7 +241,7 @@ test_npm_install_skipped_when_sf_init_running() {
 
     local out; out=$(cd "$td" && SF_INIT_RUNNING=1 HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-install.sh" 2>&1)
 
-    assert_output_contains "$out" "npm install をスキップします（初期セットアップ用の一時フォルダのため）" "sf-init 中 → npm install のスキップメッセージが表示された"
+    assert_output_contains "$out" "npm install をスキップします（sf-init は、ファイルの準備とプッシュだけを行うため）" "sf-init 中 → npm install のスキップメッセージが表示された"
     # 背景で動く sf-upgrade.sh の npm install -g（別のコマンド）と区別するため、引数なしの行だけを見る
     if grep -qx "npm install" "$MOCK_CALL_LOG"; then fail "sf-init 中 → npm install が呼び出されていない" "引数なしの npm install が呼ばれた"; else pass "sf-init 中 → npm install が呼び出されていない"; fi
     teardown "$td" "$mb" "$mh"
@@ -260,7 +260,77 @@ test_npm_install_runs_normally() {
     assert_file_contains "$MOCK_CALL_LOG" "npm install" "通常起動 → npm install が呼び出される"
     teardown "$td" "$mb" "$mh"
 }
+# create_mock_git のあとに、引数（"$*"）が、指定のパターンに一致する呼び出しだけを失敗させるラッパーを被せる
+#   引数: モックの bin・パターン（case の書式。空白は使えない）・終了コード・標準エラーに出す文言（省略可）
+_fail_git_matching() {
+    local mb="$1" pattern="$2" code="$3" msg="${4:-}"
+    mv "$mb/git" "$mb/git-base"
+    cat > "$mb/git" << EOF
+#!/bin/bash
+case "\$*" in
+    $pattern) echo "git \$*" >> "\${MOCK_CALL_LOG:-/dev/null}"; [[ -n "$msg" ]] && echo "$msg" >&2; exit $code ;;
+esac
+exec "\$(dirname "\$0")/git-base" "\$@"
+EOF
+    chmod +x "$mb/git"
+}
+
+# 回帰: detached HEAD → リリース管理ディレクトリを作らない（WARNING のみ）
+#   以前は、run が返すエラーの文言（fatal: ref HEAD is not a symbolic ref）をブランチ名とし、その名前のフォルダと branch_name.txt を作っていた
+test_release_dir_detached_head() {
+    local td mb mh out ec
+    setup_std_env td mb mh
+    create_all_mocks "$mb"
+    _fail_git_matching "$mb" "symbolic-ref*" 128 "fatal: ref HEAD is not a symbolic ref"
+
+    out=$(cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-install.sh" 2>&1); ec=$?
+    assert_exit_ok "$ec" "detached HEAD → 終了コード 0（WARNING のみ）"
+    assert_output_contains "$out" "現在のブランチ名を取得できませんでした" "detached HEAD → WARNING が表示される"
+    assert_file_not_exists "$td/sf-tools/release/branch_name.txt" "detached HEAD → branch_name.txt を作らない"
+    if ls "$td/sf-tools/release" 2>/dev/null | grep -q "fatal"; then
+        fail "detached HEAD → エラーの文言の名前のフォルダを作らない" "$(ls "$td/sf-tools/release")"
+    else
+        pass "detached HEAD → エラーの文言の名前のフォルダを作らない"
+    fi
+    teardown "$td" "$mb" "$mh"
+}
+
+# 回帰: gitmessage のテンプレートが無い → WARNING で、設置の完了（SUCCESS）を表示しない（以前は、両方を表示していた）
+test_gitmessage_template_missing() {
+    local td mb mh out
+    setup_std_env td mb mh
+    create_all_mocks "$mb"
+    rm -f "$mh/sf-tools/templates/gitmessage"
+
+    out=$(cd "$td" && SF_INIT_RUNNING=1 HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-install.sh" 2>&1)
+    assert_output_contains "$out" "gitmessage テンプレートが見つかりません" "テンプレートなし → 理由が表示される"
+    assert_output_contains "$out" "コミットメッセージテンプレートの設置に失敗しました" "テンプレートなし → 失敗の WARNING が表示される"
+    # assert_output_not_contains（grep -v）は、複数行の出力では、ほかの行で成功してしまうため、直接確かめる
+    echo "$out" | grep -q "コミットメッセージテンプレートの設置が完了しました" \
+        && fail "テンプレートなし → 完了と表示しない" "完了と表示した" \
+        || pass "テンプレートなし → 完了と表示しない"
+    teardown "$td" "$mb" "$mh"
+}
+
+# 回帰: git config commit.template が失敗 → 設置の完了を表示しない（以前は、戻り値を見ていなかった）
+test_gitmessage_config_fail() {
+    local td mb mh out
+    setup_std_env td mb mh
+    create_all_mocks "$mb"
+    _fail_git_matching "$mb" "config*commit.template*" 1 "error: could not lock config file"
+
+    out=$(cd "$td" && SF_INIT_RUNNING=1 HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-install.sh" 2>&1)
+    assert_output_contains "$out" "コミットメッセージテンプレートの設置に失敗しました" "git config の失敗 → 失敗の WARNING が表示される"
+    echo "$out" | grep -q "コミットメッセージテンプレートの設置が完了しました" \
+        && fail "git config の失敗 → 完了と表示しない" "完了と表示した" \
+        || pass "git config の失敗 → 完了と表示しない"
+    teardown "$td" "$mb" "$mh"
+}
+
 test_normal_run
+test_release_dir_detached_head
+test_gitmessage_template_missing
+test_gitmessage_config_fail
 test_npm_install_skipped_when_sf_init_running
 test_npm_install_runs_normally
 test_sf_cli_warning_only

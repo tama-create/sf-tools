@@ -542,7 +542,42 @@ test_unknown_option() {
     teardown "$mb" "$mock_home" "$(dirname "$wdir")"
 }
 
+# ==============================================================================
+# 回帰: gh が未認証のとき、gh auth login を run を使わずに実行する（gh の対話画面を表示するため）
+#   （以前は run で実行していたため、出力が一時ファイルに書き出され、gh の質問・ブラウザの案内が、正しく表示されなかった）
+# ==============================================================================
+test_gh_auth_login_direct() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] gh が未認証 → gh auth login を直接実行する（run を使わない）${CLR_RST}"
+
+    local mb mock_home cdir ec out
+    mb=$(setup_mock_bin); export MOCK_CALL_LOG="$mb/calls.log"
+    mock_home=$(setup_mock_home); cdir=$(setup_company_dir)
+    create_mock_git "$mb"
+    create_mock_gh_for_job "$mb"
+    _stub_job_subscripts "$mock_home"
+
+    out=$(printf 'JOB-test\nY\n' \
+        | (export HOME="$mock_home" PATH="$mb:$PATH" MOCK_GH_AUTH_STATUS_EXIT=1; cd "$cdir" && bash "$mock_home/sf-tools/bin/sf-job.sh" --owner tamashimon-org --project yamada) 2>&1)
+    ec=$?
+    assert_exit_ok  $ec                                                  "未認証 → ログインに成功 → 正常終了する"
+    assert_file_contains "$MOCK_CALL_LOG" "gh auth login"                "gh auth login が呼ばれる"
+    # assert_output_not_contains は grep -qv（1 行でも一致しなければ合格）のため使わず、固定文字列で全体を確かめる
+    printf '%s\n' "$out" | grep -qF "Command: [sf-job.sh] gh auth login" \
+        && fail "gh auth login は run を通さない（コマンドの記録が出ない）" "run の記録（Command: … gh auth login）が出た" \
+        || pass "gh auth login は run を通さない（コマンドの記録が出ない）"
+
+    out=$(printf 'JOB-test\nY\n' \
+        | (export HOME="$mock_home" PATH="$mb:$PATH" MOCK_GH_AUTH_STATUS_EXIT=1 MOCK_GH_AUTH_LOGIN_EXIT=1; cd "$cdir" && bash "$mock_home/sf-tools/bin/sf-job.sh" --owner tamashimon-org --project yamada) 2>&1)
+    ec=$?
+    assert_exit_fail $ec                                                 "ログインに失敗 → 中断する"
+    assert_output_contains "$out" "GitHub 認証に失敗しました"             "ログインに失敗 → 理由を表示する"
+
+    teardown "$mb" "$mock_home" "$(dirname "$(dirname "$(dirname "$cdir")")")"
+}
+
 test_happy_path
+test_gh_auth_login_direct
 test_developer_not_owner_can_run
 test_from_force_dir
 test_repo_not_found

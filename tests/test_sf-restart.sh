@@ -83,6 +83,36 @@ exit 1
     teardown "$td" "$mb" "$mh"
 }
 
+# 回帰: 退避（cp）に失敗したら、元の設定ファイルを消さずに中断する（以前は、退避の失敗を見ずに削除し、戻せなかった）
+test_backup_failure_keeps_config() {
+    local td mb mh out ec real_cp
+    setup_std_env td mb mh
+    create_all_mocks "$mb"
+    echo '{"target-org":"oldorg"}' > "$td/.sf/config.json"
+    echo '{"defaultusername":"oldorg"}' > "$td/.sfdx/sfdx-config.json"
+    mkdir -p "$mh/sf-tools/bin"
+    printf '#!/bin/bash\necho "sf-start called" >> "$MOCK_CALL_LOG"\nexit 1\n' > "$mh/sf-tools/bin/sf-start.sh"
+    chmod +x "$mh/sf-tools/bin/sf-start.sh"
+    # 退避先（sf-restart-XXXXXX）への cp だけ失敗させる。それ以外は、本物の cp を使う
+    real_cp=$(command -v cp)
+    cat > "$mb/cp" << CPEOF
+#!/bin/bash
+case "\${*: -1}" in */sf-restart-*) echo "cp: cannot create" >&2; exit 1 ;; esac
+exec "$real_cp" "\$@"
+CPEOF
+    chmod +x "$mb/cp"
+
+    out=$(cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$mh/sf-tools/bin/sf-restart.sh" 2>&1)
+    ec=$?
+
+    assert_exit_fail "$ec" "退避に失敗 → 中断する"
+    assert_output_contains "$out" "を退避できません" "退避に失敗 → 理由を表示する"
+    assert_file_contains "$td/.sf/config.json" "oldorg" "退避に失敗 → .sf/config.json を消さない"
+    assert_file_contains "$td/.sfdx/sfdx-config.json" "oldorg" "退避に失敗 → .sfdx/sfdx-config.json を消さない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "sf-start called" "退避に失敗 → sf-start.sh を呼ばない"
+    teardown "$td" "$mb" "$mh"
+}
+
 # sf-start.sh が成功したときは、元の設定を戻さない（新しい設定に置き換わる）
 test_no_restore_on_success() {
     local td mb mh
@@ -134,6 +164,7 @@ test_outside_force_dir() {
 
 test_clears_config_files
 test_restores_config_on_failure
+test_backup_failure_keeps_config
 test_no_restore_on_success
 test_calls_sf_start_with_force_relogin
 test_no_sf_start

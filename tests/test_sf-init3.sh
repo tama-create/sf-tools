@@ -4,7 +4,7 @@
 # ==============================================================================
 # sf-init.sh のテストは、時間がかかる（Windows の CI で約 10 分）ため、3 つのファイル（test_sf-init.sh・test_sf-init2.sh・
 # test_sf-init3.sh）に分け、並列に動かす。共通の部品は tests/init-test-lib.sh。関数の分け方は、実測の所要時間で、均等になるようにした。
-# どのテストが、どのファイルにあるかは、下の一覧（関数名）を参照。全部で 49 の関数（件数は、3 つの合計）。
+# どのテストが、どのファイルにあるかは、下の一覧（関数名）を参照。全部で 53 の関数（件数は、3 つの合計）。
 #
 # 【このファイルのテスト関数】
 #   test_happy_path_3branches
@@ -22,6 +22,9 @@
 #   test_verify_step
 #   test_wf_propagate_skip_missing_branch
 #   test_sf_tools_branch_mismatch
+#   test_restart_after_phase2_update
+#   test_step_header_first_step
+#   test_postprocess_conditions
 # ==============================================================================
 source "$(dirname "${BASH_SOURCE[0]}")/init-test-lib.sh"
 
@@ -353,21 +356,57 @@ test_add_tier_staging_already_exists() {
 
     create_all_mocks "$mb"
 
+    # git show origin/main:sf-tools/config/branches.txt は、MOCK_GIT_MAIN_BRANCHES（printf %b）を返す（origin/main の版）
     cat > "$mb/git" << 'GITEOF'
 #!/bin/bash
+echo "git $*" >> "${MOCK_CALL_LOG:-/dev/null}"
 case "$1 $2" in
     "remote get-url") echo "https://github.com/tamashimon/force-testproject.git" ;;
+    "show origin/main:sf-tools/config/branches.txt") printf '%b' "${MOCK_GIT_MAIN_BRANCHES:-main\n}" ;;
     *) exit 0 ;;
 esac
 GITEOF
     chmod +x "$mb/git"
 
-    local exit_code
-    ( cd "$force_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
-          bash "$mock_home/sf-tools/bin/sf-init.sh" --add-tier staging ) > /dev/null 2>&1
+    local exit_code out="$mb/out.log"
+    ( cd "$force_dir" && HOME="$mock_home" PATH="$mb:$PATH" MOCK_GIT_MAIN_BRANCHES='main\nstaging\n' \
+          bash "$mock_home/sf-tools/bin/sf-init.sh" --add-tier staging ) > "$out" 2>&1 < /dev/null
     exit_code=$?
 
     assert_exit_fail "$exit_code" "既存 tier は失敗終了する"
+    assert_file_contains "$out" "すでに branches.txt（origin/main）に登録されています" "既存 tier → 理由が表示される"
+
+    # 回帰: 作業ツリー（admin）の branches.txt には staging がなく、origin/main にはある → 重複として止める
+    #   （以前は、作業ツリーで確認し、origin/main の版に追記していたため、すり抜けて staging が 2 行になった）
+    printf 'main\n' > "$force_dir/sf-tools/config/branches.txt"
+    : > "$MOCK_CALL_LOG"
+    ( cd "$force_dir" && HOME="$mock_home" PATH="$mb:$PATH" MOCK_GIT_MAIN_BRANCHES='main\nstaging\n' \
+          bash "$mock_home/sf-tools/bin/sf-init.sh" --add-tier staging ) > "$out" 2>&1 < /dev/null
+    exit_code=$?
+    assert_exit_fail "$exit_code" "作業ツリーになく origin/main にある → 失敗終了する"
+    assert_file_contains "$out" "すでに branches.txt（origin/main）に登録されています" "作業ツリーになく origin/main にある → 重複として止める"
+    assert_file_not_contains "$MOCK_CALL_LOG" "git push" "作業ツリーになく origin/main にある → 何も push しない"
+
+    # 逆: 作業ツリーにはあり、origin/main にない → 止めない（確認は、追記する版で行う。ここでは、確認の質問まで進むことだけを見る）
+    printf 'main\nstaging\n' > "$force_dir/sf-tools/config/branches.txt"
+    ( cd "$force_dir" && HOME="$mock_home" PATH="$mb:$PATH" MOCK_GIT_MAIN_BRANCHES='main\n' \
+          bash "$mock_home/sf-tools/bin/sf-init.sh" --add-tier staging ) > "$out" 2>&1 < /dev/null
+    assert_file_not_contains "$out" "すでに branches.txt" "作業ツリーにあり origin/main にない → 重複としない"
+
+    # origin/main の branches.txt を読めない → 中断する
+    cat > "$mb/git" << 'GITEOF'
+#!/bin/bash
+case "$1 $2" in
+    "remote get-url") echo "https://github.com/tamashimon/force-testproject.git" ;;
+    "show origin/main:sf-tools/config/branches.txt") echo "fatal: path does not exist" >&2; exit 128 ;;
+    *) exit 0 ;;
+esac
+GITEOF
+    ( cd "$force_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
+          bash "$mock_home/sf-tools/bin/sf-init.sh" --add-tier staging ) > "$out" 2>&1 < /dev/null
+    exit_code=$?
+    assert_exit_fail "$exit_code" "origin/main の branches.txt を読めない → 失敗終了する"
+    assert_file_contains "$out" "を読めません" "origin/main の branches.txt を読めない → 理由が表示される"
 
     teardown "$mb" "$mock_home"
     rm -rf "$base_dir"
@@ -529,6 +568,14 @@ test_phase10_eca_auto() {
                   bash "$mock_home/sf-tools/bin/sf-init.sh" --only 10 ) > "$out" 2>&1
         exit_code=$?
     }
+    # 一時エイリアス（sf-tools-PROD）を、指定の呼び出し（$1 の最初の行）より後で外したか。引数: 呼び出しの文字列 テスト名
+    _p10_unset_after() {
+        local first last
+        first=$(grep -nF -- "$1" "$MOCK_CALL_LOG" | head -1 | cut -d: -f1)
+        last=$(grep -nF -- "sf alias unset sf-tools-PROD" "$MOCK_CALL_LOG" | tail -1 | cut -d: -f1)
+        [[ -n "$first" && -n "$last" && "$last" -gt "$first" ]] \
+            && pass "$2" || fail "$2" "「$1」の行: ${first:-なし} / 最後の alias unset の行: ${last:-なし}"
+    }
 
     # 正常
     _p10_run 'Y\n'
@@ -572,6 +619,8 @@ test_phase10_eca_auto() {
     assert_exit_fail          "$exit_code"                                                              "org display の終了コード 1 → 中断"
     assert_file_contains      "$out" "接続情報を取得できませんでした"                                      "org display の終了コード 1 → 失敗の旨が表示される"
     assert_file_not_contains  "$MOCK_CALL_LOG" "project deploy start"                                     "org display の終了コード 1 → deploy しない"
+    # 回帰: ログインのあとの die でも、一時エイリアスを外してから終了する（以前は、org_guard の違反のときだけ外していた）
+    _p10_unset_after "sf org display" "org display の終了コード 1 → 一時エイリアスを外してから中断する"
     rm -rf "$init_base"
 
     # ログイン失敗（待ち時間切れなどで接続できていない）→ 中断
@@ -595,12 +644,17 @@ test_phase10_eca_auto() {
     assert_exit_fail          "$exit_code"                                                              "deploy 失敗 → 中断"
     assert_file_not_contains  "$MOCK_CALL_LOG" "project retrieve"                                         "deploy 失敗 → retrieve しない"
     assert_file_not_contains  "$MOCK_CALL_LOG" "gh secret set SF_CONSUMER_KEY_PROD"                       "deploy 失敗 → 登録しない"
+    _p10_unset_after "sf project deploy start" "deploy 失敗 → 一時エイリアスを外してから中断する（回帰）"
     rm -rf "$init_base"
 
     # JWT が成功しない → 確認で N → 中断
     MOCK_SF_JWT_FAIL_FIRST=99 SF_INIT_JWT_RETRIES=2 _p10_run 'Y\nN\n'
     assert_exit_fail          "$exit_code"                                                              "JWT 不成功 + スキップしない → 中断"
     assert_file_not_contains  "$MOCK_CALL_LOG" "gh secret set SF_CONSUMER_KEY_PROD"                       "JWT 不成功 + スキップしない → 登録しない"
+    # 回帰: N で中断しても、一時エイリアスは残らない（retrieve のあとで外す。以前は、テストのあとに外していたため、N で残った）
+    _p10_unset_after "sf project retrieve" "JWT 不成功 + スキップしない → 一時エイリアスは外れている"
+    # 回帰: 最後の試行のあとは、待たない（試行 2 回 → 待つのは 1 回だけ。以前は、最後の失敗のあとにも待っていた）
+    assert_equals "$(grep -c "秒後に、もう一度、確認します" "$out")" "1"                                      "JWT 不成功（2 回）→ 待つのは試行の間の 1 回だけ"
     rm -rf "$init_base"
 
     # JWT が成功しない → 確認で Y → スキップして登録
@@ -608,7 +662,7 @@ test_phase10_eca_auto() {
     assert_exit_ok            "$exit_code"                                                              "JWT 不成功 + スキップする → 終了コード 0"
     assert_file_contains      "$MOCK_CALL_LOG" "gh secret set SF_CONSUMER_KEY_PROD"                       "JWT 不成功 + スキップする → 登録される"
 
-    unset -f _p10_run
+    unset -f _p10_run _p10_unset_after
     unset MOCK_SF_ORG_JSON SF_INIT_JWT_INTERVAL SF_INIT_LOGIN_URL_PROD
     teardown "$mb" "$mock_home" "$init_base"
 }
@@ -787,6 +841,164 @@ test_sf_tools_branch_mismatch() {
     teardown "$mb" "$mock_home" "$init_base" "$base"
 }
 
+# ==============================================================================
+# テスト 28: Phase 2 が sf-tools を更新した（終了コード 75）→ 作業フォルダに戻り、ロックを解放してから、実行しなおす
+# ==============================================================================
+# 回帰: 以前は、admin/ に移動したまま、ロックも残したまま exec していたため、実行しなおした側が、実行場所の確認
+#       （admin の中では実行できない）か、ロック（同じ PID を「実行中」と判定）で、必ず終了していた
+test_restart_after_phase2_update() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] Phase 2 の終了コード 75 → 作業フォルダから、ロックなしで、実行しなおす${CLR_RST}"
+
+    local mb mock_home init_base init_dir exit_code out p2
+    mb=$(setup_mock_bin)
+    export MOCK_CALL_LOG="$mb/calls.log"
+    mock_home=$(setup_mock_home)
+    init_base=$(_setup_init_dir "tamashimon" "testproject")
+    init_dir="$init_base/home/tamashimon/testproject"
+    create_all_mocks "$mb"
+    create_mock_gh_for_init "$mb"
+    out="$mb/out.log"
+    p2="$mock_home/sf-tools/phases/init/02_project_info.sh"
+
+    # Phase 2 の差し替え: 1 回目は 75（sf-tools を更新した）、2 回目以降は 0
+    cat > "$p2" << 'P2EOF'
+#!/bin/bash
+echo "phase2-stub" >> "$MOCK_CALL_LOG"
+_s="${MOCK_CALL_LOG%/*}/.phase2_called"
+if [[ ! -f "$_s" ]]; then : > "$_s"; exit 75; fi
+exit 0
+P2EOF
+    # 入力: Y = 続行しますか？（1 回目）/ Y = 続行しますか？（実行しなおした後）
+    printf 'Y\nY\n' \
+        | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
+              bash "$mock_home/sf-tools/bin/sf-init.sh" --only 2 ) > "$out" 2>&1
+    exit_code=$?
+
+    assert_exit_ok            "$exit_code"                                                  "75 → 実行しなおして、正常終了する"
+    assert_file_contains      "$out" "もう一度、はじめから実行します"                         "実行しなおすことを表示する"
+    assert_file_not_contains  "$out" "中では実行できません"                                   "実行しなおした側が、admin の中と判定されない"
+    assert_file_not_contains  "$out" "すでに実行中です"                                       "実行しなおした側が、残ったロックで止まらない"
+    assert_equals "$(grep -c 'phase2-stub' "$MOCK_CALL_LOG")" "2"                           "Phase 2 が、実行しなおした後にも、実行される"
+    assert_dir_not_exists     "$init_dir/admin/.sf-init-testproject.lock"                   "終了後に、ロックが残らない"
+    assert_dir_not_exists     "$init_dir/admin/admin"                                       "admin の中に、admin を作らない"
+
+    # 実行しなおしても、まだ 75 → 2 回目は、実行しなおさずに終了する（無限に繰り返さない）
+    printf '#!/bin/bash\necho "phase2-stub" >> "$MOCK_CALL_LOG"\nexit 75\n' > "$p2"
+    : > "$MOCK_CALL_LOG"
+    printf 'Y\nY\n' \
+        | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
+              bash "$mock_home/sf-tools/bin/sf-init.sh" --only 2 ) > "$out" 2>&1
+    exit_code=$?
+    assert_exit_fail          "$exit_code"                                                  "75 が続く → 異常終了する"
+    assert_file_contains      "$out" "sf-tools を更新しても、最新になりませんでした"          "75 が続く → 理由を表示する"
+    assert_equals "$(grep -c 'phase2-stub' "$MOCK_CALL_LOG")" "2"                           "75 が続く → 実行しなおしは 1 回だけ"
+    assert_dir_not_exists     "$init_dir/admin/.sf-init-testproject.lock"                   "75 が続く → ロックが残らない"
+
+    unset MOCK_CALL_LOG
+    teardown "$mb" "$mock_home" "$init_base"
+}
+
+# ==============================================================================
+# テスト 29: 最初のステップ（ステップ 1）の見出しに、「完了」の一覧を出さない（macOS の seq 1 0 は、1 0 と逆順に出る）
+# ==============================================================================
+# 回帰: _show_step_header が seq 1 0 を呼び、macOS（BSD）では「（完了: 準備の確認・）」と表示していた。
+#       BSD と同じ動き（開始 > 終了なら、逆順に出す）の seq を、PATH の先頭に置いて確かめる
+test_step_header_first_step() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] ステップ 1 の見出しに、完了の一覧を出さない（BSD の seq でも）${CLR_RST}"
+    source "$(dirname "${BASH_SOURCE[0]}")/../lib/platform.sh"   # run_with_timeout
+
+    local mb mock_home init_base init_dir out
+    mb=$(setup_mock_bin)
+    export MOCK_CALL_LOG="$mb/calls.log"
+    mock_home=$(setup_mock_home)
+    init_base=$(_setup_init_dir "tamashimon" "testproject")
+    init_dir="$init_base/home/tamashimon/testproject"
+    create_all_mocks "$mb"
+    create_mock_gh_for_init "$mb"
+    _stub_subscripts "$mock_home"
+    out="$mb/out.log"
+    cat > "$mb/seq" << 'SEQEOF'
+#!/bin/bash
+# BSD の seq の動き: 引数 1 つは 1〜N。開始 > 終了なら、逆順に出す
+if [[ $# -eq 1 ]]; then a=1; b=$1; else a=$1; b=$2; fi
+if (( a <= b )); then i=$a; while (( i <= b )); do echo "$i"; i=$((i + 1)); done
+else i=$a; while (( i >= b )); do echo "$i"; i=$((i - 1)); done; fi
+SEQEOF
+    chmod +x "$mb/seq"
+
+    # 入力: Enter = 開始画面の確認。以降は入力なし（Phase 2 の確認で、EOF で終了する）
+    printf '\n' \
+        | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
+              run_with_timeout 60 bash "$mock_home/sf-tools/bin/sf-init.sh" ) > "$out" 2>&1
+
+    assert_file_contains      "$out" "ステップ 1 / 9"                                        "ステップ 1 の見出しが出る"
+    assert_file_not_contains  "$out" "完了: 準備の確認・）"                                   "ステップ 1 に、完了の一覧（準備の確認・）を出さない"
+
+    unset MOCK_CALL_LOG
+    teardown "$mb" "$mock_home" "$init_base"
+}
+
+# ==============================================================================
+# テスト 30: 後処理の条件（完了の印を付けられない → 状態ファイルを残す / 同期・admin ブランチを行わなかった理由）
+# ==============================================================================
+# 回帰: 以前は、完了の印を付けられなくても、状態ファイルを消していた（_finish_unfinished_setup は残す。扱いが違った）。
+#       --only 10 でも、同期の行に「途中までの実行のため」と出ていた（最後まで実行している）
+test_postprocess_conditions() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] 後処理: 印を付けられない → 状態ファイルを残す / 同期しなかった理由を正しく出す${CLR_RST}"
+
+    local mb mock_home init_base init_dir exit_code out
+    mb=$(setup_mock_bin)
+    export MOCK_CALL_LOG="$mb/calls.log"
+    mock_home=$(setup_mock_home)
+    create_all_mocks "$mb"
+    create_mock_gh_for_init "$mb"
+    out="$mb/out.log"
+    # Phase 10 の差し替え（接続の処理は、このテストの対象外）
+    printf '#!/bin/bash\necho "phase10-stub" >> "$MOCK_CALL_LOG"\nexit 0\n' > "$mock_home/sf-tools/phases/init/10_sf_auth.sh"
+
+    # --- A. --resume 10・状態ファイルに REPO_DIR がない → 印を付けられない → 状態ファイルを残す ---
+    init_base=$(_setup_init_dir "tamashimon" "testproject")
+    init_dir="$init_base/home/tamashimon/testproject"
+    mkdir -p "$init_dir/admin"
+    printf 'REPO_FULL_NAME="tamashimon/force-testproject"\nREPO_NAME="force-testproject"\nPROJECT_NAME="testproject"\nBRANCH_COUNT="1"\n' \
+        > "$init_dir/admin/.sf-init-testproject.env"
+    printf 'Y\n' \
+        | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
+              bash "$mock_home/sf-tools/bin/sf-init.sh" --resume 10 ) > "$out" 2>&1
+    exit_code=$?
+    assert_exit_ok            "$exit_code"                                                  "REPO_DIR なし: 正常終了する"
+    assert_file_contains      "$MOCK_CALL_LOG" "phase10-stub"                               "REPO_DIR なし: Phase 10 を実行する"
+    assert_file_contains      "$out" "状態ファイルは、残します"                               "印を付けられない → 状態ファイルを残すと表示する"
+    assert_file_exists        "$init_dir/admin/.sf-init-testproject.env"                    "印を付けられない → .env を残す"
+    assert_file_exists        "$init_dir/admin/.sf-init-testproject.progress"               "印を付けられない → 進捗ファイルを残す"
+    assert_file_contains      "$out" "REPO_DIR・REPO_FULL_NAME）がないため、メタデータの同期" "同期しなかった理由: 状態ファイルに REPO_DIR などがない"
+    assert_file_contains      "$out" "クローンの場所（REPO_DIR）がないため"                   "admin ブランチにしなかった理由: REPO_DIR がない"
+    assert_file_not_contains  "$out" "途中までの実行のため"                                   "最後まで実行したので、「途中まで」とは出さない"
+    rm -rf "$init_base"
+
+    # --- B. --only 10 → 同期の行は「--only の実行のため」（「途中までの実行のため」ではない）---
+    init_base=$(_setup_init_dir "tamashimon" "testproject")
+    init_dir="$init_base/home/tamashimon/testproject"
+    mkdir -p "$init_dir/admin"
+    printf 'REPO_FULL_NAME="tamashimon/force-testproject"\nREPO_NAME="force-testproject"\nPROJECT_NAME="testproject"\nBRANCH_COUNT="1"\nREPO_DIR="%s"\n' \
+        "$init_dir/admin/force-testproject" > "$init_dir/admin/.sf-init-testproject.env"
+    printf 'Y\n' \
+        | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
+              bash "$mock_home/sf-tools/bin/sf-init.sh" --only 10 ) > "$out" 2>&1
+    exit_code=$?
+    assert_exit_ok            "$exit_code"                                                  "--only 10: 正常終了する"
+    assert_file_contains      "$out" "--only の実行のため、メタデータの同期"                  "--only 10: 同期しなかった理由は --only"
+    assert_file_not_contains  "$out" "途中までの実行のため、メタデータの同期"                 "--only 10: 「途中までの実行」とは出さない"
+    assert_file_not_contains  "$MOCK_CALL_LOG" "gh workflow run"                            "--only 10: 同期（wf-metasync）は起動しない"
+    rm -rf "$init_base"
+
+    unset MOCK_CALL_LOG
+    teardown "$mb" "$mock_home"
+}
+
 echo ""
 echo -e "${CLR_HEAD}========================================"
 echo "  sf-init.sh テスト（3/3）"
@@ -807,5 +1019,8 @@ test_phase10_eca_auto
 test_verify_step
 test_wf_propagate_skip_missing_branch
 test_sf_tools_branch_mismatch
+test_restart_after_phase2_update
+test_step_header_first_step
+test_postprocess_conditions
 
 print_summary

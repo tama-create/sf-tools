@@ -262,6 +262,53 @@ force-app/main/default/classes/MyClass.cls
     teardown "$td"
 }
 
+# 回帰: Step B（内容検索）が、空白を含むパスのテストクラスも見つける
+#   （以前は xargs が空白でパスを分割し、テストクラスを見つけられず、含まれていなくても警告しなかった）
+test_missing_test_class_found_in_path_with_space() {
+    local td
+    td=$(setup_force_dir)
+    mkdir -p "$td/force-app/main/default/classes" "$td/force-app/main/default/my tests"
+    printf 'public class MyClass {}\n' > "$td/force-app/main/default/classes/MyClass.cls"
+    printf '@isTest\npublic class MyClassSpec { static void t(){ MyClass x; } }\n' \
+        > "$td/force-app/main/default/my tests/MyClassSpec.cls"
+    local deploy="$td/deploy.txt" remove="$td/remove.txt"
+    printf '[files]\nforce-app/main/default/classes/MyClass.cls\n' > "$deploy"
+    printf '[files]\n' > "$remove"
+
+    local out; out=$(cd "$td" && bash "$SF_TOOLS_DIR/bin/sf-check.sh" "$deploy" "$remove" 2>&1)
+    assert_exit_ok "$?" "空白を含むパスのテストクラス → exit 0（warning のみ）"
+    assert_output_contains "$out" "→ force-app/main/default/my tests/MyClassSpec.cls" \
+        "空白を含むパスのテストクラスが見つかり、含まれていないと警告される"
+    teardown "$td"
+}
+
+# 回帰: deploy-target.txt に ./ 付きで書いたテストクラスも、含まれていると判定する（警告しない）
+#   （以前は、見つかったパスだけ ./ を除いて比べ、./ 付きの行と一致せず、含まれていても警告していた）
+test_no_warning_when_test_included_with_dot_slash() {
+    local td
+    td=$(setup_force_dir)
+    mkdir -p "$td/force-app/main/default/classes"
+    printf 'public class MyClass {}\n' > "$td/force-app/main/default/classes/MyClass.cls"
+    printf '@isTest\npublic class MyClassTest {}\n' > "$td/force-app/main/default/classes/MyClassTest.cls"
+    local deploy="$td/deploy.txt" remove="$td/remove.txt"
+    printf '[files]\n./force-app/main/default/classes/MyClass.cls\n./force-app/main/default/classes/MyClassTest.cls\n' > "$deploy"
+    printf '[files]\n' > "$remove"
+
+    local out; out=$(cd "$td" && bash "$SF_TOOLS_DIR/bin/sf-check.sh" "$deploy" "$remove" 2>&1)
+    assert_exit_ok "$?" "./ 付きで書いたテストクラス → exit 0"
+    echo "$out" | grep -q "テストクラス不足の可能性" \
+        && fail "./ 付きで書いたテストクラス → warning なし" "$out" \
+        || pass "./ 付きで書いたテストクラス → warning なし"
+
+    # クラスだけ ./ 付き・テストクラスは ./ なし、でも同じ
+    printf '[files]\n./force-app/main/default/classes/MyClass.cls\nforce-app/main/default/classes/MyClassTest.cls\n' > "$deploy"
+    out=$(cd "$td" && bash "$SF_TOOLS_DIR/bin/sf-check.sh" "$deploy" "$remove" 2>&1)
+    echo "$out" | grep -q "テストクラス不足の可能性" \
+        && fail "クラスだけ ./ 付き → warning なし" "$out" \
+        || pass "クラスだけ ./ 付き → warning なし"
+    teardown "$td"
+}
+
 # テストクラス不足: @isTest クラス自身のみ → WARNING なし
 # ------------------------------------------------------------------------------
 test_no_warning_for_test_class_itself() {
@@ -463,8 +510,53 @@ test_missing_branch_file_warns() {
     teardown "$td"
 }
 
+# 回帰: Step B（内容検索）の「単語として含まれる」判定（grep -qw と同じ。プロセスを起動しない書き方に直したため）
+#   クラス名が、ほかの単語の一部（Delta2・XDelta・Delta_）・大文字小文字違い（delta）のときは、テストクラスと見なさない。
+#   Eps.run() のように、記号で区切られていれば、見なす。
+#   @isTest の大文字小文字: デプロイするクラス自身が、テストクラスか（@IsTest など）の判定は、区別しない。
+#   テストクラスの本文検索（Step B）は、区別する（@isTest だけを探す）。どちらも、以前（grep）と同じ
+test_missing_test_word_boundary() {
+    local td; td=$(setup_force_dir)
+    local c="$td/force-app/main/default/classes"
+    mkdir -p "$c"
+    printf 'public class Delta {}\n' > "$c/Delta.cls"
+    printf '@isTest\nclass SpecA { void t(){ Delta2 a; XDelta b; Delta_ c; delta d; } }\n' > "$c/SpecA.cls"
+    printf 'public class Eps {}\n' > "$c/Eps.cls"
+    printf '@isTest\nclass SpecB { void t(){ Eps.run(); } }\n' > "$c/SpecB.cls"
+    printf '@IsTest\npublic class Zed {}\n' > "$c/Zed.cls"
+    printf '@isTest\nclass SpecC { void t(){ Zed z; } }\n' > "$c/SpecC.cls"
+    printf 'public class Eta {}\n' > "$c/Eta.cls"
+    printf '@istest\nclass SpecD { void t(){ Eta e; } }\n' > "$c/SpecD.cls"
+    printf '[files]\nforce-app/main/default/classes/Delta.cls\nforce-app/main/default/classes/Eps.cls\nforce-app/main/default/classes/Zed.cls\nforce-app/main/default/classes/Eta.cls\n' > "$td/deploy.txt"
+    printf '[files]\n' > "$td/remove.txt"
+
+    local out; out=$(cd "$td" && bash "$SF_TOOLS_DIR/bin/sf-check.sh" "$td/deploy.txt" "$td/remove.txt" 2>&1)
+    assert_exit_ok "$?" "単語の境界の確認 → 警告だけで、exit 0"
+    echo "$out" | grep -q "SpecA.cls" && fail "Delta2 / XDelta / Delta_ / delta は、Delta のテストと見なさない" || pass "Delta2 / XDelta / Delta_ / delta は、Delta のテストと見なさない"
+    assert_output_contains "$out" "→ force-app/main/default/classes/SpecB.cls" "Eps.run() は、単語として含まれる → テストクラスと見なす（deploy-target にないため、警告）"
+    echo "$out" | grep -q "SpecC.cls" && fail "自分が @IsTest のクラス（Zed）は、テストクラスの確認の対象外" || pass "自分が @IsTest のクラス（Zed）は、テストクラスの確認の対象外（大文字小文字を区別しない）"
+    echo "$out" | grep -q "SpecD.cls" && fail "@istest（小文字）のテストクラスは、本文検索の対象外（区別する）" || pass "@istest（小文字）のテストクラスは、本文検索の対象外（区別する）"
+    teardown "$td"
+}
+
+# 回帰: 可否の表を、最初に 1 回だけ読み込む形に直したため。同じ種類が重複していたら、最初の行を使う。
+#   CRLF の行・列の少ない行（備考なし）も、同じに扱う
+test_capability_table_duplicate_and_crlf() {
+    local td; td=$(setup_force_dir)
+    printf '# c\r\nFooNg\tng\tok\t備考A\r\nFooNg\tok\tok\t重複（無視）\r\nBarLim\tlimited\tok\r\n' > "$td/cap.txt"
+    printf '[members]\nFooNg:A\nBarLim:B\n' > "$td/deploy.txt"; printf '[files]\n' > "$td/remove.txt"
+    local out; out=$(cd "$td" && SF_CHECK_CAPABILITY_FILE="$td/cap.txt" bash "$SF_TOOLS_DIR/bin/sf-check.sh" "$td/deploy.txt" "$td/remove.txt" 2>&1)
+    assert_exit_fail "$?" "重複した種類は、最初の行（ng）を使う → エラー終了"
+    assert_output_contains "$out" "備考A" "最初の行の備考が出る（CR は除かれる）"
+    echo "$out" | grep -q "重複（無視）" && fail "重複した 2 行目は、使わない" || pass "重複した 2 行目は、使わない"
+    assert_output_contains "$out" "BarLim" "列の少ない行（備考なし）の種類も、引ける（limited → 警告）"
+    teardown "$td"
+}
+
 test_files_valid_path
 test_files_missing_path
+test_missing_test_word_boundary
+test_capability_table_duplicate_and_crlf
 test_files_directory_is_accepted
 test_unknown_option_rejected
 test_missing_branch_file_warns
@@ -477,6 +569,8 @@ test_auto_resolve_branch
 test_missing_test_class_warning
 test_no_warning_when_test_included
 test_no_warning_when_test_included_nonstandard_name
+test_missing_test_class_found_in_path_with_space
+test_no_warning_when_test_included_with_dot_slash
 test_no_warning_for_test_class_itself
 test_capability_ng_release_error
 test_capability_ng_delete_only_in_remove

@@ -101,7 +101,7 @@ test_non_admin_can_deploy() {
     setup_release_dir "$td" "feature/deploy-test"
 
     export MOCK_GIT_BRANCH="feature/deploy-test"
-    export MOCK_GH_API_USER="stranger123"  # admin-users.txt に未登録のユーザー
+    export MOCK_GH_API_USER="stranger123"  # 一般のユーザー（管理者でなくても、実行できる）
 
     local out; out=$( echo "Y" | ( cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-deploy.sh" --no-open ) 2>&1 )
     local ec=$?
@@ -144,7 +144,7 @@ test_reserved_alias_blocked() {
         out=$( echo "Y" | ( cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-deploy.sh" --no-open -t "$a" ) 2>&1 )
         ec=$?
         assert_exit_fail $ec "共有環境(${a}) を -t で指定 → 拒否（終了コード 0 以外）"
-        assert_output_contains "$out" "共有環境のため、ローカルから強制リリースできません" "共有環境(${a}) → 拒否の旨が表示される"
+        assert_output_contains "$out" "共有環境（予約名）のため、ローカルから強制リリースできません" "共有環境(${a}) → 拒否の旨が表示される"
         # 確認（続行しますか）が出ていないこと（assert_output_not_contains は複数行で常に成功するため、grep で確認する）
         echo "$out" | grep -q "続行しますか" \
             && fail "共有環境(${a}) → 確認の前に拒否する（確認を出さない）" "確認が表示された" \
@@ -165,6 +165,54 @@ test_reserved_alias_blocked() {
     assert_exit_fail $ec "接続中の組織が prod → 拒否"
     assert_file_not_contains "$MOCK_CALL_LOG" "project deploy" "接続中の組織が prod → 強制デプロイは実行されない"
     unset MOCK_GIT_BRANCH MOCK_SF_ORG_JSON
+    teardown "$td" "$mb"
+}
+
+# 回帰: ブランチを取得できない（detached HEAD など）→ 確認の前に中断する
+#   （以前は失敗を見ず、git のエラーの文言をブランチ名として扱い、保護ブランチの確認を素通りして、強制リリースまで進んでいた）
+test_branch_unavailable_blocked() {
+    local td mb mh out ec
+    setup_std_env td mb mh
+    create_all_mocks "$mb"
+    setup_release_dir "$td" "feature/deploy-test"
+    # symbolic-ref だけ失敗する git（detached HEAD の再現）。それ以外は、標準のモックに任せる
+    mv "$mb/git" "$mb/git-base"
+    cat > "$mb/git" << EOF
+#!/bin/bash
+if [[ "\$1" == "symbolic-ref" ]]; then
+    echo "git \$*" >> "\${MOCK_CALL_LOG:-/dev/null}"
+    echo "fatal: ref HEAD is not a symbolic ref" >&2
+    exit 128
+fi
+exec "$mb/git-base" "\$@"
+EOF
+    chmod +x "$mb/git"
+    export MOCK_SF_ORG_JSON='{"result":{"alias":"dev00","id":"00D000000000001AAA"}}'
+    out=$( echo "Y" | ( cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-deploy.sh" --no-open -t dev00 ) 2>&1 )
+    ec=$?
+    assert_exit_fail $ec "ブランチを取得できない → 中断（終了コード 0 以外）"
+    assert_output_contains "$out" "現在のブランチを取得できません" "ブランチを取得できない → 理由が表示される"
+    echo "$out" | grep -q "続行しますか" \
+        && fail "ブランチを取得できない → 確認の前に中断する" "確認が表示された" \
+        || pass "ブランチを取得できない → 確認の前に中断する"
+    assert_file_not_contains "$MOCK_CALL_LOG" "project deploy" "ブランチを取得できない → 強制デプロイは実行されない"
+    unset MOCK_SF_ORG_JSON
+    teardown "$td" "$mb"
+}
+
+# 保護ブランチの上 → ブランチ名を 1 回だけ表示する（以前は「main ブランチでは実行できません。現在のブランチ: main」と 2 回）
+test_protected_branch_message() {
+    local td mb mh out
+    setup_std_env td mb mh
+    create_all_mocks "$mb"
+    export MOCK_GIT_BRANCH="staging"
+    out=$( echo "Y" | ( cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-deploy.sh" ) 2>&1 )
+    assert_exit_fail $? "保護ブランチ(staging) → 中断"
+    assert_output_contains "$out" "staging は保護ブランチ（sf-tools/config/branches.txt）のため、実行できません。" "保護ブランチ → 事実だけのメッセージ"
+    echo "$out" | grep -q "現在のブランチ: staging" \
+        && fail "保護ブランチ → ブランチ名を重ねて表示しない" \
+        || pass "保護ブランチ → ブランチ名を重ねて表示しない"
+    unset MOCK_GIT_BRANCH
     teardown "$td" "$mb"
 }
 
@@ -192,6 +240,27 @@ test_target_invalid_forms_rejected() {
     done
 }
 
+# 名前を付け替えた本番組織（予約名ではない）も、確認の前に拒否する。種類を確認できない組織も拒否する
+test_renamed_production_org_denied() {
+    local td mb mh out ec
+    setup_std_env td mb mh
+    create_all_mocks "$mb"
+    setup_release_dir "$td" "feature/deploy-test"
+    export MOCK_GIT_BRANCH="feature/deploy-test"
+    out=$( echo "Y" | ( cd "$td" && HOME="$mh" PATH="$mb:$PATH" MOCK_SF_ORG_INFO='{"status":0,"result":{"records":[{"attributes":{"type":"Organization"},"Id":"00D000000000009AAA","Name":"Real Prod","IsSandbox":false,"OrganizationType":"Enterprise Edition","TrialExpirationDate":null}]}}' bash "$SF_TOOLS_DIR/bin/sf-deploy.sh" --no-open -t myprod ) 2>&1 )
+    ec=$?
+    assert_exit_fail $ec "名前を付け替えた本番組織(myprod) を -t で指定 → 拒否"
+    assert_output_contains "$out" "本番組織のため、ローカルから強制リリースできません" "本番組織 → 拒否の旨が表示される"
+    echo "$out" | grep -q "続行しますか" && fail "本番組織 → 確認の前に拒否する（確認を出さない）" "確認が表示された" || pass "本番組織 → 確認の前に拒否する（確認を出さない）"
+    assert_file_not_contains "$MOCK_CALL_LOG" "project deploy" "本番組織 → 強制デプロイは実行されない"
+    out=$( echo "Y" | ( cd "$td" && HOME="$mh" PATH="$mb:$PATH" MOCK_SF_ORG_QUERY_EXIT=1 bash "$SF_TOOLS_DIR/bin/sf-deploy.sh" --no-open -t mystg ) 2>&1 )
+    ec=$?
+    assert_exit_fail $ec "組織の種類を確認できない → 拒否"
+    assert_output_contains "$out" "組織の種類を確認できないため、ローカルから強制リリースできません" "確認できない → 拒否の旨が表示される"
+    unset MOCK_GIT_BRANCH
+    teardown "$td" "$mb"
+}
+
 # 個人用の組織（予約名以外）を -t で指定 → 実行できる
 test_personal_alias_allowed() {
     local td mb mh out ec
@@ -210,7 +279,10 @@ test_personal_alias_allowed() {
 test_feature_branch
 test_reserved_alias_blocked
 test_target_invalid_forms_rejected
+test_branch_unavailable_blocked
+test_protected_branch_message
 test_personal_alias_allowed
+test_renamed_production_org_denied
 test_confirm_no_aborts
 test_main_branch_blocked
 test_staging_branch_blocked

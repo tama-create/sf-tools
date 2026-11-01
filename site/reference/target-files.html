@@ -31,6 +31,12 @@
     <tr><td><code>remove-target.txt</code></td><td>削除するメタデータを列挙する</td></tr>
   </tbody>
 </table>
+<h2 id="folder">ファイルの置き場所</h2>
+<ul>
+  <li>フォルダ <code>sf-tools/release/&lt;ブランチ名&gt;/</code> と、2 つのファイルの雛形は、<code>sf-start.sh</code> がバックグラウンドで実行する <code>sf-install.sh</code> が、作業用のブランチで用意します（<code>main</code> ブランチでは作りません）。</li>
+  <li>どのフォルダを使うかは、<strong>今の Git のブランチではなく</strong>、<code>sf-tools/release/branch_name.txt</code>（<code>sf-install.sh</code> が書き込む、Git の管理外の手元のファイル）に書かれたブランチ名で決まります。<code>sf-check.sh</code>・<code>sf-release.sh</code> の両方が、このファイルを読みます。</li>
+  <li><code>sf-release.sh</code> は、<code>branch_name.txt</code> と 2 つのファイルの、どれか 1 つでもないと中断します。<code>sf-check.sh</code> は、ないファイルの検証を飛ばします（<code>branch_name.txt</code> がないときは、警告を出して、何も検証せずに成功します）。</li>
+</ul>
 
 <h2 id="deploy"><code>deploy-target.txt</code></h2>
 <pre><code>[files]
@@ -49,12 +55,13 @@ force-app/main/default/lwc/myComponent
   <li><code>[files]</code> と <code>[members]</code> の 2 つのセクションで構成します。</li>
   <li>行頭の <code>#</code> はコメントです。</li>
   <li>空行は無視されます。</li>
-  <li><code>[files]</code> には、ファイルまたはフォルダのパスを書きます（リポジトリのルートからの相対パス）。<strong>フォルダは、1 つのコンポーネント・オブジェクトを丸ごと指すものだけ</strong>書けます（<code>lwc/コンポーネント名</code>・<code>aura/コンポーネント名</code>・<code>objects/オブジェクト名</code>）。<code>classes</code> や <code>.</code> のような広いフォルダは、対象が広がりすぎる（<code>remove-target.txt</code> では、組織のメタデータが広範囲に削除される）ため、エラーです。絶対パスや <code>..</code> を含むパスも、エラーです。</li>
-  <li><code>[members]</code> には、<code>種別名:メンバー名</code> の形で書きます（<code>:</code> の前後が空ではいけません）。</li>
+  <li><code>[files]</code> には、ファイルまたはフォルダのパスを書きます（リポジトリのルートからの相対パス。存在しないパスは、エラーです）。<strong>フォルダは、1 つのコンポーネント・オブジェクトを丸ごと指すものだけ</strong>書けます（<code>lwc/コンポーネント名</code>・<code>aura/コンポーネント名</code>・<code>objects/オブジェクト名</code>）。<code>classes</code> や <code>.</code> のような広いフォルダは、対象が広がりすぎる（<code>remove-target.txt</code> では、組織のメタデータが広範囲に削除される）ため、エラーです。絶対パスや、要素に <code>..</code> を含むパス（リポジトリの外を指すパス）も、存在していてもエラーです。</li>
+  <li><code>[members]</code> には、<code>種別名:メンバー名</code> の形で書きます（<code>:</code> がない・先頭か末尾が <code>:</code> の行は、エラーです）。</li>
   <li>最初の <code>[files]</code> / <code>[members]</code> の行より前に書いた行は、<code>[files]</code> として扱われます。</li>
-  <li><code>@isTest</code> を持つ <code>.cls</code> ファイルを書くと、<code>sf-release.sh</code> が <code>--test-level RunSpecifiedTests --tests &lt;クラス名&gt;</code>（クラスごとに繰り返す）を、自動で設定します。</li>
-  <li><code>deploy-target.txt</code> と <code>remove-target.txt</code> の両方に、対象が 1 件もない（コメントと空行だけ）ときは、「デプロイ対象なし」と表示して、何もせず、正常に終わります。</li>
-  <li>テストクラスを書くかどうかは、利用者の責任です。ローカルにあるテストクラスの書き忘れは、<code>sf-check.sh</code> が警告で知らせます。</li>
+  <li>リリース・削除できないと確認済みの種類（<code>config/metadata-capability.txt</code> で <code>ng</code>）を書くと、<code>sf-check.sh</code> がエラーにします。条件によってできないことがある種類（<code>limited</code>）は、警告です。<code>deploy-target.txt</code> はリリースの可否、<code>remove-target.txt</code> は削除の可否で判定します。</li>
+  <li><code>[files]</code> に、<code>@isTest</code>（大文字・小文字を区別しない）を持つ <code>.cls</code> ファイルを書くと、<code>sf-release.sh</code> が <code>--test-level RunSpecifiedTests --tests &lt;クラス名&gt;</code>（クラスごとに繰り返す）を、自動で設定します。</li>
+  <li><code>deploy-target.txt</code> と <code>remove-target.txt</code> の両方に、対象が 1 件もない（コメントと空行だけ）ときは、<code>sf-release.sh</code> は「デプロイ対象なし。正常終了します。」と表示して、何もせず、正常に終わります。</li>
+  <li>テストクラスを書くかどうかは、利用者の責任です。ローカルにあるテストクラスの書き忘れは、<code>sf-check.sh</code> が警告で知らせます（先頭の <code>./</code> は、付けても付けなくても、同じに扱います）。</li>
 </ul>
 
 <h2 id="remove"><code>remove-target.txt</code></h2>
@@ -62,12 +69,14 @@ force-app/main/default/lwc/myComponent
 force-app/main/default/classes/OldClass.cls</code></pre>
 <p>書き方は、<code>deploy-target.txt</code> と同じです（<code>[files]</code> と <code>[members]</code>）。</p>
 <ul>
-  <li>組織にない削除対象を、エラーにしたくない（後始末など）ときは、<code># @ignore-missing</code> で始まるコメント行を書きます。<code>--ignore-warnings</code> が付き、削除以外の警告も、エラーになりません。通常のリリース・削除では、書かないでください（綴りの誤りを見落とすため）。</li>
+  <li>削除は、<code>deploy-target.txt</code> のデプロイより先に行われます（<code>--pre-destructive-changes</code>）。</li>
+  <li><code>deploy-target.txt</code> が空で、<code>remove-target.txt</code> にだけ対象があるときは、削除だけを行います。</li>
+  <li>組織にない削除対象を、エラーにしたくない（後始末など）ときは、<code># @ignore-missing</code> で始まるコメント行（行頭・<code>#</code> の後の空白は可）を書きます。<code>--ignore-warnings</code> が付き、削除以外の警告も、エラーになりません。通常のリリース・削除では、書かないでください（綴りの誤りを見落とすため）。</li>
 </ul>
 
 <div class="box">
   <div class="title">書いたあとは</div>
-  <p>構文は、<code>git commit</code> のときに自動で確認されます（<a href="commands-auto.html#sf-precommit">pre-commit フック</a>）。手動で確認するなら <a href="commands-dev.html#sf-check"><code>sf-check.sh</code></a> です。確認の内容（パスの存在・書式・種類の可否・テストクラスの不足）は、そちらにあります。</p>
+  <p>書き方は、<code>git commit</code> と <code>git push</code> のときに自動で確認されます（<a href="commands-auto.html#sf-precommit">pre-commit フック</a>・<a href="commands-auto.html#sf-prepush">pre-push フック</a>）。手動で確認するなら <a href="commands-dev.html#sf-check"><code>sf-check.sh</code></a> です。確認の内容（パスの存在・書式・種類の可否・テストクラスの不足）は、そちらにあります。</p>
 </div>
 
 </main>

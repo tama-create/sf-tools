@@ -40,7 +40,7 @@ assert_file_not_contains()   { ! grep -qF -- "$2" "$1" 2>/dev/null && pass "$3" 
 assert_executable()          { [[ -x "$1" ]]   && pass "$2" || fail "$2" "実行権限がない: $1"; }
 assert_equals()              { [[ "$1" == "$2" ]] && pass "$3" || fail "$3" "期待: '$2'  実際: '$1'"; }
 assert_output_contains()     { echo "$1" | grep -q "$2" && pass "$3" || fail "$3" "'$2' が出力に含まれていない"; }
-assert_output_not_contains() { echo "$1" | grep -qv "$2" && pass "$3" || fail "$3" "'$2' が出力に含まれている"; }
+assert_output_not_contains() { echo "$1" | grep -q "$2" && fail "$3" "'$2' が出力に含まれている" || pass "$3"; }
 
 # ------------------------------------------------------------------------------
 # テスト環境セットアップ
@@ -54,8 +54,6 @@ setup_force_dir() {
              "$dir/sf-tools/config" "$dir/sf-tools/release" "$dir/sf-tools/logs"
     echo "ApexClass" > "$dir/sf-tools/config/metadata.txt"
     printf 'main\nstaging\ndevelop\n' > "$dir/sf-tools/config/branches.txt"
-    # 管理者ユーザー設定（check_admin_user が参照するプロジェクトローカルファイル）
-    printf '# admin-users.txt\ntamashimon\n' > "$dir/sf-tools/config/admin-users.txt"
     echo "$dir"
 }
 

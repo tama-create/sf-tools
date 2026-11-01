@@ -113,7 +113,9 @@ test_main_ahead_and_conflict() {
     assert_equals "$(_head "$cl")" "$h0" "A6: 競合のとき、手元の HEAD は元のまま（マージを中止している）"
     assert_equals "$(_remote_ref JOB-A)" "$r0" "A6: 競合のとき、origin は変わらない"
     assert_equals "$(_it_git -C "$cl" ls-files -u | wc -l | tr -d ' ')" "0" "A6: 競合の途中の状態（未解決）が、残らない"
-    it_out_has "コンフリクト" && pass "A6: コンフリクトのメッセージが出る" || fail "A6: コンフリクトのメッセージが出る"
+    it_out_has "origin/main とのマージに失敗しました" && pass "A6: マージの失敗のメッセージが出る" || fail "A6: マージの失敗のメッセージが出る" "$(it_out | tail -5)"
+    # 理由（git merge の出力。競合したファイル名を含む。git の表示言語によらず、ファイル名は出る）も、-v なしで出る
+    it_out_has "Shared.cls" && pass "A6: 失敗の理由（競合したファイル）が出る" || fail "A6: 失敗の理由（競合したファイル）が出る" "$(it_out | tail -5)"
     # 解消（手で取り込み、競合は、手元の側を採用）→ sf-push が通る
     it_run "$cl" bash -c "git fetch -q origin && git merge -q -X ours --no-edit origin/main"
     assert_exit_ok "$IT_RC" "A6: 手で競合を解消できる"

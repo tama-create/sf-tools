@@ -8,6 +8,7 @@
 #   2. org_tier_of_suffix    : PROD / STG / DEV → main / staging / develop
 #   3. org_choose_login_url  : 3 択（Enter=Sandbox・1・2・3 の URL 入力・q）/ 環境変数の指定 / 不正な URL の再入力
 #   4. org_read_info / org_kind : 本番・Sandbox・Developer Edition・Trial・読み取り失敗（判定不能）
+#   4b. org_local_release_check : 本番（または確認できない）組織を、ローカルからのリリースから止める
 #   5. org_guard             : 本番は main のみ（staging・develop は拒否）/ 判定不能は確認
 #   6. org_save              : 組織の情報を GitHub Variables に保存
 # ==============================================================================
@@ -114,6 +115,26 @@ test_kind() {
     assert_equals "$(cat "$STD")" "rc=1|unknown" "レコードなし → 判定不能"; _oc
 }
 
+test_local_release_check() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] org_local_release_check: ローカルからのリリースの保護${CLR_RST}"
+    local prod='{"status":0,"result":{"records":[{"Id":"00D1","Name":"Acme Prod","IsSandbox":false,"OrganizationType":"Enterprise Edition","TrialExpirationDate":null}]}}'
+    local sbx='{"status":0,"result":{"records":[{"Id":"00D2","Name":"Acme Dev","IsSandbox":true,"OrganizationType":"Enterprise Edition","TrialExpirationDate":null}]}}'
+    local de='{"status":0,"result":{"records":[{"Id":"00D3","Name":"My DE","IsSandbox":false,"OrganizationType":"Developer Edition","TrialExpirationDate":null}]}}'
+    local tr='{"status":0,"result":{"records":[{"Id":"00D5","Name":"Trial","IsSandbox":false,"OrganizationType":"Enterprise Edition","TrialExpirationDate":"2026-12-01T00:00:00.000+0000"}]}}'
+    MOCK_SF_ORG_INFO="$prod" _o 'org_local_release_check x; echo "rc=$?"'
+    assert_file_contains "$STD" "rc=1" "本番 → 戻り値 1（名前に関係なく止める）"; _oc
+    MOCK_SF_ORG_INFO="$sbx" _o 'org_local_release_check x; echo "rc=$?"'
+    assert_file_contains "$STD" "rc=0" "Sandbox → 戻り値 0"; _oc
+    MOCK_SF_ORG_INFO="$de" _o 'org_local_release_check x; echo "rc=$?"'
+    assert_file_contains "$STD" "rc=0" "Developer Edition → 戻り値 0"; _oc
+    MOCK_SF_ORG_INFO="$tr" _o 'org_local_release_check x; echo "rc=$?"'
+    assert_file_contains "$STD" "rc=0" "Trial → 戻り値 0"; _oc
+    MOCK_SF_ORG_QUERY_EXIT=1 _o 'org_local_release_check x; echo "rc=$?"'
+    assert_file_contains "$STD" "rc=2" "読み取り失敗 → 戻り値 2（本番でないと推測しない）"; _oc
+    MOCK_SF_ORG_INFO='{"status":0,"result":{"records":[{"Id":"00D6","Name":"X","IsSandbox":false,"TrialExpirationDate":null}]}}' _o 'org_local_release_check x; echo "rc=$?"'
+    assert_file_contains "$STD" "rc=2" "OrganizationType が無い → 戻り値 2"; _oc
+}
+
 test_guard() {
     echo ""; echo -e "${CLR_HEAD}[TEST] org_guard: 本番は main のみ（F8）${CLR_RST}"
     local prod='{"status":0,"result":{"records":[{"Id":"00D1","Name":"Acme Prod","IsSandbox":false,"OrganizationType":"Enterprise Edition","TrialExpirationDate":null}]}}'
@@ -178,6 +199,7 @@ test_tier
 test_jwt_test
 test_choose
 test_kind
+test_local_release_check
 test_guard
 test_save
 

@@ -7,24 +7,29 @@
 # 設計: doc/wizard-ux-design.md
 #
 # 【前提】
-#   lib/common.sh を source 済みであること（CLR_* / die / read_input を使う）。
+#   lib/common.sh を source 済みであること（CLR_* / die / read_input を使う）。common.sh からは source しない
+#   （sf-init.sh・phases/init/verify.sh が、個別に source する）。
 #   表示は、標準エラー出力（log と同じ）。色は、CLR_*（端末でないときは空）。
+#   文言の中の \ で始まるエスケープ（\n など）は、解釈される（_wiz_out が printf '%b' で出すため）。
 #
 # 【提供する関数】
 #   wizard_banner TITLE                      ... 太枠のタイトル（開始・完了の画面）
 #   wizard_rule                              ... 区切り線
-#   wizard_step N TOTAL TITLE PURPOSE [完了したステップ名...]
-#                                            ... ステップの見出し（現在地・完了済み・目的の 1 文）
+#   wizard_step N TOTAL TITLE [PURPOSE [完了したステップ名...]]
+#                                            ... ステップの見出し（現在地・完了済み・目的の 1 文）。完了したステップ名を渡すときは、
+#                                                PURPOSE（空文字でもよい）を必ず渡す
 #   wizard_checklist TITLE ITEM...           ... 「□ 項目」の一覧（事前に用意するもの）
 #   wizard_do ITEM...                        ... 「▶ あなたがやること」（番号付き）
 #   wizard_next TEXT                         ... 「▶ そのあと」
 #   wizard_hint TEXT                         ... 操作のヒント（画面の下）
 #   wizard_auto TEXT                         ... 自動の処理の 1 行表示（✔）
 #   wizard_confirm [PROMPT]                  ... Enter / Y で進む。N / q は die。それ以外は、再入力
-#   wizard_fail CAUSE FIX RESUME             ... 失敗の三点セット（何が起きたか / どう直すか / どこから再開か）
-#   wizard_done TITLE MADE -- NEXT...        ... 完了画面（できたこと / 次にやること）
+#   wizard_fail CAUSE [FIX] [RESUME]         ... 失敗の三点セット（何が起きたか / どう直すか / どこから再開か）
+#   wizard_done TITLE MADE [--] [NEXT...]    ... 完了画面（できたこと / 次にやること）
+#   （内部用: _wiz_out）
 # ==============================================================================
 
+# _wiz_out - 引数を空白でつなぎ、エスケープを解釈して（printf '%b'）、1 行で標準エラーに出す
 _wiz_out() { printf '%b\n' "$*" >&2; }
 
 # 太枠のタイトル
@@ -40,10 +45,13 @@ wizard_rule() {
     _wiz_out "${CLR_INFO}────────────────────────────────────────────────────────${CLR_RESET}"
 }
 
-# ステップの見出し。引数: 番号 全体の数 タイトル 目的の 1 文 [完了したステップ名...]
+# ステップの見出し。引数: 番号 全体の数 タイトル [目的の 1 文 [完了したステップ名...]]
+#   目的の 1 文は、省略・空文字なら、表示しない。完了したステップ名は、5 つ目以降の引数で、「・」でつないで「（完了: …）」と表示する
+#   （引数が 4 つ未満のときは、完了したステップは、なしとして扱う。以前は、shift 4 が失敗して、番号などが、完了したステップ名として
+#   表示されていた）
 wizard_step() {
     local n="$1" total="$2" title="$3" purpose="${4:-}"
-    shift 4
+    if [[ $# -ge 4 ]]; then shift 4; else shift $#; fi
     local done_list="" t
     for t in "$@"; do done_list+="${done_list:+・}${t}"; done
     _wiz_out ""
@@ -98,8 +106,8 @@ wizard_auto() {
     _wiz_out "  ${CLR_SUCCESS}✔${CLR_RESET} $1"
 }
 
-# 確認。Enter（空）または Y で進む。N / q は die（管理者向けコマンドの確認の規約: N / q で必ず中断）。
-# それ以外の入力は、再入力（打ち間違いで、進まないため）。引数: 確認の文言（省略可）
+# 確認。Enter（空）または Y / y で進む（戻り値 0）。N / n / Q / q・EOF は die（管理者向けコマンドの確認の規約: N / q で必ず中断）。
+# それ以外の入力は、再入力（打ち間違いで、進まないため）。引数: 確認の文言（省略可。プロンプトは「  ▶ 文言: 」）
 wizard_confirm() {
     local prompt="${1:-用意ができたら Enter を押してください（q で中断）}" ans
     while true; do
@@ -112,8 +120,8 @@ wizard_confirm() {
     done
 }
 
-# 失敗の三点セット。引数: 原因 直し方 再開の方法
-#   die の前に呼ぶ（die のメッセージは、規約どおり、事実のみにする）
+# 失敗の三点セット。引数: 原因 [直し方] [再開の方法]（直し方・再開の方法は、空なら、その行を出さない）
+#   die の前に呼ぶ（die のメッセージは、規約どおり、事実のみにする）。戻り値は常に 0
 wizard_fail() {
     _wiz_out ""
     _wiz_out "  ${CLR_ERR}✖ うまくいきませんでした${CLR_RESET}"
@@ -123,7 +131,9 @@ wizard_fail() {
     return 0
 }
 
-# 完了画面。引数: タイトル できたこと -- 次にやること...
+# 完了画面。引数: タイトル できたこと [--] [次にやること...]
+#   太枠のタイトル → 「設定したもの : できたこと」→（次にやることがあれば）「【次にやること】」と 1 項目 1 行
+#   3 つ目の引数が -- なら、読み飛ばす（-- は、省略してもよい）
 wizard_done() {
     local title="$1" made="$2" item
     shift 2

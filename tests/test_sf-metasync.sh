@@ -93,6 +93,8 @@ Y
 
     # develop のマージ元が "main" であることを確認（staging ではない）
     assert_file_contains "$MOCK_CALL_LOG" "git-merge-arg: main" "staging 失敗後、develop は main からマージした"
+    # 回帰: 伝播の push も、pre-push フックを通さない（伝播先は保護ブランチのため、フックが必ず拒否する。以前は付けていなかった）
+    assert_file_contains "$MOCK_CALL_LOG" "git push --no-verify origin develop" "伝播の push は、pre-push フックを通さない（--no-verify）"
     ! grep -q "git-merge-arg: staging" "$MOCK_CALL_LOG" 2>/dev/null \
         && pass "staging からのマージは実行されない" \
         || fail "staging からのマージは実行されない"
@@ -241,10 +243,103 @@ test_commit_confirm_no_aborts() {
     teardown "$td" "$mb"
 }
 
+# create_mock_git のあとに、引数（"$*"）が、指定のパターンに一致する呼び出しだけを失敗させるラッパーを被せる
+#   引数: モックの bin・パターン（case の書式。空白は使えない）・終了コード
+_fail_git_matching() {
+    local mb="$1" pattern="$2" code="$3"
+    mv "$mb/git" "$mb/git-base"
+    cat > "$mb/git" << EOF
+#!/bin/bash
+case "\$*" in
+    $pattern) echo "git \$*" >> "\${MOCK_CALL_LOG:-/dev/null}"; exit $code ;;
+esac
+exec "\$(dirname "\$0")/git-base" "\$@"
+EOF
+    chmod +x "$mb/git"
+}
+
+# 回帰: prod の組織情報を取得できない（sf org display が失敗）→ 何も変更せずに中断する
+#   以前は、run の出力（エラーの文言）が空でないため、確認を素通りし、main への切替・取得まで進んでいた
+test_prod_not_registered_aborts_early() {
+    local td mb mh out ec
+    setup_std_env td mb mh
+    create_all_mocks "$mb"
+    export MOCK_GIT_BRANCH="feature/test"
+    export MOCK_GIT_DIFF_EXIT=1
+    export MOCK_SF_ORG_DISPLAY_EXIT=1
+
+    out=$( printf 'Y\nY\n' | ( cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-metasync.sh" ) 2>&1 )
+    ec=$?
+    assert_exit_fail "$ec" "sf org display が失敗 → 中断（終了コード 0 以外）"
+    assert_output_contains "$out" "prod エイリアスの組織情報を取得できませんでした" "sf org display が失敗 → 理由が表示される"
+    assert_file_not_contains "$MOCK_CALL_LOG" "git stash" "sf org display が失敗 → stash しない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "git checkout" "sf org display が失敗 → ブランチを切り替えない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "sf project retrieve" "sf org display が失敗 → 組織から取得しない"
+    unset MOCK_GIT_BRANCH MOCK_GIT_DIFF_EXIT MOCK_SF_ORG_DISPLAY_EXIT
+    teardown "$td" "$mb" "$mh"
+}
+
+# 回帰: sf org display --json の出力（アクセストークンを含む）を、ログに残さない（以前は、run がログに記録していた）
+test_org_display_output_not_logged() {
+    local td mb mh
+    setup_std_env td mb mh
+    create_all_mocks "$mb"
+    export MOCK_GIT_BRANCH="main"
+    export MOCK_GIT_DIFF_EXIT=0
+    export MOCK_SF_ORG_JSON='{"result":{"alias":"prod","accessToken":"SECRET_TOKEN_FOR_TEST"}}'
+
+    printf 'Y\n' | ( cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-metasync.sh" ) > /dev/null 2>&1
+    assert_file_not_contains "$td/sf-tools/logs/sf-metasync.log" "SECRET_TOKEN_FOR_TEST" "sf org display の出力（アクセストークン）を、ログに残さない"
+    unset MOCK_GIT_BRANCH MOCK_GIT_DIFF_EXIT MOCK_SF_ORG_JSON
+    teardown "$td" "$mb" "$mh"
+}
+
+# 回帰: detached HEAD → stash・切替の前に中断する
+#   以前は、元のブランチにエラーの文言（と「main」）が入り、終了時に戻れないまま、main の上で git stash pop していた
+test_detached_head_aborts() {
+    local td mb mh out ec
+    setup_std_env td mb mh
+    create_all_mocks "$mb"
+    _fail_git_matching "$mb" "symbolic-ref*" 1
+    export MOCK_GIT_DIFF_EXIT=1   # 未コミットの変更あり（以前は、stash していた）
+    export MOCK_SF_ORG_JSON='{"result":{"alias":"testorg","id":"00D000000000001AAA"}}'
+
+    out=$( printf 'Y\nY\n' | ( cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-metasync.sh" ) 2>&1 )
+    ec=$?
+    assert_exit_fail "$ec" "detached HEAD → 中断（終了コード 0 以外）"
+    assert_output_contains "$out" "detached HEAD" "detached HEAD → 理由が表示される"
+    assert_file_not_contains "$MOCK_CALL_LOG" "git stash" "detached HEAD → stash しない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "git checkout" "detached HEAD → ブランチを切り替えない"
+    unset MOCK_GIT_DIFF_EXIT MOCK_SF_ORG_JSON
+    teardown "$td" "$mb" "$mh"
+}
+
+# 回帰: metadata.txt が CRLF でも、種類の名前に CR を付けずに取得する（以前は、CR が付いたまま --metadata に渡していた）
+test_metadata_crlf() {
+    local td mb mh
+    setup_std_env td mb mh
+    create_all_mocks "$mb"
+    export MOCK_GIT_BRANCH="main"
+    export MOCK_GIT_DIFF_EXIT=0
+    export MOCK_SF_ORG_JSON='{"result":{"alias":"testorg","id":"00D000000000001AAA"}}'
+    printf '# comment\r\nApexClass\r\n\r\nCustomObject\r\n' > "$td/sf-tools/config/metadata.txt"
+
+    printf 'Y\n' | ( cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-metasync.sh" ) > /dev/null 2>&1
+    grep -q -- "--metadata ApexClass --metadata CustomObject$" "$MOCK_CALL_LOG" \
+        && pass "CRLF の metadata.txt → CR を除いた種類の名前で取得する" \
+        || fail "CRLF の metadata.txt → CR を除いた種類の名前で取得する" "$(grep -- '--metadata' "$MOCK_CALL_LOG" | od -c | head -5)"
+    unset MOCK_GIT_BRANCH MOCK_GIT_DIFF_EXIT MOCK_SF_ORG_JSON
+    teardown "$td" "$mb" "$mh"
+}
+
 test_outside_force_dir
 test_untracked_files_abort_locally
 test_stash_pop_on_exit
 test_sf_cli_abort
 test_commit_confirm_no_aborts
+test_prod_not_registered_aborts_early
+test_org_display_output_not_logged
+test_detached_head_aborts
+test_metadata_crlf
 
 print_summary

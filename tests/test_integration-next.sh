@@ -12,6 +12,7 @@
 #   A5-3  develop へマージ済み → 「マージ済み」・次の PR 先は staging
 #   A5-4  順序外: develop をとばして、main へ PR がマージ済み → 「順序外」の警告
 #   A5-5  他の人が先にマージして、origin の develop が進んだ → sf-push が取り込み、判定は変わらない（取り込んだ結果で、push できる）
+#   A5-6  「PR を出しますか」に Y → 開く URL（https の compare）
 # ==============================================================================
 source "$(dirname "${BASH_SOURCE[0]}")/test_helper.sh"
 source "$(dirname "${BASH_SOURCE[0]}")/integration/lib.sh"

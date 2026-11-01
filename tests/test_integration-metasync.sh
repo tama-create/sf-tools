@@ -7,7 +7,8 @@
 # ハーネスと fake は tests/integration/lib.sh。計画: doc/integration-test-plan.md（B3 のローカル部分・X8-4・X8-5）
 #
 # 【シナリオ】
-#   M0  フックのあるクローンから（ローカル実行）→ main への push は、フックを通さず（--no-verify）、成功する
+#   M0  フックのあるクローンから（ローカル実行）→ main への push と、staging への伝播の push は、フックを通さず
+#       （--no-verify）、成功する（リポジトリは main・staging の 2 段。staging は、保護ブランチのため、フックが必ず拒否する）
 #   M1  作業ブランチ（未コミットの変更あり）から実行 → main に同期のコミットが届く。元のブランチに戻り、stash が復元される
 #   M2  組織側に変更なし → コミットを作らない。元のブランチに戻る
 #   M3  差分の抽出（SGD）の失敗 → 失敗で終わり、元のブランチ・stash が復元される（X8-4）
@@ -28,7 +29,7 @@ _meta() { it_run "$CL" -i 'Y\nY\n' bash "$IT_HOME/sf-tools/bin/sf-metasync.sh"; 
 
 test_setup() {
     it_setup || { fail "サンドボックスの作成"; return 1; }
-    it_seed_repo 1 || { fail "リポジトリの生成"; return 1; }
+    it_seed_repo 2 || { fail "リポジトリの生成"; return 1; }   # main・staging（M0 で、伝播の push を確かめる）
     it_make_clone devA JOB-A || { fail "クローンの作成" "$(it_out)"; return 1; }
     CL="$IT_CL"
     IT_TIMEOUT=300
@@ -45,6 +46,9 @@ test_M0() {
     #   サーバー側の保護（Ruleset）は、そのまま効く。以前は、フックに止められ、ローカルでは、最後の push で失敗した
     assert_exit_ok "$IT_RC" "M0: フックのあるクローンでも、sf-metasync の main への push が通る"
     [[ "$(_remote_ref main)" != "$m0" ]] && pass "M0: origin の main に、同期のコミットが届く" || fail "M0: origin の main に、同期のコミットが届く"
+    # 回帰: 伝播の push も、フックを通さない（以前は、フックが、保護ブランチ（staging）の上からの push として拒否し、伝播できなかった）
+    assert_equals "$(_remote_ref staging)" "$(_remote_ref main)" "M0: origin の staging に、main が伝播する（フックに止められない）"
+    it_out_has "伝播したブランチ: staging" && pass "M0: 伝播したブランチ（staging）が表示される" || fail "M0: 伝播したブランチ（staging）が表示される"
     assert_equals "$(_cur "$CL")" "JOB-A" "M0: 元のブランチに戻る"
     assert_equals "$(_stashes "$CL")" "0" "M0: stash が復元される"
     grep -q "手元の変更" "$CL/README.md" && pass "M0: 手元の未コミットの変更が、復元される" || fail "M0: 手元の未コミットの変更が、復元される"

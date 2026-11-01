@@ -14,11 +14,11 @@ Salesforce DevOps Center は「Git を知らない Admin でも変更管理で�
 
 | 場面 | DevOps Center | sf-tools |
 |---|---|---|
-| 通常のリリース | GUI でポチポチ操作 | `sf-deploy` 一発 |
+| 通常のリリース | GUI でポチポチ操作 | PR をマージすると GitHub Actions が自動でリリース（PR の時点で自動で dry-run の検証） |
 | コンフリクト発生 | GUI では解決不能 → Git 職人が登場 | 最初から Git で管理しているため普通に解決できる |
 | 複数人の並行開発 | ブランチ管理が GUI 前提で破綻しやすい | PR ベースのワークフローがそのまま使える |
 | CI（自動テスト） | DevOps Center 単体では完結しない | GitHub Actions と直結している |
-| 新メンバーのオンボード | GUI の操作を覚えさせる必要がある | `sf-init` 一発でセットアップ完了 |
+| 新メンバーのオンボード | GUI の操作を覚えさせる必要がある | 管理者が `sf-init` で用意したプロジェクトに、`sf-job` 一発で参加できる |
 
 DevOps Center はコンフリクトが**起きてから**どう解決するかを前提とした設計になっている。
 sf-tools は**コンフリクトが起きにくい構造を最初から作る**設計になっている。
@@ -66,21 +66,25 @@ Git コマンドを直接打たない設計になっているが、Git の概念
 利用者が理解している前提で設計されている。これが DevOps Center の「概念ごと隠す」設計との違いである。
 
 ```
-sf-push    → git add / commit / push を隠蔽
-sf-next    → どのブランチに PR を出すべきか案内
-sf-start   → org 接続 + ブランチ確認 + VSCode 起動
-pre-push   → 自動 dry-run（知らないうちに守られている）
+sf-job      → 作業用ブランチの作成 + クローン + sf-start を隠蔽
+sf-start    → org 接続 + VSCode 起動 + ランチャー起動
+sf-launcher → 日常のコマンドを番号で選んで実行（sf-start の最後に自動で開く）
+sf-push     → git add / commit / push を隠蔽（main の取り込み込み）
+sf-next     → どのブランチに PR を出すべきか案内
+pre-push    → 保護ブランチへの push の拒否 + ターゲットファイルの検査 + main の取り込み（知らないうちに守られている）
 ```
 
-Salesforce 開発者が意識するのは「今日は○○機能を作った → sf-push → PR を出す」だけでよい。
+Salesforce 開発者が意識するのは「今日は○○機能を作った → sf-push → PR を出す」だけでよい（日常の操作は、ランチャーの番号で選べる）。
 **Git が透明になっている**。
 
 ### 2.2 コンフリクト予防の仕組み
 
 これは提案時の重要な訴求ポイントである。
 
-- **pre-push フックで master からマージ** → 「プッシュしたら壊れた」を事前排除
-- **sf-metasync で本番の最新状態を定期取得** → 本番と開発の乖離を最小化
+- **sf-push と pre-push フックで main を自動で取り込む** → 「プッシュしたら壊れた」を事前排除
+- **sf-metasync で本番（main の組織）の最新状態を定期取得**（GitHub Actions の wf-metasync が平日に 1 日 4 回。main にコミットし、各ブランチへ伝播） → 本番と開発の乖離を最小化
+- **main へのマージを wf-propagate が staging・develop へ自動で伝播** → 環境ブランチどうしのずれを残さない
+- **マージの順序を wf-sequence が PR で確認**（順序外は警告、環境ブランチから直接の PR はエラー） → 段階を飛ばしたリリースに気づける
 - **ブランチ構成を sf-init で統一** → 全員が同じルールで動く
 
 「コンフリクトが起きたらどう解決するか」ではなく、「そもそも起きにくい構造を作る」という思想を
@@ -91,23 +95,36 @@ Salesforce 開発者が意識するのは「今日は○○機能を作った �
 sf-tools は Salesforce 開発の全フローをカバーしている。
 
 ```
-ブランチ作成      sf-init --add-tier（ブランチ構成の整備）
+プロジェクト作成  sf-init（管理者が最初に 1 回。終わるまで、開発者は始められない）
         ↓
-開発開始          sf-start（org 接続 + VSCode 起動）
+ブランチ作成      sf-job（main から作業用ブランチを作成 + クローン）
         ↓
-コミット前確認    pre-push フック（dry-run 自動実行）
+開発開始          sf-start（org 接続 + VSCode 起動 + ランチャー起動）
         ↓
-プッシュ          sf-push（master マージ込み）
+動作確認          sf-dryrun / sf-deploy（自分用の組織で検証・強制リリース。共有環境には使えない）
         ↓
-PR 管理           sf-next（次の PR 先を案内）
+コミット前確認    pre-commit フック（ターゲットファイルの検査）
         ↓
-リリース          sf-deploy / sf-release（GitHub Actions 連動）
+プッシュ          sf-push（main の取り込み込み）+ pre-push フック（保護ブランチの拒否・ターゲットファイルの検査）
         ↓
-メタ同期          sf-metasync（本番差分を自動取得・commit・PR）
+PR 管理           sf-next（次の PR 先を案内）→ wf-validate（dry-run の検証）・wf-sequence（順序チェック）
+        ↓
+リリース          PR のマージで wf-release が自動リリース（結果を Slack に通知）。main へのマージは wf-propagate が下流へ伝播
+        ↓
+メタ同期          sf-metasync（wf-metasync で定期実行。組織の変更を main に commit・push し、各ブランチへ伝播）
 ```
 
 Git・GitHub・VSCode・Slack をそれぞれ得意な役割で使い、
 開発者は**ツールの継ぎ目を意識しない**で作業できる。
+
+### 2.4 共有環境を守る仕組み
+
+開発者の誤操作で共有環境（本番・staging・develop）が壊れない構造も、最初から組み込んでいる。
+
+- **共有環境へは、手元からリリースできない**（dry-run も含む）。接続先のエイリアスが予約名（`prod` / `staging` / `develop` / `main`）か、組織の種類が本番（または確認できない）なら、`sf-release` / `sf-deploy` が止める。共有環境へのリリースは、PR のレビューを通して、GitHub Actions だけで行う
+- **main / staging は、sf-init が Ruleset で保護する**。必須チェック（対象ファイル確認・デプロイ検証・順序チェック）が通らない PR は、マージできない（Ruleset を作れない無料プランの Private リポジトリなどを除く）
+- **GitHub Actions から組織への接続は JWT 認証**。秘密鍵・証明書の作成、Salesforce 側のアプリ（外部クライアントアプリ）の作成、GitHub Secrets への登録までを、sf-init が自動で行う
+- **リリース・削除できない種類のメタデータは、ターゲットファイルに書いた時点で知らせる**（`sf-check` が、`sf-typecheck` で実機確認した可否の表 `config/metadata-capability.txt` を読む）。対象範囲の目標は、変更セットで扱える 337 種類（公式の Metadata Coverage Report、API v64.0。`config/changeset-types.txt`）。Developer Edition で確認済みの種類を、メタデータ同期の標準セット（`metadata.txt` の雛形）にしている
 
 ---
 

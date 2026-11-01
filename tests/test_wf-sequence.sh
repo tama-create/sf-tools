@@ -3,7 +3,8 @@
 # test_wf-sequence.sh - templates/.github/workflows/wf-sequence.yml のテスト
 # ==============================================================================
 # YAML の中の「マージ順序を検証」の run スクリプトを取り出して、実際の git リポジトリ（ローカルのリモートつき）で実行する。
-# 確認すること: 順序どおり・順序外・最下位への PR・環境ブランチからの PR
+# 確認すること: 順序どおり・順序外・最下位への PR・環境ブランチからの PR・フォークからの PR・
+#   main に branches.txt がない／ブランチの行がない場合（Actions と同じ -eo pipefail で、ジョブが止まらないこと）
 source "$(dirname "${BASH_SOURCE[0]}")/test_helper.sh"
 echo -e "${CLR_HEAD}=== wf-sequence.yml ===${CLR_RST}"
 
@@ -47,13 +48,19 @@ _make_repo() {
     echo "$clone"
 }
 
-# 判定スクリプトを実行する。引数: リポジトリ FEATURE BASE。出力: GITHUB_OUTPUT の内容 + 終了コード（RC=）
+# run のスクリプトを、GitHub Actions と同じシェル（bash --noprofile --norc -eo pipefail）で実行する
+#   -e・pipefail がないと、grep の該当なしなどで、Actions ではジョブが止まる不具合を、見逃す
+_GH_BASH=(bash --noprofile --norc -eo pipefail -c)
+
+# 判定スクリプトを実行する。引数: リポジトリ FEATURE BASE [HEAD_SHA]。出力: GITHUB_OUTPUT の内容 + 終了コード（RC=）
+#   HEAD_SHA（PR のソースの最新のコミット）を省略したときは、origin/<FEATURE> のコミット
 _run_check() {
-    local repo="$1" feature="$2" base="$3" script rc
+    local repo="$1" feature="$2" base="$3" sha="${4:-}" script rc
     local out="$repo/.gh_output"   # repo を使うため、local を分ける（同じ local 内では、$repo が展開されない）
+    [[ -n "$sha" ]] || sha=$(git -C "$repo" rev-parse -q --verify "origin/$feature" 2>/dev/null || true)  # VAR=$(cmd) のため run 不使用
     script=$(_extract_script)
     : > "$out"
-    ( cd "$repo" && FEATURE_REF="$feature" BASE_REF="$base" GITHUB_OUTPUT="$out" bash -c "$script" > "$repo/.gh_stdout" 2>&1 )
+    ( cd "$repo" && FEATURE_REF="$feature" BASE_REF="$base" HEAD_SHA="$sha" GITHUB_OUTPUT="$out" "${_GH_BASH[@]}" "$script" > "$repo/.gh_stdout" 2>&1 )
     rc=$?
     cat "$out"
     echo "RC=$rc"
@@ -65,7 +72,7 @@ _run_skipcheck() {
     local out="$repo/.gh_output_skip"   # repo を使うため、local を分ける
     script=$(_extract_script check)
     : > "$out"
-    ( cd "$repo" && HEAD_REF="$head" GITHUB_OUTPUT="$out" bash -c "$script" > "$repo/.gh_stdout_skip" 2>&1 )
+    ( cd "$repo" && HEAD_REF="$head" GITHUB_OUTPUT="$out" "${_GH_BASH[@]}" "$script" > "$repo/.gh_stdout_skip" 2>&1 )
     rc=$?
     cat "$out"
     echo "RC=$rc"
@@ -175,6 +182,68 @@ test_wf_sequence_env_branch_notified() {
     assert_equals "$n" "2" "コメントと Slack の step は、always() で、エラーのあとも実行される"
 }
 
+# main の branches.txt を書き換えて push する。引数: リポジトリ 内容（空文字なら、ファイルを消す）
+_set_main_branches_txt() {
+    local repo="$1" content="$2"
+    (
+        cd "$repo" || exit 1
+        export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
+        git checkout -q main
+        if [[ -z "$content" ]]; then git rm -q sf-tools/config/branches.txt
+        else mkdir -p sf-tools/config && printf '%s' "$content" > sf-tools/config/branches.txt && git add sf-tools/config/branches.txt; fi
+        git commit -q -m "branches.txt を変更" && git push -q origin main
+    )
+}
+
+test_wf_sequence_no_branches_file() {
+    local repo out; repo=$(_make_repo)
+    # main に branches.txt がない → 順序チェックは ::notice で成功、対象ファイル確認は環境ブランチなしとして続ける
+    _set_main_branches_txt "$repo" ""
+    out=$(_run_check "$repo" feature-a main)
+    assert_output_contains "$out" "RC=0" "branches.txt がない → 順序チェックは、成功で終わる（-eo pipefail でも）"
+    assert_file_contains "$repo/.gh_stdout" "branches.txt が見つかりません" "branches.txt がない → ::notice を出す"
+    out=$(_run_skipcheck "$repo" feature-a)
+    assert_output_contains "$out" "RC=0" "branches.txt がない → 対象ファイル確認は、成功で終わる（-eo pipefail でも）"
+    assert_output_contains "$out" "skip=true" "branches.txt がない → デプロイ対象がなければ、スキップ"
+    # ブランチの行が 1 つもない（コメント・空行だけ）→ マージ先が対象外として、成功で終わる
+    _set_main_branches_txt "$repo" $'# コメントだけ\n\n'
+    out=$(_run_check "$repo" feature-a main)
+    assert_output_contains "$out" "RC=0" "ブランチの行がない → 順序チェックは、成功で終わる（-eo pipefail でも）"
+    assert_file_contains "$repo/.gh_stdout" "チェック対象外のブランチです" "ブランチの行がない → 対象外の ::notice を出す"
+    out=$(_run_skipcheck "$repo" develop)
+    assert_output_contains "$out" "RC=0" "ブランチの行がない → 対象ファイル確認は、成功で終わる（-eo pipefail でも）"
+    assert_output_contains "$out" "skip=true" "ブランチの行がない → 環境ブランチなしとして、デプロイ対象で判定する"
+    rm -rf "$(dirname "$repo")"
+}
+
+test_wf_sequence_fetch_failure() {
+    local repo out; repo=$(_make_repo)
+    # origin の main を取得できない → 対象ファイル確認は skip=false で成功（ジョブを失敗にしない）、順序チェックは失敗（通さない）
+    git -C "$repo" remote set-url origin "$(dirname "$repo")/no-such-remote.git"
+    out=$(_run_skipcheck "$repo" feature-a)
+    assert_output_contains "$out" "skip=false" "main を取得できない → 対象ファイル確認は skip=false（順序チェックに任せる）"
+    assert_output_contains "$out" "RC=0" "main を取得できない → 対象ファイル確認は、失敗にしない"
+    out=$(_run_check "$repo" feature-a main)
+    [[ "$out" != *"RC=0"* && "$out" == *"RC="* ]] && pass "main を取得できない → 順序チェックは、失敗で終わる（素通りさせない）" || fail "main を取得できない → 順序チェックは、失敗で終わる（素通りさせない）" "$out"
+    rm -rf "$(dirname "$repo")"
+}
+
+test_wf_sequence_fork_pr() {
+    local repo out sha; repo=$(_make_repo)
+    # フォークからの PR: origin/<ソースブランチ> がない。PR のソースのコミット（head.sha）で判定する
+    _merge_into "$repo" develop
+    _merge_into "$repo" staging
+    sha=$(git -C "$repo" rev-parse feature-a)
+    out=$(_run_check "$repo" fork-feature main "$sha")
+    assert_output_contains "$out" "out_of_order=false" "フォークからの PR（origin にソースブランチなし）でも、マージ済みなら順序どおり"
+    assert_output_contains "$out" "RC=0" "フォークからの PR → 終了コード 0"
+    rm -rf "$(dirname "$repo")"; repo=$(_make_repo)
+    sha=$(git -C "$repo" rev-parse feature-a)
+    out=$(_run_check "$repo" fork-feature main "$sha")
+    assert_output_contains "$out" "out_of_order=true" "フォークからの PR で、前の段階に未マージ → out_of_order=true"
+    rm -rf "$(dirname "$repo")"
+}
+
 test_wf_sequence_extractable
 test_wf_sequence_in_order
 test_wf_sequence_out_of_order
@@ -183,5 +252,8 @@ test_wf_sequence_skip_both
 test_wf_sequence_lowest_stage
 test_wf_sequence_env_branch_pr_blocked
 test_wf_sequence_env_branch_notified
+test_wf_sequence_no_branches_file
+test_wf_sequence_fetch_failure
+test_wf_sequence_fork_pr
 
 print_summary

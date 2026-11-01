@@ -18,7 +18,16 @@
 
 <div class="box">
   <div class="title">全体の流れ</div>
-  <p>自分専用の組織で、実際に試したいときだけ、②のあとに「自分の組織に反映」を使います（<a href="#deploy">自分の組織で、実際に反映する</a>）。共有の環境（本番など）への反映は、PR をマージすると、自動で行われます。</p>
+  <p>自分専用の組織で、実際に試したいときだけ、②のあとに「自分の組織に反映」を使います（<a href="#deploy">自分の組織で、実際に反映する</a>）。共有の環境（本番など）への検証と反映は、手元のパソコンからはできません。PR を作ると GitHub 上で自動で検証され、PR をマージすると、自動で反映されます（GitHub Actions という、GitHub 上で自動で動く仕組みが行います）。</p>
+</div>
+<div class="box danger" id="own-org-only">
+  <div class="title">手元から検証・反映できるのは、自分用の組織だけです</div>
+  <p>次の組織には、手元のパソコンから、dry-run（検証）も、反映もできません。実行すると、確認の画面の前に止まります。</p>
+  <ul>
+    <li><strong>共有の環境の組織:</strong> エイリアス（組織に付けた短い呼び名）が <code>prod</code> / <code>staging</code> / <code>develop</code> / <code>main</code> の組織です。この 4 つの名前は、共有の環境のための予約名で、管理者のセットアップが、この名前で登録します。</li>
+    <li><strong>本番の組織:</strong> 名前に関係なく止まります（sf-tools が、組織の種類を読み取って確かめます）。<strong>種類を確かめられなかった組織も、念のため止まります。</strong></li>
+  </ul>
+  <p>ただし、staging・develop の組織（本番ではない組織）を、予約名ではない別の名前で接続すると、名前でしか見分けられないため、止まりません。共有の環境の組織に、自分で接続しないでください。</p>
 </div>
 <figure class="diagram">
   <div class="flow">
@@ -28,18 +37,18 @@
     <div class="arrow">→</div>
     <div class="node dev"><span class="who">③ ランチャー [2]</span><strong>Push</strong><small>変更を GitHub に送る</small></div>
     <div class="arrow">→</div>
-    <div class="node dev"><span class="who">④ ランチャー [3]</span><strong>Next</strong><small>次の PR の出し先を確認</small></div>
+    <div class="node dev"><span class="who">④ ランチャー [3]</span><strong>Next</strong><small>次の PR の出し先を確認し、PR を作る</small></div>
     <div class="arrow">→</div>
-    <div class="node auto"><span class="who">🤖 自動</span><strong>検証・反映</strong><small>PR をマージすると、自動で</small></div>
+    <div class="node auto"><span class="who">🤖 自動</span><strong>検証・反映</strong><small>PR を作ると検証、マージすると反映</small></div>
   </div>
-  <figcaption>実線の箱は、あなたが行うことです。点線の箱は、自動で行われます。</figcaption>
+  <figcaption>実線の箱は、あなたが行うことです。点線の箱は、自動で行われます。②の Dryrun は、自分用の組織に対して行います。</figcaption>
 </figure>
 
 <h2 id="launcher">ランチャーで進める（おすすめ）</h2>
 <p>毎日の操作は、ランチャーのメニューから、<strong>番号を 1 つ押すだけ</strong>で実行できます。コマンドの名前を覚える必要は、ありません。コマンドを直接打つこともできます（慣れている方は、そちらでも構いません）。便利なので、ランチャーをおすすめしています。</p>
 <div class="box ok">
   <div class="title">ランチャーは、自動で開きます</div>
-  <p><code>sf-job.sh</code> や <code>sf-start.sh</code> を実行すると、最後に、ターミナルでランチャーが自動で開きます。閉じてしまったときや、<strong>VS Code のターミナルで使いたいとき</strong>は、<code>force-*</code> フォルダの中で、次のように打ちます（<code>sf-l</code> まで打って Tab キーを押すと、補完されます）。</p>
+  <p><code>sf-job.sh</code> や <code>sf-start.sh</code> を実行すると、最後に、ターミナルでランチャーが自動で開きます。閉じてしまったときや、<strong>VS Code のターミナルで使いたいとき</strong>は、<code>force-*</code> フォルダの中で、次のように打ちます（<a href="install.html#path">PATH を設定</a>していれば、<code>sf-l</code> まで打って Tab キーを押すと、補完されます）。</p>
   <pre><code>sf-launcher.sh</code></pre>
 </div>
 <figure class="diagram">
@@ -64,14 +73,16 @@
     <tr><td>ターゲットファイルの書き方を確かめる</td><td><strong>1</strong> Check</td><td><code>sf-check.sh</code></td></tr>
     <tr><td>変更を GitHub に送る</td><td><strong>2</strong> Push</td><td><code>sf-push.sh</code></td></tr>
     <tr><td>次の PR の出し先を知る</td><td><strong>3</strong> Next</td><td><code>sf-next.sh</code></td></tr>
-    <tr><td>反映できるか確かめる（dry-run）</td><td><strong>4</strong> Dryrun</td><td><code>sf-dryrun.sh</code></td></tr>
+    <tr><td>自分専用の組織に、反映できるか確かめる（dry-run）</td><td><strong>4</strong> Dryrun</td><td><code>sf-dryrun.sh</code></td></tr>
     <tr><td>自分専用の組織に、実際に反映する</td><td><strong>5</strong> Deploy</td><td><code>sf-deploy.sh</code></td></tr>
     <tr><td>前日の続きなど、作業を再開する</td><td><strong>6</strong> Start</td><td><code>sf-start.sh</code></td></tr>
     <tr><td>接続先の組織を切り替える</td><td><strong>7</strong> Restart</td><td><code>sf-restart.sh</code></td></tr>
   </tbody>
 </table>
 <ul>
-  <li>終わると、メニューに戻ります。<code>q</code> で終了します。コマンドが失敗しても、ランチャーは終わりません（エラーを読んで、直して、もう一度押せます）。</li>
+  <li>終わると、メニューに戻ります。<code>q</code> で終了します。コマンドが失敗しても、ランチャーは終わりません（エラーを読んで、直して、もう一度押せます）。メニューにない数字や文字を押しても、何も起きません。</li>
+  <li>ランチャーから実行するコマンドには、オプションは付きません。オプションを付けたいときは、コマンドを直接打ちます。</li>
+  <li><code>sf-job.sh</code> / <code>sf-start.sh</code> から自動で開いたランチャーでは、Ctrl+C は効きません。終了は <code>q</code> です（<a href="basics.html#first-run">基本の使い方</a>）。</li>
   <li><strong>VS Code のターミナルでは、6 と 7 は表示されません</strong>（VS Code が、二重に開かないようにするためです）。1〜5 を使います。</li>
   <li><code>sf-job.sh</code>（新しい作業を始める）は、メニューにありません。<code>force-*</code> フォルダの外の、<strong>作業フォルダ</strong>で実行するためです（<a href="basics.html#job">基本の使い方</a>）。始めたあとは、ランチャーが自動で開きます。</li>
   <li>ランチャーは、<code>force-*</code> フォルダの中でだけ使えます。</li>
@@ -92,30 +103,45 @@
 <h2 id="dryrun">反映できるか確かめる（dry-run）</h2>
 <p><span class="badge">🎛️ ランチャーの [4] Dryrun</span> コマンドで打つなら:</p>
 <pre><code>sf-dryrun.sh</code></pre>
-<p>実際には反映せずに、接続中の組織で「反映できるか」だけを確かめます。本番を変えずに、安心して試せます。</p>
+<p>実際には反映せずに、接続中の<strong>自分用の組織</strong>で「反映できるか」だけを確かめます。組織の中身は変わらないので、安心して試せます。共有の環境の組織と本番の組織では、dry-run も、手元からはできません（<a href="#own-org-only">上の囲み</a>）。共有の環境への検証は、PR を作ったときに、GitHub 上で自動で行われます。</p>
 <ul>
-  <li><strong>結果の見方:</strong> 成功か失敗かが、ターミナルに表示されます。</li>
-  <li><strong>失敗したとき:</strong> エラーの内容が表示されます。ターゲットファイルや、変更の内容を直して、もう一度実行してください。ログは、<code>force-*</code> フォルダの中の <code>sf-tools/logs/</code> にも残ります。</li>
+  <li><strong>流れ:</strong> まず、ターゲットファイルの書き方を確かめます（ランチャーの 1 Check と同じ確認）。そのあと、組織の「デプロイ状況」の画面をブラウザで開き、dry-run を実行します。Apex のテストクラス（<code>@isTest</code> が付いたクラス）をターゲットファイルに書いていれば、そのテストも、自動で実行されます。</li>
+  <li><strong>結果の見方:</strong> 成功か失敗かが、ターミナルに表示されます。ブラウザの「デプロイ状況」の画面でも、確かめられます。</li>
+  <li><strong>失敗したとき:</strong> エラーの内容が表示されます。ターゲットファイルや、変更の内容を直して、もう一度実行してください。ログは、<code>force-*</code> フォルダの中の <code>sf-tools/logs/</code>（<code>sf-dryrun.log</code> と <code>sf-release.log</code>）にも残ります。</li>
+  <li>ターゲットファイルに、反映も削除も 1 つも書いていないときは、「デプロイ対象なし」と表示して、何もせずに終わります。</li>
 </ul>
-<p><code>sf-release.sh</code> を、オプションなしで実行しても、同じ dry-run になります。</p>
+<p><code>sf-release.sh</code> を、オプションなしで実行しても、同じ dry-run になります。<code>sf-dryrun.sh -r</code> のように <code>-r</code> を付けると、検証ではなく<strong>実際の反映</strong>になる（確認が出ます）ので、検証だけなら付けないでください。</p>
 
 <h2 id="deploy">自分の組織で、実際に反映する（sf-deploy）</h2>
 <p><span class="badge">🎛️ ランチャーの [5] Deploy</span> コマンドで打つなら:</p>
 <pre><code>sf-deploy.sh</code></pre>
-<p>接続中の、<strong>自分専用の組織</strong>（Sandbox・Developer Edition・Scratch Org）に、変更を実際に反映します。自分の環境で動きを確かめたいときに使います。</p>
+<p>接続中の、<strong>自分専用の組織</strong>（個人用の Sandbox・Developer Edition・Scratch Org）に、変更を実際に反映します。自分の環境で動きを確かめたいときや、Sandbox を乗り換えたときに、今の開発物をまとめて入れ直すときに使います。</p>
+<ul>
+  <li><strong>組織の側の変更を、上書きします。</strong>組織で直接変えた内容とぶつかっても、止めずに上書きします（ぶつかりの確認をしない設定で反映します）。実行する前に、上書きの警告と、確認（<code>Y</code> / <code>N</code> / <code>q</code>）が出ます。<code>Y</code> を押したときだけ、反映します。</li>
+  <li>作業用のブランチの上で実行します。<code>main</code> などの保護ブランチ（<code>sf-tools/config/branches.txt</code> に書かれた、共有の環境のブランチ）の上では、止まります。</li>
+  <li>流れは、dry-run と同じです（ターゲットファイルの確認 → 「デプロイ状況」の画面を開く → 反映）。テストクラスも、同じく自動で実行されます。</li>
+</ul>
 <div class="box warn">
-  <div class="title">共有の環境には、反映できません</div>
-  <p>本番・staging・develop といった共有の環境には、パソコンから反映できない仕組みです（実行すると、確認の前に止まります）。共有の環境へは、GitHub に変更を送り、レビューを通して、PR をマージします。そうすると、自動で反映されます。</p>
+  <div class="title">共有の環境・本番には、反映できません</div>
+  <p>共有の環境の組織（予約名 <code>prod</code> / <code>staging</code> / <code>develop</code> / <code>main</code>）と、本番の組織（名前は問わない。種類を確かめられない組織も）には、パソコンから反映できない仕組みです（実行すると、確認の前に止まります。<a href="#own-org-only">上の囲み</a>）。共有の環境へは、GitHub に変更を送り、PR を作って、レビューを通し、マージします。そうすると、GitHub Actions が、自動で反映します。</p>
 </div>
 
 <h2 id="push">変更を送る（sf-push）</h2>
 <p><span class="badge">🎛️ ランチャーの [2] Push</span> コマンドで打つなら:</p>
 <pre><code>sf-push.sh</code></pre>
-<p>カレントフォルダの下の変更を、まとめてコミットして、GitHub に送ります。</p>
+<p>カレントフォルダ（ランチャーから実行したときは、<code>force-*</code> フォルダ全体）の下の変更を、まとめてコミットして、GitHub に送ります。次の順に進みます。</p>
+<ol class="steps">
+  <li><p>今いるブランチを確かめます（下の「コミットする前に止まる場合」）。</p></li>
+  <li><p>GitHub の <code>main</code> の最新を取ってきて、今のブランチに取り込みます（マージ）。ほかの人の変更が、先に <code>main</code> に入っていても、ここで合わせられます。取り込みでぶつかり（コンフリクト）が起きたときは、理由を表示し、取り込みを取り消して止まります。</p></li>
+  <li><p>カレントフォルダの下の変更を、コミットの対象にします（<code>git add</code>）。変更がなく、まだ送っていないコミットだけがあるときは、それを送って終わります。何もなければ、何もせずに終わります。</p></li>
+  <li><p>ターゲットファイルの書き方を確かめます（ランチャーの 1 Check と同じ）。エラーがあれば、どの行がなぜ悪いかを表示して止まります。</p></li>
+  <li><p>VS Code が、新しいウィンドウで開きます。コミットメッセージ（何を変えたかの説明）を書いて、保存して、<strong>そのタブ（ウィンドウ）を閉じます</strong>。閉じるまで、先に進みません。<code>#</code> で始まる行は、メッセージに入りません。何も書かずに閉じると、コミットもプッシュもせずに終わります。</p></li>
+  <li><p>コミットして、GitHub に送ります（プッシュ）。このとき、<a href="#hooks">Git のフック</a>も自動で動きます。</p></li>
+</ol>
 <ul>
-  <li>コミットメッセージは、VS Code で入力します。</li>
-  <li><code>main</code> に新しく入った変更も、自動で取り込みます。</li>
   <li>送るのだけが失敗したときは、もう一度実行してください。まだ送れていないコミットが、送られます。</li>
+  <li>前もって、自分で <code>git add</code> していた、カレントフォルダの外の変更も、一緒にコミットされます。</li>
+  <li>ログは、<code>sf-tools/logs/sf-push.log</code> に残ります。</li>
 </ul>
 <div class="box warn">
   <div class="title">コミットする前に止まる場合</div>
@@ -130,17 +156,42 @@
 <h2 id="next">PR の状況を確認する（sf-next）</h2>
 <p><span class="badge">🎛️ ランチャーの [3] Next</span> コマンドで打つなら:</p>
 <pre><code>sf-next.sh</code></pre>
-<p>いまのブランチが、<code>develop</code> / <code>staging</code> / <code>main</code> のどこまで取り込まれたかを、一覧で表示します。次に PR（取り込みの依頼）を出す先も、案内します。</p>
+<p>いまの作業用のブランチが、<code>develop</code> → <code>staging</code> → <code>main</code> のどこまで取り込まれたかを、一覧で表示します（段階は、プロジェクトの <code>branches.txt</code> の設定によります。<code>main</code> だけのプロジェクトもあります）。次に PR（取り込みの依頼）を出す先も、案内します。</p>
+<pre><code>JOB-20261024 のマージ状況
+  ✓ develop   マージ済み
+  → staging   PR発行中
+  ▶ main      次のPR先</code></pre>
+<table>
+  <thead><tr><th>記号</th><th>意味</th></tr></thead>
+  <tbody>
+    <tr><td><code>✓</code> マージ済み</td><td>その段階への PR が、マージ済みです（「ブランチ同期」と付くときは、別のブランチ経由で、変更がすでに入っています。この PR による反映は、行われていません）</td></tr>
+    <tr><td><code>⚠</code> マージ済み（順序外）</td><td>前の段階を飛ばして、マージされています。飛ばした段階には、反映されていません</td></tr>
+    <tr><td><code>→</code> PR発行中</td><td>PR を出してあり、マージを待っています</td></tr>
+    <tr><td><code>▶</code> 次のPR先</td><td>次に PR を出す先です</td></tr>
+  </tbody>
+</table>
+<ul>
+  <li>次の PR 先があるときは、「〜にPRを出しますか？」と聞かれます。<code>Y</code> を押すと、GitHub の <strong>PR の作成画面</strong>がブラウザで開きます。PR そのものは、まだ作られていません。画面で内容を確かめて、作成のボタンを押してください。<code>N</code> は何もせず終了、<code>q</code> は中断です。</li>
+  <li><strong>PR は、段階の順番どおり（<code>develop</code> → <code>staging</code> → <code>main</code>）に出します。</strong>順番を飛ばしてマージすると、飛ばした段階には、あとから反映できなくなります（<a href="../reference/commands-dev.html#sf-next">詳しくは、リファレンス</a>）。<code>sf-next.sh</code> の案内に従えば、順番どおりになります。</li>
+  <li><code>main</code> などの保護ブランチの上では、使えません（作業用のブランチの上で実行します）。</li>
+</ul>
 
 <h2 id="hooks">自動で動くチェック（git フック）</h2>
-<p>コミットとプッシュのときに、次のチェックが、自動で動きます。何もしなくて大丈夫です。</p>
+<p>コミットとプッシュのときに、次のチェックが、自動で動きます（フックは、<code>sf-start.sh</code> が裏で設置します）。何もしなくて大丈夫です。<code>sf-push.sh</code> を使っても、<code>git</code> のコマンドを直接打っても、同じように動きます。</p>
 <table>
   <thead><tr><th>フック</th><th>いつ</th><th>内容</th></tr></thead>
   <tbody>
     <tr><td><strong>pre-commit</strong></td><td><code>git commit</code> のとき</td><td>ターゲットファイルの書き方を確認します。エラーがあれば、コミットを止めます</td></tr>
-    <tr><td><strong>pre-push</strong></td><td><code>git push</code> のとき</td><td>ターゲットファイルの書き方を確認し、<code>main</code> などの新しい変更を取り込みます。<code>main</code> / <code>staging</code> / <code>develop</code> の上からも、これらへも、直接は送れません（PR を通します）。新しい変更を取り込んだときは、そのプッシュは止まります（もう一度プッシュすると、通ります）</td></tr>
+    <tr><td><strong>pre-push</strong></td><td><code>git push</code> のとき</td><td>
+      <ol>
+        <li><strong>保護ブランチへの直接のプッシュを止めます。</strong>保護ブランチは、<code>branches.txt</code> に書かれた、共有の環境のブランチ（<code>main</code> / <code>staging</code> / <code>develop</code> など）です。その上からのプッシュも、作業用のブランチから保護ブランチへ送ることも（削除も）、できません。保護ブランチへは、PR を通します。</li>
+        <li>ターゲットファイルの書き方を確認します。エラーがあれば、プッシュを止めます。</li>
+        <li>GitHub 上の自分のブランチと <code>main</code> に、まだ取り込んでいない変更があれば、取り込みます（マージ）。取り込んだときは、そのプッシュは止まります（取り込みを含めずに送ってしまわないためです）。<strong>もう一度プッシュすると、通ります。</strong>取り込みでぶつかったときは、取り込みを取り消して止まります。</li>
+      </ol>
+    </td></tr>
   </tbody>
 </table>
+<p>pre-push は、Salesforce の組織への検証（dry-run）は、行いません。組織で反映できるかは、ランチャーの 4 Dryrun（自分用の組織）と、PR を作ったときの自動の検証で確かめます。</p>
 
 <div class="box next">
   <div class="title">困ったときは</div>

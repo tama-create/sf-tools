@@ -333,8 +333,8 @@ _step_conclusion() { e2e_step_conclusion "$REPO_FULL" "$1" "$2"; }
 #   失敗した手順があれば、そこで止める（残ったクラスは、後掃除で削除される）
 # ------------------------------------------------------------------------------
 _admin_login_ok() { ( e2e_sf_admin_login ); }
-# wf-release の Slack 通知が成功したか（ログに、Slack の応答 ok:true がある）
-_slack_ok() { _e2e_gh run view "$1" -R "$REPO_FULL" --log 2>/dev/null | grep -F "Slack response" | grep -q '"ok":true'; }
+# wf-release の Slack 通知が成功したか（ログに、Slack の応答 ok:true がある）。見出しは「Slack の応答:」（以前は「Slack response:」。どちらも読む）
+_slack_ok() { _e2e_gh run view "$1" -R "$REPO_FULL" --log 2>/dev/null | grep -E "Slack (の応答|response)" | grep -q '"ok":true'; }
 
 # Hello World の作業は、開発者の作業を、sf-tools のコマンドで再現する（通常の運用と同じ道）
 #   sf-job.sh（ブランチ作成・clone・sf-start.sh）→ ファイルを書く → sf-dryrun.sh（ローカルの検証）→ sf-push.sh（commit・push・pre-push フック）
@@ -459,7 +459,7 @@ _hello_sf_next() { e2e_run_sf_cmd "sf-next" "$1" "N\n" "${SF_TOOLS_ROOT}/bin/sf-
 _hello_deploy_refused() {
     e2e_run_sf_cmd_refused "sf-deploy-refused" "$1" "N\n" "${SF_TOOLS_ROOT}/bin/sf-deploy.sh" -t main --no-open \
         && [[ -s "${E2E_TMP}/sf-deploy-refused.out" ]] \
-        && grep -q "共有環境のため" "${E2E_TMP}/sf-deploy-refused.out" \
+        && grep -q "共有環境（予約名）のため" "${E2E_TMP}/sf-deploy-refused.out" \
         && ! grep -q "project deploy start" "${E2E_TMP}/sf-deploy-refused.out"
 }
 

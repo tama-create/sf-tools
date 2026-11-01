@@ -14,6 +14,8 @@
 #   X3-4 ~/sf-tools が古い → sf-sync-wf が、更新を求める（--check は、更新せず中断）
 #   A10  sf-install: node_modules の最新判定（package-lock）と、ツール更新の 24 時間の間隔
 #   X8-1 再実行の表: sf-hook・sf-unhook を、続けて 2 回実行しても、同じ結果になる
+#   X5-3 環境の不備（インストーラー版の sf・node なし・npm の失敗・CRLF）→ 安全に止まる／警告して続ける
+#   X4-1c 同じ組織への、同時のデプロイ → ロックの競合で、片方が待つ・止まる
 # ==============================================================================
 source "$(dirname "${BASH_SOURCE[0]}")/test_helper.sh"
 source "$(dirname "${BASH_SOURCE[0]}")/integration/lib.sh"

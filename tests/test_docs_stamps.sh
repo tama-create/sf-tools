@@ -76,6 +76,21 @@ test_stamps_selftest() {
     out=$(bash "$d/tests/docs-stamp.sh" --check 2>&1); ec=$?
     [[ $ec -ne 0 && "$out" == *"文書がない"* ]] && pass "自己テスト: 文書が消えたら、検出する" || fail "自己テスト: 文書が消えたら、検出する" "$out"
 
+    # --update <文書> <コード>: 指定した 1 本の印だけを付け直し、もう 1 本は、検出され続ける
+    local d2; d2=$(mktemp -d "${TMPDIR:-/tmp}/docs-stamps2-XXXX"); _make_sample "$d2"
+    bash "$d2/tests/docs-stamp.sh" --update site/p.html -y >/dev/null 2>&1
+    sed -i.bak 's/--opt-a : 説明/--opt-a : 変更/' "$d2/bin/sf-a.sh"
+    sed -i.bak 's/--opt-b : 説明/--opt-b : 変更/' "$d2/bin/sf-b.sh"
+    rm -f "$d2"/bin/*.bak
+    bash "$d2/tests/docs-stamp.sh" --update site/p.html bin/sf-a.sh -y >/dev/null 2>&1
+    out=$(bash "$d2/tests/docs-stamp.sh" --check 2>&1); ec=$?
+    if [[ $ec -ne 0 && "$out" == *"bin/sf-b.sh の冒頭コメントが"* && "$out" != *"bin/sf-a.sh の冒頭コメントが"* ]]; then
+        pass "自己テスト: --update <文書> <コード> は、その 1 本だけ付け直し、読んでいない 1 本は、検出され続ける"
+    else
+        fail "自己テスト: --update <文書> <コード> は、その 1 本だけ付け直す" "$out"
+    fi
+    rm -rf "$d2"
+
     # --update で、一覧にない文書は、拒否する
     out=$(bash "$d/tests/docs-stamp.sh" --update site/none.html -y 2>&1); ec=$?
     [[ $ec -ne 0 ]] && pass "自己テスト: 一覧にない文書の --update は、拒否する" || fail "自己テスト: 一覧にない文書の --update は、拒否する" "$out"

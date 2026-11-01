@@ -7,20 +7,20 @@
   var NAV = [
     { title: "はじめに", items: [
       { t: "ホーム", h: "index.html" },
+      { t: "前提条件とインストール", h: "guide/install.html" },
       { t: "用語集", h: "guide/glossary.html" }
     ]},
-    { title: "使い方ガイド（開発者向け）", items: [
-      { t: "前提条件とインストール", h: "guide/install.html" },
-      { t: "基本の使い方", h: "guide/basics.html" },
-      { t: "日々の開発の流れ", h: "guide/daily.html" }
-    ]},
-    { title: "管理者ガイド", items: [
+    { title: "管理者ガイド（先に行う）", items: [
       { t: "新規プロジェクトの作成（sf-init）", h: "admin/setup.html" },
       { t: "構成の変更と診断", h: "admin/maintenance.html" },
       { t: "認証情報（Secrets / Variables）", h: "admin/secrets.html" },
       { t: "ワークフローの更新（sf-sync-wf）", h: "admin/workflows.html" },
       { t: "動作の確認（--verify）", h: "admin/verify.html" },
       { t: "トラブルシューティング", h: "admin/troubleshooting.html" }
+    ]},
+    { title: "使い方ガイド（開発者向け。管理者の準備のあと）", items: [
+      { t: "基本の使い方", h: "guide/basics.html" },
+      { t: "日々の開発の流れ", h: "guide/daily.html" }
     ]},
     { title: "リファレンス", items: [
       { t: "コマンド一覧", h: "reference/commands.html" },

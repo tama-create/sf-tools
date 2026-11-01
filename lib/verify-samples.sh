@@ -2,8 +2,18 @@
 # ==============================================================================
 # verify-samples.sh - リリースの仕組みの確認用サンプル（パターン別のコンポーネント）
 # ==============================================================================
-# lib/verify-common.sh から source される（単独では、source しない）。
-# sf-init.sh --verify --components が、develop の組織に、リリースして、削除する。
+# lib/verify-common.sh から source される（単独では、source しない）。verify-common.sh の VERIFY_APEX_HELLO_TEST・
+# verify_hello_cls・verify_hello_test_cls・verify_apex_meta を使う。
+# sf-init.sh --verify --components が、develop の組織に、リリースして、削除する（verify-common.sh の verify_set_* から呼ばれる）。
+#
+# 【提供する関数】
+#   verify_sample_labels_file_is_ours          ... labels のファイル（標準入力）が、サンプル自身のものか
+#   verify_sample_paths [stage1|stage2|all]    ... サンプルのファイルのパスの一覧（既定 all）
+#   verify_sample_content_for PATH             ... パスに対応する本文（対象外のパスは、戻り値 1）
+#   verify_sample_deploy_target_text           ... deploy-target.txt の本文
+#   verify_sample_remove_target_text [stage1|stage2] ... remove-target.txt の本文（既定 stage1）
+#   （内部用: _vs_xml_head。定数: VERIFY_SAMPLE_*）
+#   一覧・本文は、下の環境変数（VERIFY_SAMPLE_LABELS / _OBJECTS / _FLOW）で、含めるものが変わる
 # 目的は、「種類ごとに、書き方（ターゲットファイルの書式・パス・メンバー名）が違っても、リリースの仕組みが動く」ことの確認。
 # 全種類を試すのではなく、書き方のパターンごとに、最小のものを 1 つずつ置く。
 #
@@ -246,8 +256,13 @@ verify_sample_content_for() {
 
 # ------------------------------------------------------------------------------
 # deploy-target.txt / remove-target.txt の本文
-#   リリース: [files] と [members] の両方の書き方を使う（どちらも、通ることの確認）
-#   削除    : 段階 1（stage1）→ 段階 2（stage2）。オブジェクトは、参照するもの（トリガー・項目の参照・Layout）を消したあとで消す
+#   リリース: [files] と [members] の両方の書き方を使う（どちらも、通ることの確認）。
+#             [files]: Apex のクラス・トリガー・LWC（.js）・Flow・PermissionSet・EmailTemplate（.email）
+#             [members]: Aura・CustomObject・CustomField・Layout・CustomLabel
+#             （トリガーとそのテスト・CustomObject・CustomField・Layout は、オブジェクト系を含めるときだけ。Flow・CustomLabel も、
+#              それぞれの環境変数が 1 のときだけ）
+#   削除    : 段階 1（stage1）→ 段階 2（stage2）。オブジェクトと項目は、それらを参照するもの（トリガーとそのテスト）を
+#             段階 1 で消したあとで消す。Layout は消さない（オブジェクトの削除に任せる）。Flow は、削除対象に含めない
 # ------------------------------------------------------------------------------
 verify_sample_deploy_target_text() {
     local b="$VERIFY_SAMPLE_BASE" obj="${VERIFY_SAMPLE_OBJECTS:-1}"

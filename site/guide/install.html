@@ -18,7 +18,7 @@
 
 <div class="box warn">
   <div class="title">先に、管理者が、プロジェクトを作っている必要があります</div>
-  <p>sf-tools は、管理者が、sf-tools の雛形で作った、決まった形のリポジトリ（<code>force-XXXX</code>）の上でしか動きません。<strong>このページの準備は、管理者から「プロジェクトができました」と連絡を受けてから、進めてください。</strong>管理者の作業と、開発者の作業は、同時には進められません。プロジェクトの名前（<code>XXXX</code>）は、管理者に聞いてください。</p>
+  <p>sf-tools は、管理者が、sf-tools の雛形で作った、決まった形のリポジトリ（<code>force-XXXX</code>）の上でしか動きません。<strong>このページの準備は、管理者から「プロジェクトができました」と連絡を受けてから、進めてください。</strong>管理者の作業と、開発者の作業は、同時には進められません。プロジェクトの名前（<code>XXXX</code>）は、管理者に聞いてください。<strong>管理者の方は、待たずに、②〜④（ツールを入れる・sf-tools を置く・PATH を設定する）から始めてください。</strong></p>
 </div>
 
 <figure class="diagram">
@@ -44,13 +44,18 @@
     <tr><td>Git（Git Bash）</td><td><code>git --version</code></td><td>変更の履歴の管理・フック</td><td><a href="https://git-scm.com/download/win">公式サイト</a>のインストーラーを実行</td></tr>
     <tr><td>Node.js</td><td><code>node --version</code></td><td>Salesforce CLI を入れるために必要</td><td><a href="https://nodejs.org/">公式サイト</a>のインストーラーを実行</td></tr>
     <tr><td>Salesforce CLI（<strong>npm 版</strong>）</td><td><code>sf --version</code></td><td>組織への接続・反映・取得</td><td><code>npm install -g @salesforce/cli</code>（<strong>公式インストーラー版は使えません</strong>。<a href="#npm">次の節</a>で説明します）</td></tr>
-    <tr><td>GitHub CLI</td><td><code>gh --version</code></td><td>PR の作成・認証情報の登録</td><td><code>winget install --id GitHub.cli</code></td></tr>
-    <tr><td>Visual Studio Code</td><td><code>code --version</code></td><td>エディタの起動</td><td><code>winget install --id Microsoft.VisualStudioCode</code></td></tr>
+    <tr><td>GitHub CLI</td><td><code>gh --version</code></td><td>GitHub へのログイン・作業用のブランチの作成・PR の状況の確認（管理者は、リポジトリの作成や認証情報の登録にも使います）</td><td><code>winget install --id GitHub.cli</code></td></tr>
+    <tr><td>Visual Studio Code</td><td><code>code --version</code></td><td>エディタの起動・コミットメッセージの入力（<code>sf-push.sh</code> は、<code>code</code> コマンドがないと動きません）。Salesforce の拡張機能（Salesforce Extension Pack）を、事前に入れておくのがおすすめです（<a href="#vscode-ext">下の囲み</a>）</td><td><code>winget install --id Microsoft.VisualStudioCode</code></td></tr>
     <tr><td>Slack</td><td>—</td><td>リリース結果の通知を受け取る</td><td><a href="https://slack.com/downloads/windows">公式サイト</a>のインストーラーを実行</td></tr>
   </tbody>
 </table>
 <p>まとめて確認するには、次の 1 行を、Git Bash（Mac はターミナル）に貼り付けます。バージョンが 5 行並べば、そろっています。途中で「command not found」と出たら、そのツールが、まだ入っていません。</p>
 <pre><code>git --version && node --version && sf --version && gh --version && code --version</code></pre>
+<div class="box" id="vscode-ext">
+  <div class="title">VS Code には、Salesforce の拡張機能を入れておくのがおすすめです</div>
+  <p>VS Code で開発するときは、Salesforce の拡張機能（<strong>Salesforce Extension Pack</strong>）を、事前に入れておくことをお勧めします。sf-tools のコマンド自体は、拡張機能がなくても動きますが、Apex や LWC の編集や、組織の参照が、ずっと楽になります。</p>
+  <p>プロジェクト（<code>force-XXXX</code>）を VS Code で開くと、推奨の拡張機能の案内が出ます（プロジェクトの <code>.vscode/extensions.json</code> に、推奨の一覧があります）。案内から、そのまま入れられます。</p>
+</div>
 <div class="box">
   <div class="title">シェルについて</div>
   <ul>
@@ -78,11 +83,11 @@
   <thead><tr><th>コマンド</th><th>終了コードが 0 でないとき</th></tr></thead>
   <tbody>
     <tr><td><code>sf-init.sh</code></td><td>案内を表示して、<strong>そこで止まります</strong></td></tr>
-    <tr><td>毎日のコマンド（<code>sf-start.sh</code>・<code>sf-release.sh</code>・<code>sf-metasync.sh</code>・<code>sf-update-secret.sh</code>）</td><td>案内を表示して、<strong>そこで止まります</strong>。途中で中途半端に止まるより、最初に止めるほうが安全だからです</td></tr>
-    <tr><td><code>sf-install.sh</code></td><td>警告を表示するだけで、続けます。止めてしまうと、sf-tools 自身の更新が、止まってしまうためです</td></tr>
+    <tr><td>そのほかの <code>sf</code> を使うコマンド（<code>sf-start.sh</code>・<code>sf-release.sh</code>（ランチャーの Dryrun・Deploy も）・<code>sf-metasync.sh</code>・<code>sf-update-secret.sh</code>・<code>sf-typecheck.sh</code>）</td><td>案内を表示して、<strong>そこで止まります</strong>。途中で中途半端に止まるより、最初に止めるほうが安全だからです</td></tr>
+    <tr><td><code>sf-install.sh</code>（<code>sf-start.sh</code> が裏で実行します）</td><td>警告を表示するだけで、続けます。止めてしまうと、sf-tools 自身の更新が、止まってしまうためです</td></tr>
   </tbody>
 </table>
-<p>確認に成功すると、24 時間は、確認を省略します。</p>
+<p>2 行目のコマンドは、確認に成功すると、同じ場所の <code>sf</code> なら、24 時間は確認を省略します。<code>sf</code> がまだ入っていないときは、この確認はしません（<code>sf</code> を使う手順で、エラーになります）。</p>
 
 <h3 id="npm-switch">インストーラー版から npm 版へ入れ替える（Windows）</h3>
 <ol class="steps">
@@ -98,7 +103,7 @@
   <div class="title">この 2 つのフォルダは、削除しないでください</div>
   <p><code>~/.sf</code> と <code>~/.sfdx</code> には、組織のログイン情報が入っています。入れ替えても、このログイン情報は残ります。VS Code を使っている場合は、入れ替えたあとに、VS Code を再起動してください。</p>
 </div>
-<p><strong>更新するとき:</strong> <code>sf-upgrade.sh</code> が、npm 版を <code>npm install -g @salesforce/cli@latest</code> で更新します（手動でも、同じコマンドです）。</p>
+<p><strong>更新するとき:</strong> 自動で更新されます（下の「<a href="#auto-update">自動で行われる更新</a>」）。<code>sf-upgrade.sh</code> が、npm 版を <code>npm install -g @salesforce/cli@latest</code> で更新します（手動でも、同じコマンドです）。npm 版でない <code>sf</code> は、<code>sf update</code> で更新します。</p>
 <p><strong>Mac・Linux:</strong> 同じく、npm 版をおすすめします。ほかの方法（pkg や Homebrew など）で入れた場合も、上の確認コマンドで終了コード 0 になれば、そのまま使えます。</p>
 
 <h2 id="install">sf-tools をインストールする</h2>
@@ -117,7 +122,19 @@
 </table>
 <pre><code># sf-tools
 export PATH="$HOME/sf-tools/bin:$PATH"</code></pre>
-<p>追加したら、<code>source ~/.bashrc</code>（Mac は <code>source ~/.zshrc</code>）を実行して、反映します。ターミナルを開き直しても、同じです。</p>
+<p>追加したら、<code>source ~/.bashrc</code>（Mac は <code>source ~/.zshrc</code>）を実行して、反映します。ターミナルを開き直しても、同じです。PATH を設定しないときは、<code>~/sf-tools/bin/sf-job.sh</code> のように、場所を付けて実行します。</p>
+
+<h3 id="auto-update">自動で行われる更新</h3>
+<p>sf-tools の置き直しや、ツールの更新は、自分で行う必要はありません。<code>sf-start.sh</code>（<code>sf-job.sh</code> からも動きます）が、毎回、裏で <code>sf-install.sh</code> を実行し、次のことを行います。</p>
+<ul>
+  <li><code>~/sf-tools</code> を、最新に更新します（<code>git pull</code>）。</li>
+  <li>プロジェクトの設定ファイル（<code>sf-tools/config/</code> の <code>metadata.txt</code>・<code>branches.txt</code>）があるかを確かめます。</li>
+  <li>Git のフック（<code>pre-commit</code> / <code>pre-push</code>。コミット・プッシュのときに自動で動くチェック）を設置します。</li>
+  <li>作業用のブランチのとき、ターゲットファイルを置くフォルダ（<code>sf-tools/release/&lt;ブランチ名&gt;/</code>）を用意します。</li>
+  <li>プロジェクトに必要な部品を入れます（<code>npm install</code>。入れ済みなら省きます）。</li>
+  <li>前回から 24 時間以上たっていれば、<code>sf-upgrade.sh</code> で、開発ツールを最新にします: <code>npm</code>・Salesforce CLI（<code>sf</code>）と、<strong>Windows の Git Bash では Git for Windows も</strong>（<code>git update-git-for-windows</code>）。Mac・Linux・WSL の Git は、更新しません（それぞれのパッケージ管理の方法で、更新してください）。</li>
+</ul>
+<p>どれかが失敗しても、作業は止まりません。結果は、<code>force-*</code> フォルダの中の <code>sf-tools/logs/sf-start.log</code>・<code>sf-install.log</code>・<code>sf-upgrade.log</code> で確かめられます。</p>
 
 <h2 id="env">動作環境</h2>
 <p>実際に動かして確かめた環境だけを書いています。</p>
@@ -131,10 +148,27 @@ export PATH="$HOME/sf-tools/bin:$PATH"</code></pre>
   </tbody>
 </table>
 <ul>
-  <li>確認に使った Salesforce は、<strong>Developer Edition</strong>（開発者向けの無料の組織）です。ほかのエディション（Enterprise など）や Sandbox では、確認していません。</li>
   <li><strong>自動テスト</strong>とは、プログラムの各部分が正しく動くかを、機械が確かめる仕組みです。GitHub 上で、変更のたびに自動で実行されます。Linux・Mac・Windows の 3 つの環境で、合格しています。</li>
   <li>Linux のパソコンを、手元で使うことは、想定していません（Linux は、自動で動くサーバーとしてだけ使います）。WSL は、Windows の中で動くので、手元で使えます。</li>
   <li>Mac は、標準のターミナル（zsh）と標準の Bash のままで動きます。Bash を入れ直す必要はありません。</li>
+</ul>
+
+<h3 id="scope">確認の範囲（Salesforce の組織）</h3>
+<p>動作の確認に使った Salesforce の組織と、確認していない範囲です。</p>
+<figure class="diagram">
+  <p class="lane-label">どこまで確かめたか</p>
+  <div class="tiles">
+    <div class="node ok"><span class="who">✅ 確認した</span><strong>Developer Edition</strong><small>Sales・Service の標準機能つきの組織（開発者向けの無料の組織）。メタデータの種類ごとの、リリース・削除の確認も（API 64.0）</small></div>
+    <div class="node warn"><span class="who">❓ 確認していない</span><strong>製品ごと・ほかのエディション</strong><small>Sales Cloud・Service Cloud・Experience Cloud など、特定の製品を前提にした確認。Enterprise などのエディション・Sandbox</small></div>
+    <div class="node dev"><span class="who">➕ 種類を増やすには</span><strong>metadata.txt に書き足す</strong><small>CLI が対応している種類なら、原則として、リリースできる見込み（確認は、自分用の組織で）</small></div>
+  </div>
+  <figcaption>組織や権限によって、結果が変わることもあります。本番に使う前に、自分用の組織で確かめることをお勧めします。</figcaption>
+</figure>
+<ul>
+  <li>動作の確認は、<strong>Developer Edition</strong>（Sales・Service の標準機能つき）の組織で行いました。Sales Cloud・Service Cloud・Experience Cloud など、特定の製品を前提にした確認は、していません。ほかのエディション（Enterprise など）や Sandbox でも、確認していません。</li>
+  <li>本番から取り込むメタデータの種類は、各プロジェクトの設定ファイル（<code>sf-tools/config/metadata.txt</code>）に、書き足せます。書き足した種類は、確認していません。ただ、リリースは、内部で Salesforce CLI を使って行うので、CLI が対応している種類なら、原則としてリリースできる見込みです。</li>
+  <li>メタデータの種類ごとの確認の表（sf-tools の <code>config/metadata-capability.txt</code>）は、Developer Edition（API 64.0）で確かめた結果です。表で「できない（ng）」の種類を、ターゲットファイルに書くと、<code>sf-check.sh</code> がエラーにします。表にない種類は、止めません。</li>
+  <li>組織や権限によって、結果が変わることもあります。本番に使う前に、自分用の組織で確かめることをお勧めします。</li>
 </ul>
 
 <div class="box next">

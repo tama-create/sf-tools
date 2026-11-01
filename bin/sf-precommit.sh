@@ -11,6 +11,7 @@
 # 【オプション】
 #   -v, --verbose  : コマンドの応答（出力）をコンソールにも表示する（フックは、この指定で呼ぶ）
 #   -h, --help     : このヘルプを表示して終了する（1 つ目の引数のときだけ）
+#   上記以外の引数は、「不明なオプションです」と表示して中断する。
 #
 # 【処理の流れ】
 #   1. sf-check.sh を引数なしで実行し、ターゲットファイルを検証する
@@ -31,14 +32,15 @@
 # ------------------------------------------------------------------------------
 # 1. common.sh 用の事前設定
 # ------------------------------------------------------------------------------
-readonly SCRIPT_NAME=$(basename "$0" .sh)
+SCRIPT_NAME="${0##*/}"; readonly SCRIPT_NAME="${SCRIPT_NAME%.sh}"
 readonly LOG_FILE="./sf-tools/logs/${SCRIPT_NAME}.log"
 readonly LOG_MODE="NEW"
 
 # ------------------------------------------------------------------------------
 # 2. 共通ライブラリの読み込み
 # ------------------------------------------------------------------------------
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="${BASH_SOURCE[0]%/*}"
+[[ "$SCRIPT_DIR/" == /* && "$SCRIPT_DIR/" != *//* && "$SCRIPT_DIR/" != */./* && "$SCRIPT_DIR/" != */../* ]] || SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 COMMON_LIB="${SCRIPT_DIR}/../lib/common.sh"
 
 if [[ ! -f "$COMMON_LIB" ]]; then

@@ -1,0 +1,52 @@
+# ==============================================================================
+# config/metasync-detect.txt - メタデータの種類ごとの「変更の検知の区分」の表
+# ==============================================================================
+# lib/metasync.js の detect（sf-metasync.sh の変更の検知）が読む。組織に変更があるかを、全件取得の前に調べるための表。
+# 書式: 1 行に「区分 種類名」（空白区切り）。# で始まる行と空行は無視する。
+#   A : 設定変更の履歴（SetupAuditTrail）に、作成・変更が記録されることを確かめた種類
+#   B : 履歴には出ないが、更新日時の一覧（sf org list metadata）が、作成・変更・削除に追従することを確かめた種類
+#   表にない種類 = C（検知できない。毎日の全件取得でだけ反映される）
+# 確認が済んだ種類だけを書くこと（未確認の種類を A・B に入れると、変更を見逃す）。確認の結果は、
+# doc/sf-metasync-redesign.md の 15 章（Developer Edition で、種類ごとに、作成 → 変更 → 削除を実測した結果）。
+# 履歴は、分類名・Action（組織の言語や種類で表記が変わる）を見ず、「前回より後に記録が 1 件でもあるか」だけで判定する。
+# 更新日時が 1970 年のまま変わらない種類（CustomObject・Workflow・CustomMetadata など）は、B に入れない（A だけ）。
+# ==============================================================================
+
+# ---- A: 履歴 ----
+A ApexClass
+A ApexTrigger
+A ApexPage
+A ApexComponent
+A LightningComponentBundle
+A AuraDefinitionBundle
+A FlexiPage
+A QuickAction
+A CustomObject
+A CustomField
+A CustomTab
+A CustomApplication
+A CustomPermission
+A GlobalValueSet
+A CustomMetadata
+A Workflow
+A WorkflowRule
+A ApprovalProcess
+A Queue
+A NamedCredential
+A ExternalDataSource
+A PermissionSet
+A PermissionSetGroup
+A Profile
+A Flow
+
+# ---- B: 更新日時の一覧 ----
+B Report
+B ReportType
+B Document
+B EmailTemplate
+B Letterhead
+B HomePageComponent
+B CspTrustedSite
+B CorsWhitelistOrigin
+B CustomNotificationType
+B CustomHelpMenuSection

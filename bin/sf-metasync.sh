@@ -17,6 +17,8 @@
 #   -y, --yes             : --dry-run のときだけ、手順 3 の続行の確認を省く（--dry-run なしで指定すると、中断する）
 #       --allow-mass-delete : 手順 8 の削除の保留のうち、S3（消えたフォルダ）・S4（削除が多い）を解く。手元で実行したときだけ
 #                           （GitHub Actions 上で指定すると、中断する）。手順 9 の確認は、省かない
+#       --full            : 手順 5 の変更の検知で「変更なし」でも、取得を省かず、全件取得する（検知は、状態の更新のために行う）。
+#                           毎日 1 回の全件取得（wf-metasync.yml）と、手動の実行で使う
 #   -j, --json            : 手順 6 の取得の応答（JSON）の先頭を、ログにも記録する
 #   -v, --verbose         : コマンドの応答（出力）をコンソールにも表示する
 #   -h, --help            : このヘルプを表示して終了する
@@ -40,7 +42,11 @@
 #        （失敗したら git rebase --abort して中断する）
 #   5. 一時プロジェクトの準備: sfdx-project.json の packageDirectories が 1 つでなければ、中断する（S8）。
 #      一時フォルダ（${TMPDIR:-/tmp}/sf-metasync-XXXXXX）に、sfdx-project.json と .forceignore（あれば）を写す。
-#      作業ツリーには、まだ何も書かない
+#      作業ツリーには、まだ何も書かない。
+#      続けて、環境変数 SF_METASYNC_DETECT が shadow または on のとき、変更の検知を行う（node lib/metasync.js detect。読み取りのみ。
+#      設定変更の履歴と、更新日時の一覧で、組織に変更があるかを、全件取得の前に調べる）。on で、結果が「変更なし」のとき
+#      （--full・--dry-run でなく、未プッシュのコミットがないとき）は、手順 6 以降を行わず、終了する（コミット・push・伝播はしない）。
+#      検知の失敗・不明・変更ありは、すべて、手順 6 の全件取得に進む（検知は、取得を省くための手がかりで、失敗が取りこぼしにならない）
 #   6. 組織からメタデータを取得する: 一時フォルダで sf project retrieve start --target-org prod --ignore-conflicts --json に、
 #      metadata.txt の全種類を --metadata で指定して実行する。取得先は一時フォルダのため、失敗しても作業ツリーは変わらない。
 #      終了コードが 0 以外で、応答が一時的なエラー（MetadataTransferError・ERROR_HTTP_404・接続の切断・503 など）なら、60 秒待って
@@ -55,13 +61,15 @@
 #   9. 計画の要約（件数・削除の一覧の先頭 30 件・保留とその理由）を表示する。手元で、変更があるときは、続行の確認
 #      （Y/N。N・q なら中断する）を取る（GitHub Actions 上では、表示のみ）。--dry-run は、ここで終了する
 #   10. 計画を作業ツリーに反映する（node lib/metasync.js apply。保留の削除は、行わない）
-#   11. git add -A -- <パッケージのフォルダ>（sf-tools/release/ は含めない）でステージし、HEAD との差分で分岐する
+#   11. （手順 5 の検知が、変更あり・不明のとき）検知の状態を ./sf-tools/metasync/state.json に書く。
+#      git add -A -- <パッケージのフォルダ>（と、書いたときは状態ファイル。sf-tools/release/ は含めない）でステージし、HEAD との差分で分岐する
 #      - 差分あり: 「定期更新: Salesforce変更の自動反映 (YYYY-MM-DD)」でコミットし（本文に件数）、git push --no-verify origin main する
 #      - 差分なし・origin/main より先のコミットあり（前回の同期の push の失敗など）: そのコミットの一覧（git log --oneline）を
 #        表示して確認を取り、git push --no-verify origin main だけ行う（GitHub Actions 上では、確認しない）
 #      - 差分なし・先のコミットなし: 「完了: Salesforce 組織側に変更はありませんでした。」と表示して終了する（手順 12 は行わない）
 #      コミット・push の失敗は、中断する
-#   12. （手順 11 で push したときのみ）branches.txt の main 以外の各ブランチへ、main を伝播する
+#   12. （手順 11 で push したときのみ。ただし、状態ファイルの更新だけのコミットのときは、伝播しない）
+#      branches.txt の main 以外の各ブランチへ、main を伝播する
 #      - リモートに無いブランチは、WARNING を表示してスキップする
 #      - git checkout <ブランチ> → git pull origin <ブランチ> --rebase → git merge main --no-edit →
 #        git push --no-verify origin <ブランチ>。失敗したら、WARNING を表示して、そのブランチをスキップする
@@ -77,8 +85,17 @@
 #   - sf-init で prod エイリアスの組織が登録済みであること
 #   - Salesforce CLI（sf）は npm 版であること。手順 1 の確認は、成功したら 24 時間は省略する（GitHub Actions 上では、確認しない）
 #   - node があること（sf が npm 版のため、通常はある）。sf のプラグインは不要（以前使っていた sfdx-git-delta は、使わない）
+#   - 変更の検知（SF_METASYNC_DETECT が shadow・on）を使うときは、接続ユーザーに「設定・定義の参照」の権限があること
+#     （ないと、履歴の問い合わせが失敗し、毎回、全件取得になる）
 #
 # 【補足】
+#   - 変更の検知: 環境変数 SF_METASYNC_DETECT（既定 off）。off = 行わない（従来どおり、毎回、全件取得）／
+#     shadow = 検知の結果をログに出すが、取得は常に行う（検知が「変更なし」なのに、実際は変更があったときは、WARNING で
+#     その一覧を出す。運用の前の確かめ用）／ on = 「変更なし」のとき、取得を省く。種類ごとの区分は config/metasync-detect.txt
+#     （A 履歴・B 更新日時の一覧。表にない種類は C = 毎日の全件取得でだけ反映される。最大約 1 日の遅れ）。
+#     off 以外では、状態を ./sf-tools/metasync/state.json に持つ（最後に全件取得した時刻と、区分 B の記録。変更あり・不明の
+#     全件取得のあとにだけ更新するため、変更のない回は、コミットを作らない。ファイルが変わらず、状態だけが変わるときは、
+#     状態だけのコミットになる）。状態は、速くするための手がかりで、壊れていても全件取得になる。設計: doc/sf-metasync-redesign.md 15 章
 #   - 終了コード: 0（同期した・変更がなかった）／ 1（中断した）／ 3（同期した（追加・変更の push・伝播まで行った）が、
 #     削除の保留（S2・S3・S4）がある。GitHub Actions では、ジョブが失敗として表示される）。S5 の保留だけのときは 0
 #   - 同期の対象のフォルダ: <パッケージのフォルダ>/main/default の下の、config/metadata-dirs.txt（sf-tools 側）で、
@@ -141,6 +158,7 @@ JSON_ECHO=0       # -j: 取得の応答（JSON）の先頭を、ログにも記�
 DRY_RUN=0         # -n: 計画の表示までで終了する
 ASSUME_YES=0      # -y: --dry-run のときだけ、続行の確認を省く
 ALLOW_MASS=0      # --allow-mass-delete: S3・S4 の削除の保留を解く
+FULL=0            # --full: 変更の検知が「変更なし」でも、取得を省かない
 
 while [[ "$#" -gt 0 ]]; do
     case $1 in
@@ -148,6 +166,7 @@ while [[ "$#" -gt 0 ]]; do
         --json|-j)    JSON_ECHO=1 ;;
         --dry-run|-n) DRY_RUN=1 ;;
         --yes|-y)     ASSUME_YES=1 ;;
+        --full)       FULL=1 ;;
         --allow-mass-delete) ALLOW_MASS=1 ;;
         --verbose|-v) : ;;  # SILENT_EXEC は common.sh が設定済み
         --*)
@@ -163,6 +182,11 @@ done
 # -y は、push の確認を省く手段にしない（--dry-run のときだけ）。大量削除の保留を解く指定は、手元で、人が確認できるときだけ
 [[ "$ASSUME_YES" -eq 1 && "$DRY_RUN" -eq 0 ]] && die "-y / --yes は --dry-run と一緒にだけ指定できます。"
 [[ "$ALLOW_MASS" -eq 1 && "${GITHUB_ACTIONS:-false}" == "true" ]] && die "--allow-mass-delete は GitHub Actions 上では指定できません。"
+
+# 変更の検知のモード（off = 行わない（既定）／ shadow = 検知はするが、取得は常に行う／ on = 「変更なし」なら取得を省く）
+readonly DETECT_MODE="${SF_METASYNC_DETECT:-off}"
+[[ "$DETECT_MODE" == "off" || "$DETECT_MODE" == "shadow" || "$DETECT_MODE" == "on" ]] \
+    || die "SF_METASYNC_DETECT は off / shadow / on のどれかにしてください: ${DETECT_MODE}"
 
 # ------------------------------------------------------------------------------
 # 5. 固有設定
@@ -190,6 +214,8 @@ WORK_DIR=""       # 取得先の一時プロジェクト（手順 5 で作る。
 PKG_PATH=""       # sfdx-project.json の packageDirectories の path（例: force-app）。手順 5 で決める
 APPLIED=0         # 1 = 計画を作業ツリーに反映した（手順 10 の開始以降）
 COMMITTED=0       # 1 = 反映の内容をコミットした
+readonly STATE_FILE="sf-tools/metasync/state.json"   # 変更の検知の状態（main にコミットする。手順 11）
+STATE_WRITTEN=0   # 1 = 状態ファイルを書いた（コミットする前に中断したら、戻す）
 
 # 終了時の後始末: ① 反映したが、コミットする前に中断したときは、同期の対象のパッケージのフォルダを HEAD に戻す
 #   （手元の実行では、手順 4 で、追跡していないファイルがないことを確かめているため、clean で消えるのは、今回写したファイルだけ）
@@ -200,6 +226,11 @@ cleanup_on_exit() {
         run git reset -q HEAD -- "$PKG_PATH" 2>/dev/null       # ステージ済みの新規ファイルを、インデックスから外す（checkout HEAD は、HEAD にあるファイルしか戻さない）
         run git checkout HEAD -- "$PKG_PATH" 2>/dev/null       # 変更・削除したファイルを戻す
         run git clean -fdq -- "$PKG_PATH" 2>/dev/null          # 新しく書いたファイルを消す
+    fi
+    # 検知の状態ファイルを書いたが、コミットする前に中断したときは、元に戻す（HEAD にあれば戻し、なければ消す）
+    if [[ "$STATE_WRITTEN" -eq 1 && "$COMMITTED" -eq 0 ]]; then
+        run git reset -q HEAD -- "$STATE_FILE" 2>/dev/null
+        run git checkout HEAD -- "$STATE_FILE" 2>/dev/null || rm -f "$STATE_FILE" 2>/dev/null   # rm は run 不使用: 終了時の後始末（失敗しても止めない）
     fi
     run git checkout "$ORIGINAL_BRANCH" 2>/dev/null
     [[ "$STASH_USED" -eq 1 ]] && run git stash pop 2>/dev/null
@@ -300,6 +331,34 @@ phase_prepare_work() {
     return $RET_OK
 }
 
+# 【DETECT】組織に変更があるかを、全件取得の前に調べる（手順 5。SF_METASYNC_DETECT が off 以外のとき）
+#   結果は DETECT_RC に入る: 0 = 変更なし ／ 10 = 変更あり ／ 11 = 不明 ／ -1 = 検知しなかった（off）。0 以外は、すべて全件取得に進む。
+#   検知の失敗は、取得を止めない（検知は、取得を省くための手がかりで、失敗が取りこぼしにならないように、全件取得へ倒す）
+DETECT_RC=-1
+DETECT_STATE_NEW=""
+phase_detect_changes() {
+    [[ "$DETECT_MODE" == "off" ]] && return $RET_OK
+    local table="${SCRIPT_DIR}/../config/metasync-detect.txt" out line
+    if [[ ! -f "$table" ]]; then
+        log "WARNING" "検知の区分の表が見つかりません（${table}）。検知は行わず、全件取得します。"
+        return $RET_OK
+    fi
+    DETECT_STATE_NEW="$WORK_DIR/state.new.json"
+    log "INFO" "変更の検知を行います（SF_METASYNC_DETECT=${DETECT_MODE}。読み取りのみ）..."
+    # run 不使用: 戻り値（0 / 10 / 11）で分岐し、要約をログにも記録するため
+    out=$("$NODE_BIN" "$METASYNC_JS" detect --org "$TARGET_ORG" --types-file "$METADATA_CONFIG" --table "$table" \
+        --state "$STATE_FILE" --out-state "$DETECT_STATE_NEW" 2>&1)
+    DETECT_RC=$?
+    while IFS= read -r line; do
+        log "INFO" "$line"
+    done <<< "$out"
+    if [[ $DETECT_RC -ne 0 && $DETECT_RC -ne 10 ]]; then
+        [[ $DETECT_RC -eq 11 ]] || log "WARNING" "検知が異常終了しました（終了コード ${DETECT_RC}）。不明として扱い、全件取得します。"
+        DETECT_RC=11
+    fi
+    return $RET_OK
+}
+
 # 【RETRIEVE】組織からメタデータを、一時プロジェクトに取得する（手順 6）
 #   run 不使用: 応答（JSON）を判定に使うため、ファイルへ受ける（run は、出力をログに記録し、戻り値も変える。JSON は大きい）
 phase_retrieve_metadata() {
@@ -355,6 +414,12 @@ phase_plan() {
     # コミットの本文・確認の要否に使う件数（VAR=$(cmd) のため run 不使用）
     PLAN_COUNTS=$(awk -F'\t' '{c[$1]++} END{printf "追加 %d 件 / 変更 %d 件 / 削除 %d 件 / 削除の保留 %d 件", c["A"], c["M"], c["D"], c["H"]}' "$PLAN_FILE")
     PLAN_CHANGES=$(awk -F'\t' '$1=="A"||$1=="M"||$1=="D"{n++} END{print n+0}' "$PLAN_FILE")
+    # 検知が「変更なし」だったのに、実際は変更があったとき（shadow の確かめ、および --full の日次の取得）は、一覧を出す。
+    #   区分 C の種類（検知できない）の変更を含む。検知の取りこぼしの有無を、運用で確かめるための記録
+    if [[ "$DETECT_RC" -eq 0 && "$PLAN_CHANGES" -gt 0 ]]; then
+        log "WARNING" "検知は「変更なし」でしたが、実際は ${PLAN_CHANGES} 件の変更がありました（区分 C の種類の変更を含む）。先頭 10 件:"
+        awk -F'\t' '$1=="A"||$1=="M"||$1=="D"{print "  " $1 " " $2}' "$PLAN_FILE" | head -10 | while IFS= read -r line; do log "WARNING" "$line"; done
+    fi
     return $RET_OK
 }
 
@@ -364,14 +429,24 @@ phase_apply_plan() {
     local out
     out=$("$NODE_BIN" "$METASYNC_JS" apply --plan "$PLAN_FILE" --repo . --fetched "$WORK_DIR" 2>&1) || { log "ERROR" "$out"; return $RET_NG; }  # run 不使用: 戻り値で判定する
     log "INFO" "$out"
+    # 検知の状態を書く（検知が、変更あり・不明のとき。全件取得と反映が成功したあとにだけ書く。変更なしのときは、書かない）
+    if [[ "$DETECT_MODE" != "off" && ( "$DETECT_RC" -eq 10 || "$DETECT_RC" -eq 11 ) && -f "$DETECT_STATE_NEW" ]]; then
+        STATE_WRITTEN=1   # 途中で失敗しても、終了時に戻せるように、先に立てる
+        run mkdir -p "${STATE_FILE%/*}" || return $RET_NG
+        run cp "$DETECT_STATE_NEW" "$STATE_FILE" || return $RET_NG
+        log "INFO" "検知の状態を更新しました: ${STATE_FILE}"
+    fi
     return $RET_OK
 }
 
 # 【SYNC】変更を Git へ反映
 phase_git_sync() {
     log "INFO" "Git リポジトリへ反映中..."
-    # 同期の対象のパッケージのフォルダだけをステージする（それ以外が変わる理由がない。sf-tools/release/ も含めない）
-    run git add -A -- "$PKG_PATH" || return $RET_NG
+    # 同期の対象のパッケージのフォルダ（と、書いたときは検知の状態ファイル）だけをステージする
+    #   （それ以外が変わる理由がない。sf-tools/release/ も含めない）
+    local add_paths=("$PKG_PATH")
+    [[ "$STATE_WRITTEN" -eq 1 ]] && add_paths+=("$STATE_FILE")
+    run git add -A -- "${add_paths[@]}" || return $RET_NG
 
     # ステージに変更がなければ、未プッシュのコミットを確認する。あれば（前回、コミットのあとに push が失敗した）、push だけ行う。
     #   なければ、早期終了（組織側に変更なし）
@@ -390,8 +465,12 @@ phase_git_sync() {
         return $RET_NO_CHANGE
     fi
 
-    # コミットの本文に、計画の件数を書く（確認は、手順 9 で済んでいる）
-    run git commit -m "$COMMIT_MSG" -m "$PLAN_COUNTS" || return $RET_NG
+    # コミットの本文に、計画の件数を書く（確認は、手順 9 で済んでいる）。検知の状態を更新したときは、その旨も書く
+    local body="$PLAN_COUNTS"
+    if [[ "$STATE_WRITTEN" -eq 1 ]]; then
+        if [[ "$PLAN_CHANGES" -eq 0 ]]; then body="${body}（検知の状態の更新のみ）"; else body="${body}（検知の状態も更新）"; fi
+    fi
+    run git commit -m "$COMMIT_MSG" -m "$body" || return $RET_NG
     COMMITTED=1
     # --no-verify: このコマンドは、main への同期の専用（管理者が、確認して実行する。GitHub Actions では、フックがない）。
     #   pre-push フック（開発者の main への直接 push を止める）を、ここでだけ通さない。サーバー側の保護（Ruleset）は、そのまま効く
@@ -473,6 +552,23 @@ log "SUCCESS" "Git 更新完了"
 phase_prepare_work      || die "取得先の一時プロジェクトの準備に失敗しました。"
 log "SUCCESS" "一時プロジェクトの準備完了（パッケージのフォルダ: ${PKG_PATH}）"
 
+# 変更の検知（手順 5）。on で「変更なし」なら、取得を省いて終了する。--full・--dry-run のとき、および未プッシュのコミットが
+#   あるとき（前回の push の失敗。phase_git_sync が push だけ行う）は、省かない
+phase_detect_changes
+if [[ "$DETECT_MODE" == "on" && "$DETECT_RC" -eq 0 ]]; then
+    UNPUSHED=$(git rev-list --count "origin/${BRANCH_NAME}..HEAD" 2>/dev/null || echo 0)  # VAR=$(cmd) のため run 不使用
+    if [[ "$FULL" -eq 1 ]]; then
+        log "INFO" "--full が指定されているため、検知の結果にかかわらず、全件取得します。"
+    elif [[ "$DRY_RUN" -eq 1 ]]; then
+        log "INFO" "--dry-run のため、検知の結果にかかわらず、全件取得して計画を作ります（本番の実行では、取得を省きます）。"
+    elif [[ "$UNPUSHED" =~ ^[0-9]+$ && "$UNPUSHED" -gt 0 ]]; then
+        log "INFO" "未プッシュのコミットがあるため、検知の結果にかかわらず、全件取得します。"
+    else
+        log "SUCCESS" "完了: 検知の結果、Salesforce 組織側に変更はありませんでした（全件取得を省きました）。"
+        exit $RET_OK
+    fi
+fi
+
 phase_retrieve_metadata || die "メタデータの取得に失敗しました。"
 log "SUCCESS" "メタデータ取得完了"
 
@@ -497,10 +593,15 @@ RES=$?
 
 if [[ $RES -eq $RET_OK ]]; then
     log "SUCCESS" "完了: リポジトリを最新に更新しました。"
-    phase_propagate_downstream || die "下流ブランチへの伝播に失敗しました。"
-    # 実際に伝播できたブランチだけを表示する（以前は、branches.txt の内容や、スキップの有無にかかわらず、固定の文言を出していた）
-    log "SUCCESS" "下流ブランチへの伝播完了（伝播したブランチ: ${PROPAGATED_OK% }$([[ -z "$PROPAGATED_OK" ]] && echo なし)）"
-    [[ -z "$PROPAGATED_SKIPPED" ]] || log "WARNING" "伝播できなかったブランチ（スキップ）: ${PROPAGATED_SKIPPED% }"
+    if [[ "$STATE_WRITTEN" -eq 1 && "$COMMITTED" -eq 1 && "$PLAN_CHANGES" -eq 0 ]]; then
+        # 検知の状態ファイルの更新だけのコミット（メタデータの変更はない）は、下流のブランチへ伝播しない（main の中だけで使う状態のため）
+        log "INFO" "検知の状態ファイルの更新だけのコミットのため、下流ブランチへの伝播は行いません。"
+    else
+        phase_propagate_downstream || die "下流ブランチへの伝播に失敗しました。"
+        # 実際に伝播できたブランチだけを表示する（以前は、branches.txt の内容や、スキップの有無にかかわらず、固定の文言を出していた）
+        log "SUCCESS" "下流ブランチへの伝播完了（伝播したブランチ: ${PROPAGATED_OK% }$([[ -z "$PROPAGATED_OK" ]] && echo なし)）"
+        [[ -z "$PROPAGATED_SKIPPED" ]] || log "WARNING" "伝播できなかったブランチ（スキップ）: ${PROPAGATED_SKIPPED% }"
+    fi
 elif [[ $RES -eq $RET_NO_CHANGE ]]; then
     log "SUCCESS" "完了: Salesforce 組織側に変更はありませんでした。"
 else

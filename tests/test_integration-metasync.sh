@@ -19,6 +19,8 @@
 #   M8  直近にマージされたファイルの削除は保留される（S5。実際の git log の確認）。終了コード 0
 #   M9  --dry-run → 取得して計画を表示するだけ。origin・手元の HEAD・作業ブランチは変わらない
 #   M10 コミットの前に中断（commit の失敗）→ 反映した分が HEAD に戻り、元のブランチに戻る
+#   M11 変更の検知（SF_METASYNC_DETECT=on）→ 状態ファイルの作成・変更なしで取得を省く・履歴ありで取得・状態だけのコミットは
+#       伝播しない・中断で状態ファイルも戻る
 # ==============================================================================
 source "$(dirname "${BASH_SOURCE[0]}")/test_helper.sh"
 source "$(dirname "${BASH_SOURCE[0]}")/integration/lib.sh"
@@ -242,10 +244,60 @@ test_M10() {
     rm -f "$CL/.git/hooks/pre-commit"
 }
 
+test_M11() {
+    echo -e "\n${CLR_HEAD}--- M11: 変更の検知（SF_METASYNC_DETECT=on）---${CLR_RST}"
+    export SF_METASYNC_SF="bash $IT_BIN/sf" SF_METASYNC_DETECT=on   # 検知の Node が呼ぶ sf を、fake に向ける（履歴の件数は state/sf.audit）
+    rm -f "$IT_STATE/sf.audit"
+    local m0 m1 s1
+    # (0) 状態ファイルを書いたあと、コミットの前に中断（commit の失敗）→ HEAD にない状態ファイルは、消える
+    m0=$(_remote_ref main)
+    printf '#!/bin/sh\nexit 1\n' > "$CL/.git/hooks/pre-commit"; chmod +x "$CL/.git/hooks/pre-commit"
+    it_set_retrieve "force-app/main/default/classes/Det11.cls|public class Det11 { }"
+    _meta
+    assert_exit_fail "$IT_RC" "M11-0: commit が失敗すると、失敗で終わる"
+    assert_equals "$(_remote_ref main)" "$m0" "M11-0: origin の main は、変わらない"
+    _it_git -C "$CL" checkout -q main
+    [[ ! -e "$CL/sf-tools/metasync/state.json" ]] && pass "M11-0: 中断すると、書いた状態ファイルも消える（HEAD にないため）" || fail "M11-0: 中断すると、書いた状態ファイルも消える"
+    assert_equals "$(_it_git -C "$CL" status --porcelain -- . ':!sf-tools/release' | wc -l | tr -d ' ')" "0" "M11-0: main の作業ツリーは、きれい"
+    _it_git -C "$CL" checkout -q JOB-A
+    rm -f "$CL/.git/hooks/pre-commit"
+    # (1) 状態なし → 不明 → 全件取得 → 状態ファイルを含めて、コミット・push
+    it_calls_clear
+    _meta
+    assert_exit_ok "$IT_RC" "M11-1: 状態がなくても、全件取得して同期できる"
+    [[ "$(_remote_ref main)" != "$m0" ]] && pass "M11-1: origin の main に、同期のコミットが届く" || fail "M11-1: origin の main に、同期のコミットが届く"
+    _it_git --git-dir="$IT_ORIGIN" cat-file -e "refs/heads/main:sf-tools/metasync/state.json" 2>/dev/null \
+        && pass "M11-1: 状態ファイル（sf-tools/metasync/state.json）が、main に入る" || fail "M11-1: 状態ファイルが、main に入る"
+    it_calls sf | grep -q "project retrieve" && pass "M11-1: 全件取得した" || fail "M11-1: 全件取得した"
+    # (2) 変更なし（履歴 0 件・一覧は空のまま）→ 取得を省く。main は変わらない
+    m1=$(_remote_ref main); it_calls_clear
+    _meta
+    assert_exit_ok "$IT_RC" "M11-2: 変更なし → 正常終了"
+    it_out_has "全件取得を省きました" && pass "M11-2: 取得を省いたと表示される" || fail "M11-2: 取得を省いたと表示される"
+    it_calls sf | grep -q "project retrieve" && fail "M11-2: 取得しない" || pass "M11-2: 取得しない"
+    assert_equals "$(_remote_ref main)" "$m1" "M11-2: origin の main は、変わらない（コミットを作らない）"
+    assert_equals "$(_cur "$CL")" "JOB-A" "M11-2: 元のブランチに戻る"
+    # (3) 履歴に記録がある → 変更あり → 取得し、追加・変更を同期する。staging へも伝播する
+    echo 3 > "$IT_STATE/sf.audit"; it_calls_clear
+    it_set_retrieve "force-app/main/default/classes/Det11.cls|public class Det11 { }" "force-app/main/default/classes/Det11b.cls|public class Det11b { }"
+    _meta
+    assert_exit_ok "$IT_RC" "M11-3: 履歴あり → 正常終了"
+    it_calls sf | grep -q "project retrieve" && pass "M11-3: 全件取得した" || fail "M11-3: 全件取得した"
+    [[ "$(_remote_ref main)" != "$m1" ]] && pass "M11-3: origin の main に、追加のコミットが届く" || fail "M11-3: origin の main に、追加のコミットが届く"
+    assert_equals "$(_remote_ref staging)" "$(_remote_ref main)" "M11-3: メタデータの変更は、staging に伝播する"
+    # (4) 履歴はあるが、ファイルの変更はない → 状態だけのコミット。staging へは伝播しない
+    s1=$(_remote_ref staging); m1=$(_remote_ref main)
+    _meta
+    assert_exit_ok "$IT_RC" "M11-4: 履歴あり・ファイルの変更なし → 正常終了"
+    [[ "$(_remote_ref main)" != "$m1" ]] && pass "M11-4: 状態の更新だけのコミットが、main に届く" || fail "M11-4: 状態の更新だけのコミットが、main に届く"
+    assert_equals "$(_remote_ref staging)" "$s1" "M11-4: 状態の更新だけのコミットは、staging に伝播しない"
+    unset SF_METASYNC_SF SF_METASYNC_DETECT; rm -f "$IT_STATE/sf.audit"
+}
+
 _it_timed() { local t0=$SECONDS rc; "$@"; rc=$?; echo "  （所要時間: $1 = $((SECONDS - t0)) 秒）"; return $rc; }
 
 test_setup || { print_summary; exit 1; }
-for _sc in ${IT_SCENARIOS:-M0 M1 M2 M3 M4 M5 M6 M7 M8 M9 M10}; do
+for _sc in ${IT_SCENARIOS:-M0 M1 M2 M3 M4 M5 M6 M7 M8 M9 M10 M11}; do
     _it_timed "test_${_sc}" || break
 done
 

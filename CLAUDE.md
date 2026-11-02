@@ -30,6 +30,7 @@
 > **mm の前に、`--changed` の PASS は必須。PASS 確認なしの mm 依頼は禁止。全件は、mm 後の CI の結果が正（手元の Windows は遅く、全件は 2 時間以上かかることもある。手元で全件が必要なときだけ、WSL で `run_tests.sh`）。CI が赤のまま、PR・rr を進めない。**
 > **rr の前に、CI の全件が緑（`development` の最新のコミットで）が必須。さらに、`main` との差分に配布物のパス（`bin/` `lib/` `phases/` `hooks/` `templates/` `config/`）が含まれるときは、e2e（Actions の `e2e.yml`）が、配布物を変えた最新のコミット以降で成功していることも必須**（確認: `gh run list --workflow e2e.yml --branch development`）。** 配布物のパスの変更がなく、`tests/` `doc/` `.github/workflows/test.yml` などだけの変更なら、e2e は不要（確認: `git diff --stat origin/main...development -- bin lib phases hooks templates config` が空）。必須の項目が欠けた rr 依頼は断ること。
 > **変更に e2e の確認が足りないときは、e2e のほうを広げる**（手動の検証を、ユーザーに頼まない）。
+> **無言の時間を作らない（止まって見えるのは、サボりとみなす）。** ユーザーの画面には、ツールの中身も裏の処理も見えない。作業の開始時・調査や待ちに入る前に、今していること・待っていること・次にすることを 1〜2 行で書く。30 秒以上の処理は、ターミナルのタブでログの流れを見せ、途中経過をこまめに伝える。判断を求めているときは「指示待ち」とはっきり書き、完了したらすぐ結果を伝える（先に状況を聞かれたら失敗）。
 
 ### 1.3 mm / rr 実行手順
 

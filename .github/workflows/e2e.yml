@@ -14,9 +14,12 @@ name: e2e（実環境の通し検証）
 # 【いつ動くか】
 #   ・配布物（bin/ lib/ phases/ hooks/ templates/ config/）または e2e 自体（tests/e2e/・このファイル）が変わった development への push。
 #     rr のときには、すでに緑になっている（ドキュメント・単体テストだけの変更では、動かさない）。
-#   ・週 1 回（月曜 03:00 日本時間。schedule。main に対して）。
-#   ・手動（workflow_dispatch。main に取り込まれたあとで、Actions の画面・gh workflow run から。
-#     手動実行のワークフローは、既定のブランチ（main）にあるものだけが、起動できる）。
+#   ・週 1 回（月曜 03:00 日本時間。schedule。main に対して）。sf-init の版の選択には「配布版（main）」と答える
+#     （E2E_TOOLS_BRANCH=main。force-* の Actions は sf-tools の main を使い、Variable SF_TOOLS_BRANCH は付かない。利用者が受け取るものの見張り）。
+#   ・手動（workflow_dispatch。Actions の画面・gh workflow run から。入力 tools_branch で、development（既定）/ main を選ぶ。
+#     main を選ぶと、定期実行と同じ配布版の確認になる。手元の sf-tools が development のまま main を選んだときは、
+#     sf-init の「ブランチ違い」の確認に Y と答える）。
+#   ・development への push は、いつも development（検証環境）。
 #
 # 【必要な設定】（リポジトリの Settings → Environments → e2e。doc/integration-test-plan.md 12.5）
 #   ・Environment `e2e`（Deployment branches は、development と main だけ）
@@ -34,6 +37,12 @@ name: e2e（実環境の通し検証）
 # e2e の実行の前に調べて、「::add-mask::」で伏せる。組織の ID・ユーザー名・メールアドレスなどを、画面に出す処理を足すときは、これが効くか確認すること。
 on:
   workflow_dispatch:
+    inputs:
+      tools_branch:
+        description: 'sf-init で答える sf-tools の版（development = 検証環境 / main = 配布版。利用者が受け取るもの）'
+        type: choice
+        options: [development, main]
+        default: development
   # 週 1 回、main（利用者が実際に受け取るもの）に対して動かす。コードを変えていない間の、外側の変化
   # （sf の新しい版・Salesforce のリリース・Actions のイメージの更新・認証の期限切れ）の見張り。
   # 毎週月曜 03:00（日本時間）。schedule は、既定のブランチ（main）のワークフローで動く。失敗したら Slack に通知する（下の notify）
@@ -53,6 +62,12 @@ on:
 
 permissions:
   contents: read
+
+# e2e が sf-init の版の選択に答える版（tests/e2e/lib.sh の e2e_tools_branch）。
+#   定期実行（schedule）は main（利用者が受け取るものの見張り。force-* の Actions も sf-tools の main を使い、Variable SF_TOOLS_BRANCH は付かない）。
+#   手動実行は入力 tools_branch の値（既定 development）。development への push は、いつも development（検証環境）
+env:
+  E2E_TOOLS_BRANCH: ${{ github.event_name == 'schedule' && 'main' || inputs.tools_branch || 'development' }}
 
 # 同じテスト用の組織を使うため、ワークフローの実行どうしも、一列に動かす（実行中のものは、止めない）
 concurrency:

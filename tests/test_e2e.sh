@@ -1243,6 +1243,20 @@ test_e2e_layout() {
     _e2e_call 'e2e_load_fixture; e2e_make_input 4; echo "RC=$?"'
     assert_file_contains "$MB/out.log" "RC=1" "範囲外の層数は、エラー"
 
+    # 配布版（E2E_TOOLS_BRANCH=main）の台本: 環境種別は 1。確認の質問は出ない。手元の sf-tools が main 以外のときだけ、ブランチ違いの確認に Y を足す
+    git init -q "$CB/lb_main" 2>/dev/null; git -C "$CB/lb_main" symbolic-ref HEAD refs/heads/main
+    git init -q "$CB/lb_dev" 2>/dev/null;  git -C "$CB/lb_dev" symbolic-ref HEAD refs/heads/development
+    _e2e_call "e2e_load_fixture; E2E_TOOLS_BRANCH=main SF_TOOLS_ROOT='$CB/lb_main' e2e_make_input | tr '\n' ','"
+    assert_file_contains "$MB/out.log" "Y,Y,1,3,ghp_fakepat,,xoxb-fakeslack,C01ABCDEFGH,,1," "台本（配布版・手元が main）: 環境種別 1・開発版の確認なし・ブランチ違いの確認なし"
+    _e2e_call "e2e_load_fixture; E2E_TOOLS_BRANCH=main SF_TOOLS_ROOT='$CB/lb_dev' e2e_make_input | tr '\n' ','"
+    assert_file_contains "$MB/out.log" "Y,Y,1,Y,3,ghp_fakepat,,xoxb-fakeslack,C01ABCDEFGH,,1," "台本（配布版・手元が development）: ブランチ違いの確認に Y を足す"
+    _e2e_call "e2e_load_fixture; E2E_TOOLS_BRANCH=development SF_TOOLS_ROOT='$CB/lb_main' e2e_make_input | tr '\n' ','"
+    assert_file_contains "$MB/out.log" "Y,Y,2,Y,3,ghp_fakepat,,xoxb-fakeslack,C01ABCDEFGH,,1," "台本（開発版）: 手元のブランチに関係なく、今までと同じ"
+    _e2e_call 'e2e_load_fixture; E2E_TOOLS_BRANCH=staging e2e_make_input; echo "RC=$?"'
+    assert_file_contains "$MB/out.log" "RC=1" "E2E_TOOLS_BRANCH が development / main 以外なら、エラー"
+    _e2e_call '{ E2E_TOOLS_BRANCH=main e2e_tools_branch; E2E_TOOLS_BRANCH= e2e_tools_branch; unset E2E_TOOLS_BRANCH; e2e_tools_branch; } | tr "\n" ","'
+    assert_file_contains "$MB/out.log" "main,development,development," "e2e_tools_branch: main は main・空と未設定は development"
+
     unset MOCK_CALL_LOG MOCK_GH_REPOS MOCK_SF_ECAS
     teardown "$CB"
 }

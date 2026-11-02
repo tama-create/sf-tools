@@ -7,7 +7,8 @@
 #
 # 【処理の流れ】
 #   1. 前掃除      : 前回の失敗で残ったテスト用リソースを削除する（名前の形式とオーナーが一致するものだけ）
-#   2. 実行        : sf-init を Phase 1〜10 まで自動で実行する（検証環境 = SF_TOOLS_BRANCH=development。層数は --layout で選ぶ。既定は main のみ）
+#   2. 実行        : sf-init を Phase 1〜10 まで自動で実行する（既定は検証環境 = SF_TOOLS_BRANCH=development。
+#                    環境変数 E2E_TOOLS_BRANCH=main なら配布版 = Variable SF_TOOLS_BRANCH なし・Actions は sf-tools の main。層数は --layout で選ぶ。既定は main のみ）
 #                    ・既定は、引数なしの対話（管理者が実際に行う操作）: オーナーの選択 → XXXX の入力 → 確認を、標準入力で流す。
 #                      --with-args を付けると、引数 --owner / --project で指定する（対話の画面は通らない）
 #                    ・質問への答えは標準入力に流す
@@ -50,7 +51,9 @@
 #   ・gh のログインユーザーが、fixture.env の E2E_GH_USER であること（テスト用の組織の管理者）
 #   ・gh に delete_repo の権限があること: gh auth refresh -h github.com -s delete_repo
 #   ・~/sf-tools が development ブランチで、origin/development と一致していること
-#     （GitHub Actions は sf-tools の origin/development を使うため）
+#     （GitHub Actions は sf-tools の origin/development を使うため。E2E_TOOLS_BRANCH=main の配布版の確認では、origin/main を使うため不要）
+#   ・E2E_TOOLS_BRANCH（development または main。既定 development）: sf-init の版の選択に答える版。週 1 回の定期実行は main
+#     （利用者が受け取るものの見張り）。手元の sf-tools が main 以外のブランチのときは、Phase 2 の「ブランチ違い」の確認にも Y と答える
 #
 # 【関連】 管理者の実際のリポジトリ・実際の組織での検証は、phases/init/verify.sh（この e2e は、sf-tools の開発者の回帰テスト）
 #
@@ -144,13 +147,19 @@ echo -e "${CLR_ERR}║    前回の残りは、最初に削除します         
 echo -e "${CLR_ERR}║  ・sf の認証が、テスト用組織の認証 URL で置き換わり  ║${CLR_RESET}" >&2
 echo -e "${CLR_ERR}╚══════════════════════════════════════════════════════╝${CLR_RESET}" >&2
 log "INFO" "  オーナー: ${E2E_OWNER}  /  gh ユーザー: ${E2E_GH_USER}"
+# sf-init の版の選択に答える版（E2E_TOOLS_BRANCH。既定 development）。不正な値は、確認の前に止める
+TOOLS_BRANCH=$(e2e_tools_branch) || die "E2E_TOOLS_BRANCH は development または main にしてください（値: ${E2E_TOOLS_BRANCH:-}）。"  # VAR=$(cmd) のため run 不使用
+log "INFO" "  sf-tools の版: ${TOOLS_BRANCH}（GitHub Actions は origin/${TOOLS_BRANCH} の sf-tools を使います）"
 ask_yn "続行しますか？" || die "中断しました。"
 
-# 手元の sf-tools が origin/development と違うと、GitHub Actions の確認結果が手元の変更を反映しない
-_head=$(git -C "$SF_TOOLS_ROOT" rev-parse HEAD 2>/dev/null)                 # VAR=$(cmd) のため run 不使用
-_origin=$(git -C "$SF_TOOLS_ROOT" rev-parse origin/development 2>/dev/null)  # VAR=$(cmd) のため run 不使用
-if [[ -n "$_head" && "$_head" != "$_origin" ]]; then
-    log "WARNING" "手元の sf-tools が origin/development と一致していません。GitHub Actions は origin/development を使うため、Actions の確認結果は手元の未 push の変更を反映しません。"
+# 開発版: 手元の sf-tools が origin/development と違うと、GitHub Actions の確認結果が手元の変更を反映しない
+#   配布版（main）: Actions は origin/main を使う。手元の sf-tools は、クライアント側（sf-init など）の動作にだけ使われるため、この比較はしない
+if [[ "$TOOLS_BRANCH" == "development" ]]; then
+    _head=$(git -C "$SF_TOOLS_ROOT" rev-parse HEAD 2>/dev/null)                 # VAR=$(cmd) のため run 不使用
+    _origin=$(git -C "$SF_TOOLS_ROOT" rev-parse origin/development 2>/dev/null)  # VAR=$(cmd) のため run 不使用
+    if [[ -n "$_head" && "$_head" != "$_origin" ]]; then
+        log "WARNING" "手元の sf-tools が origin/development と一致していません。GitHub Actions は origin/development を使うため、Actions の確認結果は手元の未 push の変更を反映しません。"
+    fi
 fi
 
 # ------------------------------------------------------------------------------
@@ -312,6 +321,8 @@ chk() {
 _has_secret()   { _e2e_gh secret list -R "$REPO_FULL" 2>/dev/null | awk '{print $1}' | grep -qx "$1"; }
 _has_variable() { _e2e_gh variable list -R "$REPO_FULL" 2>/dev/null | awk '{print $1}' | grep -qx "$1"; }
 _var_equals()   { [[ "$(_e2e_gh variable get "$1" -R "$REPO_FULL" 2>/dev/null)" == "$2" ]]; }
+# 登録されていない（一覧の取得に失敗したときも「ない」と誤判定しないよう、一覧が取れたときだけ判定する）
+_no_variable()  { local _l; _l=$(_e2e_gh variable list -R "$REPO_FULL" 2>/dev/null) || return 1; ! printf '%s\n' "$_l" | awk '{print $1}' | grep -qx "$1"; }  # VAR=$(cmd) のため run 不使用
 _has_branch()   { _e2e_gh api "repos/${REPO_FULL}/branches" --jq '.[].name' 2>/dev/null | grep -qx "$1"; }
 _has_workflow() { _e2e_gh api "repos/${REPO_FULL}/contents/.github/workflows" --jq '.[].name' 2>/dev/null | grep -qx "$1"; }
 # ファイルに値が含まれていないこと（トークンの漏れの確認）
@@ -671,8 +682,13 @@ if [[ "$INIT_RC" -eq 0 ]]; then
     for _s in PAT_TOKEN SF_PRIVATE_KEY SLACK_BOT_TOKEN; do
         chk "Secret ${_s} が登録されている" _has_secret "$_s"
     done
+    # SF_TOOLS_BRANCH は、開発版のときだけ登録される（配布版は、未設定 = Actions が main を使う）
     for _v in SF_TOOLS_BRANCH SLACK_CHANNEL_ID; do
-        chk "Variable ${_v} が登録されている" _has_variable "$_v"
+        if [[ "$_v" == "SF_TOOLS_BRANCH" && "$TOOLS_BRANCH" == "main" ]]; then
+            chk "Variable SF_TOOLS_BRANCH が登録されていない（配布版）" _no_variable "$_v"
+        else
+            chk "Variable ${_v} が登録されている" _has_variable "$_v"
+        fi
     done
     # 段階ごとの Secret / Variable・ブランチ
     for _t in "${TIERS[@]}"; do
@@ -682,7 +698,11 @@ if [[ "$INIT_RC" -eq 0 ]]; then
         chk "Variable SF_INSTANCE_URL_${_sfx} が登録されている" _has_variable "SF_INSTANCE_URL_${_sfx}"
         chk "ブランチ ${_t} がある" _has_branch "$_t"
     done
-    chk "SF_TOOLS_BRANCH が development" _var_equals SF_TOOLS_BRANCH development
+    if [[ "$TOOLS_BRANCH" == "main" ]]; then
+        chk "SF_TOOLS_BRANCH が未設定（配布版。Actions は main を使う）" _no_variable SF_TOOLS_BRANCH
+    else
+        chk "SF_TOOLS_BRANCH が development" _var_equals SF_TOOLS_BRANCH development
+    fi
     chk "SLACK_CHANNEL_ID が入力した共有チャンネルの ID" _var_equals SLACK_CHANNEL_ID "$E2E_SLACK_CHANNEL_ID"
     for _w in wf-metasync.yml wf-propagate.yml wf-release.yml wf-sequence.yml wf-validate.yml; do
         chk "ワークフロー ${_w} がある" _has_workflow "$_w"

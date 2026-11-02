@@ -742,9 +742,21 @@ e2e_cleanup_all() {
 }
 
 # ------------------------------------------------------------------------------
+# e2e が sf-init の「sf-tools の版の選択」に答える版（環境変数 E2E_TOOLS_BRANCH）。標準出力に development または main を表示する
+#   development（既定）: 検証環境。force-* の Actions は sf-tools の development を使う（Variable SF_TOOLS_BRANCH=development）
+#   main              : 配布版。force-* の Actions は sf-tools の main を使う（Variable は登録されない）。週 1 回の定期実行（利用者が受け取るもの）
+#   それ以外は、戻り値 1（版を取り違えたまま、動かさない）
+e2e_tools_branch() {
+    case "${E2E_TOOLS_BRANCH:-development}" in
+        development) printf '%s\n' "development" ;;
+        main)        printf '%s\n' "main" ;;
+        *)           return 1 ;;
+    esac
+}
+
 # sf-init に流す標準入力（質問の順番に依存する。質問を変えたら、ここも直すこと）
 # ------------------------------------------------------------------------------
-#   Phase 1 続行 Y → Phase 2 確認 Y → 環境種別 2（検証）→ 検証環境で続行 Y → Phase 5 ブランチ 3（main のみ）
+#   Phase 1 続行 Y → Phase 2 確認 Y → 環境種別 2（検証）→ 検証環境で続行 Y（E2E_TOOLS_BRANCH=main なら、環境種別 1 のみ）→ Phase 5 ブランチ 3（main のみ）
 #   → Phase 6 PAT（先頭の改行は、直前の入力の残りを read_secret が空行として無視する。Token は、GitHub に問い合わせて
 #     検証される。値は、画面に出ない）→ 空行（Phase 7 の press_enter）
 #   → Slack Token → チャンネル ID → 空行（招待の press_enter）→ Phase 10 ログイン先 1（login.salesforce.com。
@@ -752,15 +764,28 @@ e2e_cleanup_all() {
 #   （Phase 10 が最後。admin フォルダの削除の質問は、廃止した: admin フォルダは、管理者用として残る）
 #   引数: 層数（1 = main のみ（既定）/ 2 = main + staging / 3 = main + staging + develop）
 #     Phase 5 の番号は、層数と逆（3 層 = 1、2 層 = 2、1 層 = 3）。ログイン先の 3 択は、段階の数だけ、聞かれる（どれも 1）
+#   環境変数 E2E_TOOLS_BRANCH（e2e_tools_branch）で、答える sf-tools の版を選ぶ:
+#     development（既定）: 「環境種別 2（開発版）→ 開発版で続行 Y」
+#     main（配布版）     : 「環境種別 1（配布版）」。確認の質問は出ない。ただし、手元の sf-tools が main 以外のブランチのときは、
+#                          Phase 2 が「ローカルは X ですが、選択は main です。続行しますか？」と聞くため、Y を 1 つ足す
 e2e_make_input() {
-    local layout="${1:-1}" choice i
+    local layout="${1:-1}" choice i tools local_br
+    tools=$(e2e_tools_branch) || return 1  # VAR=$(cmd) のため run 不使用
     case "$layout" in
         1) choice=3 ;;
         2) choice=2 ;;
         3) choice=1 ;;
         *) return 1 ;;
     esac
-    printf '%s\n' "Y" "Y" "2" "Y" "$choice" \
+    if [[ "$tools" == "main" ]]; then
+        printf '%s\n' "Y" "Y" "1"
+        # sf-init が調べるのと同じ、手元の sf-tools の現在のブランチ（ブランチでなければ空。そのときは Phase 2 が別の経路で動く）
+        local_br=$(git -C "${SF_TOOLS_ROOT:-${SF_TOOLS_DIR:-.}}" symbolic-ref --short HEAD 2>/dev/null || true)  # VAR=$(cmd) のため run 不使用
+        [[ -z "$local_br" || "$local_br" == "main" ]] || printf '%s\n' "Y"
+    else
+        printf '%s\n' "Y" "Y" "2" "Y"
+    fi
+    printf '%s\n' "$choice" \
         "$E2E_PAT_TOKEN" "" \
         "$E2E_SLACK_BOT_TOKEN" "$E2E_SLACK_CHANNEL_ID" ""
     for ((i = 1; i <= layout; i++)); do printf '%s\n' "1"; done

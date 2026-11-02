@@ -518,11 +518,13 @@ check_gh_owner "$GITHUB_OWNER"   # 認証ユーザーの一致確認
 
 ### 4.9 sf-upgrade.sh
 
-- npm（`npm install -g npm@latest`）→ Salesforce CLI → Git（最後）の順に更新。コマンドがなければ WARNING でスキップ
-- Salesforce CLI は、npm 版（npm があり、`npm ls -g @salesforce/cli --depth=0` が成功）なら `npm install -g @salesforce/cli@latest`、それ以外（公式インストーラー・pkg など）なら `sf update` で更新する
+- npm の確認 → Salesforce CLI の更新 → Git の更新（最後）の順。コマンドがなければ WARNING でスキップ（失敗に数える）
+- npm: `npm --version`（現在）と `npm view npm version`（最新）が同じなら何もしない。違うときは、先に `npm install -g npm@latest --dry-run`（何も書き込まない）で、今の Node で入れられるかを確かめる。入れられれば `npm install -g npm@latest` で更新、出力に `Not compatible` を含む（Node が対応していない）なら、**更新せず、Node の更新を案内するだけ**（INFO。失敗に数えない。Git Bash では `winget upgrade --id OpenJS.NodeJS.LTS` を示す）、それ以外のエラーは WARNING（失敗に数える）。背景: npm は Node に同梱され、最新の npm が今の Node を対応外にすることがある（2026-11-02: npm 12.2.1 は Node 24.15 以上が必要で、24.14.0 では入らず、毎回 WARNING になっていた）。Node は自動では更新しない
+- Salesforce CLI は、npm 版（npm があり、`npm ls -g @salesforce/cli --depth=0` が成功）なら `npm install -g @salesforce/cli@latest`、それ以外（公式インストーラー・pkg など）なら `sf update` で更新する。npm 版の更新が失敗し、npm の置き場所（`npm config get prefix`）に書き込めない（一時ファイルを作れない）ときは、その旨の WARNING を出す（置き場所が `C:\Program Files\nodejs` だと、Windows で管理者権限が要る。自分のフォルダ（`%APPDATA%\npm` の実パス）に `npm config set prefix` で変え、sf を入れ直す。**`%APPDATA%` は Git Bash では展開されず、相対パスとして扱われて、cwd の下にフォルダができる**ので、実パスで書く）
 - `sf-install.sh` から 24 時間間隔でバックグラウンド起動される（引数なし。標準出力は捨て、標準エラーは `sf-install.log` に追記）。手動でも実行できる
 - Git の更新は GitBash（`is_gitbash`: `$OSTYPE` が `msys*` / `mingw*` / `cygwin*`）のみ `git update-git-for-windows --yes` で実行（他環境はパッケージマネージャーを案内）
-- どの手順が失敗しても WARNING で続行し、最後に「すべてのアップデートが完了しました」を表示する
+- どの手順が失敗しても WARNING で続行する。最後に、失敗した手順（npm・Salesforce CLI・Git）があれば「更新できなかったものがあります: 〇〇」と名前を一覧し、なければ「すべてのアップデートが完了しました」を表示する（以前は、失敗があっても必ず SUCCESS を出していた）。終了コードは常に 0（裏で呼ぶ `sf-install.sh` を止めない）
+- 自動で呼ばれたときの表示は `sf-install.log` にだけ残る（画面には出ない）。案内（Node の更新・置き場所の権限）を画面で見るには、手動で実行する
 
 ### 4.10 sf-push.sh
 

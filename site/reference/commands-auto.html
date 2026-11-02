@@ -60,12 +60,13 @@
 <pre><code>sf-upgrade.sh [-v]</code></pre>
 <p>npm・Salesforce CLI（<code>sf</code>）・Git（Windows の Git Bash だけ）を、最新版に更新します。<code>sf-install.sh</code> から、前回から 24 時間以上たっているときに、バックグラウンドで自動で実行されます（引数なし）。<code>force-*</code> フォルダの中で、手動でも実行できます。<code>-v</code>（<code>--verbose</code>）・<code>-h</code>（<code>--help</code>。1 つ目の引数のときだけ）以外の引数は、「不明なオプションです」で中断します。</p>
 <ol>
-  <li>npm を更新する（<code>npm install -g npm@latest</code>。npm がなければ、警告を表示して飛ばす）</li>
-  <li><code>sf</code> を更新する（<code>sf</code> がなければ、警告を表示して飛ばす）。npm 版（<code>npm ls -g @salesforce/cli</code> が成功する）なら <code>npm install -g @salesforce/cli@latest</code>、それ以外（公式インストーラー版など）なら <code>sf update</code></li>
+  <li>npm を確認する（npm がなければ、警告を表示して飛ばす）。今の版と最新の版が同じなら、何もしません。違うときは、先に <code>npm install -g npm@latest --dry-run</code>（何も書き込まない確認）で、今の Node で入るかを確かめます。入るなら <code>npm install -g npm@latest</code> で更新します。<strong>Node が対応していないときは、更新せず、Node の更新を案内するだけ</strong>です（npm は Node に同梱されていて、最新の npm は、Node が新しくないと入らないことがあります）。Windows の Git Bash では <code>winget upgrade --id OpenJS.NodeJS.LTS</code> を示します（Node は自動では更新しません）</li>
+  <li><code>sf</code> を更新する（<code>sf</code> がなければ、警告を表示して飛ばす）。npm 版（<code>npm ls -g @salesforce/cli</code> が成功する）なら <code>npm install -g @salesforce/cli@latest</code>、それ以外（公式インストーラー版など）なら <code>sf update</code>。失敗したとき、npm の置き場所（<code>npm config get prefix</code>）に書き込めなければ、その旨を警告します（<code>C:\Program Files\nodejs</code> だと、Windows では管理者権限が要ります。自分のフォルダに <code>npm config set prefix</code> で変えると、権限なしで更新できます）</li>
   <li>Git を更新する（最後に実行）。Windows の Git Bash では <code>git update-git-for-windows --yes</code>。macOS・Linux・WSL では実行せず、パッケージマネージャーで更新するよう案内する</li>
 </ol>
 <ul>
-  <li>どの手順が失敗しても、警告を表示して続行し、最後に「すべてのアップデートが完了しました」と表示します。</li>
+  <li>どの手順が失敗しても、警告を表示して続行します。最後に、更新できなかったもの（npm・Salesforce CLI・Git）があれば、その名前を「更新できなかったものがあります: 〇〇」と並べ、なければ「すべてのアップデートが完了しました」と表示します。終了コードは、失敗があっても 0 です。</li>
+  <li>自動で動いたときの表示は、<code>sf-install.log</code> にだけ残ります。Node の更新の案内などを画面で見るには、手動で実行してください。</li>
   <li>ログは <code>./sf-tools/logs/sf-upgrade.log</code> です（実行のたびに作り直します）。</li>
 </ul>
 

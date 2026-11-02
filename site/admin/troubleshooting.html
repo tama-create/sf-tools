@@ -39,6 +39,9 @@
     <tr><td><code>sf-job.sh</code> が動かない</td><td><a href="#dev-job">sf-job が動かない</a></td></tr>
     <tr><td><code>sf-push.sh</code>・<code>git push</code> が止まる</td><td><a href="#dev-push">sf-push</a>・<a href="#dev-prepush">git push</a></td></tr>
     <tr><td>Dryrun・Deploy が、実行の前に断られる</td><td><a href="#dev-refused">手元から実行できない組織</a></td></tr>
+    <tr><td><code>sf-upgrade.sh</code> が「Salesforce CLI のアップデートに失敗しました」「書き込めません」と出る</td><td><a href="#dev-npm-perm">npm の入れ先に書き込めない</a></td></tr>
+    <tr><td>「npm の最新版は、今の Node では入れられません」と出る</td><td><a href="#dev-npm-node">npm が、Node に合わない</a></td></tr>
+    <tr><td><code>sf</code> を入れ直したのに古いまま・プロジェクトの中に <code>%APPDATA%</code> というフォルダができた</td><td><a href="#dev-sf-path"><code>sf</code> の場所がおかしい</a></td></tr>
   </tbody>
 </table>
 
@@ -204,6 +207,22 @@
 
 <h3 id="dev-sf"><code>sf</code> は成功しているのに、失敗と表示される</h3>
 <p>Salesforce CLI が、公式インストーラー版のときに起こります。npm 版に入れ替えると、直ります（<a href="../guide/install.html#npm">Salesforce CLI は npm 版を使う</a>）。</p>
+
+<h3 id="dev-npm-perm"><code>sf-upgrade.sh</code> が「Salesforce CLI のアップデートに失敗しました」「npm のインストール先に書き込めません」と出る</h3>
+<p>npm の入れ先（<code>npm config get prefix</code>）が、<code>C:\Program Files\nodejs</code> のように、書き込みに管理者権限が要る場所になっています。入れ先を、自分のフォルダに変えると、管理者権限なしで更新できます（最初の 1 回だけ。手順は、<a href="../guide/install.html#npm-prefix">npm の入れ先を、自分のフォルダにする</a>）。</p>
+<p>自動で動いたときの表示は、<code>sf-install.log</code> にだけ残るため、気づきにくい失敗です。<code>sf-upgrade.sh</code> を手動で実行すると、画面に出ます。</p>
+
+<h3 id="dev-npm-node">「npm の最新版は、今の Node では入れられません」と出る</h3>
+<p>失敗ではなく、案内です。npm は Node に付いてきて、最新の npm は、Node が新しくないと入らないことがあります。そのときは、npm は今の版のままにして、更新しません。sf-tools は、npm の最低の版を決めていないので、<strong>そのままでも動きます</strong>。</p>
+<p>npm を新しくしたいときは、Node を更新します（Windows）。管理者の確認画面が 1 回出ます。</p>
+<pre><code>winget upgrade --id OpenJS.NodeJS.LTS</code></pre>
+
+<h3 id="dev-sf-path"><code>sf</code> を入れ直したのに古いまま・プロジェクトの中に <code>%APPDATA%</code> というフォルダができた</h3>
+<p>原因は、2 つあります。</p>
+<ul>
+  <li><strong>古い <code>sf</code> が、先に見つかっている。</strong><code>type -a sf</code> で場所を確かめます。2 行以上出るときは、古い方（<code>C:\Program Files\nodejs</code> や <code>C:\sf</code> など）を消します（<a href="../guide/install.html#npm-switch">入れ替え</a>）。</li>
+  <li><strong><code>npm config set prefix "%APPDATA%\npm"</code> と、書いてしまった。</strong>Git Bash では、<code>%APPDATA%</code> が展開されず、「いま居るフォルダの下の <code>%APPDATA%</code> という名前のフォルダ」に、<code>sf</code> が入ります。入れ先を、実際のパス（<code>C:\Users\（ユーザー名）\AppData\Roaming\npm</code>）で設定し直して、<code>sf</code> を入れ直します。できてしまったフォルダは、プロジェクトの中で、<code>git status</code> に <code>%APPDATA%/</code> と出ます。<strong>コミットしないで</strong>ください。内容を確かめてから、削除します。</li>
+</ul>
 
 <h3 id="crlf">CRLF の警告が出る</h3>
 <p>Windows と、ほかの環境の、改行コード（行の終わりの印）の違いを知らせる、Git の警告です。動作には影響しないので、そのままで大丈夫です。</p>

@@ -409,6 +409,13 @@ create_mock_npm() {
 echo "npm $*" >> "${MOCK_CALL_LOG:-/dev/null}"
 # npm ls -g @salesforce/cli（sf が npm 版かの判定）: 既定は 1（npm 版ではない）。MOCK_NPM_LS_EXIT=0 で npm 版を再現
 [[ "$1" == "ls" ]] && exit "${MOCK_NPM_LS_EXIT:-1}"
+# npm --version（今の版）・npm view npm version（最新の版）: 既定は何も出力しない。MOCK_NPM_VERSION / MOCK_NPM_LATEST で版を再現
+[[ "$1" == "--version" ]] && { [[ -n "${MOCK_NPM_VERSION:-}" ]] && echo "$MOCK_NPM_VERSION"; exit 0; }
+[[ "$1" == "view" ]] && { [[ -n "${MOCK_NPM_LATEST:-}" ]] && echo "$MOCK_NPM_LATEST"; exit 0; }
+# npm config get prefix（npm の置き場所）: MOCK_NPM_PREFIX で再現（既定は何も出力しない）
+[[ "$1 $2 $3" == "config get prefix" ]] && { [[ -n "${MOCK_NPM_PREFIX:-}" ]] && echo "$MOCK_NPM_PREFIX"; exit 0; }
+# npm install -g npm@latest --dry-run（今の Node で入れられるかの確認）: 出力と終了コードを再現（既定は成功）
+[[ "$*" == *"--dry-run"* ]] && { [[ -n "${MOCK_NPM_DRYRUN_OUT:-}" ]] && echo "$MOCK_NPM_DRYRUN_OUT"; exit "${MOCK_NPM_DRYRUN_EXIT:-0}"; }
 exit "${MOCK_NPM_EXIT:-0}"
 EOF
     chmod +x "$bin_dir/npm"

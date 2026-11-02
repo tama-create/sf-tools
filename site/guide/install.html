@@ -42,8 +42,8 @@
   <thead><tr><th>ツール</th><th>確認コマンド</th><th>何に使うか</th><th>Windows での入れ方</th></tr></thead>
   <tbody>
     <tr><td>Git（Git Bash）</td><td><code>git --version</code></td><td>変更の履歴の管理・フック</td><td><a href="https://git-scm.com/download/win">公式サイト</a>のインストーラーを実行</td></tr>
-    <tr><td>Node.js</td><td><code>node --version</code></td><td>Salesforce CLI を入れるために必要</td><td><a href="https://nodejs.org/">公式サイト</a>のインストーラーを実行</td></tr>
-    <tr><td>Salesforce CLI（<strong>npm 版</strong>）</td><td><code>sf --version</code></td><td>組織への接続・反映・取得</td><td><code>npm install -g @salesforce/cli</code>（<strong>公式インストーラー版は使えません</strong>。<a href="#npm">次の節</a>で説明します）</td></tr>
+    <tr><td>Node.js</td><td><code>node --version</code></td><td>Salesforce CLI（npm 版）を入れるために必要。<strong>Salesforce CLI より先に</strong>入れます（npm も、これに付いてきます）</td><td><a href="https://nodejs.org/">公式サイト</a>のインストーラー（LTS）を実行、または <code>winget install --id OpenJS.NodeJS.LTS</code></td></tr>
+    <tr><td>Salesforce CLI（<strong>npm 版</strong>）</td><td><code>sf --version</code></td><td>組織への接続・反映・取得</td><td><code>npm install -g @salesforce/cli</code>（<strong>公式インストーラー版は使えません</strong>。入れる順番は<a href="#order">次の節</a>、理由と入れ替えは<a href="#npm">その次の節</a>で説明します）</td></tr>
     <tr><td>GitHub CLI</td><td><code>gh --version</code></td><td>GitHub へのログイン・作業用のブランチの作成・PR の状況の確認（管理者は、リポジトリの作成や認証情報の登録にも使います）</td><td><code>winget install --id GitHub.cli</code></td></tr>
     <tr><td>Visual Studio Code</td><td><code>code --version</code></td><td>エディタの起動・コミットメッセージの入力（<code>sf-push.sh</code> は、<code>code</code> コマンドがないと動きません）。Salesforce の拡張機能（Salesforce Extension Pack）を、事前に入れておくのがおすすめです（<a href="#vscode-ext">下の囲み</a>）</td><td><code>winget install --id Microsoft.VisualStudioCode</code></td></tr>
     <tr><td>Slack</td><td>—</td><td>リリース結果の通知を受け取る</td><td><a href="https://slack.com/downloads/windows">公式サイト</a>のインストーラーを実行</td></tr>
@@ -64,9 +64,39 @@
   </ul>
 </div>
 
+<h2 id="order">ツールを入れる順番（Windows）</h2>
+<p>順番を守らないと、あとで入れ直しになることがあります。特に、<strong>Salesforce CLI は、Node.js のあとに、npm の入れ先を確かめてから</strong>入れます。上から順に進めてください。</p>
+<ol class="steps">
+  <li>
+    <p><strong>Git（Git Bash）</strong>を入れます。このあとのコマンドは、すべて Git Bash で実行します。</p>
+  </li>
+  <li>
+    <p><strong>Node.js（LTS）</strong>を入れます。npm は、Node.js に付いてきます。古い Node.js だと、新しい npm が入らないことがあるため、<strong>新しい LTS 版</strong>をお勧めします。</p>
+  </li>
+  <li>
+    <p><strong>npm の入れ先を確かめます</strong>（Git Bash を開き直してから）。</p>
+    <pre><code>npm config get prefix</code></pre>
+    <p><code>C:\Users\（ユーザー名）\AppData\Roaming\npm</code> のような、<strong>自分のフォルダ</strong>なら、そのまま次へ進みます。<code>C:\Program Files\nodejs</code> のように、<strong>Program Files の下</strong>なら、先に<a href="#npm-prefix">入れ先を自分のフォルダに変えます</a>（最初の 1 回だけ）。Program Files の下は、書き込みに管理者権限が要り、あとの更新が失敗するためです。</p>
+  </li>
+  <li>
+    <p><strong>Salesforce CLI（npm 版）</strong>を入れます。</p>
+    <pre><code>npm install -g @salesforce/cli</code></pre>
+    <p>すでに、公式インストーラー版を入れている方は、先に<a href="#npm-switch">入れ替え</a>をします。</p>
+  </li>
+  <li>
+    <p><strong>GitHub CLI・VS Code・Slack</strong>を入れます。この 3 つは、ほかのツールと順番の関係がありません。</p>
+  </li>
+  <li>
+    <p>上の「まとめて確認」の 1 行で、確かめます。あわせて、<code>sf</code> の場所が 1 つだけで、自分のフォルダの下にあることも、確かめてください。</p>
+    <pre><code>type -a sf</code></pre>
+    <p>2 行以上出るときは、古い <code>sf</code> が、まだ残っています（<a href="#npm-switch">入れ替え</a>へ）。</p>
+  </li>
+</ol>
+<p><strong>Mac・Linux:</strong> 入れ先の設定は、ふつう要りません。書き込みの権限のエラー（<code>EACCES</code>）が出たときだけ、同じ考え方で、自分のフォルダに変えてください。</p>
+
 <h2 id="npm">Salesforce CLI は npm 版を使う</h2>
 <div class="box ok">
-  <div class="title">初めて入れる方は、上の表のコマンドだけで大丈夫です</div>
+  <div class="title">初めて入れる方は、上の「入れる順番」だけで大丈夫です</div>
   <p>この節の「入れ替え」の手順は、<strong>公式インストーラー版の Salesforce CLI を、すでに入れてしまった方</strong>だけが読めば足ります。</p>
 </div>
 <p>sf-tools は、Salesforce CLI（<code>sf</code>）の <strong>npm 版</strong>（<code>npm install -g @salesforce/cli</code>）で動かすことを前提にしています。npm 版も、Salesforce が案内しているインストール方法の 1 つです。</p>
@@ -89,30 +119,39 @@
 </table>
 <p>2 行目のコマンドは、確認に成功すると、同じ場所の <code>sf</code> なら、24 時間は確認を省略します。<code>sf</code> がまだ入っていないときは、この確認はしません（<code>sf</code> を使う手順で、エラーになります）。</p>
 
-<h3 id="npm-switch">インストーラー版から npm 版へ入れ替える（Windows）</h3>
+<h3 id="npm-prefix">npm の入れ先を、自分のフォルダにする（Windows・最初の 1 回だけ）</h3>
+<p>まず、いまの入れ先を確かめます。</p>
+<pre><code>npm config get prefix</code></pre>
+<p><code>C:\Users\（ユーザー名）\AppData\Roaming\npm</code> のような自分のフォルダなら、この手順は要りません。<code>C:\Program Files\nodejs</code> のように <strong>Program Files の下</strong>なら、書き込みに管理者権限が要ります。このままだと、<code>sf-upgrade.sh</code> が「Salesforce CLI のアップデートに失敗しました」「npm のインストール先に書き込めません」と警告し、更新できません。入れ先を自分のフォルダに変えると、以降は管理者権限なしで更新できます。</p>
 <ol class="steps">
   <li>
-    <p>npm 版を入れます。npm の置き場所が <code>C:\Program Files\nodejs</code> のままだと、書き込みに管理者権限が要ります（自分のフォルダに変える方法は、<a href="#npm-prefix">下の囲み</a>）。</p>
+    <p>Program Files の側に、<code>sf</code> を入れてしまっているときだけ、消します。<strong>管理者権限の Git Bash</strong>（Git Bash を右クリックして「管理者として実行」）で、実行します。入れていなければ、飛ばします。</p>
+    <pre><code>npm uninstall -g @salesforce/cli</code></pre>
+  </li>
+  <li>
+    <p>入れ先を、自分のフォルダに変えます（ふつうの Git Bash で）。<strong>パスは、実際の場所で書きます。</strong>Git Bash では、<code>%APPDATA%</code> が展開されず、「いま居るフォルダの下の <code>%APPDATA%</code> という名前のフォルダ」として扱われて、プロジェクトの中に <code>sf</code> が入ってしまいます。</p>
+    <pre><code>npm config set prefix "C:\Users\（ユーザー名）\AppData\Roaming\npm"</code></pre>
+  </li>
+  <li>
+    <p><code>sf</code> を入れます。確認は、<code>sf --version</code> と <code>type -a sf</code>（<code>sf</code> の場所が、自分のフォルダの 1 つだけであること）です。</p>
     <pre><code>npm install -g @salesforce/cli</code></pre>
   </li>
-  <li><p>公式インストーラー版を、アンインストールします（「設定 → アプリ」の「Salesforce CLI」、または <code>C:\sf\Uninstall.exe</code>）。</p></li>
-  <li><p>自動更新で増えた <code>%LOCALAPPDATA%\sf\client</code> を、削除します。</p></li>
-  <li><p><strong>新しい</strong> Git Bash を開いて、上の確認コマンドを実行します。あわせて <code>sf org list</code> を実行して、これまでの組織が表示されることも、確かめてください。</p></li>
+</ol>
+<p><code>command not found</code> と出るときは、<code>C:\Users\（ユーザー名）\AppData\Roaming\npm</code> が、PATH に入っているかを確かめてください（<code>echo $PATH</code>）。</p>
+
+<h3 id="npm-switch">インストーラー版から npm 版へ入れ替える（Windows）</h3>
+<p>順番が大切です。<strong>古い <code>sf</code> を先に消してから</strong>、npm 版を入れます。古い <code>sf</code> が残っていると、PATH の順番によっては、そちらが先に見つかり、新しい <code>sf</code> が使われないためです。</p>
+<ol class="steps">
+  <li><p>公式インストーラー版を、アンインストールします（「設定 → アプリ」の「Salesforce CLI」、または <code>C:\sf\Uninstall.exe</code>）。管理者の確認画面が出ることがあります。</p></li>
+  <li><p>自動更新で増えた <code>%LOCALAPPDATA%\sf\client</code> を、削除します（エクスプローラーのアドレス欄に貼り付けると、開けます）。</p></li>
+  <li><p><a href="#npm-prefix">npm の入れ先</a>を確かめて、Program Files の下なら、自分のフォルダに変えます。そのあと、npm 版を入れます: <code>npm install -g @salesforce/cli</code></p></li>
+  <li><p><strong>新しい</strong> Git Bash を開いて、上の確認コマンドを実行します。あわせて <code>type -a sf</code>（場所が 1 つだけ）と <code>sf org list</code>（これまでの組織が表示される）も、確かめてください。</p></li>
 </ol>
 <div class="box warn">
   <div class="title">この 2 つのフォルダは、削除しないでください</div>
   <p><code>~/.sf</code> と <code>~/.sfdx</code> には、組織のログイン情報が入っています。入れ替えても、このログイン情報は残ります。VS Code を使っている場合は、入れ替えたあとに、VS Code を再起動してください。</p>
 </div>
-<p><strong>更新するとき:</strong> 自動で更新されます（下の「<a href="#auto-update">自動で行われる更新</a>」）。<code>sf-upgrade.sh</code> が、npm 版を <code>npm install -g @salesforce/cli@latest</code> で更新します（手動でも、同じコマンドです）。npm 版でない <code>sf</code> は、<code>sf update</code> で更新します。</p>
-<div class="box next" id="npm-prefix">
-  <div class="title">管理者権限なしで更新できるようにする（Windows・1 回だけ）</div>
-  <p>Node のインストーラーの標準では、<code>npm install -g</code> の入れ先が <code>C:\Program Files\nodejs</code> です。ここは、書き込みに管理者権限が要るため、<code>sf-upgrade.sh</code> が「Salesforce CLI のアップデートに失敗しました」「npm のインストール先に書き込めません」と警告します。入れ先を、自分のフォルダに変えると、以降は管理者権限なしで更新できます。</p>
-  <ol>
-    <li><p>管理者権限のターミナルで、<code>Program Files</code> 側の <code>sf</code> を消します（1 回だけ）: <code>npm uninstall -g @salesforce/cli</code></p></li>
-    <li><p>入れ先を、自分のフォルダに変えます。<strong>パスは、実際の場所で書きます</strong>（<code>C:\Users\（ユーザー名）\AppData\Roaming\npm</code>）。Git Bash では、<code>%APPDATA%</code> が展開されず、「いま居るフォルダの下の <code>%APPDATA%</code> という名前のフォルダ」として扱われて、プロジェクトの中に <code>sf</code> が入ってしまいます。<br><code>npm config set prefix "C:\Users\（ユーザー名）\AppData\Roaming\npm"</code></p></li>
-    <li><p><code>sf</code> を入れ直します: <code>npm install -g @salesforce/cli</code>。確認は <code>sf --version</code> です。</p></li>
-  </ol>
-</div>
+<p><strong>更新するとき:</strong> 自動で更新されます（下の「<a href="#auto-update">自動で行われる更新</a>」）。<code>sf-upgrade.sh</code> が、npm 版を <code>npm install -g @salesforce/cli@latest</code> で更新します（手動でも、同じコマンドです）。npm 版でない <code>sf</code> は、<code>sf update</code> で更新します。「更新に失敗しました」と出るときは、<a href="#npm-prefix">npm の入れ先</a>を確かめてください。</p>
 <p><strong>Mac・Linux:</strong> 同じく、npm 版をおすすめします。ほかの方法（pkg や Homebrew など）で入れた場合も、上の確認コマンドで終了コード 0 になれば、そのまま使えます。</p>
 
 <h2 id="install">sf-tools をインストールする</h2>

@@ -18,7 +18,7 @@ site/reference/commands-dev.html | bin/sf-hook.sh | 4023496098-3227 | b2034a6
 site/reference/commands-dev.html | bin/sf-unhook.sh | 756720157-1896 | b2034a6
 
 site/reference/commands-auto.html | bin/sf-install.sh | 1238908549-5499 | b2034a6
-site/reference/commands-auto.html | bin/sf-upgrade.sh | 549138673-2170 | b2034a6
+site/reference/commands-auto.html | bin/sf-upgrade.sh | 4108711601-3714 | ed12df6
 site/reference/commands-auto.html | bin/sf-prepush.sh | 2137767055-4495 | b2034a6
 site/reference/commands-auto.html | bin/sf-precommit.sh | 2396654912-1585 | c52ffe3
 site/reference/commands-auto.html | bin/sf-metasync.sh | 1569541087-14411 | e56ea23
@@ -53,7 +53,7 @@ site/admin/verify.html | phases/init/verify.sh | 1817113336-12401 | b2034a6
 site/admin/verify.html | bin/sf-typecheck.sh | 2610487361-7160 | b2034a6
 site/admin/verify.html | lib/typecheck.js | 3564138558-5155 | b2034a6
 
-site/guide/install.html | bin/sf-upgrade.sh | 549138673-2170 | b2034a6
+site/guide/install.html | bin/sf-upgrade.sh | 4108711601-3714 | ed12df6
 site/guide/install.html | bin/sf-install.sh | 1238908549-5499 | b2034a6
 site/guide/install.html | bin/sf-start.sh | 458532388-5461 | b2034a6
 
@@ -85,7 +85,7 @@ site/design/cicd.html | bin/sf-release.sh | 1358071720-8047 | b2034a6
 site/design/cicd.html | bin/sf-next.sh | 3773425382-4882 | b2034a6
 site/design/cicd.html | bin/sf-prepush.sh | 2137767055-4495 | b2034a6
 site/design/cicd.html | bin/sf-sync-wf.sh | 2612271841-6183 | b2034a6
-site/design/cicd.html | bin/sf-upgrade.sh | 549138673-2170 | b2034a6
+site/design/cicd.html | bin/sf-upgrade.sh | 4108711601-3714 | ed12df6
 site/reference/structure.html | bin/sf-init.sh | 2046932934-22619 | b2034a6
 site/reference/structure.html | bin/sf-job.sh | 3104353950-6410 | b2034a6
 site/reference/structure.html | bin/sf-typecheck.sh | 2610487361-7160 | b2034a6

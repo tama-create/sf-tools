@@ -92,7 +92,7 @@
 <h3 id="npm-switch">インストーラー版から npm 版へ入れ替える（Windows）</h3>
 <ol class="steps">
   <li>
-    <p>npm 版を入れます。<code>C:\Program Files\nodejs</code> に書き込むので、管理者権限の Git Bash が必要な場合があります。</p>
+    <p>npm 版を入れます。npm の置き場所が <code>C:\Program Files\nodejs</code> のままだと、書き込みに管理者権限が要ります（自分のフォルダに変える方法は、<a href="#npm-prefix">下の囲み</a>）。</p>
     <pre><code>npm install -g @salesforce/cli</code></pre>
   </li>
   <li><p>公式インストーラー版を、アンインストールします（「設定 → アプリ」の「Salesforce CLI」、または <code>C:\sf\Uninstall.exe</code>）。</p></li>
@@ -104,6 +104,15 @@
   <p><code>~/.sf</code> と <code>~/.sfdx</code> には、組織のログイン情報が入っています。入れ替えても、このログイン情報は残ります。VS Code を使っている場合は、入れ替えたあとに、VS Code を再起動してください。</p>
 </div>
 <p><strong>更新するとき:</strong> 自動で更新されます（下の「<a href="#auto-update">自動で行われる更新</a>」）。<code>sf-upgrade.sh</code> が、npm 版を <code>npm install -g @salesforce/cli@latest</code> で更新します（手動でも、同じコマンドです）。npm 版でない <code>sf</code> は、<code>sf update</code> で更新します。</p>
+<div class="box next" id="npm-prefix">
+  <div class="title">管理者権限なしで更新できるようにする（Windows・1 回だけ）</div>
+  <p>Node のインストーラーの標準では、<code>npm install -g</code> の入れ先が <code>C:\Program Files\nodejs</code> です。ここは、書き込みに管理者権限が要るため、<code>sf-upgrade.sh</code> が「Salesforce CLI のアップデートに失敗しました」「npm のインストール先に書き込めません」と警告します。入れ先を、自分のフォルダに変えると、以降は管理者権限なしで更新できます。</p>
+  <ol>
+    <li><p>管理者権限のターミナルで、<code>Program Files</code> 側の <code>sf</code> を消します（1 回だけ）: <code>npm uninstall -g @salesforce/cli</code></p></li>
+    <li><p>入れ先を、自分のフォルダに変えます。<strong>パスは、実際の場所で書きます</strong>（<code>C:\Users\（ユーザー名）\AppData\Roaming\npm</code>）。Git Bash では、<code>%APPDATA%</code> が展開されず、「いま居るフォルダの下の <code>%APPDATA%</code> という名前のフォルダ」として扱われて、プロジェクトの中に <code>sf</code> が入ってしまいます。<br><code>npm config set prefix "C:\Users\（ユーザー名）\AppData\Roaming\npm"</code></p></li>
+    <li><p><code>sf</code> を入れ直します: <code>npm install -g @salesforce/cli</code>。確認は <code>sf --version</code> です。</p></li>
+  </ol>
+</div>
 <p><strong>Mac・Linux:</strong> 同じく、npm 版をおすすめします。ほかの方法（pkg や Homebrew など）で入れた場合も、上の確認コマンドで終了コード 0 になれば、そのまま使えます。</p>
 
 <h2 id="install">sf-tools をインストールする</h2>
@@ -134,7 +143,7 @@ export PATH="$HOME/sf-tools/bin:$PATH"</code></pre>
   <li>プロジェクトに必要な部品を入れます（<code>npm install</code>。入れ済みなら省きます）。</li>
   <li>前回から 24 時間以上たっていれば、<code>sf-upgrade.sh</code> で、開発ツールを最新にします: <code>npm</code>・Salesforce CLI（<code>sf</code>）と、<strong>Windows の Git Bash では Git for Windows も</strong>（<code>git update-git-for-windows</code>）。Mac・Linux・WSL の Git は、更新しません（それぞれのパッケージ管理の方法で、更新してください）。</li>
 </ul>
-<p>どれかが失敗しても、作業は止まりません。結果は、<code>force-*</code> フォルダの中の <code>sf-tools/logs/sf-start.log</code>・<code>sf-install.log</code>・<code>sf-upgrade.log</code> で確かめられます。</p>
+<p>どれかが失敗しても、作業は止まりません（更新できなかったものは、<code>sf-upgrade.log</code> の最後に名前が並びます）。<code>npm</code> は Node に同梱されていて、最新の <code>npm</code> は Node が新しくないと入らないことがあります。そのときは、<code>npm</code> は更新せず、Node の更新を案内します（<code>sf-upgrade.sh</code> を手動で実行すると、画面に出ます）。結果は、<code>force-*</code> フォルダの中の <code>sf-tools/logs/sf-start.log</code>・<code>sf-install.log</code>・<code>sf-upgrade.log</code> で確かめられます。</p>
 
 <h2 id="env">動作環境</h2>
 <p>実際に動かして確かめた環境だけを書いています。</p>

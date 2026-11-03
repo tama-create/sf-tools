@@ -139,7 +139,7 @@ test_npm_up_to_date() {
 
     local out; out=$(cd "$td" && PATH="$mb:$PATH" MOCK_NPM_VERSION=11.0.0 MOCK_NPM_LATEST=11.0.0 bash "$SF_TOOLS_DIR/bin/sf-upgrade.sh" 2>&1)
     assert_output_contains "$out" "npm は最新です" "npm が最新 → 「最新です」と表示する"
-    assert_file_not_contains "$MOCK_CALL_LOG" "npm install -g npm@latest" "npm が最新 → 確認（--dry-run）も更新もしない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "npm install -g npm@latest" "npm が最新 → 更新しない"
     teardown "$td" "$mb"
 }
 
@@ -149,13 +149,34 @@ test_npm_updated_when_compatible() {
     setup_std_env td mb mh
     create_all_mocks "$mb"
 
-    (cd "$td" && PATH="$mb:$PATH" MOCK_NPM_VERSION=10.0.0 MOCK_NPM_LATEST=11.0.0 bash "$SF_TOOLS_DIR/bin/sf-upgrade.sh") > /dev/null 2>&1
-    assert_file_contains "$MOCK_CALL_LOG" "npm install -g npm@latest --dry-run" "新しい版がある → 先に --dry-run で、入れられるかを確かめる"
+    local out; out=$(cd "$td" && PATH="$mb:$PATH" MOCK_NPM_VERSION=10.0.0 MOCK_NPM_LATEST=11.0.0 bash "$SF_TOOLS_DIR/bin/sf-upgrade.sh" 2>&1)
+    assert_file_not_contains "$MOCK_CALL_LOG" "--dry-run" "新しい版がある → --dry-run の試し打ちはしない（npm 12 では、これだけが壊れる）"
     if grep -F "npm install -g npm@latest" "$MOCK_CALL_LOG" | grep -vqF -- "--dry-run"; then
-        pass "入れられる → npm install -g npm@latest で更新する"
+        pass "新しい版がある → npm install -g npm@latest で更新する"
     else
-        fail "入れられる → npm install -g npm@latest で更新する" "更新の呼び出しがない"
+        fail "新しい版がある → npm install -g npm@latest で更新する" "更新の呼び出しがない"
     fi
+    assert_output_contains "$out" "npm を更新しました" "更新できた → SUCCESS を表示する"
+    assert_output_not_contains "$out" "更新できなかったものがあります" "更新できた → 失敗の一覧は出ない"
+    teardown "$td" "$mb"
+}
+
+# npm 12 の不具合（npm/cli#9800）の再現: --dry-run だけが EALLOWREMOTE で失敗し、本番の更新は成功する。
+# --dry-run を使っていたころは、この組み合わせで、毎回「npm のアップデートに失敗しました」と出ていた（Mac・Node 26・npm 12 で発覚）
+test_npm12_dryrun_broken() {
+    local td mb mh
+    setup_std_env td mb mh
+    create_all_mocks "$mb"
+
+    local out; out=$(cd "$td" && PATH="$mb:$PATH" MOCK_NPM_VERSION=12.2.0 MOCK_NPM_LATEST=12.2.1 \
+        MOCK_NPM_DRYRUN_EXIT=1 MOCK_NPM_DRYRUN_OUT="npm error code EALLOWREMOTE" \
+        bash "$SF_TOOLS_DIR/bin/sf-upgrade.sh" 2>&1)
+    local ec=$?
+
+    assert_exit_ok $ec "npm 12 の --dry-run の不具合 → 正常終了"
+    assert_output_contains "$out" "npm を更新しました" "npm 12 の --dry-run の不具合 → 本番の更新は成功する"
+    assert_output_not_contains "$out" "npm のアップデートに失敗しました" "npm 12 の --dry-run の不具合 → 失敗と表示しない"
+    assert_output_not_contains "$out" "更新できなかったものがあります" "npm 12 の --dry-run の不具合 → 失敗の一覧は出ない"
     teardown "$td" "$mb"
 }
 
@@ -165,37 +186,36 @@ test_npm_node_incompatible() {
     setup_std_env td mb mh
     create_all_mocks "$mb"
 
+    # 本番の npm install -g npm@latest が、npm の出力（実機で確認した形）で止まる。npm は何も変えない
     local out; out=$(cd "$td" && PATH="$mb:$PATH" MOCK_NPM_VERSION=10.0.0 MOCK_NPM_LATEST=12.0.0 \
-        MOCK_NPM_DRYRUN_EXIT=1 MOCK_NPM_DRYRUN_OUT="npm error notsup Not compatible with your version of node/npm: npm@12.0.0" \
+        MOCK_NPM_SELF_EXIT=1 MOCK_NPM_SELF_OUT=$'npm error code EBADENGINE\nnpm error notsup Not compatible with your version of node/npm: npm@12.0.0' \
         bash "$SF_TOOLS_DIR/bin/sf-upgrade.sh" 2>&1)
     local ec=$?
 
     assert_exit_ok $ec "Node が対応していない → 正常終了"
     assert_output_contains "$out" "では入れられません" "Node が対応していない → 入れられない旨を案内する"
     assert_output_contains "$out" "Node を更新してください" "Node が対応していない → Node の更新を案内する"
-    if grep -F "npm install -g npm@latest" "$MOCK_CALL_LOG" | grep -vqF -- "--dry-run"; then
-        fail "Node が対応していない → npm は更新しない" "更新が呼び出された"
-    else
-        pass "Node が対応していない → npm は更新しない"
-    fi
+    assert_output_not_contains "$out" "npm のアップデートに失敗しました" "Node が対応していない → 失敗と表示しない"
     assert_output_not_contains "$out" "更新できなかったものがあります" "Node が対応していないのは、失敗に数えない"
     teardown "$td" "$mb"
 }
 
-# 確認（--dry-run）が、対応外以外の理由で失敗 → WARNING と、失敗の一覧に npm
-test_npm_dryrun_other_error() {
+# 対応外以外の理由で、npm の更新が失敗 → WARNING に理由（npm の出力の末尾 5 行）と、失敗の一覧に npm
+test_npm_update_other_error() {
     local td mb mh
     setup_std_env td mb mh
     create_all_mocks "$mb"
 
     local out; out=$(cd "$td" && PATH="$mb:$PATH" MOCK_NPM_VERSION=10.0.0 MOCK_NPM_LATEST=11.0.0 \
-        MOCK_NPM_DRYRUN_EXIT=1 MOCK_NPM_DRYRUN_OUT="npm error network" \
+        MOCK_NPM_SELF_EXIT=1 MOCK_NPM_SELF_OUT=$'npm error line1-old\nnpm error line2\nnpm error line3\nnpm error line4\nnpm error line5\nnpm error code ENETUNREACH' \
         bash "$SF_TOOLS_DIR/bin/sf-upgrade.sh" 2>&1)
     local ec=$?
 
-    assert_exit_ok $ec "確認の失敗 → 正常終了（続行）"
-    assert_output_contains "$out" "npm のアップデートに失敗しました" "確認が失敗 → WARNING を表示する"
-    assert_output_contains "$out" "更新できなかったものがあります: npm" "確認が失敗 → 失敗の一覧に npm が出る"
+    assert_exit_ok $ec "更新の失敗 → 正常終了（続行）"
+    assert_output_contains "$out" "npm のアップデートに失敗しました" "更新が失敗 → WARNING を表示する"
+    assert_output_contains "$out" "ENETUNREACH" "更新が失敗 → 理由（npm の出力）を表示する"
+    assert_output_not_contains "$out" "line1-old" "更新が失敗 → 理由は、末尾の 5 行だけ（それより前は出さない）"
+    assert_output_contains "$out" "更新できなかったものがあります: npm" "更新が失敗 → 失敗の一覧に npm が出る"
     teardown "$td" "$mb"
 }
 
@@ -284,8 +304,9 @@ test_npm_sf_updated_by_npm
 test_non_npm_sf_updated_by_sf_update
 test_npm_up_to_date
 test_npm_updated_when_compatible
+test_npm12_dryrun_broken
 test_npm_node_incompatible
-test_npm_dryrun_other_error
+test_npm_update_other_error
 test_npm_version_unknown
 test_sf_update_failure_summary
 test_failure_summary_lists_all

@@ -182,7 +182,7 @@ export PATH="$HOME/sf-tools/bin:$PATH"</code></pre>
   <li>プロジェクトに必要な部品を入れます（<code>npm install</code>。入れ済みなら省きます）。</li>
   <li>前回から 24 時間以上たっていれば、<code>sf-upgrade.sh</code> で、開発ツールを最新にします: <code>npm</code>・Salesforce CLI（<code>sf</code>）と、<strong>Windows の Git Bash では Git for Windows も</strong>（<code>git update-git-for-windows</code>）。Mac・Linux・WSL の Git は、更新しません（それぞれのパッケージ管理の方法で、更新してください）。</li>
 </ul>
-<p>どれかが失敗しても、作業は止まりません（更新できなかったものは、<code>sf-upgrade.log</code> の最後に名前が並びます）。<code>npm</code> は Node に同梱されていて、最新の <code>npm</code> は Node が新しくないと入らないことがあります。そのときは、<code>npm</code> は更新せず、Node の更新を案内します（<code>sf-upgrade.sh</code> を手動で実行すると、画面に出ます）。結果は、<code>force-*</code> フォルダの中の <code>sf-tools/logs/sf-start.log</code>・<code>sf-install.log</code>・<code>sf-upgrade.log</code> で確かめられます。</p>
+<p>どれかが失敗しても、作業は止まりません（更新できなかったものは、<code>sf-upgrade.log</code> の最後に名前が並び、失敗の理由（<code>npm</code> の出力の末尾）も、その上に残ります）。<code>npm</code> は Node に同梱されていて、最新の <code>npm</code> は Node が新しくないと入らないことがあります。そのときは、<code>npm</code> は更新せず、Node の更新を案内します（<code>sf-upgrade.sh</code> を手動で実行すると、画面に出ます）。結果は、<code>force-*</code> フォルダの中の <code>sf-tools/logs/sf-start.log</code>・<code>sf-install.log</code>・<code>sf-upgrade.log</code> で確かめられます。</p>
 
 <h2 id="env">動作環境</h2>
 <p>実際に動かして確かめた環境だけを書いています。</p>

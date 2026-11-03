@@ -170,6 +170,28 @@ test_guards() {
     _plan --retrieve-json "$_TD/ret.json"
     assert_file_contains "$_TD/plan.tsv" "D	$ROOT/classes/Gone.cls" "応答が JSON でないときは、情報なしとして扱う"
     rm -rf "$_TD"
+
+    # S2: 「この組織・この API バージョンでは使えない種類」の報告（取得の失敗ではない。実機の応答の形）
+    #   表（metadata-dirs.txt）にない種類（GlobalPicklist）→ 保留しない。表にある種類（LightningComponentBundle）→ そのフォルダだけ保留
+    #   （lwc は、取得結果にも 1 件ある前提にする。0 件だと、S3（消えたフォルダ）が当たってしまい、S2 の確認にならない）
+    _mk
+    _w r classes/Gone.cls 'g\n'; _w r lwc/x/x.js 'x\n'; _w f classes/Other.cls 'o\n'; _w f lwc/y/y.js 'y\n'
+    echo '{"status":0,"result":{"messages":[{"problem":"Entity type '"'"'GlobalPicklist'"'"' is not available in this api version"},{"problem":"Entity type '"'"'Translations'"'"' is not available in this organization"}]}}' > "$_TD/ret.json"
+    _plan --retrieve-json "$_TD/ret.json"
+    assert_equals "$_RC" "0" "S2: 使えない種類（表にない）の報告だけ → 保留なし（終了コード 0）"
+    assert_file_contains "$_TD/plan.tsv" "D	$ROOT/classes/Gone.cls" "S2: 使えない種類（表にない）の報告では、削除を保留しない"
+    assert_file_contains "$_TD/plan.tsv" "D	$ROOT/lwc/x/x.js" "S2: 使えない種類（表にない）の報告では、他のフォルダの削除も保留しない"
+    assert_output_contains "$_OUT" "使えない種類" "S2: 使えない種類は、要約に出る（見逃さない）"
+    echo '{"status":0,"result":{"messages":[{"problem":"Entity type '"'"'LightningComponentBundle'"'"' is not available in this organization"}]}}' > "$_TD/ret.json"
+    _plan --retrieve-json "$_TD/ret.json"
+    assert_equals "$_RC" "3" "S2: 使えない種類（表にある）の報告 → 終了コード 3"
+    assert_file_contains "$_TD/plan.tsv" "H	$ROOT/lwc/x/x.js	S2" "S2: 使えない種類（表にある）は、そのフォルダ（lwc）だけ保留"
+    assert_file_contains "$_TD/plan.tsv" "D	$ROOT/classes/Gone.cls" "S2: 使えない種類の報告があっても、他のフォルダ（classes）の削除は、そのまま"
+    echo '{"status":0,"result":{"messages":[{"problem":"Entity type '"'"'GlobalPicklist'"'"' is not available in this api version"},{"problem":"something unexpected"}]}}' > "$_TD/ret.json"
+    _plan --retrieve-json "$_TD/ret.json"
+    assert_equals "$(_op D)" "0" "S2: 使えない種類と、読めない報告が混在 → 読めない報告のぶん、その回の削除は、すべて保留"
+    assert_file_contains "$_TD/plan.tsv" "H	$ROOT/classes/Gone.cls	S2" "S2: 混在 → 保留（S2）"
+    rm -rf "$_TD"
 }
 
 # --- 5. 中断する条件・引数 ---

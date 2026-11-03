@@ -34,6 +34,7 @@
     <tr><td><code>main</code> / <code>staging</code> への PR が、いつまでもマージできない</td><td><a href="#required-checks">必須チェックの名前の食い違い</a></td></tr>
     <tr><td><code>wf-metasync</code> / <code>wf-propagate</code> が失敗する</td><td><a href="#pat">PAT_TOKEN</a>・<a href="#propagate-conflict">伝播のコンフリクト</a>・<a href="#metasync-hold">削除の保留</a></td></tr>
     <tr><td><code>wf-validate</code> / <code>wf-sequence</code> が動かない・失敗する</td><td><a href="#wf-missing">検証のワークフロー</a></td></tr>
+    <tr><td>手元の <code>sf-metasync.sh</code> が「組織が、ログインされていません」「SF_ORG_ID_PROD を読み取れませんでした」と止まる</td><td><a href="#metasync-org">接続先の組織が決まらない</a></td></tr>
     <tr><td>マージしたのに、組織にリリースされない</td><td><a href="#release-skip">リリースされない</a></td></tr>
     <tr><td><code>sf-sync-wf.sh</code> が止まる</td><td><a href="#sync-wf">sf-sync-wf が止まる</a></td></tr>
     <tr><td><code>sf-job.sh</code> が動かない</td><td><a href="#dev-job">sf-job が動かない</a></td></tr>
@@ -104,6 +105,18 @@
   <li>削除してよいと判断できたら、<code>bash ~/sf-tools/bin/sf-metasync.sh --allow-mass-delete</code> で実行します（手元だけ。確認が出ます）。削除してはいけないものがあるときは、<code>metadata.txt</code> や組織の状態を直してから、もう一度実行してください。</li>
 </ol>
 <p>これまでの動作では、組織で削除されたものが <code>main</code> に残り続けていたため、<strong>初回は、たまっていた古いファイルが一度に削除の対象になります</strong>。上の手順で、1 回確かめてください。</p>
+
+<h3 id="metasync-org">手元の <code>sf-metasync.sh</code> が、接続先の組織を決められずに止まる</h3>
+<p>手元で <code>sf-metasync.sh</code> を実行すると、接続先の組織（<code>main</code> の組織）は、<strong>エイリアスの名前ではなく、組織の ID で決まります</strong>。<code>sf-init</code> が GitHub の Variable <code>SF_ORG_ID_PROD</code> に記録した、1 番目の組織の ID と、この PC の <code>sf</code> にログイン済みの組織の ID を突き合わせて、一致した組織を使います。名前（<code>prod</code> など）は、何でもかまいません。別のプロジェクトの組織で、<code>main</code> を書き換えてしまう取り違えを防ぐためです。次のどれかのときは、何も変えずに止まります（推測して、別の組織には進みません）。</p>
+<table>
+  <thead><tr><th>表示</th><th>意味と対処</th></tr></thead>
+  <tbody>
+    <tr><td><code>origin の URL から、GitHub のリポジトリを特定できません</code></td><td><code>force-*</code> フォルダの <code>origin</code> が、GitHub の URL ではありません。<code>git remote get-url origin</code> で確かめてください</td></tr>
+    <tr><td><code>GitHub の Variable SF_ORG_ID_PROD を読み取れませんでした</code></td><td><code>gh</code> が使えない・ログインしていない・リポジトリの Variable を読む権限がない、または、Variable が記録されていません。管理者のアカウントで <code>gh auth login</code> し、<code>gh variable get SF_ORG_ID_PROD -R オーナー/リポジトリ</code> で読めるか確かめます。記録がないときは、<code>force-*</code> の中で <code>sf-init.sh --reconnect main</code> を実行すると、記録されます</td></tr>
+    <tr><td><code>この PC の sf に、組織 ID …（SF_ORG_ID_PROD。main の組織）の組織が、ログインされていません</code></td><td>この PC の <code>sf</code> に、<code>main</code> の組織（<code>sf-init</code> で 1 番目に入れた組織）が、ログインされていません。<code>sf org login web --alias 好きな名前</code> で、その組織にログインしてください（<code>sf-init</code> は、この PC の <code>sf</code> にエイリアスを残しません）。<code>sf org list</code> で、組織の ID が、表示の ID と同じ組織が、あるか確かめられます。別の組織にログインしても、ID が違えば、同じように止まります</td></tr>
+  </tbody>
+</table>
+<p>GitHub Actions の <code>wf-metasync</code> は、この仕組みを使いません（ワークフローが、JWT で、<code>main</code> の組織にログインします）。</p>
 
 <h3 id="propagate-conflict"><code>wf-propagate</code> が、コンフリクトで失敗する</h3>
 <p><code>main</code> へのマージのあと、<code>main</code> を <code>staging</code> / <code>develop</code> へ伝えるときに、同じ場所が別々に変更されていると、コンフリクト（衝突）します。このときは、そのブランチへのマージを取り消して（ブランチは変わりません）、Slack に、コンフリクトしたブランチ・PR・ログの URL を通知し、失敗で終わります。</p>

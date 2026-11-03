@@ -284,6 +284,14 @@ case "$1 $2" in
             fi
             exit 0
         fi
+        # sf org list --json（ログイン済みの組織の一覧。org_find_username_by_id が使う）: 既定は 1 件
+        #   （組織 ID = MOCK_SF_ORG_LIST_ID、ユーザー名 = MOCK_SF_ORG_LIST_USER）。MOCK_SF_ORG_LIST_JSON で全体を差し替え、
+        #   MOCK_SF_ORG_LIST_EXIT=1 で失敗を再現する。既定の ID は、gh モックの SF_ORG_ID_PROD（MOCK_GH_ORG_ID_PROD の既定）と同じ
+        if [[ "$*" == *"--json"* ]]; then
+            _ol_default="{\"status\":0,\"result\":{\"nonScratchOrgs\":[{\"orgId\":\"${MOCK_SF_ORG_LIST_ID:-00D000000000001AAA}\",\"username\":\"${MOCK_SF_ORG_LIST_USER:-metasync-test@example.com}\"}]}}"
+            echo "${MOCK_SF_ORG_LIST_JSON:-$_ol_default}"
+            exit "${MOCK_SF_ORG_LIST_EXIT:-0}"
+        fi
         exit 0 ;;
     "data query")
         # 設定変更の履歴の件数（sf-metasync の変更の検知）: SELECT COUNT() FROM SetupAuditTrail。
@@ -447,7 +455,14 @@ case "$1 $2" in
     "repo create") exit "${MOCK_GH_REPO_CREATE_EXIT:-0}" ;;
     "secret set")   exit "${MOCK_GH_SECRET_SET_EXIT:-0}" ;;
     "variable set") exit "${MOCK_GH_VARIABLE_SET_EXIT:-0}" ;;
-    "variable get") echo "${MOCK_GH_VARIABLE_GET_VALUE:-fake@example.com}" ; exit "${MOCK_GH_VARIABLE_GET_EXIT:-0}" ;;
+    "variable get")
+        # SF_ORG_ID_PROD（main の組織の ID）は、専用の値（MOCK_GH_ORG_ID_PROD。既定は、sf モックの組織一覧の既定の ID と同じ）。
+        #   MOCK_GH_ORG_ID_PROD_EXIT=1 で、読み取れない（gh の失敗・Variable がない）状態を再現する（出力なし）
+        if [[ "$3" == "SF_ORG_ID_PROD" ]]; then
+            [[ "${MOCK_GH_ORG_ID_PROD_EXIT:-0}" -ne 0 ]] && { echo "HTTP 404: Not Found" >&2; exit 1; }
+            echo "${MOCK_GH_ORG_ID_PROD:-00D000000000001AAA}"; exit 0
+        fi
+        echo "${MOCK_GH_VARIABLE_GET_VALUE:-fake@example.com}" ; exit "${MOCK_GH_VARIABLE_GET_EXIT:-0}" ;;
     "api user")    echo "${MOCK_GH_API_USER:-tamashimon-org}" ;;
     # オーナー候補・既存プロジェクトの一覧（jq で絞ったあとの出力を、そのまま返す）: 改行区切り
     "api user/memberships/orgs") [[ -n "${MOCK_GH_ORGS_ADMIN:-}" ]] && printf '%s\n' "$MOCK_GH_ORGS_ADMIN"; exit 0 ;;

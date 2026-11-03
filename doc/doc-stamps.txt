@@ -21,7 +21,7 @@ site/reference/commands-auto.html | bin/sf-install.sh | 1238908549-5499 | b2034a
 site/reference/commands-auto.html | bin/sf-upgrade.sh | 3414214461-4440 | e2f9bb0
 site/reference/commands-auto.html | bin/sf-prepush.sh | 2137767055-4495 | b2034a6
 site/reference/commands-auto.html | bin/sf-precommit.sh | 2396654912-1585 | c52ffe3
-site/reference/commands-auto.html | bin/sf-metasync.sh | 1569541087-14411 | e56ea23
+site/reference/commands-auto.html | bin/sf-metasync.sh | 275654706-15752 | 6fb8407
 
 site/reference/target-files.html | bin/sf-check.sh | 334649645-7163 | b2034a6
 site/reference/target-files.html | bin/sf-release.sh | 1358071720-8047 | b2034a6
@@ -70,7 +70,7 @@ site/reference/commands.html | bin/sf-init.sh | 2046932934-22619 | b2034a6
 site/reference/commands.html | bin/sf-update-secret.sh | 1262693024-6313 | b2034a6
 site/reference/commands.html | bin/sf-sync-wf.sh | 2612271841-6183 | b2034a6
 site/reference/commands.html | bin/sf-typecheck.sh | 2610487361-7160 | b2034a6
-site/reference/commands.html | bin/sf-metasync.sh | 1569541087-14411 | e56ea23
+site/reference/commands.html | bin/sf-metasync.sh | 275654706-15752 | 6fb8407
 site/reference/commands.html | phases/init/verify.sh | 1817113336-12401 | b2034a6
 site/reference/commands.html | phases/init/add_tier.sh | 45090860-7121 | b2034a6
 site/reference/commands.html | phases/init/reconnect.sh | 126320170-5486 | b2034a6
@@ -80,7 +80,7 @@ site/index.html | bin/sf-init.sh | 2046932934-22619 | b2034a6
 site/guide/glossary.html | bin/sf-launcher.sh | 1761808291-3088 | b2034a6
 site/guide/glossary.html | bin/sf-job.sh | 3104353950-6410 | b2034a6
 site/guide/glossary.html | bin/sf-release.sh | 1358071720-8047 | b2034a6
-site/design/cicd.html | bin/sf-metasync.sh | 1569541087-14411 | e56ea23
+site/design/cicd.html | bin/sf-metasync.sh | 275654706-15752 | 6fb8407
 site/design/cicd.html | bin/sf-release.sh | 1358071720-8047 | b2034a6
 site/design/cicd.html | bin/sf-next.sh | 3773425382-4882 | b2034a6
 site/design/cicd.html | bin/sf-prepush.sh | 2137767055-4495 | b2034a6

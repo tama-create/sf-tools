@@ -2,7 +2,7 @@
 # ==============================================================================
 # sf-metasync.sh - Salesforce メタデータ Git 自動同期スクリプト
 # ==============================================================================
-# sf-init で登録した prod エイリアスの組織（本番・Sandbox どちらでもよい）から、メタデータを取得し、
+# main の組織（sf-init で 1 番目に登録した組織。本番・Sandbox・Developer Edition のどれでもよい）から、メタデータを取得し、
 # main ブランチの「同期の対象のフォルダ」（【補足】）を、取得した内容と同じにして（追加・変更・削除）、コミットして push する。
 # push したときは、branches.txt の main 以外のブランチへ、main をマージして push する。
 # Salesforce 組織の内容を正とする。どのブランチから実行しても、main に切り替えて処理し、終了時に元のブランチへ戻る。
@@ -28,7 +28,14 @@
 #   1. sf の確認: sf --version の終了コードが 0 以外なら、案内を表示して中断する（check_sf_cli --cache）。
 #      引数の解析（【オプション】）は、この確認のあとに行う
 #   2. 事前の確認（上から順に確かめ、満たされなければ、何も変更せずに中断する）
-#      - sf org display --target-org prod --json の終了コードが 0 であること（prod エイリアスの組織が登録済み）。
+#      - 接続先の組織（main の組織）を決める。手元と GitHub Actions 上で、決め方が違う:
+#          手元: エイリアスの名前には頼らず、組織 ID で決める。git remote get-url origin から owner/repo を特定し、
+#                gh variable get SF_ORG_ID_PROD（sf-init が記録した、1 番目の組織の ID）を読み、sf org list --json の
+#                ログイン済みの組織から、ID（上位 15 文字）が一致するものを探して、そのユーザー名を接続先にする。
+#                次のどれかなら、何も変更せずに中断する（推測して別の組織に進まない。prod エイリアスには、フォールバックしない）:
+#                origin から特定できない／ SF_ORG_ID_PROD を読み取れない／ 一致する組織が、この PC の sf にない
+#          GitHub Actions 上: ワークフローが JWT で作る prod エイリアスを使う（gh は見ない）
+#      - sf org display --target-org <接続先> --json の終了コードが 0 であること。
 #        出力は、表示もログへの記録もしない（アクセストークンを含むため）
 #      - 現在の HEAD がブランチを指していること（git symbolic-ref -q HEAD の終了コードが 0。detached HEAD では中断する）
 #      - ./sf-tools/config/metadata.txt が存在すること（コメント行・空行を除いた各行を、取得するメタデータの種類とする。
@@ -82,7 +89,9 @@
 #
 # 【前提条件】
 #   - force-* ディレクトリ（フォルダ名が force- で始まる）で実行すること。それ以外では lib/common.sh が終了する（終了コード 1）
-#   - sf-init で prod エイリアスの組織が登録済みであること
+#   - 手元で実行するとき: main の組織（sf-init で 1 番目に登録した組織）が、この PC の sf にログイン済みであること
+#     （エイリアスの名前は、何でもよい。sf-init は、この PC の sf にエイリアスを残さない。sf org login web --alias <名前> などでログインする）。
+#     gh が使え、リポジトリの Variable（SF_ORG_ID_PROD）を読めること
 #   - Salesforce CLI（sf）は npm 版であること。手順 1 の確認は、成功したら 24 時間は省略する（GitHub Actions 上では、確認しない）
 #   - node があること（sf が npm 版のため、通常はある）。sf のプラグインは不要（以前使っていた sfdx-git-delta は、使わない）
 #   - 変更の検知（SF_METASYNC_DETECT が shadow・on）を使うときは、接続ユーザーに「設定・定義の参照」の権限があること
@@ -141,6 +150,7 @@ if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
     exit 0
 fi
 source "$COMMON_LIB"
+source "${SCRIPT_DIR}/../lib/org.sh"   # org_find_username_by_id（組織 ID から、ログイン済みの組織を探す）
 
 # ------------------------------------------------------------------------------
 # 3. 初期チェック
@@ -191,15 +201,36 @@ readonly DETECT_MODE="${SF_METASYNC_DETECT:-off}"
 # ------------------------------------------------------------------------------
 # 5. 固有設定
 # ------------------------------------------------------------------------------
-# sf-init で登録した prod エイリアスの組織情報を取得（本番・Sandbox どちらも許容）
-readonly TARGET_ORG="prod"
-# run 不使用: 終了コードで判定するため（run は、失敗しても、エラーの文言を標準出力に返すため、出力が空かでは判定できない。
-#   以前は、そのため、prod が未登録でも、ここを素通りし、手順 7 の取得で、はじめて中断していた）。
+# 接続先の組織（main の組織。本番・Sandbox・Developer Edition のどれでもよい）
+#   ・GitHub Actions 上: ワークフローが JWT で作る prod エイリアスを使う（gh は見ない）
+#   ・手元: エイリアスの名前には頼らず、組織 ID で決める。sf-init が GitHub の Variable SF_ORG_ID_PROD に記録した、1 番目（main）の
+#     組織の ID と、この PC の sf にログイン済みの組織の ID を突き合わせ、一致した組織のユーザー名を接続先にする。
+#     名前は付け替えられ、同じ PC の別のプロジェクトと衝突する。ID で決めれば、取り違え（別のプロジェクトの組織で main を書き換える）を防げる。
+#     見つからなければ、何も変えずに中断する（推測して、別の組織に進まない。prod エイリアスには、フォールバックしない）
+# run 不使用: 終了コードで判定するため（run は、失敗しても、エラーの文言を標準出力に返すため、出力が空かでは判定できない）。
 #   出力は捨てる（--json の出力には、アクセストークンが含まれる。run は、出力をログに記録する）
-if ! sf org display --target-org "$TARGET_ORG" --json > /dev/null 2>&1; then
-    die "prod エイリアスの組織情報を取得できませんでした（sf org display --target-org ${TARGET_ORG} が失敗しました）。"
+if [[ "${GITHUB_ACTIONS:-false}" == "true" ]]; then
+    TARGET_ORG="prod"
+    if ! sf org display --target-org "$TARGET_ORG" --json > /dev/null 2>&1; then
+        die "prod エイリアスの組織情報を取得できませんでした（sf org display --target-org ${TARGET_ORG} が失敗しました）。"
+    fi
+    log "INFO" "接続先組織: ${TARGET_ORG}"
+else
+    _origin_url=$(git remote get-url origin 2>/dev/null) || _origin_url=""  # VAR=$(cmd) のため run 不使用
+    _repo_pair=$(parse_github_remote "$_origin_url") || _repo_pair=""        # VAR=$(cmd) のため run 不使用
+    [[ -n "$_repo_pair" ]] || die "origin の URL から、GitHub のリポジトリを特定できません: ${_origin_url:-（origin なし）}"
+    _repo_full="${_repo_pair%% *}/${_repo_pair##* }"
+    _main_org_id=$(gh variable get SF_ORG_ID_PROD -R "$_repo_full" 2>/dev/null | tr -d '\r') || _main_org_id=""  # VAR=$(cmd) のため run 不使用
+    [[ -n "$_main_org_id" ]] || die "GitHub の Variable SF_ORG_ID_PROD を読み取れませんでした（${_repo_full}）。"
+    TARGET_ORG=""
+    org_find_username_by_id "$_main_org_id" TARGET_ORG \
+        || die "この PC の sf に、組織 ID ${_main_org_id}（SF_ORG_ID_PROD。main の組織）の組織が、ログインされていません。"
+    if ! sf org display --target-org "$TARGET_ORG" --json > /dev/null 2>&1; then
+        die "接続先の組織情報を取得できませんでした（sf org display --target-org ${TARGET_ORG} が失敗しました）。"
+    fi
+    log "INFO" "接続先組織: ${TARGET_ORG}（組織 ID ${_main_org_id}。GitHub の SF_ORG_ID_PROD と一致）"
 fi
-log "INFO" "接続先組織: ${TARGET_ORG}"
+readonly TARGET_ORG
 
 # 常に main ブランチで作業する
 readonly BRANCH_NAME="main"

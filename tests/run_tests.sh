@@ -352,7 +352,7 @@ if [[ "${1:-}" == "--changed" ]]; then
             hooks/pre-push)
                 _changed_tests+=("test_sf-prepush.sh")
                 ;;
-            tests/e2e/*|tests/e2e-test-lib.sh)
+            tests/e2e/*|tests/e2e-test-lib.sh|tests/test_e2e.sh|tests/test_e2e2.sh|.github/workflows/e2e.yml)
                 _changed_tests+=("test_e2e.sh" "test_e2e2.sh")   # e2e のテストは、2 つのファイルに分けてある（共通の部品: tests/e2e-test-lib.sh）
                 ;;
             *.md|tests/test_docs.sh)

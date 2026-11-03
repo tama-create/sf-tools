@@ -992,7 +992,7 @@ cat .sf/config.json                               # ローカル設定ファイ�
 git log --oneline -10                             # 最近のコミット
 gh run list --limit 5                             # CI ワークフロー実行状況
 gh run list --workflow e2e.yml --branch development   # e2e の実行状況（rr の前提の確認。9.3）
-git diff --stat origin/main...development -- bin lib phases hooks templates config   # 配布物のパスの差分（空なら e2e は不要。9.3）
+git diff --stat origin/main...development -- bin lib phases hooks templates config ':!bin/sf-metasync.sh' ':!bin/sf-upgrade.sh' ':!lib/metasync.js' ':!config/metasync-detect.txt'   # e2e の対象のパスの差分（空なら e2e は不要。9.3）
 gh pr list                                        # オープン PR 一覧
 git diff HEAD~1                                   # 直前コミットとの差分
 ```
@@ -1063,12 +1063,14 @@ sf-tools の `main` への反映は、全ユーザーへの配布と同義であ
 
 **配布物のパス**は、利用者が `git pull` で受け取る実行物の `bin/` `lib/` `phases/` `hooks/` `templates/` `config/`。`tests/` `doc/` `.github/workflows/test.yml` `README.md` などは、実行に使われないため、配布物ではない（同じリポジトリにあるが、利用者の動作には影響しない）。
 
-`git diff --stat origin/main...development -- bin lib phases hooks templates config` が**空**（配布物のパスの変更がない）なら、下の表のうち「テスト」だけを確認する（e2e・ワークフローの手動実行は不要）。**空でなければ**、変更内容に応じて、表の該当する項目を実施する。
+**e2e の対象のパス**は、配布物のうち、リリース・削除の流れに関係しない 4 ファイル（`bin/sf-metasync.sh`・`bin/sf-upgrade.sh`・`lib/metasync.js`・`config/metasync-detect.txt`）を除いたもの。`e2e.yml` の `on.push.paths` が、その定義の正本（`!` で除外している）。4 ファイルは、`wf-release.yml`・`wf-propagate.yml` からは、説明のコメントに書かれているだけで、呼び出されない（`sf-upgrade.sh` は、`sf-install.sh` が裏で起動するだけで、失敗しても、リリースに影響しない）。e2e は、1 回で、テスト用の組織（`tamashimon-org`。非公開）の Actions の無料枠（月 2,000 分）を、**約 40 分ぶん**使う（2026-11 の明細: 重いテスト用リポジトリ 37〜39 分 + macOS 側 2〜3 分）。先月（2026-10）は、e2e が作ったリポジトリ 74 個で 1,309 分（65%）を使い、10/23 に枠が尽きた。そのため、リリース・削除に関係しない変更では、e2e を動かさない（`tests/test_e2e.sh` が、`e2e.yml` の除外と、この文書・`CLAUDE.md` の一覧が、そろっていることを確かめる）。使量は、`organizations/<組織の ID>/settings/billing/usage?year=Y&month=M`（リポジトリ別・日別の明細）で確かめられる。
+
+`git diff --stat origin/main...development -- bin lib phases hooks templates config ':!bin/sf-metasync.sh' ':!bin/sf-upgrade.sh' ':!lib/metasync.js' ':!config/metasync-detect.txt'` が**空**（e2e の対象のパスの変更がない）なら、下の表のうち「テスト」だけを確認する（e2e・ワークフローの手動実行は不要）。**空でなければ**、変更内容に応じて、表の該当する項目を実施する。
 
 | 確認項目 | 方法 |
 |---|---|
 | テスト | `development` の最新のコミットで、GitHub Actions の全件テスト・shellcheck・結合テスト L1 が、すべて緑（`gh run list --branch development` で確認する。手元で全件を回さない） |
-| 配布物のパスを変更した場合（必須） | GitHub Actions の `e2e.yml`（`development` への push で自動。9.6）が成功していること。確認: `gh run list --workflow e2e.yml --branch development` で、配布物を変えた最新のコミット以降の実行が success（手元の `bash tests/e2e/run.sh` は、Actions を使えないときだけ）。e2e は、新規の force-* の `sf-init.sh`（Phase 1〜10・`--add-tier`）、`wf-metasync` の手動起動、Hello World の PR（`wf-validate` → マージ → `wf-release` → 削除）、シナリオ（9.6）を通すため、下の 2 行の確認も兼ねる |
+| e2e の対象のパスを変更した場合（必須） | GitHub Actions の `e2e.yml`（`development` への push で自動。9.6）が成功していること。確認: `gh run list --workflow e2e.yml --branch development` で、その対象のパスを変えた最新のコミット以降の実行が success（手元の `bash tests/e2e/run.sh` は、Actions を使えないときだけ）。e2e は、新規の force-* の `sf-init.sh`（Phase 1〜10・`--add-tier`）、`wf-metasync` の手動起動、Hello World の PR（`wf-validate` → マージ → `wf-release` → 削除）、シナリオ（9.6）を通すため、下の 2 行の確認も兼ねる |
 | ワークフロー・`sf-metasync.sh` を変更した場合 | `wf-metasync` を `workflow_dispatch` で起動して成功すること（e2e の `run.sh` が行う。シナリオ `metasync-diff` は、組織の差分が main に入ることまで確認する） |
 | `sf-release.sh` / `wf-validate` / `wf-release` を変更した場合 | デプロイ対象を含む PR で、`wf-validate` が通ること（e2e の Hello World。シナリオ `validate-fail` は、失敗の検出と再検証。手で確かめるときは、動作確認のみの PR はマージせずに閉じる。マージすると `wf-release` が実際にデプロイする） |
 
@@ -1076,7 +1078,7 @@ sf-tools の `main` への反映は、全ユーザーへの配布と同義であ
 
 ### 9.4 リリース（rr）
 
-1. 9.3 の確認が完了している（配布物のパスの変更がないときは、全件テストと CI の成功だけでよい。配布物のパスの変更があるときは、`e2e.yml` の成功も必要）
+1. 9.3 の確認が完了している（e2e の対象のパスの変更がないときは、全件テストと CI の成功だけでよい。あるときは、`e2e.yml` の成功も必要）
 2. 「rr」の指示で、`development` → `main` の PR を作成してマージする（手順は `CLAUDE.md` 1.3.2）
 3. マージ後、`main` の内容を検証環境の force-* でもう一度確認する（配布版のワークフローが sf-tools の `main` を使うことは、e2e のシナリオ `dist-main` で確認できる。rr の直後だけ動く）
 
@@ -1123,7 +1125,7 @@ sf-tools の `main` への反映は、全ユーザーへの配布と同義であ
 - **Secrets（Environment `e2e`。Deployment branches は development と main だけ。すべて Secrets。Variables は使わない）:** `E2E_GH_TOKEN`（Classic PAT: repo / workflow / admin:org / delete_repo）・`E2E_PAT_TOKEN`・`E2E_SLACK_BOT_TOKEN`・`E2E_SFDX_AUTH_URL`・`E2E_SFDX_AUTH_URL_STG`・`E2E_SFDX_AUTH_URL_DEV`・`E2E_OWNER`・`E2E_GH_USER`・`E2E_SLACK_CHANNEL_ID`。sf-tools は公開リポジトリで、ログが公開されるため、秘密ではない値（組織名・ユーザー名・チャンネル ID）も、Secrets にして、ログで伏せる。`E2E_OWNER`・`E2E_GH_USER`・`E2E_SLACK_CHANNEL_ID` も Secrets（2026-10-21 に Variables から移行済み。`e2e.yml` に `vars.` は無い）。
 - **ログの公開対策（`tests/e2e/ci-mask.sh`）:** sf のログイン時の表示などに、組織のユーザー名・組織 ID・My Domain の URL が出る。これは、Secret に登録した値ではないため、GitHub は伏せない。e2e の実行の前に、`ci-mask.sh` が、3 つの組織（main・staging・develop）に一度ログインし、`sf org display --json` から ID（18 桁と 15 桁）・ユーザー名・アクセストークン・URL・ホスト名を調べて、`::add-mask::` で、以降のログで伏せる（調べたあとは、ログインを外す。値は表示しない）。画面に出す処理を足すときは、これが効くか確認すること。手元で e2e を動かすと、Actions の実行と、同じ組織を取り合うため、Actions に移したあとは、手元では動かさない。
 - **シナリオ（L2）の自動実行:** Windows のジョブの最後に、`run.sh` が残したテスト用リポジトリ（`--add-tier` で staging まである）に対して、`scenario.sh -y log-secrets manual-delete update-secret sync-wf cross-os validate-fail metasync-diff propagate-fail restart-org` を動かす（`dist-main` は、「rr の直後だけ」の条件があるため、除く）。macOS のジョブは、続けて、Windows が残したリポジトリの名前（Windows のジョブの `outputs.repo`）で、`scenario.sh -y --repo <名前> cross-os` を、自分の `run.sh`（開始時に、残っているテスト用リポジトリをすべて削除する）より前に動かす（OS 混在の確認）。`update-secret` を `validate-fail` などの前に置くのは、上書きした秘密鍵で、あとのワークフローが JWT ログインできること（形式が壊れていないこと）を、確かめるため。
-- **起動:** 配布物（`bin/` `lib/` `phases/` `hooks/` `templates/` `config/`）・`tests/e2e/`・`e2e.yml` が変わった `development` への push。**週 1 回（月曜 03:00 日本時間・`schedule`）、`main` に対して**（コードを変えていない間の、外側の変化の見張り。schedule は既定のブランチのワークフローで動く。公開リポジトリは、60 日間活動がないと、定期実行が止まる）。手動（`workflow_dispatch`）も使える（手動実行のワークフローは、既定のブランチ（`main`）にあるものしか起動できない。`e2e.yml` は `main` に入っている。push の起動は、どのブランチでも使える）。
+- **起動:** e2e の対象のパス（9.3。配布物のうち、リリース・削除に関係しない 4 ファイルを除いたもの）・`tests/e2e/`・`e2e.yml` が変わった `development` への push。**週 1 回（月曜 03:00 日本時間・`schedule`）、`main` に対して**（コードを変えていない間の、外側の変化の見張り。schedule は既定のブランチのワークフローで動く。公開リポジトリは、60 日間活動がないと、定期実行が止まる）。手動（`workflow_dispatch`）も使える（手動実行のワークフローは、既定のブランチ（`main`）にあるものしか起動できない。`e2e.yml` は `main` に入っている。push の起動は、どのブランチでも使える）。
 - **sf-tools の版（`E2E_TOOLS_BRANCH`。`lib.sh` の `e2e_tools_branch`）:** e2e が `sf-init` の「sf-tools の版の選択」に答える版。`development`（既定。push の起動）は「2（開発版）→ 開発版で続行 Y」で、force-* の Actions が sf-tools の `development` を使い、Variable `SF_TOOLS_BRANCH=development` が付く。`main`（配布版）は「1」だけで、Actions は sf-tools の `main` を使い、Variable は付かない（`run.sh` は「`SF_TOOLS_BRANCH` が未設定」を確認する）。定期実行は `main`、手動実行は入力 `tools_branch`（既定 `development`）で選ぶ。手元の sf-tools が `main` 以外のブランチのまま `main` を選ぶと（手動実行を `development` から動かしたとき）、`sf-init` の Phase 2 が「ブランチ違い」の確認を出すため、`e2e_make_input` が Y を 1 つ足す（手元のブランチは `git symbolic-ref` で調べる）。それ以外の値は、`e2e_make_input` がエラー・`run.sh` が `die`。定期実行は、この仕組みになる前は、毎回「ブランチ違い」の確認に `n` と答えて中断していた（2026-11-02 に判明）。
 
 **中断→再開の確認（`run.sh --interrupt`）:** `sf-init` を、わざと Phase 8 で失敗させ、「続きをやる」で再開してから、いつもの確認（Secret・Variable・ブランチ・ワークフロー・Actions・Hello World）を行う。1 回目: `_interrupt_first_run`。git の shim（`shims/git`）で、main への push を 1 回だけ失敗させ、止まった時点の状態（リポジトリ・main・進捗）を `MID_*` に記録する（再開すると変わるため）。2 回目の入力: [オーナーの選択・XXXX・確認] → 管理者向けの警告の確認 `Y` → 「続きをやる」`1` → Phase 10 のログイン先（段階の数だけ `1`）。確認: 1 回目が失敗した・shim が push を止めた・失敗の画面が「続きをやる」を案内した・リポジトリはある・main はない・進捗は 7・PAT / Slack Token / 認証 URL が出ていない・再開の画面に「前回のセットアップは」が出た・初回コミットが 1 つ。`--resume` とは同時に指定できない。共通の確認は `read_key` が 1 文字ずつ読むことに注意（改行も 1 回の読み取りで、空なら再入力になる）。

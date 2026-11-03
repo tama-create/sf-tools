@@ -24,11 +24,11 @@
 | 変更中 | `run` ラッパー必須・日本語コメント・UTF-8/LF 維持 |
 | 変更後 | **変えた箇所のコメント（冒頭コメント・コード本体の中のコメント）を見直す（2.5）。** 手元は `bash tests/run_tests.sh --changed`（変えたファイルのテスト）だけ → PASS したら mm を依頼。**全件は手元で回さない（CI が正）** |
 | mm 後 | push で、GitHub Actions が全件（Windows・macOS・Linux）と shellcheck を自動で動かす。**Claude が結果を確認して報告する。赤なら直して、もう一度 mm を依頼する**（目安 約 11 分。実績 7〜20 分。ランナーの空き待ちで延びる） |
-| 検証 | **e2e は GitHub Actions（`e2e.yml`）の結果が正。** 配布物（下記）・`tests/e2e/`・`e2e.yml` が変わった `development` への push で、自動で動く（目安。実績: Windows の全部 25〜50 分 → macOS のクライアント側 5〜6 分。前の実行が終わるまで待つ）。**Claude が結果を確認して報告する。手元では動かさない**（同じ 3 つの組織を取り合う。確認の内容は `doc/dev-reference.md` 9.6）。ユーザーに手動の確認を頼むのは、e2e で見えないことだけ |
+| 検証 | **e2e は GitHub Actions（`e2e.yml`）の結果が正。** e2e の対象のパス（下記）・`tests/e2e/`・`e2e.yml` が変わった `development` への push で、自動で動く（目安。実績: Windows の全部 25〜50 分 → macOS のクライアント側 5〜6 分。前の実行が終わるまで待つ）。**Claude が結果を確認して報告する。手元では動かさない**（同じ 3 つの組織を取り合う。確認の内容は `doc/dev-reference.md` 9.6）。ユーザーに手動の確認を頼むのは、e2e で見えないことだけ |
 | リリース | CI 全緑と検証 OK の報告後に rr を依頼 |
 
 > **mm の前に、`--changed` の PASS は必須。PASS 確認なしの mm 依頼は禁止。全件は、mm 後の CI の結果が正（手元の Windows は遅く、全件は 2 時間以上かかることもある。手元で全件が必要なときだけ、WSL で `run_tests.sh`）。CI が赤のまま、PR・rr を進めない。**
-> **rr の前に、CI の全件が緑（`development` の最新のコミットで）が必須。さらに、`main` との差分に配布物のパス（`bin/` `lib/` `phases/` `hooks/` `templates/` `config/`）が含まれるときは、e2e（Actions の `e2e.yml`）が、配布物を変えた最新のコミット以降で成功していることも必須**（確認: `gh run list --workflow e2e.yml --branch development`）。** 配布物のパスの変更がなく、`tests/` `doc/` `.github/workflows/test.yml` などだけの変更なら、e2e は不要（確認: `git diff --stat origin/main...development -- bin lib phases hooks templates config` が空）。必須の項目が欠けた rr 依頼は断ること。
+> **rr の前に、CI の全件が緑（`development` の最新のコミットで）が必須。さらに、`main` との差分に **e2e の対象のパス**（配布物の `bin/` `lib/` `phases/` `hooks/` `templates/` `config/` のうち、リリース・削除に関係しない 4 ファイル `bin/sf-metasync.sh` `bin/sf-upgrade.sh` `lib/metasync.js` `config/metasync-detect.txt` を除いたもの。`e2e.yml` の `on.push.paths` と同じ。詳細は `doc/dev-reference.md` 9.3）が含まれるときは、e2e（Actions の `e2e.yml`）が、その対象のパスを変えた最新のコミット以降で成功していることも必須**（確認: `gh run list --workflow e2e.yml --branch development`）。** e2e の対象のパスの変更がなく、`tests/` `doc/` `.github/workflows/test.yml` や、上の 4 ファイルなどだけの変更なら、e2e は不要（確認: `git diff --stat origin/main...development -- bin lib phases hooks templates config ':!bin/sf-metasync.sh' ':!bin/sf-upgrade.sh' ':!lib/metasync.js' ':!config/metasync-detect.txt'` が空）。**e2e は、1 回で、Actions の無料枠（テスト用の組織の月 2,000 分）を約 40 分ぶん使う。リリース・削除に関係しない変更では、動かさない。関係する変更は、まとめて 1 回の mm・1 回の rr にする。**必須の項目が欠けた rr 依頼は断ること。
 > **変更に e2e の確認が足りないときは、e2e のほうを広げる**（手動の検証を、ユーザーに頼まない）。
 > **無言の時間を作らない（止まって見えるのは、サボりとみなす）。** ユーザーの画面には、ツールの中身も裏の処理も見えない。作業の開始時・調査や待ちに入る前に、今していること・待っていること・次にすることを 1〜2 行で書く。30 秒以上の処理は、ターミナルのタブでログの流れを見せ、途中経過をこまめに伝える。判断を求めているときは「指示待ち」とはっきり書き、完了したらすぐ結果を伝える（先に状況を聞かれたら失敗）。
 

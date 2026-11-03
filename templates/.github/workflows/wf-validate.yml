@@ -97,7 +97,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - id: check
         name: デプロイ対象ファイルを確認
         env:
@@ -134,15 +134,17 @@ jobs:
       # Step 1: ソースコードのチェックアウト（PR のマージ結果。pull_request の既定）
       # --------------------------------------------------------------------------
       - name: ソースコードを取得
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # --------------------------------------------------------------------------
       # Step 2: Node.js のセットアップ
       # --------------------------------------------------------------------------
       - name: Node.js をインストール
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: '22'
+          # package.json の packageManager による自動キャッシュは使わない（v5 以降の既定。sf は npm install -g で入れるため不要。利用者の package.json で動きが変わらないようにする）
+          package-manager-cache: false
 
       # --------------------------------------------------------------------------
       # Step 3: Salesforce CLI のインストール
@@ -233,7 +235,7 @@ jobs:
       # --------------------------------------------------------------------------
       - name: 検証結果を PR に投稿
         if: always()
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         env:
           # ブランチ名などは、JavaScript のソースに直接埋め込まず、環境変数で受け取る
           HEAD_REF: ${{ github.event.pull_request.head.ref || github.ref_name }}

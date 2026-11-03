@@ -49,6 +49,30 @@ test_no_changes() {
     teardown "$td" "$mb"
 }
 
+# 表（metadata-dirs.txt）にない種類の警告は、1 行にまとまる（重複は除く）。しかも、警告として出る（[INFO] [WARNING] の二重にしない）
+# （以前は、種類ごとに 1 行ずつ、40 行以上出て、「[INFO] [WARNING] …」と二重になっていた）。ログファイルは色なしなので、そこで確かめる
+test_unmapped_types_warning_is_one_line() {
+    local td mb mh
+    setup_std_env td mb mh
+    create_all_mocks "$mb"
+    printf 'NoSuchTypeA\nNoSuchTypeB\nNoSuchTypeA\n' >> "$td/sf-tools/config/metadata.txt"   # 表にない種類（NoSuchTypeA は重複）
+
+    export MOCK_GIT_BRANCH="main"
+    export MOCK_GIT_DIFF_EXIT=0
+    export MOCK_SF_ORG_JSON='{"result":{"alias":"testorg","id":"00D000000000001AAA"}}'
+
+    echo "Y" | ( cd "$td" && PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-metasync.sh" ) > /dev/null 2>&1
+
+    local log_file="$td/sf-tools/logs/sf-metasync.log"
+    assert_file_contains "$log_file" "[WARNING] 表（--dirs-table）にない種類が 2 個あります" "表にない種類 → 重複を除いて、個数を 1 行に出す"
+    assert_file_contains "$log_file" "NoSuchTypeA、NoSuchTypeB" "表にない種類 → 名前は省略せずに、1 行に並べる"
+    local n; n=$(grep -c '表（--dirs-table）にない種類' "$log_file")
+    assert_equals "$n" "1" "表にない種類の警告は、1 行だけ（種類ごとに出さない）"
+    assert_file_not_contains "$log_file" "[INFO] [WARNING]" "警告は、[INFO] [WARNING] の二重にならない"
+    unset MOCK_GIT_BRANCH MOCK_GIT_DIFF_EXIT MOCK_SF_ORG_JSON
+    teardown "$td" "$mb"
+}
+
 # main 以外のブランチ → main へ自動切替して正常終了
 test_non_main_branch_switches() {
     local td mb mh
@@ -199,6 +223,7 @@ test_unpushed_commit_pushed() {
 
 test_changes_are_committed
 test_no_changes
+test_unmapped_types_warning_is_one_line
 test_unpushed_commit_pushed
 test_non_main_branch_switches
 test_staging_fail_dev_merges_main
@@ -235,9 +260,9 @@ EOF
     chmod +x "$mb/git"
 }
 
-# 回帰: prod の組織情報を取得できない（sf org display が失敗）→ 何も変更せずに中断する
+# 回帰: 接続先の組織の情報を取得できない（sf org display が失敗）→ 何も変更せずに中断する
 #   以前は、run の出力（エラーの文言）が空でないため、確認を素通りし、main への切替・取得まで進んでいた
-test_prod_not_registered_aborts_early() {
+test_target_org_display_fails_aborts_early() {
     local td mb mh out ec
     setup_std_env td mb mh
     create_all_mocks "$mb"
@@ -248,12 +273,86 @@ test_prod_not_registered_aborts_early() {
     out=$( printf 'Y\nY\n' | ( cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-metasync.sh" ) 2>&1 )
     ec=$?
     assert_exit_fail "$ec" "sf org display が失敗 → 中断（終了コード 0 以外）"
-    assert_output_contains "$out" "prod エイリアスの組織情報を取得できませんでした" "sf org display が失敗 → 理由が表示される"
+    assert_output_contains "$out" "接続先の組織情報を取得できませんでした" "sf org display が失敗 → 理由が表示される"
     assert_file_not_contains "$MOCK_CALL_LOG" "git stash" "sf org display が失敗 → stash しない"
     assert_file_not_contains "$MOCK_CALL_LOG" "git checkout" "sf org display が失敗 → ブランチを切り替えない"
     assert_file_not_contains "$MOCK_CALL_LOG" "sf project retrieve" "sf org display が失敗 → 組織から取得しない"
     unset MOCK_GIT_BRANCH MOCK_GIT_DIFF_EXIT MOCK_SF_ORG_DISPLAY_EXIT
     teardown "$td" "$mb" "$mh"
+}
+
+# 接続先は、エイリアスの名前ではなく、組織 ID で決める（手元で実行するとき）。GitHub の SF_ORG_ID_PROD（1 番目 = main の組織の ID）と
+# 同じ ID の組織が、どんな名前でログインされていても、そのユーザー名が取得の接続先になる（prod エイリアスは、なくてよい）
+test_target_org_resolved_by_org_id() {
+    local td mb mh; _ms_env td mb mh
+    export MOCK_GH_ORG_ID_PROD="00D5g00000FDr1YEAT" MOCK_SF_ORG_LIST_ID="00D5g00000FDr1YEAT" MOCK_SF_ORG_LIST_USER="main-org-user@example.com"
+    _ms_run 'Y\nY\n'
+    assert_exit_ok "$_MS_RC" "接続先（組織 ID）: 一致する組織がある → 正常終了"
+    assert_file_contains "$MOCK_CALL_LOG" "gh variable get SF_ORG_ID_PROD" "接続先（組織 ID）: GitHub の SF_ORG_ID_PROD を読む"
+    assert_file_contains "$MOCK_CALL_LOG" "sf project retrieve start --target-org main-org-user@example.com" "接続先（組織 ID）: 一致した組織のユーザー名で取得する"
+    assert_file_not_contains "$MOCK_CALL_LOG" "--target-org prod" "接続先（組織 ID）: prod エイリアスは使わない"
+    assert_output_contains "$_MS_OUT" "接続先組織: main-org-user@example.com" "接続先（組織 ID）: 接続先を表示する"
+    _ms_unset; teardown "$td" "$mb" "$mh"
+}
+
+# 組織 ID は、15 文字と 18 文字の表記の違いを吸収する（上位 15 文字で比べる）
+test_target_org_org_id_15_vs_18_chars() {
+    local td mb mh; _ms_env td mb mh
+    export MOCK_GH_ORG_ID_PROD="00D5g00000FDr1YEAT" MOCK_SF_ORG_LIST_ID="00D5g00000FDr1Y" MOCK_SF_ORG_LIST_USER="main-org-user@example.com"
+    _ms_run 'Y\nY\n'
+    assert_exit_ok "$_MS_RC" "接続先（組織 ID）: 18 文字と 15 文字の表記の違いは、一致とみなす → 正常終了"
+    assert_file_contains "$MOCK_CALL_LOG" "sf project retrieve start --target-org main-org-user@example.com" "接続先（組織 ID）: 表記が違っても、同じ組織として取得する"
+    _ms_unset; teardown "$td" "$mb" "$mh"
+}
+
+# 回帰（取り違えの防止）: main の組織の ID と同じ ID の組織が、この PC の sf にログインされていない → 何も変更せずに中断する
+#   （prod という名前の別の組織があっても、推測して進まない）
+test_target_org_not_logged_in_aborts() {
+    local td mb mh out ec
+    setup_std_env td mb mh
+    create_all_mocks "$mb"
+    export MOCK_GIT_BRANCH="feature/test" MOCK_GIT_DIFF_EXIT=1
+    export MOCK_GH_ORG_ID_PROD="00D5g00000FDr1YEAT" MOCK_SF_ORG_LIST_ID="00D999999999999AAA"   # 一覧にある組織は、別の組織
+
+    out=$( printf 'Y\nY\n' | ( cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-metasync.sh" ) 2>&1 )
+    ec=$?
+    assert_exit_fail "$ec" "接続先（組織 ID）: 一致する組織がない → 中断（終了コード 0 以外）"
+    assert_output_contains "$out" "ログインされていません" "接続先（組織 ID）: 一致する組織がない → 理由が表示される"
+    assert_output_contains "$out" "00D5g00000FDr1YEAT" "接続先（組織 ID）: 探した組織 ID が表示される"
+    assert_file_not_contains "$MOCK_CALL_LOG" "git stash" "接続先（組織 ID）: 一致する組織がない → stash しない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "git checkout" "接続先（組織 ID）: 一致する組織がない → ブランチを切り替えない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "sf project retrieve" "接続先（組織 ID）: 一致する組織がない → 別の組織から取得しない"
+    unset MOCK_GIT_BRANCH MOCK_GIT_DIFF_EXIT MOCK_GH_ORG_ID_PROD MOCK_SF_ORG_LIST_ID   # _ms_unset は、この塊より後に定義されるため使えない
+    teardown "$td" "$mb" "$mh"
+}
+
+# 回帰: GitHub の SF_ORG_ID_PROD を読み取れない → 何も変更せずに中断する（prod エイリアスには、フォールバックしない）
+test_target_org_id_variable_unreadable_aborts() {
+    local td mb mh out ec
+    setup_std_env td mb mh
+    create_all_mocks "$mb"
+    export MOCK_GIT_BRANCH="feature/test" MOCK_GIT_DIFF_EXIT=1 MOCK_GH_ORG_ID_PROD_EXIT=1
+
+    out=$( printf 'Y\nY\n' | ( cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-metasync.sh" ) 2>&1 )
+    ec=$?
+    assert_exit_fail "$ec" "接続先（組織 ID）: SF_ORG_ID_PROD を読めない → 中断（終了コード 0 以外）"
+    assert_output_contains "$out" "SF_ORG_ID_PROD を読み取れませんでした" "接続先（組織 ID）: SF_ORG_ID_PROD を読めない → 理由が表示される"
+    assert_file_not_contains "$MOCK_CALL_LOG" "git checkout" "接続先（組織 ID）: SF_ORG_ID_PROD を読めない → ブランチを切り替えない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "sf project retrieve" "接続先（組織 ID）: SF_ORG_ID_PROD を読めない → 取得しない（prod にフォールバックしない）"
+    unset MOCK_GIT_BRANCH MOCK_GIT_DIFF_EXIT MOCK_GH_ORG_ID_PROD_EXIT   # _ms_unset は、この塊より後に定義されるため使えない
+    teardown "$td" "$mb" "$mh"
+}
+
+# GitHub Actions 上では、ワークフローが JWT で作る prod エイリアスを使い、gh（GitHub の Variable）は見ない
+test_target_org_actions_uses_prod_alias() {
+    local td mb mh; _ms_env td mb mh
+    export MOCK_GH_ORG_ID_PROD_EXIT=1   # 手元の方式なら、ここで中断する。Actions 上では、読みにいかないので、影響しない
+    _MS_OUT=$( ( cd "$td" && HOME="$mh" PATH="$mb:$PATH" GITHUB_ACTIONS=true bash "$SF_TOOLS_DIR/bin/sf-metasync.sh" ) 2>&1 )
+    _MS_RC=$?
+    assert_exit_ok "$_MS_RC" "接続先（Actions）: 正常終了"
+    assert_file_contains "$MOCK_CALL_LOG" "sf project retrieve start --target-org prod" "接続先（Actions）: prod エイリアスで取得する"
+    assert_file_not_contains "$MOCK_CALL_LOG" "gh variable get SF_ORG_ID_PROD" "接続先（Actions）: GitHub の Variable は読まない"
+    _ms_unset; teardown "$td" "$mb" "$mh"
 }
 
 # 回帰: sf org display --json の出力（アクセストークンを含む）を、ログに残さない（以前は、run がログに記録していた）
@@ -313,7 +412,9 @@ test_outside_force_dir
 test_untracked_files_abort_locally
 test_stash_pop_on_exit
 test_sf_cli_abort
-test_prod_not_registered_aborts_early
+test_target_org_display_fails_aborts_early
+test_target_org_not_logged_in_aborts
+test_target_org_id_variable_unreadable_aborts
 test_org_display_output_not_logged
 test_detached_head_aborts
 test_metadata_crlf
@@ -329,7 +430,8 @@ _ms_env() {   # 引数: 変数名（td）・変数名（mb）・変数名（mh�
     export MOCK_SF_ORG_JSON='{"result":{"alias":"testorg","id":"00D000000000001AAA"}}'
 }
 _ms_unset() { unset MOCK_GIT_BRANCH MOCK_GIT_DIFF_EXIT MOCK_GIT_DIFF_EXIT_2ND MOCK_SF_ORG_JSON MOCK_SF_RETRIEVE_FILES MOCK_SF_RETRIEVE_EXIT \
-    MOCK_SF_RETRIEVE_ERR MOCK_SF_RETRIEVE_FAIL_ONCE MOCK_SF_RETRIEVE_JSON MOCK_GIT_COMMIT_EXIT SF_METASYNC_RETRY_WAIT; }
+    MOCK_SF_RETRIEVE_ERR MOCK_SF_RETRIEVE_FAIL_ONCE MOCK_SF_RETRIEVE_JSON MOCK_GIT_COMMIT_EXIT SF_METASYNC_RETRY_WAIT \
+    MOCK_SF_ORG_LIST_ID MOCK_SF_ORG_LIST_USER MOCK_SF_ORG_LIST_JSON MOCK_SF_ORG_LIST_EXIT MOCK_GH_ORG_ID_PROD MOCK_GH_ORG_ID_PROD_EXIT; }
 # 実行する。引数: 標準入力 追加の環境変数と引数…（先頭の入力以外は bash に渡す）。結果: $_MS_OUT・$_MS_RC
 _ms_run() {
     local input="$1"; shift
@@ -345,7 +447,7 @@ test_mirror_basic() {
     _ms_run 'Y\nY\n'
     assert_exit_ok "$_MS_RC" "鏡像: 追加あり → 正常終了"
     assert_file_not_contains "$MOCK_CALL_LOG" "sgd" "鏡像: sf sgd（sfdx-git-delta）を呼ばない"
-    assert_file_contains "$MOCK_CALL_LOG" "sf project retrieve start --target-org prod --ignore-conflicts --json --metadata ApexClass" "鏡像: 取得は --json で、metadata.txt の種類を指定する"
+    assert_file_contains "$MOCK_CALL_LOG" "sf project retrieve start --target-org metasync-test@example.com --ignore-conflicts --json --metadata ApexClass" "鏡像: 取得は --json で、metadata.txt の種類を指定する（接続先は、組織 ID で決めた組織のユーザー名）"
     [[ -f "$td/force-app/main/default/classes/New.cls" ]] && pass "鏡像: 取得結果の追加が、作業ツリーに入る" || fail "鏡像: 取得結果の追加が、作業ツリーに入る"
     assert_file_contains "$MOCK_CALL_LOG" "git add -A -- force-app" "鏡像: パッケージのフォルダだけをステージする"
     assert_file_contains "$MOCK_CALL_LOG" "git commit" "鏡像: commit する"
@@ -635,6 +737,9 @@ test_detect_state_restored_on_failure() {
 }
 
 test_mirror_basic
+test_target_org_resolved_by_org_id
+test_target_org_org_id_15_vs_18_chars
+test_target_org_actions_uses_prod_alias
 test_mirror_deletes
 test_retrieve_failure_and_retry
 test_dry_run_options

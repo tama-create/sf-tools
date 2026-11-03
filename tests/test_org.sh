@@ -9,6 +9,7 @@
 #   3. org_choose_login_url  : 3 択（Enter=Sandbox・1・2・3 の URL 入力・q）/ 環境変数の指定 / 不正な URL の再入力
 #   4. org_read_info / org_kind : 本番・Sandbox・Developer Edition・Trial・読み取り失敗（判定不能）
 #   4b. org_local_release_check : 本番（または確認できない）組織を、ローカルからのリリースから止める
+#   4c. org_find_username_by_id : 組織 ID（上位 15 文字）で、ログイン済みの組織を探す。エイリアスの名前に頼らない
 #   5. org_guard             : 本番は main のみ（staging・develop は拒否）/ 判定不能は確認
 #   6. org_save              : 組織の情報を GitHub Variables に保存
 # ==============================================================================
@@ -135,6 +136,41 @@ test_local_release_check() {
     assert_file_contains "$STD" "rc=2" "OrganizationType が無い → 戻り値 2"; _oc
 }
 
+# org_find_username_by_id: ログイン済みの組織から、組織 ID が一致するものを探す（エイリアスの名前に頼らない）
+test_find_username_by_id() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] org_find_username_by_id: 組織 ID で、ログイン済みの組織を探す${CLR_RST}"
+    local two='{"status":0,"result":{"nonScratchOrgs":[{"orgId":"00DAAAAAAAAAAAAAAA","username":"a@example.com","alias":"prod"},{"orgId":"00D5g00000FDr1YEAT","username":"b@example.com"}]}}'
+    # 一致する 2 件目（エイリアスなし）が見つかる。同じ名前（prod）の別の組織には、引き当てない
+    MOCK_SF_ORG_LIST_JSON="$two" _o 'org_find_username_by_id 00D5g00000FDr1YEAT U; echo "rc=$? U=$U"'
+    assert_file_contains "$STD" "rc=0 U=b@example.com" "ID が一致する組織を見つける（エイリアスがなくても。名前が prod の別の組織は、選ばない）"; _oc
+    # 15 文字と 18 文字の表記の違いは、一致とみなす
+    MOCK_SF_ORG_LIST_JSON="$two" _o 'org_find_username_by_id 00D5g00000FDr1Y U; echo "rc=$? U=$U"'
+    assert_file_contains "$STD" "rc=0 U=b@example.com" "15 文字で渡しても、18 文字の組織と一致する"; _oc
+    # 種類の違う一覧（other だけにある）も探す
+    MOCK_SF_ORG_LIST_JSON='{"status":0,"result":{"other":[{"orgId":"00D5g00000FDr1YEAT","username":"c@example.com"}]}}' \
+        _o 'org_find_username_by_id 00D5g00000FDr1YEAT U; echo "rc=$? U=$U"'
+    assert_file_contains "$STD" "rc=0 U=c@example.com" "other の一覧にある組織も、見つける"; _oc
+    # 一致しない → 戻り値 1・VAR は空（推測しない）
+    MOCK_SF_ORG_LIST_JSON="$two" _o 'U=old; org_find_username_by_id 00D999999999999AAA U; echo "rc=$? U=[$U]"'
+    assert_file_contains "$STD" "rc=1 U=[]" "一致する組織がない → 戻り値 1（VAR は、空にする）"; _oc
+    # 大文字小文字は、区別する
+    MOCK_SF_ORG_LIST_JSON="$two" _o 'org_find_username_by_id 00d5g00000fdr1yeat U; echo "rc=$?"'
+    assert_file_contains "$STD" "rc=1" "大文字小文字が違う ID は、一致としない"; _oc
+    # ID が短い（15 文字未満）・空 → 戻り値 1
+    MOCK_SF_ORG_LIST_JSON="$two" _o 'org_find_username_by_id 00D5g U; echo "rc=$?"'
+    assert_file_contains "$STD" "rc=1" "ID が短すぎる → 戻り値 1（前方一致で、別の組織に当たらない）"; _oc
+    MOCK_SF_ORG_LIST_JSON="$two" _o 'org_find_username_by_id "" U; echo "rc=$?"'
+    assert_file_contains "$STD" "rc=1" "ID が空 → 戻り値 1"; _oc
+    # 一覧の取得の失敗・読めない出力 → 戻り値 1
+    MOCK_SF_ORG_LIST_EXIT=1 _o 'org_find_username_by_id 00D5g00000FDr1YEAT U; echo "rc=$?"'
+    assert_file_contains "$STD" "rc=1" "sf org list が失敗 → 戻り値 1"; _oc
+    MOCK_SF_ORG_LIST_JSON='not json' _o 'org_find_username_by_id 00D5g00000FDr1YEAT U; echo "rc=$?"'
+    assert_file_contains "$STD" "rc=1" "一覧が JSON として読めない → 戻り値 1"; _oc
+    # ユーザー名がない要素は、読み飛ばす
+    MOCK_SF_ORG_LIST_JSON='{"status":0,"result":{"nonScratchOrgs":[{"orgId":"00D5g00000FDr1YEAT"}]}}' _o 'org_find_username_by_id 00D5g00000FDr1YEAT U; echo "rc=$?"'
+    assert_file_contains "$STD" "rc=1" "ユーザー名がない要素は、一致としない"; _oc
+}
+
 test_guard() {
     echo ""; echo -e "${CLR_HEAD}[TEST] org_guard: 本番は main のみ（F8）${CLR_RST}"
     local prod='{"status":0,"result":{"records":[{"Id":"00D1","Name":"Acme Prod","IsSandbox":false,"OrganizationType":"Enterprise Edition","TrialExpirationDate":null}]}}'
@@ -200,6 +236,7 @@ test_jwt_test
 test_choose
 test_kind
 test_local_release_check
+test_find_username_by_id
 test_guard
 test_save
 

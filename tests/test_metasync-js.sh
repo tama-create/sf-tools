@@ -192,6 +192,26 @@ test_guards() {
     assert_equals "$(_op D)" "0" "S2: 使えない種類と、読めない報告が混在 → 読めない報告のぶん、その回の削除は、すべて保留"
     assert_file_contains "$_TD/plan.tsv" "H	$ROOT/classes/Gone.cls	S2" "S2: 混在 → 保留（S2）"
     rm -rf "$_TD"
+
+    # 表示: 使えない種類は、重複を除いて、名前を省略せずに、1 行にまとめる（種類ごとに 1 行ずつ出さない）
+    _mk
+    _w r classes/Gone.cls 'g\n'; _w f classes/Other.cls 'o\n'
+    echo '{"status":0,"result":{"messages":[{"problem":"Entity type '"'"'GlobalPicklist'"'"' is not available in this api version"},{"problem":"Entity type '"'"'Translations'"'"' is not available in this organization"},{"problem":"Entity type '"'"'GlobalPicklist'"'"' is not available in this organization"}]}}' > "$_TD/ret.json"
+    _plan --retrieve-json "$_TD/ret.json"
+    assert_output_contains "$_OUT" "使えない種類が 2 個あります" "表示: 使えない種類は、重複を除いた個数を出す"
+    assert_output_contains "$_OUT" "GlobalPicklist、Translations" "表示: 使えない種類は、名前を省略せずに、1 行に並べる"
+    assert_equals "$(printf '%s\n' "$_OUT" | grep -c '使えない種類')" "1" "表示: 使えない種類は、1 行だけ（種類ごとに出さない）"
+    rm -rf "$_TD"
+
+    # 表示: 表（metadata-dirs.txt）にない種類の警告も、重複を除いて、1 行にまとめる（先頭は [WARNING]）
+    _mk
+    printf 'ApexClass\nNoSuchTypeA\nNoSuchTypeB\nNoSuchTypeA\n' > "$_TD/types.txt"
+    _w r classes/Same.cls 's\n'; _w f classes/Same.cls 's\n'
+    _plan
+    assert_output_contains "$_OUT" "^\\[WARNING\\] 表（--dirs-table）にない種類が 2 個あります" "表示: 表にない種類は、重複を除いた個数を、警告の 1 行に出す（行頭が [WARNING]）"
+    assert_output_contains "$_OUT" "NoSuchTypeA、NoSuchTypeB" "表示: 表にない種類は、名前を省略せずに、1 行に並べる"
+    assert_equals "$(printf '%s\n' "$_OUT" | grep -c '表（--dirs-table）にない種類')" "1" "表示: 表にない種類の警告は、1 行だけ"
+    rm -rf "$_TD"
 }
 
 # --- 5. 中断する条件・引数 ---

@@ -338,7 +338,11 @@ conclusion=%s
     "variable set")
         _v=""; _p=""; for _a in "$@"; do [[ "$_p" == "--body" || "$_p" == "-b" ]] && _v="$_a"; _p="$_a"; done
         mkdir -p "$IT_STATE/variables"; printf "%s" "$_v" > "$IT_STATE/variables/$3"; exit 0 ;;
-    "variable get")  [[ -f "$IT_STATE/variables/$3" ]] && { cat "$IT_STATE/variables/$3"; exit 0; }; echo "HTTP 404: Not Found" >&2; exit 1 ;;
+    "variable get")
+        [[ -f "$IT_STATE/variables/$3" ]] && { cat "$IT_STATE/variables/$3"; exit 0; }
+        # SF_ORG_ID_PROD（main の組織の ID）の既定: sf の fake（org list・org display）の組織 ID と同じ。変えるときは variables/SF_ORG_ID_PROD に書く
+        [[ "$3" == "SF_ORG_ID_PROD" ]] && { echo "00D000000000001AAA"; exit 0; }
+        echo "HTTP 404: Not Found" >&2; exit 1 ;;
     "variable list") ls "$IT_STATE/variables" 2>/dev/null; exit 0 ;;
 esac
 _it_unsupported gh "$*"
@@ -355,7 +359,9 @@ _alias=$(cat "$IT_STATE/sf.alias" 2>/dev/null || true)
 case "$1 $2" in
     "org list")
         # sf-metasync の変更の検知の一覧（sf org list metadata ...）: 空の一覧。変更の有無は、履歴の件数（state/sf.audit）で動かす
-        [[ "$3" == "metadata" ]] && { echo '{"status":0,"result":[]}'; exit 0; } ;;
+        [[ "$3" == "metadata" ]] && { echo '{"status":0,"result":[]}'; exit 0; }
+        # ログイン済みの組織の一覧（sf org list --json。sf-metasync が、組織 ID で接続先を決める）: org display と同じ組織 1 件
+        case "$*" in *"--json"*) echo '{"status":0,"result":{"nonScratchOrgs":[{"orgId":"00D000000000001AAA","username":"it@example.invalid"}]}}'; exit 0 ;; esac ;;
     "data query")
         # 設定変更の履歴の件数（sf-metasync の変更の検知）: state/sf.audit の数（なければ 0）
         case "$*" in *"SetupAuditTrail"*) echo "{\"status\":0,\"result\":{\"totalSize\":$(cat "$IT_STATE/sf.audit" 2>/dev/null || echo 0),\"done\":true,\"records\":[]}}"; exit 0 ;; esac
@@ -486,10 +492,10 @@ GITEOF
 }
 
 # fake の呼び出しの記録から、「外部へ書き込む」呼び出しだけを出す（確認で止めたはずのコマンドが、書き込んでいないことの確認用）
-#   gh: secret / variable / workflow / release / repo create・delete・edit / pr create・merge・close・comment・edit / api の書き込み
+#   gh: secret / variable の set・delete（variable の get・list は、読み取りなので、数えない）/ workflow / release / repo create・delete・edit / pr create・merge・close・comment・edit / api の書き込み
 #   sf: dry-run でない deploy / org login・logout
 it_mutating_calls() {
-    grep -E '^gh (secret|variable|workflow|release|label|ruleset) |^gh repo (create|delete|edit|rename) |^gh pr (create|merge|close|comment|edit|review) |^gh api .*(--method|-X) *(POST|PUT|PATCH|DELETE)|^gh api .*(-f|-F|--field|--raw-field) |^sf org (login|logout) ' "$IT_STATE/calls.log" 2>/dev/null
+    grep -E '^gh (secret|workflow|release|label|ruleset) |^gh variable (set|delete|remove) |^gh repo (create|delete|edit|rename) |^gh pr (create|merge|close|comment|edit|review) |^gh api .*(--method|-X) *(POST|PUT|PATCH|DELETE)|^gh api .*(-f|-F|--field|--raw-field) |^sf org (login|logout) ' "$IT_STATE/calls.log" 2>/dev/null
     grep -E '^sf project deploy start ' "$IT_STATE/calls.log" 2>/dev/null | grep -v -- '--dry-run'
     return 0
 }

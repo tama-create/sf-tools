@@ -520,7 +520,9 @@ get_branch_list() {
 # 【背景】
 #   共有環境（main・staging・develop）へのリリースは、ローカルの PC からはできない。
 #   GitHub にコミットし、レビューを通して、GitHub Actions で行う。
-#   sf-init は、組織のエイリアスとして prod / staging / develop を付ける（prod は main の組織のエイリアス名。組織の種類は、問わない）。
+#   prod / staging / develop は、sf-tools が、共有環境の組織（prod は main の組織。組織の種類は、問わない）に使う名前
+#   （GitHub Actions のワークフローが、JWT ログインで、この名前の組織を作る）。sf-init は、この PC の sf には、エイリアスを残さない
+#   （接続テストは、一時的なホームの中で行う。運用中のエイリアスと衝突させないため）。
 #   この名前を予約名とし、ローカルからのリリースを禁止する（sf-release.sh / sf-deploy.sh）。
 #   main は、ブランチ名と同じ名前（互換のため、予約名に含める）。
 #   予約名以外の名前を付けた本番組織は、名前では止められないため、sf-release.sh / sf-deploy.sh は、組織の種類も確認する

@@ -16,8 +16,8 @@ sf-tools の `main` ブランチは、**そのまま全ユーザーに配布さ�
 | 手順 | 内容 |
 |---|---|
 | 1. 修正 | `development` ブランチで修正し、変えた箇所のコメント（冒頭コメント・コード本体の中のコメント）を見直し、変えたファイルのテスト（`bash tests/run_tests.sh --changed`）を PASS させる（`mm`：`development` までコミット・push）。push すると、GitHub Actions（`test.yml`）が、全件のテスト・結合テスト L1・shellcheck を、Windows・macOS・Linux で自動で動かす（目安 約 11 分。実績 7〜20 分）。赤なら直す。手元で全件は回さない |
-| 2. 検証 | 実環境の動作を確認する。配布物（`bin/` `lib/` `phases/` `hooks/` `templates/` `config/`）・`tests/e2e/`・`e2e.yml` を変えた `development` への push で、GitHub Actions の `e2e.yml` が、自動で実行する（下記の e2e。目安。実績: Windows 25〜50 分 → macOS 5〜6 分）。結果は、`gh run list --workflow e2e.yml --branch development` で確認する。配布物を変えていない（`git diff --stat origin/main...development -- bin lib phases hooks templates config` が空）なら、e2e は不要 |
-| 3. リリース | `development` の最新のコミットで CI が全緑、配布物を変えたときは e2e の成功も確認してから、`development` → `main` の PR を作ってマージする（`rr`）。PR の CI（必須チェック 11 個）が緑になるまで、マージできない。これが配布になる。マージの直後は、e2e のシナリオ `dist-main` で、配布版のワークフローが sf-tools の `main` を使うことを確かめられる |
+| 2. 検証 | 実環境の動作を確認する。e2e の対象のパス（配布物の `bin/` `lib/` `phases/` `hooks/` `templates/` `config/` のうち、リリース・削除に関係しない `bin/sf-metasync.sh` `bin/sf-upgrade.sh` `lib/metasync.js` `config/metasync-detect.txt` を除いたもの）・`tests/e2e/`・`e2e.yml` を変えた `development` への push で、GitHub Actions の `e2e.yml` が、自動で実行する（下記の e2e。目安。実績: Windows 25〜50 分 → macOS 5〜6 分）。結果は、`gh run list --workflow e2e.yml --branch development` で確認する。e2e の対象のパスを変えていない（`git diff --stat origin/main...development -- bin lib phases hooks templates config ':!bin/sf-metasync.sh' ':!bin/sf-upgrade.sh' ':!lib/metasync.js' ':!config/metasync-detect.txt'` が空）なら、e2e は不要。e2e は、1 回で、テスト用の組織の無料枠（月 2,000 分）を約 40 分ぶん使うので、関係する変更は、まとめて 1 回の mm・1 回の rr にする |
+| 3. リリース | `development` の最新のコミットで CI が全緑、e2e の対象のパスを変えたときは e2e の成功も確認してから、`development` → `main` の PR を作ってマージする（`rr`）。PR の CI（必須チェック 11 個）が緑になるまで、マージできない。これが配布になる。マージの直後は、e2e のシナリオ `dist-main` で、配布版のワークフローが sf-tools の `main` を使うことを確かめられる |
 
 ## 2. 検証環境とは
 
@@ -28,7 +28,7 @@ sf-tools の `main` ブランチは、**そのまま全ユーザーに配布さ�
 変更内容に応じて確認します。詳細は `doc/dev-reference.md` 9.3 を参照してください。
 
 - **配布物を変えていないとき:** GitHub Actions の全件テスト・結合テスト L1・shellcheck が、`development` の最新のコミットで緑であることだけを確認します
-- **配布物を変えたとき:** `e2e.yml` が、配布物を変えた最新のコミット以降で成功していることを確認します。e2e は、新規セットアップ（`sf-init.sh` の Phase 1〜10・`--add-tier`）、メタデータ同期（`wf-metasync` の手動起動）、デプロイ対象を含む PR（`wf-validate` → マージ → `wf-release` → 削除）、シナリオ（4 章）を、自動で通します
+- **e2e の対象のパスを変えたとき:** `e2e.yml` が、その対象のパスを変えた最新のコミット以降で成功していることを確認します。e2e は、新規セットアップ（`sf-init.sh` の Phase 1〜10・`--add-tier`）、メタデータ同期（`wf-metasync` の手動起動）、デプロイ対象を含む PR（`wf-validate` → マージ → `wf-release` → 削除）、シナリオ（4 章）を、自動で通します
 - 手で確かめるのは、e2e で見えないことだけです（e2e の確認が足りないときは、e2e を広げます）。手で PR を出して確かめるときは、動作確認だけの PR はマージせずに閉じます（マージすると `wf-release` が実際にデプロイします）
 
 > ℹ️ `sf-tools` は公開リポジトリのため、`main` のブランチ保護を、GitHub の無料プランでも設定できます（以前の Private リポジトリでは設定できませんでした）。**設定済みです**（Ruleset `protect-main`: 削除の禁止、強制プッシュの禁止、直接のプッシュの禁止で PR 経由のみ。承認者の人数は 0 人。必須のステータスチェック 11 個（`test.yml` のジョブ名。e2e は含めない）が緑でないと、マージできない）。GitHub Actions は、実行のたびに sf-tools の `main` を取得して、その中のコードを、秘密鍵を持つ環境で実行するため、`main` を誰が書き換えられるかが、最も重要です。変更は、引き続き、運用（mm / rr）を守ってください。設定は、リポジトリの **Settings → Rules** で確認・変更できます。

@@ -112,7 +112,7 @@
 
 <h2 id="sf-metasync"><code>sf-metasync.sh</code></h2>
 <pre><code>sf-metasync.sh [-n] [-y] [--full] [--allow-mass-delete] [-j] [-v]</code></pre>
-<p><code>sf-init</code> で登録した <code>prod</code> エイリアスの組織（本番・Sandbox のどちらでも）から、メタデータを取得して、<code>main</code> にコミットしてプッシュします。<strong>Salesforce 組織の内容を正</strong>とします。どのブランチから実行しても、<code>main</code> に切り替えて処理し、終わると元のブランチに戻ります。主に、GitHub Actions（<code>wf-metasync</code>）からの定期実行を想定しています。</p>
+<p><code>main</code> の組織（<code>sf-init</code> で 1 番目に登録した組織。本番・Sandbox・Developer Edition のどれでも）から、メタデータを取得して、<code>main</code> にコミットしてプッシュします。<strong>Salesforce 組織の内容を正</strong>とします。どのブランチから実行しても、<code>main</code> に切り替えて処理し、終わると元のブランチに戻ります。主に、GitHub Actions（<code>wf-metasync</code>）からの定期実行を想定しています。</p>
 <div class="box admin">
   <div class="title">管理者専用</div>
   <p>実行の前に、赤い警告ボックスと確認（Y/N）が表示されます。<code>GITHUB_ACTIONS=true</code> のときは、警告も確認もスキップして、自動で実行します。</p>
@@ -130,7 +130,7 @@
 <h3>処理の流れ</h3>
 <ol>
   <li><code>sf</code> の確認（<code>sf --version</code> の終了コードが 0 以外なら中断。成功は 24 時間、確認を省く）。引数の解析は、このあとに行う</li>
-  <li>事前の確認（満たされなければ、何も変更せずに中断する）。<code>prod</code> エイリアスの組織が登録済みであること（確認の出力は、アクセストークンを含むため、表示もログへの記録もしない）・ブランチの上にいること（detached HEAD では中断）・<code>sf-tools/config/metadata.txt</code> があること</li>
+  <li>事前の確認（満たされなければ、何も変更せずに中断する）。接続先の組織（<code>main</code> の組織）を決めます。<strong>手元で実行するときは、エイリアスの名前ではなく、組織の ID で決めます</strong>: GitHub の Variable <code>SF_ORG_ID_PROD</code>（<code>sf-init</code> が記録した、1 番目の組織の ID）を読み、この PC の <code>sf</code> にログイン済みの組織から、ID が一致するものを探して使います。<code>origin</code> から GitHub のリポジトリを特定できない・<code>SF_ORG_ID_PROD</code> を読めない・一致する組織がログインされていない、のどれかなら、推測せずに中断します（別のプロジェクトの組織で <code>main</code> を書き換えるのを防ぐためです）。GitHub Actions 上では、ワークフローが作る <code>prod</code> エイリアスの組織を使います。続けて、その組織の情報を取得できること（確認の出力は、アクセストークンを含むため、表示もログへの記録もしない）・ブランチの上にいること（detached HEAD では中断）・<code>sf-tools/config/metadata.txt</code> があること</li>
   <li>警告を表示して、続行の確認（Y/N）を取る（GitHub Actions 上では、表示も確認もしない）</li>
   <li><code>main</code> に切り替える。追跡中のファイルに未コミットの変更があれば、いったん退避（<code>git stash</code>）する</li>
   <li>リモートの最新を取り込む（<code>git fetch origin</code>（失敗しても続行）→ <code>git pull origin main --rebase</code>。失敗したら <code>git rebase --abort</code> して中断）。その前に、<code>main</code> に未コミットの変更が残っているとき・手元の実行で、追跡していないファイルがあるときは、中断する（下の補足）</li>

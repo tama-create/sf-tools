@@ -403,7 +403,7 @@ node lib/metasync.js apply --plan PLAN --repo DIR --fetched DIR
 # ==============================================================================
 # sf-metasync.sh - Salesforce メタデータ Git 自動同期スクリプト
 # ==============================================================================
-# sf-init で登録した prod エイリアスの組織（本番・Sandbox どちらでもよい）から、metadata.txt の種類のメタデータを取得し、
+# main の組織（sf-init で 1 番目に登録した組織。本番・Sandbox・Developer Edition のどれでもよい）から、metadata.txt の種類のメタデータを取得し、
 # main ブランチの管理対象のフォルダ（【補足】）を、取得した内容と同じにする（追加・変更・削除）。差分があればコミットして
 # push し、push したときは、branches.txt の main 以外のブランチへ、main をマージして push する。
 # どのブランチから実行しても、main に切り替えて処理し、終了時に元のブランチへ戻る。

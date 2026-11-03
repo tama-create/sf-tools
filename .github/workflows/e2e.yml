@@ -12,8 +12,13 @@ name: e2e（実環境の通し検証）
 #   ・同じテスト用の組織を使うため、2 つのジョブは一列に動かす（Windows → macOS。ワークフローの実行どうしも、concurrency で一列）。
 #
 # 【いつ動くか】
-#   ・配布物（bin/ lib/ phases/ hooks/ templates/ config/）または e2e 自体（tests/e2e/・このファイル）が変わった development への push。
-#     rr のときには、すでに緑になっている（ドキュメント・単体テストだけの変更では、動かさない）。
+#   ・e2e の対象のパスが変わった development への push。対象のパス = 配布物（bin/ lib/ phases/ hooks/ templates/ config/）のうち、
+#     リリース・削除の流れに関係しない 4 ファイル（bin/sf-metasync.sh・bin/sf-upgrade.sh・lib/metasync.js・config/metasync-detect.txt）
+#     を除いたもの、と e2e 自体（tests/e2e/・このファイル）。下の on.push.paths が、その定義の正本（CLAUDE.md 1.2・doc/dev-reference.md 9.3 も同じ）。
+#     rr のときには、すでに緑になっている（ドキュメント・単体テスト・上の 4 ファイルだけの変更では、動かさない）。
+#     動かさない理由: e2e は、1 回で、テスト用の組織（tamashimon-org。非公開のリポジトリ）の Actions の無料枠（月 2,000 分）を、約 40 分ぶん使う。
+#     先月は、e2e の回数が多く、10/23 に枠を使い切った。上の 4 ファイルは、リリース・削除の流れから呼ばれないため、変えても、e2e の結果は変わらない。
+#     （上の 4 ファイルだけを変えたあと、実環境で確かめたいときは、手動（workflow_dispatch）で動かす。）
 #   ・週 1 回（月曜 03:00 日本時間。schedule。main に対して）。sf-init の版の選択には「配布版（main）」と答える
 #     （E2E_TOOLS_BRANCH=main。force-* の Actions は sf-tools の main を使い、Variable SF_TOOLS_BRANCH は付かない。利用者が受け取るものの見張り）。
 #   ・手動（workflow_dispatch。Actions の画面・gh workflow run から。入力 tools_branch で、development（既定）/ main を選ぶ。
@@ -52,11 +57,15 @@ on:
     branches: [development]
     paths:
       - 'bin/**'
+      - '!bin/sf-metasync.sh'
+      - '!bin/sf-upgrade.sh'
       - 'lib/**'
+      - '!lib/metasync.js'
       - 'phases/**'
       - 'hooks/**'
       - 'templates/**'
       - 'config/**'
+      - '!config/metasync-detect.txt'
       - 'tests/e2e/**'
       - '.github/workflows/e2e.yml'
 

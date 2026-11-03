@@ -638,7 +638,7 @@ Actions 上の実行は、コマンドによって扱いが違う。「全部拒
 | 修正 | Claude | 修正し、`--changed` の軽いテストだけ手元で確認する。 |
 | **mm** | あなたの指示 | commit と push だけを、Claude が行う。 |
 | 自動の検証（軽い） | GitHub | 単体・shellcheck・結合テスト L1 が、Windows・macOS・Linux で自動で動く（目標: 約 8 分。今の目安は約 12 分。`CLAUDE.md` 1.2）。 |
-| 自動の検証（重い） | GitHub | 配布物（`bin/` `lib/` `phases/` `hooks/` `templates/` `config/`）・`tests/e2e/`・`e2e.yml` が変わったとき、`development` への push で、e2e が動く（Windows は全部とシナリオ。macOS はクライアント側と `cross-os`。同じ組織を使うため、一列）。rr のときには、すでに緑。 |
+| 自動の検証（重い） | GitHub | e2e の対象のパス（配布物のうち、リリース・削除に関係しない `bin/sf-metasync.sh` `bin/sf-upgrade.sh` `lib/metasync.js` `config/metasync-detect.txt` を除いたもの）・`tests/e2e/`・`e2e.yml` が変わったとき、`development` への push で、e2e が動く（Windows は全部とシナリオ。macOS はクライアント側と `cross-os`。同じ組織を使うため、一列）。rr のときには、すでに緑。 |
 | PR | Claude | すべて緑なら、PR を作る。 |
 | **rr** | あなたの指示 | 緑なら、マージする（`main` に届く）。`main` の Ruleset の「必須のチェック」が、緑でないマージを止める。 |
 | rr の直後 | GitHub（任意） | `dist-main`（配布版の確認）を、自動で動かす。**未実装**（今は、手で `scenario.sh dist-main`。11.5）。 |

@@ -25,6 +25,8 @@
 #   org_guard TIER LABEL                  ... 本番は main のみ（F8）。違反・判定不能（main 以外）は戻り値 2
 #   org_local_release_check ALIAS         ... ローカルからのリリースの保護用。本番（または種類を確認できない）組織かを返す（戻り値 0 / 1 / 2）
 #   org_parse_info JSON                   ... sf data query の JSON から、ORG_* を取り出す
+#   org_find_username_by_id ORG_ID VAR    ... この PC の sf にログイン済みの組織から、組織 ID が一致するものを探し、ユーザー名を VAR にセットする
+#                                            （エイリアスの有無・名前は問わない。ID は上位 15 文字で比べる。見つからなければ戻り値 1）
 #   org_jwt_test ALIAS KEY KEYFILE USER URL ... JWT 接続テストと、組織情報の読み取り（一時的なホームの中。従来の接続アプリ用）
 #                                            （KEY = コンシューマー鍵 / KEYFILE = 秘密鍵ファイル / URL = ログイン先。出力は SF_ORG_JWT_OUT）
 #   org_save SUFFIX                       ... 組織 ID・名前・種類・確認日時を、GitHub の Variables に保存する
@@ -134,6 +136,35 @@ org_parse_info() {
     ORG_EDITION="${v[4]:-}"
     ORG_TRIAL_EXPIRES="${v[5]:-}"
     [[ -n "$ORG_ID" && -n "$ORG_IS_SANDBOX" ]]
+}
+
+# この PC の sf にログイン済みの組織から、組織 ID が一致するものを探し、そのユーザー名を VAR にセットする。引数: 組織 ID・VAR 名
+#   エイリアスの名前には頼らない（名前は、付け替えられ、同じ PC の別のプロジェクトと衝突する）。組織 ID は、Salesforce が付けた、
+#   変えられない印のため、段階（main / staging / develop）と組織の結びつけ（sf-init が GitHub の SF_ORG_ID_* に記録）を、確かに引き当てられる。
+#   一覧は sf org list --json（種類の違う一覧をまたいで探す。同じ組織が複数の一覧に出ても、最初の一致を使う）。
+#   ID は、上位 15 文字で比べる（15 文字と 18 文字の表記の違いを吸収する。大文字小文字は区別する）
+#   戻り値: 0=見つかった（VAR にユーザー名）/ 1=見つからない・一覧を読み取れない・ID が短すぎる（推測しない。VAR は空にする）
+org_find_username_by_id() {
+    local want="${1:0:15}" _of_var="$2" out k ids names i
+    local -a id_arr=() un_arr=()
+    set_var "$_of_var" ""
+    [[ ${#want} -eq 15 ]] || return 1
+    out=$(sf org list --json 2>/dev/null) || return 1  # VAR=$(cmd) のため run 不使用（出力にトークンは含まれないが、一覧は、ログに残さない）
+    for k in nonScratchOrgs sandboxes devHubs scratchOrgs other; do
+        ids=$(json_get "$out" "result.${k}.*.orgId") || return 1       # VAR=$(cmd) のため run 不使用
+        names=$(json_get "$out" "result.${k}.*.username") || return 1  # VAR=$(cmd) のため run 不使用
+        id_arr=(); un_arr=()
+        while IFS= read -r i; do id_arr+=("$i"); done <<< "$ids"
+        while IFS= read -r i; do un_arr+=("$i"); done <<< "$names"
+        for (( i = 0; i < ${#id_arr[@]}; i++ )); do
+            [[ -n "${id_arr[i]}" && -n "${un_arr[i]:-}" ]] || continue
+            if [[ "${id_arr[i]:0:15}" == "$want" ]]; then
+                set_var "$_of_var" "${un_arr[i]}"
+                return 0
+            fi
+        done
+    done
+    return 1
 }
 
 # ログイン済みの組織から、ID・名前・種類を読み取る。引数: エイリアス（またはユーザー名）

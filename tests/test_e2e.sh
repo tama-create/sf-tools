@@ -1914,6 +1914,24 @@ CEOF
     assert_file_contains     "$wf" "branches: [development]" "e2e.yml: push は、development だけ（rr のときには、すでに緑にする）"
     assert_file_contains     "$wf" "- 'bin/**'"            "e2e.yml: 配布物（bin/）の変更で動く"
     assert_file_not_contains "$wf" "- 'doc/**'"            "e2e.yml: ドキュメントだけの変更では、動かさない"
+    # e2e の対象のパス: リリース・削除の流れに関係しない 4 ファイルは、除外する（e2e は、1 回で、テスト用の組織の無料枠を約 40 分ぶん使うため）。
+    #   除外の一覧の正本は e2e.yml。CLAUDE.md・dev-guide.md・dev-reference.md の、確認のコマンド（git の ':!パス'）と、そろえておく
+    local _ex _in
+    for _ex in bin/sf-metasync.sh bin/sf-upgrade.sh lib/metasync.js config/metasync-detect.txt; do
+        assert_file_contains "$wf" "- '!${_ex}'" "e2e.yml: ${_ex} だけの変更では、動かさない（リリース・削除に関係しない）"
+        [[ -f "$SF_TOOLS_DIR/$_ex" ]] && pass "e2e.yml: 除外した ${_ex} が、実在する（名前を変えると、除外が効かなくなる）" \
+            || fail "e2e.yml: 除外した ${_ex} が、実在する（名前を変えると、除外が効かなくなる）" "ファイルがない"
+        assert_file_contains "$SF_TOOLS_DIR/CLAUDE.md" "':!${_ex}'" "CLAUDE.md: rr の前の確認コマンドの除外が、e2e.yml と同じ（${_ex}）"
+        assert_file_contains "$SF_TOOLS_DIR/doc/dev-guide.md" "':!${_ex}'" "dev-guide.md: 確認コマンドの除外が、e2e.yml と同じ（${_ex}）"
+        assert_file_contains "$SF_TOOLS_DIR/doc/dev-reference.md" "':!${_ex}'" "dev-reference.md: 確認コマンドの除外が、e2e.yml と同じ（${_ex}）"
+    done
+    assert_equals "$(grep -c "^      - '!" "$wf")" "4" "e2e.yml: 除外は、4 ファイルだけ（増やしたら、CLAUDE.md・dev-guide.md・dev-reference.md の一覧も直す）"
+    # 誤って除外すると、リリース・削除の確認が抜けるもの（共有部品・リリースの雛形・各フェーズ）は、除外していない
+    for _in in "- 'lib/**'" "- 'templates/**'" "- 'phases/**'" "- 'hooks/**'" "- 'config/**'" "- 'bin/**'"; do
+        assert_file_contains "$wf" "$_in" "e2e.yml: ${_in} の変更では、動く"
+    done
+    assert_file_not_contains "$wf" "- '!lib/common.sh'" "e2e.yml: 共有部品（lib/common.sh）は、除外しない"
+    assert_file_not_contains "$wf" "- '!bin/sf-release.sh'" "e2e.yml: リリースのコマンド（bin/sf-release.sh）は、除外しない"
     assert_file_contains     "$wf" 'touch "$HOME/.sf-tools-last-update"' "e2e.yml: 更新済みの印を先に置く（e2e の実行中に、バックグラウンドの sf-upgrade.sh が、sf を入れ替えない）"
     assert_equals "$(grep -c 'touch "$HOME/.sf-tools-last-update"' "$wf")" "2" "e2e.yml: 更新済みの印は、Windows・macOS の両方のジョブで置く"
     # 組織名・ユーザー名・チャンネル ID は、公開ログに出さないため、Secrets から読む（Variables は使わない）

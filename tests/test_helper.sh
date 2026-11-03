@@ -414,8 +414,11 @@ echo "npm $*" >> "${MOCK_CALL_LOG:-/dev/null}"
 [[ "$1" == "view" ]] && { [[ -n "${MOCK_NPM_LATEST:-}" ]] && echo "$MOCK_NPM_LATEST"; exit 0; }
 # npm config get prefix（npm の置き場所）: MOCK_NPM_PREFIX で再現（既定は何も出力しない）
 [[ "$1 $2 $3" == "config get prefix" ]] && { [[ -n "${MOCK_NPM_PREFIX:-}" ]] && echo "$MOCK_NPM_PREFIX"; exit 0; }
-# npm install -g npm@latest --dry-run（今の Node で入れられるかの確認）: 出力と終了コードを再現（既定は成功）
+# npm install -g npm@latest --dry-run: 出力と終了コードを再現（既定は成功）。npm 12 は、これだけが EALLOWREMOTE で壊れる（npm/cli#9800）。
+#   sf-upgrade.sh は --dry-run を使わない（使っていたら、このモックの失敗に巻き込まれて、テストが落ちる）
 [[ "$*" == *"--dry-run"* ]] && { [[ -n "${MOCK_NPM_DRYRUN_OUT:-}" ]] && echo "$MOCK_NPM_DRYRUN_OUT"; exit "${MOCK_NPM_DRYRUN_EXIT:-0}"; }
+# npm install -g npm@latest（npm 自身の更新）: 出力と終了コードを再現（MOCK_NPM_SELF_OUT / MOCK_NPM_SELF_EXIT。既定は MOCK_NPM_EXIT）
+[[ "$*" == *"npm@latest"* ]] && { [[ -n "${MOCK_NPM_SELF_OUT:-}" ]] && echo "$MOCK_NPM_SELF_OUT"; exit "${MOCK_NPM_SELF_EXIT:-${MOCK_NPM_EXIT:-0}}"; }
 exit "${MOCK_NPM_EXIT:-0}"
 EOF
     chmod +x "$bin_dir/npm"

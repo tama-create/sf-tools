@@ -18,10 +18,12 @@
 # 【処理の流れ】
 #   1. npm を確認する（npm が無ければ、WARNING を表示してスキップ）
 #        現在の版（npm --version）と最新の版（npm view npm version）が同じ: 何もしない（INFO）
-#        違うとき、まず npm install -g npm@latest --dry-run（何も書き込まない）で、今の Node で入れられるかを確かめる
-#          入れられる               : npm install -g npm@latest で更新する
-#          Node が対応していない    : 更新しない。INFO で、Node の更新が必要なことを案内する（失敗には数えない）
-#          それ以外のエラー         : WARNING（失敗に数える）
+#        違うとき、npm install -g npm@latest で更新する（出力は取っておく。--dry-run の試し打ちはしない。補足）
+#          成功                     : SUCCESS
+#          出力に「Not compatible」  : Node が対応していない。npm は何も変えずに止まる。INFO で、Node の更新が必要なことを案内する
+#                                     （失敗には数えない）
+#          それ以外の失敗           : WARNING に、npm の出力の末尾 5 行（理由）を表示する（失敗に数える）。
+#                                     npm の置き場所に書き込めないときは、その旨も表示する
 #   2. Salesforce CLI（sf）をアップデートする（sf が無ければ、WARNING を表示してスキップ）
 #        npm 版（npm があり、npm ls -g @salesforce/cli --depth=0 が成功）: npm install -g @salesforce/cli@latest
 #        それ以外（公式インストーラー・pkg など）                           : sf update
@@ -40,6 +42,9 @@
 #     （失敗があっても、終了コードは 0。sf-install.sh が裏で呼び出すため、呼び出し元を止めない）
 #   - npm の最新版は、Node の版が新しくないと入らないことがある（npm は Node に同梱されている。npm だけを更新すると、Node との組み合わせで失敗する）。
 #     その場合は、更新せず、Node の更新を案内するだけ（Windows の Git Bash では winget のコマンドを示す。自動では Node を更新しない）
+#   - npm install --dry-run を、事前の確認に使わない理由: npm 12 は、--dry-run のときだけ、npm 自身（同梱の部品を持つ）の取得を、
+#     EALLOWREMOTE（「remote の取得は無効」）で誤って拒否するため、npm 12 の環境（Node 26 など）で、毎回、失敗してしまう
+#     （npm/cli#9800。--dry-run なしの同じコマンドは成功する）。対応外の Node は、本番のコマンドの出力（Not compatible）で見分ける
 #   - 自動で呼ばれたときの表示は sf-install.log にだけ残る。案内を画面で見るには、手動で実行する
 #   - ログ: ./sf-tools/logs/sf-upgrade.log（実行ごとに作り直す）
 # ==============================================================================
@@ -111,11 +116,13 @@ if command -v npm >/dev/null 2>&1; then  # 存在確認のため run 不使用
     elif [[ "$npm_cur" == "$npm_new" ]]; then
         log "INFO" "npm は最新です（${npm_cur}）"
     else
-        # --dry-run は何も書き込まない。今の Node で最新の npm を入れられるかを、先に確かめる
-        if npm_probe=$(npm install -g npm@latest --dry-run 2>&1); then  # 判定のみのため run 不使用
-            run npm install -g npm@latest \
-                || { log "WARNING" "npm のアップデートに失敗しました（続行します）"; _warn_if_prefix_unwritable; _mark_failed "npm"; }
-        elif [[ "$npm_probe" == *"Not compatible"* ]]; then
+        # 本番のコマンドで更新する。--dry-run の「試し打ち」は使わない（npm 12 は、--dry-run のときだけ、npm 自身の取得を
+        # EALLOWREMOTE で誤って拒否し、毎回失敗する。npm/cli#9800）。出力は取っておき、失敗したときだけ、理由を表示する。
+        # 今の Node が最新の npm に対応していないときは、npm は何も変えずに「Not compatible」で止まる
+        log "INFO" "npm を ${npm_cur} から ${npm_new} に更新します（npm install -g npm@latest）..."
+        if npm_out=$(npm install -g npm@latest 2>&1); then  # 出力を取るため run 不使用
+            log "SUCCESS" "npm を更新しました（${npm_new}）"
+        elif [[ "$npm_out" == *"Not compatible"* ]]; then
             # npm は Node に同梱されている。最新の npm が今の Node を対応外にすることがある（失敗ではなく、案内だけ）
             node_cur=$(node --version 2>/dev/null || true)
             log "INFO" "npm の最新版（${npm_new}）は、今の Node（${node_cur}）では入れられません。現在の npm（${npm_cur}）のままにします"
@@ -125,7 +132,11 @@ if command -v npm >/dev/null 2>&1; then  # 存在確認のため run 不使用
                 log "INFO" "更新するには、Node を更新してください（お使いのパッケージマネージャーで）"
             fi
         else
-            log "WARNING" "npm のアップデートに失敗しました（続行します）"
+            log "WARNING" "npm のアップデートに失敗しました（続行します）。npm の出力の末尾:"
+            while IFS= read -r npm_line; do
+                log "WARNING" "  ${npm_line}"
+            done <<< "$(printf '%s\n' "$npm_out" | tail -n 5)"
+            _warn_if_prefix_unwritable
             _mark_failed "npm"
         fi
     fi

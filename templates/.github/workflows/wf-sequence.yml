@@ -98,7 +98,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - id: check
         name: デプロイ対象ファイルを確認
         env:
@@ -152,7 +152,7 @@ jobs:
       # Step 1: 全履歴付きでリポジトリをチェックアウト
       # --------------------------------------------------------------------------
       - name: ソースコードを取得
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -295,7 +295,7 @@ jobs:
       # --------------------------------------------------------------------------
       - name: 順序の結果を PR に投稿
         if: always() && github.event_name == 'pull_request' && (steps.sequence_check.outputs.out_of_order != '' || steps.sequence_check.outputs.env_branch == 'true')
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         env:
           # ブランチ名などは、JavaScript のソースに直接埋め込まず、環境変数で受け取る
           ENV_BRANCH: ${{ steps.sequence_check.outputs.env_branch }}

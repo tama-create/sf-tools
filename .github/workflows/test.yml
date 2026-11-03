@@ -27,7 +27,7 @@ jobs:
       SF_TEST_SKIP_INTEGRATION: "1"
     steps:
       - name: ソースコードを取得
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: テストを実行
         run: bash tests/run_tests.sh
@@ -38,10 +38,10 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: ソースコードを取得
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Python を用意
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -75,7 +75,7 @@ jobs:
       SF_TEST_SKIP_INTEGRATION: "1"   # 結合テストは、別のジョブ（integration）で動かす
     steps:
       - name: ソースコードを取得
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # macOS 標準の Bash（/bin/bash = 3.2）のまま実行する。sf-tools は、追加のインストールなしで、macOS で動くことが前提
       # （Bash 4 以降の機能を使うと、ここで失敗する）。sed などの標準コマンドも、BSD 版のまま使う（GNU 版は、入れない）
@@ -128,7 +128,7 @@ jobs:
         run: git config --global core.autocrlf false
 
       - name: ソースコードを取得
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # 並列（既定は CPU の数）で実行する。以前は、終了コード 2304 で異常終了していたが、原因は、並列ではなく、
       # テストが本物の `git update-git-for-windows`（Git の更新）を実行し、Git Bash 自体を壊していたことだった
@@ -158,7 +158,7 @@ jobs:
         shell: bash
     steps:
       - name: ソースコードを取得
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # 結合テストのファイル（tests/test_integration*.sh。表のガード test_integration-coverage.sh は、全件テストで動くため除く）を、
       # run_tests.sh で、並列に実行する。macOS は、標準の Bash 3.2（/bin/bash）のまま実行する。Windows は Git Bash（WSL には移らない）

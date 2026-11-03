@@ -81,7 +81,7 @@ jobs:
       # Step 1: 全履歴付きでリポジトリをチェックアウト（PAT_TOKEN を使う。以降の git push も、この PAT で行われる）
       # --------------------------------------------------------------------------
       - name: ソースコードを取得
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
           token: ${{ secrets.PAT_TOKEN }}

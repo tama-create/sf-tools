@@ -88,7 +88,7 @@ jobs:
         shell: bash
     steps:
       - name: ソースコードを取得
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 開発者の環境に近づける（~/sf-tools・git の名前・gh の認証・sf）
         env:
@@ -180,7 +180,7 @@ jobs:
         shell: /bin/bash -e {0}
     steps:
       - name: ソースコードを取得
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 開発者の環境に近づける（~/sf-tools・git の名前・gh の認証・sf・Bash 3.2）
         env:
@@ -248,7 +248,7 @@ jobs:
     environment: e2e
     steps:
       - name: ソースコードを取得
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Slack に通知
         env:

@@ -93,7 +93,7 @@ jobs:
       # Step 1: リポジトリの main ブランチを完全な履歴付きでチェックアウト（PAT_TOKEN を使う。以降の git push も、この PAT で行われる）
       # --------------------------------------------------------------------------
       - name: ソースコードを取得
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: main
           fetch-depth: 0
@@ -103,9 +103,11 @@ jobs:
       # Step 2: Node.js のセットアップ
       # --------------------------------------------------------------------------
       - name: Node.js をインストール
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "22"
+          # package.json の packageManager による自動キャッシュは使わない（v5 以降の既定。sf は npm install -g で入れるため不要。利用者の package.json で動きが変わらないようにする）
+          package-manager-cache: false
 
       # --------------------------------------------------------------------------
       # Step 3: Salesforce CLI のインストール

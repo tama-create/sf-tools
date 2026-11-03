@@ -103,7 +103,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - id: check
         name: デプロイ対象ファイルを確認
         env:
@@ -190,7 +190,7 @@ jobs:
       # Step 2: マージ先ブランチ（workflow_dispatch のときは、実行したブランチ）の最新をチェックアウト
       # --------------------------------------------------------------------------
       - name: ソースコードを取得
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.base.ref || github.ref_name }}
           fetch-depth: 0
@@ -199,9 +199,11 @@ jobs:
       # Step 3: Node.js のセットアップ
       # --------------------------------------------------------------------------
       - name: Node.js をインストール
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "22"
+          # package.json の packageManager による自動キャッシュは使わない（v5 以降の既定。sf は npm install -g で入れるため不要。利用者の package.json で動きが変わらないようにする）
+          package-manager-cache: false
 
       # --------------------------------------------------------------------------
       # Step 4: Salesforce CLI のインストール

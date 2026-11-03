@@ -247,6 +247,18 @@ readonly METASYNC_JS="${SCRIPT_DIR}/../lib/metasync.js"
 command -v "$NODE_BIN" > /dev/null 2>&1 || die "node が見つかりません（sf CLI は npm 版が前提のため、通常は、あります）。"  # 存在確認のため run 不使用
 [[ -f "$METASYNC_JS" ]] || die "lib/metasync.js が見つかりません: ${METASYNC_JS}"
 
+# Node の出力（複数行）を、1 行ずつ log に出す。先頭が「[WARNING] 」の行は、WARNING として出す（[WARNING] の文字は外す）。
+# そのまま log "INFO" に渡すと、「[INFO] [WARNING] …」と、二重になる
+_log_node_lines() {
+    local text="$1" line
+    while IFS= read -r line; do
+        case "$line" in
+            "[WARNING] "*) log "WARNING" "${line#"[WARNING] "}" ;;
+            *)             log "INFO" "$line" ;;
+        esac
+    done <<< "$text"
+}
+
 readonly METADATA_CONFIG="./sf-tools/config/metadata.txt"
 [[ ! -f "$METADATA_CONFIG" ]] && die "メタデータ設定ファイルが見つかりません: ${METADATA_CONFIG}"
 METADATA_TYPES=()
@@ -338,7 +350,7 @@ DETECT_RC=-1
 DETECT_STATE_NEW=""
 phase_detect_changes() {
     [[ "$DETECT_MODE" == "off" ]] && return $RET_OK
-    local table="${SCRIPT_DIR}/../config/metasync-detect.txt" out line
+    local table="${SCRIPT_DIR}/../config/metasync-detect.txt" out
     if [[ ! -f "$table" ]]; then
         log "WARNING" "検知の区分の表が見つかりません（${table}）。検知は行わず、全件取得します。"
         return $RET_OK
@@ -349,9 +361,7 @@ phase_detect_changes() {
     out=$("$NODE_BIN" "$METASYNC_JS" detect --org "$TARGET_ORG" --types-file "$METADATA_CONFIG" --table "$table" \
         --state "$STATE_FILE" --out-state "$DETECT_STATE_NEW" 2>&1)
     DETECT_RC=$?
-    while IFS= read -r line; do
-        log "INFO" "$line"
-    done <<< "$out"
+    _log_node_lines "$out"
     if [[ $DETECT_RC -ne 0 && $DETECT_RC -ne 10 ]]; then
         [[ $DETECT_RC -eq 11 ]] || log "WARNING" "検知が異常終了しました（終了コード ${DETECT_RC}）。不明として扱い、全件取得します。"
         DETECT_RC=11
@@ -407,9 +417,7 @@ phase_plan() {
     # run 不使用: 戻り値（0 / 3 / 1）で分岐し、要約をログにも記録するため
     summary=$("$NODE_BIN" "$METASYNC_JS" "${args[@]}" 2>&1)
     PLAN_RC=$?
-    while IFS= read -r line; do
-        log "INFO" "$line"
-    done <<< "$summary"
+    _log_node_lines "$summary"
     [[ $PLAN_RC -eq 0 || $PLAN_RC -eq 3 ]] || return $RET_NG
     # コミットの本文・確認の要否に使う件数（VAR=$(cmd) のため run 不使用）
     PLAN_COUNTS=$(awk -F'\t' '{c[$1]++} END{printf "追加 %d 件 / 変更 %d 件 / 削除 %d 件 / 削除の保留 %d 件", c["A"], c["M"], c["D"], c["H"]}' "$PLAN_FILE")

@@ -49,6 +49,30 @@ test_no_changes() {
     teardown "$td" "$mb"
 }
 
+# 表（metadata-dirs.txt）にない種類の警告は、1 行にまとまる（重複は除く）。しかも、警告として出る（[INFO] [WARNING] の二重にしない）
+# （以前は、種類ごとに 1 行ずつ、40 行以上出て、「[INFO] [WARNING] …」と二重になっていた）。ログファイルは色なしなので、そこで確かめる
+test_unmapped_types_warning_is_one_line() {
+    local td mb mh
+    setup_std_env td mb mh
+    create_all_mocks "$mb"
+    printf 'NoSuchTypeA\nNoSuchTypeB\nNoSuchTypeA\n' >> "$td/sf-tools/config/metadata.txt"   # 表にない種類（NoSuchTypeA は重複）
+
+    export MOCK_GIT_BRANCH="main"
+    export MOCK_GIT_DIFF_EXIT=0
+    export MOCK_SF_ORG_JSON='{"result":{"alias":"testorg","id":"00D000000000001AAA"}}'
+
+    echo "Y" | ( cd "$td" && PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-metasync.sh" ) > /dev/null 2>&1
+
+    local log_file="$td/sf-tools/logs/sf-metasync.log"
+    assert_file_contains "$log_file" "[WARNING] 表（--dirs-table）にない種類が 2 個あります" "表にない種類 → 重複を除いて、個数を 1 行に出す"
+    assert_file_contains "$log_file" "NoSuchTypeA、NoSuchTypeB" "表にない種類 → 名前は省略せずに、1 行に並べる"
+    local n; n=$(grep -c '表（--dirs-table）にない種類' "$log_file")
+    assert_equals "$n" "1" "表にない種類の警告は、1 行だけ（種類ごとに出さない）"
+    assert_file_not_contains "$log_file" "[INFO] [WARNING]" "警告は、[INFO] [WARNING] の二重にならない"
+    unset MOCK_GIT_BRANCH MOCK_GIT_DIFF_EXIT MOCK_SF_ORG_JSON
+    teardown "$td" "$mb"
+}
+
 # main 以外のブランチ → main へ自動切替して正常終了
 test_non_main_branch_switches() {
     local td mb mh
@@ -199,6 +223,7 @@ test_unpushed_commit_pushed() {
 
 test_changes_are_committed
 test_no_changes
+test_unmapped_types_warning_is_one_line
 test_unpushed_commit_pushed
 test_non_main_branch_switches
 test_staging_fail_dev_merges_main

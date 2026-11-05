@@ -62,7 +62,7 @@
 
 | ファイル | 対象スクリプト |
 |---|---|
-| `test_common.sh` | lib/common.sh・input.sh・platform.sh・project.sh（`check_gh_owner`・入力関数（`read_secret` / `read_key` / `press_enter`）・`_mask_secrets`・`is_gitbash`・`open_browser`・`is_reserved_org_alias`・`is_protected_branch`・`check_sf_cli`・`print_admin_warning`・`run_isolated_home`・`ensure_sf_tools_latest`・`merge_package_xml`・`sed_inplace` など・Bash 3.2 対応（`test_bash32_compat`。1.1）・`ensure_admin_branch` / `push_admin_branch`・`get_target_org`。`json_get`: 基本・先頭のドット・配列・日本語や引用符・警告つき・不正な JSON・`node` がない・`set -e` を含む。`node -e` だけは、モックではなく本物の node に渡す: `test_helper.sh`） |
+| `test_common.sh` | lib/common.sh・input.sh・platform.sh・project.sh（`check_gh_owner`・入力関数（`read_secret` / `read_key` / `press_enter`）・`_mask_secrets`・`is_gitbash`・`open_browser`・`is_reserved_org_alias`・`is_protected_branch`・`check_sf_cli`・`check_java_cli`・`print_admin_warning`・`run_isolated_home`・`ensure_sf_tools_latest`・`merge_package_xml`・`sed_inplace` など・Bash 3.2 対応（`test_bash32_compat`。1.1）・`ensure_admin_branch` / `push_admin_branch`・`get_target_org`。`json_get`: 基本・先頭のドット・配列・日本語や引用符・警告つき・不正な JSON・`node` がない・`set -e` を含む。`node -e` だけは、モックではなく本物の node に渡す: `test_helper.sh`） |
 | `test_init-common.sh` | phases/init/init-common.sh（`ensure_sf_tools_branch`・JWT 用の証明書の発行先（subject）。実際の Git と一時 bare リポジトリを使用） |
 | `test_org.sh` | lib/org.sh（ログイン先の 3 択・環境変数の指定・組織の種類の判定・本番は main のみのガード・保存） |
 | `test_verify.sh`・`test_verify2.sh`・`test_verify3.sh` | phases/init/verify.sh と lib/verify-common.sh（テスト関数を、3 つのファイルに、所要時間でほぼ均等に分けた。並列に動かすため。共通の部品は `tests/verify-test-lib.sh`。各ファイルの冒頭に一覧がある）（実行できない場所・--plan・診断の不足・確認（N / q / EOF・本番の明示）・1 層・3 層（develop → staging → main の順）・失敗（マージしない・案内）・取り違えの検出・--cleanup・部品） |
@@ -144,7 +144,7 @@
 
 ### 2.2 `test_helper.sh` の前提
 
-読み込むと、`SF_TOOLS_DIR`・`TESTS_DIR` を決め、`SF_TOOLS_SF_CHECK_STAMP=/dev/null`（`check_sf_cli --cache` の記録を、本物のホームに作らない）を export し、`TMPDIR` の末尾の `/` を除く（2.1.1）。
+読み込むと、`SF_TOOLS_DIR`・`TESTS_DIR` を決め、`SF_TOOLS_SF_CHECK_STAMP=/dev/null`（`check_sf_cli --cache` の記録を、本物のホームに作らない）・`SF_TOOLS_JAVA_CHECK_STAMP=/dev/null`（`check_java_cli --cache` の同様）を export し、`JAVA_HOME`・`SF_TOOLS_SKIP_JAVA_CHECK`・`SF_TOOLS_JAVA_MIN_MAJOR` を unset し（実機の Java で結果が変わらないように。`create_mock_java` が、モックの java を作る）、`TMPDIR` の末尾の `/` を除く（2.1.1）。
 
 判定・集計の関数: `pass` / `fail` / `skip`・`assert_exit_ok` / `assert_exit_fail`・`assert_file_exists` / `assert_file_not_exists`・`assert_dir_exists` / `assert_dir_not_exists`・`assert_file_contains` / `assert_file_not_contains`・`assert_executable`・`assert_equals`・`assert_output_contains` / `assert_output_not_contains`・`print_summary`（最後に呼ぶ。失敗があれば戻り値 1）。
 
@@ -186,7 +186,7 @@
 > 仕様の正本は、各ファイルの冒頭コメント（【提供する関数】）と、関数ごとの説明コメント。ここは要点だけ。
 > **構成**: `lib/common.sh` が窓口で、ログ（`log`）・実行（`run`）・終了（`die`）・`show_help`・`reject_unknown_args`・`print_admin_warning`・`json_get`・`_mask_secrets` / `_strip_ansi` / `_strip_term_codes` と定数を持つ。残りの関数は、責務ごとのファイルに分けてあり、`common.sh` が、最後に `input.sh` → `platform.sh` → `project.sh` の順で `source` する（呼び出し側は、`common.sh` だけを `source` すればよい。この 3 つは、単独では `source` しない）。
 > - `lib/input.sh`（対話入力: `read_input` / `read_key` / `press_enter` / `read_or_quit` / `read_secret` / `ask_yn`）
-> - `lib/platform.sh`（OS・外部コマンド: `is_gitbash` / `set_var` / `sed_inplace` / `base64_oneline` / `run_with_timeout` / `run_isolated_home` / `check_sf_cli` / `open_browser`）
+> - `lib/platform.sh`（OS・外部コマンド: `is_gitbash` / `set_var` / `sed_inplace` / `base64_oneline` / `run_with_timeout` / `run_isolated_home` / `check_sf_cli` / `check_java_cli` / `open_browser`）
 > - `lib/project.sh`（プロジェクト: `get_target_org` / `check_force_dir` / `resolve_init_identity` / `resolve_job_identity` / `check_gh_owner` / `get_branch_list` / `is_reserved_org_alias` / `is_protected_branch` / `required_status_check_names` / `ensure_sf_tools_latest` / `merge_package_xml` / 管理者用のクローンの関数など）
 >
 > `lib/org.sh`・`lib/wizard.sh`・`lib/diag.sh`・`lib/verify-common.sh`（これが `lib/verify-samples.sh` を読む）は、`common.sh` からは `source` しない。使うスクリプトが、`common.sh` のあとに個別に `source` する。`lib/typecheck.js` は、`bin/sf-typecheck.sh` が `node` で起動する（Node の標準ライブラリのみ。境界は、このファイルだけ）。
@@ -246,6 +246,7 @@ source 時の動作: Bash 3.2 未満なら `exit 1` → `LOG_FILE` の確認 →
 | `ensure_sf_tools_latest` | `ensure_sf_tools_latest [--no-update] [DIR]`（DIR の省略時は `$SF_TOOLS_DIR`） | sf-tools（DIR）が origin の最新か確認し、遅れていれば確認のうえ `git pull --ff-only` で更新する。戻り値: 0=最新（または判定できない: Git リポジトリでない・HEAD がブランチでない・origin に同じブランチがない。WARNING を出す）／2=更新した（呼び出し側は、更新した sf-tools で、再実行すること）。die: origin に接続できない・fetch 失敗・遅れていて未コミットの変更または未プッシュのコミットがある・更新を断った・pull 失敗・`--no-update` で遅れている |
 | `is_gitbash` | `if is_gitbash; then ...` | Windows の Git Bash か判定（`$OSTYPE` が `msys*` / `mingw*` / `cygwin*`） |
 | `check_sf_cli` | `check_sf_cli [--warn-only] [--cache]` | `sf --version` の終了コードが 0 か確認する（sf は npm 版が前提）。0 以外なら、sf の場所と対処を ERROR で表示して `die`（`--warn-only` は表示のみで戻り値 1）。`--cache`（日常のコマンド用）は、成功を `~/.sf-tools-sf-check`（`SF_TOOLS_SF_CHECK_STAMP` で変更可）に sf の場所つきで記録し、24 時間は確認を省略する（失敗は記録せず、毎回確認する）。sf 未インストール・GitHub Actions 上（`GITHUB_ACTIONS=true`）では何もしない |
+| `check_java_cli` | `check_java_cli [--cache]` | Java が **17 以上**か確認する（VS Code の Apex 拡張の言語サーバーの要件。Java 11 では `UnsupportedClassVersionError` で起動に失敗し、画面には `telemetry handler is null` とだけ出る）。調べる java は `JAVA_HOME/bin/java`（実行できるとき）→ PATH の `java`。`java -version`（標準エラー）の `version "…"` の行から、メジャーバージョンを読む（`1.8.0_351` → 8、`17.0.21.0.2` → 17、`17-ea` → 17。先頭が `Picked up JAVA_TOOL_OPTIONS` でも読める）。17 未満・見つからない・読み取れないときは、WARNING（原因・対処・設定済みなら無視してよいこと・`SF_TOOLS_SKIP_JAVA_CHECK=1` で消せること）を表示して戻り値 1（**`die` はしない**。呼び出し元は `sf-install.sh`）。下限は `SF_TOOLS_JAVA_MIN_MAJOR`（既定 17）。`--cache` は、成功を `~/.sf-tools-java-check`（`SF_TOOLS_JAVA_CHECK_STAMP` で変更可）に java の場所つきで記録し、24 時間は省略する（失敗は記録しない）。GitHub Actions 上・`SF_TOOLS_SKIP_JAVA_CHECK=1` では何もしない。VS Code の設定 `salesforcedx-vscode-apex.java.home` は読めない（その設定で 17 以上を指していれば、警告は無視してよい） |
 | `run_isolated_home` | `out=$(run_isolated_home CMD [ARGS])` | 一時的なホームフォルダ（`HOME` と `USERPROFILE` を `mktemp -d` のフォルダに）の中でコマンドを実行し、出力と終了コードを返す。終了後に一時フォルダを削除する。sf の認証・エイリアスを隔離するために使う（JWT 接続テスト） **Windows（Git Bash）以外では、`SF_USE_GENERIC_UNIX_KEYCHAIN=true` も設定する**（mac は、sf の暗号鍵を OS のキーチェーン（サービス `sfdx`・アカウント `local`）に保存する。一時ホームには `Library/Keychains` がなく、「キーチェーンが見つかりません」のダイアログが出るため。設定すると、鍵は一時ホームの `.sfdx/key.json` に保存され、一時フォルダごと消える。本物のキーチェーンには触れない） |
 | `open_browser` | `open_browser URL` | OS 判定してブラウザを開く（GitBash/WSL/macOS/Linux 対応。GitBash の判定を先に行う）。開けなくてもエラーにしない（戻り値は常に 0） |
 | `read_input` | `read_input VAR [PROMPT]` | readline 対応テキスト入力（矢印キー・BS 有効）。戻り値は `read` のもの（EOF で 0 以外。呼び出し側が `\|\| die` などで扱う） |
@@ -423,7 +424,7 @@ check_gh_owner "$GITHUB_OWNER"   # 認証ユーザーの一致確認
 > 仕様の正本は、`bin/sf-install.sh` の冒頭コメント（`--help`）。ここは要点だけ。
 
 処理順（順序変更禁止）:
-1. `check_sf_cli --warn-only`（`sf --version` の終了コードを確認し、0 以外なら警告のみ。中断しない。`sf-tools` 自身の最新化を止めないため）
+1. `check_sf_cli --warn-only`（`sf --version` の終了コードを確認し、0 以外なら警告のみ。中断しない。`sf-tools` 自身の最新化を止めないため）。続けて `check_java_cli --cache`（Java が 17 未満・見つからないときの警告のみ。中断しない。Apex を使わない作業はできるため）
 2. `~/sf-tools` を、現在のブランチ（取得できなければ `main`）で `git pull origin <ブランチ>`（失敗は WARNING で続行）。`sf-init.sh` から実行中（`SF_INIT_RUNNING` あり）はスキップする（実行中の `sf-init.sh` が書き換わると、bash の読み位置がずれるため）
 3. `./sf-tools/config/metadata.txt`・`branches.txt` の確認: `sf-init.sh` から実行中は、ないものだけテンプレートからコピー（失敗は中断）。それ以外は、どちらかがなければ中断する（プロジェクトの破損として扱い、生成しない）
 4. `sf-hook.sh` で Git Hook（pre-commit / pre-push）をインストール（失敗は WARNING で続行）
@@ -992,7 +993,8 @@ cat .sf/config.json                               # ローカル設定ファイ�
 git log --oneline -10                             # 最近のコミット
 gh run list --limit 5                             # CI ワークフロー実行状況
 gh run list --workflow e2e.yml --branch development   # e2e の実行状況（rr の前提の確認。9.3）
-git diff --stat origin/main...development -- bin lib phases hooks templates config ':!bin/sf-metasync.sh' ':!bin/sf-upgrade.sh' ':!lib/metasync.js' ':!config/metasync-detect.txt'   # e2e の対象のパスの差分（空なら e2e は不要。9.3）
+bash tests/e2e/needs-e2e.sh                       # e2e の対象のパスの差分（出力あり・戻り値 0 = e2e が必要 / 1 = 不要。9.3）
+bash tests/e2e/needs-e2e.sh --last-change         # 対象のパスを最後に変えたコミット（e2e の成功が、これ以降か確認する。9.3）
 gh pr list                                        # オープン PR 一覧
 git diff HEAD~1                                   # 直前コミットとの差分
 ```
@@ -1063,14 +1065,14 @@ sf-tools の `main` への反映は、全ユーザーへの配布と同義であ
 
 **配布物のパス**は、利用者が `git pull` で受け取る実行物の `bin/` `lib/` `phases/` `hooks/` `templates/` `config/`。`tests/` `doc/` `.github/workflows/test.yml` `README.md` などは、実行に使われないため、配布物ではない（同じリポジトリにあるが、利用者の動作には影響しない）。
 
-**e2e の対象のパス**は、配布物のうち、リリース・削除の流れに関係しない 4 ファイル（`bin/sf-metasync.sh`・`bin/sf-upgrade.sh`・`lib/metasync.js`・`config/metasync-detect.txt`）を除いたもの。`e2e.yml` の `on.push.paths` が、その定義の正本（`!` で除外している）。4 ファイルは、`wf-release.yml`・`wf-propagate.yml` からは、説明のコメントに書かれているだけで、呼び出されない（`sf-upgrade.sh` は、`sf-install.sh` が裏で起動するだけで、失敗しても、リリースに影響しない）。e2e は、1 回で、テスト用の組織（`tamashimon-org`。非公開）の Actions の無料枠（月 2,000 分）を、**約 40 分ぶん**使う（2026-11 の明細: 重いテスト用リポジトリ 37〜39 分 + macOS 側 2〜3 分）。先月（2026-10）は、e2e が作ったリポジトリ 74 個で 1,309 分（65%）を使い、10/23 に枠が尽きた。そのため、リリース・削除に関係しない変更では、e2e を動かさない（`tests/test_e2e.sh` が、`e2e.yml` の除外と、この文書・`CLAUDE.md` の一覧が、そろっていることを確かめる）。使量は、`organizations/<組織の ID>/settings/billing/usage?year=Y&month=M`（リポジトリ別・日別の明細）で確かめられる。
+**e2e の対象のパス**は、配布物のうち、リリース・削除の流れに関係しない 4 ファイル（`bin/sf-metasync.sh`・`bin/sf-upgrade.sh`・`lib/metasync.js`・`config/metasync-detect.txt`）を除いたもの。**`tests/e2e/needs-e2e.sh` が、その定義の正本**（対象のパスの一覧 `E2E_TARGET_PATHS` と、除外の一覧 `E2E_EXCLUDE_PATHS`。e2e 自体の `tests/e2e/`・`e2e.yml` も、対象に入れている）。e2e.yml に、push の起動はない（2026-11-05 に廃止。mm では動かさない）。4 ファイルは、`wf-release.yml`・`wf-propagate.yml` からは、説明のコメントに書かれているだけで、呼び出されない（`sf-upgrade.sh` は、`sf-install.sh` が裏で起動するだけで、失敗しても、リリースに影響しない）。e2e は、1 回で、テスト用の組織（`tamashimon-org`。非公開）の Actions の無料枠（月 2,000 分）を、**約 40 分ぶん**使う（2026-11 の明細: 重いテスト用リポジトリ 37〜39 分 + macOS 側 2〜3 分）。先月（2026-10）は、e2e が作ったリポジトリ 74 個で 1,309 分（65%）を使い、10/23 に枠が尽きた。そのため、リリース・削除に関係しない変更では、e2e を動かさない（`tests/test_e2e.sh` が、`needs-e2e.sh` の除外と、この文書・`CLAUDE.md`・`doc/dev-guide.md` の 4 ファイルの説明が、そろっていることを確かめる）。使量は、`organizations/<組織の ID>/settings/billing/usage?year=Y&month=M`（リポジトリ別・日別の明細）で確かめられる。
 
-`git diff --stat origin/main...development -- bin lib phases hooks templates config ':!bin/sf-metasync.sh' ':!bin/sf-upgrade.sh' ':!lib/metasync.js' ':!config/metasync-detect.txt'` が**空**（e2e の対象のパスの変更がない）なら、下の表のうち「テスト」だけを確認する（e2e・ワークフローの手動実行は不要）。**空でなければ**、変更内容に応じて、表の該当する項目を実施する。
+`bash tests/e2e/needs-e2e.sh` の戻り値が **1**（e2e の対象のパスの変更がない）なら、下の表のうち「テスト」だけを確認する（e2e・ワークフローの手動実行は不要）。**0**（変更あり。変わったファイルが表示される）なら、変更内容に応じて、表の該当する項目を実施する。e2e は、**mm では動かさず、rr の最初の手順として動かす**（`CLAUDE.md` 1.3.2）。
 
 | 確認項目 | 方法 |
 |---|---|
 | テスト | `development` の最新のコミットで、GitHub Actions の全件テスト・shellcheck・結合テスト L1 が、すべて緑（`gh run list --branch development` で確認する。手元で全件を回さない） |
-| e2e の対象のパスを変更した場合（必須） | GitHub Actions の `e2e.yml`（`development` への push で自動。9.6）が成功していること。確認: `gh run list --workflow e2e.yml --branch development` で、その対象のパスを変えた最新のコミット以降の実行が success（手元の `bash tests/e2e/run.sh` は、Actions を使えないときだけ）。e2e は、新規の force-* の `sf-init.sh`（Phase 1〜10・`--add-tier`）、`wf-metasync` の手動起動、Hello World の PR（`wf-validate` → マージ → `wf-release` → 削除）、シナリオ（9.6）を通すため、下の 2 行の確認も兼ねる |
+| e2e の対象のパスを変更した場合（必須） | GitHub Actions の `e2e.yml`（rr の最初の手順で、`gh workflow run e2e.yml --ref development` で動かす。9.6）が成功していること。確認: `last=$(bash tests/e2e/needs-e2e.sh --last-change)`（対象のパスを最後に変えたコミット）を求め、`gh run list --workflow e2e.yml --branch development --status success --json headSha --jq '.[].headSha'` の各 SHA について `git merge-base --is-ancestor "$last" <SHA>` が成功（戻り値 0）する実行があれば、成功済み（動かし直さない）。なければ動かす（手元の `bash tests/e2e/run.sh` は、Actions を使えないときだけ）。e2e は、新規の force-* の `sf-init.sh`（Phase 1〜10・`--add-tier`）、`wf-metasync` の手動起動、Hello World の PR（`wf-validate` → マージ → `wf-release` → 削除）、シナリオ（9.6）を通すため、下の 2 行の確認も兼ねる |
 | ワークフロー・`sf-metasync.sh` を変更した場合 | `wf-metasync` を `workflow_dispatch` で起動して成功すること（e2e の `run.sh` が行う。シナリオ `metasync-diff` は、組織の差分が main に入ることまで確認する） |
 | `sf-release.sh` / `wf-validate` / `wf-release` を変更した場合 | デプロイ対象を含む PR で、`wf-validate` が通ること（e2e の Hello World。シナリオ `validate-fail` は、失敗の検出と再検証。手で確かめるときは、動作確認のみの PR はマージせずに閉じる。マージすると `wf-release` が実際にデプロイする） |
 
@@ -1078,7 +1080,7 @@ sf-tools の `main` への反映は、全ユーザーへの配布と同義であ
 
 ### 9.4 リリース（rr）
 
-1. 9.3 の確認が完了している（e2e の対象のパスの変更がないときは、全件テストと CI の成功だけでよい。あるときは、`e2e.yml` の成功も必要）
+1. 9.3 の確認が完了している（e2e の対象のパスの変更がないときは、全件テストと CI の成功だけでよい。あるときは、`e2e.yml` の成功も必要。成功がなければ、「rr」の指示の中で、先に e2e を動かし、緑を確認してから 2 へ進む。赤なら、PR を作らずに中止する）
 2. 「rr」の指示で、`development` → `main` の PR を作成してマージする（手順は `CLAUDE.md` 1.3.2）
 3. マージ後、`main` の内容を検証環境の force-* でもう一度確認する（配布版のワークフローが sf-tools の `main` を使うことは、e2e のシナリオ `dist-main` で確認できる。rr の直後だけ動く）
 
@@ -1121,12 +1123,12 @@ sf-tools の `main` への反映は、全ユーザーへの配布と同義であ
 **GitHub Actions での実行（`.github/workflows/e2e.yml`。設計は `doc/integration-test-plan.md` 12.5）:**
 - Windows（Git Bash）で全部（`run.sh` は既定のまま。リポジトリを残し、シナリオに使う）、続けて macOS（標準の Bash 3.2）でクライアント側だけ（`--no-actions --no-add-tier --cleanup`）。同じ 3 つのテスト用組織を使うため、`needs` と `concurrency`（`group: e2e`・実行中は止めない）で、一列に動かす。どちらかが失敗したら、`notify` ジョブが Slack に通知する（`ci-notify.sh`）。
 - 準備: `~/sf-tools` にリポジトリをコピーし、git の名前・`gh auth setup-git`・`npm install -g @salesforce/cli`、更新済みの印 `~/.sf-tools-last-update` を先に置く（使い捨てのサーバーは毎回「初回」になり、`sf-install.sh` が背景で起動する `sf-upgrade.sh` が、e2e の実行中に sf を入れ替えるため）。
-- **ガード（`lib.sh` の `e2e_actions_allowed`）:** `e2e_guard_env` は、Actions 上では、①`E2E_ALLOW_ACTIONS=1`、②`GITHUB_WORKFLOW_REF` が `tama-create/sf-tools/.github/workflows/e2e.yml@refs/heads/(development|main)`、③`GITHUB_EVENT_NAME` が push・workflow_dispatch・schedule、のすべてがそろうときだけ通す（`GITHUB_*` は、ワークフローの書き手が上書きできない）。名前の形式・オーナーの一致・gh ユーザーの一致・削除の対象は、Actions 上でも同じ。ガードを通ったあと、`GITHUB_ACTIONS` と `CI` を外す（sf-tools の各スクリプトが、警告・確認を飛ばし、クライアント PC と違う動きにならないように。`run_tests.sh` と同じ）。
+- **ガード（`lib.sh` の `e2e_actions_allowed`）:** `e2e_guard_env` は、Actions 上では、①`E2E_ALLOW_ACTIONS=1`、②`GITHUB_WORKFLOW_REF` が `tama-create/sf-tools/.github/workflows/e2e.yml@refs/heads/(development|main)`、③`GITHUB_EVENT_NAME` が workflow_dispatch・schedule（push は通さない。2026-11-05 に、push の起動を廃止した）、のすべてがそろうときだけ通す（`GITHUB_*` は、ワークフローの書き手が上書きできない）。名前の形式・オーナーの一致・gh ユーザーの一致・削除の対象は、Actions 上でも同じ。ガードを通ったあと、`GITHUB_ACTIONS` と `CI` を外す（sf-tools の各スクリプトが、警告・確認を飛ばし、クライアント PC と違う動きにならないように。`run_tests.sh` と同じ）。
 - **Secrets（Environment `e2e`。Deployment branches は development と main だけ。すべて Secrets。Variables は使わない）:** `E2E_GH_TOKEN`（Classic PAT: repo / workflow / admin:org / delete_repo）・`E2E_PAT_TOKEN`・`E2E_SLACK_BOT_TOKEN`・`E2E_SFDX_AUTH_URL`・`E2E_SFDX_AUTH_URL_STG`・`E2E_SFDX_AUTH_URL_DEV`・`E2E_OWNER`・`E2E_GH_USER`・`E2E_SLACK_CHANNEL_ID`。sf-tools は公開リポジトリで、ログが公開されるため、秘密ではない値（組織名・ユーザー名・チャンネル ID）も、Secrets にして、ログで伏せる。`E2E_OWNER`・`E2E_GH_USER`・`E2E_SLACK_CHANNEL_ID` も Secrets（2026-10-21 に Variables から移行済み。`e2e.yml` に `vars.` は無い）。
 - **ログの公開対策（`tests/e2e/ci-mask.sh`）:** sf のログイン時の表示などに、組織のユーザー名・組織 ID・My Domain の URL が出る。これは、Secret に登録した値ではないため、GitHub は伏せない。e2e の実行の前に、`ci-mask.sh` が、3 つの組織（main・staging・develop）に一度ログインし、`sf org display --json` から ID（18 桁と 15 桁）・ユーザー名・アクセストークン・URL・ホスト名を調べて、`::add-mask::` で、以降のログで伏せる（調べたあとは、ログインを外す。値は表示しない）。画面に出す処理を足すときは、これが効くか確認すること。手元で e2e を動かすと、Actions の実行と、同じ組織を取り合うため、Actions に移したあとは、手元では動かさない。
 - **シナリオ（L2）の自動実行:** Windows のジョブの最後に、`run.sh` が残したテスト用リポジトリ（`--add-tier` で staging まである）に対して、`scenario.sh -y log-secrets manual-delete update-secret sync-wf cross-os validate-fail metasync-diff propagate-fail restart-org` を動かす（`dist-main` は、「rr の直後だけ」の条件があるため、除く）。macOS のジョブは、続けて、Windows が残したリポジトリの名前（Windows のジョブの `outputs.repo`）で、`scenario.sh -y --repo <名前> cross-os` を、自分の `run.sh`（開始時に、残っているテスト用リポジトリをすべて削除する）より前に動かす（OS 混在の確認）。`update-secret` を `validate-fail` などの前に置くのは、上書きした秘密鍵で、あとのワークフローが JWT ログインできること（形式が壊れていないこと）を、確かめるため。
-- **起動:** e2e の対象のパス（9.3。配布物のうち、リリース・削除に関係しない 4 ファイルを除いたもの）・`tests/e2e/`・`e2e.yml` が変わった `development` への push。**週 1 回（月曜 03:00 日本時間・`schedule`）、`main` に対して**（コードを変えていない間の、外側の変化の見張り。schedule は既定のブランチのワークフローで動く。公開リポジトリは、60 日間活動がないと、定期実行が止まる）。手動（`workflow_dispatch`）も使える（手動実行のワークフローは、既定のブランチ（`main`）にあるものしか起動できない。`e2e.yml` は `main` に入っている。push の起動は、どのブランチでも使える）。
-- **sf-tools の版（`E2E_TOOLS_BRANCH`。`lib.sh` の `e2e_tools_branch`）:** e2e が `sf-init` の「sf-tools の版の選択」に答える版。`development`（既定。push の起動）は「2（開発版）→ 開発版で続行 Y」で、force-* の Actions が sf-tools の `development` を使い、Variable `SF_TOOLS_BRANCH=development` が付く。`main`（配布版）は「1」だけで、Actions は sf-tools の `main` を使い、Variable は付かない（`run.sh` は「`SF_TOOLS_BRANCH` が未設定」を確認する）。定期実行は `main`、手動実行は入力 `tools_branch`（既定 `development`）で選ぶ。手元の sf-tools が `main` 以外のブランチのまま `main` を選ぶと（手動実行を `development` から動かしたとき）、`sf-init` の Phase 2 が「ブランチ違い」の確認を出すため、`e2e_make_input` が Y を 1 つ足す（手元のブランチは `git symbolic-ref` で調べる）。それ以外の値は、`e2e_make_input` がエラー・`run.sh` が `die`。定期実行は、この仕組みになる前は、毎回「ブランチ違い」の確認に `n` と答えて中断していた（2026-11-02 に判明）。
+- **起動:** **rr の最初の手順として、`development` に対して手動で動かす**（`gh workflow run e2e.yml --ref development`。e2e の対象のパス（9.3。`tests/e2e/needs-e2e.sh` が正本）が `main` との差分にあるときだけ）。**mm（`development` への push）では動かさない**（push の起動は、2026-11-05 に廃止した。1 回で、テスト用の組織の無料枠を約 40 分ぶん使い、mm のたびでは、枠が尽き、待つ時間も長いため）。**週 1 回（月曜 03:00 日本時間・`schedule`）、`main` に対して**（コードを変えていない間の、外側の変化の見張り。schedule は既定のブランチのワークフローで動く。公開リポジトリは、60 日間活動がないと、定期実行が止まる）。手動（`workflow_dispatch`）も使える（手動実行のワークフローは、既定のブランチ（`main`）にあるものしか起動できない。`e2e.yml` は `main` に入っている。`--ref development` で動かすと、`development` の `e2e.yml` と、その先頭のコミットのコードで動く）。
+- **sf-tools の版（`E2E_TOOLS_BRANCH`。`lib.sh` の `e2e_tools_branch`）:** e2e が `sf-init` の「sf-tools の版の選択」に答える版。`development`（既定。rr の前の手動実行）は「2（開発版）→ 開発版で続行 Y」で、force-* の Actions が sf-tools の `development` を使い、Variable `SF_TOOLS_BRANCH=development` が付く。`main`（配布版）は「1」だけで、Actions は sf-tools の `main` を使い、Variable は付かない（`run.sh` は「`SF_TOOLS_BRANCH` が未設定」を確認する）。定期実行は `main`、手動実行は入力 `tools_branch`（既定 `development`）で選ぶ。手元の sf-tools が `main` 以外のブランチのまま `main` を選ぶと（手動実行を `development` から動かしたとき）、`sf-init` の Phase 2 が「ブランチ違い」の確認を出すため、`e2e_make_input` が Y を 1 つ足す（手元のブランチは `git symbolic-ref` で調べる）。それ以外の値は、`e2e_make_input` がエラー・`run.sh` が `die`。定期実行は、この仕組みになる前は、毎回「ブランチ違い」の確認に `n` と答えて中断していた（2026-11-02 に判明）。
 
 **中断→再開の確認（`run.sh --interrupt`）:** `sf-init` を、わざと Phase 8 で失敗させ、「続きをやる」で再開してから、いつもの確認（Secret・Variable・ブランチ・ワークフロー・Actions・Hello World）を行う。1 回目: `_interrupt_first_run`。git の shim（`shims/git`）で、main への push を 1 回だけ失敗させ、止まった時点の状態（リポジトリ・main・進捗）を `MID_*` に記録する（再開すると変わるため）。2 回目の入力: [オーナーの選択・XXXX・確認] → 管理者向けの警告の確認 `Y` → 「続きをやる」`1` → Phase 10 のログイン先（段階の数だけ `1`）。確認: 1 回目が失敗した・shim が push を止めた・失敗の画面が「続きをやる」を案内した・リポジトリはある・main はない・進捗は 7・PAT / Slack Token / 認証 URL が出ていない・再開の画面に「前回のセットアップは」が出た・初回コミットが 1 つ。`--resume` とは同時に指定できない。共通の確認は `read_key` が 1 文字ずつ読むことに注意（改行も 1 回の読み取りで、空なら再入力になる）。
 

@@ -13,6 +13,7 @@
 #   run_with_timeout 秒 CMD [ARGS] ... 時間の上限つきで実行する（timeout がない macOS でも動く。時間切れは 124）
 #   run_isolated_home CMD [ARGS]   ... 一時的なホームフォルダの中でコマンドを実行（sf の認証・エイリアスを隔離）
 #   check_sf_cli [--warn-only] [--cache] ... sf が終了コードを正しく返すか確認（npm 版が前提。NG なら案内して die。--warn-only は戻り値 1）
+#   check_java_cli [--cache]       ... Java が 17 以上か確認（Apex 拡張の要件。NG なら案内を表示して戻り値 1。die はしない）
 #   open_browser URL               ... OS を判定してブラウザを開く（Git Bash/WSL/macOS/Linux 対応）
 #   ここの関数は、コマンドの実行に run を使わない（理由は、各行の「run 不使用」のコメントを参照）
 # ==============================================================================
@@ -209,6 +210,99 @@ check_sf_cli() {
         return 1
     fi
     die "sf の終了コードが 0 ではないため、処理を中断しました。"
+}
+
+# check_java_cli - Java が、Apex 拡張の要件（17 以上）を満たすか確認する
+# ------------------------------------------------------------------------------
+# 【背景】
+#   VS Code の Salesforce 拡張（Apex）の言語サーバーは、Java 17 以上が必要（拡張 68.6.1 で確認。クラスファイルが Java 17 の形式）。
+#   Java 11 などでは、起動に失敗し、「telemetry handler is null」という、原因の分かりにくいエラーだけが出る
+#   （本当の原因は、UnsupportedClassVersionError。隠れる）。そのため、sf-install.sh が、事前に気づけるようにする。
+#
+# 【使い方】
+#   check_java_cli             # 17 未満・見つからない・判定できないとき、WARNING を表示して戻り値 1（die はしない）
+#   check_java_cli --cache     # 日常のコマンド用。成功したら 24 時間は、確認を省略する（下記）
+#
+# 【動作】
+#   ・GitHub Actions 上（GITHUB_ACTIONS=true）・環境変数 SF_TOOLS_SKIP_JAVA_CHECK=1 のときは、何もしない（戻り値 0）
+#   ・調べる Java: JAVA_HOME/bin/java（実行できるとき）→ なければ PATH の java
+#     ※ VS Code の設定 salesforcedx-vscode-apex.java.home で、別の JDK を指定している場合は、ここでは分からない
+#       （その場合の警告は、無視してよい。案内に、そのことも書く）
+#   ・java -version の出力から、バージョンを読む（1.8.0_351 → 8、11.0.17 → 11、17.0.21.0.2 → 17、17-ea → 17）。
+#     最初の行が「Picked up JAVA_TOOL_OPTIONS: …」でも、「version "…"」の行を探す
+#   ・下限は、環境変数 SF_TOOLS_JAVA_MIN_MAJOR（既定 17。拡張の要件が上がったら、ここだけを変える）
+#   ・--cache のとき、成功を ~/.sf-tools-java-check（環境変数 SF_TOOLS_JAVA_CHECK_STAMP で変更可）に、java の場所を記録し、
+#     同じ場所の java なら 24 時間は、java -version の実行を省略する。失敗は、記録せず、毎回確認する
+# ------------------------------------------------------------------------------
+check_java_cli() {
+    local use_cache=0 arg min java_path out ver major rest stamp
+    min="${SF_TOOLS_JAVA_MIN_MAJOR:-17}"
+    for arg in "$@"; do
+        case "$arg" in
+            --cache) use_cache=1 ;;
+        esac
+    done
+
+    [[ "${GITHUB_ACTIONS:-}" == "true" ]] && return 0
+    [[ "${SF_TOOLS_SKIP_JAVA_CHECK:-}" == "1" ]] && return 0
+
+    # 調べる java を決める（JAVA_HOME が優先。指す先に java が無い・実行できないときは、PATH の java）
+    java_path=""
+    if [[ -n "${JAVA_HOME:-}" && -x "${JAVA_HOME}/bin/java" ]]; then  # 存在確認のため run 不使用
+        java_path="${JAVA_HOME}/bin/java"
+    else
+        java_path=$(command -v java 2>/dev/null) || java_path=""  # VAR=$(cmd) のため run 不使用（見つからなければ空）
+    fi
+
+    if [[ -z "$java_path" ]]; then
+        log "WARNING" "Java が見つかりません。Salesforce の Apex 拡張（VS Code）は、Java ${min} 以上が必要です。"
+        _java_cli_guidance "$min"
+        return 1
+    fi
+
+    stamp="${SF_TOOLS_JAVA_CHECK_STAMP:-$HOME/.sf-tools-java-check}"
+    if [[ $use_cache -eq 1 && -f "$stamp" && "$(cat "$stamp" 2>/dev/null)" == "$java_path" \
+          && -n "$(find "$stamp" -mmin -1440 2>/dev/null)" ]]; then  # 条件チェックのため run 不使用（記録の読み取り）
+        return 0   # 24 時間以内に、同じ場所の java で成功を確認済み
+    fi
+
+    # java -version は、標準エラーに出力する。Windows の改行（CR）は除く
+    out=$("$java_path" -version 2>&1 | tr -d '\r')  # VAR=$(cmd) のため run 不使用（出力の取得）
+    ver=$(printf '%s\n' "$out" | sed -n 's/.*version "\([^"]*\)".*/\1/p' | head -1)  # VAR=$(cmd) のため run 不使用（バージョン文字列の抽出）
+
+    major="${ver%%.*}"        # 17.0.21 → 17 / 1.8.0_351 → 1 / 21 → 21
+    major="${major%%[!0-9]*}" # 17-ea → 17
+    if [[ "$major" == "1" ]]; then   # 1.8.0_351 のような古い形式は、2 番目の数字が本体（8）
+        rest="${ver#1.}"
+        major="${rest%%.*}"
+        major="${major%%[!0-9]*}"
+    fi
+
+    if [[ -z "$major" ]]; then
+        log "WARNING" "Java のバージョンを判定できませんでした（${java_path}）。Apex 拡張は、Java ${min} 以上が必要です。"
+        [[ -n "$out" ]] && log "WARNING" "  java -version の出力: $(printf '%s' "$out" | head -1)"
+        _java_cli_guidance "$min"
+        return 1
+    fi
+
+    if [[ "$major" -lt "$min" ]]; then
+        log "WARNING" "Java ${ver} が使われます（${java_path}）。Salesforce の Apex 拡張（VS Code）は、Java ${min} 以上が必要です。"
+        _java_cli_guidance "$min"
+        return 1
+    fi
+
+    [[ $use_cache -eq 1 ]] && { printf '%s' "$java_path" > "$stamp" 2>/dev/null || true; }  # 記録に失敗しても続行（意図的エラー無視）
+    return 0
+}
+
+# _java_cli_guidance - check_java_cli の、共通の案内（WARNING）を表示する
+_java_cli_guidance() {
+    local min="$1"
+    log "WARNING" "  このままだと、Apex の言語サーバーが起動せず、VS Code に「telemetry handler is null」などのエラーが出ます。"
+    log "WARNING" "  対処: JDK ${min} 以上（例: Microsoft OpenJDK ${min}）をインストールし、JAVA_HOME か、VS Code の設定"
+    log "WARNING" "    salesforcedx-vscode-apex.java.home に、そのフォルダを指定してください。管理者権限が使えないときは、zip 版を展開して使えます。"
+    log "WARNING" "  VS Code の設定で、JDK ${min} 以上を指定済みなら、この警告は無視してかまいません。"
+    log "WARNING" "    警告を出さないようにするには、環境変数 SF_TOOLS_SKIP_JAVA_CHECK=1 を設定します。"
 }
 
 # open_browser - OS を判定してブラウザを開く

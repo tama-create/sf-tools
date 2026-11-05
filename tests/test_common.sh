@@ -563,6 +563,148 @@ test_check_sf_cli_cache() {
 }
 
 # ------------------------------------------------------------------------------
+# check_java_cli のテスト（Apex 拡張は Java 17 以上が必要。17 未満・見つからない・判定できないときに警告する）
+# ------------------------------------------------------------------------------
+# 引数: 1=PATH, 2=check_java_cli の引数, 3=（任意）check_java_cli の前に実行するコード（「java が無い」状態の再現など）
+#       環境変数 JAVA_HOME / MOCK_JAVA_VERSION / MOCK_JAVA_RAW / GITHUB_ACTIONS などは、そのまま引き継ぐ
+_cjc_run() {
+    PATH="$1" bash -c "
+        readonly SCRIPT_NAME=test; readonly LOG_FILE=/dev/null; readonly LOG_MODE=NEW; export SF_INIT_MODE=1
+        source '${SF_TOOLS_DIR}/lib/common.sh'
+        ${3:-}
+        check_java_cli $2
+        echo RET=\$?" 2>&1
+}
+_java_calls() { grep -c "^java -version" "$MOCK_CALL_LOG" 2>/dev/null || true; }
+
+test_check_java_cli() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] check_java_cli: Java 17 未満・見つからない・判定できないときに警告する（中断はしない）${CLR_RST}"
+    local mb jh out
+    mb=$(setup_mock_bin)
+    export MOCK_CALL_LOG="$mb/calls.log"
+    create_mock_java "$mb"
+    local P="$mb:/usr/bin:/bin"
+
+    # 17 以上 → 何も表示せず、戻り値 0
+    out=$(_cjc_run "$P" "")
+    [[ "$out" == "RET=0" ]] && pass "Java 17.0.21 → 何も表示せず、戻り値 0" || fail "Java 17.0.21 → 何も表示せず、戻り値 0" "$out"
+    out=$(MOCK_JAVA_VERSION=21 _cjc_run "$P" "")
+    [[ "$out" == "RET=0" ]] && pass "Java 21（ピリオドなし）→ 問題なし" || fail "Java 21（ピリオドなし）→ 問題なし" "$out"
+    out=$(MOCK_JAVA_VERSION=17-ea _cjc_run "$P" "")
+    [[ "$out" == "RET=0" ]] && pass "Java 17-ea → 17 として扱う" || fail "Java 17-ea → 17 として扱う" "$out"
+
+    # 17 未満 → 警告（原因の説明・対処・無視してよい場合・警告を消す方法）を表示し、戻り値 1（die しない）
+    out=$(MOCK_JAVA_VERSION=11.0.17 _cjc_run "$P" "")
+    [[ "$out" == *"WARNING"* && "$out" == *"Java 11.0.17"* && "$out" == *"Java 17 以上"* && "$out" == *"RET=1"* ]] \
+        && pass "Java 11.0.17 → 警告（バージョンと下限を表示）し、die せずに戻り値 1" || fail "Java 11.0.17 → 警告し、戻り値 1" "$out"
+    [[ "$out" == *"$mb/java"* ]] \
+        && pass "警告に、java の場所を表示する" || fail "警告に、java の場所を表示する" "$out"
+    [[ "$out" == *"telemetry handler is null"* ]] \
+        && pass "警告に、実際に出るエラーの文言（telemetry handler is null）を載せる" || fail "警告に、エラーの文言を載せる" "$out"
+    [[ "$out" == *"salesforcedx-vscode-apex.java.home"* && "$out" == *"zip"* ]] \
+        && pass "対処として、VS Code の設定と zip 版（管理者権限なし）を案内する" || fail "対処の案内" "$out"
+    [[ "$out" == *"SF_TOOLS_SKIP_JAVA_CHECK=1"* && "$out" == *"無視してかまいません"* ]] \
+        && pass "設定済みなら無視してよいこと・警告を消す方法を案内する" || fail "無視できる場合・警告を消す方法の案内" "$out"
+    out=$(MOCK_JAVA_VERSION=1.8.0_351 _cjc_run "$P" "")
+    [[ "$out" == *"Java 1.8.0_351"* && "$out" == *"RET=1"* ]] \
+        && pass "Java 1.8.0_351（旧形式）→ 8 として、警告する" || fail "Java 1.8.0_351 → 警告" "$out"
+    out=$(MOCK_JAVA_VERSION=16.0.2 _cjc_run "$P" "")
+    [[ "$out" == *"RET=1"* ]] && pass "Java 16 → 警告する（17 の境界）" || fail "Java 16 → 警告する" "$out"
+
+    # 下限は、環境変数で変えられる（拡張の要件が上がったとき用）
+    out=$(SF_TOOLS_JAVA_MIN_MAJOR=21 _cjc_run "$P" "")
+    [[ "$out" == *"Java 21 以上"* && "$out" == *"RET=1"* ]] \
+        && pass "SF_TOOLS_JAVA_MIN_MAJOR=21 → 17 でも警告し、案内も 21 になる" || fail "下限の変更" "$out"
+
+    # 「Picked up JAVA_TOOL_OPTIONS」が先頭にあっても、version の行を読む
+    out=$(MOCK_JAVA_RAW='Picked up JAVA_TOOL_OPTIONS: -Xmx1g\nopenjdk version "17.0.9" 2023-10-17' _cjc_run "$P" "")
+    [[ "$out" == "RET=0" ]] && pass "先頭が Picked up JAVA_TOOL_OPTIONS でも、version の行を読んで判定する" || fail "Picked up の行" "$out"
+
+    # バージョンを読めない出力 → 警告（出力の 1 行目を表示）
+    out=$(MOCK_JAVA_RAW='Unable to locate a Java Runtime.' _cjc_run "$P" "")
+    [[ "$out" == *"判定できませんでした"* && "$out" == *"Unable to locate a Java Runtime."* && "$out" == *"RET=1"* ]] \
+        && pass "version の行が無い → 「判定できません」と出力の 1 行目を表示して警告" || fail "判定できないとき" "$out"
+
+    # JAVA_HOME を優先する（PATH の java が 17 でも、JAVA_HOME の java が 11 なら警告する）
+    jh="$mb/jh"; mkdir -p "$jh/bin"; create_mock_java "$jh/bin"
+    out=$(JAVA_HOME="$jh" MOCK_JAVA_VERSION=11.0.17 _cjc_run "$P" "")
+    [[ "$out" == *"$jh/bin/java"* && "$out" == *"RET=1"* ]] \
+        && pass "JAVA_HOME の java を優先して調べる" || fail "JAVA_HOME の優先" "$out"
+    # JAVA_HOME の先に java が無い → PATH の java を調べる
+    out=$(JAVA_HOME="$mb/no-such-dir" _cjc_run "$P" "")
+    [[ "$out" == "RET=0" ]] && pass "JAVA_HOME の先に java が無い → PATH の java を調べる" || fail "JAVA_HOME が無効" "$out"
+
+    # java が見つからない → 警告（Apex 拡張を使うなら必要）。command -v java が失敗する状態を、関数で再現する
+    out=$(_cjc_run "$P" "" 'command() { if [[ "$1 $2" == "-v java" ]]; then return 1; fi; builtin command "$@"; }')
+    [[ "$out" == *"Java が見つかりません"* && "$out" == *"Java 17 以上"* && "$out" == *"RET=1"* ]] \
+        && pass "java が見つからない → 警告し、戻り値 1" || fail "java が見つからない" "$out"
+
+    # GitHub Actions 上・SF_TOOLS_SKIP_JAVA_CHECK=1 → 何もしない（古い Java でも）
+    out=$(GITHUB_ACTIONS=true MOCK_JAVA_VERSION=11.0.17 _cjc_run "$P" "")
+    [[ "$out" == "RET=0" ]] && pass "GitHub Actions 上 → 何もしない" || fail "GitHub Actions 上 → 何もしない" "$out"
+    out=$(SF_TOOLS_SKIP_JAVA_CHECK=1 MOCK_JAVA_VERSION=11.0.17 _cjc_run "$P" "")
+    [[ "$out" == "RET=0" ]] && pass "SF_TOOLS_SKIP_JAVA_CHECK=1 → 何もしない" || fail "SF_TOOLS_SKIP_JAVA_CHECK=1 → 何もしない" "$out"
+
+    unset MOCK_CALL_LOG
+    teardown "$mb"
+}
+
+# check_java_cli --cache: 24 時間の省略 / 失敗は記録しない
+test_check_java_cli_cache() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] check_java_cli --cache: 成功は 24 時間省略 / 失敗は毎回確認${CLR_RST}"
+    local mb stamp out
+    mb=$(setup_mock_bin)
+    export MOCK_CALL_LOG="$mb/calls.log"
+    create_mock_java "$mb"
+    stamp="$mb/java-check-stamp"
+    local P="$mb:/usr/bin:/bin"
+
+    # 1 回目: 成功 → 記録を作り、java -version を実行する
+    : > "$MOCK_CALL_LOG"
+    out=$(SF_TOOLS_JAVA_CHECK_STAMP="$stamp" _cjc_run "$P" "--cache")
+    [[ "$out" == "RET=0" && "$(_java_calls)" == "1" ]] \
+        && pass "1 回目: java -version を実行して成功する" || fail "1 回目: java -version を実行して成功する" "$out / 呼び出し $(_java_calls)"
+    [[ "$(cat "$stamp" 2>/dev/null)" == "$mb/java" ]] \
+        && pass "成功を、java の場所つきで記録する" || fail "成功を、java の場所つきで記録する" "$(cat "$stamp" 2>/dev/null)"
+
+    # 2 回目: 記録があるので、java -version を実行せずに省略する
+    SF_TOOLS_JAVA_CHECK_STAMP="$stamp" _cjc_run "$P" "--cache" > /dev/null
+    [[ "$(_java_calls)" == "1" ]] \
+        && pass "2 回目: 24 時間以内なので、java -version を実行せずに省略する" || fail "2 回目: 省略する" "呼び出し $(_java_calls)"
+
+    # 記録が古い（2 日前）→ 省略しない
+    touch_ago 2880 "$stamp"
+    SF_TOOLS_JAVA_CHECK_STAMP="$stamp" _cjc_run "$P" "--cache" > /dev/null
+    [[ "$(_java_calls)" == "2" ]] \
+        && pass "記録が 24 時間より古い → 省略せず、確認する" || fail "記録が古い → 確認する" "呼び出し $(_java_calls)"
+
+    # 記録の java の場所が違う → 省略しない
+    printf '%s' "/another/path/java" > "$stamp"
+    SF_TOOLS_JAVA_CHECK_STAMP="$stamp" _cjc_run "$P" "--cache" > /dev/null
+    [[ "$(_java_calls)" == "3" ]] \
+        && pass "記録の java の場所が違う → 省略せず、確認する" || fail "場所が違う → 確認する" "呼び出し $(_java_calls)"
+
+    # --cache なし → 記録があっても、毎回確認する
+    SF_TOOLS_JAVA_CHECK_STAMP="$stamp" _cjc_run "$P" "" > /dev/null
+    [[ "$(_java_calls)" == "4" ]] \
+        && pass "--cache なし → 毎回確認する" || fail "--cache なし → 毎回確認する" "呼び出し $(_java_calls)"
+
+    # 失敗（Java 11）→ 記録を作らず、毎回警告する
+    rm -f "$stamp"; : > "$MOCK_CALL_LOG"
+    out=$(MOCK_JAVA_VERSION=11.0.17 SF_TOOLS_JAVA_CHECK_STAMP="$stamp" _cjc_run "$P" "--cache")
+    [[ "$out" == *"Java 17 以上"* && "$out" == *"RET=1"* && ! -f "$stamp" ]] \
+        && pass "失敗 → 警告し、記録は作らない" || fail "失敗 → 警告し、記録は作らない" "$out"
+    MOCK_JAVA_VERSION=11.0.17 SF_TOOLS_JAVA_CHECK_STAMP="$stamp" _cjc_run "$P" "--cache" > /dev/null
+    [[ "$(_java_calls)" == "2" ]] \
+        && pass "失敗は、毎回確認する（省略されない）" || fail "失敗は、毎回確認する" "呼び出し $(_java_calls)"
+
+    unset MOCK_CALL_LOG
+    teardown "$mb"
+}
+
+# ------------------------------------------------------------------------------
 # print_admin_warning: 管理者向けの警告ボックス（幅のそろえ・標準の見出し）
 # ------------------------------------------------------------------------------
 test_print_admin_warning() {
@@ -1374,6 +1516,8 @@ test_open_browser_wsl_quote
 test_is_protected_branch
 test_check_sf_cli
 test_check_sf_cli_cache
+test_check_java_cli
+test_check_java_cli_cache
 test_print_admin_warning
 test_run_isolated_home
 test_ensure_sf_tools_latest

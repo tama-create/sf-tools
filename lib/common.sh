@@ -37,7 +37,7 @@
 #   主な関数を挙げる。一覧は、各ファイルの冒頭の【提供する関数】を参照:
 #   project.sh   ... get_target_org / check_force_dir / resolve_init_identity / resolve_job_identity / check_gh_owner / get_branch_list /
 #                    is_reserved_org_alias / is_protected_branch / required_status_check_names / ensure_sf_tools_latest など
-#   platform.sh  ... is_gitbash / set_var / sed_inplace / base64_oneline / run_with_timeout / run_isolated_home / check_sf_cli / open_browser
+#   platform.sh  ... is_gitbash / set_var / sed_inplace / base64_oneline / run_with_timeout / run_isolated_home / check_sf_cli / check_java_cli / open_browser
 #   input.sh     ... read_input / read_key / press_enter / read_or_quit / read_secret / ask_yn
 #   lib/ の org.sh / wizard.sh / diag.sh / verify-common.sh は、common.sh からは source しない（使うスクリプトが、個別に source する）
 #
@@ -611,7 +611,7 @@ readonly SF_RESERVED_ORG_ALIASES="prod staging develop main"
 # 10. 責務ごとのファイル（ここから読み込む。呼び出し側は、common.sh だけを source すればよい）
 #   input.sh     ... 対話入力（read_input / read_key / press_enter / read_or_quit / read_secret / ask_yn）
 #   platform.sh  ... OS・外部コマンド（is_gitbash / set_var / sed_inplace / base64_oneline / run_with_timeout /
-#                    run_isolated_home / check_sf_cli / open_browser）
+#                    run_isolated_home / check_sf_cli / check_java_cli / open_browser）
 #   project.sh   ... プロジェクト（force-*・GitHub・組織・ブランチ）。関数の一覧は、project.sh の冒頭
 #   読み込みの順は input.sh → platform.sh → project.sh（関数は、呼ばれる時点で定義済みであればよい。
 #   input.sh の read_or_quit などが使う set_var は、platform.sh にある）

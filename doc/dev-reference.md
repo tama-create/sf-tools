@@ -62,7 +62,7 @@
 
 | ファイル | 対象スクリプト |
 |---|---|
-| `test_common.sh` | lib/common.sh・input.sh・platform.sh・project.sh（`check_gh_owner`・入力関数（`read_secret` / `read_key` / `press_enter`）・`_mask_secrets`・`is_gitbash`・`open_browser`・`is_reserved_org_alias`・`is_protected_branch`・`check_sf_cli`・`print_admin_warning`・`run_isolated_home`・`ensure_sf_tools_latest`・`merge_package_xml`・`sed_inplace` など・Bash 3.2 対応（`test_bash32_compat`。1.1）・`ensure_admin_branch` / `push_admin_branch`・`get_target_org`。`json_get`: 基本・先頭のドット・配列・日本語や引用符・警告つき・不正な JSON・`node` がない・`set -e` を含む。`node -e` だけは、モックではなく本物の node に渡す: `test_helper.sh`） |
+| `test_common.sh` | lib/common.sh・input.sh・platform.sh・project.sh（`check_gh_owner`・入力関数（`read_secret` / `read_key` / `press_enter`）・`_mask_secrets`・`is_gitbash`・`open_browser`・`is_reserved_org_alias`・`is_protected_branch`・`check_sf_cli`・`check_java_cli`・`print_admin_warning`・`run_isolated_home`・`ensure_sf_tools_latest`・`merge_package_xml`・`sed_inplace` など・Bash 3.2 対応（`test_bash32_compat`。1.1）・`ensure_admin_branch` / `push_admin_branch`・`get_target_org`。`json_get`: 基本・先頭のドット・配列・日本語や引用符・警告つき・不正な JSON・`node` がない・`set -e` を含む。`node -e` だけは、モックではなく本物の node に渡す: `test_helper.sh`） |
 | `test_init-common.sh` | phases/init/init-common.sh（`ensure_sf_tools_branch`・JWT 用の証明書の発行先（subject）。実際の Git と一時 bare リポジトリを使用） |
 | `test_org.sh` | lib/org.sh（ログイン先の 3 択・環境変数の指定・組織の種類の判定・本番は main のみのガード・保存） |
 | `test_verify.sh`・`test_verify2.sh`・`test_verify3.sh` | phases/init/verify.sh と lib/verify-common.sh（テスト関数を、3 つのファイルに、所要時間でほぼ均等に分けた。並列に動かすため。共通の部品は `tests/verify-test-lib.sh`。各ファイルの冒頭に一覧がある）（実行できない場所・--plan・診断の不足・確認（N / q / EOF・本番の明示）・1 層・3 層（develop → staging → main の順）・失敗（マージしない・案内）・取り違えの検出・--cleanup・部品） |
@@ -144,7 +144,7 @@
 
 ### 2.2 `test_helper.sh` の前提
 
-読み込むと、`SF_TOOLS_DIR`・`TESTS_DIR` を決め、`SF_TOOLS_SF_CHECK_STAMP=/dev/null`（`check_sf_cli --cache` の記録を、本物のホームに作らない）を export し、`TMPDIR` の末尾の `/` を除く（2.1.1）。
+読み込むと、`SF_TOOLS_DIR`・`TESTS_DIR` を決め、`SF_TOOLS_SF_CHECK_STAMP=/dev/null`（`check_sf_cli --cache` の記録を、本物のホームに作らない）・`SF_TOOLS_JAVA_CHECK_STAMP=/dev/null`（`check_java_cli --cache` の同様）を export し、`JAVA_HOME`・`SF_TOOLS_SKIP_JAVA_CHECK`・`SF_TOOLS_JAVA_MIN_MAJOR` を unset し（実機の Java で結果が変わらないように。`create_mock_java` が、モックの java を作る）、`TMPDIR` の末尾の `/` を除く（2.1.1）。
 
 判定・集計の関数: `pass` / `fail` / `skip`・`assert_exit_ok` / `assert_exit_fail`・`assert_file_exists` / `assert_file_not_exists`・`assert_dir_exists` / `assert_dir_not_exists`・`assert_file_contains` / `assert_file_not_contains`・`assert_executable`・`assert_equals`・`assert_output_contains` / `assert_output_not_contains`・`print_summary`（最後に呼ぶ。失敗があれば戻り値 1）。
 
@@ -186,7 +186,7 @@
 > 仕様の正本は、各ファイルの冒頭コメント（【提供する関数】）と、関数ごとの説明コメント。ここは要点だけ。
 > **構成**: `lib/common.sh` が窓口で、ログ（`log`）・実行（`run`）・終了（`die`）・`show_help`・`reject_unknown_args`・`print_admin_warning`・`json_get`・`_mask_secrets` / `_strip_ansi` / `_strip_term_codes` と定数を持つ。残りの関数は、責務ごとのファイルに分けてあり、`common.sh` が、最後に `input.sh` → `platform.sh` → `project.sh` の順で `source` する（呼び出し側は、`common.sh` だけを `source` すればよい。この 3 つは、単独では `source` しない）。
 > - `lib/input.sh`（対話入力: `read_input` / `read_key` / `press_enter` / `read_or_quit` / `read_secret` / `ask_yn`）
-> - `lib/platform.sh`（OS・外部コマンド: `is_gitbash` / `set_var` / `sed_inplace` / `base64_oneline` / `run_with_timeout` / `run_isolated_home` / `check_sf_cli` / `open_browser`）
+> - `lib/platform.sh`（OS・外部コマンド: `is_gitbash` / `set_var` / `sed_inplace` / `base64_oneline` / `run_with_timeout` / `run_isolated_home` / `check_sf_cli` / `check_java_cli` / `open_browser`）
 > - `lib/project.sh`（プロジェクト: `get_target_org` / `check_force_dir` / `resolve_init_identity` / `resolve_job_identity` / `check_gh_owner` / `get_branch_list` / `is_reserved_org_alias` / `is_protected_branch` / `required_status_check_names` / `ensure_sf_tools_latest` / `merge_package_xml` / 管理者用のクローンの関数など）
 >
 > `lib/org.sh`・`lib/wizard.sh`・`lib/diag.sh`・`lib/verify-common.sh`（これが `lib/verify-samples.sh` を読む）は、`common.sh` からは `source` しない。使うスクリプトが、`common.sh` のあとに個別に `source` する。`lib/typecheck.js` は、`bin/sf-typecheck.sh` が `node` で起動する（Node の標準ライブラリのみ。境界は、このファイルだけ）。
@@ -246,6 +246,7 @@ source 時の動作: Bash 3.2 未満なら `exit 1` → `LOG_FILE` の確認 →
 | `ensure_sf_tools_latest` | `ensure_sf_tools_latest [--no-update] [DIR]`（DIR の省略時は `$SF_TOOLS_DIR`） | sf-tools（DIR）が origin の最新か確認し、遅れていれば確認のうえ `git pull --ff-only` で更新する。戻り値: 0=最新（または判定できない: Git リポジトリでない・HEAD がブランチでない・origin に同じブランチがない。WARNING を出す）／2=更新した（呼び出し側は、更新した sf-tools で、再実行すること）。die: origin に接続できない・fetch 失敗・遅れていて未コミットの変更または未プッシュのコミットがある・更新を断った・pull 失敗・`--no-update` で遅れている |
 | `is_gitbash` | `if is_gitbash; then ...` | Windows の Git Bash か判定（`$OSTYPE` が `msys*` / `mingw*` / `cygwin*`） |
 | `check_sf_cli` | `check_sf_cli [--warn-only] [--cache]` | `sf --version` の終了コードが 0 か確認する（sf は npm 版が前提）。0 以外なら、sf の場所と対処を ERROR で表示して `die`（`--warn-only` は表示のみで戻り値 1）。`--cache`（日常のコマンド用）は、成功を `~/.sf-tools-sf-check`（`SF_TOOLS_SF_CHECK_STAMP` で変更可）に sf の場所つきで記録し、24 時間は確認を省略する（失敗は記録せず、毎回確認する）。sf 未インストール・GitHub Actions 上（`GITHUB_ACTIONS=true`）では何もしない |
+| `check_java_cli` | `check_java_cli [--cache]` | Java が **17 以上**か確認する（VS Code の Apex 拡張の言語サーバーの要件。Java 11 では `UnsupportedClassVersionError` で起動に失敗し、画面には `telemetry handler is null` とだけ出る）。調べる java は `JAVA_HOME/bin/java`（実行できるとき）→ PATH の `java`。`java -version`（標準エラー）の `version "…"` の行から、メジャーバージョンを読む（`1.8.0_351` → 8、`17.0.21.0.2` → 17、`17-ea` → 17。先頭が `Picked up JAVA_TOOL_OPTIONS` でも読める）。17 未満・見つからない・読み取れないときは、WARNING（原因・対処・設定済みなら無視してよいこと・`SF_TOOLS_SKIP_JAVA_CHECK=1` で消せること）を表示して戻り値 1（**`die` はしない**。呼び出し元は `sf-install.sh`）。下限は `SF_TOOLS_JAVA_MIN_MAJOR`（既定 17）。`--cache` は、成功を `~/.sf-tools-java-check`（`SF_TOOLS_JAVA_CHECK_STAMP` で変更可）に java の場所つきで記録し、24 時間は省略する（失敗は記録しない）。GitHub Actions 上・`SF_TOOLS_SKIP_JAVA_CHECK=1` では何もしない。VS Code の設定 `salesforcedx-vscode-apex.java.home` は読めない（その設定で 17 以上を指していれば、警告は無視してよい） |
 | `run_isolated_home` | `out=$(run_isolated_home CMD [ARGS])` | 一時的なホームフォルダ（`HOME` と `USERPROFILE` を `mktemp -d` のフォルダに）の中でコマンドを実行し、出力と終了コードを返す。終了後に一時フォルダを削除する。sf の認証・エイリアスを隔離するために使う（JWT 接続テスト） **Windows（Git Bash）以外では、`SF_USE_GENERIC_UNIX_KEYCHAIN=true` も設定する**（mac は、sf の暗号鍵を OS のキーチェーン（サービス `sfdx`・アカウント `local`）に保存する。一時ホームには `Library/Keychains` がなく、「キーチェーンが見つかりません」のダイアログが出るため。設定すると、鍵は一時ホームの `.sfdx/key.json` に保存され、一時フォルダごと消える。本物のキーチェーンには触れない） |
 | `open_browser` | `open_browser URL` | OS 判定してブラウザを開く（GitBash/WSL/macOS/Linux 対応。GitBash の判定を先に行う）。開けなくてもエラーにしない（戻り値は常に 0） |
 | `read_input` | `read_input VAR [PROMPT]` | readline 対応テキスト入力（矢印キー・BS 有効）。戻り値は `read` のもの（EOF で 0 以外。呼び出し側が `\|\| die` などで扱う） |
@@ -423,7 +424,7 @@ check_gh_owner "$GITHUB_OWNER"   # 認証ユーザーの一致確認
 > 仕様の正本は、`bin/sf-install.sh` の冒頭コメント（`--help`）。ここは要点だけ。
 
 処理順（順序変更禁止）:
-1. `check_sf_cli --warn-only`（`sf --version` の終了コードを確認し、0 以外なら警告のみ。中断しない。`sf-tools` 自身の最新化を止めないため）
+1. `check_sf_cli --warn-only`（`sf --version` の終了コードを確認し、0 以外なら警告のみ。中断しない。`sf-tools` 自身の最新化を止めないため）。続けて `check_java_cli --cache`（Java が 17 未満・見つからないときの警告のみ。中断しない。Apex を使わない作業はできるため）
 2. `~/sf-tools` を、現在のブランチ（取得できなければ `main`）で `git pull origin <ブランチ>`（失敗は WARNING で続行）。`sf-init.sh` から実行中（`SF_INIT_RUNNING` あり）はスキップする（実行中の `sf-init.sh` が書き換わると、bash の読み位置がずれるため）
 3. `./sf-tools/config/metadata.txt`・`branches.txt` の確認: `sf-init.sh` から実行中は、ないものだけテンプレートからコピー（失敗は中断）。それ以外は、どちらかがなければ中断する（プロジェクトの破損として扱い、生成しない）
 4. `sf-hook.sh` で Git Hook（pre-commit / pre-push）をインストール（失敗は WARNING で続行）

@@ -17,6 +17,12 @@ CLR_RST='\033[0m'
 # 省略のテスト以外で、確認が省略されないようにするため。省略のテストは、独自の記録先を指定する）
 export SF_TOOLS_SF_CHECK_STAMP=/dev/null
 
+# check_java_cli も同様（記録を作らない。省略のテストは、独自の記録先を指定する）。
+# JAVA_HOME は、本物のものを使わない（check_java_cli は JAVA_HOME を優先するため、モックの java が無視される）。
+# 本物の環境の変数で、結果が変わらないようにする（GITHUB_ACTIONS の Linux には、JAVA_HOME が設定されている）
+export SF_TOOLS_JAVA_CHECK_STAMP=/dev/null
+unset JAVA_HOME SF_TOOLS_SKIP_JAVA_CHECK SF_TOOLS_JAVA_MIN_MAJOR
+
 # TMPDIR の末尾の / を除く。macOS の TMPDIR は /var/folders/.../T/ のように / で終わり、"${TMPDIR:-/tmp}/x" が T//x になる。
 # bash の cd は // を 1 つにして PWD を作るため、テストの期待値（T//x）と、スクリプトが出すパス（T/x）が食い違う
 while [[ "${TMPDIR:-}" == */ && "$TMPDIR" != "/" ]]; do TMPDIR="${TMPDIR%/}"; done
@@ -556,11 +562,33 @@ EOF
     chmod +x "$bin_dir/openssl"
 }
 
+# java モック（check_java_cli の確認用。java -version は、標準エラーに出力する）
+#   MOCK_JAVA_VERSION=11.0.17 のように、バージョンを差し替える（既定 17.0.21。Apex 拡張の要件を満たす）
+#   MOCK_JAVA_RAW='...'       を指定すると、その文字列（\n は改行）を、そのまま出力する（想定外の形式の再現用）
+create_mock_java() {
+    local bin_dir="$1"
+    cat > "$bin_dir/java" << 'EOF'
+#!/bin/bash
+echo "java $*" >> "${MOCK_CALL_LOG:-/dev/null}"
+if [[ -n "${MOCK_JAVA_RAW:-}" ]]; then
+    printf '%b\n' "$MOCK_JAVA_RAW" >&2
+    exit 0
+fi
+_v="${MOCK_JAVA_VERSION:-17.0.21}"
+echo "openjdk version \"${_v}\" 2026-10-22 LTS" >&2
+echo "OpenJDK Runtime Environment (build ${_v}+1-LTS)" >&2
+echo "OpenJDK 64-Bit Server VM (build ${_v}+1-LTS, mixed mode, sharing)" >&2
+exit 0
+EOF
+    chmod +x "$bin_dir/java"
+}
+
 # 全モックを一括生成
 create_all_mocks() {
     local bin_dir="$1"
     create_mock_git "$bin_dir"
     create_mock_sf "$bin_dir"
+    create_mock_java "$bin_dir"   # check_java_cli が、本物の java ではなく、これを使う（17 以上）
     create_mock_npm "$bin_dir"
     create_mock_code "$bin_dir"
     create_mock_gh "$bin_dir"

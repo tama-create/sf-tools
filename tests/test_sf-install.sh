@@ -230,6 +230,55 @@ test_sf_cli_warning_only() {
     teardown "$td" "$mb" "$mh"
 }
 
+# Java が 17 未満（Apex 拡張の要件を満たさない）→ 警告を表示するが、中断せず、sf-tools の最新化は続行する
+test_java_old_warning_only() {
+    local td mb mh
+    setup_std_env td mb mh
+    create_all_mocks "$mb"
+
+    local out; out=$(cd "$td" && HOME="$mh" PATH="$mb:$PATH" MOCK_JAVA_VERSION=11.0.17 bash "$SF_TOOLS_DIR/bin/sf-install.sh" 2>&1)
+    local ec=$?
+
+    assert_exit_ok $ec "Java 11 → 警告のみで、終了コード 0（中断しない）"
+    assert_output_contains "$out" "Java 11.0.17 が使われます" "Java 11 → 警告にバージョンが表示された"
+    assert_output_contains "$out" "Java 17 以上が必要です" "Java 11 → 17 以上が必要なことが表示された"
+    assert_output_contains "$out" "salesforcedx-vscode-apex.java.home" "Java 11 → VS Code の設定の案内が表示された"
+    assert_file_contains "$MOCK_CALL_LOG" "git -C" "Java 11 → sf-tools の git pull は、続行される"
+    teardown "$td" "$mb" "$mh"
+}
+
+# Java が見つからない → 警告を表示するが、中断しない（JAVA_HOME は、テストの読み込み時に外してある。PATH の java が無い状態を作る）
+test_java_missing_warning_only() {
+    local td mb mh
+    setup_std_env td mb mh
+    create_all_mocks "$mb"
+    rm -f "$mb/java"    # モックの java を消す。ただし、実機に java があれば、そちらが使われるため、PATH に java の無いときだけ検査する
+
+    if PATH="$mb:/usr/bin:/bin" command -v java >/dev/null 2>&1; then  # 条件チェックのため run 不使用
+        skip "この環境の /usr/bin か /bin に java があるため、「java が無い」状態を作れない（check_java_cli のテストで検査済み）"
+    else
+        local out; out=$(cd "$td" && HOME="$mh" PATH="$mb:/usr/bin:/bin" bash "$SF_TOOLS_DIR/bin/sf-install.sh" 2>&1)
+        local ec=$?
+        assert_exit_ok $ec "Java なし → 警告のみで、終了コード 0（中断しない）"
+        assert_output_contains "$out" "Java が見つかりません" "Java なし → 警告が表示された"
+    fi
+    teardown "$td" "$mb" "$mh"
+}
+
+# Java が 17 以上 → Java の警告は出ない。SF_TOOLS_SKIP_JAVA_CHECK=1 なら、古くても出ない
+test_java_ok_no_warning() {
+    local td mb mh
+    setup_std_env td mb mh
+    create_all_mocks "$mb"
+
+    local out; out=$(cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-install.sh" 2>&1)
+    assert_output_not_contains "$out" "Apex 拡張" "Java 17 → Java の警告は出ない"
+
+    out=$(cd "$td" && HOME="$mh" PATH="$mb:$PATH" MOCK_JAVA_VERSION=11.0.17 SF_TOOLS_SKIP_JAVA_CHECK=1 bash "$SF_TOOLS_DIR/bin/sf-install.sh" 2>&1)
+    assert_output_not_contains "$out" "Apex 拡張" "SF_TOOLS_SKIP_JAVA_CHECK=1 → Java 11 でも警告は出ない"
+    teardown "$td" "$mb" "$mh"
+}
+
 
 # sf-init.sh から呼ばれた場合（SF_INIT_RUNNING=1）は、package.json があっても npm install をスキップする
 #   （sf-init が、このクローンで行うのは、ファイルの準備とプッシュだけで、node_modules を使わないため。約 90 秒の短縮）
@@ -334,6 +383,9 @@ test_gitmessage_config_fail
 test_npm_install_skipped_when_sf_init_running
 test_npm_install_runs_normally
 test_sf_cli_warning_only
+test_java_old_warning_only
+test_java_missing_warning_only
+test_java_ok_no_warning
 test_gitmessage_created
 test_upgrade_skipped_within_24h
 test_upgrade_triggered_on_first_run

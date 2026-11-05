@@ -140,6 +140,7 @@ it_run() {
         unset GITHUB_ACTIONS CI GH_TOKEN GITHUB_TOKEN
         mkdir -p "$IT_ROOT/tmp"; export TMPDIR="$IT_ROOT/tmp"   # 一時ファイルの残りを、サンドボックスの中で検査できるように
         export SF_LAUNCHER_ACTIVE=1 SF_TOOLS_SF_CHECK_STAMP=/dev/null
+        export SF_TOOLS_SKIP_JAVA_CHECK=1   # 実機の Java のバージョンで、出力が変わらないように（Java の確認は、test_common.sh が検査する）
         export GIT_TERMINAL_PROMPT=0 GIT_CONFIG_NOSYSTEM=1 GIT_SSH_COMMAND="$IT_BIN/ssh"
         export E2E_COMMIT_MSG="${IT_COMMIT_MSG:-$IT_COMMIT_MSG_DEFAULT}"
         printf '%b' "$input" | run_with_timeout "${IT_TIMEOUT:-300}" "$@"

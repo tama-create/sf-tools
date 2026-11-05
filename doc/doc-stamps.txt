@@ -17,7 +17,7 @@ site/reference/commands-dev.html | bin/sf-restart.sh | 3849369820-2445 | b2034a6
 site/reference/commands-dev.html | bin/sf-hook.sh | 4023496098-3227 | b2034a6
 site/reference/commands-dev.html | bin/sf-unhook.sh | 756720157-1896 | b2034a6
 
-site/reference/commands-auto.html | bin/sf-install.sh | 1238908549-5499 | b2034a6
+site/reference/commands-auto.html | bin/sf-install.sh | 968961189-6379 | d50fc12
 site/reference/commands-auto.html | bin/sf-upgrade.sh | 3414214461-4440 | e2f9bb0
 site/reference/commands-auto.html | bin/sf-prepush.sh | 2137767055-4495 | b2034a6
 site/reference/commands-auto.html | bin/sf-precommit.sh | 2396654912-1585 | c52ffe3
@@ -54,7 +54,7 @@ site/admin/verify.html | bin/sf-typecheck.sh | 2610487361-7160 | b2034a6
 site/admin/verify.html | lib/typecheck.js | 3564138558-5155 | b2034a6
 
 site/guide/install.html | bin/sf-upgrade.sh | 3414214461-4440 | e2f9bb0
-site/guide/install.html | bin/sf-install.sh | 1238908549-5499 | b2034a6
+site/guide/install.html | bin/sf-install.sh | 968961189-6379 | d50fc12
 site/guide/install.html | bin/sf-start.sh | 458532388-5461 | b2034a6
 
 site/admin/troubleshooting.html | bin/sf-job.sh | 3104353950-6410 | b2034a6
@@ -92,7 +92,7 @@ site/reference/structure.html | bin/sf-typecheck.sh | 2610487361-7160 | b2034a6
 site/reference/structure.html | bin/sf-check.sh | 334649645-7163 | b2034a6
 site/reference/structure.html | bin/sf-prepush.sh | 2137767055-4495 | b2034a6
 site/reference/structure.html | bin/sf-hook.sh | 4023496098-3227 | b2034a6
-site/reference/structure.html | bin/sf-install.sh | 1238908549-5499 | b2034a6
+site/reference/structure.html | bin/sf-install.sh | 968961189-6379 | d50fc12
 site/admin/setup.html | phases/init/01_check_env.sh | 2407393103-1523 | b2034a6
 site/admin/setup.html | phases/init/02_project_info.sh | 1060219747-2798 | b2034a6
 site/admin/setup.html | phases/init/03_repo_create.sh | 3075761310-2366 | b2034a6

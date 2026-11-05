@@ -42,6 +42,7 @@
 #  33. シナリオ sync-wf（改変したワークフローを sf-sync-wf が見つけて直す・--remove は雛形にあるファイルを拒否・クローンの中だけ）
 #  34. シナリオ update-secret（sf-update-secret で秘密鍵を同じ鍵で上書き・更新日時が進む・誤ったパスは拒否される）
 #  35. シナリオ cross-os（別の OS が作ったリポジトリの確認: CRLF がない・フックが同じ内容で実行できる・sf-sync-wf --check が成功する。読み取りのみ）
+#  36. needs-e2e.sh（rr の前に、e2e が必要かの判定。対象のパスの正本）
 #  32. GitHub Actions で動かす準備（ci-fixture.sh が鍵一式を作る・e2e.yml とガードの整合。ガードは 2 で、Actions 上でも専用ワークフローだけ通る）
 # ==============================================================================
 source "$(dirname "${BASH_SOURCE[0]}")/e2e-test-lib.sh"
@@ -108,24 +109,26 @@ test_e2e_guard() {
     # GitHub Actions 上でも、専用のワークフロー（e2e.yml）の条件が、すべてそろえば通る。1 つでも欠けると通らない
     local _wf="tama-create/sf-tools/.github/workflows/e2e.yml@refs/heads/development"
     local _body='e2e_load_fixture; e2e_guard_env; echo "GUARD=${E2E_GUARD_OK}"; echo "GA=${GITHUB_ACTIONS:-unset} CI=${CI:-unset}"'
-    GITHUB_ACTIONS=true CI=true E2E_ALLOW_ACTIONS=1 GITHUB_WORKFLOW_REF="$_wf" GITHUB_EVENT_NAME=push _e2e_call "$_body"
-    assert_file_contains "$mb/out.log" "GUARD=1" "専用のワークフロー（e2e.yml・development・push）なら、Actions 上でも、ガードを通る"
+    GITHUB_ACTIONS=true CI=true E2E_ALLOW_ACTIONS=1 GITHUB_WORKFLOW_REF="$_wf" GITHUB_EVENT_NAME=workflow_dispatch _e2e_call "$_body"
+    assert_file_contains "$mb/out.log" "GUARD=1" "専用のワークフロー（e2e.yml・development・手動）なら、Actions 上でも、ガードを通る"
     assert_file_contains "$mb/out.log" "GA=unset CI=unset" "通ったあとは、GITHUB_ACTIONS・CI を外す（クライアント PC と同じ動きを確かめるため）"
     GITHUB_ACTIONS=true E2E_ALLOW_ACTIONS=1 GITHUB_WORKFLOW_REF="${_wf/development/main}" GITHUB_EVENT_NAME=workflow_dispatch _e2e_call "$_body"
     assert_file_contains "$mb/out.log" "GUARD=1" "main の上の手動実行（workflow_dispatch）も通る"
     GITHUB_ACTIONS=true E2E_ALLOW_ACTIONS=1 GITHUB_WORKFLOW_REF="$_wf" GITHUB_EVENT_NAME=schedule _e2e_call "$_body"
     assert_file_contains "$mb/out.log" "GUARD=1" "定期実行（schedule）も通る"
-    GITHUB_ACTIONS=true GITHUB_WORKFLOW_REF="$_wf" GITHUB_EVENT_NAME=push _e2e_call "$_body"
+    GITHUB_ACTIONS=true GITHUB_WORKFLOW_REF="$_wf" GITHUB_EVENT_NAME=workflow_dispatch _e2e_call "$_body"
     assert_file_not_contains "$mb/out.log" "GUARD=1" "E2E_ALLOW_ACTIONS=1 の印がないと、通らない"
-    GITHUB_ACTIONS=true E2E_ALLOW_ACTIONS=1 GITHUB_WORKFLOW_REF="tama-create/sf-tools/.github/workflows/test.yml@refs/heads/development" GITHUB_EVENT_NAME=push _e2e_call "$_body"
+    GITHUB_ACTIONS=true E2E_ALLOW_ACTIONS=1 GITHUB_WORKFLOW_REF="tama-create/sf-tools/.github/workflows/test.yml@refs/heads/development" GITHUB_EVENT_NAME=workflow_dispatch _e2e_call "$_body"
     assert_file_not_contains "$mb/out.log" "GUARD=1" "ほかのワークフロー（test.yml）からは、通らない"
-    GITHUB_ACTIONS=true E2E_ALLOW_ACTIONS=1 GITHUB_WORKFLOW_REF="someone/sf-tools/.github/workflows/e2e.yml@refs/heads/development" GITHUB_EVENT_NAME=push _e2e_call "$_body"
+    GITHUB_ACTIONS=true E2E_ALLOW_ACTIONS=1 GITHUB_WORKFLOW_REF="someone/sf-tools/.github/workflows/e2e.yml@refs/heads/development" GITHUB_EVENT_NAME=workflow_dispatch _e2e_call "$_body"
     assert_file_not_contains "$mb/out.log" "GUARD=1" "ほかのリポジトリの e2e.yml（フォークなど）からは、通らない"
-    GITHUB_ACTIONS=true E2E_ALLOW_ACTIONS=1 GITHUB_WORKFLOW_REF="${_wf/development/feature-x}" GITHUB_EVENT_NAME=push _e2e_call "$_body"
+    GITHUB_ACTIONS=true E2E_ALLOW_ACTIONS=1 GITHUB_WORKFLOW_REF="${_wf/development/feature-x}" GITHUB_EVENT_NAME=workflow_dispatch _e2e_call "$_body"
     assert_file_not_contains "$mb/out.log" "GUARD=1" "development・main 以外のブランチの上では、通らない"
+    GITHUB_ACTIONS=true E2E_ALLOW_ACTIONS=1 GITHUB_WORKFLOW_REF="$_wf" GITHUB_EVENT_NAME=push _e2e_call "$_body"
+    assert_file_not_contains "$mb/out.log" "GUARD=1" "push のイベントでは、通らない（e2e.yml に push の起動はない。mm では動かさない）"
     GITHUB_ACTIONS=true E2E_ALLOW_ACTIONS=1 GITHUB_WORKFLOW_REF="$_wf" GITHUB_EVENT_NAME=pull_request _e2e_call "$_body"
     assert_file_not_contains "$mb/out.log" "GUARD=1" "pull_request のイベントでは、通らない"
-    GITHUB_ACTIONS=true E2E_ALLOW_ACTIONS=1 GITHUB_WORKFLOW_REF="$_wf" GITHUB_EVENT_NAME=push MOCK_GH_API_USER=someone-else _e2e_call "$_body"
+    GITHUB_ACTIONS=true E2E_ALLOW_ACTIONS=1 GITHUB_WORKFLOW_REF="$_wf" GITHUB_EVENT_NAME=workflow_dispatch MOCK_GH_API_USER=someone-else _e2e_call "$_body"
     assert_file_not_contains "$mb/out.log" "GUARD=1" "Actions 上でも、gh のユーザーが E2E_GH_USER と違うと、通らない（既存のガードは、そのまま）"
 
     MOCK_GH_API_USER=someone-else _e2e_call 'e2e_load_fixture; e2e_guard_env; echo "GUARD=${E2E_GUARD_OK}"'
@@ -1911,27 +1914,35 @@ CEOF
     assert_file_contains     "$wf" 'E2E_ALLOW_ACTIONS: "1"' "e2e.yml: ガードを通す印を、渡す"
     assert_file_contains     "$wf" "needs: windows"        "e2e.yml: macOS は、Windows のあとに動かす（同じ組織を、同時に使わない）"
     assert_file_contains     "$wf" "--no-actions --no-add-tier" "e2e.yml: macOS は、クライアント側だけ"
-    assert_file_contains     "$wf" "branches: [development]" "e2e.yml: push は、development だけ（rr のときには、すでに緑にする）"
-    assert_file_contains     "$wf" "- 'bin/**'"            "e2e.yml: 配布物（bin/）の変更で動く"
-    assert_file_not_contains "$wf" "- 'doc/**'"            "e2e.yml: ドキュメントだけの変更では、動かさない"
+    # 起動の条件: mm（development への push）では動かさない（無料枠を、約 40 分ぶん使うため）。rr の最初に、手動で動かす（CLAUDE.md 1.3.2）
+    assert_file_not_contains "$wf" "  push:"             "e2e.yml: push では動かさない（mm のたびに動かさない。2026-11-05 に廃止）"
+    assert_file_not_contains "$wf" "branches: [development]" "e2e.yml: push の絞り込み（branches）が残っていない"
+    assert_file_not_contains "$wf" "  paths:"            "e2e.yml: push の絞り込み（paths）が残っていない（対象のパスの正本は tests/e2e/needs-e2e.sh）"
+    assert_file_contains     "$wf" "  workflow_dispatch:" "e2e.yml: 手動で動かせる（rr の最初に、Claude が動かす）"
+    assert_file_contains     "$wf" "  schedule:"          "e2e.yml: 定期実行は、そのまま残す"
     # e2e の対象のパス: リリース・削除の流れに関係しない 4 ファイルは、除外する（e2e は、1 回で、テスト用の組織の無料枠を約 40 分ぶん使うため）。
-    #   除外の一覧の正本は e2e.yml。CLAUDE.md・dev-guide.md・dev-reference.md の、確認のコマンド（git の ':!パス'）と、そろえておく
-    local _ex _in
+    #   対象のパスと除外の一覧の正本は tests/e2e/needs-e2e.sh。CLAUDE.md・dev-guide.md・dev-reference.md の説明（4 ファイルの名前）と、そろえておく
+    local _ex _in _ne="$SF_TOOLS_DIR/tests/e2e/needs-e2e.sh"
     for _ex in bin/sf-metasync.sh bin/sf-upgrade.sh lib/metasync.js config/metasync-detect.txt; do
-        assert_file_contains "$wf" "- '!${_ex}'" "e2e.yml: ${_ex} だけの変更では、動かさない（リリース・削除に関係しない）"
-        [[ -f "$SF_TOOLS_DIR/$_ex" ]] && pass "e2e.yml: 除外した ${_ex} が、実在する（名前を変えると、除外が効かなくなる）" \
-            || fail "e2e.yml: 除外した ${_ex} が、実在する（名前を変えると、除外が効かなくなる）" "ファイルがない"
-        assert_file_contains "$SF_TOOLS_DIR/CLAUDE.md" "':!${_ex}'" "CLAUDE.md: rr の前の確認コマンドの除外が、e2e.yml と同じ（${_ex}）"
-        assert_file_contains "$SF_TOOLS_DIR/doc/dev-guide.md" "':!${_ex}'" "dev-guide.md: 確認コマンドの除外が、e2e.yml と同じ（${_ex}）"
-        assert_file_contains "$SF_TOOLS_DIR/doc/dev-reference.md" "':!${_ex}'" "dev-reference.md: 確認コマンドの除外が、e2e.yml と同じ（${_ex}）"
+        assert_file_contains "$_ne" "$_ex" "needs-e2e.sh: ${_ex} は、除外の一覧にある（リリース・削除に関係しない）"
+        [[ -f "$SF_TOOLS_DIR/$_ex" ]] && pass "needs-e2e.sh: 除外した ${_ex} が、実在する（名前を変えると、除外が効かなくなる）" \
+            || fail "needs-e2e.sh: 除外した ${_ex} が、実在する（名前を変えると、除外が効かなくなる）" "ファイルがない"
+        assert_file_contains "$SF_TOOLS_DIR/CLAUDE.md" "$_ex" "CLAUDE.md: 除外の 4 ファイルの説明が、needs-e2e.sh と同じ（${_ex}）"
+        assert_file_contains "$SF_TOOLS_DIR/doc/dev-guide.md" "$_ex" "dev-guide.md: 除外の 4 ファイルの説明が、needs-e2e.sh と同じ（${_ex}）"
+        assert_file_contains "$SF_TOOLS_DIR/doc/dev-reference.md" "$_ex" "dev-reference.md: 除外の 4 ファイルの説明が、needs-e2e.sh と同じ（${_ex}）"
     done
-    assert_equals "$(grep -c "^      - '!" "$wf")" "4" "e2e.yml: 除外は、4 ファイルだけ（増やしたら、CLAUDE.md・dev-guide.md・dev-reference.md の一覧も直す）"
+    assert_equals "$(grep -c "^E2E_EXCLUDE_PATHS=" "$_ne")" "1" "needs-e2e.sh: 除外の一覧は、1 か所だけ"
+    assert_equals "$(grep "^E2E_EXCLUDE_PATHS=" "$_ne" | tr ' ' '\n' | grep -c '/')" "4" "needs-e2e.sh: 除外は、4 ファイルだけ（増やしたら、CLAUDE.md・dev-guide.md・dev-reference.md の説明も直す）"
     # 誤って除外すると、リリース・削除の確認が抜けるもの（共有部品・リリースの雛形・各フェーズ）は、除外していない
-    for _in in "- 'lib/**'" "- 'templates/**'" "- 'phases/**'" "- 'hooks/**'" "- 'config/**'" "- 'bin/**'"; do
-        assert_file_contains "$wf" "$_in" "e2e.yml: ${_in} の変更では、動く"
+    for _in in lib phases hooks templates config bin tests/e2e .github/workflows/e2e.yml; do
+        if grep "^E2E_TARGET_PATHS=" "$_ne" | tr ' ()' '\n\n\n' | grep -qx "$_in"; then  # 対象の一覧の 1 語と、完全一致するか
+            pass "needs-e2e.sh: ${_in} の変更では、e2e が必要"
+        else
+            fail "needs-e2e.sh: ${_in} の変更では、e2e が必要" "対象の一覧にない"
+        fi
     done
-    assert_file_not_contains "$wf" "- '!lib/common.sh'" "e2e.yml: 共有部品（lib/common.sh）は、除外しない"
-    assert_file_not_contains "$wf" "- '!bin/sf-release.sh'" "e2e.yml: リリースのコマンド（bin/sf-release.sh）は、除外しない"
+    assert_file_not_contains "$_ne" "lib/common.sh" "needs-e2e.sh: 共有部品（lib/common.sh）は、除外しない"
+    assert_file_not_contains "$_ne" "bin/sf-release.sh" "needs-e2e.sh: リリースのコマンド（bin/sf-release.sh）は、除外しない"
     assert_file_contains     "$wf" 'touch "$HOME/.sf-tools-last-update"' "e2e.yml: 更新済みの印を先に置く（e2e の実行中に、バックグラウンドの sf-upgrade.sh が、sf を入れ替えない）"
     assert_equals "$(grep -c 'touch "$HOME/.sf-tools-last-update"' "$wf")" "2" "e2e.yml: 更新済みの印は、Windows・macOS の両方のジョブで置く"
     # 組織名・ユーザー名・チャンネル ID は、公開ログに出さないため、Secrets から読む（Variables は使わない）
@@ -1962,9 +1973,84 @@ CEOF
 
 
 
+# ------------------------------------------------------------------------------
+# 36. needs-e2e.sh（rr の前に、e2e が必要かを、git の差分で判定する。対象のパスの正本）
+# ------------------------------------------------------------------------------
+test_e2e_needs_e2e() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] needs-e2e.sh（e2e の対象のパスの判定。文書・単体テスト・除外の 4 ファイルだけなら、不要）${CLR_RST}"
+    local r rc out sha root base_sha g="git -c user.name=t -c user.email=t@example.com -c commit.gpgsign=false"
+    local ne="" ; r=$(mktemp -d "${TMPDIR:-/tmp}/needs-e2e-XXXXXX")
+    mkdir -p "$r/tests/e2e" "$r/bin" "$r/lib" "$r/doc" "$r/config" "$r/.github/workflows"
+    ne="$r/tests/e2e/needs-e2e.sh"
+    git -C "$r" init -q . 2>/dev/null; git -C "$r" checkout -q -B main 2>/dev/null
+    git -C "$r" config core.autocrlf false   # 一時リポジトリ。Windows の改行の警告を出さない
+    # 最初のコミット: 文書だけ（対象のパスを、まだ変えていない）
+    echo a > "$r/doc/a.md"; $g -C "$r" add -A; $g -C "$r" commit -q -m root; root=$(git -C "$r" rev-parse HEAD)
+    # main: 配布物・e2e・除外の 4 ファイルがある状態（判定のスクリプト自体は、ここで置く。最初のコミットに入れると、対象のパスを変えた扱いになる）
+    local f
+    cp "$SF_TOOLS_DIR/tests/e2e/needs-e2e.sh" "$ne"
+    for f in bin/sf-release.sh bin/sf-metasync.sh bin/sf-upgrade.sh lib/common.sh lib/metasync.js config/metasync-detect.txt \
+             tests/e2e/lib.sh tests/test_x.sh .github/workflows/e2e.yml .github/workflows/test.yml; do
+        mkdir -p "$r/$(dirname "$f")"; echo a > "$r/$f"
+    done
+    $g -C "$r" add -A; $g -C "$r" commit -q -m base; base_sha=$(git -C "$r" rev-parse HEAD)
+    git -C "$r" checkout -q -b development 2>/dev/null
+    _ne_commit() { local file; for file in "$@"; do echo "x$RANDOM" >> "$r/$file"; done; $g -C "$r" add -A; $g -C "$r" commit -q -m "change $*"; }
+
+    # 変更なし → 不要（戻り値 1・出力なし）
+    out=$(bash "$ne" main development 2>&1); rc=$?
+    assert_equals "$rc" "1" "差分がない → 不要（戻り値 1）"
+    assert_equals "$out" "" "差分がない → 何も表示しない"
+
+    # 文書・単体テスト・test.yml・除外の 4 ファイルだけ → 不要
+    _ne_commit doc/a.md tests/test_x.sh .github/workflows/test.yml bin/sf-metasync.sh bin/sf-upgrade.sh lib/metasync.js config/metasync-detect.txt
+    out=$(bash "$ne" main development 2>&1); rc=$?
+    assert_equals "$rc" "1" "文書・単体テスト・test.yml・除外の 4 ファイルだけの変更 → 不要（戻り値 1）"
+    assert_equals "$out" "" "その場合、対象のパスの変更は、表示されない"
+    sha=$(bash "$ne" --last-change development 2>&1); rc=$?
+    assert_equals "$sha" "$base_sha" "最後の変更: 不要な変更のあとでも、対象のパスを最後に変えたコミット（base）を返す"
+    assert_equals "$rc" "0" "最後の変更: 見つかれば、戻り値 0"
+
+    # 配布物（リリースのコマンド）を変えた → 必要（戻り値 0・ファイル名を表示）
+    _ne_commit bin/sf-release.sh
+    out=$(bash "$ne" main development 2>&1); rc=$?
+    assert_equals "$rc" "0" "bin/sf-release.sh の変更 → 必要（戻り値 0）"
+    assert_equals "$out" "bin/sf-release.sh" "変わった対象のファイルだけを、1 行ずつ表示する（除外・文書は出ない）"
+    local last; last=$(git -C "$r" rev-parse HEAD)
+    assert_equals "$(bash "$ne" --last-change development)" "$last" "最後の変更: 直前のコミット（bin/sf-release.sh）を返す"
+
+    # そのあとに文書だけ変えても、最後の変更は動かない（e2e の成功が、この SHA 以降かで判定できる）
+    _ne_commit doc/a.md
+    assert_equals "$(bash "$ne" --last-change development)" "$last" "最後の変更: 文書だけのコミットでは、動かない"
+    git -C "$r" merge-base --is-ancestor "$last" HEAD && pass "最後の変更は、先頭の祖先（e2e の成功の判定に使える）" || fail "最後の変更は、先頭の祖先（e2e の成功の判定に使える）"
+
+    # 共有部品・e2e 自体・e2e.yml の変更 → 必要（除外していない）
+    _ne_commit lib/common.sh tests/e2e/lib.sh .github/workflows/e2e.yml
+    out=$(bash "$ne" main development 2>&1); rc=$?
+    assert_equals "$rc" "0" "共有部品・e2e 自体・e2e.yml の変更 → 必要"
+    assert_equals "$out" "$(printf '%s\n' .github/workflows/e2e.yml bin/sf-release.sh lib/common.sh tests/e2e/lib.sh)" "対象のファイルが、すべて表示される（除外の 4 ファイルと文書は、出ない）"
+
+    # 対象のパスを、一度も変えていない履歴 → 最後の変更は、なし（戻り値 1）
+    out=$(bash "$ne" --last-change "$root" 2>&1); rc=$?
+    assert_equals "$rc" "1" "最後の変更: 対象のパスを変えたコミットがない履歴 → 戻り値 1"
+    assert_equals "$out" "" "最後の変更: その場合、何も表示しない"
+
+    # エラー: 不明なオプション・存在しない参照・引数が多い → 戻り値 2
+    bash "$ne" -x >/dev/null 2>&1; assert_equals "$?" "2" "不明なオプション → 戻り値 2"
+    bash "$ne" main no-such-ref >/dev/null 2>&1; assert_equals "$?" "2" "存在しないブランチ → 戻り値 2（e2e は不要、とは判定しない）"
+    bash "$ne" --last-change no-such-ref >/dev/null 2>&1; assert_equals "$?" "2" "最後の変更: 存在しないブランチ → 戻り値 2"
+    bash "$ne" a b c >/dev/null 2>&1; assert_equals "$?" "2" "引数が多すぎる → 戻り値 2"
+    out=$(bash "$ne" --help 2>&1); rc=$?
+    assert_equals "$rc" "0" "--help → 戻り値 0"
+    assert_output_contains "$out" "対象のパス" "--help → 対象のパスの定義を表示する"
+
+    rm -rf "$r"
+}
+
 test_e2e_names
 test_e2e_guard
 test_e2e_ci
+test_e2e_needs_e2e
 test_e2e_delete_guards
 test_e2e_fixture
 test_e2e_cleanup_list

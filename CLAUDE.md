@@ -24,11 +24,11 @@
 | 変更中 | `run` ラッパー必須・日本語コメント・UTF-8/LF 維持 |
 | 変更後 | **変えた箇所のコメント（冒頭コメント・コード本体の中のコメント）を見直す（2.5）。** 手元は `bash tests/run_tests.sh --changed`（変えたファイルのテスト）だけ → PASS したら mm を依頼。**全件は手元で回さない（CI が正）** |
 | mm 後 | push で、GitHub Actions が全件（Windows・macOS・Linux）と shellcheck を自動で動かす。**Claude が結果を確認して報告する。赤なら直して、もう一度 mm を依頼する**（目安 約 11 分。実績 7〜20 分。ランナーの空き待ちで延びる） |
-| 検証 | **e2e は GitHub Actions（`e2e.yml`）の結果が正。** e2e の対象のパス（下記）・`tests/e2e/`・`e2e.yml` が変わった `development` への push で、自動で動く（目安。実績: Windows の全部 25〜50 分 → macOS のクライアント側 5〜6 分。前の実行が終わるまで待つ）。**Claude が結果を確認して報告する。手元では動かさない**（同じ 3 つの組織を取り合う。確認の内容は `doc/dev-reference.md` 9.6）。ユーザーに手動の確認を頼むのは、e2e で見えないことだけ |
-| リリース | CI 全緑と検証 OK の報告後に rr を依頼 |
+| 検証 | **e2e は GitHub Actions（`e2e.yml`）の結果が正。mm では動かさない**（1 回で、テスト用の組織の無料枠を約 40 分ぶん使うため）。**rr の最初の手順として、Claude が `development` に対して手動で動かす**（e2e の対象のパスが `main` との差分にあるときだけ。判定は `bash tests/e2e/needs-e2e.sh`。1.3.2）。目安: Windows の全部 25〜50 分 → macOS のクライアント側 5〜6 分。**Claude が結果を確認して報告する。手元では動かさない**（同じ 3 つの組織を取り合う。確認の内容は `doc/dev-reference.md` 9.6）。重い変更（リリース・削除の流れ・sf-init）を、rr の前に早めに確かめたいときも、同じ手動の実行を使う。ユーザーに手動の確認を頼むのは、e2e で見えないことだけ |
+| リリース | CI 全緑の報告後に rr を依頼。rr の中で、必要なら e2e を動かし、緑を確認してから、PR・マージに進む（1.3.2） |
 
 > **mm の前に、`--changed` の PASS は必須。PASS 確認なしの mm 依頼は禁止。全件は、mm 後の CI の結果が正（手元の Windows は遅く、全件は 2 時間以上かかることもある。手元で全件が必要なときだけ、WSL で `run_tests.sh`）。CI が赤のまま、PR・rr を進めない。**
-> **rr の前に、CI の全件が緑（`development` の最新のコミットで）が必須。さらに、`main` との差分に **e2e の対象のパス**（配布物の `bin/` `lib/` `phases/` `hooks/` `templates/` `config/` のうち、リリース・削除に関係しない 4 ファイル `bin/sf-metasync.sh` `bin/sf-upgrade.sh` `lib/metasync.js` `config/metasync-detect.txt` を除いたもの。`e2e.yml` の `on.push.paths` と同じ。詳細は `doc/dev-reference.md` 9.3）が含まれるときは、e2e（Actions の `e2e.yml`）が、その対象のパスを変えた最新のコミット以降で成功していることも必須**（確認: `gh run list --workflow e2e.yml --branch development`）。** e2e の対象のパスの変更がなく、`tests/` `doc/` `.github/workflows/test.yml` や、上の 4 ファイルなどだけの変更なら、e2e は不要（確認: `git diff --stat origin/main...development -- bin lib phases hooks templates config ':!bin/sf-metasync.sh' ':!bin/sf-upgrade.sh' ':!lib/metasync.js' ':!config/metasync-detect.txt'` が空）。**e2e は、1 回で、Actions の無料枠（テスト用の組織の月 2,000 分）を約 40 分ぶん使う。リリース・削除に関係しない変更では、動かさない。関係する変更は、まとめて 1 回の mm・1 回の rr にする。**必須の項目が欠けた rr 依頼は断ること。
+> **rr の前に、CI の全件が緑（`development` の最新のコミットで）が必須。さらに、`main` との差分に **e2e の対象のパス**が含まれるとき（`bash tests/e2e/needs-e2e.sh` の戻り値が 0）は、e2e（Actions の `e2e.yml`）が、その対象のパスを最後に変えたコミット（`bash tests/e2e/needs-e2e.sh --last-change`）以降で成功していることも必須**（成功がなければ、rr の最初の手順として、Claude が動かす。1.3.2）。**対象のパスの定義の正本は `tests/e2e/needs-e2e.sh`**（配布物の `bin/` `lib/` `phases/` `hooks/` `templates/` `config/` と、e2e 自体の `tests/e2e/` `e2e.yml` のうち、リリース・削除に関係しない 4 ファイル `bin/sf-metasync.sh` `bin/sf-upgrade.sh` `lib/metasync.js` `config/metasync-detect.txt` を除いたもの。詳細は `doc/dev-reference.md` 9.3）。戻り値が 1（`tests/`（e2e 以外）`doc/` `.github/workflows/test.yml` や、上の 4 ファイルなどだけの変更）なら、e2e は不要。**e2e は、1 回で、Actions の無料枠（テスト用の組織の月 2,000 分）を約 40 分ぶん使う。mm では動かさず、rr の前の 1 回にする。リリース・削除に関係する変更は、まとめて 1 回の rr にする。** CI が赤のままの rr 依頼・e2e が赤の rr は、進めない（直して、もう一度 mm → rr）。
 > **変更に e2e の確認が足りないときは、e2e のほうを広げる**（手動の検証を、ユーザーに頼まない）。
 > **無言の時間を作らない（止まって見えるのは、サボりとみなす）。** ユーザーの画面には、ツールの中身も裏の処理も見えない。作業の開始時・調査や待ちに入る前に、今していること・待っていること・次にすることを 1〜2 行で書く。30 秒以上の処理は、ターミナルのタブでログの流れを見せ、途中経過をこまめに伝える。判断を求めているときは「指示待ち」とはっきり書き、完了したらすぐ結果を伝える（先に状況を聞かれたら失敗）。
 
@@ -49,17 +49,28 @@ git push origin development
 
 #### 1.3.2 rr（リリース）
 
-「rr」と明示された場合のみ、以下の手順を一括実行すること。前提: `development` が mm 済み（未コミットの変更なし）で、1.2 の rr 前提が満たされていること。
+「rr」と明示された場合のみ、以下の手順を一括実行すること。前提: `development` が mm 済み（未コミットの変更なし）で、CI が全緑であること（1.2）。e2e が必要で、まだ成功していなければ、手順の中で動かす（「rr」の指示に含まれる。約 40 分。待つ間は、ターミナルのタブでログの流れを見せ、途中経過を伝える）。
 
 ```bash
 git checkout development
 git fetch origin                         # origin/development・origin/main が手元より進んでいないか確認
+bash tests/e2e/needs-e2e.sh              # 戻り値 0 = e2e が必要（変わった対象のファイルを表示）/ 1 = 不要（そのまま PR へ）
+# 必要なとき: 成功済みか確認する。`--last-change` の SHA 以降の実行が success なら、動かし直さない（下の注）
+#   last=$(bash tests/e2e/needs-e2e.sh --last-change)
+#   GH_TOKEN="$(gh auth token --user <オーナー>)" gh run list --workflow e2e.yml --branch development --status success --json headSha --jq '.[].headSha'
+#   各 SHA について git merge-base --is-ancestor "$last" <SHA>（戻り値 0 なら、成功済み）
+# 成功済みでなければ、e2e を動かして、完了を待つ（約 40 分。赤なら、ここで中止）
+GH_TOKEN="$(gh auth token --user <オーナー>)" gh workflow run e2e.yml --ref development
+GH_TOKEN="$(gh auth token --user <オーナー>)" gh run list --workflow e2e.yml --branch development --event workflow_dispatch --limit 1 --json databaseId --jq '.[0].databaseId'   # 起動した実行の ID
+GH_TOKEN="$(gh auth token --user <オーナー>)" gh run watch <実行ID> --exit-status
 gh pr create --base main
 gh pr checks <PR番号> --watch             # PR の CI（必須チェック 11 個）の完了を待つ。Ruleset が、緑になるまで、マージを止める
 gh pr merge <PR番号> --merge             # --delete-branch は付けない
 git checkout development                 # マージ後も development に戻る
 git pull origin main                     # main の最新を取り込む
 ```
+
+> 注: e2e の実行は、`--ref` で指定した `development` の先頭のコミットで動く。起動したあとに `development` へ push しても、その実行は、起動時のコミットのまま（対象のパスを変えていなければ、成功は有効）。e2e が赤のときは、PR を作らず、原因を調べて報告する（再実行は、枠を使うため、原因を直してから）。
 
 ### 1.4 メモリ・ドキュメント管理
 
@@ -190,7 +201,7 @@ bash tests/run_tests.sh --changed             # 変更ファイルに対応す�
 bash tests/run_tests.sh --jobs 4 / --serial   # 同時に動かすファイル数（既定: CPU の数。--serial は 1 つずつ）
 bash tests/test_integration.sh                # 結合テスト L1（実 git ＋ fake。run_tests.sh の全件にも含まれる。手元の Windows は約 10 分、CI は 1〜3 分）
 bash tests/e2e/doctor.sh                       # e2e を動かせる環境かの確認（読み取りのみ。新しい環境で、run.sh の前に実行）
-bash tests/e2e/run.sh                          # 実環境の通し検証（通常のテストには含まれない。通常は Actions の e2e.yml が動かす。手元は新しい環境の確認・調査のときだけ: 1.2）
+bash tests/e2e/run.sh                          # 実環境の通し検証（通常のテストには含まれない。通常は rr の中で、Actions の e2e.yml を手動で動かす。手元は新しい環境の確認・調査のときだけ: 1.2）
 bash tests/e2e/scenario.sh --list             # 実環境のシナリオ（run.sh が残したリポジトリに、名前で選んで実行。読み取りのみのものから）
 ```
 
@@ -253,7 +264,7 @@ Salesforce 開発の環境構築と日々の作業を自動化するシェルス
 
 - 作業は `development` ブランチで行い、`main` へは PR 経由でマージする
 - mm = commit → push（`development` まで。`main` には入らない）
-- rr = PR 作成 → `main` へマージ（配布）。実施前の確認は 1.2（CI 全緑・配布物の変更があれば e2e の成功）
+- rr = （必要なら e2e を動かして緑を確認）→ PR 作成 → `main` へマージ（配布）。実施前の確認は 1.2（CI 全緑・e2e の対象のパスの変更があれば e2e の成功）
 - 検証環境 = Variable `SF_TOOLS_BRANCH=development` の force-*（Actions が sf-tools の `development` を使う）。詳細は `doc/dev-reference.md` セクション 9
 - `main` のブランチ保護は、`sf-tools` が公開リポジトリのため設定済み（Ruleset `protect-main`: 削除禁止・強制プッシュ禁止・PR 必須・**必須チェック 11 個（通常の CI。e2e は含めない）**）。直接 push は拒否され、CI が緑でない PR はマージできない。ジョブ名を変えるときは、Ruleset も更新する（`doc/dev-reference.md` 9.5）。上記の運用ルールを守る
 

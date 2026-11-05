@@ -3,9 +3,9 @@
 > **本書の位置づけ:** sf-tools 自体を開発・リリースする人向けの手順書です（以前は `README.md` の 9 章でした）。利用者向けの使い方は、文書サイト（`site/`）にあります。
 > 実装の詳細は `doc/dev-reference.md`（9 章に、本書と同じ範囲の詳しい説明）、AI 向けの作業ルールは `CLAUDE.md` を参照してください。
 
-> **e2e の実行について:** e2e は、GitHub Actions（`.github/workflows/e2e.yml`）でも動きます。通常は、Actions の結果が正です。同じテスト用の組織を使うため、**Actions の実行中に、手元で動かさないでください**。手元で動かすのは、新しい環境（Mac など）の確認や、不具合の調査のときです。
+> **e2e の実行について:** e2e は、通常、GitHub Actions（`.github/workflows/e2e.yml`）で動かします。**mm では動かさず、rr の最初の手順として、Claude が手動で動かします**（e2e の対象のパスが `main` との差分にあるときだけ）。通常は、Actions の結果が正です。同じテスト用の組織を使うため、**Actions の実行中に、手元で動かさないでください**。手元で動かすのは、新しい環境（Mac など）の確認や、不具合の調査のときです。
 
-> **Actions の無料枠について（2026-10-23）:** e2e が使うテスト用の組織（非公開のリポジトリ）の GitHub Actions は、無料枠（月 2000 分）を使い切ると、起動の直後に失敗します（コードの不具合ではありません）。枠が回復するまで、`e2e.yml` は無効にしています。**枠が回復したら（11 月 1 日以降）、`gh workflow enable e2e.yml` で戻し、枠切れの間に変えた配布物を、e2e で確認してください。**
+> **Actions の無料枠について（2026-11-05）:** e2e が使うテスト用の組織（非公開のリポジトリ）の GitHub Actions は、無料枠（月 2,000 分）を使い切ると、起動の直後に失敗します（コードの不具合ではありません）。e2e は、1 回で約 40 分ぶん使います。先月（2026-10）は、e2e の回数が多く、10/23 に枠が尽きました。そのため、mm のたびには動かさず、**rr の前の 1 回だけ**にしています（2026-11-05 に、push の起動を廃止）。使用量は、`organizations/<組織の ID>/settings/billing/usage/summary` で確かめられます。
 
 ---
 
@@ -16,8 +16,8 @@ sf-tools の `main` ブランチは、**そのまま全ユーザーに配布さ�
 | 手順 | 内容 |
 |---|---|
 | 1. 修正 | `development` ブランチで修正し、変えた箇所のコメント（冒頭コメント・コード本体の中のコメント）を見直し、変えたファイルのテスト（`bash tests/run_tests.sh --changed`）を PASS させる（`mm`：`development` までコミット・push）。push すると、GitHub Actions（`test.yml`）が、全件のテスト・結合テスト L1・shellcheck を、Windows・macOS・Linux で自動で動かす（目安 約 11 分。実績 7〜20 分）。赤なら直す。手元で全件は回さない |
-| 2. 検証 | 実環境の動作を確認する。e2e の対象のパス（配布物の `bin/` `lib/` `phases/` `hooks/` `templates/` `config/` のうち、リリース・削除に関係しない `bin/sf-metasync.sh` `bin/sf-upgrade.sh` `lib/metasync.js` `config/metasync-detect.txt` を除いたもの）・`tests/e2e/`・`e2e.yml` を変えた `development` への push で、GitHub Actions の `e2e.yml` が、自動で実行する（下記の e2e。目安。実績: Windows 25〜50 分 → macOS 5〜6 分）。結果は、`gh run list --workflow e2e.yml --branch development` で確認する。e2e の対象のパスを変えていない（`git diff --stat origin/main...development -- bin lib phases hooks templates config ':!bin/sf-metasync.sh' ':!bin/sf-upgrade.sh' ':!lib/metasync.js' ':!config/metasync-detect.txt'` が空）なら、e2e は不要。e2e は、1 回で、テスト用の組織の無料枠（月 2,000 分）を約 40 分ぶん使うので、関係する変更は、まとめて 1 回の mm・1 回の rr にする |
-| 3. リリース | `development` の最新のコミットで CI が全緑、e2e の対象のパスを変えたときは e2e の成功も確認してから、`development` → `main` の PR を作ってマージする（`rr`）。PR の CI（必須チェック 11 個）が緑になるまで、マージできない。これが配布になる。マージの直後は、e2e のシナリオ `dist-main` で、配布版のワークフローが sf-tools の `main` を使うことを確かめられる |
+| 2. 検証 | 実環境の動作を確認する（e2e）。**mm では動かさず、rr の最初の手順で動かす。** e2e の対象のパスが `main` との差分にあるときだけ必要で、判定は `bash tests/e2e/needs-e2e.sh`（戻り値 0 = 必要 / 1 = 不要。対象のパスの定義の正本は、このスクリプト。配布物の `bin/` `lib/` `phases/` `hooks/` `templates/` `config/` と、e2e 自体の `tests/e2e/` `e2e.yml` のうち、リリース・削除に関係しない `bin/sf-metasync.sh` `bin/sf-upgrade.sh` `lib/metasync.js` `config/metasync-detect.txt` を除いたもの）。動かすのは、`gh workflow run e2e.yml --ref development`（rr の中で、Claude が行う。目安。実績: Windows 25〜50 分 → macOS 5〜6 分）。重い変更（リリース・削除の流れ・sf-init）を、rr の前に早めに確かめたいときも、同じコマンドで動かせる。結果は、`gh run list --workflow e2e.yml --branch development` で確認する。e2e は、1 回で、テスト用の組織の無料枠（月 2,000 分）を約 40 分ぶん使うので、関係する変更は、まとめて 1 回の rr にする |
+| 3. リリース | `development` の最新のコミットで CI が全緑であること、e2e の対象のパスを変えたときは（rr の最初の手順で）e2e の成功を確認してから、`development` → `main` の PR を作ってマージする（`rr`）。PR の CI（必須チェック 11 個）が緑になるまで、マージできない。これが配布になる。マージの直後は、e2e のシナリオ `dist-main` で、配布版のワークフローが sf-tools の `main` を使うことを確かめられる |
 
 ## 2. 検証環境とは
 
@@ -28,7 +28,7 @@ sf-tools の `main` ブランチは、**そのまま全ユーザーに配布さ�
 変更内容に応じて確認します。詳細は `doc/dev-reference.md` 9.3 を参照してください。
 
 - **配布物を変えていないとき:** GitHub Actions の全件テスト・結合テスト L1・shellcheck が、`development` の最新のコミットで緑であることだけを確認します
-- **e2e の対象のパスを変えたとき:** `e2e.yml` が、その対象のパスを変えた最新のコミット以降で成功していることを確認します。e2e は、新規セットアップ（`sf-init.sh` の Phase 1〜10・`--add-tier`）、メタデータ同期（`wf-metasync` の手動起動）、デプロイ対象を含む PR（`wf-validate` → マージ → `wf-release` → 削除）、シナリオ（4 章）を、自動で通します
+- **e2e の対象のパスを変えたとき:** `e2e.yml` が、その対象のパスを最後に変えたコミット（`bash tests/e2e/needs-e2e.sh --last-change`）以降で成功していることを確認します（rr の最初の手順で、なければ動かします）。e2e は、新規セットアップ（`sf-init.sh` の Phase 1〜10・`--add-tier`）、メタデータ同期（`wf-metasync` の手動起動）、デプロイ対象を含む PR（`wf-validate` → マージ → `wf-release` → 削除）、シナリオ（4 章）を、自動で通します
 - 手で確かめるのは、e2e で見えないことだけです（e2e の確認が足りないときは、e2e を広げます）。手で PR を出して確かめるときは、動作確認だけの PR はマージせずに閉じます（マージすると `wf-release` が実際にデプロイします）
 
 > ℹ️ `sf-tools` は公開リポジトリのため、`main` のブランチ保護を、GitHub の無料プランでも設定できます（以前の Private リポジトリでは設定できませんでした）。**設定済みです**（Ruleset `protect-main`: 削除の禁止、強制プッシュの禁止、直接のプッシュの禁止で PR 経由のみ。承認者の人数は 0 人。必須のステータスチェック 11 個（`test.yml` のジョブ名。e2e は含めない）が緑でないと、マージできない）。GitHub Actions は、実行のたびに sf-tools の `main` を取得して、その中のコードを、秘密鍵を持つ環境で実行するため、`main` を誰が書き換えられるかが、最も重要です。変更は、引き続き、運用（mm / rr）を守ってください。設定は、リポジトリの **Settings → Rules** で確認・変更できます。

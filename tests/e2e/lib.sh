@@ -20,7 +20,7 @@
 #                          e2e-sfdx-url.XXXXXX（実行中の run.sh のものと、30 分以内のものは対象外）
 #   3. オーナーは、鍵一式のファイルで明示した E2E_OWNER だけ。gh のログインユーザーも E2E_GH_USER と一致が必須
 #   4. GitHub Actions 上では、専用のワークフロー（.github/workflows/e2e.yml。sf-tools の development / main の上の
-#      push・手動・定期のみ。E2E_ALLOW_ACTIONS=1 が必要）以外からは動かない（e2e_actions_allowed）。上の 2・3 は、Actions 上でも同じ
+#      手動・定期のみ（push では動かさない。2026-11-05 に廃止）。E2E_ALLOW_ACTIONS=1 が必要）以外からは動かない（e2e_actions_allowed）。上の 2・3 は、Actions 上でも同じ
 #
 # 【鍵一式のファイル】（リポジトリの外。~/.sf-tools-e2e/fixture.env。bootstrap.sh が作成する）
 #   E2E_OWNER             テスト用リポジトリのオーナー（組織名）
@@ -182,12 +182,12 @@ e2e_org_id() {
 #   ・E2E_ALLOW_ACTIONS=1（専用のワークフローが、明示して渡す印）
 #   ・GITHUB_WORKFLOW_REF が、sf-tools の .github/workflows/e2e.yml（development または main のブランチ上）
 #     （GITHUB_* は、GitHub が決める値で、ワークフローの書き手が上書きできない。ほかのワークフロー・リポジトリ・ブランチは、通さない）
-#   ・GITHUB_EVENT_NAME が、push・workflow_dispatch・schedule のどれか（pull_request は、通さない）
+#   ・GITHUB_EVENT_NAME が、workflow_dispatch・schedule のどちらか（push・pull_request は、通さない。e2e.yml に push の起動はない）
 e2e_actions_allowed() {
     local re='^tama-create/sf-tools/\.github/workflows/e2e\.yml@refs/heads/(development|main)$'
     [[ "${E2E_ALLOW_ACTIONS:-}" == "1" ]] || return 1
     [[ "${GITHUB_WORKFLOW_REF:-}" =~ $re ]] || return 1
-    case "${GITHUB_EVENT_NAME:-}" in push|workflow_dispatch|schedule) return 0 ;; *) return 1 ;; esac
+    case "${GITHUB_EVENT_NAME:-}" in workflow_dispatch|schedule) return 0 ;; *) return 1 ;; esac
 }
 
 e2e_guard_env() {

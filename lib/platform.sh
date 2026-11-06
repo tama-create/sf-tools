@@ -13,7 +13,8 @@
 #   run_with_timeout 秒 CMD [ARGS] ... 時間の上限つきで実行する（timeout がない macOS でも動く。時間切れは 124）
 #   run_isolated_home CMD [ARGS]   ... 一時的なホームフォルダの中でコマンドを実行（sf の認証・エイリアスを隔離）
 #   check_sf_cli [--warn-only] [--cache] ... sf が終了コードを正しく返すか確認（npm 版が前提。NG なら案内して die。--warn-only は戻り値 1）
-#   check_java_cli [--cache]       ... Java が 17 以上か確認（Apex 拡張の要件。NG なら案内を表示して戻り値 1。die はしない）
+#   check_java_cli [--cache] [--error] ... Java が 17 以上か確認（Apex 拡張の要件。NG なら案内を表示して戻り値 1。die はしない。--error は、案内を ERROR で出す）
+#   check_vscode_extension [--error]   ... VS Code に、Salesforce 拡張（salesforce.salesforcedx-vscode）が入っているか確認（NG なら案内を表示して戻り値 1。die はしない）
 #   open_browser URL               ... OS を判定してブラウザを開く（Git Bash/WSL/macOS/Linux 対応）
 #   ここの関数は、コマンドの実行に run を使わない（理由は、各行の「run 不使用」のコメントを参照）
 # ==============================================================================
@@ -222,12 +223,15 @@ check_sf_cli() {
 # 【使い方】
 #   check_java_cli             # 17 未満・見つからない・判定できないとき、WARNING を表示して戻り値 1（die はしない）
 #   check_java_cli --cache     # 日常のコマンド用。成功したら 24 時間は、確認を省略する（下記）
+#   check_java_cli --error     # 案内を、WARNING ではなく ERROR で表示する（呼び出し元が、続けられないと判断して die するとき。
+#                              #   sf-init の Phase 1。戻り値は同じ。die は、呼び出し元がする）
 #
 # 【動作】
 #   ・GitHub Actions 上（GITHUB_ACTIONS=true）・環境変数 SF_TOOLS_SKIP_JAVA_CHECK=1 のときは、何もしない（戻り値 0）
 #   ・調べる Java: JAVA_HOME/bin/java（実行できるとき）→ なければ PATH の java
-#     ※ VS Code の設定 salesforcedx-vscode-apex.java.home で、別の JDK を指定している場合は、ここでは分からない
-#       （その場合の警告は、無視してよい。案内に、そのことも書く）
+#     ※ VS Code の設定 salesforcedx-vscode-apex.java.home は、読まない。見る場所は、JAVA_HOME に一本化する
+#       （VS Code・ターミナル・sf-tools が、同じ Java を見るようにするため。案内も、JAVA_HOME の設定を勧める）。
+#       その設定で別の JDK を指していて、この確認を省くときは、SF_TOOLS_SKIP_JAVA_CHECK=1
 #   ・java -version の出力から、バージョンを読む（1.8.0_351 → 8、11.0.17 → 11、17.0.21.0.2 → 17、17-ea → 17）。
 #     最初の行が「Picked up JAVA_TOOL_OPTIONS: …」でも、「version "…"」の行を探す
 #   ・下限は、環境変数 SF_TOOLS_JAVA_MIN_MAJOR（既定 17。拡張の要件が上がったら、ここだけを変える）
@@ -235,11 +239,12 @@ check_sf_cli() {
 #     同じ場所の java なら 24 時間は、java -version の実行を省略する。失敗は、記録せず、毎回確認する
 # ------------------------------------------------------------------------------
 check_java_cli() {
-    local use_cache=0 arg min java_path out ver major rest stamp
+    local use_cache=0 arg min java_path out ver major rest stamp lvl="WARNING"
     min="${SF_TOOLS_JAVA_MIN_MAJOR:-17}"
     for arg in "$@"; do
         case "$arg" in
             --cache) use_cache=1 ;;
+            --error) lvl="ERROR" ;;
         esac
     done
 
@@ -255,8 +260,8 @@ check_java_cli() {
     fi
 
     if [[ -z "$java_path" ]]; then
-        log "WARNING" "Java が見つかりません。Salesforce の Apex 拡張（VS Code）は、Java ${min} 以上が必要です。"
-        _java_cli_guidance "$min"
+        log "$lvl" "Java が見つかりません。Salesforce の Apex 拡張（VS Code）は、Java ${min} 以上が必要です。"
+        _java_cli_guidance "$min" "$lvl"
         return 1
     fi
 
@@ -279,15 +284,15 @@ check_java_cli() {
     fi
 
     if [[ -z "$major" ]]; then
-        log "WARNING" "Java のバージョンを判定できませんでした（${java_path}）。Apex 拡張は、Java ${min} 以上が必要です。"
-        [[ -n "$out" ]] && log "WARNING" "  java -version の出力: $(printf '%s' "$out" | head -1)"
-        _java_cli_guidance "$min"
+        log "$lvl" "Java のバージョンを判定できませんでした（${java_path}）。Apex 拡張は、Java ${min} 以上が必要です。"
+        [[ -n "$out" ]] && log "$lvl" "  java -version の出力: $(printf '%s' "$out" | head -1)"
+        _java_cli_guidance "$min" "$lvl"
         return 1
     fi
 
     if [[ "$major" -lt "$min" ]]; then
-        log "WARNING" "Java ${ver} が使われます（${java_path}）。Salesforce の Apex 拡張（VS Code）は、Java ${min} 以上が必要です。"
-        _java_cli_guidance "$min"
+        log "$lvl" "Java ${ver} が使われます（${java_path}）。Salesforce の Apex 拡張（VS Code）は、Java ${min} 以上が必要です。"
+        _java_cli_guidance "$min" "$lvl"
         return 1
     fi
 
@@ -295,14 +300,62 @@ check_java_cli() {
     return 0
 }
 
-# _java_cli_guidance - check_java_cli の、共通の案内（WARNING）を表示する
+# _java_cli_guidance - check_java_cli の、共通の案内を表示する（OS 別。JAVA_HOME の設定に一本化）
+# 【使い方】 _java_cli_guidance MIN LEVEL      LEVEL は、log のレベル（WARNING / ERROR）
 _java_cli_guidance() {
-    local min="$1"
-    log "WARNING" "  このままだと、Apex の言語サーバーが起動せず、VS Code に「telemetry handler is null」などのエラーが出ます。"
-    log "WARNING" "  対処: JDK ${min} 以上（例: Microsoft OpenJDK ${min}）をインストールし、JAVA_HOME か、VS Code の設定"
-    log "WARNING" "    salesforcedx-vscode-apex.java.home に、そのフォルダを指定してください。管理者権限が使えないときは、zip 版を展開して使えます。"
-    log "WARNING" "  VS Code の設定で、JDK ${min} 以上を指定済みなら、この警告は無視してかまいません。"
-    log "WARNING" "    警告を出さないようにするには、環境変数 SF_TOOLS_SKIP_JAVA_CHECK=1 を設定します。"
+    local min="$1" lvl="${2:-WARNING}"
+    log "$lvl" "  このままだと、Apex の言語サーバーが起動せず、VS Code に「telemetry handler is null」などのエラーが出ます。"
+    log "$lvl" "  対処: JDK ${min} 以上（例: Microsoft OpenJDK ${min}）をインストールし、環境変数 JAVA_HOME に、そのフォルダを設定してください。"
+    if is_gitbash; then
+        log "$lvl" "    管理者権限が使えないときは、zip 版を展開し、ユーザーの環境変数に設定できます（管理者権限は不要）。"
+        log "$lvl" "      例: setx JAVA_HOME 'C:\\Users\\（ユーザー名）\\tools\\jdk-${min}'（設定後に開く、新しいターミナルと VS Code から有効）"
+    elif [[ "$OSTYPE" == "darwin"* ]]; then
+        log "$lvl" "    macOS: ~/.zshrc に export JAVA_HOME=\$(/usr/libexec/java_home -v ${min}) を書き、ターミナルを開き直してください。"
+    else
+        log "$lvl" "    ~/.bashrc などに export JAVA_HOME=（JDK のフォルダ）を書き、ターミナルを開き直してください。"
+    fi
+    log "$lvl" "  VS Code の設定（salesforcedx-vscode-apex.java.home）で別の JDK を指していて、この確認を省くときは、環境変数 SF_TOOLS_SKIP_JAVA_CHECK=1 を設定します。"
+}
+
+# check_vscode_extension - VS Code に、Salesforce 拡張（Salesforce Extension Pack）が入っているか確認する
+# ------------------------------------------------------------------------------
+# 【背景】 sf-tools は、VS Code で Salesforce を開発する前提（Apex・LWC の補完・エラー表示など）。拡張が入っていないと、
+#         管理者が、開発者の環境を再現して指導できない。sf-init の Phase 1 が、他の必要なツールと同じく、事前に確認する。
+#
+# 【使い方】
+#   check_vscode_extension             # 入っていない・確認できないとき、WARNING を表示して戻り値 1（die はしない）
+#   check_vscode_extension --error     # 案内を、ERROR で表示する（呼び出し元が die するとき。sf-init の Phase 1）
+#
+# 【動作】
+#   ・GitHub Actions 上（GITHUB_ACTIONS=true）・環境変数 SF_TOOLS_SKIP_VSCODE_CHECK=1 のときは、何もしない（戻り値 0）
+#   ・code コマンドがなければ、何もしない（戻り値 0。code の有無は、呼び出し元が確認する）
+#   ・code --list-extensions の出力に、salesforce.salesforcedx-vscode（拡張の ID。大文字・小文字は区別しない）があるか見る
+#   ・入っていないとき、入れるコマンド（code --install-extension salesforce.salesforcedx-vscode）を案内する。自動では入れない
+#     （管理者が、何が入るかを理解して、自分で入れるため）
+# ------------------------------------------------------------------------------
+check_vscode_extension() {
+    local arg lvl="WARNING" ext_id="salesforce.salesforcedx-vscode" exts
+    for arg in "$@"; do
+        case "$arg" in
+            --error) lvl="ERROR" ;;
+        esac
+    done
+
+    [[ "${GITHUB_ACTIONS:-}" == "true" ]] && return 0
+    [[ "${SF_TOOLS_SKIP_VSCODE_CHECK:-}" == "1" ]] && return 0
+    command -v code >/dev/null 2>&1 || return 0  # 存在確認のため run 不使用
+
+    # 一覧の取得に失敗（code が異常終了）したときは、入っていない扱いにする。Windows の改行（CR）は除く
+    exts=$(code --list-extensions 2>/dev/null | tr -d '\r') || exts=""  # VAR=$(cmd) のため run 不使用（出力の取得）
+    if printf '%s\n' "$exts" | grep -qix "$ext_id"; then  # 条件チェックのため run 不使用
+        return 0
+    fi
+
+    log "$lvl" "VS Code に、Salesforce の拡張機能（Salesforce Extension Pack: ${ext_id}）が入っていません。"
+    log "$lvl" "  対処: 次のコマンドで入れてください（入れたあと、VS Code を開き直します）。"
+    log "$lvl" "    code --install-extension ${ext_id}"
+    log "$lvl" "  別の VS Code（Insiders など）に入れていて、この確認を省くときは、環境変数 SF_TOOLS_SKIP_VSCODE_CHECK=1 を設定します。"
+    return 1
 }
 
 # open_browser - OS を判定してブラウザを開く

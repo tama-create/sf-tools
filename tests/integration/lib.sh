@@ -453,6 +453,7 @@ CURLEOF
 _last=""; _wait=0
 for _a in "$@"; do [[ "$_a" == "--wait" || "$_a" == "-w" ]] && _wait=1; _last="$_a"; done
 echo "code $*" >> "$IT_STATE/calls.log"
+[[ "${1:-}" == "--list-extensions" ]] && echo "salesforce.salesforcedx-vscode"   # sf-init の Phase 1（拡張の確認）の代わり
 [[ $_wait -eq 1 && -f "$_last" ]] && printf '%s\n' "${E2E_COMMIT_MSG:-it}" > "$_last"
 exit 0
 CODEEOF

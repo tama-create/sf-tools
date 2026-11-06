@@ -602,10 +602,26 @@ test_check_java_cli() {
         && pass "警告に、java の場所を表示する" || fail "警告に、java の場所を表示する" "$out"
     [[ "$out" == *"telemetry handler is null"* ]] \
         && pass "警告に、実際に出るエラーの文言（telemetry handler is null）を載せる" || fail "警告に、エラーの文言を載せる" "$out"
-    [[ "$out" == *"salesforcedx-vscode-apex.java.home"* && "$out" == *"zip"* ]] \
-        && pass "対処として、VS Code の設定と zip 版（管理者権限なし）を案内する" || fail "対処の案内" "$out"
-    [[ "$out" == *"SF_TOOLS_SKIP_JAVA_CHECK=1"* && "$out" == *"無視してかまいません"* ]] \
-        && pass "設定済みなら無視してよいこと・警告を消す方法を案内する" || fail "無視できる場合・警告を消す方法の案内" "$out"
+    [[ "$out" == *"環境変数 JAVA_HOME"* && "$out" != *"無視してかまいません"* ]] \
+        && pass "対処は、環境変数 JAVA_HOME の設定に一本化する（「無視してよい」とは書かない）" || fail "対処の案内（JAVA_HOME に一本化）" "$out"
+    [[ "$out" == *"SF_TOOLS_SKIP_JAVA_CHECK=1"* && "$out" == *"salesforcedx-vscode-apex.java.home"* ]] \
+        && pass "VS Code の設定で別の JDK を指している人向けに、確認を省く方法（SF_TOOLS_SKIP_JAVA_CHECK=1）を案内する" || fail "確認を省く方法の案内" "$out"
+    # OS 別の案内（OSTYPE を、チェックの前に差し替えて再現する）
+    out=$(MOCK_JAVA_VERSION=11.0.17 _cjc_run "$P" "" 'OSTYPE=msys')
+    [[ "$out" == *"setx JAVA_HOME"* && "$out" == *"管理者権限は不要"* && "$out" != *".zshrc"* && "$out" != *".bashrc"* ]] \
+        && pass "Windows（Git Bash）の案内: ユーザーの環境変数（setx。管理者権限は不要）" || fail "Windows の案内" "$out"
+    out=$(MOCK_JAVA_VERSION=11.0.17 _cjc_run "$P" "" 'OSTYPE=darwin23')
+    [[ "$out" == *".zshrc"* && "$out" == *"/usr/libexec/java_home -v 17"* && "$out" != *"setx"* ]] \
+        && pass "macOS の案内: ~/.zshrc に export JAVA_HOME=\$(/usr/libexec/java_home -v 17)" || fail "macOS の案内" "$out"
+    out=$(MOCK_JAVA_VERSION=11.0.17 _cjc_run "$P" "" 'OSTYPE=linux-gnu')
+    [[ "$out" == *".bashrc"* && "$out" != *"setx"* && "$out" != *".zshrc"* ]] \
+        && pass "Linux の案内: ~/.bashrc に export JAVA_HOME=" || fail "Linux の案内" "$out"
+    # --error: 案内を ERROR で出す（戻り値は同じ 1。die は呼び出し元がする）
+    out=$(MOCK_JAVA_VERSION=11.0.17 _cjc_run "$P" "--error")
+    [[ "$out" == *"ERROR"* && "$out" != *"WARNING"* && "$out" == *"Java 17 以上"* && "$out" == *"JAVA_HOME"* && "$out" == *"RET=1"* ]] \
+        && pass "--error: 案内を、すべて ERROR で表示し（WARNING は出さない）、戻り値 1" || fail "--error の表示" "$out"
+    out=$(_cjc_run "$P" "--error")
+    [[ "$out" == "RET=0" ]] && pass "--error: 17 以上なら、何も表示せず戻り値 0" || fail "--error（17 以上）" "$out"
     out=$(MOCK_JAVA_VERSION=1.8.0_351 _cjc_run "$P" "")
     [[ "$out" == *"Java 1.8.0_351"* && "$out" == *"RET=1"* ]] \
         && pass "Java 1.8.0_351（旧形式）→ 8 として、警告する" || fail "Java 1.8.0_351 → 警告" "$out"
@@ -645,6 +661,65 @@ test_check_java_cli() {
     [[ "$out" == "RET=0" ]] && pass "GitHub Actions 上 → 何もしない" || fail "GitHub Actions 上 → 何もしない" "$out"
     out=$(SF_TOOLS_SKIP_JAVA_CHECK=1 MOCK_JAVA_VERSION=11.0.17 _cjc_run "$P" "")
     [[ "$out" == "RET=0" ]] && pass "SF_TOOLS_SKIP_JAVA_CHECK=1 → 何もしない" || fail "SF_TOOLS_SKIP_JAVA_CHECK=1 → 何もしない" "$out"
+
+    unset MOCK_CALL_LOG
+    teardown "$mb"
+}
+
+# check_vscode_extension のテスト（sf-init の Phase 1。VS Code に Salesforce 拡張が入っているか）
+_cve_run() {   # 引数: 1=PATH, 2=check_vscode_extension の引数
+    PATH="$1" bash -c "
+        readonly SCRIPT_NAME=test; readonly LOG_FILE=/dev/null; readonly LOG_MODE=NEW; export SF_INIT_MODE=1
+        source '${SF_TOOLS_DIR}/lib/common.sh'
+        check_vscode_extension $2
+        echo RET=\$?" 2>&1
+}
+
+test_check_vscode_extension() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] check_vscode_extension: Salesforce 拡張が入っていないときに案内する（自動では入れない）${CLR_RST}"
+    local mb out
+    mb=$(setup_mock_bin)
+    export MOCK_CALL_LOG="$mb/calls.log"
+    create_mock_code "$mb"
+    local P="$mb:/usr/bin:/bin"
+
+    # 入っている → 何も表示せず、戻り値 0（他の拡張が並んでいても、改行が CRLF でも、ID の大文字・小文字が違っても）
+    out=$(_cve_run "$P" "")
+    [[ "$out" == "RET=0" ]] && pass "Salesforce 拡張が入っている → 何も表示せず、戻り値 0" || fail "入っている" "$out"
+    out=$(MOCK_CODE_EXTENSIONS=$'dbaeumer.vscode-eslint\r\nSalesforce.SalesforceDX-VSCode\r\nredhat.vscode-xml' _cve_run "$P" "")
+    [[ "$out" == "RET=0" ]] && pass "他の拡張が並び、CRLF・大文字小文字が違っても、入っていると判定する" || fail "一覧の読み取り" "$out"
+
+    # 入っていない → 案内（入れるコマンド・確認を省く方法）を表示し、戻り値 1。自動では入れない
+    : > "$MOCK_CALL_LOG"
+    out=$(MOCK_CODE_EXTENSIONS=$'dbaeumer.vscode-eslint\nesbenp.prettier-vscode' _cve_run "$P" "")
+    [[ "$out" == *"WARNING"* && "$out" == *"code --install-extension salesforce.salesforcedx-vscode"* && "$out" == *"SF_TOOLS_SKIP_VSCODE_CHECK=1"* && "$out" == *"RET=1"* ]] \
+        && pass "入っていない → 警告と、入れるコマンド・確認を省く方法を表示し、戻り値 1" || fail "入っていない" "$out"
+    ! grep -q "install-extension" "$MOCK_CALL_LOG" \
+        && pass "自動では、拡張を入れない（code --install-extension を実行しない）" || fail "自動では入れない" "$(cat "$MOCK_CALL_LOG")"
+    out=$(MOCK_CODE_EXTENSIONS= _cve_run "$P" "")
+    [[ "$out" == *"RET=1"* ]] && pass "拡張が 1 つもない（空の一覧）→ 入っていない扱い" || fail "空の一覧" "$out"
+    # 部分一致では、入っているとしない（salesforce.salesforcedx-vscode-apex だけでは、パックが入っていない）
+    out=$(MOCK_CODE_EXTENSIONS='salesforce.salesforcedx-vscode-apex' _cve_run "$P" "")
+    [[ "$out" == *"RET=1"* ]] && pass "ID の部分一致（-apex だけ）では、入っているとしない" || fail "部分一致" "$out"
+    # code が異常終了 → 入っていない扱い
+    out=$(MOCK_CODE_EXIT=1 MOCK_CODE_EXTENSIONS= _cve_run "$P" "")
+    [[ "$out" == *"RET=1"* ]] && pass "一覧を取れない（code が異常終了）→ 入っていない扱い" || fail "code が異常終了" "$out"
+
+    # --error → 案内を ERROR で表示
+    out=$(MOCK_CODE_EXTENSIONS= _cve_run "$P" "--error")
+    [[ "$out" == *"ERROR"* && "$out" != *"WARNING"* && "$out" == *"RET=1"* ]] \
+        && pass "--error: 案内を ERROR で表示し（WARNING は出さない）、戻り値 1" || fail "--error" "$out"
+
+    # code がない → 何もしない（code の有無は、呼び出し元が確認する）
+    out=$(_cve_run "/usr/bin:/bin" "")
+    [[ "$out" == "RET=0" ]] && pass "code コマンドがない → 何もしない（有無の確認は呼び出し元）" || fail "code がない" "$out"
+
+    # GitHub Actions 上・SF_TOOLS_SKIP_VSCODE_CHECK=1 → 何もしない（入っていなくても）
+    out=$(GITHUB_ACTIONS=true MOCK_CODE_EXTENSIONS= _cve_run "$P" "")
+    [[ "$out" == "RET=0" ]] && pass "GitHub Actions 上 → 何もしない" || fail "GitHub Actions 上" "$out"
+    out=$(SF_TOOLS_SKIP_VSCODE_CHECK=1 MOCK_CODE_EXTENSIONS= _cve_run "$P" "")
+    [[ "$out" == "RET=0" ]] && pass "SF_TOOLS_SKIP_VSCODE_CHECK=1 → 何もしない" || fail "SF_TOOLS_SKIP_VSCODE_CHECK=1" "$out"
 
     unset MOCK_CALL_LOG
     teardown "$mb"
@@ -1518,6 +1593,7 @@ test_check_sf_cli
 test_check_sf_cli_cache
 test_check_java_cli
 test_check_java_cli_cache
+test_check_vscode_extension
 test_print_admin_warning
 test_run_isolated_home
 test_ensure_sf_tools_latest

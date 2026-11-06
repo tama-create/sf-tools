@@ -5,3 +5,4 @@
 command sf-logwatch.sh   # README の設計書の一覧（doc/sf-logwatch-design.md。未実装）
 option  --id             # winget install --id（外部コマンド）
 option  --state          # gh pr list --state（外部コマンド）
+option  --install-extension  # code --install-extension（VS Code の外部コマンドのオプション。sf-init の Phase 1 の案内）

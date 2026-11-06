@@ -143,6 +143,7 @@ test_X4_1b() {
         (
             cd "$1" || exit 99
             export HOME="$IT_HOME" PATH="$IT_BIN:$PATH" IT_STATE IT_ORIGIN SF_LAUNCHER_ACTIVE=1 SF_TOOLS_SF_CHECK_STAMP=/dev/null
+            export SF_TOOLS_SKIP_JAVA_CHECK=1   # 実機の Java で、sf-init の Phase 1 が止まらないように（Java の確認は、test_common.sh が検査する）
             export GIT_TERMINAL_PROMPT=0 GIT_CONFIG_NOSYSTEM=1 GIT_SSH_COMMAND="$IT_BIN/ssh" TMPDIR="$IT_ROOT/tmp"
             unset GITHUB_ACTIONS CI GH_TOKEN GITHUB_TOKEN; mkdir -p "$TMPDIR"
             bash "$IT_HOME/sf-tools/bin/sf-init.sh" --owner "$IT_OWNER" --project "$IT_PROJECT" < "$2" > "$3" 2>&1; echo $? > "$4"

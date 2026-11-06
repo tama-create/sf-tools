@@ -23,6 +23,10 @@ export SF_TOOLS_SF_CHECK_STAMP=/dev/null
 export SF_TOOLS_JAVA_CHECK_STAMP=/dev/null
 unset JAVA_HOME SF_TOOLS_SKIP_JAVA_CHECK SF_TOOLS_JAVA_MIN_MAJOR
 
+# check_vscode_extension（sf-init の Phase 1）も、本物の環境の設定で、結果が変わらないようにする
+# （本物の VS Code の代わりに、create_mock_code の code が、拡張の一覧を返す）
+unset SF_TOOLS_SKIP_VSCODE_CHECK
+
 # TMPDIR の末尾の / を除く。macOS の TMPDIR は /var/folders/.../T/ のように / で終わり、"${TMPDIR:-/tmp}/x" が T//x になる。
 # bash の cd は // を 1 つにして PWD を作るため、テストの期待値（T//x）と、スクリプトが出すパス（T/x）が食い違う
 while [[ "${TMPDIR:-}" == */ && "$TMPDIR" != "/" ]]; do TMPDIR="${TMPDIR%/}"; done
@@ -439,12 +443,17 @@ EOF
 }
 
 # code（VS Code）モック
+# code --list-extensions（check_vscode_extension）には、MOCK_CODE_EXTENSIONS（改行区切り）を返す。
+# 既定は、Salesforce 拡張が入っている状態（salesforce.salesforcedx-vscode）。空文字（MOCK_CODE_EXTENSIONS=）なら、何も入っていない状態
 create_mock_code() {
     local bin_dir="$1"
     cat > "$bin_dir/code" << 'EOF'
 #!/bin/bash
 echo "code $*" >> "${MOCK_CALL_LOG:-/dev/null}"
-exit 0
+if [[ "${1:-}" == "--list-extensions" ]]; then
+    printf '%s\n' "${MOCK_CODE_EXTENSIONS-salesforce.salesforcedx-vscode}"
+fi
+exit "${MOCK_CODE_EXIT:-0}"
 EOF
     chmod +x "$bin_dir/code"
 }

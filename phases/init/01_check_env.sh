@@ -9,8 +9,12 @@
 #
 # 【処理の流れ】
 #   1. カレントのフォルダ名が admin でなければ die
-#   2. git / gh / node / npm / sf / code の有無を確認し、それぞれ --version の 1 行目を表示する。1 つでもなければ die
-#   3. gh auth status が失敗したら、gh auth login を実行する（ログインに失敗したら die）
+#   2. git / gh / node / npm / sf / code の有無を確認し、それぞれ --version の 1 行目を表示する
+#   3. Java が 17 以上か（check_java_cli --error。VS Code の Apex 拡張の要件）、VS Code に Salesforce 拡張
+#      （salesforce.salesforcedx-vscode）が入っているか（check_vscode_extension --error）を確認する。
+#      2・3 のどれか 1 つでも満たさなければ、案内（ERROR）を表示して、まとめて die する
+#      （管理者が、開発者と同じ環境をそろえてから始めて、開発者の困りごとを再現・指導できるようにするため）
+#   4. gh auth status が失敗したら、gh auth login を実行する（ログインに失敗したら die）
 #
 # 【前提条件】
 #   - 環境変数 SF_TOOLS_DIR（sf-tools のルート。sf-init.sh が export する）。未設定のときは、このスクリプトの
@@ -18,6 +22,8 @@
 #
 # 【補足】
 #   - SF_INIT_ENV_FILE（未設定時は ${PWD}/.sf-init.env）があれば source する（この Phase では、その値を使わない）
+#   - Java と VS Code の拡張の確認は、GitHub Actions 上（GITHUB_ACTIONS=true）では省く。環境変数 SF_TOOLS_SKIP_JAVA_CHECK=1・
+#     SF_TOOLS_SKIP_VSCODE_CHECK=1 でも、それぞれ省ける（VS Code の設定で Java を指している・別の VS Code を使う場合）
 #   - 状態ファイルに何も書かない。sf-init.sh は、通常の実行（はじめから）と、「続きをやる」（前回の続きから再開。
 #     RESUMED=1）のときに、この Phase を実行する（「続きをやる」では、続きの Phase の前に足す）。
 #     --resume N（N が 2 以上）・--only N（N が 2 以上）のときは、実行しない
@@ -67,6 +73,10 @@ for cmd in git gh node npm sf code; do
         missing=1
     fi
 done
+
+# Java 17 以上と、VS Code の Salesforce 拡張（Apex 拡張の要件）。足りない分は、案内（ERROR）を出して、まとめて止める
+check_java_cli --error || missing=1
+check_vscode_extension --error || missing=1
 
 [[ $missing -eq 1 ]] && die "必要なツールが不足しています。インストール後に再実行してください。"
 

@@ -46,7 +46,7 @@
     <tr><td>Salesforce CLI（<strong>npm 版</strong>）</td><td><code>sf --version</code></td><td>組織への接続・反映・取得</td><td><code>npm install -g @salesforce/cli</code>（<strong>公式インストーラー版は使えません</strong>。入れる順番は<a href="#order">次の節</a>、理由と入れ替えは<a href="#npm">その次の節</a>で説明します）</td></tr>
     <tr><td>GitHub CLI</td><td><code>gh --version</code></td><td>GitHub へのログイン・作業用のブランチの作成・PR の状況の確認（管理者は、リポジトリの作成や認証情報の登録にも使います）</td><td><code>winget install --id GitHub.cli</code></td></tr>
     <tr><td>Visual Studio Code</td><td><code>code --version</code></td><td>エディタの起動・コミットメッセージの入力（<code>sf-push.sh</code> は、<code>code</code> コマンドがないと動きません）。Salesforce の拡張機能（Salesforce Extension Pack）を、事前に入れておくのがおすすめです（<a href="#vscode-ext">下の囲み</a>）</td><td><code>winget install --id Microsoft.VisualStudioCode</code></td></tr>
-    <tr><td>Java（<strong>17 以上</strong>の JDK）</td><td><code>java -version</code></td><td>VS Code の Apex 拡張（Apex の補完・定義ジャンプ・エラー表示を行う言語サーバー）が使います。sf-tools のコマンド自体は、Java がなくても動きます（<a href="#vscode-ext">下の囲み</a>）</td><td><code>winget install --id Microsoft.OpenJDK.17</code>（管理者の確認画面が出ます。出せないときは、zip 版を展開する方法が、<a href="../admin/troubleshooting.html#dev-java">困ったときの節</a>にあります）</td></tr>
+    <tr><td>Java（<strong>17 以上</strong>の JDK）</td><td><code>java -version</code></td><td>VS Code の Apex 拡張（Apex の補完・定義ジャンプ・エラー表示を行う言語サーバー）が使います。sf-tools のコマンド自体は、Java がなくても動きます（<a href="#vscode-ext">下の囲み</a>）</td><td><code>winget install --id Microsoft.OpenJDK.17</code>（管理者の確認画面が出ます。出せないときは、zip 版を展開する方法が、<a href="../admin/troubleshooting.html#dev-java">困ったときの節</a>にあります）。入れたら、環境変数 <code>JAVA_HOME</code> も、その JDK のフォルダに設定します（同じ節）</td></tr>
     <tr><td>Slack</td><td>—</td><td>リリース結果の通知を受け取る</td><td><a href="https://slack.com/downloads/windows">公式サイト</a>のインストーラーを実行</td></tr>
   </tbody>
 </table>
@@ -56,7 +56,8 @@
   <div class="title">VS Code には、Salesforce の拡張機能を入れておくのがおすすめです</div>
   <p>VS Code で開発するときは、Salesforce の拡張機能（<strong>Salesforce Extension Pack</strong>）を、事前に入れておくことをお勧めします。sf-tools のコマンド自体は、拡張機能がなくても動きますが、Apex や LWC の編集や、組織の参照が、ずっと楽になります。</p>
   <p>プロジェクト（<code>force-XXXX</code>）を VS Code で開くと、推奨の拡張機能の案内が出ます（プロジェクトの <code>.vscode/extensions.json</code> に、推奨の一覧があります）。案内から、そのまま入れられます。</p>
-  <p><strong>Apex 拡張は、Java 17 以上が必要です。</strong>Java が古い（11 など）と、Apex の言語サーバーが起動せず、「telemetry handler is null」のような、原因の分かりにくいエラーが出ます。<code>sf-install.sh</code>（<code>sf-start.sh</code> が、起動のたびに実行します）が、Java のバージョンを確かめ、17 未満のとき・見つからないときに、警告を表示します（警告だけで、作業は止まりません）。VS Code の設定 <code>salesforcedx-vscode-apex.java.home</code> で、17 以上の JDK を指定している場合は、この警告は無視してかまいません。</p>
+  <p><strong>Apex 拡張は、Java 17 以上が必要です。</strong>Java が古い（11 など）と、Apex の言語サーバーが起動せず、「telemetry handler is null」のような、原因の分かりにくいエラーが出ます。<code>sf-install.sh</code>（<code>sf-start.sh</code> が、起動のたびに実行します）が、Java のバージョンを確かめ、17 未満のとき・見つからないときに、警告を表示します（警告だけで、作業は止まりません）。見る場所は、環境変数 <code>JAVA_HOME</code>（なければ PATH の <code>java</code>）です。VS Code・ターミナル・sf-tools が、同じ Java を見るようにするため、JAVA_HOME を設定してください（<a href="../admin/troubleshooting.html#dev-java">設定のしかたは、困ったときの節</a>）。</p>
+  <p>なお、管理者が使う <code>sf-init.sh</code> は、Java 17 以上と、Salesforce の拡張機能が入っていないと、最初の確認で止まります（管理者が、開発者と同じ環境をそろえて、指導するためです）。</p>
 </div>
 <div class="box">
   <div class="title">シェルについて</div>

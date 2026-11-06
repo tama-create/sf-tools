@@ -111,7 +111,7 @@ sf-init.sh --owner my-org --project acme            # オーナーと XXXX を�
 <table>
   <thead><tr><th>ステップ</th><th>何をするか</th><th>あなたの操作</th></tr></thead>
   <tbody>
-    <tr><td>1. 準備の確認</td><td>必要なツール（<code>git</code>・<code>gh</code>・<code>node</code>・<code>npm</code>・<code>sf</code>・<code>code</code>）があるかと、GitHub CLI へのログインを確かめます。1 つでもなければ、止まります。GitHub CLI にログインしていなければ、ログインの画面を出します</td><td>なし（ログインしていなければ、ログイン）</td></tr>
+    <tr><td>1. 準備の確認</td><td>必要なツール（<code>git</code>・<code>gh</code>・<code>node</code>・<code>npm</code>・<code>sf</code>・<code>code</code>）があるかと、<strong>Java 17 以上</strong>（VS Code の Apex 拡張の要件。環境変数 <code>JAVA_HOME</code> で確認します）と、<strong>VS Code の Salesforce 拡張機能</strong>が入っているか、GitHub CLI へのログインを確かめます。足りないものは、まとめて案内したうえで、止まります（開発者と同じ環境をそろえてから、始めるためです。直し方は、<a href="troubleshooting.html#dev-java">困ったときの節</a>）。GitHub CLI にログインしていなければ、ログインの画面を出します</td><td>なし（ログインしていなければ、ログイン）</td></tr>
     <tr><td>2. プロジェクトの確認</td><td>作るリポジトリの名前と、管理者用のクローンの場所を表示して、確認します（Y/N/q。<code>N</code> か <code>q</code> で中断します）。使う sf-tools の版（<a href="#in-env">配布版か開発版か</a>）を選びます</td><td>確認と選択</td></tr>
     <tr><td>3. リポジトリの作成</td><td>GitHub に、<strong>非公開（Private）</strong>のリポジトリを作って、管理者用フォルダにクローンします。sf-tools の雛形（設定ファイル・ワークフロー）をコピーして、Git のフック（コミット・プッシュの前に動くチェック）を入れます</td><td>なし</td></tr>
     <tr><td>4. ブランチの構成</td><td>変更を、段階的に確かめて、最後の段階（<code>main</code>）に出す流れ（<a href="#in-branch">ブランチの構成</a>）を選びます。GitHub のブランチは、ステップ 7 で作ります</td><td>選択</td></tr>

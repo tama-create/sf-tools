@@ -6,11 +6,17 @@
 # VS Code を開かない。
 #   ・--wait とファイルが渡されたとき（sf-push.sh のコミットメッセージ入力）: メッセージを書き込んで終わる
 #     （開発者が、VS Code でメッセージを入力して閉じる操作の代わり）
+#   ・--list-extensions: Salesforce 拡張が入っている応答を返す（sf-init の Phase 1 の、拡張の確認のため。
+#     この PC の VS Code の状態に、e2e の結果が左右されないように）
 #   ・それ以外（code .）: 何もしない
 #
 # 環境変数（run.sh が設定する）:
 #   E2E_COMMIT_MSG  書き込むコミットメッセージ（既定: e2e）
 # ==============================================================================
+if [[ "${1:-}" == "--list-extensions" ]]; then
+    echo "salesforce.salesforcedx-vscode"
+    exit 0
+fi
 _last=""
 _wait=0
 for _a in "$@"; do

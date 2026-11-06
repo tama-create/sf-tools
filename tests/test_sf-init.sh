@@ -26,6 +26,7 @@
 #   test_phase6_pat_token
 #   test_resume_choice
 #   test_required_checks_match_workflows
+#   test_phase1_java_vscode_check
 # ==============================================================================
 source "$(dirname "${BASH_SOURCE[0]}")/init-test-lib.sh"
 
@@ -1133,6 +1134,62 @@ test_required_checks_match_workflows() {
     done
 }
 
+# ==============================================================================
+# Phase 1（環境チェック）: Java 17 以上と、VS Code の Salesforce 拡張が、足りなければ止める
+#   管理者が、開発者と同じ環境をそろえてから始めるため（足りないまま進むと、開発者の困りごとを再現・指導できない）。
+#   Phase 1 のスクリプトを、admin という名前のフォルダで、直接動かす（sf-init.sh の対話を通さない）
+# ==============================================================================
+test_phase1_java_vscode_check() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] Phase 1: Java 17 未満・Salesforce 拡張なしなら、止める（まとめて案内）${CLR_RST}"
+    local mb mh base admin out rc
+    mb=$(setup_mock_bin); create_all_mocks "$mb"
+    export MOCK_CALL_LOG="$mb/calls.log"
+    mh=$(setup_mock_home)
+    base=$(mktemp -d "${TMPDIR:-/tmp}/test-phase1-XXXX"); admin="$base/admin"; mkdir -p "$admin"
+    _p1() {   # 環境変数は、そのまま引き継ぐ。出力は out、終了コードは rc に入れる
+        out=$(cd "$admin" && HOME="$mh" SF_TOOLS_DIR="$mh/sf-tools" PATH="$mb:$PATH" bash "$mh/sf-tools/phases/init/01_check_env.sh" 2>&1)
+        rc=$?
+    }
+
+    # 1. すべてそろっている → 通る
+    _p1
+    assert_exit_ok "$rc" "Java 17・Salesforce 拡張あり → Phase 1 は成功する"
+    assert_output_contains "$out" "環境チェック OK" "成功のメッセージを表示する"
+
+    # 2. Java 11 → 止まる（ERROR で案内。JAVA_HOME の設定を勧める）
+    MOCK_JAVA_VERSION=11.0.17 _p1
+    assert_exit_fail "$rc" "Java 11 → Phase 1 は止まる"
+    assert_output_contains "$out" "Java 17 以上" "Java の要件（17 以上）を案内する"
+    assert_output_contains "$out" "環境変数 JAVA_HOME" "対処として、環境変数 JAVA_HOME の設定を案内する"
+    assert_output_contains "$out" "必要なツールが不足しています" "die のメッセージ（事実のみ）を出す"
+    assert_output_not_contains "$out" "WARNING" "止めるときの案内は、WARNING ではなく ERROR で出す"
+
+    # 3. Salesforce 拡張なし → 止まる（入れるコマンドを案内。自動では入れない）
+    MOCK_CODE_EXTENSIONS=$'dbaeumer.vscode-eslint' _p1
+    assert_exit_fail "$rc" "Salesforce 拡張なし → Phase 1 は止まる"
+    assert_output_contains "$out" "code --install-extension salesforce.salesforcedx-vscode" "入れるコマンドを案内する"
+    assert_file_not_contains "$MOCK_CALL_LOG" "install-extension" "自動では、拡張を入れない"
+
+    # 4. 両方足りない → まとめて案内してから止まる（1 つずつ直す手間を減らす）
+    MOCK_JAVA_VERSION=11.0.17 MOCK_CODE_EXTENSIONS= _p1
+    assert_exit_fail "$rc" "Java・拡張の両方が足りない → 止まる"
+    assert_output_contains "$out" "Java 17 以上" "両方足りないとき: Java の案内も出す"
+    assert_output_contains "$out" "code --install-extension" "両方足りないとき: 拡張の案内も出す（まとめて）"
+
+    # 5. GitHub Actions 上は、省く（Java が古くても、拡張がなくても通る）
+    GITHUB_ACTIONS=true MOCK_JAVA_VERSION=11.0.17 MOCK_CODE_EXTENSIONS= _p1
+    assert_exit_ok "$rc" "GitHub Actions 上 → Java・拡張の確認を省いて、成功する"
+    # 6. 環境変数で、それぞれ省ける
+    SF_TOOLS_SKIP_JAVA_CHECK=1 SF_TOOLS_SKIP_VSCODE_CHECK=1 MOCK_JAVA_VERSION=11.0.17 MOCK_CODE_EXTENSIONS= _p1
+    assert_exit_ok "$rc" "SF_TOOLS_SKIP_JAVA_CHECK=1・SF_TOOLS_SKIP_VSCODE_CHECK=1 → 確認を省いて、成功する"
+    SF_TOOLS_SKIP_JAVA_CHECK=1 MOCK_JAVA_VERSION=11.0.17 MOCK_CODE_EXTENSIONS= _p1
+    assert_exit_fail "$rc" "Java の確認だけ省いても、拡張がなければ止まる（別々に省く）"
+
+    unset -f _p1
+    unset MOCK_CALL_LOG
+    teardown "$mb" "$mh" "$base"
+}
+
 echo ""
 echo -e "${CLR_HEAD}========================================"
 echo "  sf-init.sh テスト（1/3）"
@@ -1157,5 +1214,6 @@ test_wf_no_script_injection
 test_phase6_pat_token
 test_resume_choice
 test_required_checks_match_workflows
+test_phase1_java_vscode_check
 
 print_summary

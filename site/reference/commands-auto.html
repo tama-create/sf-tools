@@ -31,7 +31,7 @@
 <p><code>-v</code>（<code>--verbose</code>）は、コマンドの応答をコンソールにも表示します（<code>sf-hook.sh</code> にも渡し、<code>sf-upgrade.sh</code> には渡しません）。<code>-h</code>（<code>--help</code>。1 つ目の引数のときだけ）以外の、ほかの引数は、「不明なオプションです」で中断します。</p>
 <h3>主な処理（この順序）</h3>
 <ol>
-  <li><code>sf</code> が動くかを確認する（<code>sf --version</code> の終了コードが 0 以外なら、エラーの案内を表示しますが、中断はしません。中断すると、sf-tools 自身の更新まで止まるためです）。<code>sf</code> が未インストールのとき・GitHub Actions 上では、確認しません。続けて、Java のバージョンを確認します。17 未満のとき・見つからないとき・バージョンを読み取れないときは、警告で案内を表示しますが、中断はしません（VS Code の Apex 拡張が、Java 17 以上を必要とするためです。調べるのは、<code>JAVA_HOME/bin/java</code>（あれば）、なければ PATH の <code>java</code> です。成功は 24 時間、確認を省きます。GitHub Actions 上・環境変数 <code>SF_TOOLS_SKIP_JAVA_CHECK=1</code> のときは、確認しません。<a href="../admin/troubleshooting.html#dev-java">対処は、困ったときの節</a>）</li>
+  <li><code>sf</code> が動くかを確認する（<code>sf --version</code> の終了コードが 0 以外なら、エラーの案内を表示しますが、中断はしません。中断すると、sf-tools 自身の更新まで止まるためです）。<code>sf</code> が未インストールのとき・GitHub Actions 上では、確認しません。続けて、Java のバージョンを確認します。17 未満のとき・見つからないとき・バージョンを読み取れないときは、警告で案内を表示しますが、中断はしません（VS Code の Apex 拡張が、Java 17 以上を必要とするためです。調べるのは、<code>JAVA_HOME/bin/java</code>（あれば）、なければ PATH の <code>java</code> です（VS Code の設定は読みません。見る場所は <code>JAVA_HOME</code> に一本化しています。案内は、Windows・macOS・Linux 別です）。成功は 24 時間、確認を省きます。GitHub Actions 上・環境変数 <code>SF_TOOLS_SKIP_JAVA_CHECK=1</code> のときは、確認しません。<a href="../admin/troubleshooting.html#dev-java">対処は、困ったときの節</a>）</li>
   <li><code>~/sf-tools</code> の現在のブランチ（取得できなければ <code>main</code>）を、<code>git pull</code> で最新にする（失敗しても続行。<code>sf-init.sh</code> から呼ばれたときは行わない）</li>
   <li>設定ファイル（<code>sf-tools/config/metadata.txt</code> と <code>branches.txt</code>）を確認する。通常の実行で、どちらかがなければ<strong>中断</strong>します（プロジェクトの破損として扱い、作りません）。<code>sf-init.sh</code> から呼ばれたときだけ、ないものを雛形からコピーします（失敗したら中断）</li>
   <li>Git フック（<code>pre-commit</code> と <code>pre-push</code>）を、<a href="commands-dev.html#sf-hook"><code>sf-hook.sh</code></a> でインストールする</li>
@@ -51,7 +51,7 @@
 <ul>
   <li>手順 3 以外の失敗は、警告を表示して続行します。終了コードは <code>0</code> で、手順 3 で中断したとき・不明なオプションのときだけ <code>1</code> です。</li>
   <li><code>branch_name.txt</code> は、Git の管理外の、手元のファイルです。<code>main</code> では書き換えないため、作業用のブランチのあとで <code>main</code> に切り替えると、前のブランチの値が残ります（<a href="commands-dev.html#sf-check"><code>sf-check.sh</code></a> は、その値で検証します）。</li>
-  <li>前提: <code>~/sf-tools</code> が初回のインストール済み（<code>git clone https://github.com/tama-create/sf-tools.git ~/sf-tools</code>）で、Salesforce CLI（<code>sf</code>）が npm 版であること。Java 17 以上があること（VS Code の Apex 拡張の要件。確認は警告のみ）。</li>
+  <li>前提: <code>~/sf-tools</code> が初回のインストール済み（<code>git clone https://github.com/tama-create/sf-tools.git ~/sf-tools</code>）で、Salesforce CLI（<code>sf</code>）が npm 版であること。Java 17 以上があり、環境変数 <code>JAVA_HOME</code> が、それを指していること（VS Code の Apex 拡張の要件。確認は警告のみ）。</li>
   <li>ワークフロー（<code>.github/workflows/</code>）は、扱いません。新しいプロジェクトには <code>sf-init.sh</code>（Phase 3）が雛形からコピーし、作成済みのプロジェクトへの反映は、<a href="../admin/workflows.html"><code>sf-sync-wf.sh</code></a>（管理者が手動で実行）が行います。</li>
   <li>ログは <code>./sf-tools/logs/sf-install.log</code> です（実行のたびに作り直します）。</li>
 </ul>

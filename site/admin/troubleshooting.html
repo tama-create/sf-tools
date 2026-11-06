@@ -41,6 +41,7 @@
     <tr><td><code>sf-push.sh</code>・<code>git push</code> が止まる</td><td><a href="#dev-push">sf-push</a>・<a href="#dev-prepush">git push</a></td></tr>
     <tr><td>Dryrun・Deploy が、実行の前に断られる</td><td><a href="#dev-refused">手元から実行できない組織</a></td></tr>
     <tr><td>VS Code の Apex 拡張に「telemetry handler is null」と出る・<code>sf-install.sh</code> が Java の警告を出す</td><td><a href="#dev-java">Java が古い（17 未満）</a></td></tr>
+    <tr><td><code>sf-init.sh</code> が、最初の確認で、「Java が…」「Salesforce の拡張機能が入っていません」と出て止まる</td><td><a href="#dev-java">Java</a>・<a href="#dev-vscode-ext">拡張機能</a></td></tr>
     <tr><td><code>sf-upgrade.sh</code> が「Salesforce CLI のアップデートに失敗しました」「書き込めません」と出る</td><td><a href="#dev-npm-perm">npm の入れ先に書き込めない</a></td></tr>
     <tr><td>「npm の最新版は、今の Node では入れられません」と出る</td><td><a href="#dev-npm-node">npm が、Node に合わない</a></td></tr>
     <tr><td><code>sf</code> を入れ直したのに古いまま・プロジェクトの中に <code>%APPDATA%</code> というフォルダができた</td><td><a href="#dev-sf-path"><code>sf</code> の場所がおかしい</a></td></tr>
@@ -224,19 +225,32 @@
 
 <h3 id="dev-java">VS Code の Apex 拡張にエラーが出る・<code>sf-install.sh</code> が Java の警告を出す</h3>
 <p>VS Code の「出力」パネルの「Apex 言語サーバ」に <code>telemetry handler is null</code> と出て、Apex の補完や定義ジャンプが働かないときは、<strong>Java のバージョンが古い</strong>ことが多いです。Apex 拡張（Salesforce Extension Pack）の言語サーバーは、<strong>Java 17 以上</strong>が必要です（拡張 68.6.1 で確認。Java 11 では、起動の途中で失敗します。画面に出るエラーは、本当の原因（<code>UnsupportedClassVersionError</code>）を隠しています）。</p>
-<p><code>sf-install.sh</code> は、<code>sf-start.sh</code> が起動のたびに実行するときに、Java のバージョンを確かめ、次のときに警告を表示します（警告だけで、作業は止まりません）。</p>
+<p><code>sf-install.sh</code> は、<code>sf-start.sh</code> が起動のたびに実行するときに、Java のバージョンを確かめ、次のときに警告を表示します（警告だけで、作業は止まりません）。管理者が使う <code>sf-init.sh</code> は、同じ確認を最初の確認（Phase 1）で行い、<strong>足りないと、止まります</strong>（Salesforce の拡張機能が入っていない場合も、同じです。下の「拡張機能がないと止まるとき」）。</p>
 <ul>
-  <li>Java が 17 未満（調べる場所は、<code>JAVA_HOME</code>、なければ PATH の <code>java</code>）</li>
+  <li>Java が 17 未満（調べる場所は、環境変数 <code>JAVA_HOME</code>、なければ PATH の <code>java</code>。VS Code の設定は、読みません）</li>
   <li>Java が見つからない・バージョンを読み取れない</li>
 </ul>
-<p><strong>直し方（どちらか）:</strong></p>
+<p><strong>見る場所は、<code>JAVA_HOME</code> に一本化しています。</strong>VS Code の Apex 拡張・ターミナル・sf-tools が、同じ Java を見るため、「VS Code は動くのに、sf-install だけ警告が出る」というずれが起きません。</p>
+<p><strong>直し方:</strong></p>
 <ol>
-  <li><strong>JDK 17 以上を入れる。</strong>Windows は <code>winget install --id Microsoft.OpenJDK.17</code>（管理者の確認画面が出ます）。入れたあと、Git Bash を開き直して、<code>java -version</code> が 17 以上になるか確かめます。古い Java が先に見つかるときは、<code>JAVA_HOME</code> と PATH の順番を確かめます。</li>
-  <li><strong>管理者権限が使えないとき（zip 版）。</strong><a href="https://learn.microsoft.com/java/openjdk/download">Microsoft Build of OpenJDK のダウンロードページ</a>から、17 の zip を取得し、自分のフォルダ（例: <code>C:\Users\（ユーザー名）\tools\jdk-17</code>）に展開します。そのあと、VS Code のユーザー設定（<code>Ctrl+Shift+P</code> →「Preferences: Open User Settings (JSON)」）に、次の 1 行を足します。パスの区切りは、<code>/</code> でかまいません。足したら「Developer: Reload Window」で、VS Code を読み込み直します。
-<pre><code>"salesforcedx-vscode-apex.java.home": "C:/Users/（ユーザー名）/tools/jdk-17"</code></pre>
-  システムの Java（<code>JAVA_HOME</code>）は、変えなくてかまいません。他のツールへの影響を避けられます。</li>
+  <li><strong>JDK 17 以上を入れる。</strong>Windows は <code>winget install --id Microsoft.OpenJDK.17</code>（管理者の確認画面が出ます）。管理者権限が使えないときは、<a href="https://learn.microsoft.com/java/openjdk/download">Microsoft Build of OpenJDK のダウンロードページ</a>から、17 の zip を取得し、自分のフォルダ（例: <code>C:Users（ユーザー名）	oolsjdk-17</code>）に展開します。</li>
+  <li><strong>環境変数 <code>JAVA_HOME</code> を、その JDK のフォルダに設定する。</strong>
+    <ul>
+      <li><strong>Windows（Git Bash）:</strong> ユーザーの環境変数に設定します（<strong>管理者権限は不要</strong>。システムの Java より優先されます）。
+<pre><code>setx JAVA_HOME 'C:Users（ユーザー名）	oolsjdk-17'</code></pre></li>
+      <li><strong>macOS:</strong> <code>~/.zshrc</code> に、次の 1 行を書きます。
+<pre><code>export JAVA_HOME=$(/usr/libexec/java_home -v 17)</code></pre></li>
+      <li><strong>Linux:</strong> <code>~/.bashrc</code> などに、<code>export JAVA_HOME=（JDK のフォルダ）</code> を書きます。</li>
+    </ul>
+  </li>
+  <li><strong>ターミナルと VS Code を、開き直す。</strong>設定は、開き直したものから有効になります。そのあと <code>sf-install.sh</code> を実行して、警告が出ないことを確かめます。</li>
 </ol>
-<p><strong>警告が出続けるとき:</strong> 上の 2 番の方法（VS Code の設定で指定）を使っていると、<code>sf-install.sh</code> は、その設定を読めないため、システムの Java が古いままだと、警告が出続けます。Apex 拡張が動いているなら、無視してかまいません。出さないようにするには、環境変数 <code>SF_TOOLS_SKIP_JAVA_CHECK=1</code> を設定します。なお、下限のバージョンは、環境変数 <code>SF_TOOLS_JAVA_MIN_MAJOR</code>（既定 17）で変えられます。</p>
+<p><strong>注意:</strong> Windows では、<code>PATH</code> の先頭に、古い Java（システム側）が残っていることがあり、<code>java -version</code> は、古い版のままかもしれません。sf-tools と Apex 拡張は、<code>JAVA_HOME</code> を先に見るので、動作には影響しません。</p>
+<p><strong>以前の案内（VS Code の設定で指定）を使っているとき:</strong> VS Code の設定 <code>salesforcedx-vscode-apex.java.home</code> で Java を指していると、<code>sf-install.sh</code> は、その設定を読めないため、システムの Java が古いままなら、警告が出ます。上の方法で <code>JAVA_HOME</code> を設定するのが、いちばん分かりやすい解決です。設定を残したままで、確認だけを省くときは、環境変数 <code>SF_TOOLS_SKIP_JAVA_CHECK=1</code> を設定します。なお、下限のバージョンは、環境変数 <code>SF_TOOLS_JAVA_MIN_MAJOR</code>（既定 17）で変えられます。</p>
+<h4 id="dev-vscode-ext">拡張機能がないと止まるとき（<code>sf-init.sh</code>）</h4>
+<p>管理者が使う <code>sf-init.sh</code> は、最初の確認で、VS Code に Salesforce の拡張機能（Salesforce Extension Pack。ID <code>salesforce.salesforcedx-vscode</code>）が入っているかを確かめ、なければ止まります。案内に出るコマンドで、入れてください（入れたあと、VS Code を開き直します）。自動では入れません。</p>
+<pre><code>code --install-extension salesforce.salesforcedx-vscode</code></pre>
+<p>別の VS Code（Insiders など）に入れていて、この確認を省くときは、環境変数 <code>SF_TOOLS_SKIP_VSCODE_CHECK=1</code> を設定します。</p>
 
 <h3 id="dev-npm-perm"><code>sf-upgrade.sh</code> が「Salesforce CLI のアップデートに失敗しました」「npm のインストール先に書き込めません」と出る</h3>
 <p>npm の入れ先（<code>npm config get prefix</code>）が、<code>C:\Program Files\nodejs</code> のように、書き込みに管理者権限が要る場所になっています。入れ先を、自分のフォルダに変えると、管理者権限なしで更新できます（最初の 1 回だけ。手順は、<a href="../guide/install.html#npm-prefix">npm の入れ先を、自分のフォルダにする</a>）。</p>

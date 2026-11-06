@@ -19,8 +19,12 @@
 #      （中断すると、sf-tools 自身の最新化まで止まるため）。sf が未インストールのとき・GitHub Actions 上では、確認しない
 #      続けて、Java の確認: Java が 17 未満・見つからない・バージョンを判定できないとき、WARNING で案内を表示する。中断はしない
 #      （Apex を使わない作業はできるため）。VS Code の Salesforce 拡張（Apex）の言語サーバーが、Java 17 以上を要求するため。
-#      調べる java は、JAVA_HOME/bin/java（あれば）→ PATH の java。成功は、24 時間、確認を省略する（失敗は、毎回確認する）。
+#      調べる java は、JAVA_HOME/bin/java（あれば）→ PATH の java（VS Code の設定は、読まない。JAVA_HOME に一本化する）。
+#      案内は、OS 別（Windows: ユーザーの環境変数 setx / macOS: ~/.zshrc / Linux: ~/.bashrc で JAVA_HOME を設定）。
+#      成功は、24 時間、確認を省略する（失敗は、毎回確認する）。
 #      GitHub Actions 上・環境変数 SF_TOOLS_SKIP_JAVA_CHECK=1 のときは、確認しない
+#      （開発者の環境では警告だけにとどめる。止めると、Java と関係のない、フックの設定などが、できなくなるため。
+#       管理者の sf-init は、Phase 1 で、Java と VS Code の拡張が足りなければ止める）
 #   2. ~/sf-tools の現在のブランチ（取得できなければ main）を git pull origin <ブランチ> で最新化する。
 #      失敗しても WARNING を表示して続行する。sf-init.sh から呼ばれたとき（SF_INIT_RUNNING が空でない）は、スキップする
 #   3. 設定ファイル ./sf-tools/config/metadata.txt・branches.txt を確認する
@@ -52,8 +56,7 @@
 #   - ~/sf-tools は初回インストール済みであること
 #     初回インストール: git clone https://github.com/tama-create/sf-tools.git ~/sf-tools
 #   - Salesforce CLI（sf）は npm 版（npm install -g @salesforce/cli）であること（手順 1 の確認は、警告のみ）
-#   - Java 17 以上（JAVA_HOME、または PATH。VS Code の Apex 拡張の要件。手順 1 の確認は、警告のみ。
-#     VS Code の設定 salesforcedx-vscode-apex.java.home で、17 以上を指定していれば、システムの Java は古くてもよい）
+#   - Java 17 以上（環境変数 JAVA_HOME、なければ PATH の java。VS Code の Apex 拡張の要件。手順 1 の確認は、警告のみ）
 #
 # 【補足】
 #   - 終了コード: 0。手順 3 で中断したとき・不明なオプションのときは 1。手順 3 以外の失敗は、WARNING を表示して続行する

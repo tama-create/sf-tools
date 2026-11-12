@@ -736,6 +736,195 @@ test_detect_state_restored_on_failure() {
     _ms_unset; _det_unset; teardown "$td" "$mb"
 }
 
+# ------------------------------------------------------------------------------
+# 一覧の指紋（SF_METASYNC_FINGERPRINT。設計: doc/sf-metasync-redesign.md 16 章の P1）のテスト
+#   Metadata API は、モックのサーバー（tests/mock-soap-server.js）。sf の org display は、そのサーバーの URL とトークンを返す
+# ------------------------------------------------------------------------------
+# モックのサーバーを起動し、sf のモックが、そのサーバーを指すようにする。結果: FPI_DIR（サーバーのデータ・記録）・FPI_PID
+_fpi_start() {
+    FPI_DIR=$(mktemp -d "${TMPDIR:-/tmp}/test-msfpi-XXXX")
+    echo '{"validToken":"TESTTOKEN","lists":{}}' > "$FPI_DIR/data.json"; : > "$FPI_DIR/requests.log"
+    node "$SF_TOOLS_DIR/tests/mock-soap-server.js" "$FPI_DIR/data.json" "$FPI_DIR/port.txt" "$FPI_DIR/requests.log" &   # & はバックグラウンド起動（run 不使用の例外）
+    FPI_PID=$!
+    local i; for i in $(seq 1 100); do [[ -s "$FPI_DIR/port.txt" ]] && break; sleep 0.1; done
+    [[ -s "$FPI_DIR/port.txt" ]] || fail "モックの SOAP サーバーが起動しなかった（10 秒待った）"
+    trap '_fpi_stop' EXIT   # テストが途中で止まっても、モックのサーバーを残さない
+    export MOCK_SF_ORG_JSON="{\"status\":0,\"result\":{\"alias\":\"testorg\",\"id\":\"00D000000000001AAA\",\"accessToken\":\"TESTTOKEN\",\"instanceUrl\":\"http://127.0.0.1:$(cat "$FPI_DIR/port.txt")\"}}"
+    export SF_METASYNC_SF="bash $mb/sf"
+}
+_fpi_stop() {
+    [[ -n "${FPI_PID:-}" ]] && { kill "$FPI_PID" 2>/dev/null; wait "$FPI_PID" 2>/dev/null; }
+    FPI_PID=""; [[ -n "${FPI_DIR:-}" ]] && rm -rf "$FPI_DIR"
+    unset SF_METASYNC_SF SF_METASYNC_FINGERPRINT SF_METASYNC_DETECT MOCK_SF_LIST_DIR MOCK_SF_AUDIT_COUNT
+}
+# サーバーのデータを書き換える。引数: キー・JSON の値
+_fpi_set() {
+    node -e 'const fs=require("fs");const f=process.argv[1],k=process.argv[2],v=process.argv[3];const d=JSON.parse(fs.readFileSync(f,"utf8"));d.lists=d.lists||{};d.lists[k]=JSON.parse(v);fs.writeFileSync(f,JSON.stringify(d));' "$FPI_DIR/data.json" "$1" "$2"
+}
+# 今のサーバーのデータで、指紋の状態（前回の同期の記録）を、あらかじめ作る
+_fpi_state() {
+    mkdir -p "$td/sf-tools/metasync"
+    node "$SF_TOOLS_DIR/lib/metasync.js" fingerprint --org prod --fp-config "$SF_TOOLS_DIR/config/metasync-fingerprint.txt" \
+        --state "$td/none.json" --out-state "$td/sf-tools/metasync/fingerprint.json" --repo "$td" > /dev/null 2>&1
+}
+
+# off（既定）: 指紋を作らない（Metadata API を呼ばない）。従来どおり、取得する
+test_fp_off_default() {
+    local td mb mh; _ms_env td mb mh; _fpi_start
+    _ms_run 'Y\nY\n'
+    assert_exit_ok "$_MS_RC" "指紋 off: 正常終了"
+    assert_file_contains "$MOCK_CALL_LOG" "sf project retrieve start" "指紋 off: 取得する"
+    assert_output_not_contains "$_MS_OUT" "一覧の指紋" "指紋 off: 指紋の出力がない"
+    assert_equals "$(wc -l < "$FPI_DIR/requests.log" | tr -d ' ')" "0" "指紋 off: Metadata API を呼ばない"
+    [[ ! -f "$td/sf-tools/metasync/fingerprint.json" ]] && pass "指紋 off: 状態ファイルを作らない" || fail "指紋 off: 状態ファイルを作らない"
+    _fpi_stop; _ms_unset; teardown "$td" "$mb"
+}
+
+# 不正なモード（on は、まだない）→ 中断
+test_fp_bad_mode() {
+    local td mb mh; _ms_env td mb mh
+    SF_METASYNC_FINGERPRINT=on _ms_run 'Y\nY\n'
+    assert_exit_fail "$_MS_RC" "指紋のモードが不正（on は、まだない）→ 中断"
+    assert_output_contains "$_MS_OUT" "off / shadow" "指紋のモードが不正 → 使える値が出る"
+    _ms_unset; teardown "$td" "$mb"
+}
+
+# shadow・状態なし → 不明 → 取得して、指紋の状態を書いてコミットする（ファイルの変更がなくても、状態だけのコミット。伝播しない）
+test_fp_shadow_first_run() {
+    local td mb mh; _ms_env td mb mh; _fpi_start
+    export MOCK_GIT_DIFF_EXIT_2ND=1
+    SF_METASYNC_FINGERPRINT=shadow _ms_run 'Y\nY\n'
+    assert_exit_ok "$_MS_RC" "指紋 shadow・状態なし: 正常終了"
+    assert_output_contains "$_MS_OUT" "一覧の指紋を作ります" "指紋 shadow: 指紋を作ると表示される"
+    assert_output_contains "$_MS_OUT" "前回の指紋がありません" "指紋 shadow・状態なし: 不明の理由が出る"
+    assert_file_contains "$MOCK_CALL_LOG" "sf project retrieve start" "指紋 shadow: 取得は、常に行う（省かない）"
+    [[ -f "$td/sf-tools/metasync/fingerprint.json" ]] && pass "指紋 shadow・状態なし: 指紋の状態ファイルを書く" || fail "指紋 shadow・状態なし: 指紋の状態ファイルを書く"
+    assert_file_contains "$MOCK_CALL_LOG" "git add -A -- force-app sf-tools/metasync/fingerprint.json" "指紋の状態ファイルも、ステージする（検知の状態ファイルは、別）"
+    assert_file_contains "$MOCK_CALL_LOG" "指紋の状態の更新のみ" "メタデータの変更がなければ、コミットの本文に「指紋の状態の更新のみ」と書く"
+    assert_output_contains "$_MS_OUT" "指紋の状態ファイルの更新だけのコミットのため、下流ブランチへの伝播は行いません" "状態ファイルの更新だけのコミットは、下流へ伝播しない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "git merge" "状態ファイルの更新だけのコミットは、merge しない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "metasync/state.json" "検知（SF_METASYNC_DETECT）が off なら、検知の状態ファイルは触らない"
+    _fpi_stop; _ms_unset; teardown "$td" "$mb"
+}
+
+# shadow・指紋は変更なし・実際は変更あり → 見逃しの WARNING。取得・反映は、そのまま行う
+test_fp_shadow_miss() {
+    local td mb mh; _ms_env td mb mh; _fpi_start
+    _fpi_state
+    cp "$td/sf-tools/metasync/fingerprint.json" "$td/fp.before"
+    export MOCK_GIT_DIFF_EXIT_2ND=1
+    export MOCK_SF_RETRIEVE_FILES='force-app/main/default/classes/New.cls|x'
+    SF_METASYNC_FINGERPRINT=shadow _ms_run 'Y\nY\n'
+    assert_exit_ok "$_MS_RC" "指紋 shadow・見逃し: 正常終了（同期は続ける）"
+    assert_output_contains "$_MS_OUT" "変更なし（すべての種類で、指紋が前回と同じです）" "指紋は、変更なし"
+    assert_output_contains "$_MS_OUT" "見逃し 1（1 件）" "影の比較: 見逃しの数が出る"
+    assert_output_contains "$_MS_OUT" "指紋の見逃し: classes（指紋の種類: ApexClass）" "影の比較: 見逃しのフォルダと種類が出る"
+    assert_output_contains "$_MS_OUT" "A force-app/main/default/classes/New.cls" "影の比較: 見逃しのファイルの例が出る"
+    [[ -f "$td/force-app/main/default/classes/New.cls" ]] && pass "指紋 shadow: 取得結果は、そのまま反映する" || fail "指紋 shadow: 取得結果は、そのまま反映する"
+    cmp -s "$td/sf-tools/metasync/fingerprint.json" "$td/fp.before" && pass "指紋が変更なしなら、状態ファイルは変わらない" || fail "指紋が変更なしなら、状態ファイルは変わらない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "fingerprint.json" "指紋が変更なしなら、状態ファイルをステージしない"
+    assert_file_contains "$MOCK_CALL_LOG" "git merge" "メタデータの変更があるときは、下流へ伝播する"
+    _fpi_stop; _ms_unset; teardown "$td" "$mb"
+}
+
+# shadow・指紋が変わり・実際にも変更あり → 検知できた。状態も更新する
+test_fp_shadow_hit() {
+    local td mb mh; _ms_env td mb mh; _fpi_start
+    _fpi_state
+    _fpi_set ApexClass '[{"fullName":"A9","lastModifiedDate":"2026-11-01T09:00:00.000Z"}]'
+    export MOCK_GIT_DIFF_EXIT_2ND=1
+    export MOCK_SF_RETRIEVE_FILES='force-app/main/default/classes/New.cls|x'
+    SF_METASYNC_FINGERPRINT=shadow _ms_run 'Y\nY\n'
+    assert_exit_ok "$_MS_RC" "指紋 shadow・検知できた: 正常終了"
+    assert_output_contains "$_MS_OUT" "変更あり（指紋が前回と違う種類 1 個）" "指紋は、変更あり"
+    assert_output_contains "$_MS_OUT" "検知できた 1（1 件）/ 見逃し 0（0 件）" "影の比較: 検知できた"
+    assert_file_contains "$MOCK_CALL_LOG" "git add -A -- force-app sf-tools/metasync/fingerprint.json" "指紋が変わったら、状態ファイルもステージする"
+    assert_file_contains "$MOCK_CALL_LOG" "指紋の状態も更新" "メタデータの変更があるときは、本文に「指紋の状態も更新」と書く"
+    _fpi_stop; _ms_unset; teardown "$td" "$mb"
+}
+
+# 指紋の失敗（接続できない）は、同期を止めない（WARNING なしでも、取得・反映は続く。状態は書かない）
+test_fp_failure_does_not_stop_sync() {
+    local td mb mh; _ms_env td mb mh; _fpi_start
+    # 使われていないポート（1）に向けて、接続の失敗を再現する（サーバーを止めて空いたポートを狙うと、並列のテストのモックが取ることがある）
+    export MOCK_SF_ORG_JSON='{"status":0,"result":{"alias":"testorg","id":"00D000000000001AAA","accessToken":"TESTTOKEN","instanceUrl":"http://127.0.0.1:1"}}'
+    export MOCK_GIT_DIFF_EXIT_2ND=1
+    export MOCK_SF_RETRIEVE_FILES='force-app/main/default/classes/New.cls|x'
+    SF_METASYNC_FINGERPRINT=shadow _ms_run 'Y\nY\n'
+    assert_exit_ok "$_MS_RC" "指紋の失敗: 同期は正常終了する"
+    assert_output_contains "$_MS_OUT" "一覧の取得に失敗した種類があります" "指紋の失敗の理由が出る"
+    assert_output_contains "$_MS_OUT" "指紋が不明" "指紋が不明のときは、影の比較をしない"
+    assert_file_contains "$MOCK_CALL_LOG" "sf project retrieve start" "指紋の失敗でも、取得する"
+    [[ -f "$td/force-app/main/default/classes/New.cls" ]] && pass "指紋の失敗でも、取得結果を反映する" || fail "指紋の失敗でも、取得結果を反映する"
+    [[ ! -f "$td/sf-tools/metasync/fingerprint.json" ]] && pass "指紋が取れなかったら、状態ファイルを書かない" || fail "指紋が取れなかったら、状態ファイルを書かない"
+    _fpi_stop; _ms_unset; teardown "$td" "$mb"
+}
+
+# 指紋の状態ファイルを書いたが、コミットの前に中断（commit の失敗）→ 状態ファイルも戻す
+test_fp_state_restored_on_failure() {
+    local td mb mh; _ms_env td mb mh; _fpi_start
+    export MOCK_GIT_DIFF_EXIT_2ND=1 MOCK_GIT_COMMIT_EXIT=1
+    SF_METASYNC_FINGERPRINT=shadow _ms_run 'Y\nY\n'
+    assert_exit_fail "$_MS_RC" "commit の失敗 → 中断"
+    assert_file_contains "$MOCK_CALL_LOG" "git reset -q HEAD -- sf-tools/metasync/fingerprint.json" "中断 → 指紋の状態ファイルを、インデックスから外す"
+    assert_file_contains "$MOCK_CALL_LOG" "git checkout HEAD -- sf-tools/metasync/fingerprint.json" "中断 → 指紋の状態ファイルを HEAD に戻す"
+    _fpi_stop; _ms_unset; teardown "$td" "$mb"
+}
+
+# 検知（SF_METASYNC_DETECT=shadow）と指紋（shadow）を同時に使う: 2 つの状態ファイルを別々に書く
+test_fp_with_detect() {
+    local td mb mh; _ms_env td mb mh; _fpi_start
+    mkdir -p "$td/lists"; export MOCK_SF_LIST_DIR="$td/lists" MOCK_SF_AUDIT_COUNT=0
+    export MOCK_GIT_DIFF_EXIT_2ND=1
+    SF_METASYNC_DETECT=shadow SF_METASYNC_FINGERPRINT=shadow _ms_run 'Y\nY\n'
+    assert_exit_ok "$_MS_RC" "検知と指紋を同時に使う: 正常終了"
+    assert_file_contains "$MOCK_CALL_LOG" "git add -A -- force-app sf-tools/metasync/state.json sf-tools/metasync/fingerprint.json" "2 つの状態ファイルを、どちらもステージする"
+    assert_file_contains "$MOCK_CALL_LOG" "検知・指紋の状態の更新のみ" "本文に「検知・指紋の状態の更新のみ」と書く"
+    [[ -f "$td/sf-tools/metasync/state.json" && -f "$td/sf-tools/metasync/fingerprint.json" ]] && pass "状態ファイルは、別々に 2 つできる" || fail "状態ファイルは、別々に 2 つできる"
+    _fpi_stop; _ms_unset; teardown "$td" "$mb"
+}
+
+# 検知 on・指紋 shadow: 検知は「変更なし」、指紋は「変更あり」→ 食い違いの WARNING を出して、取得を省く（指紋の状態は書かない）
+test_fp_detect_on_conflict_warning() {
+    local td mb mh; _ms_env td mb mh; _det_env 0; _fpi_start
+    _det_state; _fpi_state
+    cp "$td/sf-tools/metasync/fingerprint.json" "$td/fp.before"
+    _fpi_set ApexClass '[{"fullName":"A9","lastModifiedDate":"2026-11-01T09:00:00.000Z"}]'
+    SF_METASYNC_DETECT=on SF_METASYNC_FINGERPRINT=shadow _ms_run 'Y\nY\n'
+    assert_exit_ok "$_MS_RC" "検知 on・指紋 shadow・食い違い: 正常終了"
+    assert_output_contains "$_MS_OUT" "指紋は『変更あり』ですが、検知は『変更なし』でした" "食い違いの WARNING が出る"
+    assert_output_contains "$_MS_OUT" "全件取得を省きました" "検知が変更なしなら、取得を省く"
+    assert_file_not_contains "$MOCK_CALL_LOG" "sf project retrieve" "取得しない"
+    cmp -s "$td/sf-tools/metasync/fingerprint.json" "$td/fp.before" && pass "取得を省いたときは、指紋の状態ファイルを更新しない" || fail "取得を省いたときは、指紋の状態ファイルを更新しない"
+    _fpi_stop; _ms_unset; _det_unset; teardown "$td" "$mb"
+}
+
+# 指紋 shadow・--dry-run: 取得して計画を作るだけ。commit・push しない（指紋の状態ファイルも、コミットしない）
+test_fp_dry_run() {
+    local td mb mh; _ms_env td mb mh; _fpi_start
+    export MOCK_SF_RETRIEVE_FILES='force-app/main/default/classes/New.cls|x'
+    SF_METASYNC_FINGERPRINT=shadow _ms_run '' --dry-run -y
+    assert_exit_ok "$_MS_RC" "指紋 shadow・--dry-run: 正常終了"
+    assert_output_contains "$_MS_OUT" "一覧の指紋を作ります" "--dry-run でも、指紋は作る（読み取りのみ）"
+    assert_file_not_contains "$MOCK_CALL_LOG" "git commit" "--dry-run: commit しない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "fingerprint.json" "--dry-run: 指紋の状態ファイルを、ステージしない"
+    _fpi_stop; _ms_unset; teardown "$td" "$mb"
+}
+
+# 指紋は変わったが、ファイルの変更はなかった（空振り）→ 空振りを表示し、指紋の状態だけをコミットする
+test_fp_changed_but_no_file_change() {
+    local td mb mh; _ms_env td mb mh; _fpi_start
+    _fpi_state
+    _fpi_set ApexClass '[{"fullName":"A9","lastModifiedDate":"2026-11-01T09:00:00.000Z"}]'
+    export MOCK_GIT_DIFF_EXIT_2ND=1
+    SF_METASYNC_FINGERPRINT=shadow _ms_run 'Y\nY\n'
+    assert_exit_ok "$_MS_RC" "指紋は変更あり・ファイルの変更なし: 正常終了"
+    assert_output_contains "$_MS_OUT" "指紋の空振り" "空振り（指紋は変わったが、ファイルの変更はなかった種類）が出る"
+    assert_file_contains "$MOCK_CALL_LOG" "指紋の状態の更新のみ" "指紋の状態だけのコミットになる"
+    assert_file_not_contains "$MOCK_CALL_LOG" "git merge" "状態だけのコミットは、下流へ伝播しない"
+    _fpi_stop; _ms_unset; teardown "$td" "$mb"
+}
+
 test_mirror_basic
 test_target_org_resolved_by_org_id
 test_target_org_org_id_15_vs_18_chars
@@ -757,5 +946,16 @@ test_detect_on_changed_and_dry_run
 test_detect_failure_falls_back_to_full
 test_detect_shadow_reports_mismatch
 test_detect_state_restored_on_failure
+test_fp_off_default
+test_fp_bad_mode
+test_fp_shadow_first_run
+test_fp_shadow_miss
+test_fp_shadow_hit
+test_fp_failure_does_not_stop_sync
+test_fp_state_restored_on_failure
+test_fp_with_detect
+test_fp_detect_on_conflict_warning
+test_fp_dry_run
+test_fp_changed_but_no_file_change
 
 print_summary

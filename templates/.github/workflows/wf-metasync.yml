@@ -32,7 +32,8 @@
 #   6. sf-tools を、公開リポジトリ https://github.com/tama-create/sf-tools.git から、Variable SF_TOOLS_BRANCH のブランチ
 #      （未設定なら main）で、~/sf-tools に clone する（Token は使わない）
 #   7. sf-metasync.sh を実行する（GitHub Actions 上のため、警告・確認は表示されない）。オプションは、毎日 1 回の cron と
-#      手動の実行のときだけ --full、それ以外はなし。環境変数 SF_METASYNC_DETECT に、Variable SF_METASYNC_DETECT（未設定なら off）を渡す。
+#      手動の実行のときだけ --full、それ以外はなし。環境変数 SF_METASYNC_DETECT に、Variable SF_METASYNC_DETECT（未設定なら off）を、
+#      環境変数 SF_METASYNC_FINGERPRINT に、Variable SF_METASYNC_FINGERPRINT（未設定なら off）を渡す。
 #      主な動き（SF_METASYNC_DETECT が off のとき。shadow・on の検知は、sf-metasync.sh の冒頭コメントを参照）:
 #        sf-tools/config/metadata.txt の種類を、組織から一時プロジェクトへ取得する → main の「同期の対象のフォルダ」を、取得した内容と
 #        同じにする（追加・変更・削除。削除には、安全の守りがある）→ 差分があれば「定期更新: Salesforce変更の自動反映 (YYYY-MM-DD)」で
@@ -56,6 +57,7 @@
 #     SF_INSTANCE_URL_PROD : main の組織の接続 URL（https://login.salesforce.com 等）
 #     SF_TOOLS_BRANCH      : clone する sf-tools のブランチ（任意。未設定なら main。Phase 9 は development のときだけ登録する）
 #     SF_METASYNC_DETECT   : 変更の検知のモード（任意。off / shadow / on。未設定なら off = 従来どおり、毎回、全件取得）
+#     SF_METASYNC_FINGERPRINT : 一覧の指紋のモード（任意。off / shadow。未設定なら off。shadow は、指紋と実際の変更の食い違いをログに記録する。取得は省かない）
 #
 # 【補足】
 #   - 同期の push は、pull_request ではないため、wf-release.yml・wf-propagate.yml は動かない（組織へのリリースは行わない。
@@ -156,5 +158,6 @@ jobs:
       - name: メタデータ取得・Git 同期を実行
         env:
           SF_METASYNC_DETECT: ${{ vars.SF_METASYNC_DETECT || 'off' }}
+          SF_METASYNC_FINGERPRINT: ${{ vars.SF_METASYNC_FINGERPRINT || 'off' }}
         # --full: 毎日 1 回の cron（0 0 * * 1-5）と、手動の実行では、変更の検知が「変更なし」でも、全件取得する
         run: ~/sf-tools/bin/sf-metasync.sh ${{ (github.event_name != 'schedule' || github.event.schedule == '0 0 * * 1-5') && '--full' || '' }}

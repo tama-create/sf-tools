@@ -324,6 +324,15 @@ case "$1 $2" in
         # 接続ユーザーのプロファイル名の取得（sf-init の外部クライアントアプリ作成）
         echo "{\"status\":0,\"result\":{\"records\":[{\"Profile\":{\"Name\":\"${MOCK_SF_PROFILE_NAME:-System Administrator}\"}}]}}"
         exit 0 ;;
+    "org auth")
+        # sf org auth show-access-token --json（sf-metasync の一覧の指紋: lib/metasync.js fingerprint。org display が伏せ字のときの最初の取得と、期限切れのトークンの取り直し）。
+        #   MOCK_SF_FRESH_TOKEN=<トークン>（既定 TESTTOKEN-FRESH）。MOCK_SF_TOKEN_EXIT=1 で、失敗を再現する
+        if [[ "$3" == "show-access-token" ]]; then
+            [[ "${MOCK_SF_TOKEN_EXIT:-0}" -ne 0 ]] && { echo '{"status":1,"message":"token failed"}'; exit 1; }
+            echo "{\"status\":0,\"result\":{\"accessToken\":\"${MOCK_SF_FRESH_TOKEN:-TESTTOKEN-FRESH}\"}}"
+            exit 0
+        fi
+        exit 0 ;;
     "org logout")   exit 0 ;;
     "org open")     exit 0 ;;
     "alias unset")  exit 0 ;;

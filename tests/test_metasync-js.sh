@@ -1,6 +1,6 @@
 #!/bin/bash
 # ==============================================================================
-# test_metasync-js.sh - lib/metasync.js（sf-metasync.sh の鏡像: plan / apply）の単体テスト
+# test_metasync-js.sh - lib/metasync.js（sf-metasync.sh の鏡像: plan / apply / detect / fingerprint / fpcompare）の単体テスト
 # ==============================================================================
 # 手元（A）と取得結果（B）のフォルダを、テストの中で作り、plan の計画（TSV）と終了コード、apply の反映を確かめる。
 # 設計: doc/sf-metasync-redesign.md 9.2
@@ -14,6 +14,10 @@
 #   6. apply: A・M・D の反映・H は何もしない・空になったフォルダを消す・根の外のパスは、何も変えずに中断する
 #   7. detect（変更の検知）: 状態なし・変更なし・履歴あり・区分 B の変化（更新日時・件数・名前・フォルダ型）・履歴の失敗・
 #      一覧の失敗・状態の破損や設定の不一致・区分 A がないときは履歴を問い合わせない・引数の誤り／区分の表の整合
+#   8. fingerprint（一覧の指紋。モックの SOAP サーバー tests/mock-soap-server.js を使う）: 判定（変更なし・変更あり・不審・不明）・
+#      トークンの取り直し（伏せ字・期限切れ）・応答の検証（SOAP でない・0 件の自己終了タグ）・転送の拒否・https 以外の拒否・
+#      時間切れ（1 回・全体・sf の呼び出し）・失敗時の中止・まとめて問い合わせ・フォルダ上限・トークンの伏せ字
+#   9. fpcompare（影の比較）: 検知できた・見逃し・日時では検知できない種類・指紋の対象外・空振り／種類の表（metasync-fingerprint.txt）の整合
 # ==============================================================================
 source "$(dirname "${BASH_SOURCE[0]}")/test_helper.sh"
 echo -e "${CLR_HEAD}=== lib/metasync.js ===${CLR_RST}"
@@ -388,6 +392,444 @@ test_detect_table() {
     [[ -z "$unknown" ]] && pass "表の種類は、すべて metadata-dirs.txt にある" || fail "metadata-dirs.txt にない種類: $unknown"
 }
 
+# --- 8. fingerprint（一覧の指紋。設計 16 章の P1）---
+#   Metadata API は、モックのサーバー（tests/mock-soap-server.js。127.0.0.1 のランダムなポート。データの JSON を書き換えて挙動を変える）。
+#   sf は、モック（org display が、アクセストークンと、モックのサーバーの URL を返す。org auth show-access-token は、取り直したトークン）。
+FP_SERVER_PID=""
+_fp_server_start() {   # $_FD に、サーバーのデータ・ポート・リクエストの記録を置く。結果: $_FD/port.txt
+    node "$SF_TOOLS_DIR/tests/mock-soap-server.js" "$_FD/data.json" "$_FD/port.txt" "$_FD/requests.log" &   # & はバックグラウンド起動（run 不使用の例外）
+    FP_SERVER_PID=$!
+    local i; for i in $(seq 1 100); do [[ -s "$_FD/port.txt" ]] && break; sleep 0.1; done
+    [[ -s "$_FD/port.txt" ]] || fail "モックの SOAP サーバーが起動しなかった（10 秒待った）"
+    trap '_fp_server_stop; rm -rf "$_FD"' EXIT   # テストが途中で止まっても、モックのサーバーを残さない
+}
+_fp_server_stop() { [[ -n "$FP_SERVER_PID" ]] && { kill "$FP_SERVER_PID" 2>/dev/null; wait "$FP_SERVER_PID" 2>/dev/null; }; FP_SERVER_PID=""; }
+# 準備: 作業フォルダ（$_FD）に、モックの sf・種類の表（fp.txt）・リポジトリ（repo。sfdx-project.json）・サーバーのデータを作り、サーバーを起動する
+_fp_mk() {
+    _FD=$(mktemp -d "${TMPDIR:-/tmp}/test-msfp-XXXX")
+    mkdir -p "$_FD/bin" "$_FD/repo"
+    create_mock_sf "$_FD/bin"
+    echo '{"packageDirectories":[{"path":"force-app","default":true}]}' > "$_FD/repo/sfdx-project.json"
+    cat > "$_FD/fp.txt" << 'EOF'
+ApexClass
+CustomField  dir=objects
+ReportType
+Report       folder=ReportFolder unfiled=unfiled$public dir=reports
+Gone
+EOF
+    cat > "$_FD/data.json" << 'EOF'
+{"validToken":"TESTTOKEN","lists":{
+ "ApexClass":[{"fullName":"A1","lastModifiedDate":"2026-11-01T01:00:00.000Z"},{"fullName":"A2","lastModifiedDate":"2026-11-01T02:00:00.000Z"}],
+ "CustomField":[{"fullName":"Account.F1__c","lastModifiedDate":"2026-11-01T03:00:00.000Z"}],
+ "ReportType":[{"fullName":"RT1","lastModifiedDate":"2026-11-01T04:00:00.000Z"}],
+ "ReportFolder":[{"fullName":"F1","lastModifiedDate":"2026-11-01T05:00:00.000Z"}],
+ "Report|F1":[{"fullName":"F1/R1","lastModifiedDate":"2026-11-01T06:00:00.000Z"}],
+ "Report|unfiled$public":[],
+ "Gone":{"fault":"INVALID_TYPE: Cannot use: Gone in this organization"}}}
+EOF
+    : > "$_FD/requests.log"
+    _fp_server_start
+    _FD_PORT=$(cat "$_FD/port.txt")
+    _FD_ORG="{\"status\":0,\"result\":{\"accessToken\":\"TESTTOKEN\",\"instanceUrl\":\"http://127.0.0.1:${_FD_PORT}\"}}"
+}
+# サーバーのデータを書き換える。引数: キー（lists の下。"ApexClass"・"Report|F1" など）・JSON の値
+_fp_set() {
+    node -e 'const fs=require("fs");const f=process.argv[1],k=process.argv[2],v=process.argv[3];const d=JSON.parse(fs.readFileSync(f,"utf8"));d.lists=d.lists||{};d.lists[k]=JSON.parse(v);fs.writeFileSync(f,JSON.stringify(d));' "$_FD/data.json" "$1" "$2"
+}
+_fp_token() {   # サーバーが受け付けるトークンを変える（セッション切れの再現）
+    node -e 'const fs=require("fs");const f=process.argv[1];const d=JSON.parse(fs.readFileSync(f,"utf8"));d.validToken=process.argv[2];fs.writeFileSync(f,JSON.stringify(d));' "$_FD/data.json" "$1"
+}
+# fingerprint を実行する。引数: 追加のオプション。環境変数 MOCK_SF_*（呼び出し側で指定）。結果: $_OUT・$_RC・$_FD/new.json・$_FD/report.json
+_fp() {
+    rm -f "$_FD/new.json" "$_FD/report.json"
+    _OUT=$(SF_METASYNC_SF="bash $_FD/bin/sf" MOCK_CALL_LOG="$_FD/calls.log" MOCK_SF_ORG_JSON="$_FD_ORG" \
+        node "$MJS" fingerprint --org prod --fp-config "$_FD/fp.txt" --state "$_FD/state.json" --out-state "$_FD/new.json" \
+        --out-report "$_FD/report.json" --repo "$_FD/repo" --now 2026-11-02T00:00:00Z "$@" 2>&1)
+    _RC=$?
+}
+_fp_json() { node -e 'const j=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));console.log(eval("j."+process.argv[2]))' "$1" "$2"; }
+
+test_fingerprint() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] metasync.js: fingerprint（一覧の指紋）${CLR_RST}"
+    _fp_mk
+    # 状態がない → 不明（11）。今回の状態と、種類ごとの結果を書く。フォルダ型は、フォルダを先に一覧し、フォルダごとに部品を一覧する
+    _fp
+    assert_equals "$_RC" "11" "指紋: 状態がない → 不明（終了コード 11）"
+    assert_output_contains "$_OUT" "前回の指紋がありません" "状態がない理由が出る"
+    assert_output_contains "$_OUT" "指紋: 5 種類（使える 4 / この組織では使えない 1）" "種類の数と、使えない種類（INVALID_TYPE）の数が出る"
+    assert_output_not_contains "$_OUT" "TESTTOKEN" "アクセストークンは、出力に出さない"
+    assert_file_contains "$_FD/new.json" '"count": 2' "今回の状態に、種類ごとの件数が入る"
+    assert_file_contains "$_FD/new.json" '"unavailable": true' "使えない種類は、「使えない」として記録する"
+    assert_equals "$(_fp_json "$_FD/report.json" verdict)" "11" "結果の JSON に、判定が入る"
+    assert_equals "$(_fp_json "$_FD/report.json" 'types.ApexClass.status')" "new" "状態がないときは、種類ごとに new"
+    assert_file_contains "$_FD/requests.log" 'ReportFolder||TESTTOKEN|64.0' "フォルダ型: フォルダの種類を先に一覧する（API バージョンは既定 64.0）"
+    assert_file_contains "$_FD/requests.log" 'Report|F1|TESTTOKEN' "フォルダ型: フォルダごとに部品を一覧する"
+    assert_file_contains "$_FD/requests.log" 'Report|unfiled$public|TESTTOKEN' "フォルダ型: フォルダに入っていない部品の置き場所も一覧する"
+    assert_equals "$(grep -c '^ApexClass|' "$_FD/requests.log")" "1" "1 種類の一覧は 1 回"
+    # 前回と同じ → 変更なし（0）。状態は書かない
+    cp "$_FD/new.json" "$_FD/state.json"
+    _fp
+    assert_equals "$_RC" "0" "前回と同じ → 変更なし（終了コード 0）"
+    assert_output_contains "$_OUT" "変更なし" "変更なしと表示される"
+    [[ ! -f "$_FD/new.json" ]] && pass "変更なしのときは、状態を書かない" || fail "変更なしのときは、状態を書かない"
+    assert_equals "$(_fp_json "$_FD/report.json" 'types.ApexClass.status')" "unchanged" "種類ごとの結果: unchanged"
+    assert_equals "$(_fp_json "$_FD/report.json" 'types.Gone.status')" "unavailable" "使えない種類のまま: unavailable（変更にしない）"
+    # 更新日時が進んだ・件数が変わった → 変更あり（10）
+    _fp_set ApexClass '[{"fullName":"A1","lastModifiedDate":"2026-11-01T09:00:00.000Z"},{"fullName":"A2","lastModifiedDate":"2026-11-01T02:00:00.000Z"}]'
+    _fp
+    assert_equals "$_RC" "10" "更新日時が進んだ → 変更あり（終了コード 10）"
+    assert_output_contains "$_OUT" "ApexClass（件数 2 → 2）" "変わった種類が出る"
+    [[ -f "$_FD/new.json" ]] && pass "変更ありのときは、状態を書く" || fail "変更ありのときは、状態を書く"
+    assert_equals "$(_fp_json "$_FD/report.json" 'types.ApexClass.status')" "changed" "種類ごとの結果: changed"
+    assert_equals "$(_fp_json "$_FD/report.json" 'types.ReportType.status')" "unchanged" "ほかの種類は unchanged"
+    _fp_set ApexClass '[{"fullName":"A1","lastModifiedDate":"2026-11-01T01:00:00.000Z"},{"fullName":"A2","lastModifiedDate":"2026-11-01T02:00:00.000Z"},{"fullName":"A3","lastModifiedDate":"2026-11-01T03:00:00.000Z"}]'
+    _fp
+    assert_output_contains "$_OUT" "ApexClass（件数 2 → 3）" "件数の変化が出る"
+    # 管理パッケージ本体の部品（installed）は、指紋に入れない
+    _fp_set ApexClass '[{"fullName":"A1","lastModifiedDate":"2026-11-01T01:00:00.000Z"},{"fullName":"A2","lastModifiedDate":"2026-11-01T02:00:00.000Z"},{"fullName":"ns__P1","lastModifiedDate":"2026-11-01T09:00:00.000Z","manageableState":"installed"}]'
+    _fp
+    assert_equals "$_RC" "0" "管理パッケージ本体（installed）の部品が増えても、変更なし"
+    # フォルダ型: フォルダの中の部品が変わった・フォルダに入っていない部品が増えた → 変更あり
+    _fp_set 'Report|F1' '[{"fullName":"F1/R1","lastModifiedDate":"2026-11-01T09:00:00.000Z"}]'
+    _fp
+    assert_equals "$_RC" "10" "フォルダの中の部品の更新日時が進んだ → 変更あり"
+    assert_output_contains "$_OUT" "Report（" "フォルダ型の変化が出る"
+    _fp_set 'Report|F1' '[{"fullName":"F1/R1","lastModifiedDate":"2026-11-01T06:00:00.000Z"}]'
+    _fp_set 'Report|unfiled$public' '[{"fullName":"unfiled$public/R9","lastModifiedDate":"2026-11-01T06:00:00.000Z"}]'
+    _fp
+    assert_equals "$_RC" "10" "フォルダに入っていない部品が増えた → 変更あり"
+    _fp_set 'Report|unfiled$public' '[]'
+    # 使えなかった種類が、使えるようになった → 変更あり
+    _fp_set Gone '[{"fullName":"G1","lastModifiedDate":"2026-11-01T06:00:00.000Z"}]'
+    _fp
+    assert_equals "$_RC" "10" "使えなかった種類が、使えるようになった → 変更あり"
+    assert_output_contains "$_OUT" "Gone（件数 - → 1）" "使えるようになった種類が出る"
+    _fp_set Gone '{"fault":"INVALID_TYPE: Cannot use: Gone in this organization"}'
+    # 件数が半分以下に減った（前回が 4 件以上）→ 不審 → 不明（11）。一覧が欠けた回に、全件取得へ倒す
+    _fp_set ApexClass '[{"fullName":"A1","lastModifiedDate":"2026-11-01T01:00:00.000Z"},{"fullName":"A2","lastModifiedDate":"2026-11-01T01:00:00.000Z"},{"fullName":"A3","lastModifiedDate":"2026-11-01T01:00:00.000Z"},{"fullName":"A4","lastModifiedDate":"2026-11-01T01:00:00.000Z"},{"fullName":"A5","lastModifiedDate":"2026-11-01T01:00:00.000Z"},{"fullName":"A6","lastModifiedDate":"2026-11-01T01:00:00.000Z"}]'
+    _fp; cp "$_FD/new.json" "$_FD/state.json"
+    _fp_set ApexClass '[{"fullName":"A1","lastModifiedDate":"2026-11-01T01:00:00.000Z"},{"fullName":"A2","lastModifiedDate":"2026-11-01T01:00:00.000Z"}]'
+    _fp
+    assert_equals "$_RC" "11" "件数が前回の半分以下 → 不明（終了コード 11）"
+    assert_output_contains "$_OUT" "ApexClass（6 → 2）" "不審な種類と件数が出る"
+    assert_output_contains "$_OUT" "\[WARNING\] 不明: 件数が前回の半分以下" "不審は、WARNING で出る（一覧が欠けた疑い）"
+    assert_equals "$(_fp_json "$_FD/report.json" 'types.ApexClass.status')" "suspect" "種類ごとの結果: suspect"
+    [[ -f "$_FD/new.json" ]] && pass "不審でも、一覧が取れていれば状態を書く（全件取得の基準にする）" || fail "不審でも、一覧が取れていれば状態を書く"
+    # 前回が 4 件未満なら、減っても疑わない（状態は、件数 2 のものにしてから、1 件に減らす）
+    cp "$_FD/new.json" "$_FD/state.json"
+    _fp_set ApexClass '[{"fullName":"A1","lastModifiedDate":"2026-11-01T01:00:00.000Z"}]'; _fp
+    assert_equals "$_RC" "10" "前回が 4 件未満なら、半分に減っても不審にしない（変更あり）"
+    # 一覧の失敗（INVALID_TYPE 以外の Fault・HTTP エラー）→ 不明（11）。状態は書かない
+    _fp_set ReportType '{"fault":"UNKNOWN_EXCEPTION: boom"}'
+    _fp
+    assert_equals "$_RC" "11" "一覧の取得の失敗（Fault）→ 不明（終了コード 11）"
+    assert_output_contains "$_OUT" "一覧の取得に失敗した種類があります" "失敗の理由が出る"
+    assert_output_contains "$_OUT" "ReportType" "失敗した種類が出る"
+    [[ ! -f "$_FD/new.json" ]] && pass "一覧が取れないときは、状態を書かない" || fail "一覧が取れないときは、状態を書かない"
+    assert_equals "$(_fp_json "$_FD/report.json" verdict)" "11" "失敗のときも、結果の JSON に判定を書く（影の比較が、比べない）"
+    _fp_set ReportType '{"http":503}'
+    _fp
+    assert_equals "$_RC" "11" "一覧の取得の失敗（HTTP 503）→ 不明"
+    assert_output_contains "$_OUT" "HTTP 503" "HTTP のエラーが出る"
+    _fp_set ReportType '[{"fullName":"RT1","lastModifiedDate":"2026-11-01T04:00:00.000Z"}]'
+    # 状態が使えない（壊れている・種類の表が違う・API バージョンが違う）→ 不明
+    echo '{broken' > "$_FD/state.json"; _fp
+    assert_equals "$_RC" "11" "状態が壊れている → 不明"
+    assert_output_contains "$_OUT" "前回の指紋を読めません" "壊れている理由が出る"
+    rm -f "$_FD/state.json"; _fp; cp "$_FD/new.json" "$_FD/state.json"
+    _fp; assert_equals "$_RC" "0" "状態を作り直せば、同じ内容は変更なし"
+    cp "$_FD/fp.txt" "$_FD/fp.orig"; echo 'Gone2' >> "$_FD/fp.txt"; _fp
+    assert_equals "$_RC" "11" "種類の表が変わった → 不明（設定のハッシュが合わない）"
+    assert_output_contains "$_OUT" "版または設定" "設定の不一致の理由が出る"
+    cp "$_FD/fp.orig" "$_FD/fp.txt"
+    echo '{"packageDirectories":[{"path":"force-app"}],"sourceApiVersion":"63.0"}' > "$_FD/repo/sfdx-project.json"
+    : > "$_FD/requests.log"; _fp
+    assert_equals "$_RC" "11" "API バージョンが変わった → 不明（指紋は、API バージョンごと）"
+    assert_file_contains "$_FD/requests.log" '|63.0' "API バージョンは、sfdx-project.json の sourceApiVersion"
+    echo '{"packageDirectories":[{"path":"force-app"}]}' > "$_FD/repo/sfdx-project.json"
+    # 引数・設定の誤り
+    local out
+    out=$(node "$MJS" fingerprint --org prod 2>&1); assert_equals "$?" "1" "fingerprint の必須オプションがない → 中断（終了コード 1）"
+    out=$(node "$MJS" fingerprint --org prod --fp-config "$_FD/fp.txt" --state "$_FD/s.json" --out-state "$_FD/n.json" --now bad 2>&1)
+    assert_equals "$?" "1" "--now が日時でない → 中断"
+    printf 'ApexClass bogus=1\n' > "$_FD/bad.txt"
+    out=$(node "$MJS" fingerprint --org prod --fp-config "$_FD/bad.txt" --state "$_FD/s.json" --out-state "$_FD/n.json" 2>&1)
+    assert_equals "$?" "1" "種類の表に、不明な指定 → 中断"; assert_output_contains "$out" "不明な指定" "不明な指定の理由が出る"
+    printf 'ApexClass\nApexClass\n' > "$_FD/bad.txt"
+    out=$(node "$MJS" fingerprint --org prod --fp-config "$_FD/bad.txt" --state "$_FD/s.json" --out-state "$_FD/n.json" 2>&1)
+    assert_equals "$?" "1" "種類の表に、同じ種類が 2 回 → 中断"
+    printf 'ApexClass unfiled=x\n' > "$_FD/bad.txt"
+    out=$(node "$MJS" fingerprint --org prod --fp-config "$_FD/bad.txt" --state "$_FD/s.json" --out-state "$_FD/n.json" 2>&1)
+    assert_equals "$?" "1" "unfiled= だけの指定（folder= がない）→ 中断"
+    _fp_server_stop; rm -rf "$_FD"
+}
+
+# セッション切れ: sf org display のトークンが無効なとき、sf org auth show-access-token で 1 回だけ取り直して、やり直す
+test_fingerprint_token_refresh() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] metasync.js: fingerprint（トークンの取り直し・接続の失敗）${CLR_RST}"
+    _fp_mk
+    _fp_token "TESTTOKEN-FRESH"     # サーバーは、取り直したトークンだけ受け付ける。sf org display のトークン（TESTTOKEN）は、期限切れ
+    : > "$_FD/calls.log"
+    MOCK_SF_FRESH_TOKEN="TESTTOKEN-FRESH" _fp
+    assert_equals "$_RC" "11" "セッション切れ → 取り直して、一覧が取れる（状態がないので、不明 11）"
+    assert_output_not_contains "$_OUT" "INVALID_SESSION_ID" "取り直しで解決すれば、失敗は出ない"
+    assert_equals "$(grep -c 'org auth show-access-token' "$_FD/calls.log")" "1" "同時に失敗しても、トークンの取り直しは 1 回だけ"
+    assert_file_contains "$_FD/requests.log" 'TESTTOKEN-FRESH' "やり直しは、取り直したトークンで行う"
+    assert_output_not_contains "$_OUT" "TESTTOKEN" "トークンは、出力に出さない"
+    # 現行の sf: org display のトークンは伏せ字。伏せ字を SOAP に送らず、最初から show-access-token で取る
+    _fp_token "TESTTOKEN-FRESH"; : > "$_FD/calls.log"; : > "$_FD/requests.log"
+    _FD_ORG="{\"status\":0,\"result\":{\"accessToken\":\"[REDACTED] Use 'sf org auth show-access-token' to view\",\"instanceUrl\":\"http://127.0.0.1:${_FD_PORT}\"}}" \
+        MOCK_SF_FRESH_TOKEN="TESTTOKEN-FRESH" _fp
+    assert_equals "$_RC" "11" "伏せ字のトークン → 取り直して、一覧が取れる（状態がないので、不明 11）"
+    assert_output_not_contains "$_OUT" "INVALID_SESSION_ID" "伏せ字のときは、セッション切れの失敗にならない"
+    assert_equals "$(grep -c 'REDACTED' "$_FD/requests.log")" "0" "伏せ字は、SOAP に送らない"
+    assert_equals "$(grep -c 'org auth show-access-token' "$_FD/calls.log")" "1" "伏せ字のときは、最初に 1 回だけ show-access-token で取る"
+    assert_file_contains "$_FD/requests.log" 'TESTTOKEN-FRESH' "取ったトークンで一覧を取る"
+    # 伏せ字で、show-access-token も失敗 → SOAP を呼ばずに不明
+    : > "$_FD/requests.log"
+    _FD_ORG="{\"status\":0,\"result\":{\"accessToken\":\"[REDACTED] Use 'sf org auth show-access-token' to view\",\"instanceUrl\":\"http://127.0.0.1:${_FD_PORT}\"}}" \
+        MOCK_SF_TOKEN_EXIT=1 _fp
+    assert_equals "$_RC" "11" "伏せ字で、取得も失敗 → 不明"
+    assert_output_contains "$_OUT" "アクセストークンを取得できませんでした" "取得できない理由が出る"
+    assert_equals "$(wc -l < "$_FD/requests.log" | tr -d ' ')" "0" "取得できないときは、SOAP を呼ばない"
+    # 取り直しが失敗 → 一覧の取得に失敗 → 不明
+    MOCK_SF_TOKEN_EXIT=1 _fp
+    assert_equals "$_RC" "11" "取り直しも失敗 → 不明"
+    assert_output_contains "$_OUT" "INVALID_SESSION_ID" "セッションが無効な理由が出る"
+    [[ ! -f "$_FD/new.json" ]] && pass "取り直しも失敗 → 状態を書かない" || fail "取り直しも失敗 → 状態を書かない"
+    # 接続情報（アクセストークン・URL）がない → 不明
+    _FD_ORG='{"status":0,"result":{"alias":"x"}}' _fp
+    assert_equals "$_RC" "11" "接続情報がない → 不明"
+    assert_output_contains "$_OUT" "接続情報" "接続情報を取得できない理由が出る"
+    # サーバーに接続できない → 不明（2 回試して諦める）。使われていないポート（1）に向ける（サーバーを止めて空いたポートを狙うと、
+    #   並列に動く別のテストのモックが同じポートを取ることがある）
+    _FD_ORG='{"status":0,"result":{"accessToken":"TESTTOKEN","instanceUrl":"http://127.0.0.1:1"}}' _fp
+    assert_equals "$_RC" "11" "接続できない → 不明"
+    assert_output_contains "$_OUT" "接続エラー" "接続エラーが出る"
+    _fp_server_stop; rm -rf "$_FD"
+}
+
+# 応答の検証・転送の拒否・時間切れ・まとめて問い合わせ・上限（設計 16 章の P1。レビューでの指摘の対応）
+_fp_top() {   # サーバーのデータの先頭の項目（nonSoap・redirect・delay）を設定する。引数: キー・JSON の値（null で消す）
+    node -e 'const fs=require("fs");const f=process.argv[1];const d=JSON.parse(fs.readFileSync(f,"utf8"));const v=JSON.parse(process.argv[3]);if(v===null)delete d[process.argv[2]];else d[process.argv[2]]=v;fs.writeFileSync(f,JSON.stringify(d));' "$_FD/data.json" "$1" "$2"
+}
+test_fingerprint_hardening() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] metasync.js: fingerprint（応答の検証・転送の拒否・時間切れ・上限）${CLR_RST}"
+    _fp_mk
+    # 0 件の種類: 実機は自己終了タグ（<listMetadataResponse/>）で返す。失敗ではなく「件数 0」として扱う（モックも同じ形で返す）
+    _fp_set ApexClass '[]'
+    _fp
+    assert_output_not_contains "$_OUT" "Metadata API の形ではありません" "0 件の一覧（自己終了タグ）は、失敗にしない"
+    assert_equals "$(_fp_json "$_FD/report.json" 'types.ApexClass.count')" "0" "0 件の種類は、件数 0 として記録する"
+    assert_output_not_contains "$_OUT" "一覧の取得に失敗した種類があります" "0 件の種類があっても、全体は失敗にならない"
+    _fp_set ApexClass '[{"fullName":"A1","lastModifiedDate":"2026-11-01T01:00:00.000Z"},{"fullName":"A2","lastModifiedDate":"2026-11-01T02:00:00.000Z"}]'
+    # HTTP 200 でも SOAP の応答でない本文（メンテナンス画面など）→ 「0 件の一覧」にせず、失敗（不明 11）
+    _fp_top nonSoap true
+    _fp
+    assert_equals "$_RC" "11" "HTTP 200 で SOAP でない応答 → 不明（空の一覧とみなさない）"
+    assert_output_contains "$_OUT" "Metadata API の形ではありません" "SOAP でない応答の理由が出る"
+    assert_output_contains "$_OUT" "\[WARNING\] 不明" "不明になった理由は WARNING で出る"
+    [[ ! -f "$_FD/new.json" ]] && pass "SOAP でない応答のときは、状態を書かない" || fail "SOAP でない応答のときは、状態を書かない"
+    # 1 種類が失敗したら、残りの問い合わせは中止する（応答しない組織で、全種類ぶん待たない）。種類が多い表で、要求の数を見る
+    for i in $(seq 1 40); do echo "TypeN$i"; done > "$_FD/fp.big"
+    : > "$_FD/requests.log"
+    _OUT=$(SF_METASYNC_SF="bash $_FD/bin/sf" MOCK_CALL_LOG="$_FD/calls.log" MOCK_SF_ORG_JSON="$_FD_ORG" \
+        node "$MJS" fingerprint --org prod --fp-config "$_FD/fp.big" --state "$_FD/state.json" --out-state "$_FD/new.json" \
+        --out-report "$_FD/report.json" --repo "$_FD/repo" 2>&1); _RC=$?
+    assert_equals "$_RC" "11" "多くの種類が失敗 → 不明"
+    [[ "$(wc -l < "$_FD/requests.log" | tr -d ' ')" -le 6 ]] && pass "失敗したら、残りの問い合わせは中止する（同時に走る 6 件より多く出さない。中止がなければ 40 回）" || fail "失敗したら、残りの問い合わせは中止する"
+    assert_output_not_contains "$_OUT" "(中止)" "中止した種類は、失敗の一覧に出さない"
+    assert_output_contains "$_OUT" "ほかの種類は、中止しました" "中止したときは、失敗の件数が部分的な数である旨を添える"
+    # 種類が 1 つだけ（待ち行列ができない）で失敗した回は、中止した問い合わせがないので、注記を付けない
+    _fp_top nonSoap null
+    echo "ReportType" > "$_FD/fp.one"; _fp_set ReportType '{"http":503}'
+    _OUT=$(SF_METASYNC_SF="bash $_FD/bin/sf" MOCK_CALL_LOG="$_FD/calls.log" MOCK_SF_ORG_JSON="$_FD_ORG" \
+        node "$MJS" fingerprint --org prod --fp-config "$_FD/fp.one" --state "$_FD/state.json" --out-state "$_FD/new.json" \
+        --out-report "$_FD/report.json" --repo "$_FD/repo" 2>&1); _RC=$?
+    assert_equals "$_RC" "11" "1 種類だけの失敗 → 不明"
+    assert_output_contains "$_OUT" "HTTP 503" "意図した失敗（HTTP 503）で不明になる"
+    assert_output_not_contains "$_OUT" "中止しました" "中止した問い合わせがない回には、中止の注記を付けない"
+    _fp_set ReportType '[{"fullName":"RT1","lastModifiedDate":"2026-11-01T04:00:00.000Z"}]'
+    _fp_top nonSoap null
+    # 転送（307）→ 追わない（トークン入りの本文を、別のホストへ再送しない）。同じ問い合わせは 2 回（やり直しの 1 回）で諦める
+    : > "$_FD/requests.log"
+    _fp_top redirect '"http://127.0.0.1:9/elsewhere"'
+    _fp
+    assert_equals "$_RC" "11" "転送された → 不明（追わない）"
+    assert_equals "$(grep -c '^ApexClass|' "$_FD/requests.log")" "2" "転送は追わない（追うと、何度も要求が来る）。やり直しの 1 回だけ"
+    assert_output_not_contains "$_OUT" "TESTTOKEN" "転送のときも、トークンを出力しない"
+    _fp_top redirect null
+    # 応答が遅い → 1 回の待ちの上限で諦める（不明）
+    _fp_top delay 1500
+    SF_METASYNC_FP_TIMEOUT_MS=200 _fp
+    assert_equals "$_RC" "11" "応答が遅すぎる → 不明（1 回の待ちの上限）"
+    assert_output_contains "$_OUT" "接続エラー" "時間切れは接続エラーとして出る"
+    # 全体の期限: フォルダ型は 2 段階（フォルダ → 部品）。最初の段階で期限を超えると、次の段階に進まない。
+    #   （遅い環境では sf の呼び出しだけで期限を過ぎることがあるが、どちらの経路でも「時間切れ」と出て、不明になる）
+    _fp_top delay 2000
+    SF_METASYNC_FP_DEADLINE_MS=1500 _fp
+    assert_equals "$_RC" "11" "全体の期限を超えた → 不明"
+    assert_output_contains "$_OUT" "時間切れ" "全体の期限切れの理由が出る"
+    _fp_top delay null
+    # sf の呼び出しも、全体の期限に含める（遅い sf を、残り時間で打ち切る。応答が空でも「JSON が読めない」とは区別する）
+    cat > "$_FD/slowsf" << 'EOS'
+#!/bin/bash
+# 引数に $SLOW_ON を含む呼び出しだけ、$SLOW_SEC 秒（既定 3）眠る。SLOW_THEN=1 なら、眠ったあと、モックの sf に任せる（正しい応答を返す）。
+#   そうでなければ、応答は空で終わる。ほかの呼び出しは、すぐモックの sf に任せる
+case "$*" in *"$SLOW_ON"*) sleep "${SLOW_SEC:-3}"; [[ "${SLOW_THEN:-}" == "1" ]] || exit 0 ;; esac
+exec bash "$(dirname "$0")/bin/sf" "$@"
+EOS
+    SLOW_ON="org display" SF_METASYNC_FP_DEADLINE_MS=1000 SF_METASYNC_SF="bash $_FD/slowsf" MOCK_CALL_LOG="$_FD/calls.log" MOCK_SF_ORG_JSON="$_FD_ORG" \
+        node "$MJS" fingerprint --org prod --fp-config "$_FD/fp.txt" --state "$_FD/state.json" --out-state "$_FD/new.json" --out-report "$_FD/report.json" --repo "$_FD/repo" > "$_FD/slow.out" 2>&1
+    assert_equals "$?" "11" "sf の呼び出しが期限を超えた → 不明"
+    assert_file_contains "$_FD/slow.out" "sf が時間切れです" "sf の時間切れは、「応答を読めません」とは別の理由で出る"
+    # トークンの取り直し（sf org auth show-access-token）も、期限で打ち切る
+    _fp_token "TESTTOKEN-FRESH"
+    # 眠りが期限より長く、眠ったあとは正しいトークンを返す: 打ち切られなければ取り直しに成功し、INVALID_SESSION_ID は出ない
+    SLOW_ON="show-access-token" SLOW_SEC=8 SLOW_THEN=1 MOCK_SF_FRESH_TOKEN="TESTTOKEN-FRESH" SF_METASYNC_FP_DEADLINE_MS=5000 SF_METASYNC_SF="bash $_FD/slowsf" MOCK_CALL_LOG="$_FD/calls.log" MOCK_SF_ORG_JSON="$_FD_ORG" \
+        node "$MJS" fingerprint --org prod --fp-config "$_FD/fp.txt" --state "$_FD/state.json" --out-state "$_FD/new.json" --out-report "$_FD/report.json" --repo "$_FD/repo" > "$_FD/slow.out" 2>&1
+    assert_equals "$?" "11" "トークンの取り直しが遅すぎる → 不明（取り直しも期限で打ち切る）"
+    assert_file_contains "$_FD/slow.out" "INVALID_SESSION_ID" "取り直せなかったので、セッションが無効な理由が出る（打ち切られなければ、取り直しに成功してしまう）"
+    _fp_token "TESTTOKEN"
+    # インスタンス URL が https でない（手元のモック以外の http）→ トークンを送らず、不明
+    : > "$_FD/requests.log"
+    _FD_ORG='{"status":0,"result":{"accessToken":"TESTTOKEN","instanceUrl":"http://example.com"}}' _fp
+    assert_equals "$_RC" "11" "https でないインスタンス URL → 不明"
+    assert_output_contains "$_OUT" "https ではない" "https でない理由が出る"
+    assert_equals "$(wc -l < "$_FD/requests.log" | tr -d ' ')" "0" "https でないときは、要求を出さない"
+    _FD_ORG='{"status":0,"result":{"accessToken":"TESTTOKEN","instanceUrl":"not a url"}}' _fp
+    assert_output_contains "$_OUT" "インスタンス URL を読めません" "URL として読めない → 不明"
+    # 失敗の文面にトークンが入っていても、出力では伏せる
+    _fp_set ReportType '{"fault":"UNKNOWN_EXCEPTION: bad TESTTOKEN here"}'
+    _fp
+    assert_output_not_contains "$_OUT" "TESTTOKEN" "Fault の文面にトークンがあっても、出力しない"
+    assert_output_contains "$_OUT" "bad \*\*\* here" "トークンは *** に置き換える"
+    _fp_set ReportType '[{"fullName":"RT1","lastModifiedDate":"2026-11-01T04:00:00.000Z"}]'
+    # フォルダの問い合わせは、3 つずつまとめる（呼び出しの回数を減らす）
+    node -e 'const fs=require("fs");const f=process.argv[1];const d=JSON.parse(fs.readFileSync(f,"utf8"));
+      d.lists.ReportFolder=[1,2,3,4,5,6,7].map(i=>({fullName:"G"+i,lastModifiedDate:"2026-11-01T05:00:00.000Z"}));
+      fs.writeFileSync(f,JSON.stringify(d));' "$_FD/data.json"
+    : > "$_FD/requests.log"; : > "$_FD/requests.log.calls"
+    _fp
+    assert_file_contains "$_FD/requests.log" 'Report|G7|TESTTOKEN' "まとめても、フォルダごとに一覧される"
+    assert_file_contains "$_FD/requests.log" 'Report|unfiled$public|TESTTOKEN' "まとめても、フォルダに入っていない部品の置き場所も一覧される"
+    assert_equals "$(grep -c '^3$' "$_FD/requests.log.calls")" "2" "8 か所（7 フォルダ + 置き場所）は、3 + 3 + 2 の 3 回で一覧（3 つの回は 2 回）"
+    assert_equals "$(grep -c '^2$' "$_FD/requests.log.calls")" "1" "残りの 2 か所は 1 回にまとまる"
+    assert_output_contains "$_OUT" "一覧の呼び出し 8 回" "全体の呼び出しは、フォルダの種類 1 + 部品 3 + ほかの 4 種類（Gone を含む）= 8 回"
+    # フォルダが多すぎる → 不明（上限 900）
+    node -e 'const fs=require("fs");const f=process.argv[1];const d=JSON.parse(fs.readFileSync(f,"utf8"));
+      d.lists.ReportFolder=Array.from({length:901},(_,i)=>({fullName:"H"+i,lastModifiedDate:"2026-11-01T05:00:00.000Z"}));
+      fs.writeFileSync(f,JSON.stringify(d));' "$_FD/data.json"
+    _fp
+    assert_equals "$_RC" "11" "フォルダが上限を超えた → 不明"
+    assert_output_contains "$_OUT" "フォルダが多すぎます" "上限超過の理由が出る"
+    assert_output_not_contains "$_OUT" "Report: Report" "失敗した種類の名前が、二重にならない"
+    # フォルダ上限超えで中止したとき、実行中の別の種類の要求は、時間切れのあとにやり直さない（遅い種類への要求は 1 回だけ）
+    _fp_set ApexClass '{"delay":6000}'; : > "$_FD/requests.log"
+    SF_METASYNC_FP_TIMEOUT_MS=2000 _fp   # 中止の旗が立つ（901 件の応答）より先に、遅い種類が時間切れにならない余裕（負荷のかかった CI を考えて 2 秒）
+    assert_equals "$_RC" "11" "フォルダ上限超え + 遅い種類 → 不明"
+    assert_equals "$(grep -c '^ApexClass|' "$_FD/requests.log")" "1" "中止したあとは、実行中の要求もやり直さない"
+    # 更新日時が 1970 年のままの部品の数（epoch）が、結果に入る（影の比較用）
+    _fp_set ApexClass '[{"fullName":"A1","lastModifiedDate":"1970-01-01T00:00:00.000Z"},{"fullName":"A2","lastModifiedDate":"2026-11-01T02:00:00.000Z"}]'
+    node -e 'const fs=require("fs");const f=process.argv[1];const d=JSON.parse(fs.readFileSync(f,"utf8"));d.lists.ReportFolder=[];fs.writeFileSync(f,JSON.stringify(d));' "$_FD/data.json"
+    _fp
+    assert_equals "$(_fp_json "$_FD/report.json" 'types.ApexClass.epoch')" "1" "結果に、更新日時が 1970 年のままの件数が入る"
+    assert_file_not_contains "$_FD/new.json" "epoch" "状態ファイルには、epoch を入れない（影の比較用）"
+    _fp_server_stop; rm -rf "$_FD"
+}
+
+# --- 9. fpcompare（影の比較）---
+test_fpcompare() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] metasync.js: fpcompare（影の比較）${CLR_RST}"
+    _FD=$(mktemp -d "${TMPDIR:-/tmp}/test-msfc-XXXX")
+    printf 'ApexClass\nCustomField dir=objects\nReportType\nReport folder=ReportFolder unfiled=unfiled$public dir=reports\n' > "$_FD/fp.txt"
+    local R='force-app/main/default'
+    _fpc() { _OUT=$(node "$MJS" fpcompare --report "$_FD/report.json" --plan "$_FD/plan.tsv" --fp-config "$_FD/fp.txt" --dirs-table "$DIRS_TABLE" 2>&1); _RC=$?; }
+    _rep() { echo "{\"verdict\":$1,\"types\":{\"ApexClass\":{\"status\":\"$2\"},\"CustomField\":{\"status\":\"unchanged\"},\"ReportType\":{\"status\":\"unchanged\"},\"Report\":{\"status\":\"unchanged\"}}}" > "$_FD/report.json"; }
+    # 検知できた: 計画の変更があるフォルダ（classes）の種類（ApexClass）が、変わっていた
+    _rep 10 changed
+    printf 'M\t%s/classes/A1.cls\t\nA\t%s/classes/A9.cls\t\n' "$R" "$R" > "$_FD/plan.tsv"; _fpc
+    assert_equals "$_RC" "0" "影の比較は、常に終了コード 0（情報のみ）"
+    assert_output_contains "$_OUT" "実際の変更 2 件（1 グループ）— 検知できた 1（2 件）/ 見逃し 0（0 件）/ 日時では検知できない種類 0（0 件）/ 指紋の対象外 0（0 件）" "指紋が変わった種類のフォルダの変更は、検知できた"
+    assert_output_not_contains "$_OUT" "WARNING" "見逃しがなければ、WARNING は出ない"
+    # 見逃し: 指紋の対象の種類があるのに、どれも変わっていない → WARNING
+    _rep 10 unchanged
+    printf 'M\t%s/classes/A1.cls\t\n' "$R" > "$_FD/plan.tsv"; _fpc
+    assert_output_contains "$_OUT" "見逃し 1（1 件）" "指紋が動かなかったのに、ファイルが変わった → 見逃し"
+    assert_output_contains "$_OUT" "\[WARNING\] 指紋の見逃し: classes（指紋の種類: ApexClass）" "見逃しは WARNING で、フォルダと種類を出す"
+    assert_output_contains "$_OUT" "M force-app/main/default/classes/A1.cls" "見逃しのファイルの例が出る"
+    # 見逃し: 指紋の変化が、ほかの種類だけ（ReportType）で、変更はフォルダ classes → 見逃し（種類は、フォルダごとに結びつける）
+    printf '{"verdict":10,"types":{"ApexClass":{"status":"unchanged"},"ReportType":{"status":"changed"}}}\n' > "$_FD/report.json"
+    printf 'M\t%s/classes/A1.cls\t\n' "$R" > "$_FD/plan.tsv"; _fpc
+    assert_output_contains "$_OUT" "見逃し 1" "別の種類の指紋が変わっても、そのフォルダの種類が動いていなければ、見逃し"
+    # objects: 子の種類ごとに結びつける（fields = CustomField）。CustomObject は、表にないので対象外
+    _rep 10 changed
+    printf 'M\t%s/objects/Account/fields/F1__c.field-meta.xml\t\nM\t%s/objects/Account/Account.object-meta.xml\t\nM\t%s/objects/Account/listViews/L.listView-meta.xml\t\n' "$R" "$R" "$R" > "$_FD/plan.tsv"; _fpc
+    assert_output_contains "$_OUT" "見逃し 1（1 件）/ 日時では検知できない種類 0（0 件）/ 指紋の対象外 2（2 件）" "objects: 項目 = CustomField は見逃し。オブジェクト本体・リストビューは、表にない種類 = 対象外"
+    assert_output_contains "$_OUT" "指紋の見逃し: objects/CustomField" "objects の見逃しは、子の種類で出る"
+    # 指紋の対象外: 表にない種類のフォルダ
+    _rep 10 changed
+    printf 'A\t%s/staticresources/S.resource\t\n' "$R" > "$_FD/plan.tsv"; _fpc
+    assert_output_contains "$_OUT" "指紋の対象外 1（1 件）" "表にない種類のフォルダの変更は、指紋の対象外"
+    assert_output_contains "$_OUT" "staticresources" "対象外のフォルダが出る"
+    # 削除の保留（H）は、実際の変更に数えない
+    printf 'H\t%s/classes/A1.cls\tS4\n' "$R" > "$_FD/plan.tsv"; _fpc
+    assert_output_contains "$_OUT" "実際の変更はありませんでした" "保留（H）は、変更に数えない"
+    # 空振り: 指紋は変わったが、変更がなかった種類
+    _rep 10 changed
+    : > "$_FD/plan.tsv"; _fpc
+    assert_output_contains "$_OUT" "指紋の空振り（指紋は変わったが、ファイルの変更はなかった種類）: ApexClass" "指紋が変わったのに、変更がなかった種類（空振り）が出る"
+    # 日時では検知できない種類: Profile など（別の部品を足しても、自分の更新日時が動かない）と、一覧の日時がすべて 1970 年の種類は、見逃しと分ける
+    printf 'Profile\n' >> "$_FD/fp.txt"
+    printf '{"verdict":10,"types":{"ApexClass":{"status":"unchanged","count":2,"epoch":2},"Profile":{"status":"unchanged","count":3,"epoch":0},"ReportType":{"status":"changed"}}}\n' > "$_FD/report.json"
+    printf 'M\t%s/classes/A1.cls\t\nM\t%s/profiles/Admin.profile-meta.xml\t\n' "$R" "$R" > "$_FD/plan.tsv"; _fpc
+    assert_output_contains "$_OUT" "見逃し 0（0 件）/ 日時では検知できない種類 2（2 件）" "更新日時が動かない種類（Profile・日時がすべて 1970 年の種類）は、見逃しにしない"
+    assert_output_not_contains "$_OUT" "WARNING" "日時では検知できない種類は、WARNING にしない"
+    assert_output_contains "$_OUT" "日時では検知できない種類（更新日時が動かない" "その種類のフォルダが出る"
+    # 同じフォルダの子の種類に 0 件のものが混じっても、日時では検知できない種類は、見逃しにしない（0 件の種類は判定から外す）
+    printf 'Workflow dir=workflows\nWorkflowRule dir=workflows\n' >> "$_FD/fp.txt"
+    printf '{"verdict":10,"types":{"ApexClass":{"status":"changed"},"Workflow":{"status":"unchanged","count":2,"epoch":2},"WorkflowRule":{"status":"unchanged","count":0,"epoch":0}}}\n' > "$_FD/report.json"
+    printf 'M\t%s/workflows/Account.workflow-meta.xml\t\n' "$R" > "$_FD/plan.tsv"; _fpc
+    assert_output_contains "$_OUT" "見逃し 0（0 件）/ 日時では検知できない種類 1（1 件）" "0 件の子の種類が混じっても、全件 1970 年の種類は、見逃しにしない"
+    # 使えない種類（この組織にない）が同じフォルダに混じっても、同じ
+    printf '{"verdict":10,"types":{"ApexClass":{"status":"changed"},"Workflow":{"status":"unchanged","count":2,"epoch":2},"WorkflowRule":{"status":"unavailable","count":null,"unavailable":true}}}\n' > "$_FD/report.json"
+    printf 'M\t%s/workflows/Account.workflow-meta.xml\t\n' "$R" > "$_FD/plan.tsv"; _fpc
+    assert_output_contains "$_OUT" "見逃し 0（0 件）/ 日時では検知できない種類 1（1 件）" "使えない子の種類が混じっても、全件 1970 年の種類は、見逃しにしない"
+    # 日時が 1970 年のものが一部だけなら、日時で見分けられる種類なので、見逃しにする
+    printf '{"verdict":10,"types":{"ApexClass":{"status":"unchanged","count":2,"epoch":1},"ReportType":{"status":"changed"}}}\n' > "$_FD/report.json"
+    printf 'M\t%s/classes/A1.cls\t\n' "$R" > "$_FD/plan.tsv"; _fpc
+    assert_output_contains "$_OUT" "見逃し 1（1 件）" "1970 年が一部だけの種類は、見逃しとして数える"
+    # 指紋が不明（11）・結果が読めない → 比べない
+    _rep 11 changed; _fpc
+    assert_output_contains "$_OUT" "指紋が不明" "指紋が不明のときは、比べない"
+    rm -f "$_FD/report.json"; _fpc
+    assert_equals "$_RC" "0" "結果が読めなくても、終了コード 0"
+    assert_output_contains "$_OUT" "読めないため" "結果が読めない旨が出る"
+    rm -rf "$_FD"
+}
+
+# 種類の表（config/metasync-fingerprint.txt）の整合: 書式が正しく、重複がなく、Document 系を含まず、影の比較で結びつくフォルダがある
+FP_TABLE="$SF_TOOLS_DIR/config/metasync-fingerprint.txt"
+test_fingerprint_table() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] config/metasync-fingerprint.txt: 書式と整合${CLR_RST}"
+    local bad dup nodir doc
+    bad=$(grep -v -E '^\s*(#.*)?$' "$FP_TABLE" | grep -v -E '^[A-Za-z0-9_]+(\s+(dir|folder|unfiled)=[^[:space:]]+)*\s*(#.*)?$')
+    [[ -z "$bad" ]] && pass "すべての行が「種類名 [キー=値 ...]」の書式" || fail "書式が正しくない行: $bad"
+    dup=$(grep -v -E '^\s*(#.*)?$' "$FP_TABLE" | awk '{print $1}' | sort | uniq -d)
+    [[ -z "$dup" ]] && pass "同じ種類が、2 回書かれていない" || fail "重複: $dup"
+    nodir=$(grep -v -E '^\s*(#.*)?$' "$FP_TABLE" | while read -r t rest; do [[ "$rest" == *dir=* ]] || grep -q "^$t " "$DIRS_TABLE" || echo "$t"; done)
+    [[ -z "$nodir" ]] && pass "すべての種類が、フォルダに結びつく（dir= または metadata-dirs.txt）" || fail "フォルダに結びつかない種類: $nodir"
+    doc=$(grep -v -E '^\s*#' "$FP_TABLE" | grep -E '^(Document|DocumentFolder)\b')
+    [[ -z "$doc" ]] && pass "Document・DocumentFolder は含まない（設計 16.3.1: 取得の対象から外した）" || fail "Document 系が入っている: $doc"
+    # 本物の表を、本物の読み取り（loadFpConfig）で読めること（書式の誤り・重複・不明な指定は、ここで中断する）
+    local d out; d=$(mktemp -d "${TMPDIR:-/tmp}/test-msfpt-XXXX")
+    echo '{"verdict":0,"types":{}}' > "$d/report.json"; : > "$d/plan.tsv"
+    out=$(node "$MJS" fpcompare --report "$d/report.json" --plan "$d/plan.tsv" --fp-config "$FP_TABLE" --dirs-table "$DIRS_TABLE" 2>&1)
+    assert_equals "$?" "0" "本物の表を、読み込める"
+    assert_output_contains "$out" "実際の変更はありませんでした" "本物の表で、影の比較が動く"
+    rm -rf "$d"
+}
+
 test_basic_ops
 test_keep_files
 test_scope
@@ -396,5 +838,10 @@ test_aborts
 test_apply
 test_detect
 test_detect_table
+test_fingerprint
+test_fingerprint_token_refresh
+test_fingerprint_hardening
+test_fpcompare
+test_fingerprint_table
 
 print_summary

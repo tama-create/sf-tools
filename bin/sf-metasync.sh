@@ -53,7 +53,12 @@
 #      続けて、環境変数 SF_METASYNC_DETECT が shadow または on のとき、変更の検知を行う（node lib/metasync.js detect。読み取りのみ。
 #      設定変更の履歴と、更新日時の一覧で、組織に変更があるかを、全件取得の前に調べる）。on で、結果が「変更なし」のとき
 #      （--full・--dry-run でなく、未プッシュのコミットがないとき）は、手順 6 以降を行わず、終了する（コミット・push・伝播はしない）。
-#      検知の失敗・不明・変更ありは、すべて、手順 6 の全件取得に進む（検知は、取得を省くための手がかりで、失敗が取りこぼしにならない）
+#      検知の失敗・不明・変更ありは、すべて、手順 6 の全件取得に進む（検知は、取得を省くための手がかりで、失敗が取りこぼしにならない）。
+#      続けて、環境変数 SF_METASYNC_FINGERPRINT が shadow のとき、一覧の指紋を作る（node lib/metasync.js fingerprint。読み取りのみ。
+#      config/metasync-fingerprint.txt の種類ごとに、組織の一覧を Node 直接の SOAP（listMetadata）で取り、件数・最新の更新日時・
+#      名前と更新日時のハッシュを、前回（./sf-tools/metasync/fingerprint.json）と比べる。管理パッケージ本体の部品は除く）。
+#      shadow は、取得を省かない（影の比較）。指紋の失敗・不明は、取得を止めない（WARNING を出して、全件取得に進む）。
+#      検知 on で「検知は変更なし」なのに、指紋が「変更あり」のときは、食い違いの WARNING を出して（検知の見逃しの可能性）、検知に従って終了する
 #   6. 組織からメタデータを取得する: 一時フォルダで sf project retrieve start --target-org prod --ignore-conflicts --json に、
 #      metadata.txt の全種類を --metadata で指定して実行する。取得先は一時フォルダのため、失敗しても作業ツリーは変わらない。
 #      終了コードが 0 以外で、応答が一時的なエラー（MetadataTransferError・ERROR_HTTP_404・接続の切断・503 など）なら、60 秒待って
@@ -64,11 +69,16 @@
 #      削除の守りで保留にした分（ファイルは残す）を決める。保留の条件（lib/metasync.js の冒頭に詳細）:
 #        S2 取得の応答に、問題の報告がある ／ S3 手元に 1 件以上あったフォルダが、取得結果で 0 件 ／
 #        S4 削除の件数が max(100, 手元の同期の対象のファイルの 10%) を超える ／ S5 手順 7 の一覧にあるファイル
-#      取得の応答の status が 0 以外（S1）のときは、中断する
+#      取得の応答の status が 0 以外（S1）のときは、中断する。
+#      続けて、指紋を作っていれば、影の比較を表示する（node lib/metasync.js fpcompare。指紋の結果と、計画の追加・変更・削除を、
+#      フォルダ（objects は子の種類）ごとに突き合わせ、「検知できた」「見逃し」「日時では検知できない種類」「指紋の対象外」を数える。
+#      見逃しだけが WARNING（Profile など、更新日時が動かない種類は、見逃しと分ける）。
+#      指紋が変わったのに変更がなかった種類（空振り）も出す。指紋が不明のときは、比べない。情報のみで、同期には影響しない）
 #   9. 計画の要約（件数・削除の一覧の先頭 30 件・保留とその理由）を表示する。手元で、変更があるときは、続行の確認
 #      （Y/N。N・q なら中断する）を取る（GitHub Actions 上では、表示のみ）。--dry-run は、ここで終了する
 #   10. 計画を作業ツリーに反映する（node lib/metasync.js apply。保留の削除は、行わない）
 #   11. （手順 5 の検知が、変更あり・不明のとき）検知の状態を ./sf-tools/metasync/state.json に書く。
+#      （手順 5 の指紋が、変更あり・不明のとき）指紋の状態を ./sf-tools/metasync/fingerprint.json に書く（検知の状態とは別のファイル）。
 #      git add -A -- <パッケージのフォルダ>（と、書いたときは状態ファイル。sf-tools/release/ は含めない）でステージし、HEAD との差分で分岐する
 #      - 差分あり: 「定期更新: Salesforce変更の自動反映 (YYYY-MM-DD)」でコミットし（本文に件数）、git push --no-verify origin main する
 #      - 差分なし・origin/main より先のコミットあり（前回の同期の push の失敗など）: そのコミットの一覧（git log --oneline）を
@@ -98,6 +108,15 @@
 #     （ないと、履歴の問い合わせが失敗し、毎回、全件取得になる）
 #
 # 【補足】
+#   - 一覧の指紋（設計: doc/sf-metasync-redesign.md 16 章の P1）: 環境変数 SF_METASYNC_FINGERPRINT（既定 off）。off = 行わない ／
+#     shadow = 指紋を作って前回と比べ、実際の変更との食い違い（見逃し）を、ログに記録する。取得は、常に行う（取得を省く動作は、まだない）。
+#     状態は ./sf-tools/metasync/fingerprint.json（変更あり・不明の回にだけ更新する。状態の更新だけのコミットは、下流へ伝播しない）。
+#     接続: sf org display のアクセストークンで、Node から SOAP を直接呼ぶ（現行の sf は、org display のトークンを伏せ字で返すため、
+#     そのときは、最初から sf org auth show-access-token で取る。本物が返る古い sf では、期限切れのときだけ取り直す。
+#     トークンは、ログに出さない。https のインスタンス URL にだけ送り、転送は追わない）。Node 18 以上が必要（fetch を使う）。
+#     応答が SOAP でない・待ちの期限切れ（1 回 30 秒・全体 180 秒。sf の呼び出しを含む）・フォルダが 900 個超は、失敗として扱う
+#     （不明。取得は止めない）。Node の fetch は HTTPS_PROXY を使わないため、プロキシ越しでは指紋は常に不明になる（取得は行う）。
+#     影の比較の「見逃し」は、指紋を取ったあとに組織が変わった回にも出る（次の回の「空振り」と対で見る）。
 #   - 変更の検知: 環境変数 SF_METASYNC_DETECT（既定 off）。off = 行わない（従来どおり、毎回、全件取得）／
 #     shadow = 検知の結果をログに出すが、取得は常に行う（検知が「変更なし」なのに、実際は変更があったときは、WARNING で
 #     その一覧を出す。運用の前の確かめ用）／ on = 「変更なし」のとき、取得を省く。種類ごとの区分は config/metasync-detect.txt
@@ -198,6 +217,12 @@ readonly DETECT_MODE="${SF_METASYNC_DETECT:-off}"
 [[ "$DETECT_MODE" == "off" || "$DETECT_MODE" == "shadow" || "$DETECT_MODE" == "on" ]] \
     || die "SF_METASYNC_DETECT は off / shadow / on のどれかにしてください: ${DETECT_MODE}"
 
+# 一覧の指紋のモード（設計 16 章の P1。off = 行わない（既定）／ shadow = 指紋を作って前回と比べ、実際の変更との食い違いを記録する。
+#   取得は常に行う（取得を省く動作は、まだない））
+readonly FP_MODE="${SF_METASYNC_FINGERPRINT:-off}"
+[[ "$FP_MODE" == "off" || "$FP_MODE" == "shadow" ]] \
+    || die "SF_METASYNC_FINGERPRINT は off / shadow のどちらかにしてください: ${FP_MODE}"
+
 # ------------------------------------------------------------------------------
 # 5. 固有設定
 # ------------------------------------------------------------------------------
@@ -247,6 +272,8 @@ APPLIED=0         # 1 = 計画を作業ツリーに反映した（手順 10 の�
 COMMITTED=0       # 1 = 反映の内容をコミットした
 readonly STATE_FILE="sf-tools/metasync/state.json"   # 変更の検知の状態（main にコミットする。手順 11）
 STATE_WRITTEN=0   # 1 = 状態ファイルを書いた（コミットする前に中断したら、戻す）
+readonly FP_STATE_FILE="sf-tools/metasync/fingerprint.json"   # 一覧の指紋の状態（main にコミットする。手順 11。検知の状態とは別のファイル）
+FP_WRITTEN=0      # 1 = 指紋の状態ファイルを書いた（コミットする前に中断したら、戻す）
 
 # 終了時の後始末: ① 反映したが、コミットする前に中断したときは、同期の対象のパッケージのフォルダを HEAD に戻す
 #   （手元の実行では、手順 4 で、追跡していないファイルがないことを確かめているため、clean で消えるのは、今回写したファイルだけ）
@@ -262,6 +289,11 @@ cleanup_on_exit() {
     if [[ "$STATE_WRITTEN" -eq 1 && "$COMMITTED" -eq 0 ]]; then
         run git reset -q HEAD -- "$STATE_FILE" 2>/dev/null
         run git checkout HEAD -- "$STATE_FILE" 2>/dev/null || rm -f "$STATE_FILE" 2>/dev/null   # rm は run 不使用: 終了時の後始末（失敗しても止めない）
+    fi
+    # 指紋の状態ファイルも、同じように戻す
+    if [[ "$FP_WRITTEN" -eq 1 && "$COMMITTED" -eq 0 ]]; then
+        run git reset -q HEAD -- "$FP_STATE_FILE" 2>/dev/null
+        run git checkout HEAD -- "$FP_STATE_FILE" 2>/dev/null || rm -f "$FP_STATE_FILE" 2>/dev/null   # rm は run 不使用: 終了時の後始末（失敗しても止めない）
     fi
     run git checkout "$ORIGINAL_BRANCH" 2>/dev/null
     [[ "$STASH_USED" -eq 1 ]] && run git stash pop 2>/dev/null
@@ -400,6 +432,34 @@ phase_detect_changes() {
     return $RET_OK
 }
 
+# 【FINGERPRINT】一覧の指紋を作り、前回と比べる（手順 5。SF_METASYNC_FINGERPRINT が shadow のとき。読み取りのみ）
+#   結果は FP_RC に入る: 0 = 変更なし ／ 10 = 変更あり ／ 11 = 不明 ／ -1 = 行わなかった（off・表がない）。
+#   shadow は、取得を省かない（影の比較）。失敗は、取得を止めない（WARNING を出して、全件取得に進む）
+FP_RC=-1
+FP_STATE_NEW=""
+FP_REPORT=""
+phase_fingerprint() {
+    [[ "$FP_MODE" == "off" ]] && return $RET_OK
+    local table="${SCRIPT_DIR}/../config/metasync-fingerprint.txt" out
+    if [[ ! -f "$table" ]]; then
+        log "WARNING" "指紋の種類の表が見つかりません（${table}）。指紋は作りません。"
+        return $RET_OK
+    fi
+    FP_STATE_NEW="$WORK_DIR/fp.new.json"
+    FP_REPORT="$WORK_DIR/fp.report.json"
+    log "INFO" "一覧の指紋を作ります（SF_METASYNC_FINGERPRINT=${FP_MODE}。読み取りのみ）..."
+    # run 不使用: 戻り値（0 / 10 / 11）で分岐し、要約をログにも記録するため
+    out=$("$NODE_BIN" "$METASYNC_JS" fingerprint --org "$TARGET_ORG" --fp-config "$table" --repo . \
+        --state "$FP_STATE_FILE" --out-state "$FP_STATE_NEW" --out-report "$FP_REPORT" 2>&1)
+    FP_RC=$?
+    _log_node_lines "$out"
+    if [[ $FP_RC -ne 0 && $FP_RC -ne 10 ]]; then
+        [[ $FP_RC -eq 11 ]] || log "WARNING" "指紋の作成が異常終了しました（終了コード ${FP_RC}）。不明として扱います（取得には影響しません）。"
+        FP_RC=11
+    fi
+    return $RET_OK
+}
+
 # 【RETRIEVE】組織からメタデータを、一時プロジェクトに取得する（手順 6）
 #   run 不使用: 応答（JSON）を判定に使うため、ファイルへ受ける（run は、出力をログに記録し、戻り値も変える。JSON は大きい）
 phase_retrieve_metadata() {
@@ -459,6 +519,14 @@ phase_plan() {
         log "WARNING" "検知は「変更なし」でしたが、実際は ${PLAN_CHANGES} 件の変更がありました（区分 C の種類の変更を含む）。先頭 10 件:"
         awk -F'\t' '$1=="A"||$1=="M"||$1=="D"{print "  " $1 " " $2}' "$PLAN_FILE" | head -10 | while IFS= read -r line; do log "WARNING" "$line"; done
     fi
+    # 一覧の指紋の影の比較（実際の変更と、指紋の変化を突き合わせて、見逃しを記録する。情報のみ。失敗しても、同期は続ける）
+    if [[ "$FP_MODE" != "off" && "$FP_RC" -ge 0 && -f "$FP_REPORT" ]]; then
+        local cmp
+        cmp=$("$NODE_BIN" "$METASYNC_JS" fpcompare --report "$FP_REPORT" --plan "$PLAN_FILE" \
+            --fp-config "${SCRIPT_DIR}/../config/metasync-fingerprint.txt" --dirs-table "${SCRIPT_DIR}/../config/metadata-dirs.txt" 2>&1) \
+            || log "WARNING" "指紋の影の比較に失敗しました（同期には影響しません）。"  # run 不使用: 出力を変数に受ける
+        [[ -n "$cmp" ]] && _log_node_lines "$cmp"
+    fi
     return $RET_OK
 }
 
@@ -475,6 +543,13 @@ phase_apply_plan() {
         run cp "$DETECT_STATE_NEW" "$STATE_FILE" || return $RET_NG
         log "INFO" "検知の状態を更新しました: ${STATE_FILE}"
     fi
+    # 指紋の状態を書く（指紋が、変更あり・不明のとき。取得と反映が成功したあとにだけ書く。変更なしのときは、書かない）
+    if [[ "$FP_MODE" != "off" && ( "$FP_RC" -eq 10 || "$FP_RC" -eq 11 ) && -f "$FP_STATE_NEW" ]]; then
+        FP_WRITTEN=1   # 途中で失敗しても、終了時に戻せるように、先に立てる
+        run mkdir -p "${FP_STATE_FILE%/*}" || return $RET_NG
+        run cp "$FP_STATE_NEW" "$FP_STATE_FILE" || return $RET_NG
+        log "INFO" "指紋の状態を更新しました: ${FP_STATE_FILE}"
+    fi
     return $RET_OK
 }
 
@@ -485,6 +560,7 @@ phase_git_sync() {
     #   （それ以外が変わる理由がない。sf-tools/release/ も含めない）
     local add_paths=("$PKG_PATH")
     [[ "$STATE_WRITTEN" -eq 1 ]] && add_paths+=("$STATE_FILE")
+    [[ "$FP_WRITTEN" -eq 1 ]] && add_paths+=("$FP_STATE_FILE")
     run git add -A -- "${add_paths[@]}" || return $RET_NG
 
     # ステージに変更がなければ、未プッシュのコミットを確認する。あれば（前回、コミットのあとに push が失敗した）、push だけ行う。
@@ -504,10 +580,12 @@ phase_git_sync() {
         return $RET_NO_CHANGE
     fi
 
-    # コミットの本文に、計画の件数を書く（確認は、手順 9 で済んでいる）。検知の状態を更新したときは、その旨も書く
+    # コミットの本文に、計画の件数を書く（確認は、手順 9 で済んでいる）。検知・指紋の状態を更新したときは、その旨も書く
     local body="$PLAN_COUNTS"
-    if [[ "$STATE_WRITTEN" -eq 1 ]]; then
-        if [[ "$PLAN_CHANGES" -eq 0 ]]; then body="${body}（検知の状態の更新のみ）"; else body="${body}（検知の状態も更新）"; fi
+    if [[ "$STATE_WRITTEN" -eq 1 || "$FP_WRITTEN" -eq 1 ]]; then
+        local _label="検知の状態"   # 検知だけのときは、従来の文言のまま。指紋の状態が加わるときだけ変える
+        if [[ "$FP_WRITTEN" -eq 1 ]]; then _label=$([[ "$STATE_WRITTEN" -eq 1 ]] && echo "検知・指紋の状態" || echo "指紋の状態"); fi  # VAR=$(cmd) のため run 不使用
+        if [[ "$PLAN_CHANGES" -eq 0 ]]; then body="${body}（${_label}の更新のみ）"; else body="${body}（${_label}も更新）"; fi
     fi
     run git commit -m "$COMMIT_MSG" -m "$body" || return $RET_NG
     COMMITTED=1
@@ -594,6 +672,7 @@ log "SUCCESS" "一時プロジェクトの準備完了（パッケージのフ�
 # 変更の検知（手順 5）。on で「変更なし」なら、取得を省いて終了する。--full・--dry-run のとき、および未プッシュのコミットが
 #   あるとき（前回の push の失敗。phase_git_sync が push だけ行う）は、省かない
 phase_detect_changes
+phase_fingerprint
 if [[ "$DETECT_MODE" == "on" && "$DETECT_RC" -eq 0 ]]; then
     UNPUSHED=$(git rev-list --count "origin/${BRANCH_NAME}..HEAD" 2>/dev/null || echo 0)  # VAR=$(cmd) のため run 不使用
     if [[ "$FULL" -eq 1 ]]; then
@@ -603,6 +682,10 @@ if [[ "$DETECT_MODE" == "on" && "$DETECT_RC" -eq 0 ]]; then
     elif [[ "$UNPUSHED" =~ ^[0-9]+$ && "$UNPUSHED" -gt 0 ]]; then
         log "INFO" "未プッシュのコミットがあるため、検知の結果にかかわらず、全件取得します。"
     else
+        # 指紋が「変更あり」なのに、検知が「変更なし」: 食い違い。検知の見逃しの可能性があるため、記録に残す（取得は省く。指紋の状態は書かない）
+        if [[ "$FP_RC" -eq 10 ]]; then
+            log "WARNING" "指紋は『変更あり』ですが、検知は『変更なし』でした。検知の見逃しの可能性があります（今回は取得を省きます。毎日の --full で反映されます）。"
+        fi
         log "SUCCESS" "完了: 検知の結果、Salesforce 組織側に変更はありませんでした（全件取得を省きました）。"
         exit $RET_OK
     fi
@@ -632,9 +715,15 @@ RES=$?
 
 if [[ $RES -eq $RET_OK ]]; then
     log "SUCCESS" "完了: リポジトリを最新に更新しました。"
-    if [[ "$STATE_WRITTEN" -eq 1 && "$COMMITTED" -eq 1 && "$PLAN_CHANGES" -eq 0 ]]; then
-        # 検知の状態ファイルの更新だけのコミット（メタデータの変更はない）は、下流のブランチへ伝播しない（main の中だけで使う状態のため）
-        log "INFO" "検知の状態ファイルの更新だけのコミットのため、下流ブランチへの伝播は行いません。"
+    if [[ ( "$STATE_WRITTEN" -eq 1 || "$FP_WRITTEN" -eq 1 ) && "$COMMITTED" -eq 1 && "$PLAN_CHANGES" -eq 0 ]]; then
+        # 検知・指紋の状態ファイルの更新だけのコミット（メタデータの変更はない）は、下流のブランチへ伝播しない（main の中だけで使う状態のため）
+        if [[ "$FP_WRITTEN" -eq 1 && "$STATE_WRITTEN" -eq 1 ]]; then
+            log "INFO" "検知・指紋の状態ファイルの更新だけのコミットのため、下流ブランチへの伝播は行いません。"
+        elif [[ "$FP_WRITTEN" -eq 1 ]]; then
+            log "INFO" "指紋の状態ファイルの更新だけのコミットのため、下流ブランチへの伝播は行いません。"
+        else
+            log "INFO" "検知の状態ファイルの更新だけのコミットのため、下流ブランチへの伝播は行いません。"
+        fi
     else
         phase_propagate_downstream || die "下流ブランチへの伝播に失敗しました。"
         # 実際に伝播できたブランチだけを表示する（以前は、branches.txt の内容や、スキップの有無にかかわらず、固定の文言を出していた）

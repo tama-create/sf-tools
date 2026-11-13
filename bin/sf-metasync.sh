@@ -34,14 +34,18 @@
 #                ログイン済みの組織から、ID（上位 15 文字）が一致するものを探して、そのユーザー名を接続先にする。
 #                次のどれかなら、何も変更せずに中断する（推測して別の組織に進まない。prod エイリアスには、フォールバックしない）:
 #                origin から特定できない／ SF_ORG_ID_PROD を読み取れない／ 一致する組織が、この PC の sf にない
-#          GitHub Actions 上: ワークフローが JWT で作る prod エイリアスを使う（gh は見ない）
+#          GitHub Actions 上: ワークフローが JWT で作る prod エイリアスを使う（接続先の決定には、gh を使わない）
 #      - sf org display --target-org <接続先> --json の終了コードが 0 であること。
 #        出力は、表示もログへの記録もしない（アクセストークンを含むため）
 #      - 現在の HEAD がブランチを指していること（git symbolic-ref -q HEAD の終了コードが 0。detached HEAD では中断する）
 #      - ./sf-tools/config/metadata.txt が存在すること（コメント行・空行を除いた各行を、取得するメタデータの種類とする。
 #        行末の CR は除く）
 #   3. 管理者向けの警告を表示し、続行の確認（Y/N）を取る。N・q なら中断する（GitHub Actions 上では、表示・確認しない）
-#   4. main ブランチへ切り替える（実行時のブランチが main 以外のとき）→ リモートの最新を取り込む
+#   4. リポジトリが公開でないことを確認する（手順 3 のあと、切り替えの前。gh api repos/<owner>/<repo> --jq .visibility が private か
+#      internal。常に確認する。切り替えはない。失敗時は 3 回まで試す）。公開（public）、または確認できない（gh の失敗・権限不足・
+#      GitHub Actions 上で GH_TOKEN がない）ときは、何も取得せず、Slack に通知して、終了コード 5 で止める（--dry-run のときは、通知しない）。
+#      Salesforce 組織の開発物を、外部にさらさないため
+#      main ブランチへ切り替える（実行時のブランチが main 以外のとき）→ リモートの最新を取り込む
 #      - 追跡中のファイルに未コミットの変更があれば、git stash で退避してから git checkout main する
 #      - main で、追跡中のファイルに未コミットの変更があれば、中断する（ローカルの変更は、同期に含めない）
 #      - 手元で実行したときは、追跡していないファイル（.gitignore の対象と、sf-tools/release/ を除く）があっても、中断する（【補足】）
@@ -74,6 +78,14 @@
 #      フォルダ（objects は子の種類）ごとに突き合わせ、「検知できた」「見逃し」「日時では検知できない種類」「指紋の対象外」を数える。
 #      見逃しだけが WARNING（Profile など、更新日時が動かない種類は、見逃しと分ける）。
 #      指紋が変わったのに変更がなかった種類（空振り）も出す。指紋が不明のときは、比べない。情報のみで、同期には影響しない）
+#      続けて、秘密情報の検査（SF_METASYNC_SECRET_SCAN が off 以外。node lib/metasync.js scan）: これから書く内容（計画の追加・変更。
+#      取得結果と手元を比べ、今回新しく入る分だけ）に、秘密の疑い（秘密らしい要素・項目への値、秘密鍵、既知のトークンの形、コードへの直書き）が
+#      ないか調べる。作業ツリーは、まだ触らない。値は、ログにも通知にも出さない（規則名とパスだけ）。許可の一覧: ./sf-tools/config/metasync-secret-allow.txt
+#      （1 行に「規則 パス [キー]」。キーは、疑いの表示の「キー: …」= 項目名・ラベル名・要素名・変数名。省略すると、そのパスの規則すべて）。
+#      バイナリは、秘密鍵・既知のトークンだけ探し、20 MB 超は検査しない（どちらも、検査に制限があったファイルとして、名前を出す）。
+#      数 MB の連続した文字列などで規則が失敗したファイルは、疑い（規則 scan-error）として扱う（on では止まる。確かめたら許可の一覧で外す）。
+#      shadow は、WARNING で出すだけで止めない。on は、疑いがあれば、何もコミット・push せず、Slack に通知して、終了コード 4 で止める
+#      （検査そのものが失敗したとき（許可の一覧の書式の誤りなど）も、on なら、同じく通知して終了コード 4。--dry-run のときは、通知しない）
 #   9. 計画の要約（件数・削除の一覧の先頭 30 件・保留とその理由）を表示する。手元で、変更があるときは、続行の確認
 #      （Y/N。N・q なら中断する）を取る（GitHub Actions 上では、表示のみ）。--dry-run は、ここで終了する
 #   10. 計画を作業ツリーに反映する（node lib/metasync.js apply。保留の削除は、行わない）
@@ -125,7 +137,12 @@
 #     全件取得のあとにだけ更新するため、変更のない回は、コミットを作らない。ファイルが変わらず、状態だけが変わるときは、
 #     状態だけのコミットになる）。状態は、速くするための手がかりで、壊れていても全件取得になる。設計: doc/sf-metasync-redesign.md 15 章
 #   - 終了コード: 0（同期した・変更がなかった）／ 1（中断した）／ 3（同期した（追加・変更の push・伝播まで行った）が、
-#     削除の保留（S2・S3・S4）がある。GitHub Actions では、ジョブが失敗として表示される）。S5 の保留だけのときは 0
+#     削除の保留（S2・S3・S4）がある。GitHub Actions では、ジョブが失敗として表示される）。S5 の保留だけのときは 0 ／
+#     4（秘密の疑いで止めた。何もコミット・push していない）／ 5（公開リポジトリ、または公開・非公開を確認できず、取得せずに止めた）
+#   - 秘密情報の検査・公開リポジトリの拒否・Slack 通知（設計: doc/sf-metasync-redesign.md 16.7）: 環境変数 SF_METASYNC_SECRET_SCAN
+#     （off / shadow / on。既定 shadow = 検査して WARNING を出すが、止めない。誤検知を測ってから on にする）。Slack に通知するのは、
+#     on で秘密の疑いにより止めたとき（終了コード 4）と、公開リポジトリで止めたとき（終了コード 5）だけ。SLACK_BOT_TOKEN・SLACK_CHANNEL_ID
+#     （wf-release.yml と同じもの）が未設定でも、止める（通知できない旨の WARNING のみ）。公開・非公開の確認に、GitHub Actions 上では GH_TOKEN が要る
 #   - 同期の対象のフォルダ: <パッケージのフォルダ>/main/default の下の、config/metadata-dirs.txt（sf-tools 側）で、
 #     metadata.txt の種類に当たるフォルダと、取得結果にあるフォルダ。それ以外（metadata.txt にない種類のフォルダなど）は触らない。
 #     フォルダを共有する種類（objects など）は、フォルダ単位で同じにする（metadata.txt から種類を外すと、そのファイルは削除になる）
@@ -223,18 +240,29 @@ readonly FP_MODE="${SF_METASYNC_FINGERPRINT:-off}"
 [[ "$FP_MODE" == "off" || "$FP_MODE" == "shadow" ]] \
     || die "SF_METASYNC_FINGERPRINT は off / shadow のどちらかにしてください: ${FP_MODE}"
 
+# 秘密情報の検査のモード（設計 16.7。off = 行わない／ shadow = 検査して、疑いを WARNING で出すが、止めない（既定。誤検知を測る期間）／
+#   on = 疑いがあれば、何もコミット・push せず、全体を止める（終了コード 4）。止めたら Slack に通知する）
+readonly SCAN_MODE="${SF_METASYNC_SECRET_SCAN:-shadow}"
+[[ "$SCAN_MODE" == "off" || "$SCAN_MODE" == "shadow" || "$SCAN_MODE" == "on" ]] \
+    || die "SF_METASYNC_SECRET_SCAN は off / shadow / on のどれかにしてください: ${SCAN_MODE}"
+# 止めたときの終了コード（4 = 秘密の疑いで止めた／ 5 = 公開リポジトリ（または公開・非公開を確認できない）で止めた）
+readonly EXIT_SECRET=4
+readonly EXIT_PUBLIC=5
+
 # ------------------------------------------------------------------------------
 # 5. 固有設定
 # ------------------------------------------------------------------------------
 # 接続先の組織（main の組織。本番・Sandbox・Developer Edition のどれでもよい）
-#   ・GitHub Actions 上: ワークフローが JWT で作る prod エイリアスを使う（gh は見ない）
+#   ・GitHub Actions 上: ワークフローが JWT で作る prod エイリアスを使う（接続先の決定には、gh を使わない）
 #   ・手元: エイリアスの名前には頼らず、組織 ID で決める。sf-init が GitHub の Variable SF_ORG_ID_PROD に記録した、1 番目（main）の
 #     組織の ID と、この PC の sf にログイン済みの組織の ID を突き合わせ、一致した組織のユーザー名を接続先にする。
 #     名前は付け替えられ、同じ PC の別のプロジェクトと衝突する。ID で決めれば、取り違え（別のプロジェクトの組織で main を書き換える）を防げる。
 #     見つからなければ、何も変えずに中断する（推測して、別の組織に進まない。prod エイリアスには、フォールバックしない）
 # run 不使用: 終了コードで判定するため（run は、失敗しても、エラーの文言を標準出力に返すため、出力が空かでは判定できない）。
 #   出力は捨てる（--json の出力には、アクセストークンが含まれる。run は、出力をログに記録する）
+REPO_FULL=""   # このリポジトリの owner/repo（公開・非公開の確認と、Slack の通知に使う）
 if [[ "${GITHUB_ACTIONS:-false}" == "true" ]]; then
+    REPO_FULL="${GITHUB_REPOSITORY:-}"
     TARGET_ORG="prod"
     if ! sf org display --target-org "$TARGET_ORG" --json > /dev/null 2>&1; then
         die "prod エイリアスの組織情報を取得できませんでした（sf org display --target-org ${TARGET_ORG} が失敗しました）。"
@@ -245,6 +273,7 @@ else
     _repo_pair=$(parse_github_remote "$_origin_url") || _repo_pair=""        # VAR=$(cmd) のため run 不使用
     [[ -n "$_repo_pair" ]] || die "origin の URL から、GitHub のリポジトリを特定できません: ${_origin_url:-（origin なし）}"
     _repo_full="${_repo_pair%% *}/${_repo_pair##* }"
+    REPO_FULL="$_repo_full"
     _main_org_id=$(gh variable get SF_ORG_ID_PROD -R "$_repo_full" 2>/dev/null | tr -d '\r') || _main_org_id=""  # VAR=$(cmd) のため run 不使用
     [[ -n "$_main_org_id" ]] || die "GitHub の Variable SF_ORG_ID_PROD を読み取れませんでした（${_repo_full}）。"
     TARGET_ORG=""
@@ -317,9 +346,82 @@ _log_node_lines() {
     while IFS= read -r line; do
         case "$line" in
             "[WARNING] "*) log "WARNING" "${line#"[WARNING] "}" ;;
+            "[ERROR] "*)   log "ERROR" "${line#"[ERROR] "}" ;;
             *)             log "INFO" "$line" ;;
         esac
     done <<< "$text"
+}
+
+# Slack に通知する（chat.postMessage。wf-release.yml と同じ SLACK_BOT_TOKEN・SLACK_CHANNEL_ID）。引数: 見出し 行…
+#   通知するのは、秘密の疑いで止めたとき・公開リポジトリで止めたときだけ（呼び出し側）。値（秘密）は、通知に入れない（パスと規則名だけ）。
+#   未設定・失敗は、WARNING にとどめる（止める判断は、すでに済んでいる）。
+#   run 不使用: トークンを含む引数を、ログに記録しないため。応答の本文は、ログに出さない（ok の可否と error の文言だけ）
+notify_slack() {
+    local token="${SLACK_BOT_TOKEN:-}" channel="${SLACK_CHANNEL_ID:-}"
+    if [[ -z "$token" || -z "$channel" ]]; then
+        log "WARNING" "Slack に通知できません（SLACK_BOT_TOKEN・SLACK_CHANNEL_ID が未設定です）。"
+        return 0
+    fi
+    if ! command -v curl > /dev/null 2>&1; then  # 存在確認のため run 不使用
+        log "WARNING" "Slack に通知できません（curl が見つかりません）。"
+        return 0
+    fi
+    local text="$1" l resp _curl_ok
+    shift
+    for l in "$@"; do text+=$'\n'"$l"; done
+    if [[ -n "${GITHUB_RUN_ID:-}" && -n "${GITHUB_REPOSITORY:-}" ]]; then
+        text+=$'\n'"実行: ${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+    fi
+    # JSON の文字列として安全にする（制御文字の除去（改行・タブ以外）・\ と " のエスケープ・改行の \n 化・タブの空白化・
+    #   Slack の特殊文字 & < > の置き換え）。置き換えの文字列は、引用符で囲む（Bash 5.2 以降は、囲まないと、& が「一致した文字」に展開される）
+    text=$(printf '%s' "$text" | LC_ALL=C tr -d '\000-\010\013\014\016-\037')  # VAR=$(cmd) のため run 不使用
+    text="${text//\\/\\\\}"; text="${text//\"/\\\"}"; text="${text//$'\r'/}"; text="${text//$'\n'/\\n}"; text="${text//$'\t'/ }"
+    text=${text//&/"&amp;"}; text=${text//</"&lt;"}; text=${text//>/"&gt;"}
+    channel="${channel//\"/}"; channel="${channel//\\/}"
+    # トークンは、コマンドラインの引数に出さない（ps で見えるため）。curl の設定を標準入力（-K -）から渡す。printf は組み込みコマンド
+    resp=$(printf 'header = "Authorization: Bearer %s"\n' "$token" | curl -sS --max-time 20 -K - -X POST "https://slack.com/api/chat.postMessage" \
+        -H "Content-Type: application/json; charset=utf-8" \
+        --data "{\"channel\":\"${channel}\",\"text\":\"${text}\"}" 2>&1) && _curl_ok=1 || _curl_ok=0
+    if [[ "$resp" == *'"ok":true'* ]]; then
+        log "INFO" "Slack に通知しました。"
+    elif [[ "$resp" == *'"error":"'* ]]; then
+        local err="${resp#*\"error\":\"}"; err="${err%%\"*}"
+        log "WARNING" "Slack への通知に失敗しました（${err:0:60}）。SLACK_BOT_TOKEN・SLACK_CHANNEL_ID を確認してください。"
+    else
+        log "WARNING" "Slack への通知に失敗しました（接続または応答の異常。curl の終了: $([[ "$_curl_ok" -eq 1 ]] && echo 正常 || echo 失敗)）。"
+    fi
+    return 0
+}
+
+# 【VISIBILITY】リポジトリが公開でないことを確認する（設計 16.7.3。取得の前。切り替えはなく、常に行う）
+#   private・internal だけ通す。公開、または確認できない（gh の失敗・権限不足・未知の値）ときは、何も取得せずに止める（終了コード 5）
+#   公開リポジトリに、組織の開発物（Apex・設定など）を置くと、外部にさらすため
+phase_check_visibility() {
+    local vis="" try why
+    # GitHub Actions 上で GH_TOKEN・GITHUB_TOKEN がどちらもないのは、wf-metasync.yml が古いとき（sf-tools は先に届く）。理由を分かるようにする
+    local no_token=0
+    [[ "${GITHUB_ACTIONS:-false}" == "true" && -z "${GH_TOKEN:-}" && -z "${GITHUB_TOKEN:-}" ]] && no_token=1
+    if [[ -n "$REPO_FULL" && "$no_token" -eq 0 ]]; then
+        # 一時的な API の失敗で止めないよう、3 回まで試す（失敗時、gh は標準出力にエラーの JSON を出すため、private・internal・public 以外は、確認できない扱い）
+        for try in 1 2 3; do
+            vis=$(gh api "repos/${REPO_FULL}" --jq .visibility 2>/dev/null) || vis=""  # VAR=$(cmd) のため run 不使用
+            vis="${vis//$'\r'/}"
+            case "$vis" in private|internal|public) break ;; esac
+            vis=""
+            [[ "$try" -lt 3 ]] && sleep "${SF_METASYNC_VIS_RETRY_WAIT:-3}"
+        done
+    fi
+    case "$vis" in
+        private|internal)
+            log "INFO" "リポジトリの公開範囲: ${vis}（${REPO_FULL}）"
+            return 0 ;;
+    esac
+    if [[ "$vis" == "public" ]]; then why="リポジトリが公開（public）です"
+    elif [[ "$no_token" -eq 1 ]]; then why="リポジトリの公開・非公開を確認できませんでした（GH_TOKEN が渡されていません。wf-metasync.yml が古い可能性があります。sf-sync-wf.sh で更新してください）"
+    else why="リポジトリの公開・非公開を確認できませんでした（${REPO_FULL:-不明}）"; fi
+    log "ERROR" "${why}。Salesforce 組織の開発物を外部にさらさないため、取得せずに止めます。非公開（private）のリポジトリで実行してください。"
+    [[ "$DRY_RUN" -eq 1 ]] || notify_slack ":no_entry: [metasync] 同期を止めました: ${REPO_FULL:-不明}" "理由: ${why}（取得は行っていません）"
+    exit $EXIT_PUBLIC
 }
 
 readonly METADATA_CONFIG="./sf-tools/config/metadata.txt"
@@ -530,6 +632,57 @@ phase_plan() {
     return $RET_OK
 }
 
+# 【SCAN】これから書く内容（計画の追加・変更）に、秘密情報の疑いがないか検査する（設計 16.7。反映の前・コミットの前。読み取りのみ）
+#   取得結果（一時フォルダ）と、手元のファイルを比べて、今回新しく入る疑わしい文字列だけを調べる。作業ツリーは、まだ触らない
+#   （止めても、戻すものがない）。値は、ログにも通知にも出さない（規則名とパスだけ）。許可の一覧: ./sf-tools/config/metasync-secret-allow.txt
+#   on で疑いがあれば、Slack に通知して、終了コード 4 で止める。検査そのものが失敗したときも、on なら止める（検査していないものを
+#   コミットしない）。shadow は、WARNING を出すだけで、止めない
+SCAN_REPORT=""
+phase_secret_scan() {
+    [[ "$SCAN_MODE" == "off" ]] && return $RET_OK
+    SCAN_REPORT="$WORK_DIR/scan.report.tsv"
+    local allow="./sf-tools/config/metasync-secret-allow.txt" args out rc
+    args=(scan --plan "$PLAN_FILE" --repo . --fetched "$WORK_DIR" --out-report "$SCAN_REPORT")
+    [[ -f "$allow" ]] && args+=(--allow "$allow")
+    # run 不使用: 戻り値（0 / 10 / 1）で分岐し、要約をログにも記録するため
+    out=$("$NODE_BIN" "$METASYNC_JS" "${args[@]}" 2>&1)
+    rc=$?
+    _log_node_lines "$out"
+    if [[ $rc -eq 0 ]]; then
+        return $RET_OK
+    fi
+    if [[ $rc -ne 10 ]]; then
+        if [[ "$SCAN_MODE" == "on" ]]; then
+            # 検査していない内容はコミットしない。疑いで止めたときと同じく、Slack に通知して、終了コード 4 で止める
+            #   （許可の一覧の書式の誤りなどで、以後の同期が、通知なしで止まり続けないように）
+            log "ERROR" "秘密情報の検査に失敗しました（終了コード ${rc}）。検査していない内容はコミットしないため、何もコミット・push せずに止めます。"
+            [[ "$DRY_RUN" -eq 1 ]] || notify_slack ":rotating_light: [metasync] 秘密情報の検査に失敗したため、同期を止めました: ${REPO_FULL:-不明}" \
+                "理由: 検査そのものが失敗しました（許可の一覧 sf-tools/config/metasync-secret-allow.txt の書式の誤りなど）。コミット・push は行っていません。" \
+                "確認: 実行のログを見て、原因を直してください。"
+            exit $EXIT_SECRET
+        fi
+        log "WARNING" "秘密情報の検査に失敗しました（終了コード ${rc}）。shadow のため、止めません。"
+        return $RET_OK
+    fi
+    if [[ "$SCAN_MODE" == "shadow" ]]; then
+        log "WARNING" "秘密の疑いがあります（shadow のため、止めません）。誤検知なら ${allow} に「規則 パス [キー]」を足し（パスに空白があるときは * で書く）、本物なら組織側で取り除いてください（規則が scan-error のものは、検査できなかったファイル。上の行の案内を参照）。"
+        return $RET_OK
+    fi
+    log "ERROR" "秘密の疑いがあるため、何もコミット・push せずに止めます。本物なら組織側で取り除き、誤検知なら ${allow} に「規則 パス [キー]」を足し（パスに空白があるときは * で書く）てください（値は表示しません。規則が scan-error のものは、検査できなかったファイル。上の行の案内を参照）。"
+    if [[ "$DRY_RUN" -eq 0 ]]; then
+        local lines=() r f c k
+        while IFS=$'\t' read -r r f c k; do
+            # 4 列目 = キー（項目名・ラベル名など。scan-error では、検査できなかった規則名）
+            [[ -n "$r" ]] && lines+=("・${r}  ${f}${k:+（${k}）}")
+            [[ ${#lines[@]} -ge 10 ]] && break
+        done < "$SCAN_REPORT"
+        notify_slack ":rotating_light: [metasync] 秘密の疑いのため、同期を止めました: ${REPO_FULL:-不明}" \
+            "理由: 組織から取得した内容に、秘密情報の疑いがあります（コミット・push は行っていません）。" "${lines[@]}" \
+            "確認: 本物なら組織側で取り除く。誤検知なら sf-tools/config/metasync-secret-allow.txt に「規則 パス [キー]」を足す（パスの空白は * で書く）。規則が scan-error のものは、検査できなかった規則（キー）があるファイルで、中身を確かめ、問題なければ「scan-error パス キー」を足す。"
+    fi
+    exit $EXIT_SECRET
+}
+
 # 【APPLY】計画を作業ツリーに反映する（手順 10）。保留の削除は、行わない
 phase_apply_plan() {
     APPLIED=1   # 途中で失敗しても、終了時に HEAD へ戻せるように、先に立てる
@@ -660,6 +813,9 @@ if [[ "${GITHUB_ACTIONS:-false}" != "true" ]]; then
     fi
 fi
 
+# 公開リポジトリでは実行しない（取得の前。切り替えなし）
+phase_check_visibility
+
 phase_switch_to_main    || die "main ブランチへの切替に失敗しました。"
 log "SUCCESS" "main ブランチへの切替完了"
 
@@ -697,6 +853,8 @@ log "SUCCESS" "メタデータ取得完了"
 phase_recent_files
 phase_plan              || die "計画の作成に失敗しました。"
 log "SUCCESS" "計画の作成完了（${PLAN_COUNTS}）"
+
+phase_secret_scan       # on で疑いがあれば、ここで止まる（終了コード 4）
 
 if [[ "$DRY_RUN" -eq 1 ]]; then
     log "SUCCESS" "完了: --dry-run のため、計画の表示までで終了します（作業ツリー・コミット・push・伝播は行いません）。"

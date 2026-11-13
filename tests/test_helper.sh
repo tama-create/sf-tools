@@ -492,6 +492,11 @@ case "$1 $2" in
         fi
         echo "${MOCK_GH_VARIABLE_GET_VALUE:-fake@example.com}" ; exit "${MOCK_GH_VARIABLE_GET_EXIT:-0}" ;;
     "api user")    echo "${MOCK_GH_API_USER:-tamashimon-org}" ;;
+    # リポジトリの公開・非公開（sf-metasync.sh。gh api repos/<owner>/<repo> --jq .visibility）。MOCK_GH_VISIBILITY（既定 private）、
+    #   MOCK_GH_VISIBILITY_EXIT=1 で、確認できない（gh の失敗）状態を再現する
+    "api repos/"*)
+        [[ "${MOCK_GH_VISIBILITY_EXIT:-0}" -ne 0 ]] && { echo '{"message":"Not Found","status":"404"}'; echo "gh: Not Found (HTTP 404)" >&2; exit 1; }   # 実物の gh は、失敗時も標準出力にエラーの JSON を出す
+        echo "${MOCK_GH_VISIBILITY:-private}"; exit 0 ;;
     # オーナー候補・既存プロジェクトの一覧（jq で絞ったあとの出力を、そのまま返す）: 改行区切り
     "api user/memberships/orgs") [[ -n "${MOCK_GH_ORGS_ADMIN:-}" ]] && printf '%s\n' "$MOCK_GH_ORGS_ADMIN"; exit 0 ;;
     "api user/orgs")             [[ -n "${MOCK_GH_ORGS_MEMBER:-}" ]] && printf '%s\n' "$MOCK_GH_ORGS_MEMBER"; exit 0 ;;
@@ -605,6 +610,19 @@ EOF
     chmod +x "$bin_dir/java"
 }
 
+# curl モック（sf-metasync.sh の Slack 通知: curl -X POST https://slack.com/api/chat.postMessage）
+#   呼び出しを MOCK_CALL_LOG に記録する（引数の全体。送る本文も入る）。応答は MOCK_CURL_RESPONSE（既定 {"ok":true}）、終了コードは MOCK_CURL_EXIT
+create_mock_curl() {
+    local bin_dir="$1"
+    cat > "$bin_dir/curl" << 'EOF'
+#!/bin/bash
+echo "curl $*" >> "${MOCK_CALL_LOG:-/dev/null}"
+if [[ -n "${MOCK_CURL_RESPONSE:-}" ]]; then echo "$MOCK_CURL_RESPONSE"; else echo '{"ok":true}'; fi
+exit "${MOCK_CURL_EXIT:-0}"
+EOF
+    chmod +x "$bin_dir/curl"
+}
+
 # 全モックを一括生成
 create_all_mocks() {
     local bin_dir="$1"
@@ -614,6 +632,7 @@ create_all_mocks() {
     create_mock_npm "$bin_dir"
     create_mock_code "$bin_dir"
     create_mock_gh "$bin_dir"
+    create_mock_curl "$bin_dir"
     create_mock_node "$bin_dir"
     create_mock_browser "$bin_dir"  # ブラウザ起動コマンドを無効化
     create_mock_openssl "$bin_dir"  # JWT 証明書生成コマンドを無効化

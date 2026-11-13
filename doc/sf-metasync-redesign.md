@@ -1027,10 +1027,21 @@ node lib/metasync.js apply --plan PLAN --repo DIR --fetched DIR
 - **誤検知への備え:** 確認済みの誤検知を許可する一覧（パス・規則・ハッシュ）を、`sf-tools/config/` に置く。許可は人が足す。
 - 伏せる方式（取得後に値を置換）は**採らない**。伏せた値がリリースに乗ると、組織の本物の値を上書きする恐れがある。
 
+**実装での決定（2026-11-13。P3。詳細は `doc/dev-reference.md` の P3 の項）:**
+
+- 検査は、反映の前（計画のあと）に、取得結果と手元を比べて、**今回新しく入る分だけ**を調べる（作業ツリーは触らない）。
+- 許可の一覧は、**ハッシュではなく「規則 パス [キー]」**（キー = 項目名・ラベル名・要素名・変数名）。ハッシュを出すと、弱い秘密の推測に使われるため。
+- モード `SF_METASYNC_SECRET_SCAN`: `off` / `shadow`（既定。警告だけで止めない。誤検知を測る期間）/ `on`（止める）。
+- 規則は 7 種類（`xml-secret-element`・`custommetadata-secret-field`・`customlabel-secret`・`private-key`・`known-token`・`url-secret`・`code-hardcoded-secret`）。数字を含まない値（英字だけの長いパスワード）は検出しない（既知の制約）。規則が失敗した（数 MB の連続した文字列）ファイルは、疑い `scan-error` として扱い、`on` では止める。
+- 検査そのものが失敗したとき（許可の一覧の書式の誤りなど）も、`on` では止め、Slack に通知する（終了コード 4）。
+- 終了コード: 4 = 秘密の疑い、5 = 公開リポジトリ（または確認できない）。
+
 #### 16.7.3 公開リポジトリでは実行しない（決定済み）
 
 - Salesforce の組織の Git 管理は、**非公開リポジトリが原則**。公開にすると開発物を外部にさらす。
 - 実行の最初（取得の前）に、リポジトリの公開・非公開を確認する（`gh repo view --json visibility`、Actions 上は `GITHUB_REPOSITORY` で API）。**公開、または確認できない場合は、取得せずに止める**（上書きの設定は設けない）。止めたら Slack に通知する（16.7.4）。
+
+**実装での決定（P3）:** 公開範囲の確認は `gh repo view` ではなく `gh api repos/<owner>/<repo> --jq .visibility`（Actions 上は `GH_TOKEN` = `github.token`）。`private`・`internal` だけ通し、失敗時は 3 回まで試す。確認できないときは、止める（終了コード 5）。**既存の force-\* は、`wf-metasync.yml` を更新するまで（`GH_TOKEN` がないため）、この理由で止まる。mm のあと、`sf-sync-wf` を先に行う。**
 
 #### 16.7.4 Slack 通知（決定済み）
 

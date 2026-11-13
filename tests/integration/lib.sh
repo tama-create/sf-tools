@@ -297,6 +297,8 @@ X-Oauth-Scopes: %s
             echo "{\"ref\":\"$_ref\"}"; exit 0 ;;
         repos/*/*)   # リポジトリの情報（permissions.admin など）。他のパターンに合わなかった repos/OWNER/REPO だけ
             case "$_path" in repos/*/*/*) ;; *)
+                # 公開範囲（sf-metasync.sh: gh api repos/OWNER/REPO --jq .visibility）。state/gh.visibility で変える（既定 private）
+                [[ "$*" == *".visibility"* ]] && { cat "$IT_STATE/gh.visibility" 2>/dev/null || echo private; exit 0; }
                 if [[ $_has_jq -eq 1 ]]; then echo "$(cat "$IT_STATE/gh.repo_admin" 2>/dev/null || echo true)"; else echo "{\"permissions\":{\"admin\":true}}"; fi; exit 0 ;;
             esac ;;
     esac

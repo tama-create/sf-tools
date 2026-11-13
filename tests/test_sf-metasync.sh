@@ -165,7 +165,7 @@ Y
     : > "$MOCK_CALL_LOG"
     out=$( printf 'Y
 Y
-' | ( cd "$td" && HOME="$mh" PATH="$mb:$PATH" GITHUB_ACTIONS=true bash "$SF_TOOLS_DIR/bin/sf-metasync.sh" ) 2>&1 )
+' | ( cd "$td" && HOME="$mh" PATH="$mb:$PATH" GITHUB_ACTIONS=true GITHUB_REPOSITORY=tamashimon-org/force-test GH_TOKEN=dummy bash "$SF_TOOLS_DIR/bin/sf-metasync.sh" ) 2>&1 )
     echo "$out" | grep -q "追跡していないファイルがあります"         && fail "GitHub Actions 上では、追跡していないファイルを、確認しない" "中止した"         || pass "GitHub Actions 上では、追跡していないファイルを、確認しない"
     unset MOCK_GIT_BRANCH MOCK_GIT_DIFF_EXIT MOCK_GIT_DIFF_EXIT_2ND MOCK_GIT_UNTRACKED MOCK_SF_ORG_JSON
     teardown "$td" "$mb"
@@ -347,7 +347,7 @@ test_target_org_id_variable_unreadable_aborts() {
 test_target_org_actions_uses_prod_alias() {
     local td mb mh; _ms_env td mb mh
     export MOCK_GH_ORG_ID_PROD_EXIT=1   # 手元の方式なら、ここで中断する。Actions 上では、読みにいかないので、影響しない
-    _MS_OUT=$( ( cd "$td" && HOME="$mh" PATH="$mb:$PATH" GITHUB_ACTIONS=true bash "$SF_TOOLS_DIR/bin/sf-metasync.sh" ) 2>&1 )
+    _MS_OUT=$( ( cd "$td" && HOME="$mh" PATH="$mb:$PATH" GITHUB_ACTIONS=true GITHUB_REPOSITORY=tamashimon-org/force-test GH_TOKEN=dummy bash "$SF_TOOLS_DIR/bin/sf-metasync.sh" ) 2>&1 )
     _MS_RC=$?
     assert_exit_ok "$_MS_RC" "接続先（Actions）: 正常終了"
     assert_file_contains "$MOCK_CALL_LOG" "sf project retrieve start --target-org prod" "接続先（Actions）: prod エイリアスで取得する"
@@ -527,7 +527,7 @@ test_dry_run_options() {
 # --allow-mass-delete は GitHub Actions 上では指定できない
 test_allow_mass_delete_on_actions() {
     local td mb mh; _ms_env td mb mh
-    _MS_OUT=$( ( cd "$td" && HOME="$mh" PATH="$mb:$PATH" GITHUB_ACTIONS=true bash "$SF_TOOLS_DIR/bin/sf-metasync.sh" --allow-mass-delete ) 2>&1 )
+    _MS_OUT=$( ( cd "$td" && HOME="$mh" PATH="$mb:$PATH" GITHUB_ACTIONS=true GITHUB_REPOSITORY=tamashimon-org/force-test GH_TOKEN=dummy bash "$SF_TOOLS_DIR/bin/sf-metasync.sh" --allow-mass-delete ) 2>&1 )
     assert_exit_fail $? "--allow-mass-delete を GitHub Actions 上で指定 → 中断"
     assert_output_contains "$_MS_OUT" "GitHub Actions 上では指定できません" "--allow-mass-delete: 理由が表示される"
     _ms_unset; teardown "$td" "$mb"
@@ -549,7 +549,7 @@ test_hold_exit_code_3() {
     export MOCK_GIT_DIFF_EXIT_2ND=1
     mkdir -p "$td/force-app/main/default/classes"; echo old > "$td/force-app/main/default/classes/Gone.cls"
     export MOCK_SF_RETRIEVE_FILES='force-app/main/default/lwc/c/c.js|js'
-    _MS_OUT=$( ( cd "$td" && HOME="$mh" PATH="$mb:$PATH" GITHUB_ACTIONS=true bash "$SF_TOOLS_DIR/bin/sf-metasync.sh" ) 2>&1 )
+    _MS_OUT=$( ( cd "$td" && HOME="$mh" PATH="$mb:$PATH" GITHUB_ACTIONS=true GITHUB_REPOSITORY=tamashimon-org/force-test GH_TOKEN=dummy bash "$SF_TOOLS_DIR/bin/sf-metasync.sh" ) 2>&1 )
     _MS_RC=$?
     assert_equals "$_MS_RC" "3" "削除の保留あり → 終了コード 3"
     [[ -f "$td/force-app/main/default/classes/Gone.cls" ]] && pass "削除の保留: ファイルは残る" || fail "削除の保留: ファイルは残る"
@@ -925,6 +925,186 @@ test_fp_changed_but_no_file_change() {
     _fpi_stop; _ms_unset; teardown "$td" "$mb"
 }
 
+# ------------------------------------------------------------------------------
+# 公開リポジトリの拒否・秘密情報の検査・Slack 通知（設計 16.7。P3）
+# ------------------------------------------------------------------------------
+_p3_unset() { unset SF_METASYNC_VIS_RETRY_WAIT SF_METASYNC_SECRET_SCAN SLACK_BOT_TOKEN SLACK_CHANNEL_ID MOCK_GH_VISIBILITY MOCK_GH_VISIBILITY_EXIT MOCK_CURL_RESPONSE MOCK_CURL_EXIT; }
+_p3_slack() { export SLACK_BOT_TOKEN="xoxb-TESTTOKEN123456" SLACK_CHANNEL_ID="C0TESTCHAN"; }
+# 取得結果に、秘密の疑い（AWS のアクセスキーの形）を含むファイルを 1 つ入れる
+_p3_leak() { export MOCK_GIT_DIFF_EXIT_2ND=1 MOCK_SF_RETRIEVE_FILES='force-app/main/default/classes/Leak.cls|public class Leak { String t = "AKIAABCDEFGHIJKLMNOP"; }'; }
+
+# private・internal は通る（公開範囲がログに出る）
+test_p3_visibility_ok() {
+    local td mb mh; _ms_env td mb mh
+    export MOCK_GIT_DIFF_EXIT_2ND=1 MOCK_SF_RETRIEVE_FILES='force-app/main/default/classes/New.cls|public class New {}'
+    _ms_run 'Y\nY\n'
+    assert_exit_ok "$_MS_RC" "公開範囲 private: 正常終了"
+    assert_output_contains "$_MS_OUT" "リポジトリの公開範囲: private" "公開範囲がログに出る"
+    assert_file_contains "$MOCK_CALL_LOG" "gh api repos/" "公開範囲は gh api repos/<owner>/<repo> で確認する"
+    _ms_unset; _p3_unset; teardown "$td" "$mb"
+    local td mb mh; _ms_env td mb mh
+    export MOCK_GH_VISIBILITY=internal MOCK_GIT_DIFF_EXIT_2ND=1 MOCK_SF_RETRIEVE_FILES='force-app/main/default/classes/New.cls|public class New {}'
+    _ms_run 'Y\nY\n'
+    assert_exit_ok "$_MS_RC" "公開範囲 internal: 正常終了"
+    _ms_unset; _p3_unset; teardown "$td" "$mb"
+}
+
+# 公開、または確認できない → 取得せずに止める（終了コード 5）。Slack に通知する（dry-run を除く）
+test_p3_visibility_public() {
+    local td mb mh; _ms_env td mb mh; _p3_slack
+    export MOCK_GH_VISIBILITY=public
+    _ms_run 'Y\nY\n'
+    assert_equals "$_MS_RC" "5" "公開リポジトリ → 終了コード 5"
+    assert_output_contains "$_MS_OUT" "リポジトリが公開（public）です" "公開の理由が出る"
+    assert_file_not_contains "$MOCK_CALL_LOG" "sf project retrieve" "公開リポジトリ: 取得しない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "git commit" "公開リポジトリ: コミットしない"
+    assert_file_contains "$MOCK_CALL_LOG" "https://slack.com/api/chat.postMessage" "公開リポジトリ: Slack に通知する"
+    assert_file_not_contains "$MOCK_CALL_LOG" "xoxb-TESTTOKEN123456" "Slack のトークンは、curl のコマンドラインの引数に出さない（標準入力で渡す）"
+    assert_file_contains "$MOCK_CALL_LOG" " -K - " "curl の設定は、標準入力（-K -）から渡す"
+    assert_file_contains "$MOCK_CALL_LOG" "取得は行っていません" "通知の本文に、理由が入る"
+    assert_output_not_contains "$_MS_OUT" "xoxb-TESTTOKEN123456" "Slack のトークンは、ログに出さない"
+    assert_output_contains "$_MS_OUT" "Slack に通知しました" "通知できた旨が出る"
+    _ms_unset; _p3_unset; teardown "$td" "$mb"
+    # 確認できない（gh の失敗・権限不足）→ 同じく止める
+    local td mb mh; _ms_env td mb mh; _p3_slack
+    export MOCK_GH_VISIBILITY_EXIT=1 SF_METASYNC_VIS_RETRY_WAIT=0
+    _ms_run 'Y\nY\n'
+    assert_equals "$_MS_RC" "5" "公開・非公開を確認できない → 終了コード 5"
+    assert_equals "$(grep -c 'gh api repos/' "$MOCK_CALL_LOG")" "3" "確認できないときは、3 回まで試す（一時的な API の失敗で止めない）"
+    assert_output_contains "$_MS_OUT" "確認できませんでした" "確認できない理由が出る"
+    assert_file_not_contains "$MOCK_CALL_LOG" "sf project retrieve" "確認できない: 取得しない"
+    _ms_unset; _p3_unset; teardown "$td" "$mb"
+    # --dry-run: 止めるが、Slack には通知しない
+    local td mb mh; _ms_env td mb mh; _p3_slack
+    export MOCK_GH_VISIBILITY=public
+    _ms_run '' --dry-run -y
+    assert_equals "$_MS_RC" "5" "--dry-run でも、公開リポジトリは止める"
+    assert_file_not_contains "$MOCK_CALL_LOG" "slack.com" "--dry-run: Slack に通知しない"
+    _ms_unset; _p3_unset; teardown "$td" "$mb"
+    # Slack の設定がない → WARNING にとどめて、止める
+    local td mb mh; _ms_env td mb mh
+    export MOCK_GH_VISIBILITY=public
+    _ms_run 'Y\nY\n'
+    assert_equals "$_MS_RC" "5" "Slack 未設定でも、公開リポジトリは止める"
+    assert_output_contains "$_MS_OUT" "Slack に通知できません" "Slack 未設定の WARNING が出る"
+    _ms_unset; _p3_unset; teardown "$td" "$mb"
+}
+
+# 検査 shadow（既定）: 疑いを WARNING で出すが、止めない（コミットする）
+test_p3_scan_shadow() {
+    local td mb mh; _ms_env td mb mh; _p3_slack; _p3_leak
+    _ms_run 'Y\nY\n'
+    assert_exit_ok "$_MS_RC" "検査 shadow（既定）: 疑いがあっても、正常終了"
+    assert_output_contains "$_MS_OUT" "秘密の疑い: known-token force-app/main/default/classes/Leak.cls" "疑いの規則とパスが出る"
+    assert_output_contains "$_MS_OUT" "shadow のため、止めません" "止めない旨が出る"
+    assert_output_not_contains "$_MS_OUT" "AKIAABCDEFGHIJKLMNOP" "値（秘密）は、ログに出さない"
+    assert_file_contains "$MOCK_CALL_LOG" "git commit" "shadow: コミットする"
+    assert_file_not_contains "$MOCK_CALL_LOG" "slack.com" "shadow: Slack には通知しない"
+    _ms_unset; _p3_unset; teardown "$td" "$mb"
+}
+
+# 検査 on: 疑いがあれば、何もコミットせずに止める（終了コード 4）。Slack に通知する
+test_p3_scan_on() {
+    local td mb mh; _ms_env td mb mh; _p3_slack; _p3_leak
+    SF_METASYNC_SECRET_SCAN=on _ms_run 'Y\nY\n'
+    assert_equals "$_MS_RC" "4" "検査 on: 疑いがある → 終了コード 4"
+    assert_output_contains "$_MS_OUT" "何もコミット・push せずに止めます" "止める旨が出る"
+    assert_output_not_contains "$_MS_OUT" "AKIAABCDEFGHIJKLMNOP" "値（秘密）は、ログに出さない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "git commit" "検査 on: コミットしない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "git push" "検査 on: push しない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "git add" "検査 on: ステージしない"
+    [[ ! -f "$td/force-app/main/default/classes/Leak.cls" ]] && pass "検査 on: 作業ツリーに、疑わしいファイルを書かない" || fail "検査 on: 作業ツリーに、疑わしいファイルを書かない"
+    assert_file_contains "$MOCK_CALL_LOG" "https://slack.com/api/chat.postMessage" "検査 on: Slack に通知する"
+    assert_file_contains "$MOCK_CALL_LOG" "known-token  force-app/main/default/classes/Leak.cls" "通知の本文に、規則とパスが入る"
+    assert_file_not_contains "$MOCK_CALL_LOG" "AKIAABCDEFGHIJKLMNOP" "通知にも、値（秘密）は入れない"
+    assert_output_not_contains "$_MS_OUT" "xoxb-TESTTOKEN123456" "Slack のトークンは、ログに出さない"
+    _ms_unset; _p3_unset; teardown "$td" "$mb"
+    # Slack 未設定 / 通知の失敗 → WARNING にとどめて、止める
+    local td mb mh; _ms_env td mb mh; _p3_leak
+    SF_METASYNC_SECRET_SCAN=on _ms_run 'Y\nY\n'
+    assert_equals "$_MS_RC" "4" "Slack 未設定でも、疑いがあれば止める"
+    assert_output_contains "$_MS_OUT" "Slack に通知できません" "Slack 未設定の WARNING が出る"
+    _ms_unset; _p3_unset; teardown "$td" "$mb"
+    local td mb mh; _ms_env td mb mh; _p3_slack; _p3_leak
+    export MOCK_CURL_RESPONSE='{"ok":false,"error":"invalid_auth"}'
+    SF_METASYNC_SECRET_SCAN=on _ms_run 'Y\nY\n'
+    assert_equals "$_MS_RC" "4" "Slack の通知が失敗しても、疑いがあれば止める"
+    assert_output_contains "$_MS_OUT" "Slack への通知に失敗しました（invalid_auth）" "通知の失敗の理由が出る"
+    _ms_unset; _p3_unset; teardown "$td" "$mb"
+    # --dry-run: 止めるが、Slack には通知しない
+    local td mb mh; _ms_env td mb mh; _p3_slack; _p3_leak
+    SF_METASYNC_SECRET_SCAN=on _ms_run '' --dry-run -y
+    assert_equals "$_MS_RC" "4" "検査 on・--dry-run: 疑いがあれば、終了コード 4"
+    assert_file_not_contains "$MOCK_CALL_LOG" "slack.com" "--dry-run: Slack に通知しない"
+    _ms_unset; _p3_unset; teardown "$td" "$mb"
+}
+
+# Actions 上で GH_TOKEN がない（wf-metasync.yml が古い）→ 理由が分かる文言で止める。gh は呼ばない
+test_p3_visibility_no_token() {
+    local td mb mh; _ms_env td mb mh
+    _MS_OUT=$( ( cd "$td" && env -u GH_TOKEN -u GITHUB_TOKEN HOME="$mh" PATH="$mb:$PATH" GITHUB_ACTIONS=true GITHUB_REPOSITORY=tamashimon-org/force-test bash "$SF_TOOLS_DIR/bin/sf-metasync.sh" ) 2>&1 )
+    _MS_RC=$?
+    assert_equals "$_MS_RC" "5" "Actions で GH_TOKEN がない → 終了コード 5"
+    assert_output_contains "$_MS_OUT" "GH_TOKEN が渡されていません" "wf-metasync.yml が古い可能性を案内する"
+    assert_file_not_contains "$MOCK_CALL_LOG" "gh api repos/" "GH_TOKEN がないときは、gh を呼ばない"
+    _ms_unset; _p3_unset; teardown "$td" "$mb"
+}
+
+# Slack の本文の置き換えの書き方（Bash 5.2 以降は、置き換え側を引用しないと & が展開される）が、この Bash でも正しい
+test_p3_slack_escape_syntax() {
+    local t='a<b>c&d'
+    t=${t//&/"&amp;"}; t=${t//</"&lt;"}; t=${t//>/"&gt;"}
+    assert_equals "$t" 'a&lt;b&gt;c&amp;d' "Slack の特殊文字（& < >）の置き換えが、この Bash で正しい"
+}
+
+# 許可の一覧・検査の失敗・off・不正なモード
+test_p3_scan_misc() {
+    local td mb mh; _ms_env td mb mh; _p3_slack; _p3_leak
+    printf '# 確認済みの誤検知\nknown-token force-app/main/default/classes/*\n' > "$td/sf-tools/config/metasync-secret-allow.txt"
+    SF_METASYNC_SECRET_SCAN=on _ms_run 'Y\nY\n'
+    assert_exit_ok "$_MS_RC" "許可の一覧に当たる疑いは、on でも止めない"
+    assert_output_contains "$_MS_OUT" "許可済み 1 件" "許可済みの件数が出る"
+    assert_file_contains "$MOCK_CALL_LOG" "git commit" "許可された内容は、コミットする"
+    _ms_unset; _p3_unset; teardown "$td" "$mb"
+    # 検査そのものが失敗（許可の一覧の書式の誤り）: on なら止める（検査していないものを、コミットしない）／ shadow は止めない
+    local td mb mh; _ms_env td mb mh; _p3_slack; _p3_leak
+    printf 'known-token\n' > "$td/sf-tools/config/metasync-secret-allow.txt"
+    SF_METASYNC_SECRET_SCAN=on _ms_run 'Y\nY\n'
+    assert_equals "$_MS_RC" "4" "検査 on・検査の失敗 → 終了コード 4 で止める"
+    assert_output_contains "$_MS_OUT" "検査していない内容はコミットしない" "検査の失敗の理由が出る"
+    assert_output_contains "$_MS_OUT" "の形式が正しくありません" "検査の失敗の原因が出る"
+    assert_output_not_contains "$_MS_OUT" "\[ERROR\] \[ERROR\]" "ラベルが二重にならない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "git commit" "検査の失敗: コミットしない"
+    assert_file_contains "$MOCK_CALL_LOG" "https://slack.com/api/chat.postMessage" "検査の失敗: Slack に通知する（通知なしで止まり続けない）"
+    assert_file_contains "$MOCK_CALL_LOG" "検査そのものが失敗しました" "検査の失敗: 通知の本文に、理由が入る"
+    _ms_unset; _p3_unset; teardown "$td" "$mb"
+    local td mb mh; _ms_env td mb mh; _p3_leak
+    printf 'known-token\n' > "$td/sf-tools/config/metasync-secret-allow.txt"
+    SF_METASYNC_SECRET_SCAN=shadow _ms_run 'Y\nY\n'
+    assert_exit_ok "$_MS_RC" "検査 shadow・検査の失敗 → 止めない"
+    assert_output_contains "$_MS_OUT" "秘密情報の検査に失敗しました" "検査の失敗が WARNING で出る"
+    _ms_unset; _p3_unset; teardown "$td" "$mb"
+    # off: 検査しない
+    local td mb mh; _ms_env td mb mh; _p3_leak
+    SF_METASYNC_SECRET_SCAN=off _ms_run 'Y\nY\n'
+    assert_exit_ok "$_MS_RC" "検査 off: 正常終了"
+    assert_output_not_contains "$_MS_OUT" "秘密の検査" "検査 off: 検査しない"
+    _ms_unset; _p3_unset; teardown "$td" "$mb"
+    # 疑いがなければ、on でも通る
+    local td mb mh; _ms_env td mb mh
+    export MOCK_GIT_DIFF_EXIT_2ND=1 MOCK_SF_RETRIEVE_FILES='force-app/main/default/classes/Safe.cls|public class Safe {}'
+    SF_METASYNC_SECRET_SCAN=on _ms_run 'Y\nY\n'
+    assert_exit_ok "$_MS_RC" "検査 on・疑いなし: 正常終了"
+    assert_output_contains "$_MS_OUT" "疑い 0 件" "疑い 0 件と出る"
+    _ms_unset; _p3_unset; teardown "$td" "$mb"
+    # 不正なモード
+    local td mb mh; _ms_env td mb mh
+    SF_METASYNC_SECRET_SCAN=maybe _ms_run 'Y\nY\n'
+    assert_exit_fail "$_MS_RC" "検査のモードが不正 → 中断"
+    assert_output_contains "$_MS_OUT" "off / shadow / on" "使える値が出る"
+    _ms_unset; _p3_unset; teardown "$td" "$mb"
+}
+
 test_mirror_basic
 test_target_org_resolved_by_org_id
 test_target_org_org_id_15_vs_18_chars
@@ -957,5 +1137,12 @@ test_fp_with_detect
 test_fp_detect_on_conflict_warning
 test_fp_dry_run
 test_fp_changed_but_no_file_change
+test_p3_visibility_ok
+test_p3_visibility_public
+test_p3_visibility_no_token
+test_p3_slack_escape_syntax
+test_p3_scan_shadow
+test_p3_scan_on
+test_p3_scan_misc
 
 print_summary

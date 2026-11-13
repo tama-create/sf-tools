@@ -21,6 +21,8 @@
 #   M10 コミットの前に中断（commit の失敗）→ 反映した分が HEAD に戻り、元のブランチに戻る
 #   M11 変更の検知（SF_METASYNC_DETECT=on）→ 状態ファイルの作成・変更なしで取得を省く・履歴ありで取得・状態だけのコミットは
 #       伝播しない・中断で状態ファイルも戻る
+#   M12 公開リポジトリの拒否（終了コード 5・取得しない）・秘密情報の検査（on = 終了コード 4 で止める・作業ツリーはきれい／
+#       shadow = 止めない）
 # ==============================================================================
 source "$(dirname "${BASH_SOURCE[0]}")/test_helper.sh"
 source "$(dirname "${BASH_SOURCE[0]}")/integration/lib.sh"
@@ -294,10 +296,47 @@ test_M11() {
     unset SF_METASYNC_SF SF_METASYNC_DETECT; rm -f "$IT_STATE/sf.audit"
 }
 
+test_M12() {
+    echo -e "\n${CLR_HEAD}--- M12: 公開リポジトリの拒否・秘密情報の検査（設計 16.7）---${CLR_RST}"
+    local m0 n0
+    # (1) 公開リポジトリ → 取得せずに止める（終了コード 5）。main は変わらない
+    m0=$(_remote_ref main)
+    echo public > "$IT_STATE/gh.visibility"
+    it_set_retrieve "force-app/main/default/classes/Pub12.cls|public class Pub12 { }"
+    n0=$(it_calls sf | grep -c 'project retrieve')
+    _meta
+    assert_equals "$IT_RC" "5" "M12-1: 公開リポジトリ → 終了コード 5"
+    it_out_has "リポジトリが公開（public）です" && pass "M12-1: 公開の理由が表示される" || fail "M12-1: 公開の理由が表示される"
+    assert_equals "$(it_calls sf | grep -c 'project retrieve')" "$n0" "M12-1: 組織から取得しない"
+    assert_equals "$(_remote_ref main)" "$m0" "M12-1: origin の main は、変わらない"
+    assert_equals "$(_cur "$CL")" "JOB-A" "M12-1: 元のブランチのまま"
+    rm -f "$IT_STATE/gh.visibility"
+    # (2) 秘密の疑い・on → 何もコミットせずに止める（終了コード 4）。作業ツリーも、きれい
+    m0=$(_remote_ref main)
+    export SF_METASYNC_SECRET_SCAN=on
+    it_set_retrieve 'force-app/main/default/classes/Leak12.cls|public class Leak12 { String t = "AKIAABCDEFGHIJKLMNOP"; }'
+    _meta
+    assert_equals "$IT_RC" "4" "M12-2: 秘密の疑い（on）→ 終了コード 4"
+    it_out_has "秘密の疑い: known-token force-app/main/default/classes/Leak12.cls" && pass "M12-2: 疑いの規則とパスが表示される" || fail "M12-2: 疑いの規則とパスが表示される"
+    it_out_has "AKIAABCDEFGHIJKLMNOP" && fail "M12-2: 値（秘密）は、出力に出さない" "出力に含まれている" || pass "M12-2: 値（秘密）は、出力に出さない"
+    assert_equals "$(_remote_ref main)" "$m0" "M12-2: origin の main は、変わらない"
+    assert_equals "$(_cur "$CL")" "JOB-A" "M12-2: 元のブランチに戻る"
+    _it_git -C "$CL" checkout -q main
+    assert_equals "$(_it_git -C "$CL" status --porcelain -- . ':!sf-tools/release' | wc -l | tr -d ' ')" "0" "M12-2: main の作業ツリーは、きれい（疑わしいファイルを書いていない）"
+    _it_git -C "$CL" checkout -q JOB-A
+    # (3) 秘密の疑い・shadow（既定）→ WARNING を出すが、止めない（コミットされる）
+    export SF_METASYNC_SECRET_SCAN=shadow
+    _meta
+    assert_exit_ok "$IT_RC" "M12-3: 秘密の疑い（shadow）→ 止めない"
+    it_out_has "shadow のため、止めません" && pass "M12-3: 止めない旨が表示される" || fail "M12-3: 止めない旨が表示される"
+    [[ "$(_remote_ref main)" != "$m0" ]] && pass "M12-3: shadow では、同期のコミットが届く" || fail "M12-3: shadow では、同期のコミットが届く"
+    unset SF_METASYNC_SECRET_SCAN
+}
+
 _it_timed() { local t0=$SECONDS rc; "$@"; rc=$?; echo "  （所要時間: $1 = $((SECONDS - t0)) 秒）"; return $rc; }
 
 test_setup || { print_summary; exit 1; }
-for _sc in ${IT_SCENARIOS:-M0 M1 M2 M3 M4 M5 M6 M7 M8 M9 M10 M11}; do
+for _sc in ${IT_SCENARIOS:-M0 M1 M2 M3 M4 M5 M6 M7 M8 M9 M10 M11 M12}; do
     _it_timed "test_${_sc}" || break
 done
 

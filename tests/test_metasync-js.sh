@@ -830,6 +830,317 @@ test_fingerprint_table() {
     rm -rf "$d"
 }
 
+# --- 10. scan（秘密情報の検査。設計 16.7）---
+#   準備: $_SD に、手元（repo）・取得結果（fetched）・計画（plan.tsv）を作る。_sc_put で、ファイルを置く
+_sc_mk() {
+    _SD=$(mktemp -d "${TMPDIR:-/tmp}/test-mssc-XXXX")
+    mkdir -p "$_SD/repo" "$_SD/fetched"
+    echo '{"packageDirectories":[{"path":"force-app"}]}' > "$_SD/repo/sfdx-project.json"
+    cp "$_SD/repo/sfdx-project.json" "$_SD/fetched/"
+    : > "$_SD/plan.tsv"
+}
+# 引数: 置き場所（repo か fetched）・パス（force-app/main/default からの相対）・内容（計画への追加は、_sc_plan で別に行う）
+_sc_put() {
+    local where="$1" rel="$2" body="$3" f="$_SD/$1/force-app/main/default/$2"
+    mkdir -p "${f%/*}"; printf '%s\n' "$body" > "$f"
+}
+_sc_plan() { printf '%s\tforce-app/main/default/%s\t\n' "$1" "$2" >> "$_SD/plan.tsv"; }   # 引数: 操作（A・M）・パス
+_sc() { _OUT=$(node "$MJS" scan --plan "$_SD/plan.tsv" --repo "$_SD/repo" --fetched "$_SD/fetched" --out-report "$_SD/rep.tsv" "$@" 2>&1); _RC=$?; }
+
+test_scan() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] metasync.js: scan（秘密情報の検査）${CLR_RST}"
+    _sc_mk
+    # 規則ごとに、1 件ずつ見つかる。値は、出力に出さない
+    _sc_put fetched classes/A.cls "public class A { String apiKey = 'abcdef123456'; String note = 'hello world 1234'; }"; _sc_plan A classes/A.cls
+    _sc_put fetched authproviders/G.authprovider-meta.xml '<AuthProvider><password>hunter2hunter2</password></AuthProvider>'; _sc_plan A authproviders/G.authprovider-meta.xml
+    _sc_put fetched customMetadata/X.md-meta.xml '<CustomMetadata><values><field>Api_Key__c</field><value xsi:type="xsd:string">abcdef123456</value></values></CustomMetadata>'; _sc_plan A customMetadata/X.md-meta.xml
+    _sc_put fetched labels/CustomLabels.labels-meta.xml '<CustomLabels><labels><fullName>Stripe_Secret</fullName><value>abcdef123456</value></labels></CustomLabels>'; _sc_plan A labels/CustomLabels.labels-meta.xml
+    _sc_put fetched staticresources/k.txt '-----BEGIN RSA PRIVATE KEY-----'; _sc_plan A staticresources/k.txt
+    _sc_put fetched pages/P.page "<apex:page>AKIAABCDEFGHIJKLMNOP</apex:page>"; _sc_plan A pages/P.page
+    _sc
+    assert_equals "$_RC" "10" "scan: 疑いがある → 終了コード 10"
+    assert_output_contains "$_OUT" "疑い 6 件（6 ファイル）" "scan: 疑いの件数とファイル数が出る"
+    assert_output_contains "$_OUT" "\[WARNING\] 秘密の疑い: code-hardcoded-secret force-app/main/default/classes/A.cls" "scan: コードへの直書き"
+    assert_output_contains "$_OUT" "xml-secret-element force-app/main/default/authproviders/G.authprovider-meta.xml" "scan: 秘密の要素（password）"
+    assert_output_contains "$_OUT" "custommetadata-secret-field force-app/main/default/customMetadata/X.md-meta.xml" "scan: カスタムメタデータの秘密らしい項目"
+    assert_output_contains "$_OUT" "customlabel-secret force-app/main/default/labels/CustomLabels.labels-meta.xml" "scan: カスタム表示ラベルの秘密らしい名前"
+    assert_output_contains "$_OUT" "private-key force-app/main/default/staticresources/k.txt" "scan: 秘密鍵"
+    assert_output_contains "$_OUT" "known-token force-app/main/default/pages/P.page" "scan: 既知のトークンの形（AWS）"
+    assert_output_not_contains "$_OUT" "abcdef123456" "scan: 値（秘密）は、出力に出さない"
+    assert_output_not_contains "$_OUT" "hunter2" "scan: 値（秘密）は、出力に出さない（要素）"
+    assert_output_not_contains "$_OUT" "AKIAABCDEF" "scan: 値（秘密）は、出力に出さない（トークン）"
+    assert_file_contains "$_SD/rep.tsv" "xml-secret-element	force-app/main/default/authproviders/G.authprovider-meta.xml	1" "scan: 結果のファイルに、規則・パス・件数が入る（値は入らない）"
+    assert_file_not_contains "$_SD/rep.tsv" "hunter2" "scan: 結果のファイルにも、値は入らない"
+    rm -rf "$_SD"
+
+    # 疑いにならないもの: プレースホルダ・秘密でない要素名・短い値・空・説明文・秘密でない名前の項目
+    _sc_mk
+    _sc_put fetched authproviders/G.authprovider-meta.xml '<AuthProvider><consumerSecret>Placeholder_abcdef</consumerSecret><consumerKey>3MVG9abcdefghijk</consumerKey><password></password><token>true</token></AuthProvider>'; _sc_plan A authproviders/G.authprovider-meta.xml
+    _sc_put fetched settings/Password.settings-meta.xml '<PasswordPolicies><passwordComplexity>5</passwordComplexity><minimumPasswordLength>8</minimumPasswordLength></PasswordPolicies>'; _sc_plan A settings/Password.settings-meta.xml
+    _sc_put fetched customMetadata/Y.md-meta.xml '<CustomMetadata><values><field>Api_Key__c</field><value xsi:type="xsd:string">short</value></values><values><field>Color__c</field><value xsi:type="xsd:string">abcdef123456</value></values></CustomMetadata>'; _sc_plan A customMetadata/Y.md-meta.xml
+    _sc_put fetched classes/B.cls "public class B { String tokenLabel = 'Enter your token'; String msg = 'hello'; String apiKey = 'Placeholder_xxxxxxxx'; }"; _sc_plan A classes/B.cls
+    _sc_put fetched reports/R.report-meta.xml '<Report><description>password reset report abcdef123456</description></Report>'; _sc_plan A reports/R.report-meta.xml
+    _sc
+    assert_equals "$_RC" "0" "scan: 秘密でないもの（プレースホルダ・短い値・説明文など）は、疑いにしない"
+    assert_output_contains "$_OUT" "疑い 0 件" "scan: 疑い 0 件と出る"
+    assert_equals "$(wc -c < "$_SD/rep.tsv" | tr -d ' ')" "0" "scan: 疑いがないとき、結果のファイルは空"
+    rm -rf "$_SD"
+
+    # 変更（M）: 手元にすでにある疑わしい文字列は、今回の新しい疑いにしない。新しく入った分だけ
+    _sc_mk
+    _sc_put repo classes/C.cls "public class C { String apiKey = 'abcdef123456'; }"
+    _sc_put fetched classes/C.cls "public class C { String apiKey = 'abcdef123456'; String x = 1; }"; _sc_plan M classes/C.cls
+    _sc
+    assert_equals "$_RC" "0" "scan: 変更（M）で、すでにコミット済みの疑わしい文字列は、疑いにしない"
+    _sc_put fetched classes/C.cls "public class C { String apiKey = 'abcdef123456'; String secretKey = 'zzzzzzzz9999'; }"
+    _sc
+    assert_equals "$_RC" "10" "scan: 変更（M）で、新しく入った疑わしい文字列は、疑いにする"
+    assert_output_contains "$_OUT" "classes/C.cls（キー: secretKey）（1 件" "scan: 新しく入った分の件数だけ数える（キー = 変数名も表示する）"
+    rm -rf "$_SD"
+
+    # 追加・変更だけを検査する（削除 D・保留 H は、対象外）。バイナリは、秘密鍵・既知のトークンだけ探す（テキストの規則はかけない）。20 MB 超は検査しない
+    _sc_mk
+    _sc_put fetched classes/D.cls "public class D { String apiKey = 'abcdef123456'; }"
+    _sc_plan D classes/D.cls; _sc_plan H classes/D.cls
+    printf 'password = abcdef123456 binary' > "$_SD/fetched/force-app/main/default/classes/bin0.cls"; printf ' \0y' >> "$_SD/fetched/force-app/main/default/classes/bin0.cls"; _sc_plan A classes/bin0.cls
+    _sc
+    assert_equals "$_RC" "0" "scan: 削除（D）・保留（H）は検査しない／ バイナリには、テキストの規則（直書きなど）をかけない"
+    assert_output_contains "$_OUT" "検査に制限があるファイル 1 個" "scan: 制限があるファイルの数が出る"
+    assert_output_contains "$_OUT" "classes/bin0.cls（バイナリ" "scan: 制限があるファイルの名前が出る"
+    printf 'AKIAABCDEFGHIJKLMNOP' > "$_SD/fetched/force-app/main/default/classes/bin1.cls"; printf ' \0y' >> "$_SD/fetched/force-app/main/default/classes/bin1.cls"; _sc_plan A classes/bin1.cls
+    _sc
+    assert_equals "$_RC" "10" "scan: バイナリでも、既知のトークンの形は検出する"
+    assert_output_contains "$_OUT" "known-token force-app/main/default/classes/bin1.cls" "scan: バイナリの疑いの規則とパスが出る"
+    head -c 21000000 /dev/zero > "$_SD/fetched/force-app/main/default/classes/big.cls"; : > "$_SD/plan.tsv"; _sc_plan A classes/big.cls
+    _sc
+    assert_equals "$_RC" "0" "scan: 20 MB 超は検査しない（疑いにしない）"
+    assert_output_contains "$_OUT" "big.cls（20 MB 超" "scan: 検査しなかったファイルの名前が出る"
+    node -e 'require("fs").writeFileSync(process.argv[1], Buffer.concat([Buffer.from([255,254]), Buffer.from("<AuthProvider><password>hunter2hunter2</password></AuthProvider>", "utf16le")]))' "$_SD/fetched/force-app/main/default/classes/u16.xml"
+    : > "$_SD/plan.tsv"; _sc_plan A classes/u16.xml
+    _sc
+    assert_equals "$_RC" "10" "scan: UTF-16（BOM つき）のファイルも、テキストとして検査する"
+    rm -rf "$_SD"
+
+    # 許可の一覧（--allow）: 「規則 パス」。* が使える。なくてもよい。書式の誤りは中断
+    _sc_mk
+    _sc_put fetched classes/A.cls "public class A { String apiKey = 'abcdef123456'; }"; _sc_plan A classes/A.cls
+    _sc_put fetched pages/P.page "<apex:page>AKIAABCDEFGHIJKLMNOP</apex:page>"; _sc_plan A pages/P.page
+    printf '# 確認済みの誤検知\ncode-hardcoded-secret force-app/main/default/classes/*\n' > "$_SD/allow.txt"
+    _sc --allow "$_SD/allow.txt"
+    assert_equals "$_RC" "10" "scan: 許可に当たらない疑いが残れば、終了コード 10"
+    assert_output_contains "$_OUT" "許可済み 1 件" "scan: 許可済みの件数が出る"
+    assert_output_not_contains "$_OUT" "\[WARNING\] 秘密の疑い: code-hardcoded-secret force-app/main/default/classes/A.cls" "scan: 許可した疑いは、警告に出ない"
+    assert_output_contains "$_OUT" "許可済み: code-hardcoded-secret force-app/main/default/classes/A.cls" "scan: 許可した疑いの内訳が、許可済みとして出る"
+    assert_output_contains "$_OUT" "known-token force-app/main/default/pages/P.page" "scan: 許可していない疑いは、残る"
+    printf '* force-app/main/default/*\n' > "$_SD/allow.txt"
+    _sc --allow "$_SD/allow.txt"
+    assert_equals "$_RC" "0" "scan: 規則 * とパスの * で、まとめて許可できる"
+    _sc --allow "$_SD/none.txt"
+    assert_equals "$_RC" "10" "scan: 許可の一覧がなくても、動く"
+    printf 'known-token\n' > "$_SD/allow.txt"   # 語が 1 つだけ（規則名は正しい）
+    _sc --allow "$_SD/allow.txt"
+    assert_equals "$_RC" "1" "scan: 許可の一覧の書式の誤り → 中断（終了コード 1）"
+    rm -rf "$_SD"
+
+    # 引数・計画の誤り
+    _sc_mk
+    _sc_plan A classes/Missing.cls
+    _sc
+    assert_equals "$_RC" "1" "scan: 取得結果にないファイルが計画にある → 中断"
+    : > "$_SD/plan.tsv"; printf 'A\tforce-app/../../etc/x\t\n' >> "$_SD/plan.tsv"
+    _sc
+    assert_equals "$_RC" "1" "scan: 計画のパスが対象の外を指す → 中断"
+    out=$(node "$MJS" scan --repo "$_SD/repo" 2>&1); assert_equals "$?" "1" "scan: 必須オプションがない → 中断"
+    : > "$_SD/plan.tsv"; _sc
+    assert_equals "$_RC" "0" "scan: 計画が空 → 疑いなし"
+    rm -rf "$_SD"
+}
+
+# scan の規則の精度: 普通のメタデータで誤検知しない／ 典型的な書き方を見逃さない（レビューでの指摘の対応）
+test_scan_rules() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] metasync.js: scan（規則の精度）${CLR_RST}"
+    # 誤検知しない: 名前・URL・API 名・日本語の文言・テストクラスのダミー値
+    _sc_mk
+    _sc_put fetched customMetadata/Cfg.md-meta.xml '<CustomMetadata><values><field>Token_Endpoint__c</field><value xsi:type="xsd:string">https://login.salesforce.com/services/oauth2/token</value></values><values><field>Named_Credential__c</field><value xsi:type="xsd:string">My_Named_Credential</value></values></CustomMetadata>'; _sc_plan A customMetadata/Cfg.md-meta.xml
+    _sc_put fetched labels/CustomLabels.labels-meta.xml '<CustomLabels><labels><fullName>Forgot_Password</fullName><value>パスワードをお忘れですか？</value></labels><labels><fullName>Password_Label</fullName><value>Password</value></labels></CustomLabels>'; _sc_plan A labels/CustomLabels.labels-meta.xml
+    _sc_put fetched classes/Consts.cls "public class Consts { static final String FIELD_PASSWORD = 'Password__c'; String apiKey = 'API_Key__c'; }"; _sc_plan A classes/Consts.cls
+    _sc_put fetched classes/SiteLoginControllerTest.cls "@isTest public class SiteLoginControllerTest { void t() { controller.password = 'abcd1234'; } }"; _sc_plan A classes/SiteLoginControllerTest.cls
+    _sc_put fetched lwc/login/login.js "export default class Login { fields = { password: 'Password', apiKey: 'c.API_Key_Label' }; }"; _sc_plan A lwc/login/login.js
+    _sc
+    assert_equals "$_RC" "0" "scan: 名前・URL・API 名・日本語の文言・テストクラスのダミー値は、疑いにしない"
+    rm -rf "$_SD"
+    # 見逃さない: URL の中の秘密・Bearer・Webhook・認証情報つき URL・属性つきの要素・CDATA・引用符つきのキーと =>・Key という項目名
+    _sc_mk
+    _sc_put fetched classes/Http.cls "public class Http { String b = 'grant_type=x&client_secret=Zq81xKd92mP4&code=1'; String h = 'Bearer abcdefghij0123456789ABCD'; String u = 'https://user:Pa55w0rd99@example.com/x'; }"; _sc_plan A classes/Http.cls
+    _sc_put fetched classes/Hook.cls "public class Hook { String w = 'https://hooks.slack.com/services/T0ABCDEFG/B0ABCDEFG/abcdefghijklmnop'; }"; _sc_plan A classes/Hook.cls
+    _sc_put fetched authproviders/Attr.authprovider-meta.xml '<AuthProvider><password xsi:type="xsd:string">hunter2hunter2</password></AuthProvider>'; _sc_plan A authproviders/Attr.authprovider-meta.xml
+    _sc_put fetched authproviders/Cd.authprovider-meta.xml '<AuthProvider><clientSecret><![CDATA[hunter2hunter2]]></clientSecret></AuthProvider>'; _sc_plan A authproviders/Cd.authprovider-meta.xml
+    _sc_put fetched classes/Map.cls "public class Map { Object m = new Map<String,String>{'password' => 'Zq81xKd92mP4'}; Object j = '{\"apiKey\": \"Zq81xKd92mP4\"}'; String q = 'secretKey=' ; String s3cret_key = 'Zq81xKd92mP4'; }"; _sc_plan A classes/Map.cls
+    _sc_put fetched customMetadata/Key.md-meta.xml '<CustomMetadata><values><field>Key__c</field><value xsi:type="xsd:string">Zq81xKd92mP4wQ7aB</value></values></CustomMetadata>'; _sc_plan A customMetadata/Key.md-meta.xml
+    _sc
+    assert_equals "$_RC" "10" "scan: 典型的な書き方の秘密は、疑いにする"
+    assert_output_contains "$_OUT" "url-secret force-app/main/default/classes/Http.cls（キー: client_secret）" "scan: URL の中の秘密（client_secret=）"
+    assert_output_contains "$_OUT" "url-secret force-app/main/default/classes/Http.cls（キー: bearer）" "scan: Bearer トークン"
+    assert_output_contains "$_OUT" "url-secret force-app/main/default/classes/Http.cls（キー: userinfo）" "scan: 認証情報つきの URL"
+    assert_output_contains "$_OUT" "known-token force-app/main/default/classes/Hook.cls" "scan: Slack の Webhook URL"
+    assert_output_contains "$_OUT" "xml-secret-element force-app/main/default/authproviders/Attr.authprovider-meta.xml（キー: password）" "scan: 属性つきの要素"
+    assert_output_contains "$_OUT" "xml-secret-element force-app/main/default/authproviders/Cd.authprovider-meta.xml（キー: clientSecret）" "scan: CDATA の中の値"
+    assert_output_contains "$_OUT" "code-hardcoded-secret force-app/main/default/classes/Map.cls（キー: password）" "scan: 引用符つきのキーと =>（Map の初期化）"
+    assert_output_contains "$_OUT" "custommetadata-secret-field force-app/main/default/customMetadata/Key.md-meta.xml（キー: Key__c）" "scan: Key という項目名"
+    assert_output_not_contains "$_OUT" "Zq81xKd92mP4" "scan: 値（秘密）は、出力に出さない"
+    # 許可の一覧は、キーで絞れる（ラベル・項目・変数名の単位。パス全体を無検査にしない）
+    rm -rf "$_SD"; _sc_mk
+    _sc_put fetched labels/CustomLabels.labels-meta.xml '<CustomLabels><labels><fullName>Stripe_Secret_Test</fullName><value>Zq81xKd92mP4wQ</value></labels><labels><fullName>Other_Token</fullName><value>Zq81xKd92mP4wQ</value></labels></CustomLabels>'; _sc_plan A labels/CustomLabels.labels-meta.xml
+    _sc
+    assert_output_contains "$_OUT" "疑い 2 件" "scan: ラベルごとに疑いを数える"
+    assert_output_contains "$_OUT" "customlabel-secret force-app/main/default/labels/CustomLabels.labels-meta.xml（キー: Stripe_Secret_Test）" "scan: ラベル名（キー）が出る"
+    printf 'customlabel-secret force-app/main/default/labels/CustomLabels.labels-meta.xml Stripe_Secret_Test\n' > "$_SD/allow.txt"
+    _sc --allow "$_SD/allow.txt"
+    assert_equals "$_RC" "10" "scan: キーで許可したラベルは外れるが、別のラベルの疑いは残る"
+    assert_output_contains "$_OUT" "許可済み 1 件" "scan: 許可済みの件数が出る"
+    assert_output_not_contains "$_OUT" "\[WARNING\] 秘密の疑い: customlabel-secret force-app/main/default/labels/CustomLabels.labels-meta.xml（キー: Stripe_Secret_Test）" "scan: 許可したラベルは、警告に出ない"
+    assert_output_contains "$_OUT" "Other_Token" "scan: 許可していないラベルは、残る"
+    assert_file_contains "$_SD/rep.tsv" "customlabel-secret	force-app/main/default/labels/CustomLabels.labels-meta.xml	1	Other_Token" "scan: 結果のファイルに、キーの列が入る"
+    rm -rf "$_SD"
+}
+
+# scan の規則の精度（2 回目のレビューの指摘）: 秘密でない型・名前・日付・Apex の連結／ 巨大な入力でも遅くならない／ 許可の書式
+test_scan_rules2() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] metasync.js: scan（規則の精度 その 2）${CLR_RST}"
+    _sc_mk
+    _sc_put fetched customMetadata/Cfg.md-meta.xml '<CustomMetadata><values><field>Token_Endpoint__c</field><value xsi:type="xsd:string">/services/oauth2/token</value></values><values><field>Token_Expiry__c</field><value xsi:type="xsd:date">2026-12-31</value></values><values><field>Token_Lifetime_Sec__c</field><value xsi:type="xsd:double">86400000.0</value></values><values><field>Api_Key_Updated__c</field><value xsi:type="xsd:dateTime">2026-11-01T00:00:00.000Z</value></values><values><field>External_Key__c</field><value xsi:type="xsd:string">ACC-00123</value></values><values><field>Credential_Name__c</field><value xsi:type="xsd:string">MyNamedCred01</value></values></CustomMetadata>'; _sc_plan A customMetadata/Cfg.md-meta.xml
+    _sc_put fetched labels/CustomLabels.labels-meta.xml '<CustomLabels><labels><fullName>Token_Url</fullName><value>/services/oauth2/token</value></labels></CustomLabels>'; _sc_plan A labels/CustomLabels.labels-meta.xml
+    _sc_put fetched classes/Soap.cls "public class Soap { String x = '<password>' + pwd + '</password>'; String y = '&client_secret='+creds.get(0).Secret+'&username='; }"; _sc_plan A classes/Soap.cls
+    _sc_put fetched classes/Contest.cls "@isTest public class ContestHelper { }"; _sc_plan A classes/Contest.cls
+    _sc
+    assert_equals "$_RC" "0" "scan: 秘密でない型（日付・数値）・名前・相対パス・Apex の文字列連結は、疑いにしない"
+    rm -rf "$_SD"
+    # すり抜けない: ラベルの CDATA・Flow の直書き・Contest.cls（名前が test で終わるだけの本番クラス）・UTF-16BE の奇数長
+    _sc_mk
+    _sc_put fetched labels/CustomLabels.labels-meta.xml '<CustomLabels><labels><fullName>Stripe_Secret</fullName><value><![CDATA[Zq81xKd92mP4wQ]]></value></labels></CustomLabels>'; _sc_plan A labels/CustomLabels.labels-meta.xml
+    _sc_put fetched flows/F.flow-meta.xml '<Flow><inputAssignments><field>Api_Key__c</field><value><stringValue>Zq81xKd92mP4wQ</stringValue></value></inputAssignments></Flow>'; _sc_plan A flows/F.flow-meta.xml
+    _sc_put fetched classes/Contest.cls "public class Contest { String apiKey = 'q9Zx81LmPq77aa'; }"; _sc_plan A classes/Contest.cls
+    printf '\376\377abc' > "$_SD/fetched/force-app/main/default/classes/odd.cls"; _sc_plan A classes/odd.cls
+    _sc
+    assert_equals "$_RC" "10" "scan: CDATA のラベル・Flow の直書き・Contest.cls は、疑いにする"
+    assert_output_contains "$_OUT" "customlabel-secret force-app/main/default/labels/CustomLabels.labels-meta.xml（キー: Stripe_Secret）" "scan: ラベルの CDATA の中の値"
+    assert_output_contains "$_OUT" "custommetadata-secret-field force-app/main/default/flows/F.flow-meta.xml（キー: Api_Key__c）" "scan: Flow の stringValue の直書き"
+    assert_output_contains "$_OUT" "code-hardcoded-secret force-app/main/default/classes/Contest.cls" "scan: Contest.cls は、テストクラスとして除外しない"
+    assert_output_not_contains "$_OUT" "検査するファイルを読めません" "scan: UTF-16BE の奇数長のファイルで、検査全体が失敗しない"
+    rm -rf "$_SD"
+    # 巨大で閉じタグのない入力でも、遅くならない（線形）。約 3 MB の閉じない <token>・<labels>・<field> を、10 秒以内に検査できる
+    _sc_mk
+    node -e 'const fs=require("fs");const d=process.argv[1]+"/fetched/force-app/main/default/";fs.mkdirSync(d+"authproviders",{recursive:true});fs.mkdirSync(d+"labels",{recursive:true});fs.mkdirSync(d+"customMetadata",{recursive:true});
+      fs.writeFileSync(d+"authproviders/Big.authprovider-meta.xml","<token>x".repeat(300000));
+      fs.writeFileSync(d+"labels/CustomLabels.labels-meta.xml","<labels><fullName>a</fullName>".repeat(100000));
+      fs.writeFileSync(d+"customMetadata/Big.md-meta.xml","<field>a</field><value>".repeat(150000));' "$_SD"
+    _sc_plan A authproviders/Big.authprovider-meta.xml; _sc_plan A labels/CustomLabels.labels-meta.xml; _sc_plan A customMetadata/Big.md-meta.xml
+    local t0=$SECONDS
+    _sc
+    [[ $((SECONDS - t0)) -lt 10 ]] && pass "scan: 閉じタグのない巨大な入力でも、遅くならない（線形）" || fail "scan: 閉じタグのない巨大な入力でも、遅くならない（線形）" "$((SECONDS - t0)) 秒かかった"
+    rm -rf "$_SD"
+    # 名前の除外は、末尾の「単語」で見る: 本物の鍵の名前（末尾が id・count・time・ms に当たるだけのもの）を、除外しない
+    _sc_mk
+    local nm
+    for nm in Api_Key_Android Token_Guid Secret_Account Api_Token_Account Api_Key_Realtime Password_Onetime Token_Sms Auth_Token_Params Non_Expiring_Token Expiring_Api_Key Expiry_Secret Token_Value Password_Hash; do
+        printf '<field>%s__c</field><value xsi:type="xsd:string">Zq81xKd92mP4wQ7aB</value>' "$nm"
+    done > "$_SD/fields.txt"
+    _sc_put fetched customMetadata/Names.md-meta.xml "<CustomMetadata><values>$(cat "$_SD/fields.txt")</values></CustomMetadata>"; _sc_plan A customMetadata/Names.md-meta.xml
+    _sc
+    assert_output_contains "$_OUT" "疑い 13 件" "scan: 末尾が id・count・time・ms・expir に当たるだけの本物の鍵の名前を、除外しない（13 個とも疑い）"
+    rm -rf "$_SD"; _sc_mk
+    for nm in Api_Key_Id Client_Secret_Name Token_Endpoint Token_Expiry Token_Lifetime_Sec Api_Key_Updated Credential_Name Password_Label; do
+        printf '<field>%s__c</field><value xsi:type="xsd:string">Zq81xKd92mP4wQ7aB</value>' "$nm"
+    done > "$_SD/fields.txt"
+    _sc_put fetched customMetadata/Benign.md-meta.xml "<CustomMetadata><values>$(cat "$_SD/fields.txt")</values></CustomMetadata>"; _sc_plan A customMetadata/Benign.md-meta.xml
+    _sc
+    assert_equals "$_RC" "0" "scan: 最後の単語が id・name・label・endpoint・expiry などの名前は、除外する"
+    rm -rf "$_SD"
+    # 巨大で、2 乗時間になりやすい形の入力（JWT の eyJ-・属性つきの未完の要素・閉じない CDATA）でも、遅くならない
+    _sc_mk
+    node -e 'const fs=require("fs");const d=process.argv[1]+"/fetched/force-app/main/default/";fs.mkdirSync(d+"classes",{recursive:true});fs.mkdirSync(d+"authproviders",{recursive:true});
+      fs.writeFileSync(d+"classes/Jwt.cls","eyJ-".repeat(600000));
+      fs.writeFileSync(d+"authproviders/Attr.authprovider-meta.xml","<token ".repeat(400000));
+      fs.writeFileSync(d+"authproviders/Cd.authprovider-meta.xml","<![CDATA[".repeat(300000));' "$_SD"
+    _sc_plan A classes/Jwt.cls; _sc_plan A authproviders/Attr.authprovider-meta.xml; _sc_plan A authproviders/Cd.authprovider-meta.xml
+    local t1=$SECONDS
+    _sc
+    [[ $((SECONDS - t1)) -lt 10 ]] && pass "scan: 2 乗時間になりやすい形（eyJ-・<token ・<![CDATA[）の巨大な入力でも、遅くならない" || fail "scan: 2 乗時間になりやすい形の巨大な入力でも、遅くならない" "$((SECONDS - t1)) 秒かかった"
+    rm -rf "$_SD"
+    # Flow の定数・変数・入力パラメータの直書き／ 動的な値（{!…}）は除く／ base64 の秘密（/ で始まる）／ キーの制御文字
+    _sc_mk
+    _sc_put fetched flows/G.flow-meta.xml '<Flow><constants><name>API_TOKEN</name><dataType>String</dataType><value><stringValue>Zq81xKd92mP4wQ7aB</stringValue></value></constants><inputParameters><name>password</name><value><stringValue>Zq81xKd92mP4wQ7aB</stringValue></value></inputParameters><constants><name>MY_TOKEN</name><dataType>String</dataType><value><stringValue>KEY-{!varName}-2024</stringValue></value></constants></Flow>'; _sc_plan A flows/G.flow-meta.xml
+    _sc_put fetched customMetadata/Slash.md-meta.xml '<CustomMetadata><values><field>Client_Secret__c</field><value xsi:type="xsd:string">/x9Kd82mPq4Zw1Ab+c==</value></values></CustomMetadata>'; _sc_plan A customMetadata/Slash.md-meta.xml
+    _sc
+    assert_output_contains "$_OUT" "flows/G.flow-meta.xml（キー: API_TOKEN）" "scan: Flow の定数（<name> の後の <stringValue>）の直書き"
+    assert_output_contains "$_OUT" "flows/G.flow-meta.xml（キー: password）" "scan: Flow の入力パラメータの直書き"
+    assert_output_not_contains "$_OUT" "キー: MY_TOKEN" "scan: Flow の動的な値（{!…} を含む）は、疑いにしない"
+    assert_output_contains "$_OUT" "customMetadata/Slash.md-meta.xml（キー: Client_Secret__c）" "scan: / で始まる base64 の秘密も、疑いにする（パスの形だけ除外する）"
+    rm -rf "$_SD"; _sc_mk
+    node -e 'const fs=require("fs");const d=process.argv[1]+"/fetched/force-app/main/default/customMetadata/";fs.mkdirSync(d,{recursive:true});
+      fs.writeFileSync(d+"Ctl.md-meta.xml","<CustomMetadata><values><field>Api_Key__c\n[ERROR] forged\tx</field><value xsi:type=\"xsd:string\">Zq81xKd92mP4wQ7aB</value></values></CustomMetadata>");' "$_SD"
+    _sc_plan A customMetadata/Ctl.md-meta.xml
+    _sc
+    assert_output_not_contains "$_OUT" "^\[ERROR\] forged" "scan: 項目名の改行・タブは、ログ・報告に出さない（行を偽装できない）"
+    assert_equals "$(wc -l < "$_SD/rep.tsv" | tr -d ' ')" "1" "scan: 項目名に改行があっても、報告のファイルは 1 行"
+    rm -rf "$_SD"
+    # Flow の変数の既定値（<name> と <value> の間に 4 つの要素）／ Flow の巨大な入力でも遅くならない／ 数 MB の連続した文字列でも、検査全体が落ちない
+    _sc_mk
+    _sc_put fetched flows/V.flow-meta.xml '<Flow><variables><name>varPassword</name><dataType>String</dataType><isCollection>false</isCollection><isInput>true</isInput><isOutput>false</isOutput><value><stringValue>Zq81xKd92mP4wQ7aB</stringValue></value></variables></Flow>'; _sc_plan A flows/V.flow-meta.xml
+    _sc
+    assert_output_contains "$_OUT" "flows/V.flow-meta.xml（キー: varPassword）" "scan: Flow の変数の既定値（間に 4 つの要素）も、疑いにする"
+    rm -rf "$_SD"; _sc_mk
+    node -e 'const fs=require("fs");const d=process.argv[1]+"/fetched/force-app/main/default/";fs.mkdirSync(d+"flows",{recursive:true});fs.mkdirSync(d+"classes",{recursive:true});
+      fs.writeFileSync(d+"flows/Big.flow-meta.xml","<name>a</name><a>b</a>".repeat(200000));
+      fs.writeFileSync(d+"classes/Huge.cls","var u=\"https://x/y?token="+"a1".repeat(8000000)+"\"");' "$_SD"
+    _sc_plan A flows/Big.flow-meta.xml; _sc_plan A classes/Huge.cls
+    local t2=$SECONDS
+    _sc
+    [[ $((SECONDS - t2)) -lt 20 ]] && pass "scan: Flow の <name> の繰り返しの巨大な入力でも、遅くならない" || fail "scan: Flow の <name> の繰り返しの巨大な入力でも、遅くならない" "$((SECONDS - t2)) 秒かかった"
+    assert_output_not_contains "$_OUT" "RangeError" "scan: 数 MB の連続した文字列でも、スタック溢れで検査全体が落ちない"
+    assert_equals "$_RC" "10" "scan: 規則が失敗したファイルは、「検査できなかった」疑いとして扱う（黙って通さない。終了コード 10）"
+    assert_output_contains "$_OUT" "検査できなかった規則: url-secret force-app/main/default/classes/Huge.cls" "scan: 検査できなかった規則名が出る"
+    # 許可の一覧の「scan-error パス」で外せる／ 変更（M）で、手元（変更前）の側も巨大でも、検査全体が落ちない
+    printf 'scan-error force-app/main/default/classes/Huge.cls\n' > "$_SD/allow.txt"
+    _sc --allow "$_SD/allow.txt"
+    assert_equals "$_RC" "0" "scan: 確かめた scan-error は、許可の一覧で外せる"
+    mkdir -p "$_SD/repo/force-app/main/default/classes"; cp "$_SD/fetched/force-app/main/default/classes/Huge.cls" "$_SD/repo/force-app/main/default/classes/Huge.cls"
+    : > "$_SD/plan.tsv"; _sc_plan M classes/Huge.cls
+    _sc
+    assert_equals "$_RC" "10" "scan: 変更（M）で、手元の側も巨大でも、検査全体が落ちず、scan-error になる（終了コード 1 にならない）"
+    rm -rf "$_SD"
+    # 項目名のバックスラッシュで、画面のログの行を偽装できない（echo -e の解釈を受けない）
+    _sc_mk
+    node -e 'const fs=require("fs");const d=process.argv[1]+"/fetched/force-app/main/default/customMetadata/";fs.mkdirSync(d,{recursive:true});
+      fs.writeFileSync(d+"Bs.md-meta.xml","<CustomMetadata><values><field>Api_Key__c\\n[ERROR] forged \\c</field><value xsi:type=\"xsd:string\">Zq81xKd92mP4wQ7aB</value></values></CustomMetadata>");' "$_SD"
+    _sc_plan A customMetadata/Bs.md-meta.xml
+    _sc
+    assert_output_not_contains "$_OUT" "Api_Key__c\\\\n" "scan: 項目名のバックスラッシュは、キーに残さない"
+    rm -rf "$_SD"
+    # 許可の一覧: 規則名の誤記は、黙って効かない行にせず、中断する
+    _sc_mk
+    _sc_put fetched classes/A.cls "public class A { String apiKey = 'abcdef123456'; }"; _sc_plan A classes/A.cls
+    printf 'code-hardcoded force-app/main/default/classes/*\n' > "$_SD/allow.txt"
+    _sc --allow "$_SD/allow.txt"
+    assert_equals "$_RC" "1" "scan: 許可の規則名の誤記 → 中断"
+    assert_output_contains "$_OUT" "規則名が正しくありません" "scan: 規則名の誤記の案内が出る"
+    printf '\357\273\277code-hardcoded-secret force-app/main/default/classes/*\n' > "$_SD/allow.txt"
+    _sc --allow "$_SD/allow.txt"
+    assert_equals "$_RC" "0" "scan: 先頭に BOM があっても、許可が効く"
+    rm -rf "$_SD"
+    # 許可の一覧の書式: 語が 4 つ以上（パスの空白）は、黙って別の意味にせず、中断する。* で書けば効く
+    _sc_mk
+    _sc_put fetched "customMetadata/sp ace/B C.md-meta.xml" '<CustomMetadata><values><field>Api_Key__c</field><value xsi:type="xsd:string">Zq81xKd92mP4wQ7aB</value></values></CustomMetadata>'; _sc_plan A "customMetadata/sp ace/B C.md-meta.xml"
+    printf '* force-app/main/default/customMetadata/sp ace/B C.md-meta.xml\n' > "$_SD/allow.txt"
+    _sc --allow "$_SD/allow.txt"
+    assert_equals "$_RC" "1" "scan: 許可の行に空白があるパス（語が 4 つ以上）→ 中断（黙って別の意味にしない）"
+    assert_output_contains "$_OUT" "パスに空白があるときは" "scan: 空白のパスは、ワイルドカードで書くよう案内する"
+    printf '* force-app/main/default/customMetadata/sp*ace/B*C.md-meta.xml\n' > "$_SD/allow.txt"
+    _sc --allow "$_SD/allow.txt"
+    assert_equals "$_RC" "0" "scan: 空白の部分を * で書けば、許可が効く"
+    rm -rf "$_SD"
+}
+
 test_basic_ops
 test_keep_files
 test_scope
@@ -843,5 +1154,8 @@ test_fingerprint_token_refresh
 test_fingerprint_hardening
 test_fpcompare
 test_fingerprint_table
+test_scan
+test_scan_rules
+test_scan_rules2
 
 print_summary

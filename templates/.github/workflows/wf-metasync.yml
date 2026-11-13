@@ -33,7 +33,8 @@
 #      （未設定なら main）で、~/sf-tools に clone する（Token は使わない）
 #   7. sf-metasync.sh を実行する（GitHub Actions 上のため、警告・確認は表示されない）。オプションは、毎日 1 回の cron と
 #      手動の実行のときだけ --full、それ以外はなし。環境変数 SF_METASYNC_DETECT に、Variable SF_METASYNC_DETECT（未設定なら off）を、
-#      環境変数 SF_METASYNC_FINGERPRINT に、Variable SF_METASYNC_FINGERPRINT（未設定なら off）を渡す。
+#      環境変数 SF_METASYNC_FINGERPRINT に、Variable SF_METASYNC_FINGERPRINT（未設定なら off）を、SF_METASYNC_SECRET_SCAN に、Variable
+#      SF_METASYNC_SECRET_SCAN（未設定なら shadow）を渡す。GH_TOKEN（公開・非公開の確認）と Slack の Secret / Variable も渡す。
 #      主な動き（SF_METASYNC_DETECT が off のとき。shadow・on の検知は、sf-metasync.sh の冒頭コメントを参照）:
 #        sf-tools/config/metadata.txt の種類を、組織から一時プロジェクトへ取得する → main の「同期の対象のフォルダ」を、取得した内容と
 #        同じにする（追加・変更・削除。削除には、安全の守りがある）→ 差分があれば「定期更新: Salesforce変更の自動反映 (YYYY-MM-DD)」で
@@ -41,7 +42,8 @@
 #        push する（失敗したブランチは WARNING でスキップ）。変更がなければ、何もせずに成功する。
 #        詳細と終了コード（0: 同期した・変更なし / 1: 中断 / 3: 同期したが、削除の保留がある）は、sf-metasync.sh の冒頭コメントを参照。
 #        終了コード 3 のとき、ジョブは失敗として表示される（追加・変更の同期と、伝播は済んでいる）
-#   どの手順が失敗しても、以降の手順は行わず、ジョブは失敗する（Slack への通知はしない）
+#   どの手順が失敗しても、以降の手順は行わず、ジョブは失敗する。Slack に通知するのは、sf-metasync.sh が止めたとき（秘密情報の疑い = 終了コード 4、
+#   公開リポジトリ = 終了コード 5）だけ。それ以外の失敗は、通知しない
 #
 # 【必要な Secrets / Variables】
 #   Secrets（このリポジトリに設定する）:
@@ -49,6 +51,8 @@
 #                            sf-update-secret.sh が登録する）
 #     SF_CONSUMER_KEY_PROD : main の組織のアプリ（外部クライアントアプリケーション / 接続アプリケーション）のコンシューマー鍵
 #                            （sf-init の Phase 10・sf-update-secret.sh・sf-init.sh --reconnect が登録する）
+#     SLACK_BOT_TOKEN      : Slack API の Bot Token（任意。秘密の疑い・公開リポジトリで止めたときの通知に使う。wf-release.yml と同じもの。
+#                            未設定なら、通知せずに WARNING を出す）
 #     PAT_TOKEN            : GitHub の PAT（Classic。repo・workflow の権限。sf-init の Phase 6 が登録する）。
 #                            main・staging への push で、Ruleset protect-main / protect-staging（必須チェック）をバイパスする
 #                            （PAT の持ち主が Admin のとき）ために使う
@@ -58,6 +62,9 @@
 #     SF_TOOLS_BRANCH      : clone する sf-tools のブランチ（任意。未設定なら main。Phase 9 は development のときだけ登録する）
 #     SF_METASYNC_DETECT   : 変更の検知のモード（任意。off / shadow / on。未設定なら off = 従来どおり、毎回、全件取得）
 #     SF_METASYNC_FINGERPRINT : 一覧の指紋のモード（任意。off / shadow。未設定なら off。shadow は、指紋と実際の変更の食い違いをログに記録する。取得は省かない）
+#     SF_METASYNC_SECRET_SCAN : 秘密情報の検査のモード（任意。off / shadow / on。未設定なら shadow = 検査して WARNING を出すが、止めない。
+#                            on = 疑いがあれば、何もコミット・push せずに止め、Slack に通知する）
+#     SLACK_CHANNEL_ID     : 通知先 Slack チャンネル ID（任意。wf-release.yml と同じもの）
 #
 # 【補足】
 #   - 同期の push は、pull_request ではないため、wf-release.yml・wf-propagate.yml は動かない（組織へのリリースは行わない。
@@ -159,5 +166,11 @@ jobs:
         env:
           SF_METASYNC_DETECT: ${{ vars.SF_METASYNC_DETECT || 'off' }}
           SF_METASYNC_FINGERPRINT: ${{ vars.SF_METASYNC_FINGERPRINT || 'off' }}
+          SF_METASYNC_SECRET_SCAN: ${{ vars.SF_METASYNC_SECRET_SCAN || 'shadow' }}
+          # リポジトリの公開・非公開の確認（gh api repos/…）に使う。公開、または確認できないときは、取得せずに止める（終了コード 5）
+          GH_TOKEN: ${{ github.token }}
+          # 止めたときの Slack 通知（任意。wf-release.yml と同じ Secret / Variable）
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL_ID: ${{ vars.SLACK_CHANNEL_ID }}
         # --full: 毎日 1 回の cron（0 0 * * 1-5）と、手動の実行では、変更の検知が「変更なし」でも、全件取得する
         run: ~/sf-tools/bin/sf-metasync.sh ${{ (github.event_name != 'schedule' || github.event.schedule == '0 0 * * 1-5') && '--full' || '' }}

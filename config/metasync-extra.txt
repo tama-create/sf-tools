@@ -1,0 +1,30 @@
+# ==============================================================================
+# config/metasync-extra.txt - 追加の取得（現行の取得で取れていないもの）の対象の表
+# ==============================================================================
+# bin/sf-metasync.sh が、環境変数 SF_METASYNC_EXTRA=on のとき、現行の取得（metadata.txt の全種類）のあとに、もう 1 回、
+# 名前を指定した取得（package.xml）を行う。lib/metasync.js の manifest が、組織の一覧（listMetadata）から名前を集めて package.xml を作り、
+# plan が、取得結果の削除の守りに使う。対象の種類は、各プロジェクトの metadata.txt ではなく、この表で決める
+# （sf-tools の更新だけで、既存の force-* に届く）。設計: doc/sf-metasync-redesign.md 16.2・16.5.3・16.5.4
+#
+# 書式: 1 行に「種類名 [folder=フォルダの種類] [unfiled=フォルダに入っていない部品の置き場所] [mode=list|stdobj|svs]」。
+#   mode の既定は list。
+#   list   = その種類の一覧（listMetadata）の名前を、そのまま指定する（管理パッケージ本体は除く）
+#   folder = フォルダ型（レポート・ダッシュボード・メールテンプレート）。ワイルドカードで取れないため、フォルダの一覧を先に取り、
+#            フォルダごとに部品を一覧する。フォルダ自身（folder= の種類）も取る。unfiled= は、フォルダに入っていない部品の置き場所
+#   stdobj = 標準オブジェクト（Account など。オブジェクト名に __ を含まないもの）の上にある部品だけを指定する。
+#            CustomObject / CustomField のワイルドカードが、標準オブジェクトを含まないため。CustomField は、カスタム項目（__c）だけ
+#   svs    = StandardValueSet。ワイルドカードも一覧も 0 件のため、固定の名前の表（lib/metasync.js）から指定する
+# Document・DocumentFolder・ContentAsset は取らない（Git で編集してリリースする便利さがなく、秘密の検査もできないため）。
+# ==============================================================================
+Report         folder=ReportFolder unfiled=unfiled$public
+Dashboard      folder=DashboardFolder
+EmailTemplate  folder=EmailFolder unfiled=unfiled$public
+StandardValueSet mode=svs
+CustomField    mode=stdobj
+ValidationRule mode=stdobj
+ListView       mode=stdobj
+RecordType     mode=stdobj
+WebLink        mode=stdobj
+FieldSet       mode=stdobj
+CompactLayout  mode=stdobj
+BusinessProcess mode=stdobj

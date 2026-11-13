@@ -67,12 +67,20 @@
 #      metadata.txt の全種類を --metadata で指定して実行する。取得先は一時フォルダのため、失敗しても作業ツリーは変わらない。
 #      終了コードが 0 以外で、応答が一時的なエラー（MetadataTransferError・ERROR_HTTP_404・接続の切断・503 など）なら、60 秒待って
 #      1 回だけやり直す（環境変数 SF_METASYNC_RETRY_WAIT で秒数を変えられる）。それでも失敗したら、中断する
+#      続けて、環境変数 SF_METASYNC_EXTRA が on のとき、追加の取得（設計 16 章の P2）を行う: 現行の取得で取れていないもの（レポート・ダッシュボード・
+#      メールテンプレートとそのフォルダ、StandardValueSet、標準オブジェクト上の項目・入力規則・リストビュー・レコードタイプなど。config/metasync-extra.txt）の
+#      名前を、組織の一覧から集め（node lib/metasync.js manifest。管理パッケージ本体は除く）、package.xml で、同じ一時フォルダへ取る
+#      （sf project retrieve start --manifest。一時的なエラーは 1 回やり直す）。失敗しても、同期は止めない: 手順 8 の plan が、その種類のフォルダと
+#      標準オブジェクトの部品（objects/<標準オブジェクト>/）の削除を、すべて保留する（取れなかったものを、削除と取り違えない）。
+#      取れたかどうかは、応答の文言ではなく、ディスクで確かめる: 指定した名前（package.xml）のうち、取得結果にファイルがない名前は、そのファイルの削除だけ
+#      保留する。既定は off（off のときも、手順 8 の plan は、標準オブジェクトの部品の削除を保留する。on で取ったファイルを、off に戻した回に消さないため）
 #   7. 直近にマージされたファイルの一覧を作る（S5 用）: 直近 24 時間に、同期以外のコミットで変わった、同期の対象のパス
 #      （git log --first-parent -m --since="24 hours ago" --invert-grep --grep=<同期のコミットの件名> --name-only）
 #   8. 計画を作る（node lib/metasync.js plan）: 同期の対象のフォルダごとに、手元と取得結果を比べる。追加・変更・削除と、
 #      削除の守りで保留にした分（ファイルは残す）を決める。保留の条件（lib/metasync.js の冒頭に詳細）:
 #        S2 取得の応答に、問題の報告がある ／ S3 手元に 1 件以上あったフォルダが、取得結果で 0 件 ／
-#        S4 削除の件数が max(100, 手元の同期の対象のファイルの 10%) を超える ／ S5 手順 7 の一覧にあるファイル
+#        S4 削除の件数が max(100, 手元の同期の対象のファイルの 10%) を超える ／ S5 手順 7 の一覧にあるファイル ／ S9 追加の取得を行わない設定（off）のときの、標準オブジェクトの部品
+#        （S5・S9 は、終了コードを 3 にしない）
 #      取得の応答の status が 0 以外（S1）のときは、中断する。
 #      続けて、指紋を作っていれば、影の比較を表示する（node lib/metasync.js fpcompare。指紋の結果と、計画の追加・変更・削除を、
 #      フォルダ（objects は子の種類）ごとに突き合わせ、「検知できた」「見逃し」「日時では検知できない種類」「指紋の対象外」を数える。
@@ -137,8 +145,12 @@
 #     全件取得のあとにだけ更新するため、変更のない回は、コミットを作らない。ファイルが変わらず、状態だけが変わるときは、
 #     状態だけのコミットになる）。状態は、速くするための手がかりで、壊れていても全件取得になる。設計: doc/sf-metasync-redesign.md 15 章
 #   - 終了コード: 0（同期した・変更がなかった）／ 1（中断した）／ 3（同期した（追加・変更の push・伝播まで行った）が、
-#     削除の保留（S2・S3・S4）がある。GitHub Actions では、ジョブが失敗として表示される）。S5 の保留だけのときは 0 ／
+#     削除の保留（S2・S3・S4）がある。GitHub Actions では、ジョブが失敗として表示される）。S5・S9 の保留だけのときは 0 ／
 #     4（秘密の疑いで止めた。何もコミット・push していない）／ 5（公開リポジトリ、または公開・非公開を確認できず、取得せずに止めた）
+#   - 追加の取得（設計: doc/sf-metasync-redesign.md 16 章の P2）: 環境変数 SF_METASYNC_EXTRA（off / on。既定 off）。対象の種類は、各プロジェクトの metadata.txt ではなく、
+#     sf-tools の config/metasync-extra.txt で決める（sf-tools の更新だけで、既存の force-* に届く）。Document・ContentAsset は取らない。
+#     on にすると、初回は、レポートなどが大量に追加される。on から off に戻した回は、標準オブジェクトの部品（objects/<標準オブジェクト>/）の削除を保留し、
+#     取得結果に現れない追加の取得のフォルダ（reports など）は、同期の対象にしない（on で取ったファイルを消さない）。取得したものは、手順 8 の秘密情報の検査の対象になる
 #   - 秘密情報の検査・公開リポジトリの拒否・Slack 通知（設計: doc/sf-metasync-redesign.md 16.7）: 環境変数 SF_METASYNC_SECRET_SCAN
 #     （off / shadow / on。既定 shadow = 検査して WARNING を出すが、止めない。誤検知を測ってから on にする）。Slack に通知するのは、
 #     on で秘密の疑いにより止めたとき（終了コード 4）と、公開リポジトリで止めたとき（終了コード 5）だけ。SLACK_BOT_TOKEN・SLACK_CHANNEL_ID
@@ -245,6 +257,11 @@ readonly FP_MODE="${SF_METASYNC_FINGERPRINT:-off}"
 readonly SCAN_MODE="${SF_METASYNC_SECRET_SCAN:-shadow}"
 [[ "$SCAN_MODE" == "off" || "$SCAN_MODE" == "shadow" || "$SCAN_MODE" == "on" ]] \
     || die "SF_METASYNC_SECRET_SCAN は off / shadow / on のどれかにしてください: ${SCAN_MODE}"
+# 追加の取得のモード（設計 16 章の P2。off = 行わない（既定）／ on = 現行の取得のあと、もう 1 回、名前を指定して取得する:
+#   レポート・ダッシュボード・メールテンプレート（とフォルダ）・StandardValueSet・標準オブジェクト上の項目や入力規則など。config/metasync-extra.txt）
+readonly EXTRA_MODE="${SF_METASYNC_EXTRA:-off}"
+[[ "$EXTRA_MODE" == "off" || "$EXTRA_MODE" == "on" ]] \
+    || die "SF_METASYNC_EXTRA は off / on のどちらかにしてください: ${EXTRA_MODE}"
 # 止めたときの終了コード（4 = 秘密の疑いで止めた／ 5 = 公開リポジトリ（または公開・非公開を確認できない）で止めた）
 readonly EXIT_SECRET=4
 readonly EXIT_PUBLIC=5
@@ -590,6 +607,57 @@ phase_retrieve_metadata() {
     return $RET_NG
 }
 
+# 【RETRIEVE-EXTRA】追加の取得（設計 16 章の P2。SF_METASYNC_EXTRA が on のとき。手順 6 のあと）
+#   現行の取得で取れていないもの（フォルダ型・StandardValueSet・標準オブジェクト上の部品）の名前を、組織の一覧から集めて（node lib/metasync.js
+#   manifest）、package.xml で取る（同じ一時プロジェクトへ）。結果は EXTRA_STATE に入る: ok = 取れた（取る部品がない場合を含む）／ failed = 失敗。
+#   失敗しても、同期は止めない: plan が、その種類のフォルダと標準オブジェクトの部品の削除を、すべて保留する（取れなかったものを、削除と取り違えない）
+#   run 不使用: 応答（JSON）を判定に使うため、ファイルへ受ける（phase_retrieve_metadata と同じ）
+EXTRA_STATE="off"
+EXTRA_JSON=""
+EXTRA_TABLE="${SCRIPT_DIR}/../config/metasync-extra.txt"
+phase_retrieve_extra() {
+    [[ "$EXTRA_MODE" == "off" ]] && return $RET_OK
+    EXTRA_STATE="failed"
+    local manifest="$WORK_DIR/extra.package.xml" err="$WORK_DIR/extra.retrieve.err" out rc attempt
+    EXTRA_JSON="$WORK_DIR/extra.retrieve.json"
+    if [[ ! -f "$EXTRA_TABLE" ]]; then
+        log "WARNING" "追加の取得の表が見つかりません（${EXTRA_TABLE}）。追加の取得は行いません（その種類の削除は保留します）。"
+        return $RET_OK
+    fi
+    log "INFO" "追加の取得: 名前を集めます（SF_METASYNC_EXTRA=${EXTRA_MODE}。読み取りのみ）..."
+    out=$("$NODE_BIN" "$METASYNC_JS" manifest --org "$TARGET_ORG" --extra-config "$EXTRA_TABLE" --repo . --out "$manifest" 2>&1)
+    rc=$?
+    _log_node_lines "$out"
+    if [[ $rc -eq 12 ]]; then
+        EXTRA_STATE="ok"
+        log "INFO" "追加の取得: 取る部品がありません。"
+        return $RET_OK
+    fi
+    if [[ $rc -ne 0 ]]; then
+        log "WARNING" "追加の取得: 名前を集められませんでした。今回は取りません（その種類と標準オブジェクトの部品の削除は保留します）。"
+        return $RET_OK
+    fi
+    for attempt in 1 2; do
+        log "INFO" "追加の取得: 組織から取得します（package.xml。試行 ${attempt}/2）..."
+        ( cd "$WORK_DIR" && sf project retrieve start --target-org "$TARGET_ORG" --ignore-conflicts --json --manifest "$manifest" ) > "$EXTRA_JSON" 2> "$err"
+        rc=$?
+        if [[ $rc -eq 0 ]]; then
+            EXTRA_STATE="ok"
+            log "SUCCESS" "追加の取得: 完了"
+            return $RET_OK
+        fi
+        log "WARNING" "追加の取得が失敗しました（終了コード ${rc}）: $(_mask_secrets "$(head -c 600 "$err"; head -c 600 "$EXTRA_JSON")" | tr '\n' ' ')"
+        if [[ $attempt -eq 1 ]] && grep -qE 'MetadataTransferError|UNKNOWN_EXCEPTION|ERROR_HTTP_404|ECONNRESET|ETIMEDOUT|socket hang up|fetch failed|503|Service Unavailable' "$EXTRA_JSON" "$err" 2>/dev/null; then
+            log "WARNING" "一時的なエラーの可能性があるため、${SF_METASYNC_RETRY_WAIT:-60} 秒待って 1 回だけやり直します。"
+            sleep "${SF_METASYNC_RETRY_WAIT:-60}"  # run 不使用: 待機
+            continue
+        fi
+        break
+    done
+    log "WARNING" "追加の取得は行えませんでした。その種類と標準オブジェクトの部品の削除は保留します。"
+    return $RET_OK
+}
+
 # 【RECENT】直近 24 時間に、同期以外のコミット（PR のマージなど）で変わったファイルの一覧を作る（手順 7。S5 用）
 #   組織にまだリリースされていない（リリース中・失敗した）部品は、組織にないため、鏡像では削除の対象になってしまう。それを保留にする
 #   run 不使用: 出力をファイルへ受けるため。失敗しても、空の一覧にして続ける（S5 が働かないだけ）
@@ -606,6 +674,20 @@ phase_plan() {
     local args=(plan --repo . --fetched "$WORK_DIR" --types-file "$METADATA_CONFIG" --dirs-table "${SCRIPT_DIR}/../config/metadata-dirs.txt"
                 --out "$PLAN_FILE" --recent-files "$RECENT_FILES" --retrieve-json "$RETRIEVE_JSON")
     [[ "$ALLOW_MASS" -eq 1 ]] && args+=(--allow-mass-delete)
+    # 追加の取得の扱い: off でも表と状態（off）を渡す（on で入れた標準オブジェクトの部品を、off に戻した回に消さないため）。on は、結果（ok / failed）と、
+    #   取るのに使った package.xml（取れたかを、ディスクで確かめる）も渡す
+    if [[ "$EXTRA_MODE" == "on" && ! -f "$EXTRA_TABLE" ]]; then
+        log "ERROR" "追加の取得の表が見つかりません（${EXTRA_TABLE}）。標準オブジェクトの部品を守れないため、計画を作りません（sf-tools の更新を確認してください）。"
+        return $RET_NG
+    fi
+    if [[ -f "$EXTRA_TABLE" ]]; then
+        if [[ "$EXTRA_MODE" == "on" ]]; then
+            args+=(--extra-config "$EXTRA_TABLE" --extra-json "$EXTRA_JSON" --extra-state "$EXTRA_STATE")
+            [[ "$EXTRA_STATE" == "ok" && -f "$WORK_DIR/extra.package.xml" ]] && args+=(--extra-manifest "$WORK_DIR/extra.package.xml")
+        else
+            args+=(--extra-config "$EXTRA_TABLE" --extra-state off)
+        fi
+    fi
     local summary line
     # run 不使用: 戻り値（0 / 3 / 1）で分岐し、要約をログにも記録するため
     summary=$("$NODE_BIN" "$METASYNC_JS" "${args[@]}" 2>&1)
@@ -849,6 +931,8 @@ fi
 
 phase_retrieve_metadata || die "メタデータの取得に失敗しました。"
 log "SUCCESS" "メタデータ取得完了"
+
+phase_retrieve_extra    # 失敗しても止めない（plan が、その種類の削除を保留する）
 
 phase_recent_files
 phase_plan              || die "計画の作成に失敗しました。"

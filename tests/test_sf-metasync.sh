@@ -1039,6 +1039,81 @@ test_p3_scan_on() {
     _ms_unset; _p3_unset; teardown "$td" "$mb"
 }
 
+# ------------------------------------------------------------------------------
+# 追加の取得（SF_METASYNC_EXTRA。設計: doc/sf-metasync-redesign.md 16 章の P2）のテスト
+#   名前を集める Metadata API は、モックのサーバー（_fpi_start）。--manifest つきの sf project retrieve は、モックの MOCK_SF_EXTRA_*
+# ------------------------------------------------------------------------------
+_ex_unset() { unset SF_METASYNC_EXTRA MOCK_SF_EXTRA_FILES MOCK_SF_EXTRA_EXIT MOCK_SF_EXTRA_ERR MOCK_SF_EXTRA_JSON; }
+# 通常の取得に、カスタムオブジェクトのファイルを 1 つ入れる（objects を、同期の対象にする）。手元に、標準オブジェクトの項目のファイルを置く
+_ex_prep() {
+    export MOCK_GIT_DIFF_EXIT_2ND=1
+    export MOCK_SF_RETRIEVE_FILES='force-app/main/default/objects/Foo__c/Foo__c.object-meta.xml|<CustomObject/>'
+    mkdir -p "$td/force-app/main/default/objects/Account/fields"
+    printf 'old\n' > "$td/force-app/main/default/objects/Account/fields/Old__c.field-meta.xml"
+}
+
+# off（既定）: 追加の取得をしない（名前を集めない・--manifest の取得をしない）
+test_extra_off_default() {
+    local td mb mh; _ms_env td mb mh; _fpi_start; _ex_prep
+    _ms_run 'Y\nY\n'
+    assert_file_not_contains "$MOCK_CALL_LOG" "--manifest" "追加の取得 off: --manifest の取得をしない"
+    assert_output_not_contains "$_MS_OUT" "追加の取得: 完了" "追加の取得 off: 追加の取得を行わない"
+    assert_equals "$(wc -l < "$FPI_DIR/requests.log" | tr -d ' ')" "0" "追加の取得 off: Metadata API を呼ばない"
+    # on で入れた標準オブジェクトの部品は、off に戻した回に消さない（保留して、理由を出す）
+    [[ -f "$td/force-app/main/default/objects/Account/fields/Old__c.field-meta.xml" ]] && pass "追加の取得 off: 標準オブジェクトの項目を、削除しない" || fail "追加の取得 off: 標準オブジェクトの項目を、削除しない"
+    assert_output_contains "$_MS_OUT" "追加の取得は行わない設定" "追加の取得 off: 保留の理由が出る"
+    _fpi_stop; _ms_unset; _ex_unset; teardown "$td" "$mb"
+}
+
+test_extra_bad_mode() {
+    local td mb mh; _ms_env td mb mh
+    SF_METASYNC_EXTRA=maybe _ms_run 'Y\nY\n'
+    assert_exit_fail "$_MS_RC" "追加の取得のモードが不正 → 中断"
+    assert_output_contains "$_MS_OUT" "off / on" "使える値が出る"
+    _ms_unset; _ex_unset; teardown "$td" "$mb"
+}
+
+# on・成功: 名前を集め、--manifest で取り、取得結果（reports）を反映する。標準オブジェクトの部品も、組織になければ削除できる
+test_extra_on_ok() {
+    local td mb mh; _ms_env td mb mh; _fpi_start; _ex_prep
+    _fpi_set ReportFolder '[{"fullName":"F1"}]'
+    _fpi_set 'Report|F1' '[{"fullName":"F1/R1"},{"fullName":"F1/R2"}]'   # R2 は、一覧にあるが、取得の応答に入らない（取れなかったレポート）
+    mkdir -p "$td/force-app/main/default/reports/F1"; printf 'r2\n' > "$td/force-app/main/default/reports/F1/R2.report-meta.xml"
+    export MOCK_SF_EXTRA_FILES='force-app/main/default/reports/F1/R1.report-meta.xml|<Report/>'
+    SF_METASYNC_EXTRA=on _ms_run 'Y\nY\n'
+    [[ -f "$td/force-app/main/default/reports/F1/R2.report-meta.xml" ]] && pass "追加の取得 on: 指定したのに取れなかったレポートは、削除しない（ディスクで確かめて保留）" || fail "追加の取得 on: 指定したのに取れなかったレポートは、削除しない"
+    assert_file_contains "$MOCK_CALL_LOG" "--manifest" "追加の取得 on: --manifest で取得する"
+    assert_output_contains "$_MS_OUT" "追加の取得: 完了" "追加の取得 on: 完了と出る"
+    assert_output_contains "$_MS_OUT" "追加の取得: 反映した" "追加の取得 on: 計画の要約に出る"
+    [[ -f "$td/force-app/main/default/reports/F1/R1.report-meta.xml" ]] && pass "追加の取得 on: 取得したレポートが、作業ツリーに入る" || fail "追加の取得 on: 取得したレポートが、作業ツリーに入る"
+    [[ ! -f "$td/force-app/main/default/objects/Account/fields/Old__c.field-meta.xml" ]] && pass "追加の取得 on・成功: 組織にない標準オブジェクトの項目は、削除する" || fail "追加の取得 on・成功: 組織にない標準オブジェクトの項目は、削除する"
+    assert_file_contains "$FPI_DIR/requests.log" "ReportFolder|" "追加の取得 on: フォルダの一覧を取る"
+    _fpi_stop; _ms_unset; _ex_unset; teardown "$td" "$mb"
+}
+
+# on・取得の失敗: 同期は続け、標準オブジェクトの部品の削除を保留する（取れなかったものを、削除と取り違えない）
+test_extra_retrieve_fails() {
+    local td mb mh; _ms_env td mb mh; _fpi_start; _ex_prep
+    export MOCK_SF_EXTRA_EXIT=1 MOCK_SF_EXTRA_ERR="boom"
+    SF_METASYNC_EXTRA=on SF_METASYNC_RETRY_WAIT=0 _ms_run 'Y\nY\n'
+    assert_output_contains "$_MS_OUT" "追加の取得が失敗しました" "追加の取得の失敗が、WARNING で出る"
+    assert_output_contains "$_MS_OUT" "追加の取得が失敗または不完全だったため" "削除を保留した旨が、計画の要約に出る"
+    [[ -f "$td/force-app/main/default/objects/Account/fields/Old__c.field-meta.xml" ]] && pass "追加の取得が失敗: 標準オブジェクトの項目を、削除しない" || fail "追加の取得が失敗: 標準オブジェクトの項目を、削除しない"
+    assert_file_contains "$MOCK_CALL_LOG" "git commit" "追加の取得が失敗でも: 通常の取得の内容は、コミットする（同期は止めない）"
+    _fpi_stop; _ms_unset; _ex_unset; teardown "$td" "$mb"
+}
+
+# on・名前を集められない（Metadata API に接続できない）: 取得せず、同じく保留
+test_extra_manifest_fails() {
+    local td mb mh; _ms_env td mb mh; _fpi_start; _ex_prep
+    export MOCK_SF_ORG_JSON='{"status":0,"result":{"alias":"testorg","id":"00D000000000001AAA","accessToken":"TESTTOKEN","instanceUrl":"http://127.0.0.1:1"}}'
+    SF_METASYNC_EXTRA=on _ms_run 'Y\nY\n'
+    assert_output_contains "$_MS_OUT" "名前を集められませんでした" "名前を集められない: WARNING が出る"
+    assert_file_not_contains "$MOCK_CALL_LOG" "--manifest" "名前を集められない: --manifest の取得をしない"
+    [[ -f "$td/force-app/main/default/objects/Account/fields/Old__c.field-meta.xml" ]] && pass "名前を集められない: 標準オブジェクトの項目を、削除しない" || fail "名前を集められない: 標準オブジェクトの項目を、削除しない"
+    _fpi_stop; _ms_unset; _ex_unset; teardown "$td" "$mb"
+}
+
 # Actions 上で GH_TOKEN がない（wf-metasync.yml が古い）→ 理由が分かる文言で止める。gh は呼ばない
 test_p3_visibility_no_token() {
     local td mb mh; _ms_env td mb mh
@@ -1139,6 +1214,11 @@ test_fp_dry_run
 test_fp_changed_but_no_file_change
 test_p3_visibility_ok
 test_p3_visibility_public
+test_extra_off_default
+test_extra_bad_mode
+test_extra_on_ok
+test_extra_retrieve_fails
+test_extra_manifest_fails
 test_p3_visibility_no_token
 test_p3_slack_escape_syntax
 test_p3_scan_shadow

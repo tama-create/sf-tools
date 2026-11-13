@@ -247,6 +247,7 @@ templates/.github/workflows/  ─ sf-init →   .github/workflows/
   <li>本番の組織に、JWT 認証でログインする</li>
   <li>sf-tools を取ってきて、<code>sf-metasync.sh</code> を実行する</li>
   <li><code>sf-tools/config/metadata.txt</code> に書かれた種類のメタデータを、一時的な場所へ取得し、<code>main</code> の同期の対象のフォルダを、取得した内容と同じにする（追加・変更・<strong>削除</strong>。削除には安全の守りがあり、当たったものは保留にして、終了コード 3 で知らせます）（<a href="../reference/commands-auto.html#sf-metasync">取得する種類</a>）</li>
+  <li>Variable <code>SF_METASYNC_EXTRA</code> を <code>on</code> にしていると、通常の取得では取れないもの（レポート・ダッシュボード・メールテンプレート・標準オブジェクト上の項目など）も、名前を指定して、もう 1 回取る（既定は <code>off</code>。取れなかったものを、削除と取り違えない）</li>
   <li>変更があれば、コミットして、<code>main</code> へ直接 push し、<code>branches.txt</code> のほかのブランチ（staging・develop）へ伝える（伝えられなかったブランチは、警告を出して飛ばす）。変更がなければ、何もせず、正常に終わる</li>
 </ol>
 

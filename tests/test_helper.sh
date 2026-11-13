@@ -369,6 +369,16 @@ case "$1 $2" in
         # sf-metasync の取得を再現: MOCK_SF_RETRIEVE_FILES=<パス|内容>（複数は改行区切り）を、カレント（取得先の一時プロジェクト）に書く。
         #   MOCK_SF_RETRIEVE_EXIT=<コード>: その終了コードで失敗する（MOCK_SF_RETRIEVE_ERR=<文言> を標準エラーに出す）
         #   MOCK_SF_RETRIEVE_JSON=<JSON>: 標準出力に出す応答
+        # 追加の取得（sf-metasync の P2。--manifest つき）: MOCK_SF_EXTRA_FILES=<パス|内容>（複数は改行区切り）を書く。MOCK_SF_EXTRA_EXIT=<コード> で失敗する
+        #   （MOCK_SF_EXTRA_ERR を標準エラーに出す）。MOCK_SF_EXTRA_JSON=<JSON> は、標準出力に出す応答。--manifest がなければ、下の通常の取得
+        if [[ " $* " == *" --manifest "* ]]; then
+            if [[ -n "${MOCK_SF_EXTRA_EXIT:-}" ]]; then echo "${MOCK_SF_EXTRA_ERR:-}" >&2; exit "$MOCK_SF_EXTRA_EXIT"; fi
+            if [[ -n "${MOCK_SF_EXTRA_FILES:-}" ]]; then
+                while IFS="|" read -r _fp _fc; do [[ -n "$_fp" ]] || continue; mkdir -p "${_fp%/*}"; printf '%s\n' "$_fc" > "$_fp"; done <<< "$MOCK_SF_EXTRA_FILES"
+            fi
+            [[ -n "${MOCK_SF_EXTRA_JSON:-}" ]] && echo "$MOCK_SF_EXTRA_JSON"
+            exit 0
+        fi
         if [[ -n "${MOCK_SF_RETRIEVE_EXIT:-}" ]]; then
             _rcnt="${MOCK_CALL_LOG%/*}/retrieve.cnt"; _rn=$(( $(cat "$_rcnt" 2>/dev/null || echo 0) + 1 )); echo "$_rn" > "$_rcnt"
             # MOCK_SF_RETRIEVE_FAIL_ONCE=1: 1 回目だけ失敗する（やり直しの確認）

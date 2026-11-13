@@ -34,7 +34,7 @@
 #   7. sf-metasync.sh を実行する（GitHub Actions 上のため、警告・確認は表示されない）。オプションは、毎日 1 回の cron と
 #      手動の実行のときだけ --full、それ以外はなし。環境変数 SF_METASYNC_DETECT に、Variable SF_METASYNC_DETECT（未設定なら off）を、
 #      環境変数 SF_METASYNC_FINGERPRINT に、Variable SF_METASYNC_FINGERPRINT（未設定なら off）を、SF_METASYNC_SECRET_SCAN に、Variable
-#      SF_METASYNC_SECRET_SCAN（未設定なら shadow）を渡す。GH_TOKEN（公開・非公開の確認）と Slack の Secret / Variable も渡す。
+#      SF_METASYNC_SECRET_SCAN（未設定なら shadow）を、SF_METASYNC_EXTRA に、Variable SF_METASYNC_EXTRA（未設定なら off）を渡す。GH_TOKEN（公開・非公開の確認）と Slack の Secret / Variable も渡す。
 #      主な動き（SF_METASYNC_DETECT が off のとき。shadow・on の検知は、sf-metasync.sh の冒頭コメントを参照）:
 #        sf-tools/config/metadata.txt の種類を、組織から一時プロジェクトへ取得する → main の「同期の対象のフォルダ」を、取得した内容と
 #        同じにする（追加・変更・削除。削除には、安全の守りがある）→ 差分があれば「定期更新: Salesforce変更の自動反映 (YYYY-MM-DD)」で
@@ -64,6 +64,8 @@
 #     SF_METASYNC_FINGERPRINT : 一覧の指紋のモード（任意。off / shadow。未設定なら off。shadow は、指紋と実際の変更の食い違いをログに記録する。取得は省かない）
 #     SF_METASYNC_SECRET_SCAN : 秘密情報の検査のモード（任意。off / shadow / on。未設定なら shadow = 検査して WARNING を出すが、止めない。
 #                            on = 疑いがあれば、何もコミット・push せずに止め、Slack に通知する）
+#     SF_METASYNC_EXTRA    : 追加の取得のモード（任意。off / on。未設定なら off。on は、レポート・ダッシュボード・メールテンプレート・StandardValueSet・標準オブジェクト上の
+#                            項目などを、名前を指定して、もう 1 回取る。初回は大量に追加される）
 #     SLACK_CHANNEL_ID     : 通知先 Slack チャンネル ID（任意。wf-release.yml と同じもの）
 #
 # 【補足】
@@ -167,6 +169,7 @@ jobs:
           SF_METASYNC_DETECT: ${{ vars.SF_METASYNC_DETECT || 'off' }}
           SF_METASYNC_FINGERPRINT: ${{ vars.SF_METASYNC_FINGERPRINT || 'off' }}
           SF_METASYNC_SECRET_SCAN: ${{ vars.SF_METASYNC_SECRET_SCAN || 'shadow' }}
+          SF_METASYNC_EXTRA: ${{ vars.SF_METASYNC_EXTRA || 'off' }}
           # リポジトリの公開・非公開の確認（gh api repos/…）に使う。公開、または確認できないときは、取得せずに止める（終了コード 5）
           GH_TOKEN: ${{ github.token }}
           # 止めたときの Slack 通知（任意。wf-release.yml と同じ Secret / Variable）

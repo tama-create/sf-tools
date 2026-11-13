@@ -1141,6 +1141,187 @@ test_scan_rules2() {
     rm -rf "$_SD"
 }
 
+# --- 11. 追加の取得（設計 16 章の P2）: manifest（名前を集めて package.xml を作る）と、plan の追加の取得の守り ---
+_ex_cfg() { printf '%s\n' "$@" > "$_FD/extra.txt"; }
+_ex() {   # manifest を実行する。結果: $_OUT・$_RC・$_FD/package.xml
+    rm -f "$_FD/package.xml"
+    _OUT=$(SF_METASYNC_SF="bash $_FD/bin/sf" MOCK_CALL_LOG="$_FD/calls.log" MOCK_SF_ORG_JSON="$_FD_ORG" \
+        node "$MJS" manifest --org prod --extra-config "$_FD/extra.txt" --repo "$_FD/repo" --out "$_FD/package.xml" "$@" 2>&1)
+    _RC=$?
+}
+test_manifest() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] metasync.js: manifest（追加の取得の package.xml）${CLR_RST}"
+    _fp_mk
+    _ex_cfg 'Report folder=ReportFolder unfiled=unfiled$public' 'StandardValueSet mode=svs' 'CustomField mode=stdobj' 'ListView mode=stdobj' 'Gone2'
+    node -e 'const fs=require("fs");const f=process.argv[1];const d=JSON.parse(fs.readFileSync(f,"utf8"));const L=d.lists;
+      L.ReportFolder=[{fullName:"F1"},{fullName:"unfiled$public"},{fullName:"ns_F",manageableState:"installed"}];
+      L["Report|F1"]=[{fullName:"F1/R1"},{fullName:"F1/Rm",manageableState:"installed"}];
+      L["Report|unfiled$public"]=[{fullName:"unfiled$public/U1"}];
+      L["Report|ns_F"]=[{fullName:"ns_F/X"}];
+      L.CustomField=[{fullName:"Account.Foo__c"},{fullName:"Account.Name"},{fullName:"MyObj__c.Bar__c"},{fullName:"ns__Obj__c.Baz__c"},{fullName:"Contact.ns__Q__c"},{fullName:"Case.Inst__c",manageableState:"installed"}];
+      L.ListView=[{fullName:"Account.AllAccounts"},{fullName:"MyObj__c.All"}];
+      L.Gone2={fault:"INVALID_TYPE: Cannot use: Gone2 in this organization"};
+      fs.writeFileSync(f,JSON.stringify(d));' "$_FD/data.json"
+    _ex
+    assert_equals "$_RC" "0" "manifest: package.xml を書く（終了コード 0）"
+    assert_output_contains "$_OUT" "追加の取得:" "manifest: 部品の数が出る"
+    assert_file_contains "$_FD/package.xml" "<members>F1/R1</members>" "manifest: フォルダの中のレポート"
+    assert_file_contains "$_FD/package.xml" "<members>unfiled\$public/U1</members>" "manifest: フォルダに入っていないレポート（unfiled\$public）"
+    assert_file_contains "$_FD/package.xml" "<name>ReportFolder</name>" "manifest: フォルダ自身の種類（ReportFolder）も取る"
+    assert_file_not_contains "$_FD/package.xml" "<members>unfiled\$public</members>" "manifest: unfiled\$public は、実在のフォルダではないので、フォルダとしては取らない"
+    assert_file_not_contains "$_FD/package.xml" "ns_F" "manifest: 管理パッケージ本体のフォルダは、取らない"
+    assert_file_not_contains "$_FD/package.xml" "F1/Rm" "manifest: 管理パッケージ本体のレポートは、取らない"
+    assert_file_contains "$_FD/package.xml" "<members>LeadSource</members>" "manifest: StandardValueSet は、固定の名前の表から指定する"
+    assert_file_contains "$_FD/package.xml" "<members>Account.Foo__c</members>" "manifest: 標準オブジェクトのカスタム項目"
+    assert_file_contains "$_FD/package.xml" "<members>Contact.ns__Q__c</members>" "manifest: 標準オブジェクト上の、名前空間つき（管理パッケージ本体でない）のカスタム項目"
+    assert_file_not_contains "$_FD/package.xml" "Account.Name" "manifest: 標準項目（__c でない）は、取らない"
+    assert_file_not_contains "$_FD/package.xml" "MyObj__c.Bar__c" "manifest: カスタムオブジェクト上の項目は、既存の取得の担当（取らない）"
+    assert_file_not_contains "$_FD/package.xml" "ns__Obj__c" "manifest: 名前空間つきのカスタムオブジェクトの項目も、取らない"
+    assert_file_not_contains "$_FD/package.xml" "Case.Inst__c" "manifest: 管理パッケージ本体の項目は、取らない"
+    assert_file_contains "$_FD/package.xml" "<members>Account.AllAccounts</members>" "manifest: 標準オブジェクトのリストビュー"
+    assert_file_not_contains "$_FD/package.xml" "MyObj__c.All" "manifest: カスタムオブジェクトのリストビューは、取らない"
+    assert_file_not_contains "$_FD/package.xml" "Gone2" "manifest: この組織にない種類（INVALID_TYPE）は、飛ばす"
+    assert_file_contains "$_FD/package.xml" "<version>64.0</version>" "manifest: API バージョン"
+    assert_file_contains "$_FD/package.xml" "<?xml version=\"1.0\" encoding=\"UTF-8\"?>" "manifest: XML 宣言"
+    assert_output_not_contains "$_OUT" "TESTTOKEN" "manifest: トークンは、出力に出さない"
+    # 取る部品がない → 終了コード 12（package.xml は書かない）
+    _ex_cfg 'Gone2'
+    _ex
+    assert_equals "$_RC" "12" "manifest: 取る部品がない → 終了コード 12"
+    [[ ! -f "$_FD/package.xml" ]] && pass "manifest: 取る部品がないときは、package.xml を書かない" || fail "manifest: 取る部品がないときは、package.xml を書かない"
+    # 一覧の失敗 → 不明（11）
+    _ex_cfg 'Report folder=ReportFolder'
+    _fp_set ReportFolder '{"http":503}'
+    _ex
+    assert_equals "$_RC" "11" "manifest: 一覧の取得の失敗 → 不明（終了コード 11）"
+    assert_output_contains "$_OUT" "一覧の取得に失敗した種類があります" "manifest: 失敗の理由が出る"
+    [[ ! -f "$_FD/package.xml" ]] && pass "manifest: 失敗のときは、package.xml を書かない" || fail "manifest: 失敗のときは、package.xml を書かない"
+    # 表の誤り → 中断（1）
+    _ex_cfg 'Report bogus=1'; _ex; assert_equals "$_RC" "1" "manifest: 表に不明な指定 → 中断"
+    _ex_cfg 'Report mode=nope'; _ex; assert_equals "$_RC" "1" "manifest: mode が不正 → 中断"
+    _ex_cfg 'Report' 'Report'; _ex; assert_equals "$_RC" "1" "manifest: 同じ種類が 2 回 → 中断"
+    _ex_cfg 'Report unfiled=x'; _ex; assert_equals "$_RC" "1" "manifest: unfiled= だけ（folder= がない）→ 中断"
+    # 本物の表を読める
+    cp "$SF_TOOLS_DIR/config/metasync-extra.txt" "$_FD/extra.txt"
+    _fp_set ReportFolder '[]'
+    _ex
+    assert_equals "$_RC" "0" "manifest: 本物の表（config/metasync-extra.txt）を読める"
+    assert_file_not_contains "$_FD/package.xml" "<name>Document" "manifest: Document 系は、本物の表に含まれない"
+    _fp_server_stop; rm -rf "$_FD"
+}
+
+test_plan_extra() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] metasync.js: plan（追加の取得の削除の守り）${CLR_RST}"
+    _mk
+    printf 'Report folder=ReportFolder\nStandardValueSet mode=svs\nCustomField mode=stdobj\n' > "$_TD/extra.txt"
+    _w r objects/Account/fields/Old__c.field-meta.xml 'o\n'
+    _w r objects/Account/fields/Gone__c.field-meta.xml 'g\n'
+    _w r objects/MyObj__c/fields/Del__c.field-meta.xml 'c\n'
+    _w r reports/F1/R1.report-meta.xml 'r\n'
+    _w f objects/MyObj__c/fields/Keep__c.field-meta.xml 'k\n'
+    # 追加の取得が失敗: reports と標準オブジェクトの部品の削除は、すべて保留（S2）。カスタムオブジェクトの削除は、通常どおり
+    _plan --extra-config "$_TD/extra.txt" --extra-state failed
+    assert_equals "$_RC" "3" "plan（追加の取得が失敗）: 保留（S2）があるので、終了コード 3"
+    assert_file_contains "$_TD/plan.tsv" "H	$ROOT/objects/Account/fields/Old__c.field-meta.xml	S2" "追加の取得が失敗: 標準オブジェクトの部品の削除は、保留（S2）"
+    assert_file_not_contains "$_TD/plan.tsv" "reports/F1/R1" "追加の取得が失敗: reports は、同期の対象にならない（触らない。削除もしない）"
+    assert_file_contains "$_TD/plan.tsv" "D	$ROOT/objects/MyObj__c/fields/Del__c.field-meta.xml" "追加の取得が失敗でも: カスタムオブジェクトの削除は、通常どおり"
+    assert_output_contains "$_OUT" "追加の取得が失敗または不完全だったため" "追加の取得が失敗: WARNING が出る"
+    # 追加の取得が成功（応答に問題なし）: 取れなかったファイルは、削除できる
+    _plan --extra-config "$_TD/extra.txt" --extra-state ok --extra-json /nonexistent
+    assert_file_contains "$_TD/plan.tsv" "D	$ROOT/objects/Account/fields/Old__c.field-meta.xml" "追加の取得が成功: 組織にない標準オブジェクトの部品は、削除する"
+    assert_output_contains "$_OUT" "追加の取得: 反映した" "追加の取得が成功: 要約に出る"
+    # 成功で、reports が取得結果に 0 件 → S3 の守り（手元にあったフォルダが 0 件になった）
+    assert_file_contains "$_TD/plan.tsv" "H	$ROOT/reports/F1/R1.report-meta.xml	S3" "追加の取得が成功でも、reports が 0 件になった回は、S3 の守りが効く"
+    # 指定したのに取れなかった名前（--extra-manifest − 取得結果のファイル）: そのファイルだけ削除を保留。ほかは削除できる（応答の文言には頼らない）
+    cat > "$_TD/extra.xml" <<'XMLEOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<Package xmlns="http://soap.sforce.com/2006/04/metadata">
+  <types>
+    <members>Account.Old__c</members>
+    <name>CustomField</name>
+  </types>
+  <types>
+    <members>Zzz.All</members>
+    <name>ListView</name>
+  </types>
+  <version>64.0</version>
+</Package>
+XMLEOF
+    printf '{"status":0,"result":{"warnings":[]}}\n' > "$_TD/extra.json"
+    _plan --extra-config "$_TD/extra.txt" --extra-state ok --extra-json "$_TD/extra.json" --extra-manifest "$_TD/extra.xml"
+    assert_file_contains "$_TD/plan.tsv" "H	$ROOT/objects/Account/fields/Old__c.field-meta.xml	S2" "指定したのに取れなかった名前のファイルは、削除を保留"
+    assert_file_contains "$_TD/plan.tsv" "D	$ROOT/objects/Account/fields/Gone__c.field-meta.xml" "ほかのファイルは、削除できる（取れなかった名前があっても、全体を保留しない）"
+    assert_output_contains "$_OUT" "取れなかった名前 2 件" "取れなかった名前の件数が出る"
+    # 実機（develop 組織）の応答の形: 取れない StandardValueSet・文言のない空の報告（取れなかったレポート）・フォルダの権限不足。
+    #   どれも、文言では判断しない。取れなかった部品は、ディスクで確かめて、そのファイルだけ保留する
+    _w r standardValueSets/QuoteStatus.standardValueSet-meta.xml 'q\n'
+    _w r standardValueSets/Industry.standardValueSet-meta.xml 'i\n'
+    _w f standardValueSets/Industry.standardValueSet-meta.xml 'i\n'
+    _w r reports/F1/R2.report-meta.xml 'r2\n'; _w f reports/F1/R3.report-meta.xml 'r3\n'
+    _w r dashboards/F/D1.dashboard-meta.xml 'd\n'; _w f dashboards/F2/D2.dashboard-meta.xml 'd\n'
+    cat > "$_TD/extra.xml" <<'XMLEOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<Package xmlns="http://soap.sforce.com/2006/04/metadata">
+  <types>
+    <members>F/D1</members>
+    <name>Dashboard</name>
+  </types>
+  <types>
+    <members>F1/R2</members>
+    <members>F1/R3</members>
+    <name>Report</name>
+  </types>
+  <types>
+    <members>Industry</members>
+    <members>QuoteStatus</members>
+    <name>StandardValueSet</name>
+  </types>
+  <version>64.0</version>
+</Package>
+XMLEOF
+    printf '{"status":0,"result":{"warnings":["Unable to retrieve file for id 54 (QuoteStatus). This Standard Value Set is either inaccessible or not supported in Metadata API.","You do not have the proper permissions to access Dashboard.",{"fileName":"unpackaged/package.xml","problem":""}]}}\n' > "$_TD/extra.json"
+    _plan --extra-config "$_TD/extra.txt" --extra-state ok --extra-json "$_TD/extra.json" --extra-manifest "$_TD/extra.xml"
+    assert_file_contains "$_TD/plan.tsv" "H	$ROOT/standardValueSets/QuoteStatus.standardValueSet-meta.xml	S2" "取れない StandardValueSet のファイルは、削除を保留（全体は保留しない）"
+    assert_file_contains "$_TD/plan.tsv" "H	$ROOT/reports/F1/R2.report-meta.xml	S2" "文言のない空の報告になった、取れなかったレポートは、削除を保留（文言に頼らず、ディスクで確かめる）"
+    assert_file_contains "$_TD/plan.tsv" "D	$ROOT/reports/F1/R1.report-meta.xml" "指定していない名前（組織にない）のレポートは、削除できる"
+    assert_file_contains "$_TD/plan.tsv" "H	$ROOT/dashboards/F/D1.dashboard-meta.xml	S2" "ダッシュボードの権限不足: 指定したのに取れなかったファイルだけ保留"
+    assert_file_contains "$_TD/plan.tsv" "D	$ROOT/objects/Account/fields/Gone__c.field-meta.xml" "文言のない空の報告・権限不足の警告があっても: ほかのファイルの削除は、通常どおり（全体を保留しない）"
+    assert_output_contains "$_OUT" "応答の報告 3 件は情報のみ" "応答の報告は、情報として数える"
+    # 標準オブジェクトの入れ物だけのファイル（中身のない <CustomObject/>）は、追加も変更も削除もしない
+    _w f objects/Account/Account.object-meta.xml '<?xml version="1.0" encoding="UTF-8"?>\n<CustomObject xmlns="http://soap.sforce.com/2006/04/metadata">\n</CustomObject>\n'
+    _plan --extra-config "$_TD/extra.txt" --extra-state ok --extra-json "$_TD/extra.json" --extra-manifest "$_TD/extra.xml"
+    assert_file_not_contains "$_TD/plan.tsv" "objects/Account/Account.object-meta.xml" "標準オブジェクトの入れ物だけのファイルは、追加しない"
+    _w r objects/Account/Account.object-meta.xml 'real\n'
+    _plan --extra-config "$_TD/extra.txt" --extra-state ok --extra-json "$_TD/extra.json" --extra-manifest "$_TD/extra.xml"
+    assert_file_not_contains "$_TD/plan.tsv" "objects/Account/Account.object-meta.xml" "手元に同じ名前があっても、入れ物だけのファイルで変更も削除もしない"
+    rm -f "$_TD/r/$ROOT/objects/Account/Account.object-meta.xml"; rm -f "$_TD/f/$ROOT/objects/Account/Account.object-meta.xml"
+    # 取得の応答の status が 0 以外 → 失敗として扱う（全体は中断しない）
+    printf '{"status":1,"message":"boom"}\n' > "$_TD/extra.json"
+    _plan --extra-config "$_TD/extra.txt" --extra-state ok --extra-json "$_TD/extra.json"
+    assert_file_contains "$_TD/plan.tsv" "H	$ROOT/objects/Account/fields/Old__c.field-meta.xml	S2" "追加の取得の応答の status が 0 以外: 失敗として、標準オブジェクトの部品を保留"
+    # 種類を読み取れない問題の報告 → その回の削除を、すべて保留（S2）
+    printf '{"status":0,"result":{"warnings":["something strange happened"]}}\n' > "$_TD/extra.json"
+    _plan --extra-config "$_TD/extra.txt" --extra-state ok --extra-json "$_TD/extra.json"
+    assert_file_contains "$_TD/plan.tsv" "H	$ROOT/objects/MyObj__c/fields/Del__c.field-meta.xml	S2" "追加の取得の応答に、読み取れない問題: その回の削除を、すべて保留"
+    # 引数の誤り
+    _plan --extra-state bogus --extra-config "$_TD/extra.txt"
+    assert_equals "$_RC" "1" "--extra-state が off / ok / failed でない → 中断"
+    _plan --extra-state ok
+    assert_equals "$_RC" "1" "--extra-state に --extra-config がない → 中断"
+    # 行わない設定（off）: on で取った標準オブジェクトの部品を、消さない。取得結果に現れない追加の取得のフォルダは、同期の対象にしない
+    rm -rf "$_TD/f/$ROOT/reports"   # 取得結果に reports が現れない回
+    _plan --extra-config "$_TD/extra.txt" --extra-state off
+    assert_equals "$_RC" "0" "plan（追加の取得 off）: 標準オブジェクトの部品の保留（S9）だけなので、終了コードは 3 にしない"
+    assert_file_contains "$_TD/plan.tsv" "H	$ROOT/objects/Account/fields/Old__c.field-meta.xml	S9" "追加の取得 off: 標準オブジェクトの部品の削除は、保留（S9。on で取ったファイルを消さない）"
+    assert_file_contains "$_TD/plan.tsv" "D	$ROOT/objects/MyObj__c/fields/Del__c.field-meta.xml" "追加の取得 off でも: カスタムオブジェクトの削除は、通常どおり"
+    assert_output_contains "$_OUT" "追加の取得は行わない設定" "追加の取得 off: 保留の理由の WARNING が出る"
+    assert_file_not_contains "$_TD/plan.tsv" "reports/F1/R1" "追加の取得 off: 取得結果に現れない reports は、同期の対象にしない（触らない）"
+    # 追加の取得の扱いなし（--extra-state 省略。表も渡さない）は、従来どおり（標準オブジェクトの部品も、通常の削除）
+    _plan
+    assert_file_contains "$_TD/plan.tsv" "D	$ROOT/objects/Account/fields/Old__c.field-meta.xml" "追加の取得の扱いなし: 従来どおり（objects の削除は、通常どおり）"
+    rm -rf "$_TD"
+}
+
 test_basic_ops
 test_keep_files
 test_scope
@@ -1157,5 +1338,7 @@ test_fingerprint_table
 test_scan
 test_scan_rules
 test_scan_rules2
+test_manifest
+test_plan_extra
 
 print_summary

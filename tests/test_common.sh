@@ -1631,21 +1631,54 @@ test_env_log() {
     done
     assert_equals "$(grep -c '\[ENV\] sf-tools' "$log" | tr -d ' ')" "2" "追記のログでは、実行のたびに [ENV] の行が 1 行ずつ増える"
 
+    # 3b. 親のプロセスが、同じログファイルに書いたあとは、子のプロセスの source で重ねて書かない（sf-init の Phase など）
+    log="$td/f2.log"
+    ( export SF_INIT_MODE=1 SCRIPT_NAME=parent LOG_FILE="$log"
+      source "$SF_TOOLS_DIR/lib/common.sh"
+      SCRIPT_NAME=child bash -c 'source "$1"' _ "$SF_TOOLS_DIR/lib/common.sh" ) > /dev/null 2>&1
+    assert_equals "$(grep -c '\[ENV\] sf-tools' "$log" | tr -d ' ')" "1" "親が書いた同じログには、子の source で [ENV] の行を重ねて書かない"
+    # LOG_MODE=NEW の子は、source でログが空になるため、書き直す
+    ( export SF_INIT_MODE=1 SCRIPT_NAME=parent LOG_FILE="$log"
+      source "$SF_TOOLS_DIR/lib/common.sh"
+      SCRIPT_NAME=child LOG_MODE=NEW bash -c 'source "$1"' _ "$SF_TOOLS_DIR/lib/common.sh" ) > /dev/null 2>&1
+    assert_file_contains "$log" "| child" "LOG_MODE=NEW の子は、ログが空になるため、[ENV] の行を書き直す"
+
     # 4. die のとき、git・node・sf の版が、ログに 1 行入る（偽のコマンドで。1 つのプロセスで 1 回だけ）
     local mb="$td/bin"
     mkdir -p "$mb"
     printf '#!/bin/bash\necho "git version 9.9.9"\n' > "$mb/git"
     printf '#!/bin/bash\necho "v9.8.7"\n' > "$mb/node"
-    printf '#!/bin/bash\necho "@salesforce/cli/9.1.2 linux-x64 node-v9.8.7"\necho "second line"\n' > "$mb/sf"
+    # sf は起動が遅いため、起動せず、package.json の version を読む（起動したら sf-called ができる）
+    printf '#!/bin/bash\ntouch "%s/sf-called"\necho "@salesforce/cli/0.0.0"\n' "$td" > "$mb/sf"
+    mkdir -p "$mb/node_modules/@salesforce/cli"
+    printf '{\n  "name": "@salesforce/cli",\n  "version": "9.1.2",\n  "dependencies": {"x": {"version": "0.0.1"}}\n}\n' > "$mb/node_modules/@salesforce/cli/package.json"
     chmod +x "$mb/git" "$mb/node" "$mb/sf"
     log="$td/g.log"
     ( export SF_INIT_MODE=1 PATH="$mb:$PATH"; unset SF_TOOLS_SKIP_ENV_VERSIONS
       readonly SCRIPT_NAME=test LOG_FILE="$log" LOG_MODE=NEW
       source "$SF_TOOLS_DIR/lib/common.sh"
       _log_env_tools; die "テストの致命的エラー" ) > /dev/null 2>&1
-    assert_file_contains "$log" "[ENV] git 9.9.9 | node v9.8.7 | sf @salesforce/cli/9.1.2 linux-x64 node-v9.8.7" "die のとき、git・node・sf の版が、ログに残る（sf は 1 行目だけ）"
-    assert_equals "$(grep -c 'node v9.8.7 | sf' "$log" | tr -d ' ')" "1" "git・node・sf の版は、1 つのプロセスで 1 回だけ書く"
+    assert_file_contains "$log" "[ENV] git 9.9.9 | node v9.8.7 | sf @salesforce/cli/9.1.2" "die のとき、git・node・sf の版が、ログに残る（sf は package.json の version）"
+    assert_file_not_exists "$td/sf-called" "sf --version は起動しない（起動が遅く、利用者の中断（q / N の die）を遅くするため）"
     assert_file_contains "$log" "[FATAL] テストの致命的エラー" "die のメッセージも、ログに残る"
+
+    # 4b. sf が bin/ にある配置（macOS・Linux の npm: ../lib/node_modules/…）でも読める。package.json がなければ「不明」
+    local mb2="$td/prefix"
+    mkdir -p "$mb2/bin" "$mb2/lib/node_modules/@salesforce/cli"
+    cp "$mb/git" "$mb/node" "$mb/sf" "$mb2/bin/"
+    printf '{"name": "@salesforce/cli", "version": "8.7.6"}\n' > "$mb2/lib/node_modules/@salesforce/cli/package.json"
+    log="$td/g2.log"
+    ( export SF_INIT_MODE=1 PATH="$mb2/bin:$PATH"; unset SF_TOOLS_SKIP_ENV_VERSIONS
+      readonly SCRIPT_NAME=test LOG_FILE="$log" LOG_MODE=NEW
+      source "$SF_TOOLS_DIR/lib/common.sh"; die "x" ) > /dev/null 2>&1
+    assert_file_contains "$log" "sf @salesforce/cli/8.7.6" "sf が bin/ にある配置（../lib/node_modules）でも、版を読める"
+    rm -f "$mb2/lib/node_modules/@salesforce/cli/package.json"
+    log="$td/g3.log"
+    ( export SF_INIT_MODE=1 PATH="$mb2/bin:$PATH"; unset SF_TOOLS_SKIP_ENV_VERSIONS
+      readonly SCRIPT_NAME=test LOG_FILE="$log" LOG_MODE=NEW
+      source "$SF_TOOLS_DIR/lib/common.sh"; die "x" ) > /dev/null 2>&1
+    assert_file_contains "$log" "| sf 不明" "package.json が見つからないときは、sf の版は「不明」"
+    assert_equals "$(grep -c 'node v9.8.7 | sf' "$log" | tr -d ' ')" "1" "git・node・sf の版は、1 つのプロセスで 1 回だけ書く"
 
     # 5. SF_TOOLS_SKIP_ENV_VERSIONS=1 のときは、偽のコマンドを呼ばない（テストの呼び出しの記録を、変えないため）
     log="$td/h.log"

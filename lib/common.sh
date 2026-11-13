@@ -15,12 +15,14 @@
 #   - Bash 3.2 未満なら、エラーを表示して exit 1
 #   - カレントディレクトリ名が force- で始まらなければ、エラーを表示して exit 1（SF_INIT_MODE=1 のときは確認しない）
 #   - LOG_FILE のフォルダを作り（chmod 700）、LOG_MODE=NEW ならログファイルを空にする
+#   - ログファイルに、環境情報の行（[ENV]: sf-tools のコミット・OS・bash の版・スクリプト名）を 1 行書く（6b）。
+#     利用者から受け取ったログで、同じバージョンの再現をするため。自動の通知・送信はしない（セキュリティ）
 #   - 最後に、同じフォルダの input.sh / platform.sh / project.sh を source する
 #
 # 【提供する関数】
 #   log LEVEL MESSAGE [DEST]  ... 画面とログファイルへ出力
 #   run CMD [ARGS...]         ... コマンドを実行してログに記録
-#   die MESSAGE [EXIT_CODE]   ... エラーログを出力して終了
+#   die MESSAGE [EXIT_CODE]   ... エラーログを出力して終了（終了の前に、git・node・sf の版を、ログに 1 行残す）
 #   show_help                 ... 呼び出し元スクリプトの冒頭コメント（--help 用の部分）を表示して exit 0
 #   reject_unknown_args "$@"  ... -v / --verbose 以外の引数があれば die
 #   print_admin_warning [--standard] [行...] ... 管理者向けの警告ボックス（赤）を表示する（確認は、含まない）
@@ -281,6 +283,85 @@ else
 fi
 
 # ------------------------------------------------------------------------------
+# 6b. 環境情報のログ（利用者から受け取ったログで、同じ条件を再現するため）
+# ------------------------------------------------------------------------------
+# 失敗の自動通知・自動送信は、しない（セキュリティ）。利用者がログを渡してくれたとき、そこから、同じバージョンの
+# sf-tools と、近い環境を用意して、再現できるようにする。書くのは、バージョンなどの番号だけ（パス・ユーザー名・Token は含めない）。
+#   source 時（_log_env_header）: sf-tools のコミット・OS・bash の版を、ログファイルに 1 行書く（[ENV] の行）。
+#                                 外部のプログラムを起動しない（ファイルの読み取りと組み込みの変数だけ。起動のたびに走るため）
+#   die のとき（_log_env_tools）: git・node・sf の版を、ログファイルに 1 行書く（外部のプログラムを起動するため、致命的エラーのときだけ。
+#                                 1 つのプロセスで 1 回。SF_TOOLS_SKIP_ENV_VERSIONS=1 のときは書かない: テストの偽のコマンドを呼ばないため）
+# ------------------------------------------------------------------------------
+
+# sf-tools のコミット（短い ID とブランチ）を、変数に入れる。.git の中のファイルを直接読む（git を起動しない）。
+#   通常のクローン（.git がフォルダ）だけ。ワークツリー（.git がファイル）や、.git がないコピーは「不明」
+_sf_tools_commit_var() {
+    local _scv_root _scv_head="" _scv_ref _scv_sha="" _scv_line _scv_res="不明"
+    case "${BASH_SOURCE[0]}" in
+        */*) _scv_root="${BASH_SOURCE[0]%/*}/.." ;;
+        *)   _scv_root=".." ;;
+    esac
+    if [[ -f "$_scv_root/.git/HEAD" ]]; then
+        read -r _scv_head < "$_scv_root/.git/HEAD" || true  # 意図的エラー無視（最終行の改行なし）
+        case "$_scv_head" in
+            "ref: "*)
+                _scv_ref="${_scv_head#ref: }"
+                if [[ -f "$_scv_root/.git/$_scv_ref" ]]; then
+                    read -r _scv_sha < "$_scv_root/.git/$_scv_ref" || true  # 意図的エラー無視
+                elif [[ -f "$_scv_root/.git/packed-refs" ]]; then
+                    while read -r _scv_line; do
+                        case "$_scv_line" in *" $_scv_ref") _scv_sha="${_scv_line%% *}"; break ;; esac
+                    done < "$_scv_root/.git/packed-refs"
+                fi
+                _scv_res="${_scv_sha:0:7}"
+                [[ -n "$_scv_res" ]] || _scv_res="不明"
+                _scv_res="$_scv_res (${_scv_ref#refs/heads/})" ;;
+            "")  ;;
+            *)   _scv_res="${_scv_head:0:7} (detached)" ;;
+        esac
+    fi
+    printf -v "$1" '%s' "$_scv_res"
+}
+
+# ログファイルに、sf-tools のコミット・OS・bash の版・スクリプト名を、1 行書く（source のたびに、1 行。追記のログでは、実行の区切りにもなる）
+_log_env_header() {
+    local _leh_ts _leh_commit
+    _now_ts _leh_ts
+    _sf_tools_commit_var _leh_commit
+    printf '[%s] [ENV] sf-tools %s | OS %s | bash %s | %s\n' \
+        "$_leh_ts" "$_leh_commit" "${OSTYPE:-不明}" "${BASH_VERSION%%(*}" "${SCRIPT_NAME:-不明}" >> "$LOG_FILE"
+}
+_log_env_header
+
+# ログファイルに、git・node・sf の版を、1 行書く（die が呼ぶ。1 つのプロセスで 1 回）。入っていないものは「なし」、取得できないものは「不明」
+_SF_ENV_TOOLS_LOGGED=0
+_log_env_tools() {
+    [[ "${SF_TOOLS_SKIP_ENV_VERSIONS:-}" == "1" ]] && return 0
+    [[ "$_SF_ENV_TOOLS_LOGGED" == "1" ]] && return 0
+    _SF_ENV_TOOLS_LOGGED=1
+    local _let_ts _let_git="なし" _let_node="なし" _let_sf="なし" _let_v
+    if command -v git >/dev/null 2>&1; then  # 存在確認のため run 不使用
+        _let_v=$(git --version 2>/dev/null </dev/null) || _let_v=""  # VAR=$(cmd) のため run 不使用
+        _let_git="${_let_v#git version }"; [[ -n "$_let_git" ]] || _let_git="不明"
+    fi
+    if command -v node >/dev/null 2>&1; then  # 存在確認のため run 不使用
+        _let_v=$(node --version 2>/dev/null </dev/null) || _let_v=""  # VAR=$(cmd) のため run 不使用
+        _let_node="${_let_v:-不明}"
+    fi
+    if command -v sf >/dev/null 2>&1; then  # 存在確認のため run 不使用
+        # sf は起動が遅い（数秒）。固まっても、15 秒で打ち切る（run_with_timeout は platform.sh。読み込み前なら、そのまま実行）
+        if declare -F run_with_timeout >/dev/null 2>&1; then
+            _let_v=$(run_with_timeout 15 sf --version 2>/dev/null </dev/null) || _let_v=""  # VAR=$(cmd) のため run 不使用
+        else
+            _let_v=$(sf --version 2>/dev/null </dev/null) || _let_v=""  # VAR=$(cmd) のため run 不使用
+        fi
+        _let_sf="${_let_v%%$'\n'*}"; [[ -n "$_let_sf" ]] || _let_sf="不明"
+    fi
+    _now_ts _let_ts
+    printf '[%s] [ENV] git %s | node %s | sf %s\n' "$_let_ts" "$_let_git" "$_let_node" "$_let_sf" >> "$LOG_FILE"
+}
+
+# ------------------------------------------------------------------------------
 # 端末の制御コードの除去（標準入力 → 標準出力。GNU / BSD の sed の、どちらでも動く）
 #   BSD の sed（macOS）は、\x1b のような 16 進の表記を解釈しない。そのため、Bash が、実際の文字に展開してから、sed に渡す。
 #   LC_ALL=C により、. が任意の 1 バイトにマッチする（日本語は 0xe3〜0xe9 始まりのため、除去の対象外）。
@@ -488,6 +569,7 @@ readonly SF_HOOK_MARKER="# Generated by sf-tools: wrapper for pre-push hook"
 # ------------------------------------------------------------------------------
 die() {
     log "FATAL" "$1"
+    _log_env_tools   # git・node・sf の版を、ログに残す（利用者のログから再現するため。6b）
     exit "${2:-$RET_NG}"
 }
 

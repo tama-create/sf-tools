@@ -1578,12 +1578,104 @@ EOF
     teardown "$b"
 }
 
+
+# ------------------------------------------------------------------------------
+# 環境情報のログ（[ENV] の行。利用者から受け取ったログで、同じバージョンを再現するため。common.sh の 6b）
+# ------------------------------------------------------------------------------
+test_env_log() {
+    local td lib log
+    td=$(mktemp -d "${TMPDIR:-/tmp}/test-envlog-XXXX")
+
+    # 1. source 時に、ログの 1 行目に、環境情報の行が入る（このテストの実行場所は、.git がフォルダとは限らないので、コミットは問わない）
+    log="$td/a.log"
+    ( export SF_INIT_MODE=1; readonly SCRIPT_NAME=test-env LOG_FILE="$log" LOG_MODE=NEW
+      source "$SF_TOOLS_DIR/lib/common.sh" ) > /dev/null 2>&1
+    assert_output_contains "$(head -n 1 "$log")" '\[ENV\] sf-tools .* | OS .* | bash [0-9].* | test-env$' "source すると、ログの 1 行目に [ENV] の行（コミット・OS・bash の版・スクリプト名）が入る"
+
+    # 2. コミットは、.git の中のファイルを直接読んで求める（ブランチの先端のファイル・packed-refs・detached HEAD・.git なし）
+    lib="$td/sf-tools"
+    mkdir -p "$lib/lib" "$lib/.git/refs/heads"
+    cp "$SF_TOOLS_DIR"/lib/*.sh "$lib/lib/"
+    echo "ref: refs/heads/main" > "$lib/.git/HEAD"
+    echo "abcdef1234567890abcdef1234567890abcdef12" > "$lib/.git/refs/heads/main"
+    log="$td/b.log"
+    ( export SF_INIT_MODE=1; readonly SCRIPT_NAME=test LOG_FILE="$log" LOG_MODE=NEW
+      source "$lib/lib/common.sh" ) > /dev/null 2>&1
+    assert_file_contains "$log" "sf-tools abcdef1 (main) |" "コミットの短い ID とブランチが入る（refs/heads/ のファイルから）"
+
+    rm -f "$lib/.git/refs/heads/main"
+    printf '# pack-refs\n1234567890abcdef1234567890abcdef12345678 refs/heads/other\nfedcba9876543210fedcba9876543210fedcba98 refs/heads/main\n' > "$lib/.git/packed-refs"
+    log="$td/c.log"
+    ( export SF_INIT_MODE=1; readonly SCRIPT_NAME=test LOG_FILE="$log" LOG_MODE=NEW
+      source "$lib/lib/common.sh" ) > /dev/null 2>&1
+    assert_file_contains "$log" "sf-tools fedcba9 (main) |" "コミットの ID が、packed-refs からも求められる"
+
+    echo "0123456789abcdef0123456789abcdef01234567" > "$lib/.git/HEAD"
+    log="$td/d.log"
+    ( export SF_INIT_MODE=1; readonly SCRIPT_NAME=test LOG_FILE="$log" LOG_MODE=NEW
+      source "$lib/lib/common.sh" ) > /dev/null 2>&1
+    assert_file_contains "$log" "sf-tools 0123456 (detached) |" "ブランチを指していない HEAD（detached）も扱える"
+
+    rm -rf "$lib/.git"
+    log="$td/e.log"
+    ( export SF_INIT_MODE=1; readonly SCRIPT_NAME=test LOG_FILE="$log" LOG_MODE=NEW
+      source "$lib/lib/common.sh" ) > /dev/null 2>&1
+    assert_file_contains "$log" "sf-tools 不明 |" ".git がないコピーでは、コミットは「不明」"
+
+    # 3. 追記のログ（LOG_MODE が NEW 以外）では、実行のたびに 1 行ずつ増える（実行の区切りになる）
+    log="$td/f.log"
+    local i
+    for i in 1 2; do
+        ( export SF_INIT_MODE=1; readonly SCRIPT_NAME=test LOG_FILE="$log"
+          source "$SF_TOOLS_DIR/lib/common.sh" ) > /dev/null 2>&1
+    done
+    assert_equals "$(grep -c '\[ENV\] sf-tools' "$log" | tr -d ' ')" "2" "追記のログでは、実行のたびに [ENV] の行が 1 行ずつ増える"
+
+    # 4. die のとき、git・node・sf の版が、ログに 1 行入る（偽のコマンドで。1 つのプロセスで 1 回だけ）
+    local mb="$td/bin"
+    mkdir -p "$mb"
+    printf '#!/bin/bash\necho "git version 9.9.9"\n' > "$mb/git"
+    printf '#!/bin/bash\necho "v9.8.7"\n' > "$mb/node"
+    printf '#!/bin/bash\necho "@salesforce/cli/9.1.2 linux-x64 node-v9.8.7"\necho "second line"\n' > "$mb/sf"
+    chmod +x "$mb/git" "$mb/node" "$mb/sf"
+    log="$td/g.log"
+    ( export SF_INIT_MODE=1 PATH="$mb:$PATH"; unset SF_TOOLS_SKIP_ENV_VERSIONS
+      readonly SCRIPT_NAME=test LOG_FILE="$log" LOG_MODE=NEW
+      source "$SF_TOOLS_DIR/lib/common.sh"
+      _log_env_tools; die "テストの致命的エラー" ) > /dev/null 2>&1
+    assert_file_contains "$log" "[ENV] git 9.9.9 | node v9.8.7 | sf @salesforce/cli/9.1.2 linux-x64 node-v9.8.7" "die のとき、git・node・sf の版が、ログに残る（sf は 1 行目だけ）"
+    assert_equals "$(grep -c 'node v9.8.7 | sf' "$log" | tr -d ' ')" "1" "git・node・sf の版は、1 つのプロセスで 1 回だけ書く"
+    assert_file_contains "$log" "[FATAL] テストの致命的エラー" "die のメッセージも、ログに残る"
+
+    # 5. SF_TOOLS_SKIP_ENV_VERSIONS=1 のときは、偽のコマンドを呼ばない（テストの呼び出しの記録を、変えないため）
+    log="$td/h.log"
+    ( export SF_INIT_MODE=1 PATH="$mb:$PATH" SF_TOOLS_SKIP_ENV_VERSIONS=1
+      readonly SCRIPT_NAME=test LOG_FILE="$log" LOG_MODE=NEW
+      source "$SF_TOOLS_DIR/lib/common.sh"
+      die "テストの致命的エラー" ) > /dev/null 2>&1
+    assert_file_not_contains "$log" "[ENV] git" "SF_TOOLS_SKIP_ENV_VERSIONS=1 → git・node・sf の版を書かない"
+
+    # 6. 入っていないコマンドは「なし」（PATH に偽のコマンドだけを置く。sf・node がない環境）
+    printf '#!/bin/bash\necho "git version 1.2.3"\n' > "$mb/git"
+    rm -f "$mb/node" "$mb/sf"
+    log="$td/i.log"
+    ( export SF_INIT_MODE=1; unset SF_TOOLS_SKIP_ENV_VERSIONS
+      readonly SCRIPT_NAME=test LOG_FILE="$log" LOG_MODE=NEW
+      source "$SF_TOOLS_DIR/lib/common.sh"
+      PATH="$mb"; hash -r   # 偽の git だけを置く（本物の node・sf を見つけないため）
+      die "x" ) > /dev/null 2>&1
+    assert_file_contains "$log" "[ENV] git 1.2.3 | node なし | sf なし" "入っていないコマンドは「なし」と書く"
+
+    rm -rf "$td"
+}
+
 test_read_secret
 test_read_key_and_press_enter
 test_get_target_org
 test_mask_secrets
 test_run_fast_paths
 test_startup_fast_paths
+test_env_log
 test_is_gitbash
 test_is_reserved_org_alias
 test_open_browser_gitbash

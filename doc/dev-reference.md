@@ -283,6 +283,8 @@ source 時の動作: Bash 3.2 未満なら `exit 1` → `LOG_FILE` の確認 →
 
 **起動時の外部プログラムの削減（2026-10-28）:** コマンドの起動のたびに走る部分でも、`basename`・`dirname`・`$(cd … && pwd)`・`mkdir`・`chmod` を、文字列の加工（パラメータ展開）に置き換えた（Windows の Git Bash は、外部プログラムの起動と `$( )` のサブシェルが、1 回 約 60ms）。対象は、①`lib/common.sh` の読み込み（`${PWD##*/}` で force-* の確認、ログフォルダは `${LOG_FILE%/*}`。フォルダがあれば `mkdir` を省き、`chmod 700` は Windows では効果がないため省く）、②`bin/sf-*.sh` の `SCRIPT_NAME`（`${0##*/}` と `%.sh`）、③`SCRIPT_DIR`・`PHASE_DIR`・`_COMMON_LIB_DIR`（`${BASH_SOURCE[0]%/*}`。**`/` で始まり、`//`・`/./`・`/../` を含まないときだけ**この近道を使い、それ以外（相対パス・`C:/…`・`..` を含む）は、従来の `cd + pwd`）。実測（Windows の Git Bash、同じ条件で並べて計測）: `sf-check.sh`（引数なし）の起動から終了まで 約 1000ms → 約 510ms。回帰テストは `tests/test_common.sh` の `test_startup_fast_paths`（`bin/sf-check.sh` の実物の 2 行を取り出して、絶対・相対・`./`・`..`・`//` の呼び出しで、`cd + pwd` と同じ結果になることを確認する）。
 
+**環境情報のログ（2026-11-13）:** 失敗の自動通知・自動送信は、作らない（セキュリティ上、好ましくないため）。利用者が渡してくれたログから、同じバージョンの sf-tools と近い環境を用意して、再現する運用にする。そのため、ログに、再現に必要な番号だけを残す（パス・ユーザー名・Token は含めない）。①`lib/common.sh` を source すると、ログファイルに `[ENV] sf-tools <短いコミット> (<ブランチ>) | OS <OSTYPE> | bash <版> | <SCRIPT_NAME>` を 1 行書く（`_log_env_header`）。コミットは `.git/HEAD` と `refs/heads/`・`packed-refs` を直接読んで求める（`git` を起動しない。起動のたびに走るため、外部のプログラムを増やさない）。`.git` がファイルのワークツリーや、`.git` がないコピーは「不明」。追記のログ（`LOG_MODE` が `NEW` 以外）では、実行のたびに 1 行ずつ増え、実行の区切りになる。②`die` のとき、`[ENV] git <版> | node <版> | sf <版>` を 1 行書く（`_log_env_tools`。外部のプログラムを起動するため、致命的エラーのときだけ。1 つのプロセスで 1 回。入っていないものは「なし」、`sf` は固まっても 15 秒で打ち切る）。`SF_TOOLS_SKIP_ENV_VERSIONS=1` のときは書かない（テストの偽の `git`・`node`・`sf` の呼び出しの記録を変えないため。`tests/test_helper.sh`・`tests/integration/lib.sh`・`init-lib.sh` が設定する）。回帰テストは `tests/test_common.sh` の `test_env_log`。
+
 ### 3.4 安全ガードパターン
 
 管理者向けコマンドには2種類の安全ガードを組み合わせて使う。

@@ -17,6 +17,10 @@ CLR_RST='\033[0m'
 # 省略のテスト以外で、確認が省略されないようにするため。省略のテストは、独自の記録先を指定する）
 export SF_TOOLS_SF_CHECK_STAMP=/dev/null
 
+# die が、ログに git・node・sf の版を残すために、それらを呼ばないようにする（テストの偽のコマンドの呼び出しの記録を、変えないため。
+# 版を残す動作は、test_common.sh が、この変数を外して検査する）
+export SF_TOOLS_SKIP_ENV_VERSIONS=1
+
 # check_java_cli も同様（記録を作らない。省略のテストは、独自の記録先を指定する）。
 # JAVA_HOME は、本物のものを使わない（check_java_cli は JAVA_HOME を優先するため、モックの java が無視される）。
 # 本物の環境の変数で、結果が変わらないようにする（GITHUB_ACTIONS の Linux には、JAVA_HOME が設定されている）

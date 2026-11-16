@@ -61,6 +61,8 @@
 #      続けて、環境変数 SF_METASYNC_FINGERPRINT が shadow のとき、一覧の指紋を作る（node lib/metasync.js fingerprint。読み取りのみ。
 #      config/metasync-fingerprint.txt の種類ごとに、組織の一覧を Node 直接の SOAP（listMetadata）で取り、件数・最新の更新日時・
 #      名前と更新日時のハッシュを、前回（./sf-tools/metasync/fingerprint.json）と比べる。管理パッケージ本体の部品は除く）。
+#      取得の範囲（metadata.txt の種類と、SF_METASYNC_EXTRA が on のときの config/metasync-extra.txt）が前回と変わった回は、不明にする
+#      （組織が同じでも、ファイルが増減するため。影の比較で、見逃しに数えない）。
 #      shadow は、取得を省かない（影の比較）。指紋の失敗・不明は、取得を止めない（WARNING を出して、全件取得に進む）。
 #      検知 on で「検知は変更なし」なのに、指紋が「変更あり」のときは、食い違いの WARNING を出して（検知の見逃しの可能性）、検知に従って終了する
 #   6. 組織からメタデータを取得する: 一時フォルダで sf project retrieve start --target-org prod --ignore-conflicts --json に、
@@ -85,7 +87,7 @@
 #      続けて、指紋を作っていれば、影の比較を表示する（node lib/metasync.js fpcompare。指紋の結果と、計画の追加・変更・削除を、
 #      フォルダ（objects は子の種類）ごとに突き合わせ、「検知できた」「見逃し」「日時では検知できない種類」「指紋の対象外」を数える。
 #      見逃しだけが WARNING（Profile など、更新日時が動かない種類は、見逃しと分ける）。
-#      指紋が変わったのに変更がなかった種類（空振り）も出す。指紋が不明のときは、比べない。情報のみで、同期には影響しない）
+#      指紋が変わったのに変更がなかった種類（空振り）も出す（S3・S4 で削除を保留した種類は、空振りにせず、別に出す）。指紋が不明のときは、比べない。情報のみで、同期には影響しない）
 #      続けて、秘密情報の検査（SF_METASYNC_SECRET_SCAN が off 以外。node lib/metasync.js scan）: これから書く内容（計画の追加・変更。
 #      取得結果と手元を比べ、今回新しく入る分だけ）に、秘密の疑い（秘密らしい要素・項目への値、秘密鍵、既知のトークンの形、コードへの直書き）が
 #      ないか調べる。作業ツリーは、まだ触らない。値は、ログにも通知にも出さない（規則名とパスだけ）。許可の一覧: ./sf-tools/config/metasync-secret-allow.txt
@@ -567,8 +569,12 @@ phase_fingerprint() {
     FP_STATE_NEW="$WORK_DIR/fp.new.json"
     FP_REPORT="$WORK_DIR/fp.report.json"
     log "INFO" "一覧の指紋を作ります（SF_METASYNC_FINGERPRINT=${FP_MODE}。読み取りのみ）..."
+    # 取得の範囲（metadata.txt の種類と、追加の取得の表。off のときは渡さない）も渡す。範囲が前回と変わった回は、指紋を不明（11）にする
+    #   （組織が同じでも、取得の範囲の変更でファイルが増減するため。影の比較で、見逃しに数えない）
+    local scope=(--types-file "$METADATA_CONFIG")
+    [[ "$EXTRA_MODE" != "off" && -f "$EXTRA_TABLE" ]] && scope+=(--extra-config "$EXTRA_TABLE")
     # run 不使用: 戻り値（0 / 10 / 11）で分岐し、要約をログにも記録するため
-    out=$("$NODE_BIN" "$METASYNC_JS" fingerprint --org "$TARGET_ORG" --fp-config "$table" --repo . \
+    out=$("$NODE_BIN" "$METASYNC_JS" fingerprint --org "$TARGET_ORG" --fp-config "$table" --repo . "${scope[@]}" \
         --state "$FP_STATE_FILE" --out-state "$FP_STATE_NEW" --out-report "$FP_REPORT" 2>&1)
     FP_RC=$?
     _log_node_lines "$out"

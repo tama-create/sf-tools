@@ -14,10 +14,11 @@
 #   6. apply: A・M・D の反映・H は何もしない・空になったフォルダを消す・根の外のパスは、何も変えずに中断する
 #   7. detect（変更の検知）: 状態なし・変更なし・履歴あり・区分 B の変化（更新日時・件数・名前・フォルダ型）・履歴の失敗・
 #      一覧の失敗・状態の破損や設定の不一致・区分 A がないときは履歴を問い合わせない・引数の誤り／区分の表の整合
-#   8. fingerprint（一覧の指紋。モックの SOAP サーバー tests/mock-soap-server.js を使う）: 判定（変更なし・変更あり・不審・不明）・
+#   8. fingerprint（一覧の指紋。モックの SOAP サーバー tests/mock-soap-server.js を使う）: 判定（変更なし・変更あり・不審・不明。取得の範囲の変更 = 不明）・
 #      トークンの取り直し（伏せ字・期限切れ）・応答の検証（SOAP でない・0 件の自己終了タグ）・転送の拒否・https 以外の拒否・
 #      時間切れ（1 回・全体・sf の呼び出し）・失敗時の中止・まとめて問い合わせ・フォルダ上限・トークンの伏せ字
-#   9. fpcompare（影の比較）: 検知できた・見逃し・日時では検知できない種類・指紋の対象外・空振り／種類の表（metasync-fingerprint.txt）の整合
+#   9. fpcompare（影の比較）: 検知できた・見逃し・日時では検知できない種類・指紋の対象外・空振り・保留（変更に数えない。S3・S4 は、空振りの説明にだけ使う）／
+#      種類の表（metasync-fingerprint.txt）の整合
 # ==============================================================================
 source "$(dirname "${BASH_SOURCE[0]}")/test_helper.sh"
 echo -e "${CLR_HEAD}=== lib/metasync.js ===${CLR_RST}"
@@ -547,6 +548,28 @@ test_fingerprint() {
     assert_equals "$_RC" "11" "API バージョンが変わった → 不明（指紋は、API バージョンごと）"
     assert_file_contains "$_FD/requests.log" '|63.0' "API バージョンは、sfdx-project.json の sourceApiVersion"
     echo '{"packageDirectories":[{"path":"force-app"}]}' > "$_FD/repo/sfdx-project.json"
+    # 取得の範囲（--types-file = metadata.txt・--extra-config = 追加の取得の表）が変わった → 不明（組織が同じでも、ファイルが増減するため）
+    printf 'ApexClass\nReport\n' > "$_FD/types.txt"; printf 'Report folder=ReportFolder\n' > "$_FD/extra.txt"
+    rm -f "$_FD/state.json"; _fp --types-file "$_FD/types.txt"; cp "$_FD/new.json" "$_FD/state.json"
+    _fp --types-file "$_FD/types.txt"
+    assert_equals "$_RC" "0" "取得の範囲が同じ → 比べる（変更なし）"
+    printf '# 注釈\nApexClass\n\nReport   \n' > "$_FD/types.txt"; _fp --types-file "$_FD/types.txt"
+    assert_equals "$_RC" "0" "注釈・空行・行末の空白だけの違いは、範囲の変更にしない"
+    _fp --types-file "$_FD/types.txt" --extra-config "$_FD/extra.txt"
+    assert_equals "$_RC" "11" "追加の取得を on にした（追加の取得の表を渡した）→ 不明"
+    assert_output_contains "$_OUT" "取得の範囲" "範囲の不一致の理由が出る"
+    [[ -f "$_FD/new.json" ]] && pass "範囲が変わった回も、今回の状態を書く（次の回から比べる）" || fail "範囲が変わった回も、今回の状態を書く"
+    cp "$_FD/new.json" "$_FD/state.json"
+    _fp --types-file "$_FD/types.txt" --extra-config "$_FD/extra.txt"
+    assert_equals "$_RC" "0" "範囲を記録した次の回は、比べる（変更なし）"
+    printf 'Report folder=ReportFolder\nDashboard folder=DashboardFolder\n' > "$_FD/extra.txt"; _fp --types-file "$_FD/types.txt" --extra-config "$_FD/extra.txt"
+    assert_equals "$_RC" "11" "追加の取得の表が変わった → 不明"
+    _fp --types-file "$_FD/types.txt"
+    assert_equals "$_RC" "11" "追加の取得を off に戻した（表を渡さない）→ 不明"
+    printf 'ApexClass\nReport\nApexTrigger\n' > "$_FD/types.txt"; _fp --types-file "$_FD/types.txt" --extra-config "$_FD/extra.txt"
+    assert_equals "$_RC" "11" "metadata.txt の種類が変わった → 不明"
+    rm -f "$_FD/state.json"; _fp; cp "$_FD/new.json" "$_FD/state.json"
+    _fp; assert_equals "$_RC" "0" "--types-file がない（旧い呼び出し）ときは、範囲を比べない（従来どおり）"
     # 引数・設定の誤り
     local out
     out=$(node "$MJS" fingerprint --org prod 2>&1); assert_equals "$?" "1" "fingerprint の必須オプションがない → 中断（終了コード 1）"
@@ -772,9 +795,23 @@ test_fpcompare() {
     printf 'A\t%s/staticresources/S.resource\t\n' "$R" > "$_FD/plan.tsv"; _fpc
     assert_output_contains "$_OUT" "指紋の対象外 1（1 件）" "表にない種類のフォルダの変更は、指紋の対象外"
     assert_output_contains "$_OUT" "staticresources" "対象外のフォルダが出る"
-    # 削除の保留（H）は、実際の変更に数えない
-    printf 'H\t%s/classes/A1.cls\tS4\n' "$R" > "$_FD/plan.tsv"; _fpc
+    # 削除の保留（H）は、変更に数えない（保留は次の回以降も残るため。数えると、組織が変わらない回に毎回、見逃しになる）
+    _rep 10 unchanged
+    printf 'H\t%s/classes/A1.cls\tS3\n' "$R" > "$_FD/plan.tsv"; _fpc
     assert_output_contains "$_OUT" "実際の変更はありませんでした" "保留（H）は、変更に数えない"
+    assert_output_not_contains "$_OUT" "見逃し" "保留が残っている回に、指紋が動かなくても、見逃しにしない（実機: 前の回の S3 の保留が残る）"
+    # ただし、S3（フォルダが 0 件）・S4（削除が多い）の保留は、指紋が動いた理由の説明に使う（空振りにしない。実機: e2e が消したクラスの保留）
+    _rep 10 changed
+    printf 'H\t%s/classes/A1.cls\tS3\nH\t%s/classes/A1.cls-meta.xml\tS3\n' "$R" "$R" > "$_FD/plan.tsv"; _fpc
+    assert_output_not_contains "$_OUT" "指紋の空振り" "S3 の保留がある種類は、空振りにしない"
+    assert_output_contains "$_OUT" "削除を保留した種類（指紋の変化は、保留した削除で説明できる。空振りにしない）: ApexClass（classes）" "保留で説明できる指紋の変化は、別に出す"
+    printf 'H\t%s/classes/A1.cls\tS4\n' "$R" > "$_FD/plan.tsv"; _fpc
+    assert_output_not_contains "$_OUT" "指紋の空振り" "S4 の保留がある種類も、空振りにしない"
+    # S2（取れなかった）・S5（最近のマージ）・S9（追加の取得が off）の保留は、組織の変更とは限らないので、説明に使わない（空振りのまま）
+    for r in S2 S5 S9; do
+        printf 'H\t%s/classes/A1.cls\t%s\n' "$R" "$r" > "$_FD/plan.tsv"; _fpc
+        assert_output_contains "$_OUT" "指紋の空振り（指紋は変わったが、ファイルの変更はなかった種類）: ApexClass" "${r} の保留は、指紋の変化の説明に使わない（空振り）"
+    done
     # 空振り: 指紋は変わったが、変更がなかった種類
     _rep 10 changed
     : > "$_FD/plan.tsv"; _fpc

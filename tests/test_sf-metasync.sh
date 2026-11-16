@@ -762,9 +762,11 @@ _fpi_set() {
     node -e 'const fs=require("fs");const f=process.argv[1],k=process.argv[2],v=process.argv[3];const d=JSON.parse(fs.readFileSync(f,"utf8"));d.lists=d.lists||{};d.lists[k]=JSON.parse(v);fs.writeFileSync(f,JSON.stringify(d));' "$FPI_DIR/data.json" "$1" "$2"
 }
 # 今のサーバーのデータで、指紋の状態（前回の同期の記録）を、あらかじめ作る
+#   取得の範囲は、スクリプトと同じもの（metadata.txt。追加の取得は off）を渡す（範囲が違うと、不明になるため）
 _fpi_state() {
     mkdir -p "$td/sf-tools/metasync"
     node "$SF_TOOLS_DIR/lib/metasync.js" fingerprint --org prod --fp-config "$SF_TOOLS_DIR/config/metasync-fingerprint.txt" \
+        --types-file "$td/sf-tools/config/metadata.txt" \
         --state "$td/none.json" --out-state "$td/sf-tools/metasync/fingerprint.json" --repo "$td" > /dev/null 2>&1
 }
 
@@ -824,6 +826,19 @@ test_fp_shadow_miss() {
     cmp -s "$td/sf-tools/metasync/fingerprint.json" "$td/fp.before" && pass "指紋が変更なしなら、状態ファイルは変わらない" || fail "指紋が変更なしなら、状態ファイルは変わらない"
     assert_file_not_contains "$MOCK_CALL_LOG" "fingerprint.json" "指紋が変更なしなら、状態ファイルをステージしない"
     assert_file_contains "$MOCK_CALL_LOG" "git merge" "メタデータの変更があるときは、下流へ伝播する"
+    _fpi_stop; _ms_unset; teardown "$td" "$mb"
+}
+
+# 取得の範囲が変わった回（追加の取得を on にした）→ 指紋は不明（初回の取り込みを、見逃しに数えない）
+test_fp_scope_change() {
+    local td mb mh; _ms_env td mb mh; _fpi_start
+    _fpi_state   # 追加の取得なし（off）の範囲で、前回の状態を作る
+    export MOCK_GIT_DIFF_EXIT_2ND=1
+    export MOCK_SF_RETRIEVE_FILES='force-app/main/default/classes/New.cls|x'
+    SF_METASYNC_FINGERPRINT=shadow SF_METASYNC_EXTRA=on _ms_run 'Y\nY\n'
+    assert_output_contains "$_MS_OUT" "取得の範囲）が、今回と合いません" "追加の取得を on にした回は、指紋の範囲が合わない"
+    assert_output_contains "$_MS_OUT" "指紋が不明（全件取得に倒す回）のため、比べません" "範囲が変わった回は、影の比較をしない（取り込みを見逃しに数えない）"
+    assert_output_not_contains "$_MS_OUT" "指紋の見逃し" "範囲が変わった回は、見逃しの WARNING を出さない"
     _fpi_stop; _ms_unset; teardown "$td" "$mb"
 }
 
@@ -1205,6 +1220,7 @@ test_fp_off_default
 test_fp_bad_mode
 test_fp_shadow_first_run
 test_fp_shadow_miss
+test_fp_scope_change
 test_fp_shadow_hit
 test_fp_failure_does_not_stop_sync
 test_fp_state_restored_on_failure

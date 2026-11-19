@@ -49,7 +49,7 @@ test_happy_path_3branches() {
     local exit_code
     _make_input_3branches \
         | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
-              bash "$mock_home/sf-tools/bin/sf-init.sh" --legacy-connected-app ) \
+              env "${INIT_ECA_ENV[@]}" bash "$mock_home/sf-tools/bin/sf-init.sh" ) \
           > /tmp/sf-init-test-happy.log 2>&1
     exit_code=$?
 
@@ -69,12 +69,13 @@ test_happy_path_3branches() {
     assert_file_contains "$MOCK_CALL_LOG" "gh variable set SLACK_CHANNEL_ID"          "SLACK_CHANNEL_ID が登録される"
     assert_file_not_contains "$MOCK_CALL_LOG" "SF_TOOLS_TOKEN"                       "SF_TOOLS_TOKEN は登録しない（sf-tools は公開リポジトリのため不要）"
     assert_file_not_contains "$MOCK_CALL_LOG" "ghp_faketoken"                        "PAT_TOKEN の値がコマンド（git push 等）のログに含まれない"
-    assert_file_not_contains "$MOCK_CALL_LOG" "--body fake_prod_key"                 "コンシューマー鍵を --body（コマンドの引数）で渡さない（標準入力で渡す）"
-    # 接続アプリ版の JWT 接続テストも、一時的なホームフォルダの中で実行される（ユーザーの sf の認証を変えない）
+    assert_file_not_contains "$MOCK_CALL_LOG" "--body 3MVGMOCKCONSUMERKEY"          "コンシューマー鍵を --body（コマンドの引数）で渡さない（標準入力で渡す）"
+    assert_equals "$(grep -c 'sf project deploy start --source-dir force-app' "$MOCK_CALL_LOG")" "3" "外部クライアントアプリを、3 つの組織に 1 回ずつ作る"
+    # JWT 接続テストは、一時的なホームフォルダの中で実行される（ユーザーの sf の認証を変えない）
     local jwt_home_ca
     jwt_home_ca=$(grep "^sf-jwt-env HOME=" "$MOCK_CALL_LOG" | head -1 | sed -E 's/^sf-jwt-env HOME=([^ ]*) .*/\1/')
     [[ -n "$jwt_home_ca" && "$jwt_home_ca" == *"sf-tools-home."* && "$jwt_home_ca" != "$mock_home" && ! -e "$jwt_home_ca" ]] \
-        && pass "接続アプリ版: JWT 接続テストは、一時的なホームの中で実行され、実行後に削除される" || fail "接続アプリ版: JWT 接続テストの隔離" "HOME=${jwt_home_ca}"
+        && pass "JWT 接続テストは、一時的なホームの中で実行され、実行後に削除される" || fail "JWT 接続テストの隔離" "HOME=${jwt_home_ca}"
     assert_file_contains "$MOCK_CALL_LOG" "git -c credential.helper= push"           "Phase 8: 認証ヘルパーを無効化して push する"
     assert_file_not_exists "$init_dir/admin/.sf-init-testproject.env"                              "全 Phase 完了後、状態ファイル（.env: Token の値を含みうる）は消える"
     assert_file_not_exists "$init_dir/admin/.sf-init-testproject.progress"                         "全 Phase 完了後、進捗ファイルも消える"
@@ -117,7 +118,7 @@ test_flex_layout_with_args() {
     local exit_code
     _make_input_3branches \
         | ( cd "$work" && HOME="$mock_home" PATH="$mb:$PATH" \
-              bash "$mock_home/sf-tools/bin/sf-init.sh" --owner tamashimon --project force-testproject --legacy-connected-app ) \
+              env "${INIT_ECA_ENV[@]}" bash "$mock_home/sf-tools/bin/sf-init.sh" --owner tamashimon --project force-testproject ) \
           > /tmp/sf-init-test-flex.log 2>&1
     exit_code=$?
 
@@ -201,7 +202,7 @@ test_admin_branch_created_from_main() {
     export MOCK_GIT_REV_VERIFY_EXIT=1     # admin ブランチは、まだない
     _make_input_3branches \
         | ( cd "$work" && HOME="$mock_home" PATH="$mb:$PATH" \
-              bash "$mock_home/sf-tools/bin/sf-init.sh" --owner tamashimon --project testproject --legacy-connected-app ) \
+              env "${INIT_ECA_ENV[@]}" bash "$mock_home/sf-tools/bin/sf-init.sh" --owner tamashimon --project testproject ) \
           > /tmp/sf-init-test-newadmin.log 2>&1
     exit_code=$?
     unset MOCK_GIT_REV_VERIFY_EXIT

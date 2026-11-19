@@ -49,7 +49,7 @@
 #   Secrets（このリポジトリに設定する）:
 #     SF_PRIVATE_KEY       : JWT の秘密鍵（server.key の PEM を、1 行の Base64 にした値。全組織共通。sf-init の Phase 10・
 #                            sf-update-secret.sh が登録する）
-#     SF_CONSUMER_KEY_PROD : main の組織のアプリ（外部クライアントアプリケーション / 接続アプリケーション）のコンシューマー鍵
+#     SF_CONSUMER_KEY_PROD : main の組織のアプリ（外部クライアントアプリケーション）のコンシューマー鍵
 #                            （sf-init の Phase 10・sf-update-secret.sh・sf-init.sh --reconnect が登録する）
 #     SLACK_BOT_TOKEN      : Slack API の Bot Token（任意。秘密の疑い・公開リポジトリで止めたときの通知に使う。wf-release.yml と同じもの。
 #                            未設定なら、通知せずに WARNING を出す）

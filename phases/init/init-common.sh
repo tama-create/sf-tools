@@ -18,9 +18,6 @@
 #                                 両方がすでにあれば、生成せずに ensure_jwt_cert_subject だけを行う
 #   ensure_jwt_cert_subject DIR REPO_NAME
 #                             ... 既存の証明書の発行先が空なら、秘密鍵はそのままで、証明書だけを作り直す
-#   register_jwt_secret ALIAS SUFFIX LABEL KEY_FILE [Y|N]
-#                             ... 従来の接続アプリケーション用。コンシューマー鍵・ユーザー名を手動で入力し、JWT 接続テストのあと、
-#                                 GitHub に登録する。テストに失敗したときは、スキップして登録だけ行うかを確認する
 #   register_jwt_secret_eca ALIAS SUFFIX LABEL KEY_FILE CERT_FILE
 #                             ... 外部クライアントアプリを deploy で作成し、コンシューマー鍵を retrieve で取得して、
 #                                 JWT 接続テストのあと、GitHub に登録する（ログインのあとの失敗の経路では、一時エイリアスを
@@ -39,8 +36,10 @@
 #     run_isolated_home など。lib/org.sh も、lib/common.sh の関数を使う）
 #   - initial_metadata_sync は、lib/verify-common.sh の関数（verify_dispatch_workflow / verify_gh / verify_run_conclusion /
 #     _sfv_poll）を使う。このファイルは lib/verify-common.sh を source しないため、呼び出し側が source しておくこと
-#   - register_jwt_secret / register_jwt_secret_eca は、登録先のリポジトリとして、変数 REPO_FULL_NAME を使う
-#     （register_jwt_secret_eca は、アプリ名 SF_TOOLS_<REPO_NAME の英数字以外を _> のために、REPO_NAME も使う）
+#   - register_jwt_secret_eca は、登録先のリポジトリとして、変数 REPO_FULL_NAME を使う
+#     （アプリ名 SF_TOOLS_<REPO_NAME の英数字以外を _> のために、REPO_NAME も使う）
+#   - 従来の接続アプリケーション用の register_jwt_secret（コンシューマー鍵・ユーザー名の手動の入力）は、廃止した
+#     （sf-init.sh --legacy-connected-app の廃止。外部クライアントアプリだけを使う）
 # ==============================================================================
 
 # Salesforce 組織の接続情報の共通部品（ログイン先の選択・組織の種類の読み取り・本番は main のみ）
@@ -173,101 +172,6 @@ generate_jwt_cert() {
     log "SUCCESS" "証明書を生成しました。"
     log "INFO"    "  秘密鍵: ${jwt_dir}/server.key"
     log "INFO"    "  証明書: ${jwt_dir}/server.crt"
-}
-
-# ------------------------------------------------------------------------------
-# JWT 認証情報を取得・テストして GitHub Secret に登録する
-# 引数:
-#   $1 - org_alias        : Salesforce 組織エイリアス（例: prod, staging, develop）
-#   $2 - suffix           : Secret 名のサフィックス（例: PROD, STG, DEV）
-#   $3 - label            : 表示用ラベル（例: メイン組織）
-#   $4 - key_file         : 秘密鍵ファイルパス
-#   $5 - is_sandbox_override: "Y" = test.salesforce.com / "N" = login.salesforce.com で、ログイン先の選択を省く
-#                           （省略時は org_choose_login_url で選ぶ）
-# 処理: ログイン先の決定 → コンシューマー鍵・ユーザー名の入力 → JWT 接続テスト（失敗時は、スキップして登録だけ行うかを
-#       ask_yn で確認。N / q は die）→ 本番は main のみのガード（org_guard。違反は die）→ 登録
-# 登録する Secrets / Variables:
-#   SF_CONSUMER_KEY_<suffix>  （Secret）
-#   SF_USERNAME_<suffix>      （Variable）
-#   SF_INSTANCE_URL_<suffix>  （Variable）
-#   SF_ORG_ID_<suffix> / SF_ORG_NAME_<suffix> / SF_ORG_KIND_<suffix> / SF_ORG_CHECKED_<suffix>
-#                             （Variable。org_save。組織の情報を読み取れたときだけ）
-# ------------------------------------------------------------------------------
-register_jwt_secret() {
-    local org_alias="$1"
-    local suffix="$2"
-    local label="$3"
-    local key_file="$4"
-    local is_sandbox_override="${5:-}"  # 省略時は対話で確認
-
-    log "HEADER" "${label}（SF_*_${suffix}）の設定"
-
-    # 接続 URL（ログイン先）を決定する。種類ではなく、URL で選ぶ（段階と組織の種類は、結びつけない）
-    local instance_url="https://login.salesforce.com"
-    local tier
-    tier=$(org_tier_of_suffix "$suffix")  # VAR=$(cmd) のため run 不使用
-    if [[ -n "$is_sandbox_override" ]]; then
-        # 自動実行・テスト用: "Y" = test.salesforce.com / "N" = login.salesforce.com
-        [[ "$is_sandbox_override" =~ ^[Yy] ]] && instance_url="https://test.salesforce.com"
-    else
-        org_choose_login_url instance_url "$label" "${tier:-main}" "$suffix"
-    fi
-    log "INFO" "  接続 URL: ${instance_url}"
-
-    # コンシューマーキーを入力
-    local consumer_key
-    read_or_quit consumer_key "  コンシューマーキーを入力してください："
-
-    # 接続ユーザー名を入力
-    local username
-    read_or_quit username "  接続ユーザー名を入力してください（例: admin@example.com）："
-
-    # JWT 接続テスト
-    log "INFO" "  JWT 接続テストを実行中..."
-    log "INFO" "  [jwt cmd] sf org login jwt --client-id ***masked*** --jwt-key-file ${key_file} --username ${username} --instance-url ${instance_url} --alias ${org_alias}"
-    # 成否は sf の終了コードで判定する（sf は npm 版が前提）。一時的なホームフォルダの中で実行する（エイリアスが増えず、
-    # 同じユーザーの既存の sf の認証も置き換わらない）。組織の種類の読み取りも、同じ一時的なホームの中で行う（org_jwt_test）
-    local jwt_err
-    if ! org_jwt_test "$org_alias" "$consumer_key" "$key_file" "$username" "$instance_url"; then  # 条件チェック
-        jwt_err="$SF_ORG_JWT_OUT"
-        log "ERROR" "  [jwt error] ${jwt_err}"
-        log "WARNING" "  JWT 接続テストに失敗しました。以下を確認してください:"
-        log "WARNING" "  ・コンシューマーキーが正しいか（コピーミスに注意）"
-        log "WARNING" "  ・ユーザー名が正しいか"
-        log "WARNING" "  ・プロファイルに接続ユーザーが割り当てられているか"
-        log "WARNING" "  ・Connected App 保存後 2〜10 分経過しているか（反映待ち）"
-        log "WARNING" "  ・Trailhead Playground / orgfarm-* 系は JWT Bearer Flow 非対応のため使用不可"
-        log "WARNING" "  ・Developer Edition 組織では認証反映が遅延・失敗する場合があります"
-        # テスト失敗時はスキップして続行するか確認する
-        # （DE 組織などローカルで認証できない場合でも GitHub Secrets への登録だけ済ませて
-        #   GitHub Actions で動作確認できるようにするため）
-        if ask_yn "  接続テストをスキップして GitHub Secrets への登録のみ行いますか？（GitHub Actions で後でテストできます）"; then
-            log "WARNING" "  接続テストをスキップします。GitHub Actions で動作を確認してください。"
-        else
-            die "  JWT 接続テストに失敗しました。設定を見直してから再実行してください。"
-        fi
-    else
-        log "SUCCESS" "  JWT 接続テスト成功。"
-    fi
-
-    # 本番組織は main にしか、つなげない（F8）。Secrets を登録する前に確認する。
-    #   組織の種類を読み取れなかった場合（接続テストのスキップなど）は、main 以外では、つなげない（確認で、通さない）
-    if ! org_guard "${tier:-main}" "$label"; then
-        die "${label}（${tier:-main}）に、Salesforce の本番組織、または、種類を判定できない組織は、つなげません（本番組織は main のみです）。"
-    fi
-
-    # GitHub Secrets / Variables に登録
-    # SF_CONSUMER_KEY は機密情報のため Secret、SF_USERNAME と SF_INSTANCE_URL は Variable（平文で管理）
-    printf '%s' "$consumer_key" | run gh secret set "SF_CONSUMER_KEY_${suffix}" -R "$REPO_FULL_NAME" \
-        || die "SF_CONSUMER_KEY_${suffix} の登録に失敗しました。"
-    run gh variable set      "SF_USERNAME_${suffix}"     --body "$username"     -R "$REPO_FULL_NAME" \
-        || die "SF_USERNAME_${suffix} の登録に失敗しました。"
-    run gh variable set      "SF_INSTANCE_URL_${suffix}" --body "$instance_url" -R "$REPO_FULL_NAME" \
-        || die "SF_INSTANCE_URL_${suffix} の登録に失敗しました。"
-
-    log "SUCCESS" "  SF_CONSUMER_KEY_${suffix}（Secret）/ SF_USERNAME_${suffix}（Variable）/ SF_INSTANCE_URL_${suffix}（Variable）を登録しました。"
-    # 組織の情報（ID・名前・種類・確認日時）を保存する（--status の表示用。読み取れていなければ、保存しない）
-    org_save "$suffix"
 }
 
 # ------------------------------------------------------------------------------

@@ -7,7 +7,7 @@
 #
 # 【使い方】
 #   cd {作業フォルダ}                                  # sf-job.sh を実行する場所（admin・force-* の中は不可）
-#   ~/sf-tools/bin/sf-init.sh [--owner OWNER] [--project XXXX] [--legacy-connected-app]
+#   ~/sf-tools/bin/sf-init.sh [--owner OWNER] [--project XXXX]
 #   ~/sf-tools/bin/sf-init.sh [--owner OWNER] [--project XXXX] --resume N
 #   ~/sf-tools/bin/sf-init.sh [--owner OWNER] [--project XXXX] --only N
 #
@@ -29,7 +29,6 @@
 #   --only N              : Phase N（1〜10 の整数。--resume と同じ検査）だけを実行する（デバッグ・単体テスト用）。進捗を記録しない。続きの質問・完了済みの選択画面は
 #                           出さない。完了済みのプロジェクトでは拒否する（終了コード 1）。Phase 3 以降は、.sf-init-XXXX.env が必要（【補足】）。
 #                           phases/init/NN_*.sh（NN = N の 2 桁）がなければ終了する
-#   --legacy-connected-app: 従来の接続アプリケーション（手動の入力。今後廃止予定）を使う。既定は、外部クライアントアプリ（自動で作成）
 #   --add-tier staging|develop
 #                         : 既存プロジェクトに staging / develop の段階を追加する（phases/init/add_tier.sh）
 #   --reconnect <段階>    : 1 つの段階（main / staging / develop）の、接続先の Salesforce 組織を付け替える（phases/init/reconnect.sh）。
@@ -290,11 +289,6 @@ while [[ $# -gt 0 ]]; do
             VERIFY_ARGS+=("$1")   # --verify と一緒に指定するもの（下で、--verify なしの指定を拒否する）
             shift
             ;;
-        --legacy-connected-app)
-            # 従来の接続アプリケーション（今後廃止予定）を使う。既定は、外部クライアントアプリ（自動で作成）
-            export SF_INIT_LEGACY_CONNECTED_APP=1
-            shift
-            ;;
         *)
             die "不明なオプションです: $1
 使い方:
@@ -308,8 +302,7 @@ while [[ $# -gt 0 ]]; do
   ~/sf-tools/bin/sf-init.sh --status               # セットアップの診断と、段階ごとの接続先を一覧にする
   ~/sf-tools/bin/sf-init.sh --verify               # 動作の確認（Hello World を、各段階にリリースして、削除する。--plan / --cleanup / --no-metasync）
   ~/sf-tools/bin/sf-init.sh --verify --components  # パターン別のサンプルを、develop の組織だけに、リリースして、削除する（--validate-only: 検証のみ）
-  ~/sf-tools/bin/sf-init.sh --verify --components --with-objects  # オブジェクト系も、リリースして、削除する
-  ~/sf-tools/bin/sf-init.sh --legacy-connected-app # 従来の接続アプリケーションを使う（今後廃止予定）"
+  ~/sf-tools/bin/sf-init.sh --verify --components --with-objects  # オブジェクト系も、リリースして、削除する"
             ;;
     esac
 done

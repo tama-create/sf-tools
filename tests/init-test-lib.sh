@@ -213,25 +213,21 @@ _stub_subscripts() {
 #   8. xoxb-faketoken     (Slack Bot Token - read_or_quit)
 #   9. C01ABCDEFGH        (Slack チャンネル ID - read_or_quit)
 #  10. \n                 (press_enter - Bot 招待完了確認)
-# 入力順（Phase 10: JWT 認証）:
-#  11. 1                  (アプリ種別選択 - read_key [12Qq]。接続アプリケーションを選択。\n は buffer 残留)
-#  ★ \n は read_key [12Qq] が無効として読み飛ばし
-#  12. \n                 (press_enter - Connected App 設定案内)
-#  13. N                  (prod Sandbox? - ask_yn read_key。\n は buffer 残留)
-#  ★ \n は read_or_quit が空行として無視
-#  14. fake_prod_key      (prod コンシューマーキー - read_or_quit)
-#  15. prod@example.com   (prod ユーザー名 - read_or_quit)
-#  16. Y                  (staging Sandbox? - ask_yn read_key。\n は buffer 残留)
-#  ★ \n は read_or_quit が空行として無視
-#  17. fake_stg_key       (staging コンシューマーキー - read_or_quit)
-#  18. stg@example.com    (staging ユーザー名 - read_or_quit)
-#  19. Y                  (develop Sandbox? - ask_yn read_key)
-#  20. fake_dev_key       (develop コンシューマーキー - read_or_quit)
-#  21. dev@example.com    (develop ユーザー名 - read_or_quit)
+# 入力順（Phase 10: JWT 認証。外部クライアントアプリを自動で作成する。アプリの種類は聞かない）:
+#  11. 1                  (main のログイン先 - org_choose_login_url の 3 択。1 = login.salesforce.com)
+#  12. 1                  (staging のログイン先)
+#  13. 1                  (develop のログイン先)
+#  ★ 組織の種類は、モックの既定（Sandbox）。接続ユーザー名は、INIT_ECA_ENV の MOCK_SF_ORG_JSON から読む
 # 入力順（後処理）: なし（admin フォルダの削除の質問は、廃止した。admin フォルダは、管理者用として残す。Phase 10 が最後）
+#
+# 外部クライアントアプリの道で、最後まで進めるには、sf-init.sh を、次の環境変数つきで実行する（INIT_ECA_ENV）:
+#   MOCK_SF_ORG_JSON  : sf org display の応答に、接続ユーザー名を入れる（ないと「接続ユーザー名を取得できません」で止まる）
+#   SF_INIT_JWT_INTERVAL=0 : JWT 接続テストの、試行の間の待ち時間をなくす
+#   使い方: ( cd "$dir" && HOME=... PATH=... env "${INIT_ECA_ENV[@]}" bash "$mock_home/sf-tools/bin/sf-init.sh" ... )
 # ==============================================================================
+INIT_ECA_ENV=(MOCK_SF_ORG_JSON='{"result":{"username":"admin@example.com","alias":"x"}}' SF_INIT_JWT_INTERVAL=0)
 _make_input_3branches() {
-    printf 'Y\nY\n1\n1\nghp_faketoken\n\nxoxb-faketoken\nC01ABCDEFGH\n\n\n1\nfake_prod_key\nprod@example.com\n\nY\nfake_stg_key\nstg@example.com\n\nY\nfake_dev_key\ndev@example.com\n'
+    printf 'Y\nY\n1\n1\nghp_faketoken\n\nxoxb-faketoken\nC01ABCDEFGH\n\n1\n1\n1\n'
 }
 
 # ==============================================================================

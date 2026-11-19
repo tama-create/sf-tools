@@ -27,7 +27,7 @@
 #   org_parse_info JSON                   ... sf data query の JSON から、ORG_* を取り出す
 #   org_find_username_by_id ORG_ID VAR    ... この PC の sf にログイン済みの組織から、組織 ID が一致するものを探し、ユーザー名を VAR にセットする
 #                                            （エイリアスの有無・名前は問わない。ID は上位 15 文字で比べる。見つからなければ戻り値 1）
-#   org_jwt_test ALIAS KEY KEYFILE USER URL ... JWT 接続テストと、組織情報の読み取り（一時的なホームの中。従来の接続アプリ用）
+#   org_jwt_test ALIAS KEY KEYFILE USER URL ... JWT 接続テストと、組織情報の読み取り（一時的なホームの中。sf-update-secret.sh 用）
 #                                            （KEY = コンシューマー鍵 / KEYFILE = 秘密鍵ファイル / URL = ログイン先。出力は SF_ORG_JWT_OUT）
 #   org_save SUFFIX                       ... 組織 ID・名前・種類・確認日時を、GitHub の Variables に保存する
 #
@@ -179,7 +179,8 @@ org_read_info() {
     org_parse_info "$out"
 }
 
-# JWT 接続テストと、組織情報の読み取りを、同じ一時的なホームフォルダの中で行う（従来の接続アプリ用）
+# JWT 接続テストと、組織情報の読み取りを、同じ一時的なホームフォルダの中で行う（sf-update-secret.sh 用。
+#   コンシューマー鍵を手で入れたとき。sf-init の外部クライアントアプリの道は、register_jwt_secret_eca が別に確かめる）
 #   一時的なホームの中で実行する: エイリアスが増えず、同じユーザーの既存の sf の認証も置き換わらない（run_isolated_home）。
 #   認証は、一時的なホームと一緒に消えるため、組織情報の読み取りも、その中で行う。
 #   引数: エイリアス コンシューマー鍵 秘密鍵ファイル ユーザー名 ログイン入口（--instance-url）

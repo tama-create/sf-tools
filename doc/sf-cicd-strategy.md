@@ -332,7 +332,7 @@ deploy-target.txt が空で remove-target.txt にだけ対象があれば、削�
 | 名前 | 種別 | 用途（登録元） |
 | :--- | :--- | :--- |
 | `SF_PRIVATE_KEY` | Secret | JWT Bearer Flow 用 PEM 秘密鍵を 1 行の Base64 にした値（全組織共通。Phase 10） |
-| `SF_CONSUMER_KEY_PROD` | Secret | 本番組織のアプリ（外部クライアントアプリケーション / 接続アプリケーション）のコンシューマー鍵（Phase 10） |
+| `SF_CONSUMER_KEY_PROD` | Secret | 本番組織のアプリ（外部クライアントアプリケーション）のコンシューマー鍵（Phase 10） |
 | `SF_CONSUMER_KEY_STG` | Secret | ステージング組織のアプリのコンシューマー鍵（Phase 10・`--add-tier`） |
 | `SF_CONSUMER_KEY_DEV` | Secret | 開発組織のアプリのコンシューマー鍵（Phase 10・`--add-tier`） |
 | `PAT_TOKEN` | Secret | GitHub Classic PAT（`repo` + `workflow` スコープ。持ち主はリポジトリの Admin）— wf-metasync・wf-propagate が main / staging / develop に直接 push するために必要（main・staging の Ruleset のバイパスと、`.github/workflows/` の変更を含む push のため。Phase 6） |
@@ -343,7 +343,7 @@ deploy-target.txt が空で remove-target.txt にだけ対象があれば、削�
 | `SF_TOOLS_BRANCH` | Variable | Actions が clone する sf-tools のブランチ（任意。未設定なら `main`。Phase 9 が、開発版のときだけ `development` を登録） |
 | `SF_ORG_*` | Variable | 組織の情報（`sf-init.sh --status` の表示用） |
 
-JWT の秘密鍵・証明書: Phase 10 が `openssl` で生成し（`~/.sf-jwt/<リポジトリ名>/`）、既定では外部クライアントアプリケーションを組織ごとに自動作成して、コンシューマー鍵を取得する（`--legacy-connected-app` のときは、従来の接続アプリケーションを手動で作る）。
+JWT の秘密鍵・証明書: Phase 10 が `openssl` で生成し（`~/.sf-jwt/<リポジトリ名>/`）、外部クライアントアプリケーションを組織ごとに自動作成して、コンシューマー鍵を取得する（従来の接続アプリケーション（`--legacy-connected-app`）は、廃止した）。
 PAT の作成: Phase 6 が、Note・Scopes・Expiration を入力済みの作成ページをブラウザで開き、貼り付けた Token のスコープと Admin 権限を確かめてから登録する（詳細は `doc/dev-reference.md` の 4.13）。
 `SF_TOOLS_TOKEN` は 2026-10-05 に廃止（sf-tools は公開リポジトリ）。
 

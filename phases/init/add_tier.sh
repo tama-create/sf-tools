@@ -19,12 +19,9 @@
 #      branches.txt は、origin/main と食い違うことがあり、それで確認すると、重複がすり抜ける）
 #   4. 管理者向けの警告（print_admin_warning）→ check_gh_owner → ask_yn（N / q は die）。GITHUB_ACTIONS=true でも省略しない
 #   5. git status --porcelain が空でなければ（未コミットの変更があれば）die
-#   6. Salesforce 組織に接続する。~/.sf-jwt/<REPO_NAME>/server.key がなければ die
-#        - 既定: server.crt がなければ die。register_jwt_secret_eca（init-common.sh）で、ログイン先の選択 → ブラウザで
-#          ログイン → 組織の種類の読み取り → 本番は main のみのガード → 外部クライアントアプリの deploy →
-#          コンシューマー鍵の retrieve → JWT 接続テスト → 登録
-#        - SF_INIT_LEGACY_CONNECTED_APP=1（--legacy-connected-app）: register_jwt_secret（init-common.sh。
-#          コンシューマー鍵・ユーザー名を手動で入力）
+#   6. Salesforce 組織に接続する。~/.sf-jwt/<REPO_NAME>/server.key・server.crt のどちらかがなければ die
+#        - register_jwt_secret_eca（init-common.sh）で、ログイン先の選択 → ブラウザでログイン → 組織の種類の読み取り →
+#          本番は main のみのガード → 外部クライアントアプリの deploy → コンシューマー鍵の retrieve → JWT 接続テスト → 登録
 #        - 関数が 0 以外を返したときも die
 #   7. 実行前のブランチを記録し（取得できなければ main）、git checkout main。origin/main は、取り直さない（手順 3 の版を使う）。
 #      origin に ADD_TIER のブランチがあれば作らない。なければ、origin/main から作って push --no-verify -u し、main に戻る
@@ -37,7 +34,7 @@
 #
 # 【前提条件】
 #   - force-* ディレクトリ（リポジトリのクローン）の中で実行すること
-#   - ~/.sf-jwt/<REPO_NAME>/server.key（既定では server.crt も）。sf-init Phase 10 が作る
+#   - ~/.sf-jwt/<REPO_NAME>/server.key・server.crt。sf-init Phase 10 が作る
 #   - gh の認証ユーザーが、リポジトリのオーナー（組織では、その組織の有効な管理者）であること（check_gh_owner）
 #
 # 【補足】
@@ -62,9 +59,8 @@
 #     実行すると、origin/main にはまだないため、重複の確認では止まらない（PR が 2 本できる）
 #   - 環境変数:
 #       ADD_TIER                         : 追加する段階（staging | develop。sf-init.sh が export する）
-#       SF_INIT_LEGACY_CONNECTED_APP=1   : 従来の接続アプリケーション（手動の入力）を使う
 #       SF_INIT_LOGIN_URL_<STG|DEV>      : ログイン先を、質問せずに指定する（login | test | URL）
-#       SF_INIT_JWT_RETRIES              : 既定の方式の JWT 接続テストの最大の試行回数（既定 20）
+#       SF_INIT_JWT_RETRIES              : JWT 接続テストの最大の試行回数（既定 20）
 #       SF_INIT_JWT_INTERVAL             : 試行の間の待ち時間（秒。既定 30）。待つのは試行の間だけで、既定では、最大
 #                                          (20 - 1) × 30 = 570 秒（約 10 分）待つ（作成したアプリの反映待ち）
 #   - ログは ~/sf-tools/logs/sf-init.log に、実行ごとに新しく書く（LOG_MODE=NEW。前回の内容は消える）
@@ -155,11 +151,7 @@ log "INFO" "  追加 tier     : ${ADD_TIER}（${LABEL}）"
 
 # 管理者向けの警告と確認（CLAUDE.md 2.4）。GITHUB_ACTIONS=true のときも、省略しない（Actions 上で実行する想定がない）
 print_admin_warning "!!  このコマンドは管理者専用です" "    段階（ブランチ）と、Salesforce 組織への接続を" "    追加します。Secrets / Variables が書き換わります"
-if [[ "${SF_INIT_LEGACY_CONNECTED_APP:-}" == "1" ]]; then
-    log "WARNING" "途中で失敗しても、登録した Secrets / Variables と、作成したブランチは、自動では、元に戻しません。"
-else
-    log "WARNING" "途中で失敗しても、Salesforce 側に作った外部クライアントアプリと、登録した Secrets / Variables と、作成したブランチは、自動では、元に戻しません。"
-fi
+log "WARNING" "途中で失敗しても、Salesforce 側に作った外部クライアントアプリと、登録した Secrets / Variables と、作成したブランチは、自動では、元に戻しません。"
 check_gh_owner "${REPO_FULL_NAME%%/*}"
 ask_yn "  続行しますか？" || die "中断しました。"
 
@@ -176,15 +168,12 @@ log "HEADER" "Step 1: ${LABEL} を、Salesforce 組織に接続します。"
 JWT_DIR="$HOME/.sf-jwt/${REPO_NAME}"
 [[ ! -f "${JWT_DIR}/server.key" ]] && die "秘密鍵が見つかりません: ${JWT_DIR}/server.key
   sf-init Phase 10 を先に実行してください。"
+[[ ! -f "${JWT_DIR}/server.crt" ]] && die "証明書が見つかりません: ${JWT_DIR}/server.crt"
 
-if [[ "${SF_INIT_LEGACY_CONNECTED_APP:-}" == "1" ]]; then
-    # 従来の接続アプリケーション（今後廃止予定）: コンシューマー鍵・ユーザー名を、手動で入力する
-    register_jwt_secret "$ORG_ALIAS" "$SUFFIX" "$LABEL" "${JWT_DIR}/server.key"
-else
-    # 既定: 外部クライアントアプリケーション（自動で作成する）
-    [[ ! -f "${JWT_DIR}/server.crt" ]] && die "証明書が見つかりません: ${JWT_DIR}/server.crt"
-    register_jwt_secret_eca "$ORG_ALIAS" "$SUFFIX" "$LABEL" "${JWT_DIR}/server.key" "${JWT_DIR}/server.crt"
-fi || die "${LABEL}（${SUFFIX}）の接続に失敗しました。"  # 失敗は関数の中で die する。0 以外が返ったときも、ブランチの追加に進まない
+# 外部クライアントアプリケーションを、自動で作成する
+#   失敗は関数の中で die する。0 以外が返ったときも、ブランチの追加に進まない
+register_jwt_secret_eca "$ORG_ALIAS" "$SUFFIX" "$LABEL" "${JWT_DIR}/server.key" "${JWT_DIR}/server.crt" \
+    || die "${LABEL}（${SUFFIX}）の接続に失敗しました。"
 
 # ------------------------------------------------------------------------------
 # 5. branches.txt の更新と、ブランチの追加

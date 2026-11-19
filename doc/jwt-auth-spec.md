@@ -2,9 +2,9 @@
 
 > **本ドキュメントの範囲:** JWT 認証への移行設計・仕様・実装方針。実装の詳細（コマンド引数等）はコードを正とします。
 >
-> **補足（sf-init Phase 10）:** Salesforce 側のアプリは、**既定が「外部クライアントアプリケーション（External Client App。以下 ECA）」で、自動で作成します**。従来の「接続アプリケーション（Connected App）」（手動で作成。今後廃止予定）は、`sf-init.sh --legacy-connected-app`（環境変数 `SF_INIT_LEGACY_CONNECTED_APP=1`）を指定したときだけ使います（利用者には選ばせません。4.1 の Step 1.5）。どちらも同じ JWT Bearer Flow で動作します。
+> **補足（sf-init Phase 10）:** Salesforce 側のアプリは、**「外部クライアントアプリケーション（External Client App。以下 ECA）」だけで、自動で作成します**。従来の「接続アプリケーション（Connected App）」（手動で作成。`sf-init.sh --legacy-connected-app`）は、Salesforce のサポート終了（Summer '27）を前に、廃止しました（以前の状態ファイルに残る `APP_TYPE` は読みません）。
 >
-> **ECA（既定）は自動作成です。** Step 2 の手動案内は出ず、Step 4 の組織ごとの設定で、ログイン先（URL）の選択 → `sf org login web`（ブラウザでログイン）→ 接続ユーザー名の取得 → 組織の種類の読み取りと「本番は main のみ」の確認（`org_guard`）→ プロファイル名（表示名）の取得 → メタデータ（5 ファイル）の `sf project deploy` でアプリ作成（証明書の登録、JWT Bearer、フルアクセス + refresh_token、管理者が承認したユーザーは事前承認済み）→ `sf project retrieve` でコンシューマー鍵を自動取得 → JWT 接続テスト（反映待ちのためリトライ）→ Secrets / Variables を登録、までを `sf-init` が行います（コンシューマーキー・ユーザー名の手入力は不要です。詳細は 4.2）。ログイン用の一時エイリアスは `sf-tools-PROD` / `sf-tools-STG` / `sf-tools-DEV` で、ユーザーが運用中のエイリアスと重ならない名前にしています。`sf` は npm 版が前提のため、ログイン（`sf org login web`）・接続情報の取得（`sf org display`）・プロファイル名の取得（`sf data query`）・deploy・retrieve・JWT 接続テストの成否は、すべて `sf` の終了コードで判定します（出力の文言では判定しません）。JWT 接続テスト以外は、0 以外なら中断します。JWT 接続テストは、リトライしても成功しなければ、「テストをスキップして登録だけ行う」かを確認します（N / q は中断）。**JWT 接続テストは、一時的なホームフォルダの中で実行します**（`run_isolated_home`）。`sf` の認証はユーザー名単位のため、そのまま実行すると、エイリアスが増える上に、同じユーザーの既存の認証が JWT の認証に置き換わってしまうからです。このため、`sf` の接続テストの `--alias`（`prod` / `staging` / `develop`）は、一時フォルダの中だけで有効で、ユーザーの `sf` には残りません（従来の接続アプリ・`sf-update-secret.sh` の接続テストも同様です。どちらも `lib/org.sh` の `org_jwt_test`）。実装は `phases/init/10_sf_auth.sh`、`phases/init/init-common.sh` の `register_jwt_secret_eca` / `generate_eca_metadata` / `register_jwt_secret`、`lib/org.sh` を参照してください。
+> **ECA は自動作成です。** Step 4 の組織ごとの設定で、ログイン先（URL）の選択 → `sf org login web`（ブラウザでログイン）→ 接続ユーザー名の取得 → 組織の種類の読み取りと「本番は main のみ」の確認（`org_guard`）→ プロファイル名（表示名）の取得 → メタデータ（5 ファイル）の `sf project deploy` でアプリ作成（証明書の登録、JWT Bearer、フルアクセス + refresh_token、管理者が承認したユーザーは事前承認済み）→ `sf project retrieve` でコンシューマー鍵を自動取得 → JWT 接続テスト（反映待ちのためリトライ）→ Secrets / Variables を登録、までを `sf-init` が行います（コンシューマーキー・ユーザー名の手入力は不要です。詳細は 4.2）。ログイン用の一時エイリアスは `sf-tools-PROD` / `sf-tools-STG` / `sf-tools-DEV` で、ユーザーが運用中のエイリアスと重ならない名前にしています。`sf` は npm 版が前提のため、ログイン（`sf org login web`）・接続情報の取得（`sf org display`）・プロファイル名の取得（`sf data query`）・deploy・retrieve・JWT 接続テストの成否は、すべて `sf` の終了コードで判定します（出力の文言では判定しません）。JWT 接続テスト以外は、0 以外なら中断します。JWT 接続テストは、リトライしても成功しなければ、「テストをスキップして登録だけ行う」かを確認します（N / q は中断）。**JWT 接続テストは、一時的なホームフォルダの中で実行します**（`run_isolated_home`）。`sf` の認証はユーザー名単位のため、そのまま実行すると、エイリアスが増える上に、同じユーザーの既存の認証が JWT の認証に置き換わってしまうからです。このため、`sf` の接続テストの `--alias`（`prod` / `staging` / `develop`）は、一時フォルダの中だけで有効で、ユーザーの `sf` には残りません（`sf-update-secret.sh` の接続テストも同様です。`lib/org.sh` の `org_jwt_test`）。実装は `phases/init/10_sf_auth.sh`、`phases/init/init-common.sh` の `register_jwt_secret_eca` / `generate_eca_metadata`、`lib/org.sh` を参照してください。
 
 ---
 
@@ -48,7 +48,7 @@ STG は段階が 2 つ以上、DEV は 3 つのとき（または `--add-tier` �
 | 名前 | 種別 | 共通/組織別 | 内容 | 登録元 |
 |---|---|---|---|---|
 | `SF_PRIVATE_KEY` | Secret | **プロジェクト共通（1つ）** | 秘密鍵 `server.key`（PEM）から CR を除き、`base64_oneline` で 1 行の Base64 にした値。全組織のアプリに同一の証明書を登録するため共通 | sf-init Phase 10（Step 3。毎回上書き）/ `sf-update-secret.sh` のメニュー 1・4 |
-| `SF_CONSUMER_KEY_PROD` / `_STG` / `_DEV` | Secret | 組織別 | その組織のアプリ（ECA / 接続アプリ）のコンシューマー鍵 | Phase 10 / `sf-init.sh --add-tier`（`_STG`・`_DEV`）/ `sf-init.sh --reconnect` / `sf-update-secret.sh` のメニュー 2・4 |
+| `SF_CONSUMER_KEY_PROD` / `_STG` / `_DEV` | Secret | 組織別 | その組織のアプリ（ECA）のコンシューマー鍵 | Phase 10 / `sf-init.sh --add-tier`（`_STG`・`_DEV`）/ `sf-init.sh --reconnect` / `sf-update-secret.sh` のメニュー 2・4 |
 | `SF_USERNAME_PROD` / `_STG` / `_DEV` | Variable | 組織別 | 接続ユーザー名 | Phase 10 / `--add-tier` / `--reconnect` / `sf-update-secret.sh` のメニュー 3・4 |
 | `SF_INSTANCE_URL_PROD` / `_STG` / `_DEV` | Variable | 組織別 | ログイン先の URL（`sf org login jwt --instance-url` に渡す。2.3） | Phase 10 / `--add-tier` / `--reconnect` / `sf-update-secret.sh` のメニュー 4 のみ |
 | `SF_ORG_ID_*` / `SF_ORG_NAME_*` / `SF_ORG_KIND_*` / `SF_ORG_CHECKED_*` | Variable | 組織別 | 組織 ID・組織名・種類（production / sandbox / developer / trial / unknown）・確認日時。`sf-init.sh --status` の表示と、`--reconnect` の「古い組織」の判定に使う（ワークフローは使わない） | `org_save`（`lib/org.sh`）。Phase 10 / `--add-tier` / `--reconnect` / `sf-update-secret.sh` のメニュー 2〜4。組織の情報を読み取れたときだけ（保存の失敗は WARNING で続行） |
@@ -68,7 +68,7 @@ STG は段階が 2 つ以上、DEV は 3 つのとき（または `--add-tier` �
 
 ### 2.3 SF_CONSUMER_KEY が組織ごとに異なる理由
 
-アプリ（ECA / 接続アプリ）は各 Salesforce 組織に個別に作成するため、コンシューマー鍵は組織ごとに固有の値となる。
+アプリ（ECA）は各 Salesforce 組織に個別に作成するため、コンシューマー鍵は組織ごとに固有の値となる。
 ただし **証明書（公開鍵）は共通**なので、各組織のアプリに同一の `server.crt` を登録することで、秘密鍵 1 つで全組織に認証できる。
 
 ### 2.4 SF_INSTANCE_URL の値
@@ -92,7 +92,7 @@ STG は段階が 2 つ以上、DEV は 3 つのとき（または `--add-tier` �
 ```
 ~/.sf-jwt/<REPO_NAME>/        ← フォルダの権限 700
   server.key   ← 秘密鍵（RSA 2048 ビット・PKCS#1。権限 600。Base64 にして Secret SF_PRIVATE_KEY に登録）
-  server.crt   ← 公開鍵証明書（ECA: メタデータに入れて deploy で登録 / 接続アプリ: 利用者が各組織にアップロード）
+  server.crt   ← 公開鍵証明書（メタデータに入れて deploy で登録）
 ```
 
 - 秘密鍵はプロジェクトリポジトリには含めない（リポジトリの外、sf-init を実行した管理者の PC のホームに保管する）
@@ -131,36 +131,16 @@ openssl req -new -x509 -days 3650 \
   │    Y: 再利用（発行先が空なら証明書だけ作り直す）/ N: 削除して作り直す / q: 中断
   └─ どちらかがないとき: generate_jwt_cert で作る（3.2）
 
-[Step 1.5] アプリの種類（APP_TYPE）を決める（利用者には聞かない）
-  ├─ 状態ファイルに APP_TYPE があれば、それを使う（--legacy-connected-app の指定があり、1 以外なら中断）
-  └─ なければ: --legacy-connected-app なら 1（接続アプリ）、それ以外は 2（ECA）。状態ファイルに追記
-
 [Step 2] アプリの案内（共通・1回）
-  ├─ APP_TYPE=1: 接続アプリの作成手順を表示して Enter を待つ（q は中断）
-  │    STEP A: アプリケーションマネージャ → 新規接続アプリケーション（名前 SF_TOOLS）→ OAuth 設定の有効化
-  │            （コールバック URL）→ スコープ（full / refresh_token, offline_access）→ デジタル署名に server.crt を
-  │            アップロード → 保存 → コンシューマー鍵をコピー → 2〜10 分待つ
-  │    STEP B: 接続アプリケーションを管理 → ポリシー「管理者が承認したユーザーは事前承認済み」→ 接続ユーザーのプロファイルを追加
-  └─ APP_TYPE=2: 自動で作成する旨を表示するだけ
+  └─ ECA を組織ごとに自動で作成する旨を表示するだけ（質問はしない）
 
 [Step 3] SF_PRIVATE_KEY を GitHub Secrets に登録（共通・毎回上書き）
   └─ tr -d '\r' < server.key | base64_oneline | gh secret set SF_PRIVATE_KEY（秘密鍵をログに残さないため run を使わない）
 
 [Step 4] 組織ごとの設定（PROD は常に / STG は BRANCH_COUNT ≥ 2 / DEV は BRANCH_COUNT ≥ 3）
   ├─ 前回完了済みの段階はスキップ（4.4）
-  ├─ APP_TYPE=2: register_jwt_secret_eca（4.2）
-  └─ APP_TYPE=1: register_jwt_secret
-       ├─ ログイン先（URL）を選ぶ（2.4）
-       ├─ コンシューマー鍵・接続ユーザー名を入力（read_or_quit）
-       ├─ JWT 接続テスト（org_jwt_test。一時的なホームの中で、ログインと組織の種類の読み取り）
-       │    sf org login jwt --client-id <鍵> --jwt-key-file ~/.sf-jwt/<REPO>/server.key \
-       │      --username <ユーザー名> --instance-url <URL> --alias <prod|staging|develop>
-       │    → 失敗時: ask_yn「接続テストをスキップして GitHub Secrets への登録のみ行いますか？」（N / q は中断）
-       ├─ 本番は main のみ（org_guard。4.3）。違反は中断
-       └─ gh secret set SF_CONSUMER_KEY_xxx / gh variable set SF_USERNAME_xxx・SF_INSTANCE_URL_xxx / org_save
+  └─ register_jwt_secret_eca（4.2）
 ```
-
-接続アプリ（APP_TYPE=1）の注意（`10_sf_auth.sh` の冒頭コメント）: 作成した接続アプリを「外部クライアントアプリへの移行」または「削除」しないこと（OAuth の内部状態が壊れ、`client_identifier_invalid` が出る。問題が起きたら、別名で新規作成する）。Developer Edition 組織では事前承認の反映が遅れる・失敗する場合がある。
 
 ### 4.2 外部クライアントアプリの自動作成（register_jwt_secret_eca）
 
@@ -192,7 +172,7 @@ openssl req -new -x509 -days 3650 \
 
 - 組織の種類は、ログインした組織の `Organization`（`Id`・`Name`・`IsSandbox`・`OrganizationType`・`TrialExpirationDate`）を読み取って判定する（`org_read_info` / `org_jwt_test` → `org_kind`）。上から順に: 読み取れない → unknown / `IsSandbox` が true → sandbox / `OrganizationType` に Developer → developer / `TrialExpirationDate` あり → trial / `OrganizationType` が空 → unknown / それ以外 → production（推測しない）
 - staging・develop に production または unknown をつなごうとしたら、登録する前に中断する。main は、unknown でも WARNING を出して続行する
-- 確認のタイミング: ECA は deploy の前（誤って本番にアプリを作らないため）。接続アプリ・`sf-update-secret.sh` は JWT 接続テストのあと、登録の前（接続テストをスキップしたときは unknown として扱う）
+- 確認のタイミング: ECA は deploy の前（誤って本番にアプリを作らないため）。`sf-update-secret.sh` は JWT 接続テストのあと、登録の前（接続テストをスキップしたときは unknown として扱う）
 
 ### 4.4 再開（--resume）時の考慮
 
@@ -201,16 +181,15 @@ openssl req -new -x509 -days 3650 \
 - 記録とスキップは `SF_INIT_TIER_RESUME=1`（`sf-init.sh` が `--only` 以外のときに export する）のときだけ。`--only 10` では、記録も、スキップもしない
 - Step 1 で N（鍵の作り直し）を選んだ実行では、スキップしない（`SF_PRIVATE_KEY` が新しい鍵に置き換わり、古い証明書が残る組織が JWT 接続できなくなるため）
 - Phase 10 が成功すると、`sf-init.sh` が進捗ファイルを書き直すため、段階の記録は消える
-- アプリの種類は、状態ファイルの `APP_TYPE` を再利用する（4.1 の Step 1.5）
 
 ### 4.5 段階の追加・接続先の付け替え（--add-tier / --reconnect）
 
-セットアップ後に、1 つの段階だけを Phase 10 と同じ関数で設定する（force-* の中で実行する管理者向けのモード。管理者向けの警告・`check_gh_owner`・確認のあと）。どちらも、既定は `register_jwt_secret_eca`、`--legacy-connected-app`（`SF_INIT_LEGACY_CONNECTED_APP=1`）のときは `register_jwt_secret`。鍵・証明書は `~/.sf-jwt/<REPO_NAME>/` のものを使う（新しくは作らない）。
+セットアップ後に、1 つの段階だけを Phase 10 と同じ関数で設定する（force-* の中で実行する管理者向けのモード。管理者向けの警告・`check_gh_owner`・確認のあと）。どちらも `register_jwt_secret_eca` を使う。鍵・証明書は `~/.sf-jwt/<REPO_NAME>/` のものを使う（新しくは作らない）。
 
 | モード | スクリプト | 登録するもの | 補足 |
 |---|---|---|---|
 | `sf-init.sh --add-tier staging\|develop` | `phases/init/add_tier.sh` | `*_STG` または `*_DEV` | 組織への接続を先に行い、そのあとブランチを作り、`branches.txt` の変更を PR にする。接続で中断したときは、ブランチ・`branches.txt` は変更しない（deploy 済みの ECA は組織に残る） |
-| `sf-init.sh --reconnect main\|staging\|develop` | `phases/init/reconnect.sh` | その段階の `*_<接尾辞>` | いまの接続（Variables）を表示してから付け替える。以前の組織 ID と違う組織につないだときは、古い組織に残るアプリ（ECA `SF_TOOLS_<…>` / 手動の接続アプリ）と削除の場所を表示する（自動では削除しない）。登録は 1 つずつ行うため、途中で止まると新旧の値が混在する（もう一度 `--reconnect` でそろえる） |
+| `sf-init.sh --reconnect main\|staging\|develop` | `phases/init/reconnect.sh` | その段階の `*_<接尾辞>` | いまの接続（Variables）を表示してから付け替える。以前の組織 ID と違う組織につないだときは、古い組織に残るアプリ（ECA `SF_TOOLS_<…>`）と削除の場所を表示する（自動では削除しない）。登録は 1 つずつ行うため、途中で止まると新旧の値が混在する（もう一度 `--reconnect` でそろえる） |
 
 鍵・ユーザー名だけの部分的な更新は `sf-update-secret.sh`（6）。
 
@@ -309,7 +288,7 @@ sf org login jwt \
 | ファイル | 変更種別 | 内容 |
 |---|---|---|
 | `phases/init/10_sf_auth.sh`（旧 `06_sf_auth.sh`） | 全面書き換え | JWT フローに変更 |
-| `phases/init/init-common.sh` | 関数差し替え | `register_sf_secret` 削除・`register_jwt_secret` 追加 |
+| `phases/init/init-common.sh` | 関数差し替え | `register_sf_secret` 削除・`register_jwt_secret` 追加（のちに、接続アプリケーションの廃止で、`register_jwt_secret` も削除） |
 | `bin/sf-update-secret.sh` | 全面書き換え | JWT Secrets 対応 |
 | `templates/.github/workflows/wf-validate.yml` | 認証ステップ変更・自己完結化 | sfdxAuthUrl → JWT、reusable WF パターン廃止 |
 | `templates/.github/workflows/wf-release.yml` | 同上 | 同上 |

@@ -141,6 +141,7 @@ it_run() {
         mkdir -p "$IT_ROOT/tmp"; export TMPDIR="$IT_ROOT/tmp"   # 一時ファイルの残りを、サンドボックスの中で検査できるように
         export SF_LAUNCHER_ACTIVE=1 SF_TOOLS_SF_CHECK_STAMP=/dev/null
         export SF_TOOLS_SKIP_JAVA_CHECK=1   # 実機の Java のバージョンで、出力が変わらないように（Java の確認は、test_common.sh が検査する）
+        export SF_TOOLS_SKIP_ENV_VERSIONS=1   # die が、ログに git・node・sf の版を残すために、偽のコマンドを呼ばないように（test_common.sh が検査する）
         export GIT_TERMINAL_PROMPT=0 GIT_CONFIG_NOSYSTEM=1 GIT_SSH_COMMAND="$IT_BIN/ssh"
         export E2E_COMMIT_MSG="${IT_COMMIT_MSG:-$IT_COMMIT_MSG_DEFAULT}"
         printf '%b' "$input" | run_with_timeout "${IT_TIMEOUT:-300}" "$@"
@@ -296,6 +297,8 @@ X-Oauth-Scopes: %s
             echo "{\"ref\":\"$_ref\"}"; exit 0 ;;
         repos/*/*)   # リポジトリの情報（permissions.admin など）。他のパターンに合わなかった repos/OWNER/REPO だけ
             case "$_path" in repos/*/*/*) ;; *)
+                # 公開範囲（sf-metasync.sh: gh api repos/OWNER/REPO --jq .visibility）。state/gh.visibility で変える（既定 private）
+                [[ "$*" == *".visibility"* ]] && { cat "$IT_STATE/gh.visibility" 2>/dev/null || echo private; exit 0; }
                 if [[ $_has_jq -eq 1 ]]; then echo "$(cat "$IT_STATE/gh.repo_admin" 2>/dev/null || echo true)"; else echo "{\"permissions\":{\"admin\":true}}"; fi; exit 0 ;;
             esac ;;
     esac

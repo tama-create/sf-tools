@@ -17,6 +17,10 @@ CLR_RST='\033[0m'
 # 省略のテスト以外で、確認が省略されないようにするため。省略のテストは、独自の記録先を指定する）
 export SF_TOOLS_SF_CHECK_STAMP=/dev/null
 
+# die が、ログに git・node・sf の版を残すために、それらを呼ばないようにする（テストの偽のコマンドの呼び出しの記録を、変えないため。
+# 版を残す動作は、test_common.sh が、この変数を外して検査する）
+export SF_TOOLS_SKIP_ENV_VERSIONS=1
+
 # check_java_cli も同様（記録を作らない。省略のテストは、独自の記録先を指定する）。
 # JAVA_HOME は、本物のものを使わない（check_java_cli は JAVA_HOME を優先するため、モックの java が無視される）。
 # 本物の環境の変数で、結果が変わらないようにする（GITHUB_ACTIONS の Linux には、JAVA_HOME が設定されている）
@@ -324,6 +328,15 @@ case "$1 $2" in
         # 接続ユーザーのプロファイル名の取得（sf-init の外部クライアントアプリ作成）
         echo "{\"status\":0,\"result\":{\"records\":[{\"Profile\":{\"Name\":\"${MOCK_SF_PROFILE_NAME:-System Administrator}\"}}]}}"
         exit 0 ;;
+    "org auth")
+        # sf org auth show-access-token --json（sf-metasync の一覧の指紋: lib/metasync.js fingerprint。org display が伏せ字のときの最初の取得と、期限切れのトークンの取り直し）。
+        #   MOCK_SF_FRESH_TOKEN=<トークン>（既定 TESTTOKEN-FRESH）。MOCK_SF_TOKEN_EXIT=1 で、失敗を再現する
+        if [[ "$3" == "show-access-token" ]]; then
+            [[ "${MOCK_SF_TOKEN_EXIT:-0}" -ne 0 ]] && { echo '{"status":1,"message":"token failed"}'; exit 1; }
+            echo "{\"status\":0,\"result\":{\"accessToken\":\"${MOCK_SF_FRESH_TOKEN:-TESTTOKEN-FRESH}\"}}"
+            exit 0
+        fi
+        exit 0 ;;
     "org logout")   exit 0 ;;
     "org open")     exit 0 ;;
     "alias unset")  exit 0 ;;
@@ -356,6 +369,16 @@ case "$1 $2" in
         # sf-metasync の取得を再現: MOCK_SF_RETRIEVE_FILES=<パス|内容>（複数は改行区切り）を、カレント（取得先の一時プロジェクト）に書く。
         #   MOCK_SF_RETRIEVE_EXIT=<コード>: その終了コードで失敗する（MOCK_SF_RETRIEVE_ERR=<文言> を標準エラーに出す）
         #   MOCK_SF_RETRIEVE_JSON=<JSON>: 標準出力に出す応答
+        # 追加の取得（sf-metasync の P2。--manifest つき）: MOCK_SF_EXTRA_FILES=<パス|内容>（複数は改行区切り）を書く。MOCK_SF_EXTRA_EXIT=<コード> で失敗する
+        #   （MOCK_SF_EXTRA_ERR を標準エラーに出す）。MOCK_SF_EXTRA_JSON=<JSON> は、標準出力に出す応答。--manifest がなければ、下の通常の取得
+        if [[ " $* " == *" --manifest "* ]]; then
+            if [[ -n "${MOCK_SF_EXTRA_EXIT:-}" ]]; then echo "${MOCK_SF_EXTRA_ERR:-}" >&2; exit "$MOCK_SF_EXTRA_EXIT"; fi
+            if [[ -n "${MOCK_SF_EXTRA_FILES:-}" ]]; then
+                while IFS="|" read -r _fp _fc; do [[ -n "$_fp" ]] || continue; mkdir -p "${_fp%/*}"; printf '%s\n' "$_fc" > "$_fp"; done <<< "$MOCK_SF_EXTRA_FILES"
+            fi
+            [[ -n "${MOCK_SF_EXTRA_JSON:-}" ]] && echo "$MOCK_SF_EXTRA_JSON"
+            exit 0
+        fi
         if [[ -n "${MOCK_SF_RETRIEVE_EXIT:-}" ]]; then
             _rcnt="${MOCK_CALL_LOG%/*}/retrieve.cnt"; _rn=$(( $(cat "$_rcnt" 2>/dev/null || echo 0) + 1 )); echo "$_rn" > "$_rcnt"
             # MOCK_SF_RETRIEVE_FAIL_ONCE=1: 1 回目だけ失敗する（やり直しの確認）
@@ -479,6 +502,11 @@ case "$1 $2" in
         fi
         echo "${MOCK_GH_VARIABLE_GET_VALUE:-fake@example.com}" ; exit "${MOCK_GH_VARIABLE_GET_EXIT:-0}" ;;
     "api user")    echo "${MOCK_GH_API_USER:-tamashimon-org}" ;;
+    # リポジトリの公開・非公開（sf-metasync.sh。gh api repos/<owner>/<repo> --jq .visibility）。MOCK_GH_VISIBILITY（既定 private）、
+    #   MOCK_GH_VISIBILITY_EXIT=1 で、確認できない（gh の失敗）状態を再現する
+    "api repos/"*)
+        [[ "${MOCK_GH_VISIBILITY_EXIT:-0}" -ne 0 ]] && { echo '{"message":"Not Found","status":"404"}'; echo "gh: Not Found (HTTP 404)" >&2; exit 1; }   # 実物の gh は、失敗時も標準出力にエラーの JSON を出す
+        echo "${MOCK_GH_VISIBILITY:-private}"; exit 0 ;;
     # オーナー候補・既存プロジェクトの一覧（jq で絞ったあとの出力を、そのまま返す）: 改行区切り
     "api user/memberships/orgs") [[ -n "${MOCK_GH_ORGS_ADMIN:-}" ]] && printf '%s\n' "$MOCK_GH_ORGS_ADMIN"; exit 0 ;;
     "api user/orgs")             [[ -n "${MOCK_GH_ORGS_MEMBER:-}" ]] && printf '%s\n' "$MOCK_GH_ORGS_MEMBER"; exit 0 ;;
@@ -592,6 +620,19 @@ EOF
     chmod +x "$bin_dir/java"
 }
 
+# curl モック（sf-metasync.sh の Slack 通知: curl -X POST https://slack.com/api/chat.postMessage）
+#   呼び出しを MOCK_CALL_LOG に記録する（引数の全体。送る本文も入る）。応答は MOCK_CURL_RESPONSE（既定 {"ok":true}）、終了コードは MOCK_CURL_EXIT
+create_mock_curl() {
+    local bin_dir="$1"
+    cat > "$bin_dir/curl" << 'EOF'
+#!/bin/bash
+echo "curl $*" >> "${MOCK_CALL_LOG:-/dev/null}"
+if [[ -n "${MOCK_CURL_RESPONSE:-}" ]]; then echo "$MOCK_CURL_RESPONSE"; else echo '{"ok":true}'; fi
+exit "${MOCK_CURL_EXIT:-0}"
+EOF
+    chmod +x "$bin_dir/curl"
+}
+
 # 全モックを一括生成
 create_all_mocks() {
     local bin_dir="$1"
@@ -601,6 +642,7 @@ create_all_mocks() {
     create_mock_npm "$bin_dir"
     create_mock_code "$bin_dir"
     create_mock_gh "$bin_dir"
+    create_mock_curl "$bin_dir"
     create_mock_node "$bin_dir"
     create_mock_browser "$bin_dir"  # ブラウザ起動コマンドを無効化
     create_mock_openssl "$bin_dir"  # JWT 証明書生成コマンドを無効化

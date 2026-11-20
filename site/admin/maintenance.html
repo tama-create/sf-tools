@@ -50,7 +50,7 @@
   <li>組織の URL を入力（My Domain。例: <code>https://会社名.my.salesforce.com</code>）。<code>https://</code> で始まり、<code>salesforce.com</code> か <code>force.com</code> のドメインでないと、入力し直しになります</li>
 </ol>
 <p>選んだあと、ブラウザで Salesforce にログインします（システム管理者のユーザーで。約 2 分で時間切れになります）。ログインすると、組織の ID・名前・種類（本番 / Sandbox / Developer Edition / Trial）を、<strong>組織から読み取ります</strong>。読み取った内容は、GitHub の Variable（<code>SF_ORG_*</code>）に保存され、<a href="#status"><code>--status</code></a> で見られます。</p>
-<p>そのあとの、外部クライアントアプリの自動作成・接続のテスト（最大 約 10 分くり返します）・GitHub への登録は、最初のセットアップと同じです（<a href="setup.html#in-sf">Salesforce の接続</a>）。<code>--legacy-connected-app</code> を付けると、従来の接続アプリケーション（手動の入力）を使います。</p>
+<p>そのあとの、外部クライアントアプリの自動作成・接続のテスト（最大 約 10 分くり返します）・GitHub への登録は、最初のセットアップと同じです（<a href="setup.html#in-sf">Salesforce の接続</a>）。</p>
 
 <h2 id="add-tier">段階を足す（<code>--add-tier</code>）</h2>
 <p>セットアップのあとで、<code>main</code> だけの構成から、<code>staging</code>・<code>develop</code> へ、段階を足せます。</p>
@@ -125,11 +125,11 @@ sf-init.sh --add-tier develop    # main + staging → main + staging + develop</
   <li>管理者向けの警告が出て、gh にログインしているユーザーが、オーナー本人か、その組織の管理者かを確かめてから、「付け替えますか？」（Y/N/q）と聞かれます（<code>N</code> / <code>q</code> で中止）。</li>
   <li>ログイン先を選んで、ブラウザで、新しい組織にログインします。組織の種類を確かめて、外部クライアントアプリを作り、接続をテストします。</li>
   <li>Secret <code>SF_CONSUMER_KEY_*</code> と、Variable <code>SF_USERNAME_*</code>・<code>SF_INSTANCE_URL_*</code>・<code>SF_ORG_*</code> を、新しい組織の値に更新します。</li>
-  <li>以前の組織と新しい組織が違うときは、以前の組織に、以前の接続に使ったアプリが残っていることと、削除する場所を表示します。以前の接続の方式は記録していないので、両方を表示します: sf-init が作った外部クライアントアプリ（<code>SF_TOOLS_</code> で始まる名前。外部クライアントアプリマネージャ）と、<code>--legacy-connected-app</code> で手動で作った接続アプリケーション（アプリケーションマネージャ）。<strong>自動では削除しません。</strong>以前の組織の ID が記録されていなかったときは、確かめるよう案内が出ます。</li>
+  <li>以前の組織と新しい組織が違うときは、以前の組織に、sf-init が作った外部クライアントアプリ（<code>SF_TOOLS_</code> で始まる名前）が残っていることと、削除する場所（外部クライアントアプリ マネージャ）を表示します。<strong>自動では削除しません。</strong>以前の組織の ID が記録されていなかったときは、確かめるよう案内が出ます。</li>
 </ol>
 <ul>
   <li>段階は、<code>main</code>（<code>prod</code> も <code>main</code> として受け付けます）・<code>staging</code>・<code>develop</code> のいずれかです。<code>staging</code> と <code>develop</code> は、<code>branches.txt</code> にその段階があるときだけ指定できます。</li>
-  <li>JWT の鍵と証明書（<code>~/.sf-jwt/force-XXXX/</code> の <code>server.key</code> と <code>server.crt</code>）が、この PC に必要です（<code>--legacy-connected-app</code> のときも、両方が必要です）。</li>
+  <li>JWT の鍵と証明書（<code>~/.sf-jwt/force-XXXX/</code> の <code>server.key</code> と <code>server.crt</code>）が、この PC に必要です。</li>
 </ul>
 <div class="box warn">
   <div class="title">途中で止まったとき</div>

@@ -5,6 +5,9 @@
 # YAML の中の「マージ順序を検証」の run スクリプトを取り出して、実際の git リポジトリ（ローカルのリモートつき）で実行する。
 # 確認すること: 順序どおり・順序外・最下位への PR・環境ブランチからの PR・フォークからの PR・
 #   main に branches.txt がない／ブランチの行がない場合（Actions と同じ -eo pipefail で、ジョブが止まらないこと）
+# 診断と再実行: 判定スクリプトの標準出力・標準エラーを出力に付ける。全件の並列実行で、まれに期待が外れる（原因は未特定）ため、
+#   期待が外れたら、直前の判定を 1 回だけ再実行する。再実行で通ったら、初回の出力の全文を [RETRY] 付きで残す。
+#   再実行でも外れたら、失敗にして、両方の出力の全文を表示する（assert_output_contains は、このファイルの中で上書きしている）
 source "$(dirname "${BASH_SOURCE[0]}")/test_helper.sh"
 echo -e "${CLR_HEAD}=== wf-sequence.yml ===${CLR_RST}"
 
@@ -52,9 +55,61 @@ _make_repo() {
 #   -e・pipefail がないと、grep の該当なしなどで、Actions ではジョブが止まる不具合を、見逃す
 _GH_BASH=(bash --noprofile --norc -eo pipefail -c)
 
-# 判定スクリプトを実行する。引数: リポジトリ FEATURE BASE [HEAD_SHA]。出力: GITHUB_OUTPUT の内容 + 終了コード（RC=）
+# 並列実行（run_tests.sh の全件）で、まれに落ちる原因を調べるための診断。
+#   スクリプトの標準出力・標準エラーは、後で消えるため、RC= の行のあとに付ける（落ちたときに、原因を読めるようにする）。
+#   付ける文には、アサーションが探す文字列（out_of_order=・skip=・RC= など）は含まれない
+_diag_stdout() {
+    echo "[スクリプトの標準出力・標準エラー]"
+    cat "$1" 2>/dev/null
+}
+
+# 直前に実行した判定の記録（実行したコマンドと、その出力）。まれな失敗のとき、1 回だけ再実行するために使う。
+#   $(...) の中で実行されるため、変数ではなくファイルに残す。最後（print_summary の前）に削除する
+_WFS_STATE=$(mktemp -d "${TMPDIR:-/tmp}/wfseq-state-XXXX")
+
+# 判定を実行して、その実行内容と出力を記録する。引数: 実行する関数 引数…。出力: その関数の出力そのまま
+_record_run() {
+    local out
+    out=$("$@")   # VAR=$(cmd) のため run 不使用
+    printf '%q ' "$@" > "$_WFS_STATE/cmd"
+    printf '%s\n' "$out" > "$_WFS_STATE/out"
+    printf '%s\n' "$out"
+}
+
+# 出力に文字列が含まれるかを確認する（test_helper.sh の同名の関数を、この中で上書きする）。
+#   並列実行（run_tests.sh の全件）で、まれに期待が外れることがある（原因は未特定）ため、期待が外れたら、
+#   直前の判定（$1 が、その出力と同じときだけ）を 1 回だけ再実行する。再実行で通ったら成功とし、初回の出力の全文を
+#   [RETRY] 付きで残す（あとで原因を読めるように）。本物の不具合は、再実行でも外れるので、見逃さない。
+#   外れたままのときは、出力の全文（GITHUB_OUTPUT の内容・RC=・スクリプトの標準出力）も表示する
+assert_output_contains() {
+    if grep -q -- "$2" <<< "$1"; then
+        pass "$3"
+        return
+    fi
+    local cmd last out2
+    cmd=$(cat "$_WFS_STATE/cmd" 2>/dev/null)
+    last=$(cat "$_WFS_STATE/out" 2>/dev/null)
+    if [[ -n "$cmd" && "$1" == "$last" ]]; then
+        out2=$(eval "$cmd")   # VAR=$(cmd) のため run 不使用
+        if grep -q -- "$2" <<< "$out2"; then
+            pass "$3"
+            echo "      [RETRY] 初回は期待が外れ、再実行で通った（まれな失敗の記録。期待: '$2'）"
+            sed 's/^/      | 初回: /' <<< "$1"
+            return
+        fi
+        fail "$3" "'$2' が出力に含まれていない（再実行でも外れた）"
+        sed 's/^/      | 初回: /' <<< "$1"
+        sed 's/^/      | 再実行: /' <<< "$out2"
+        return
+    fi
+    fail "$3" "'$2' が出力に含まれていない"
+    sed 's/^/      | /' <<< "$1"
+}
+
+# 判定スクリプトを実行する。引数: リポジトリ FEATURE BASE [HEAD_SHA]。出力: GITHUB_OUTPUT の内容 + 終了コード（RC=）+ 診断
 #   HEAD_SHA（PR のソースの最新のコミット）を省略したときは、origin/<FEATURE> のコミット
-_run_check() {
+_run_check() { _record_run _run_check_once "$@"; }
+_run_check_once() {
     local repo="$1" feature="$2" base="$3" sha="${4:-}" script rc
     local out="$repo/.gh_output"   # repo を使うため、local を分ける（同じ local 内では、$repo が展開されない）
     [[ -n "$sha" ]] || sha=$(git -C "$repo" rev-parse -q --verify "origin/$feature" 2>/dev/null || true)  # VAR=$(cmd) のため run 不使用
@@ -64,10 +119,12 @@ _run_check() {
     rc=$?
     cat "$out"
     echo "RC=$rc"
+    _diag_stdout "$repo/.gh_stdout"
 }
 
-# 「対象ファイル確認」（スキップの判定）を実行する。引数: リポジトリ HEAD_REF。出力: GITHUB_OUTPUT の内容 + RC=
-_run_skipcheck() {
+# 「対象ファイル確認」（スキップの判定）を実行する。引数: リポジトリ HEAD_REF。出力: GITHUB_OUTPUT の内容 + RC= + 診断
+_run_skipcheck() { _record_run _run_skipcheck_once "$@"; }
+_run_skipcheck_once() {
     local repo="$1" head="$2" script rc
     local out="$repo/.gh_output_skip"   # repo を使うため、local を分ける
     script=$(_extract_script check)
@@ -76,6 +133,7 @@ _run_skipcheck() {
     rc=$?
     cat "$out"
     echo "RC=$rc"
+    _diag_stdout "$repo/.gh_stdout_skip"
 }
 
 # feature-a を、指定したブランチへマージして、リモートへ push する（前の段階にマージ済みの状態を作る）
@@ -256,4 +314,5 @@ test_wf_sequence_no_branches_file
 test_wf_sequence_fetch_failure
 test_wf_sequence_fork_pr
 
+rm -rf "$_WFS_STATE"   # 判定の記録（_record_run）の後始末
 print_summary

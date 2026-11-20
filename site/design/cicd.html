@@ -240,13 +240,14 @@ templates/.github/workflows/  ─ sf-init →   .github/workflows/
 </ul>
 
 <h3 id="metasync">wf-metasync（本番の自動同期）</h3>
-<p>平日の日本時間 9:00 / 12:00 / 15:00 / 18:00 に、本番の組織の最新の状態を、<code>main</code> に反映します。9:00 の回は、毎日 1 回の全件取得です。ほかの回は、変更の検知（Variable <code>SF_METASYNC_DETECT</code> を <code>shadow</code> / <code>on</code> にしたとき）で、組織に変更がなければ、取得そのものを省けます（既定は、検知を行わず、毎回、全件取得です）。手動でも実行できます（セットアップの最後と、<code>sf-init.sh --verify</code> が、手動の実行で動かします）。同時には 1 つずつしか動きません。</p>
+<p>平日の日本時間 9:00 / 12:00 / 15:00 / 18:00 に、本番の組織の最新の状態を、<code>main</code> に反映します。9:00 の回は、毎日 1 回の全件取得です。ほかの回は、変更の検知（Variable <code>SF_METASYNC_DETECT</code> を <code>shadow</code> / <code>on</code> にしたとき）で、組織に変更がなければ、取得そのものを省けます（既定は、検知を行わず、毎回、全件取得です）。また、Variable <code>SF_METASYNC_FINGERPRINT</code> を <code>shadow</code> にすると、組織の一覧から「指紋」を作り、実際の変更との食い違い（見逃し）をログに記録します（検証用。取得は省きません）。さらに、リポジトリが公開のときは取得せずに止まり、取得した内容に秘密情報の疑いがあるときは（Variable <code>SF_METASYNC_SECRET_SCAN</code> が <code>on</code> のとき）コミットせずに止まって Slack に通知します（<code>shadow</code> が既定で、警告だけです）。手動でも実行できます（セットアップの最後と、<code>sf-init.sh --verify</code> が、手動の実行で動かします）。同時には 1 つずつしか動きません。</p>
 <ol>
   <li><code>main</code> を、全履歴つきでチェックアウトする（直近のマージの確認に、履歴が必要なため）</li>
   <li>Node.js と Salesforce CLI を入れる（sf のプラグインは、入れません）</li>
   <li>本番の組織に、JWT 認証でログインする</li>
   <li>sf-tools を取ってきて、<code>sf-metasync.sh</code> を実行する</li>
   <li><code>sf-tools/config/metadata.txt</code> に書かれた種類のメタデータを、一時的な場所へ取得し、<code>main</code> の同期の対象のフォルダを、取得した内容と同じにする（追加・変更・<strong>削除</strong>。削除には安全の守りがあり、当たったものは保留にして、終了コード 3 で知らせます）（<a href="../reference/commands-auto.html#sf-metasync">取得する種類</a>）</li>
+  <li>Variable <code>SF_METASYNC_EXTRA</code> を <code>on</code> にしていると、通常の取得では取れないもの（レポート・ダッシュボード・メールテンプレート・標準オブジェクト上の項目など）も、名前を指定して、もう 1 回取る（既定は <code>off</code>。取れなかったものを、削除と取り違えない）</li>
   <li>変更があれば、コミットして、<code>main</code> へ直接 push し、<code>branches.txt</code> のほかのブランチ（staging・develop）へ伝える（伝えられなかったブランチは、警告を出して飛ばす）。変更がなければ、何もせず、正常に終わる</li>
 </ol>
 

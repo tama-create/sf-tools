@@ -34,14 +34,18 @@
 #                ログイン済みの組織から、ID（上位 15 文字）が一致するものを探して、そのユーザー名を接続先にする。
 #                次のどれかなら、何も変更せずに中断する（推測して別の組織に進まない。prod エイリアスには、フォールバックしない）:
 #                origin から特定できない／ SF_ORG_ID_PROD を読み取れない／ 一致する組織が、この PC の sf にない
-#          GitHub Actions 上: ワークフローが JWT で作る prod エイリアスを使う（gh は見ない）
+#          GitHub Actions 上: ワークフローが JWT で作る prod エイリアスを使う（接続先の決定には、gh を使わない）
 #      - sf org display --target-org <接続先> --json の終了コードが 0 であること。
 #        出力は、表示もログへの記録もしない（アクセストークンを含むため）
 #      - 現在の HEAD がブランチを指していること（git symbolic-ref -q HEAD の終了コードが 0。detached HEAD では中断する）
 #      - ./sf-tools/config/metadata.txt が存在すること（コメント行・空行を除いた各行を、取得するメタデータの種類とする。
 #        行末の CR は除く）
 #   3. 管理者向けの警告を表示し、続行の確認（Y/N）を取る。N・q なら中断する（GitHub Actions 上では、表示・確認しない）
-#   4. main ブランチへ切り替える（実行時のブランチが main 以外のとき）→ リモートの最新を取り込む
+#   4. リポジトリが公開でないことを確認する（手順 3 のあと、切り替えの前。gh api repos/<owner>/<repo> --jq .visibility が private か
+#      internal。常に確認する。切り替えはない。失敗時は 3 回まで試す）。公開（public）、または確認できない（gh の失敗・権限不足・
+#      GitHub Actions 上で GH_TOKEN がない）ときは、何も取得せず、Slack に通知して、終了コード 5 で止める（--dry-run のときは、通知しない）。
+#      Salesforce 組織の開発物を、外部にさらさないため
+#      main ブランチへ切り替える（実行時のブランチが main 以外のとき）→ リモートの最新を取り込む
 #      - 追跡中のファイルに未コミットの変更があれば、git stash で退避してから git checkout main する
 #      - main で、追跡中のファイルに未コミットの変更があれば、中断する（ローカルの変更は、同期に含めない）
 #      - 手元で実行したときは、追跡していないファイル（.gitignore の対象と、sf-tools/release/ を除く）があっても、中断する（【補足】）
@@ -53,22 +57,50 @@
 #      続けて、環境変数 SF_METASYNC_DETECT が shadow または on のとき、変更の検知を行う（node lib/metasync.js detect。読み取りのみ。
 #      設定変更の履歴と、更新日時の一覧で、組織に変更があるかを、全件取得の前に調べる）。on で、結果が「変更なし」のとき
 #      （--full・--dry-run でなく、未プッシュのコミットがないとき）は、手順 6 以降を行わず、終了する（コミット・push・伝播はしない）。
-#      検知の失敗・不明・変更ありは、すべて、手順 6 の全件取得に進む（検知は、取得を省くための手がかりで、失敗が取りこぼしにならない）
+#      検知の失敗・不明・変更ありは、すべて、手順 6 の全件取得に進む（検知は、取得を省くための手がかりで、失敗が取りこぼしにならない）。
+#      続けて、環境変数 SF_METASYNC_FINGERPRINT が shadow のとき、一覧の指紋を作る（node lib/metasync.js fingerprint。読み取りのみ。
+#      config/metasync-fingerprint.txt の種類ごとに、組織の一覧を Node 直接の SOAP（listMetadata）で取り、件数・最新の更新日時・
+#      名前と更新日時のハッシュを、前回（./sf-tools/metasync/fingerprint.json）と比べる。管理パッケージ本体の部品は除く）。
+#      取得の範囲（metadata.txt の種類と、SF_METASYNC_EXTRA が on のときの config/metasync-extra.txt）が前回と変わった回は、不明にする
+#      （組織が同じでも、ファイルが増減するため。影の比較で、見逃しに数えない）。
+#      shadow は、取得を省かない（影の比較）。指紋の失敗・不明は、取得を止めない（WARNING を出して、全件取得に進む）。
+#      検知 on で「検知は変更なし」なのに、指紋が「変更あり」のときは、食い違いの WARNING を出して（検知の見逃しの可能性）、検知に従って終了する
 #   6. 組織からメタデータを取得する: 一時フォルダで sf project retrieve start --target-org prod --ignore-conflicts --json に、
 #      metadata.txt の全種類を --metadata で指定して実行する。取得先は一時フォルダのため、失敗しても作業ツリーは変わらない。
 #      終了コードが 0 以外で、応答が一時的なエラー（MetadataTransferError・ERROR_HTTP_404・接続の切断・503 など）なら、60 秒待って
 #      1 回だけやり直す（環境変数 SF_METASYNC_RETRY_WAIT で秒数を変えられる）。それでも失敗したら、中断する
+#      続けて、環境変数 SF_METASYNC_EXTRA が on のとき、追加の取得（設計 16 章の P2）を行う: 現行の取得で取れていないもの（レポート・ダッシュボード・
+#      メールテンプレートとそのフォルダ、StandardValueSet、標準オブジェクト上の項目・入力規則・リストビュー・レコードタイプなど。config/metasync-extra.txt）の
+#      名前を、組織の一覧から集め（node lib/metasync.js manifest。管理パッケージ本体は除く）、package.xml で、同じ一時フォルダへ取る
+#      （sf project retrieve start --manifest。一時的なエラーは 1 回やり直す）。失敗しても、同期は止めない: 手順 8 の plan が、その種類のフォルダと
+#      標準オブジェクトの部品（objects/<標準オブジェクト>/）の削除を、すべて保留する（取れなかったものを、削除と取り違えない）。
+#      取れたかどうかは、応答の文言ではなく、ディスクで確かめる: 指定した名前（package.xml）のうち、取得結果にファイルがない名前は、そのファイルの削除だけ
+#      保留する。既定は off（off のときも、手順 8 の plan は、標準オブジェクトの部品の削除を保留する。on で取ったファイルを、off に戻した回に消さないため）
 #   7. 直近にマージされたファイルの一覧を作る（S5 用）: 直近 24 時間に、同期以外のコミットで変わった、同期の対象のパス
 #      （git log --first-parent -m --since="24 hours ago" --invert-grep --grep=<同期のコミットの件名> --name-only）
 #   8. 計画を作る（node lib/metasync.js plan）: 同期の対象のフォルダごとに、手元と取得結果を比べる。追加・変更・削除と、
 #      削除の守りで保留にした分（ファイルは残す）を決める。保留の条件（lib/metasync.js の冒頭に詳細）:
 #        S2 取得の応答に、問題の報告がある ／ S3 手元に 1 件以上あったフォルダが、取得結果で 0 件 ／
-#        S4 削除の件数が max(100, 手元の同期の対象のファイルの 10%) を超える ／ S5 手順 7 の一覧にあるファイル
-#      取得の応答の status が 0 以外（S1）のときは、中断する
+#        S4 削除の件数が max(100, 手元の同期の対象のファイルの 10%) を超える ／ S5 手順 7 の一覧にあるファイル ／ S9 追加の取得を行わない設定（off）のときの、標準オブジェクトの部品
+#        （S5・S9 は、終了コードを 3 にしない）
+#      取得の応答の status が 0 以外（S1）のときは、中断する。
+#      続けて、指紋を作っていれば、影の比較を表示する（node lib/metasync.js fpcompare。指紋の結果と、計画の追加・変更・削除を、
+#      フォルダ（objects は子の種類）ごとに突き合わせ、「検知できた」「見逃し」「日時では検知できない種類」「指紋の対象外」を数える。
+#      見逃しだけが WARNING（Profile など、更新日時が動かない種類は、見逃しと分ける）。
+#      指紋が変わったのに変更がなかった種類（空振り）も出す（S3・S4 で削除を保留した種類は、空振りにせず、別に出す）。指紋が不明のときは、比べない。情報のみで、同期には影響しない）
+#      続けて、秘密情報の検査（SF_METASYNC_SECRET_SCAN が off 以外。node lib/metasync.js scan）: これから書く内容（計画の追加・変更。
+#      取得結果と手元を比べ、今回新しく入る分だけ）に、秘密の疑い（秘密らしい要素・項目への値、秘密鍵、既知のトークンの形、コードへの直書き）が
+#      ないか調べる。作業ツリーは、まだ触らない。値は、ログにも通知にも出さない（規則名とパスだけ）。許可の一覧: ./sf-tools/config/metasync-secret-allow.txt
+#      （1 行に「規則 パス [キー]」。キーは、疑いの表示の「キー: …」= 項目名・ラベル名・要素名・変数名。省略すると、そのパスの規則すべて）。
+#      バイナリは、秘密鍵・既知のトークンだけ探し、20 MB 超は検査しない（どちらも、検査に制限があったファイルとして、名前を出す）。
+#      数 MB の連続した文字列などで規則が失敗したファイルは、疑い（規則 scan-error）として扱う（on では止まる。確かめたら許可の一覧で外す）。
+#      shadow は、WARNING で出すだけで止めない。on は、疑いがあれば、何もコミット・push せず、Slack に通知して、終了コード 4 で止める
+#      （検査そのものが失敗したとき（許可の一覧の書式の誤りなど）も、on なら、同じく通知して終了コード 4。--dry-run のときは、通知しない）
 #   9. 計画の要約（件数・削除の一覧の先頭 30 件・保留とその理由）を表示する。手元で、変更があるときは、続行の確認
 #      （Y/N。N・q なら中断する）を取る（GitHub Actions 上では、表示のみ）。--dry-run は、ここで終了する
 #   10. 計画を作業ツリーに反映する（node lib/metasync.js apply。保留の削除は、行わない）
 #   11. （手順 5 の検知が、変更あり・不明のとき）検知の状態を ./sf-tools/metasync/state.json に書く。
+#      （手順 5 の指紋が、変更あり・不明のとき）指紋の状態を ./sf-tools/metasync/fingerprint.json に書く（検知の状態とは別のファイル）。
 #      git add -A -- <パッケージのフォルダ>（と、書いたときは状態ファイル。sf-tools/release/ は含めない）でステージし、HEAD との差分で分岐する
 #      - 差分あり: 「定期更新: Salesforce変更の自動反映 (YYYY-MM-DD)」でコミットし（本文に件数）、git push --no-verify origin main する
 #      - 差分なし・origin/main より先のコミットあり（前回の同期の push の失敗など）: そのコミットの一覧（git log --oneline）を
@@ -98,6 +130,15 @@
 #     （ないと、履歴の問い合わせが失敗し、毎回、全件取得になる）
 #
 # 【補足】
+#   - 一覧の指紋（設計: doc/sf-metasync-redesign.md 16 章の P1）: 環境変数 SF_METASYNC_FINGERPRINT（既定 off）。off = 行わない ／
+#     shadow = 指紋を作って前回と比べ、実際の変更との食い違い（見逃し）を、ログに記録する。取得は、常に行う（取得を省く動作は、まだない）。
+#     状態は ./sf-tools/metasync/fingerprint.json（変更あり・不明の回にだけ更新する。状態の更新だけのコミットは、下流へ伝播しない）。
+#     接続: sf org display のアクセストークンで、Node から SOAP を直接呼ぶ（現行の sf は、org display のトークンを伏せ字で返すため、
+#     そのときは、最初から sf org auth show-access-token で取る。本物が返る古い sf では、期限切れのときだけ取り直す。
+#     トークンは、ログに出さない。https のインスタンス URL にだけ送り、転送は追わない）。Node 18 以上が必要（fetch を使う）。
+#     応答が SOAP でない・待ちの期限切れ（1 回 30 秒・全体 180 秒。sf の呼び出しを含む）・フォルダが 900 個超は、失敗として扱う
+#     （不明。取得は止めない）。Node の fetch は HTTPS_PROXY を使わないため、プロキシ越しでは指紋は常に不明になる（取得は行う）。
+#     影の比較の「見逃し」は、指紋を取ったあとに組織が変わった回にも出る（次の回の「空振り」と対で見る）。
 #   - 変更の検知: 環境変数 SF_METASYNC_DETECT（既定 off）。off = 行わない（従来どおり、毎回、全件取得）／
 #     shadow = 検知の結果をログに出すが、取得は常に行う（検知が「変更なし」なのに、実際は変更があったときは、WARNING で
 #     その一覧を出す。運用の前の確かめ用）／ on = 「変更なし」のとき、取得を省く。種類ごとの区分は config/metasync-detect.txt
@@ -106,7 +147,16 @@
 #     全件取得のあとにだけ更新するため、変更のない回は、コミットを作らない。ファイルが変わらず、状態だけが変わるときは、
 #     状態だけのコミットになる）。状態は、速くするための手がかりで、壊れていても全件取得になる。設計: doc/sf-metasync-redesign.md 15 章
 #   - 終了コード: 0（同期した・変更がなかった）／ 1（中断した）／ 3（同期した（追加・変更の push・伝播まで行った）が、
-#     削除の保留（S2・S3・S4）がある。GitHub Actions では、ジョブが失敗として表示される）。S5 の保留だけのときは 0
+#     削除の保留（S2・S3・S4）がある。GitHub Actions では、ジョブが失敗として表示される）。S5・S9 の保留だけのときは 0 ／
+#     4（秘密の疑いで止めた。何もコミット・push していない）／ 5（公開リポジトリ、または公開・非公開を確認できず、取得せずに止めた）
+#   - 追加の取得（設計: doc/sf-metasync-redesign.md 16 章の P2）: 環境変数 SF_METASYNC_EXTRA（off / on。既定 off）。対象の種類は、各プロジェクトの metadata.txt ではなく、
+#     sf-tools の config/metasync-extra.txt で決める（sf-tools の更新だけで、既存の force-* に届く）。Document・ContentAsset は取らない。
+#     on にすると、初回は、レポートなどが大量に追加される。on から off に戻した回は、標準オブジェクトの部品（objects/<標準オブジェクト>/）の削除を保留し、
+#     取得結果に現れない追加の取得のフォルダ（reports など）は、同期の対象にしない（on で取ったファイルを消さない）。取得したものは、手順 8 の秘密情報の検査の対象になる
+#   - 秘密情報の検査・公開リポジトリの拒否・Slack 通知（設計: doc/sf-metasync-redesign.md 16.7）: 環境変数 SF_METASYNC_SECRET_SCAN
+#     （off / shadow / on。既定 shadow = 検査して WARNING を出すが、止めない。誤検知を測ってから on にする）。Slack に通知するのは、
+#     on で秘密の疑いにより止めたとき（終了コード 4）と、公開リポジトリで止めたとき（終了コード 5）だけ。SLACK_BOT_TOKEN・SLACK_CHANNEL_ID
+#     （wf-release.yml と同じもの）が未設定でも、止める（通知できない旨の WARNING のみ）。公開・非公開の確認に、GitHub Actions 上では GH_TOKEN が要る
 #   - 同期の対象のフォルダ: <パッケージのフォルダ>/main/default の下の、config/metadata-dirs.txt（sf-tools 側）で、
 #     metadata.txt の種類に当たるフォルダと、取得結果にあるフォルダ。それ以外（metadata.txt にない種類のフォルダなど）は触らない。
 #     フォルダを共有する種類（objects など）は、フォルダ単位で同じにする（metadata.txt から種類を外すと、そのファイルは削除になる）
@@ -198,18 +248,40 @@ readonly DETECT_MODE="${SF_METASYNC_DETECT:-off}"
 [[ "$DETECT_MODE" == "off" || "$DETECT_MODE" == "shadow" || "$DETECT_MODE" == "on" ]] \
     || die "SF_METASYNC_DETECT は off / shadow / on のどれかにしてください: ${DETECT_MODE}"
 
+# 一覧の指紋のモード（設計 16 章の P1。off = 行わない（既定）／ shadow = 指紋を作って前回と比べ、実際の変更との食い違いを記録する。
+#   取得は常に行う（取得を省く動作は、まだない））
+readonly FP_MODE="${SF_METASYNC_FINGERPRINT:-off}"
+[[ "$FP_MODE" == "off" || "$FP_MODE" == "shadow" ]] \
+    || die "SF_METASYNC_FINGERPRINT は off / shadow のどちらかにしてください: ${FP_MODE}"
+
+# 秘密情報の検査のモード（設計 16.7。off = 行わない／ shadow = 検査して、疑いを WARNING で出すが、止めない（既定。誤検知を測る期間）／
+#   on = 疑いがあれば、何もコミット・push せず、全体を止める（終了コード 4）。止めたら Slack に通知する）
+readonly SCAN_MODE="${SF_METASYNC_SECRET_SCAN:-shadow}"
+[[ "$SCAN_MODE" == "off" || "$SCAN_MODE" == "shadow" || "$SCAN_MODE" == "on" ]] \
+    || die "SF_METASYNC_SECRET_SCAN は off / shadow / on のどれかにしてください: ${SCAN_MODE}"
+# 追加の取得のモード（設計 16 章の P2。off = 行わない（既定）／ on = 現行の取得のあと、もう 1 回、名前を指定して取得する:
+#   レポート・ダッシュボード・メールテンプレート（とフォルダ）・StandardValueSet・標準オブジェクト上の項目や入力規則など。config/metasync-extra.txt）
+readonly EXTRA_MODE="${SF_METASYNC_EXTRA:-off}"
+[[ "$EXTRA_MODE" == "off" || "$EXTRA_MODE" == "on" ]] \
+    || die "SF_METASYNC_EXTRA は off / on のどちらかにしてください: ${EXTRA_MODE}"
+# 止めたときの終了コード（4 = 秘密の疑いで止めた／ 5 = 公開リポジトリ（または公開・非公開を確認できない）で止めた）
+readonly EXIT_SECRET=4
+readonly EXIT_PUBLIC=5
+
 # ------------------------------------------------------------------------------
 # 5. 固有設定
 # ------------------------------------------------------------------------------
 # 接続先の組織（main の組織。本番・Sandbox・Developer Edition のどれでもよい）
-#   ・GitHub Actions 上: ワークフローが JWT で作る prod エイリアスを使う（gh は見ない）
+#   ・GitHub Actions 上: ワークフローが JWT で作る prod エイリアスを使う（接続先の決定には、gh を使わない）
 #   ・手元: エイリアスの名前には頼らず、組織 ID で決める。sf-init が GitHub の Variable SF_ORG_ID_PROD に記録した、1 番目（main）の
 #     組織の ID と、この PC の sf にログイン済みの組織の ID を突き合わせ、一致した組織のユーザー名を接続先にする。
 #     名前は付け替えられ、同じ PC の別のプロジェクトと衝突する。ID で決めれば、取り違え（別のプロジェクトの組織で main を書き換える）を防げる。
 #     見つからなければ、何も変えずに中断する（推測して、別の組織に進まない。prod エイリアスには、フォールバックしない）
 # run 不使用: 終了コードで判定するため（run は、失敗しても、エラーの文言を標準出力に返すため、出力が空かでは判定できない）。
 #   出力は捨てる（--json の出力には、アクセストークンが含まれる。run は、出力をログに記録する）
+REPO_FULL=""   # このリポジトリの owner/repo（公開・非公開の確認と、Slack の通知に使う）
 if [[ "${GITHUB_ACTIONS:-false}" == "true" ]]; then
+    REPO_FULL="${GITHUB_REPOSITORY:-}"
     TARGET_ORG="prod"
     if ! sf org display --target-org "$TARGET_ORG" --json > /dev/null 2>&1; then
         die "prod エイリアスの組織情報を取得できませんでした（sf org display --target-org ${TARGET_ORG} が失敗しました）。"
@@ -220,6 +292,7 @@ else
     _repo_pair=$(parse_github_remote "$_origin_url") || _repo_pair=""        # VAR=$(cmd) のため run 不使用
     [[ -n "$_repo_pair" ]] || die "origin の URL から、GitHub のリポジトリを特定できません: ${_origin_url:-（origin なし）}"
     _repo_full="${_repo_pair%% *}/${_repo_pair##* }"
+    REPO_FULL="$_repo_full"
     _main_org_id=$(gh variable get SF_ORG_ID_PROD -R "$_repo_full" 2>/dev/null | tr -d '\r') || _main_org_id=""  # VAR=$(cmd) のため run 不使用
     [[ -n "$_main_org_id" ]] || die "GitHub の Variable SF_ORG_ID_PROD を読み取れませんでした（${_repo_full}）。"
     TARGET_ORG=""
@@ -247,6 +320,8 @@ APPLIED=0         # 1 = 計画を作業ツリーに反映した（手順 10 の�
 COMMITTED=0       # 1 = 反映の内容をコミットした
 readonly STATE_FILE="sf-tools/metasync/state.json"   # 変更の検知の状態（main にコミットする。手順 11）
 STATE_WRITTEN=0   # 1 = 状態ファイルを書いた（コミットする前に中断したら、戻す）
+readonly FP_STATE_FILE="sf-tools/metasync/fingerprint.json"   # 一覧の指紋の状態（main にコミットする。手順 11。検知の状態とは別のファイル）
+FP_WRITTEN=0      # 1 = 指紋の状態ファイルを書いた（コミットする前に中断したら、戻す）
 
 # 終了時の後始末: ① 反映したが、コミットする前に中断したときは、同期の対象のパッケージのフォルダを HEAD に戻す
 #   （手元の実行では、手順 4 で、追跡していないファイルがないことを確かめているため、clean で消えるのは、今回写したファイルだけ）
@@ -262,6 +337,11 @@ cleanup_on_exit() {
     if [[ "$STATE_WRITTEN" -eq 1 && "$COMMITTED" -eq 0 ]]; then
         run git reset -q HEAD -- "$STATE_FILE" 2>/dev/null
         run git checkout HEAD -- "$STATE_FILE" 2>/dev/null || rm -f "$STATE_FILE" 2>/dev/null   # rm は run 不使用: 終了時の後始末（失敗しても止めない）
+    fi
+    # 指紋の状態ファイルも、同じように戻す
+    if [[ "$FP_WRITTEN" -eq 1 && "$COMMITTED" -eq 0 ]]; then
+        run git reset -q HEAD -- "$FP_STATE_FILE" 2>/dev/null
+        run git checkout HEAD -- "$FP_STATE_FILE" 2>/dev/null || rm -f "$FP_STATE_FILE" 2>/dev/null   # rm は run 不使用: 終了時の後始末（失敗しても止めない）
     fi
     run git checkout "$ORIGINAL_BRANCH" 2>/dev/null
     [[ "$STASH_USED" -eq 1 ]] && run git stash pop 2>/dev/null
@@ -285,9 +365,82 @@ _log_node_lines() {
     while IFS= read -r line; do
         case "$line" in
             "[WARNING] "*) log "WARNING" "${line#"[WARNING] "}" ;;
+            "[ERROR] "*)   log "ERROR" "${line#"[ERROR] "}" ;;
             *)             log "INFO" "$line" ;;
         esac
     done <<< "$text"
+}
+
+# Slack に通知する（chat.postMessage。wf-release.yml と同じ SLACK_BOT_TOKEN・SLACK_CHANNEL_ID）。引数: 見出し 行…
+#   通知するのは、秘密の疑いで止めたとき・公開リポジトリで止めたときだけ（呼び出し側）。値（秘密）は、通知に入れない（パスと規則名だけ）。
+#   未設定・失敗は、WARNING にとどめる（止める判断は、すでに済んでいる）。
+#   run 不使用: トークンを含む引数を、ログに記録しないため。応答の本文は、ログに出さない（ok の可否と error の文言だけ）
+notify_slack() {
+    local token="${SLACK_BOT_TOKEN:-}" channel="${SLACK_CHANNEL_ID:-}"
+    if [[ -z "$token" || -z "$channel" ]]; then
+        log "WARNING" "Slack に通知できません（SLACK_BOT_TOKEN・SLACK_CHANNEL_ID が未設定です）。"
+        return 0
+    fi
+    if ! command -v curl > /dev/null 2>&1; then  # 存在確認のため run 不使用
+        log "WARNING" "Slack に通知できません（curl が見つかりません）。"
+        return 0
+    fi
+    local text="$1" l resp _curl_ok
+    shift
+    for l in "$@"; do text+=$'\n'"$l"; done
+    if [[ -n "${GITHUB_RUN_ID:-}" && -n "${GITHUB_REPOSITORY:-}" ]]; then
+        text+=$'\n'"実行: ${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+    fi
+    # JSON の文字列として安全にする（制御文字の除去（改行・タブ以外）・\ と " のエスケープ・改行の \n 化・タブの空白化・
+    #   Slack の特殊文字 & < > の置き換え）。置き換えの文字列は、引用符で囲む（Bash 5.2 以降は、囲まないと、& が「一致した文字」に展開される）
+    text=$(printf '%s' "$text" | LC_ALL=C tr -d '\000-\010\013\014\016-\037')  # VAR=$(cmd) のため run 不使用
+    text="${text//\\/\\\\}"; text="${text//\"/\\\"}"; text="${text//$'\r'/}"; text="${text//$'\n'/\\n}"; text="${text//$'\t'/ }"
+    text=${text//&/"&amp;"}; text=${text//</"&lt;"}; text=${text//>/"&gt;"}
+    channel="${channel//\"/}"; channel="${channel//\\/}"
+    # トークンは、コマンドラインの引数に出さない（ps で見えるため）。curl の設定を標準入力（-K -）から渡す。printf は組み込みコマンド
+    resp=$(printf 'header = "Authorization: Bearer %s"\n' "$token" | curl -sS --max-time 20 -K - -X POST "https://slack.com/api/chat.postMessage" \
+        -H "Content-Type: application/json; charset=utf-8" \
+        --data "{\"channel\":\"${channel}\",\"text\":\"${text}\"}" 2>&1) && _curl_ok=1 || _curl_ok=0
+    if [[ "$resp" == *'"ok":true'* ]]; then
+        log "INFO" "Slack に通知しました。"
+    elif [[ "$resp" == *'"error":"'* ]]; then
+        local err="${resp#*\"error\":\"}"; err="${err%%\"*}"
+        log "WARNING" "Slack への通知に失敗しました（${err:0:60}）。SLACK_BOT_TOKEN・SLACK_CHANNEL_ID を確認してください。"
+    else
+        log "WARNING" "Slack への通知に失敗しました（接続または応答の異常。curl の終了: $([[ "$_curl_ok" -eq 1 ]] && echo 正常 || echo 失敗)）。"
+    fi
+    return 0
+}
+
+# 【VISIBILITY】リポジトリが公開でないことを確認する（設計 16.7.3。取得の前。切り替えはなく、常に行う）
+#   private・internal だけ通す。公開、または確認できない（gh の失敗・権限不足・未知の値）ときは、何も取得せずに止める（終了コード 5）
+#   公開リポジトリに、組織の開発物（Apex・設定など）を置くと、外部にさらすため
+phase_check_visibility() {
+    local vis="" try why
+    # GitHub Actions 上で GH_TOKEN・GITHUB_TOKEN がどちらもないのは、wf-metasync.yml が古いとき（sf-tools は先に届く）。理由を分かるようにする
+    local no_token=0
+    [[ "${GITHUB_ACTIONS:-false}" == "true" && -z "${GH_TOKEN:-}" && -z "${GITHUB_TOKEN:-}" ]] && no_token=1
+    if [[ -n "$REPO_FULL" && "$no_token" -eq 0 ]]; then
+        # 一時的な API の失敗で止めないよう、3 回まで試す（失敗時、gh は標準出力にエラーの JSON を出すため、private・internal・public 以外は、確認できない扱い）
+        for try in 1 2 3; do
+            vis=$(gh api "repos/${REPO_FULL}" --jq .visibility 2>/dev/null) || vis=""  # VAR=$(cmd) のため run 不使用
+            vis="${vis//$'\r'/}"
+            case "$vis" in private|internal|public) break ;; esac
+            vis=""
+            [[ "$try" -lt 3 ]] && sleep "${SF_METASYNC_VIS_RETRY_WAIT:-3}"
+        done
+    fi
+    case "$vis" in
+        private|internal)
+            log "INFO" "リポジトリの公開範囲: ${vis}（${REPO_FULL}）"
+            return 0 ;;
+    esac
+    if [[ "$vis" == "public" ]]; then why="リポジトリが公開（public）です"
+    elif [[ "$no_token" -eq 1 ]]; then why="リポジトリの公開・非公開を確認できませんでした（GH_TOKEN が渡されていません。wf-metasync.yml が古い可能性があります。sf-sync-wf.sh で更新してください）"
+    else why="リポジトリの公開・非公開を確認できませんでした（${REPO_FULL:-不明}）"; fi
+    log "ERROR" "${why}。Salesforce 組織の開発物を外部にさらさないため、取得せずに止めます。非公開（private）のリポジトリで実行してください。"
+    [[ "$DRY_RUN" -eq 1 ]] || notify_slack ":no_entry: [metasync] 同期を止めました: ${REPO_FULL:-不明}" "理由: ${why}（取得は行っていません）"
+    exit $EXIT_PUBLIC
 }
 
 readonly METADATA_CONFIG="./sf-tools/config/metadata.txt"
@@ -400,6 +553,38 @@ phase_detect_changes() {
     return $RET_OK
 }
 
+# 【FINGERPRINT】一覧の指紋を作り、前回と比べる（手順 5。SF_METASYNC_FINGERPRINT が shadow のとき。読み取りのみ）
+#   結果は FP_RC に入る: 0 = 変更なし ／ 10 = 変更あり ／ 11 = 不明 ／ -1 = 行わなかった（off・表がない）。
+#   shadow は、取得を省かない（影の比較）。失敗は、取得を止めない（WARNING を出して、全件取得に進む）
+FP_RC=-1
+FP_STATE_NEW=""
+FP_REPORT=""
+phase_fingerprint() {
+    [[ "$FP_MODE" == "off" ]] && return $RET_OK
+    local table="${SCRIPT_DIR}/../config/metasync-fingerprint.txt" out
+    if [[ ! -f "$table" ]]; then
+        log "WARNING" "指紋の種類の表が見つかりません（${table}）。指紋は作りません。"
+        return $RET_OK
+    fi
+    FP_STATE_NEW="$WORK_DIR/fp.new.json"
+    FP_REPORT="$WORK_DIR/fp.report.json"
+    log "INFO" "一覧の指紋を作ります（SF_METASYNC_FINGERPRINT=${FP_MODE}。読み取りのみ）..."
+    # 取得の範囲（metadata.txt の種類と、追加の取得の表。off のときは渡さない）も渡す。範囲が前回と変わった回は、指紋を不明（11）にする
+    #   （組織が同じでも、取得の範囲の変更でファイルが増減するため。影の比較で、見逃しに数えない）
+    local scope=(--types-file "$METADATA_CONFIG")
+    [[ "$EXTRA_MODE" != "off" && -f "$EXTRA_TABLE" ]] && scope+=(--extra-config "$EXTRA_TABLE")
+    # run 不使用: 戻り値（0 / 10 / 11）で分岐し、要約をログにも記録するため
+    out=$("$NODE_BIN" "$METASYNC_JS" fingerprint --org "$TARGET_ORG" --fp-config "$table" --repo . "${scope[@]}" \
+        --state "$FP_STATE_FILE" --out-state "$FP_STATE_NEW" --out-report "$FP_REPORT" 2>&1)
+    FP_RC=$?
+    _log_node_lines "$out"
+    if [[ $FP_RC -ne 0 && $FP_RC -ne 10 ]]; then
+        [[ $FP_RC -eq 11 ]] || log "WARNING" "指紋の作成が異常終了しました（終了コード ${FP_RC}）。不明として扱います（取得には影響しません）。"
+        FP_RC=11
+    fi
+    return $RET_OK
+}
+
 # 【RETRIEVE】組織からメタデータを、一時プロジェクトに取得する（手順 6）
 #   run 不使用: 応答（JSON）を判定に使うため、ファイルへ受ける（run は、出力をログに記録し、戻り値も変える。JSON は大きい）
 phase_retrieve_metadata() {
@@ -428,6 +613,57 @@ phase_retrieve_metadata() {
     return $RET_NG
 }
 
+# 【RETRIEVE-EXTRA】追加の取得（設計 16 章の P2。SF_METASYNC_EXTRA が on のとき。手順 6 のあと）
+#   現行の取得で取れていないもの（フォルダ型・StandardValueSet・標準オブジェクト上の部品）の名前を、組織の一覧から集めて（node lib/metasync.js
+#   manifest）、package.xml で取る（同じ一時プロジェクトへ）。結果は EXTRA_STATE に入る: ok = 取れた（取る部品がない場合を含む）／ failed = 失敗。
+#   失敗しても、同期は止めない: plan が、その種類のフォルダと標準オブジェクトの部品の削除を、すべて保留する（取れなかったものを、削除と取り違えない）
+#   run 不使用: 応答（JSON）を判定に使うため、ファイルへ受ける（phase_retrieve_metadata と同じ）
+EXTRA_STATE="off"
+EXTRA_JSON=""
+EXTRA_TABLE="${SCRIPT_DIR}/../config/metasync-extra.txt"
+phase_retrieve_extra() {
+    [[ "$EXTRA_MODE" == "off" ]] && return $RET_OK
+    EXTRA_STATE="failed"
+    local manifest="$WORK_DIR/extra.package.xml" err="$WORK_DIR/extra.retrieve.err" out rc attempt
+    EXTRA_JSON="$WORK_DIR/extra.retrieve.json"
+    if [[ ! -f "$EXTRA_TABLE" ]]; then
+        log "WARNING" "追加の取得の表が見つかりません（${EXTRA_TABLE}）。追加の取得は行いません（その種類の削除は保留します）。"
+        return $RET_OK
+    fi
+    log "INFO" "追加の取得: 名前を集めます（SF_METASYNC_EXTRA=${EXTRA_MODE}。読み取りのみ）..."
+    out=$("$NODE_BIN" "$METASYNC_JS" manifest --org "$TARGET_ORG" --extra-config "$EXTRA_TABLE" --repo . --out "$manifest" 2>&1)
+    rc=$?
+    _log_node_lines "$out"
+    if [[ $rc -eq 12 ]]; then
+        EXTRA_STATE="ok"
+        log "INFO" "追加の取得: 取る部品がありません。"
+        return $RET_OK
+    fi
+    if [[ $rc -ne 0 ]]; then
+        log "WARNING" "追加の取得: 名前を集められませんでした。今回は取りません（その種類と標準オブジェクトの部品の削除は保留します）。"
+        return $RET_OK
+    fi
+    for attempt in 1 2; do
+        log "INFO" "追加の取得: 組織から取得します（package.xml。試行 ${attempt}/2）..."
+        ( cd "$WORK_DIR" && sf project retrieve start --target-org "$TARGET_ORG" --ignore-conflicts --json --manifest "$manifest" ) > "$EXTRA_JSON" 2> "$err"
+        rc=$?
+        if [[ $rc -eq 0 ]]; then
+            EXTRA_STATE="ok"
+            log "SUCCESS" "追加の取得: 完了"
+            return $RET_OK
+        fi
+        log "WARNING" "追加の取得が失敗しました（終了コード ${rc}）: $(_mask_secrets "$(head -c 600 "$err"; head -c 600 "$EXTRA_JSON")" | tr '\n' ' ')"
+        if [[ $attempt -eq 1 ]] && grep -qE 'MetadataTransferError|UNKNOWN_EXCEPTION|ERROR_HTTP_404|ECONNRESET|ETIMEDOUT|socket hang up|fetch failed|503|Service Unavailable' "$EXTRA_JSON" "$err" 2>/dev/null; then
+            log "WARNING" "一時的なエラーの可能性があるため、${SF_METASYNC_RETRY_WAIT:-60} 秒待って 1 回だけやり直します。"
+            sleep "${SF_METASYNC_RETRY_WAIT:-60}"  # run 不使用: 待機
+            continue
+        fi
+        break
+    done
+    log "WARNING" "追加の取得は行えませんでした。その種類と標準オブジェクトの部品の削除は保留します。"
+    return $RET_OK
+}
+
 # 【RECENT】直近 24 時間に、同期以外のコミット（PR のマージなど）で変わったファイルの一覧を作る（手順 7。S5 用）
 #   組織にまだリリースされていない（リリース中・失敗した）部品は、組織にないため、鏡像では削除の対象になってしまう。それを保留にする
 #   run 不使用: 出力をファイルへ受けるため。失敗しても、空の一覧にして続ける（S5 が働かないだけ）
@@ -444,6 +680,20 @@ phase_plan() {
     local args=(plan --repo . --fetched "$WORK_DIR" --types-file "$METADATA_CONFIG" --dirs-table "${SCRIPT_DIR}/../config/metadata-dirs.txt"
                 --out "$PLAN_FILE" --recent-files "$RECENT_FILES" --retrieve-json "$RETRIEVE_JSON")
     [[ "$ALLOW_MASS" -eq 1 ]] && args+=(--allow-mass-delete)
+    # 追加の取得の扱い: off でも表と状態（off）を渡す（on で入れた標準オブジェクトの部品を、off に戻した回に消さないため）。on は、結果（ok / failed）と、
+    #   取るのに使った package.xml（取れたかを、ディスクで確かめる）も渡す
+    if [[ "$EXTRA_MODE" == "on" && ! -f "$EXTRA_TABLE" ]]; then
+        log "ERROR" "追加の取得の表が見つかりません（${EXTRA_TABLE}）。標準オブジェクトの部品を守れないため、計画を作りません（sf-tools の更新を確認してください）。"
+        return $RET_NG
+    fi
+    if [[ -f "$EXTRA_TABLE" ]]; then
+        if [[ "$EXTRA_MODE" == "on" ]]; then
+            args+=(--extra-config "$EXTRA_TABLE" --extra-json "$EXTRA_JSON" --extra-state "$EXTRA_STATE")
+            [[ "$EXTRA_STATE" == "ok" && -f "$WORK_DIR/extra.package.xml" ]] && args+=(--extra-manifest "$WORK_DIR/extra.package.xml")
+        else
+            args+=(--extra-config "$EXTRA_TABLE" --extra-state off)
+        fi
+    fi
     local summary line
     # run 不使用: 戻り値（0 / 3 / 1）で分岐し、要約をログにも記録するため
     summary=$("$NODE_BIN" "$METASYNC_JS" "${args[@]}" 2>&1)
@@ -459,7 +709,66 @@ phase_plan() {
         log "WARNING" "検知は「変更なし」でしたが、実際は ${PLAN_CHANGES} 件の変更がありました（区分 C の種類の変更を含む）。先頭 10 件:"
         awk -F'\t' '$1=="A"||$1=="M"||$1=="D"{print "  " $1 " " $2}' "$PLAN_FILE" | head -10 | while IFS= read -r line; do log "WARNING" "$line"; done
     fi
+    # 一覧の指紋の影の比較（実際の変更と、指紋の変化を突き合わせて、見逃しを記録する。情報のみ。失敗しても、同期は続ける）
+    if [[ "$FP_MODE" != "off" && "$FP_RC" -ge 0 && -f "$FP_REPORT" ]]; then
+        local cmp
+        cmp=$("$NODE_BIN" "$METASYNC_JS" fpcompare --report "$FP_REPORT" --plan "$PLAN_FILE" \
+            --fp-config "${SCRIPT_DIR}/../config/metasync-fingerprint.txt" --dirs-table "${SCRIPT_DIR}/../config/metadata-dirs.txt" 2>&1) \
+            || log "WARNING" "指紋の影の比較に失敗しました（同期には影響しません）。"  # run 不使用: 出力を変数に受ける
+        [[ -n "$cmp" ]] && _log_node_lines "$cmp"
+    fi
     return $RET_OK
+}
+
+# 【SCAN】これから書く内容（計画の追加・変更）に、秘密情報の疑いがないか検査する（設計 16.7。反映の前・コミットの前。読み取りのみ）
+#   取得結果（一時フォルダ）と、手元のファイルを比べて、今回新しく入る疑わしい文字列だけを調べる。作業ツリーは、まだ触らない
+#   （止めても、戻すものがない）。値は、ログにも通知にも出さない（規則名とパスだけ）。許可の一覧: ./sf-tools/config/metasync-secret-allow.txt
+#   on で疑いがあれば、Slack に通知して、終了コード 4 で止める。検査そのものが失敗したときも、on なら止める（検査していないものを
+#   コミットしない）。shadow は、WARNING を出すだけで、止めない
+SCAN_REPORT=""
+phase_secret_scan() {
+    [[ "$SCAN_MODE" == "off" ]] && return $RET_OK
+    SCAN_REPORT="$WORK_DIR/scan.report.tsv"
+    local allow="./sf-tools/config/metasync-secret-allow.txt" args out rc
+    args=(scan --plan "$PLAN_FILE" --repo . --fetched "$WORK_DIR" --out-report "$SCAN_REPORT")
+    [[ -f "$allow" ]] && args+=(--allow "$allow")
+    # run 不使用: 戻り値（0 / 10 / 1）で分岐し、要約をログにも記録するため
+    out=$("$NODE_BIN" "$METASYNC_JS" "${args[@]}" 2>&1)
+    rc=$?
+    _log_node_lines "$out"
+    if [[ $rc -eq 0 ]]; then
+        return $RET_OK
+    fi
+    if [[ $rc -ne 10 ]]; then
+        if [[ "$SCAN_MODE" == "on" ]]; then
+            # 検査していない内容はコミットしない。疑いで止めたときと同じく、Slack に通知して、終了コード 4 で止める
+            #   （許可の一覧の書式の誤りなどで、以後の同期が、通知なしで止まり続けないように）
+            log "ERROR" "秘密情報の検査に失敗しました（終了コード ${rc}）。検査していない内容はコミットしないため、何もコミット・push せずに止めます。"
+            [[ "$DRY_RUN" -eq 1 ]] || notify_slack ":rotating_light: [metasync] 秘密情報の検査に失敗したため、同期を止めました: ${REPO_FULL:-不明}" \
+                "理由: 検査そのものが失敗しました（許可の一覧 sf-tools/config/metasync-secret-allow.txt の書式の誤りなど）。コミット・push は行っていません。" \
+                "確認: 実行のログを見て、原因を直してください。"
+            exit $EXIT_SECRET
+        fi
+        log "WARNING" "秘密情報の検査に失敗しました（終了コード ${rc}）。shadow のため、止めません。"
+        return $RET_OK
+    fi
+    if [[ "$SCAN_MODE" == "shadow" ]]; then
+        log "WARNING" "秘密の疑いがあります（shadow のため、止めません）。誤検知なら ${allow} に「規則 パス [キー]」を足し（パスに空白があるときは * で書く）、本物なら組織側で取り除いてください（規則が scan-error のものは、検査できなかったファイル。上の行の案内を参照）。"
+        return $RET_OK
+    fi
+    log "ERROR" "秘密の疑いがあるため、何もコミット・push せずに止めます。本物なら組織側で取り除き、誤検知なら ${allow} に「規則 パス [キー]」を足し（パスに空白があるときは * で書く）てください（値は表示しません。規則が scan-error のものは、検査できなかったファイル。上の行の案内を参照）。"
+    if [[ "$DRY_RUN" -eq 0 ]]; then
+        local lines=() r f c k
+        while IFS=$'\t' read -r r f c k; do
+            # 4 列目 = キー（項目名・ラベル名など。scan-error では、検査できなかった規則名）
+            [[ -n "$r" ]] && lines+=("・${r}  ${f}${k:+（${k}）}")
+            [[ ${#lines[@]} -ge 10 ]] && break
+        done < "$SCAN_REPORT"
+        notify_slack ":rotating_light: [metasync] 秘密の疑いのため、同期を止めました: ${REPO_FULL:-不明}" \
+            "理由: 組織から取得した内容に、秘密情報の疑いがあります（コミット・push は行っていません）。" "${lines[@]}" \
+            "確認: 本物なら組織側で取り除く。誤検知なら sf-tools/config/metasync-secret-allow.txt に「規則 パス [キー]」を足す（パスの空白は * で書く）。規則が scan-error のものは、検査できなかった規則（キー）があるファイルで、中身を確かめ、問題なければ「scan-error パス キー」を足す。"
+    fi
+    exit $EXIT_SECRET
 }
 
 # 【APPLY】計画を作業ツリーに反映する（手順 10）。保留の削除は、行わない
@@ -475,6 +784,13 @@ phase_apply_plan() {
         run cp "$DETECT_STATE_NEW" "$STATE_FILE" || return $RET_NG
         log "INFO" "検知の状態を更新しました: ${STATE_FILE}"
     fi
+    # 指紋の状態を書く（指紋が、変更あり・不明のとき。取得と反映が成功したあとにだけ書く。変更なしのときは、書かない）
+    if [[ "$FP_MODE" != "off" && ( "$FP_RC" -eq 10 || "$FP_RC" -eq 11 ) && -f "$FP_STATE_NEW" ]]; then
+        FP_WRITTEN=1   # 途中で失敗しても、終了時に戻せるように、先に立てる
+        run mkdir -p "${FP_STATE_FILE%/*}" || return $RET_NG
+        run cp "$FP_STATE_NEW" "$FP_STATE_FILE" || return $RET_NG
+        log "INFO" "指紋の状態を更新しました: ${FP_STATE_FILE}"
+    fi
     return $RET_OK
 }
 
@@ -485,6 +801,7 @@ phase_git_sync() {
     #   （それ以外が変わる理由がない。sf-tools/release/ も含めない）
     local add_paths=("$PKG_PATH")
     [[ "$STATE_WRITTEN" -eq 1 ]] && add_paths+=("$STATE_FILE")
+    [[ "$FP_WRITTEN" -eq 1 ]] && add_paths+=("$FP_STATE_FILE")
     run git add -A -- "${add_paths[@]}" || return $RET_NG
 
     # ステージに変更がなければ、未プッシュのコミットを確認する。あれば（前回、コミットのあとに push が失敗した）、push だけ行う。
@@ -504,10 +821,12 @@ phase_git_sync() {
         return $RET_NO_CHANGE
     fi
 
-    # コミットの本文に、計画の件数を書く（確認は、手順 9 で済んでいる）。検知の状態を更新したときは、その旨も書く
+    # コミットの本文に、計画の件数を書く（確認は、手順 9 で済んでいる）。検知・指紋の状態を更新したときは、その旨も書く
     local body="$PLAN_COUNTS"
-    if [[ "$STATE_WRITTEN" -eq 1 ]]; then
-        if [[ "$PLAN_CHANGES" -eq 0 ]]; then body="${body}（検知の状態の更新のみ）"; else body="${body}（検知の状態も更新）"; fi
+    if [[ "$STATE_WRITTEN" -eq 1 || "$FP_WRITTEN" -eq 1 ]]; then
+        local _label="検知の状態"   # 検知だけのときは、従来の文言のまま。指紋の状態が加わるときだけ変える
+        if [[ "$FP_WRITTEN" -eq 1 ]]; then _label=$([[ "$STATE_WRITTEN" -eq 1 ]] && echo "検知・指紋の状態" || echo "指紋の状態"); fi  # VAR=$(cmd) のため run 不使用
+        if [[ "$PLAN_CHANGES" -eq 0 ]]; then body="${body}（${_label}の更新のみ）"; else body="${body}（${_label}も更新）"; fi
     fi
     run git commit -m "$COMMIT_MSG" -m "$body" || return $RET_NG
     COMMITTED=1
@@ -582,6 +901,9 @@ if [[ "${GITHUB_ACTIONS:-false}" != "true" ]]; then
     fi
 fi
 
+# 公開リポジトリでは実行しない（取得の前。切り替えなし）
+phase_check_visibility
+
 phase_switch_to_main    || die "main ブランチへの切替に失敗しました。"
 log "SUCCESS" "main ブランチへの切替完了"
 
@@ -594,6 +916,7 @@ log "SUCCESS" "一時プロジェクトの準備完了（パッケージのフ�
 # 変更の検知（手順 5）。on で「変更なし」なら、取得を省いて終了する。--full・--dry-run のとき、および未プッシュのコミットが
 #   あるとき（前回の push の失敗。phase_git_sync が push だけ行う）は、省かない
 phase_detect_changes
+phase_fingerprint
 if [[ "$DETECT_MODE" == "on" && "$DETECT_RC" -eq 0 ]]; then
     UNPUSHED=$(git rev-list --count "origin/${BRANCH_NAME}..HEAD" 2>/dev/null || echo 0)  # VAR=$(cmd) のため run 不使用
     if [[ "$FULL" -eq 1 ]]; then
@@ -603,6 +926,10 @@ if [[ "$DETECT_MODE" == "on" && "$DETECT_RC" -eq 0 ]]; then
     elif [[ "$UNPUSHED" =~ ^[0-9]+$ && "$UNPUSHED" -gt 0 ]]; then
         log "INFO" "未プッシュのコミットがあるため、検知の結果にかかわらず、全件取得します。"
     else
+        # 指紋が「変更あり」なのに、検知が「変更なし」: 食い違い。検知の見逃しの可能性があるため、記録に残す（取得は省く。指紋の状態は書かない）
+        if [[ "$FP_RC" -eq 10 ]]; then
+            log "WARNING" "指紋は『変更あり』ですが、検知は『変更なし』でした。検知の見逃しの可能性があります（今回は取得を省きます。毎日の --full で反映されます）。"
+        fi
         log "SUCCESS" "完了: 検知の結果、Salesforce 組織側に変更はありませんでした（全件取得を省きました）。"
         exit $RET_OK
     fi
@@ -611,9 +938,13 @@ fi
 phase_retrieve_metadata || die "メタデータの取得に失敗しました。"
 log "SUCCESS" "メタデータ取得完了"
 
+phase_retrieve_extra    # 失敗しても止めない（plan が、その種類の削除を保留する）
+
 phase_recent_files
 phase_plan              || die "計画の作成に失敗しました。"
 log "SUCCESS" "計画の作成完了（${PLAN_COUNTS}）"
+
+phase_secret_scan       # on で疑いがあれば、ここで止まる（終了コード 4）
 
 if [[ "$DRY_RUN" -eq 1 ]]; then
     log "SUCCESS" "完了: --dry-run のため、計画の表示までで終了します（作業ツリー・コミット・push・伝播は行いません）。"
@@ -632,9 +963,15 @@ RES=$?
 
 if [[ $RES -eq $RET_OK ]]; then
     log "SUCCESS" "完了: リポジトリを最新に更新しました。"
-    if [[ "$STATE_WRITTEN" -eq 1 && "$COMMITTED" -eq 1 && "$PLAN_CHANGES" -eq 0 ]]; then
-        # 検知の状態ファイルの更新だけのコミット（メタデータの変更はない）は、下流のブランチへ伝播しない（main の中だけで使う状態のため）
-        log "INFO" "検知の状態ファイルの更新だけのコミットのため、下流ブランチへの伝播は行いません。"
+    if [[ ( "$STATE_WRITTEN" -eq 1 || "$FP_WRITTEN" -eq 1 ) && "$COMMITTED" -eq 1 && "$PLAN_CHANGES" -eq 0 ]]; then
+        # 検知・指紋の状態ファイルの更新だけのコミット（メタデータの変更はない）は、下流のブランチへ伝播しない（main の中だけで使う状態のため）
+        if [[ "$FP_WRITTEN" -eq 1 && "$STATE_WRITTEN" -eq 1 ]]; then
+            log "INFO" "検知・指紋の状態ファイルの更新だけのコミットのため、下流ブランチへの伝播は行いません。"
+        elif [[ "$FP_WRITTEN" -eq 1 ]]; then
+            log "INFO" "指紋の状態ファイルの更新だけのコミットのため、下流ブランチへの伝播は行いません。"
+        else
+            log "INFO" "検知の状態ファイルの更新だけのコミットのため、下流ブランチへの伝播は行いません。"
+        fi
     else
         phase_propagate_downstream || die "下流ブランチへの伝播に失敗しました。"
         # 実際に伝播できたブランチだけを表示する（以前は、branches.txt の内容や、スキップの有無にかかわらず、固定の文言を出していた）

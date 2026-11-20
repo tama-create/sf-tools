@@ -215,7 +215,7 @@ test_save() {
     assert_file_not_contains "$MOCK_CALL_LOG" "SF_ORG_ID_STG" "読み取れていない → 保存しない（推測した値を、保存しない）"; _oc
 }
 
-# JWT 接続テストと、組織情報の読み取り（従来の接続アプリ用。同じ一時的なホームの中）
+# JWT 接続テストと、組織情報の読み取り（sf-update-secret.sh 用。同じ一時的なホームの中）
 test_jwt_test() {
     echo ""; echo -e "${CLR_HEAD}[TEST] org_jwt_test / org_parse_info${CLR_RST}"
     local de='{"status":0,"result":{"records":[{"Id":"00D3","Name":"My DE","IsSandbox":false,"OrganizationType":"Developer Edition","TrialExpirationDate":null}]}}'

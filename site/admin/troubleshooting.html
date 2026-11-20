@@ -45,6 +45,7 @@
     <tr><td><code>sf-upgrade.sh</code> が「Salesforce CLI のアップデートに失敗しました」「書き込めません」と出る</td><td><a href="#dev-npm-perm">npm の入れ先に書き込めない</a></td></tr>
     <tr><td>「npm の最新版は、今の Node では入れられません」と出る</td><td><a href="#dev-npm-node">npm が、Node に合わない</a></td></tr>
     <tr><td><code>sf</code> を入れ直したのに古いまま・プロジェクトの中に <code>%APPDATA%</code> というフォルダができた</td><td><a href="#dev-sf-path"><code>sf</code> の場所がおかしい</a></td></tr>
+    <tr><td>どれにも当てはまらない・直らない（不具合だと思う）</td><td><a href="#report">ログの渡し方</a></td></tr>
   </tbody>
 </table>
 
@@ -270,6 +271,38 @@
 
 <h3 id="crlf">CRLF の警告が出る</h3>
 <p>Windows と、ほかの環境の、改行コード（行の終わりの印）の違いを知らせる、Git の警告です。動作には影響しないので、そのままで大丈夫です。</p>
+
+<h2 id="report">直らないとき・不具合を連絡するとき（ログの渡し方）</h2>
+<p>sf-tools は、失敗したことを、<strong>開発者へ自動で知らせたり、送ったりはしません</strong>。あなたのプロジェクトの情報が、勝手に外へ出ないようにするためです。直らないときや、不具合だと思うときは、<strong>ログを、あなたが確かめてから、管理者（または sf-tools の担当者）へ渡して</strong>ください。ログがあれば、担当者が、同じバージョンの sf-tools と近い環境を用意して、同じ失敗を再現して調べられます。</p>
+
+<h3 id="report-what">渡すもの</h3>
+<ul>
+  <li><strong>失敗したコマンドの名前と、何をしようとしていたか</strong>（例: 「<code>sf-push.sh</code> で Push しようとして、止まった」）。</li>
+  <li><strong>画面に出たメッセージ</strong>（そのまま貼ってください）。</li>
+  <li><strong>そのコマンドのログ</strong>（<code>&lt;コマンド名&gt;.log</code>）。場所は<a href="../reference/structure.html#logs">ログとリポジトリ構成</a>の表にあります。<code>force-*</code> フォルダの中の <code>sf-tools/logs/</code>、または <code>~/sf-tools/logs/</code> の下です。</li>
+  <li>同じフォルダに <code>error.log</code> があれば、それも（<code>run</code> で失敗したコマンドの出力が、まとまっています）。</li>
+</ul>
+
+<h3 id="report-env">ログの <code>[ENV]</code> の行（再現に使う情報）</h3>
+<p>ログには、再現に必要な<strong>番号だけ</strong>が、<code>[ENV]</code> の行として残ります（パス・ユーザー名・Token は含みません）。</p>
+<table>
+  <thead><tr><th>いつ書かれるか</th><th>書かれること</th></tr></thead>
+  <tbody>
+    <tr><td>コマンドを始めたとき（その実行の始まり。ログを実行のたびに作り直すコマンドでは、ログの先頭。追記するログでは、途中にも入ります）</td><td><code>[ENV] sf-tools 1a2b3c4 (main) | OS msys | bash 5.2.37 | sf-push</code> のように、sf-tools のバージョン（コミットの短い ID とブランチ）・OS・bash の版・コマンド名。sf-tools が Git のコピーでないときは、「不明」。<code>sf-init.sh</code> のように、1 つのログに、途中の手順（Phase）も追記するコマンドでは、最初の 1 行だけです</td></tr>
+    <tr><td>致命的なエラーで止まったとき</td><td><code>[ENV] git 2.56.0 | node v22.1.0 | sf @salesforce/cli/2.50.1</code> のように、git・node・sf の版（<code>sf</code> は、起動せず、インストールされた記録から読みます）。入っていないものは「なし」、見つからないものは「不明」</td></tr>
+  </tbody>
+</table>
+<p>ログが長いときは、全体を渡すのが確実です。重いときは、<code>[ENV]</code> の行（複数あれば、いちばん最後の、失敗した実行のもの）と、失敗した前後だけでも構いません。</p>
+<pre><code>grep '\[ENV\]' sf-tools/logs/sf-push.log        # 環境の行だけを取り出す
+tail -n 200 sf-tools/logs/sf-push.log           # 最後の 200 行（失敗の前後）</code></pre>
+
+<h3 id="report-check">渡す前に確かめること</h3>
+<p>ログには、実行したコマンド、フォルダやファイルの名前、組織のユーザー名などが含まれることがあります。<strong>渡す前に、ログを開いて、見せてよい内容かを確かめて</strong>ください。</p>
+<ul>
+  <li>コマンドの行にある Token は、自動で伏せ字（<code>***masked***</code>）になります。ただし、<strong>コマンドの出力は伏せ字になりません</strong>。念のため、<code>ghp_</code>・<code>github_pat_</code>・<code>xoxb-</code>・<code>BEGIN PRIVATE KEY</code>・パスワードのような文字が入っていないかを、検索して確かめます。</li>
+  <li>入っていたら、その部分を消して（<code>***</code> などに置き換えて）から渡します。もし Token が出てしまっていたら、<a href="secrets.html">Secrets のページ</a>の手順で、その Token を作り直してください。</li>
+  <li>見せたくない情報（顧客名など）が入っていたら、その行も消して構いません。消したことを、一言添えてください。</li>
+</ul>
 
 </main>
 <aside id="toc"></aside>

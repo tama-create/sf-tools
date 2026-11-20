@@ -165,7 +165,7 @@ Y
     : > "$MOCK_CALL_LOG"
     out=$( printf 'Y
 Y
-' | ( cd "$td" && HOME="$mh" PATH="$mb:$PATH" GITHUB_ACTIONS=true bash "$SF_TOOLS_DIR/bin/sf-metasync.sh" ) 2>&1 )
+' | ( cd "$td" && HOME="$mh" PATH="$mb:$PATH" GITHUB_ACTIONS=true GITHUB_REPOSITORY=tamashimon-org/force-test GH_TOKEN=dummy bash "$SF_TOOLS_DIR/bin/sf-metasync.sh" ) 2>&1 )
     echo "$out" | grep -q "追跡していないファイルがあります"         && fail "GitHub Actions 上では、追跡していないファイルを、確認しない" "中止した"         || pass "GitHub Actions 上では、追跡していないファイルを、確認しない"
     unset MOCK_GIT_BRANCH MOCK_GIT_DIFF_EXIT MOCK_GIT_DIFF_EXIT_2ND MOCK_GIT_UNTRACKED MOCK_SF_ORG_JSON
     teardown "$td" "$mb"
@@ -347,7 +347,7 @@ test_target_org_id_variable_unreadable_aborts() {
 test_target_org_actions_uses_prod_alias() {
     local td mb mh; _ms_env td mb mh
     export MOCK_GH_ORG_ID_PROD_EXIT=1   # 手元の方式なら、ここで中断する。Actions 上では、読みにいかないので、影響しない
-    _MS_OUT=$( ( cd "$td" && HOME="$mh" PATH="$mb:$PATH" GITHUB_ACTIONS=true bash "$SF_TOOLS_DIR/bin/sf-metasync.sh" ) 2>&1 )
+    _MS_OUT=$( ( cd "$td" && HOME="$mh" PATH="$mb:$PATH" GITHUB_ACTIONS=true GITHUB_REPOSITORY=tamashimon-org/force-test GH_TOKEN=dummy bash "$SF_TOOLS_DIR/bin/sf-metasync.sh" ) 2>&1 )
     _MS_RC=$?
     assert_exit_ok "$_MS_RC" "接続先（Actions）: 正常終了"
     assert_file_contains "$MOCK_CALL_LOG" "sf project retrieve start --target-org prod" "接続先（Actions）: prod エイリアスで取得する"
@@ -527,7 +527,7 @@ test_dry_run_options() {
 # --allow-mass-delete は GitHub Actions 上では指定できない
 test_allow_mass_delete_on_actions() {
     local td mb mh; _ms_env td mb mh
-    _MS_OUT=$( ( cd "$td" && HOME="$mh" PATH="$mb:$PATH" GITHUB_ACTIONS=true bash "$SF_TOOLS_DIR/bin/sf-metasync.sh" --allow-mass-delete ) 2>&1 )
+    _MS_OUT=$( ( cd "$td" && HOME="$mh" PATH="$mb:$PATH" GITHUB_ACTIONS=true GITHUB_REPOSITORY=tamashimon-org/force-test GH_TOKEN=dummy bash "$SF_TOOLS_DIR/bin/sf-metasync.sh" --allow-mass-delete ) 2>&1 )
     assert_exit_fail $? "--allow-mass-delete を GitHub Actions 上で指定 → 中断"
     assert_output_contains "$_MS_OUT" "GitHub Actions 上では指定できません" "--allow-mass-delete: 理由が表示される"
     _ms_unset; teardown "$td" "$mb"
@@ -549,7 +549,7 @@ test_hold_exit_code_3() {
     export MOCK_GIT_DIFF_EXIT_2ND=1
     mkdir -p "$td/force-app/main/default/classes"; echo old > "$td/force-app/main/default/classes/Gone.cls"
     export MOCK_SF_RETRIEVE_FILES='force-app/main/default/lwc/c/c.js|js'
-    _MS_OUT=$( ( cd "$td" && HOME="$mh" PATH="$mb:$PATH" GITHUB_ACTIONS=true bash "$SF_TOOLS_DIR/bin/sf-metasync.sh" ) 2>&1 )
+    _MS_OUT=$( ( cd "$td" && HOME="$mh" PATH="$mb:$PATH" GITHUB_ACTIONS=true GITHUB_REPOSITORY=tamashimon-org/force-test GH_TOKEN=dummy bash "$SF_TOOLS_DIR/bin/sf-metasync.sh" ) 2>&1 )
     _MS_RC=$?
     assert_equals "$_MS_RC" "3" "削除の保留あり → 終了コード 3"
     [[ -f "$td/force-app/main/default/classes/Gone.cls" ]] && pass "削除の保留: ファイルは残る" || fail "削除の保留: ファイルは残る"
@@ -736,6 +736,465 @@ test_detect_state_restored_on_failure() {
     _ms_unset; _det_unset; teardown "$td" "$mb"
 }
 
+# ------------------------------------------------------------------------------
+# 一覧の指紋（SF_METASYNC_FINGERPRINT。設計: doc/sf-metasync-redesign.md 16 章の P1）のテスト
+#   Metadata API は、モックのサーバー（tests/mock-soap-server.js）。sf の org display は、そのサーバーの URL とトークンを返す
+# ------------------------------------------------------------------------------
+# モックのサーバーを起動し、sf のモックが、そのサーバーを指すようにする。結果: FPI_DIR（サーバーのデータ・記録）・FPI_PID
+_fpi_start() {
+    FPI_DIR=$(mktemp -d "${TMPDIR:-/tmp}/test-msfpi-XXXX")
+    echo '{"validToken":"TESTTOKEN","lists":{}}' > "$FPI_DIR/data.json"; : > "$FPI_DIR/requests.log"
+    node "$SF_TOOLS_DIR/tests/mock-soap-server.js" "$FPI_DIR/data.json" "$FPI_DIR/port.txt" "$FPI_DIR/requests.log" &   # & はバックグラウンド起動（run 不使用の例外）
+    FPI_PID=$!
+    local i; for i in $(seq 1 100); do [[ -s "$FPI_DIR/port.txt" ]] && break; sleep 0.1; done
+    [[ -s "$FPI_DIR/port.txt" ]] || fail "モックの SOAP サーバーが起動しなかった（10 秒待った）"
+    trap '_fpi_stop' EXIT   # テストが途中で止まっても、モックのサーバーを残さない
+    export MOCK_SF_ORG_JSON="{\"status\":0,\"result\":{\"alias\":\"testorg\",\"id\":\"00D000000000001AAA\",\"accessToken\":\"TESTTOKEN\",\"instanceUrl\":\"http://127.0.0.1:$(cat "$FPI_DIR/port.txt")\"}}"
+    export SF_METASYNC_SF="bash $mb/sf"
+}
+_fpi_stop() {
+    [[ -n "${FPI_PID:-}" ]] && { kill "$FPI_PID" 2>/dev/null; wait "$FPI_PID" 2>/dev/null; }
+    FPI_PID=""; [[ -n "${FPI_DIR:-}" ]] && rm -rf "$FPI_DIR"
+    unset SF_METASYNC_SF SF_METASYNC_FINGERPRINT SF_METASYNC_DETECT MOCK_SF_LIST_DIR MOCK_SF_AUDIT_COUNT
+}
+# サーバーのデータを書き換える。引数: キー・JSON の値
+_fpi_set() {
+    node -e 'const fs=require("fs");const f=process.argv[1],k=process.argv[2],v=process.argv[3];const d=JSON.parse(fs.readFileSync(f,"utf8"));d.lists=d.lists||{};d.lists[k]=JSON.parse(v);fs.writeFileSync(f,JSON.stringify(d));' "$FPI_DIR/data.json" "$1" "$2"
+}
+# 今のサーバーのデータで、指紋の状態（前回の同期の記録）を、あらかじめ作る
+#   取得の範囲は、スクリプトと同じもの（metadata.txt。追加の取得は off）を渡す（範囲が違うと、不明になるため）
+_fpi_state() {
+    mkdir -p "$td/sf-tools/metasync"
+    node "$SF_TOOLS_DIR/lib/metasync.js" fingerprint --org prod --fp-config "$SF_TOOLS_DIR/config/metasync-fingerprint.txt" \
+        --types-file "$td/sf-tools/config/metadata.txt" \
+        --state "$td/none.json" --out-state "$td/sf-tools/metasync/fingerprint.json" --repo "$td" > /dev/null 2>&1
+}
+
+# off（既定）: 指紋を作らない（Metadata API を呼ばない）。従来どおり、取得する
+test_fp_off_default() {
+    local td mb mh; _ms_env td mb mh; _fpi_start
+    _ms_run 'Y\nY\n'
+    assert_exit_ok "$_MS_RC" "指紋 off: 正常終了"
+    assert_file_contains "$MOCK_CALL_LOG" "sf project retrieve start" "指紋 off: 取得する"
+    assert_output_not_contains "$_MS_OUT" "一覧の指紋" "指紋 off: 指紋の出力がない"
+    assert_equals "$(wc -l < "$FPI_DIR/requests.log" | tr -d ' ')" "0" "指紋 off: Metadata API を呼ばない"
+    [[ ! -f "$td/sf-tools/metasync/fingerprint.json" ]] && pass "指紋 off: 状態ファイルを作らない" || fail "指紋 off: 状態ファイルを作らない"
+    _fpi_stop; _ms_unset; teardown "$td" "$mb"
+}
+
+# 不正なモード（on は、まだない）→ 中断
+test_fp_bad_mode() {
+    local td mb mh; _ms_env td mb mh
+    SF_METASYNC_FINGERPRINT=on _ms_run 'Y\nY\n'
+    assert_exit_fail "$_MS_RC" "指紋のモードが不正（on は、まだない）→ 中断"
+    assert_output_contains "$_MS_OUT" "off / shadow" "指紋のモードが不正 → 使える値が出る"
+    _ms_unset; teardown "$td" "$mb"
+}
+
+# shadow・状態なし → 不明 → 取得して、指紋の状態を書いてコミットする（ファイルの変更がなくても、状態だけのコミット。伝播しない）
+test_fp_shadow_first_run() {
+    local td mb mh; _ms_env td mb mh; _fpi_start
+    export MOCK_GIT_DIFF_EXIT_2ND=1
+    SF_METASYNC_FINGERPRINT=shadow _ms_run 'Y\nY\n'
+    assert_exit_ok "$_MS_RC" "指紋 shadow・状態なし: 正常終了"
+    assert_output_contains "$_MS_OUT" "一覧の指紋を作ります" "指紋 shadow: 指紋を作ると表示される"
+    assert_output_contains "$_MS_OUT" "前回の指紋がありません" "指紋 shadow・状態なし: 不明の理由が出る"
+    assert_file_contains "$MOCK_CALL_LOG" "sf project retrieve start" "指紋 shadow: 取得は、常に行う（省かない）"
+    [[ -f "$td/sf-tools/metasync/fingerprint.json" ]] && pass "指紋 shadow・状態なし: 指紋の状態ファイルを書く" || fail "指紋 shadow・状態なし: 指紋の状態ファイルを書く"
+    assert_file_contains "$MOCK_CALL_LOG" "git add -A -- force-app sf-tools/metasync/fingerprint.json" "指紋の状態ファイルも、ステージする（検知の状態ファイルは、別）"
+    assert_file_contains "$MOCK_CALL_LOG" "指紋の状態の更新のみ" "メタデータの変更がなければ、コミットの本文に「指紋の状態の更新のみ」と書く"
+    assert_output_contains "$_MS_OUT" "指紋の状態ファイルの更新だけのコミットのため、下流ブランチへの伝播は行いません" "状態ファイルの更新だけのコミットは、下流へ伝播しない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "git merge" "状態ファイルの更新だけのコミットは、merge しない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "metasync/state.json" "検知（SF_METASYNC_DETECT）が off なら、検知の状態ファイルは触らない"
+    _fpi_stop; _ms_unset; teardown "$td" "$mb"
+}
+
+# shadow・指紋は変更なし・実際は変更あり → 見逃しの WARNING。取得・反映は、そのまま行う
+test_fp_shadow_miss() {
+    local td mb mh; _ms_env td mb mh; _fpi_start
+    _fpi_state
+    cp "$td/sf-tools/metasync/fingerprint.json" "$td/fp.before"
+    export MOCK_GIT_DIFF_EXIT_2ND=1
+    export MOCK_SF_RETRIEVE_FILES='force-app/main/default/classes/New.cls|x'
+    SF_METASYNC_FINGERPRINT=shadow _ms_run 'Y\nY\n'
+    assert_exit_ok "$_MS_RC" "指紋 shadow・見逃し: 正常終了（同期は続ける）"
+    assert_output_contains "$_MS_OUT" "変更なし（すべての種類で、指紋が前回と同じです）" "指紋は、変更なし"
+    assert_output_contains "$_MS_OUT" "見逃し 1（1 件）" "影の比較: 見逃しの数が出る"
+    assert_output_contains "$_MS_OUT" "指紋の見逃し: classes（指紋の種類: ApexClass）" "影の比較: 見逃しのフォルダと種類が出る"
+    assert_output_contains "$_MS_OUT" "A force-app/main/default/classes/New.cls" "影の比較: 見逃しのファイルの例が出る"
+    [[ -f "$td/force-app/main/default/classes/New.cls" ]] && pass "指紋 shadow: 取得結果は、そのまま反映する" || fail "指紋 shadow: 取得結果は、そのまま反映する"
+    cmp -s "$td/sf-tools/metasync/fingerprint.json" "$td/fp.before" && pass "指紋が変更なしなら、状態ファイルは変わらない" || fail "指紋が変更なしなら、状態ファイルは変わらない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "fingerprint.json" "指紋が変更なしなら、状態ファイルをステージしない"
+    assert_file_contains "$MOCK_CALL_LOG" "git merge" "メタデータの変更があるときは、下流へ伝播する"
+    _fpi_stop; _ms_unset; teardown "$td" "$mb"
+}
+
+# 取得の範囲が変わった回（追加の取得を on にした）→ 指紋は不明（初回の取り込みを、見逃しに数えない）
+test_fp_scope_change() {
+    local td mb mh; _ms_env td mb mh; _fpi_start
+    _fpi_state   # 追加の取得なし（off）の範囲で、前回の状態を作る
+    export MOCK_GIT_DIFF_EXIT_2ND=1
+    export MOCK_SF_RETRIEVE_FILES='force-app/main/default/classes/New.cls|x'
+    SF_METASYNC_FINGERPRINT=shadow SF_METASYNC_EXTRA=on _ms_run 'Y\nY\n'
+    assert_output_contains "$_MS_OUT" "取得の範囲）が、今回と合いません" "追加の取得を on にした回は、指紋の範囲が合わない"
+    assert_output_contains "$_MS_OUT" "指紋が不明（全件取得に倒す回）のため、比べません" "範囲が変わった回は、影の比較をしない（取り込みを見逃しに数えない）"
+    assert_output_not_contains "$_MS_OUT" "指紋の見逃し" "範囲が変わった回は、見逃しの WARNING を出さない"
+    _fpi_stop; _ms_unset; teardown "$td" "$mb"
+}
+
+# shadow・指紋が変わり・実際にも変更あり → 検知できた。状態も更新する
+test_fp_shadow_hit() {
+    local td mb mh; _ms_env td mb mh; _fpi_start
+    _fpi_state
+    _fpi_set ApexClass '[{"fullName":"A9","lastModifiedDate":"2026-11-01T09:00:00.000Z"}]'
+    export MOCK_GIT_DIFF_EXIT_2ND=1
+    export MOCK_SF_RETRIEVE_FILES='force-app/main/default/classes/New.cls|x'
+    SF_METASYNC_FINGERPRINT=shadow _ms_run 'Y\nY\n'
+    assert_exit_ok "$_MS_RC" "指紋 shadow・検知できた: 正常終了"
+    assert_output_contains "$_MS_OUT" "変更あり（指紋が前回と違う種類 1 個）" "指紋は、変更あり"
+    assert_output_contains "$_MS_OUT" "検知できた 1（1 件）/ 見逃し 0（0 件）" "影の比較: 検知できた"
+    assert_file_contains "$MOCK_CALL_LOG" "git add -A -- force-app sf-tools/metasync/fingerprint.json" "指紋が変わったら、状態ファイルもステージする"
+    assert_file_contains "$MOCK_CALL_LOG" "指紋の状態も更新" "メタデータの変更があるときは、本文に「指紋の状態も更新」と書く"
+    _fpi_stop; _ms_unset; teardown "$td" "$mb"
+}
+
+# 指紋の失敗（接続できない）は、同期を止めない（WARNING なしでも、取得・反映は続く。状態は書かない）
+test_fp_failure_does_not_stop_sync() {
+    local td mb mh; _ms_env td mb mh; _fpi_start
+    # 使われていないポート（1）に向けて、接続の失敗を再現する（サーバーを止めて空いたポートを狙うと、並列のテストのモックが取ることがある）
+    export MOCK_SF_ORG_JSON='{"status":0,"result":{"alias":"testorg","id":"00D000000000001AAA","accessToken":"TESTTOKEN","instanceUrl":"http://127.0.0.1:1"}}'
+    export MOCK_GIT_DIFF_EXIT_2ND=1
+    export MOCK_SF_RETRIEVE_FILES='force-app/main/default/classes/New.cls|x'
+    SF_METASYNC_FINGERPRINT=shadow _ms_run 'Y\nY\n'
+    assert_exit_ok "$_MS_RC" "指紋の失敗: 同期は正常終了する"
+    assert_output_contains "$_MS_OUT" "一覧の取得に失敗した種類があります" "指紋の失敗の理由が出る"
+    assert_output_contains "$_MS_OUT" "指紋が不明" "指紋が不明のときは、影の比較をしない"
+    assert_file_contains "$MOCK_CALL_LOG" "sf project retrieve start" "指紋の失敗でも、取得する"
+    [[ -f "$td/force-app/main/default/classes/New.cls" ]] && pass "指紋の失敗でも、取得結果を反映する" || fail "指紋の失敗でも、取得結果を反映する"
+    [[ ! -f "$td/sf-tools/metasync/fingerprint.json" ]] && pass "指紋が取れなかったら、状態ファイルを書かない" || fail "指紋が取れなかったら、状態ファイルを書かない"
+    _fpi_stop; _ms_unset; teardown "$td" "$mb"
+}
+
+# 指紋の状態ファイルを書いたが、コミットの前に中断（commit の失敗）→ 状態ファイルも戻す
+test_fp_state_restored_on_failure() {
+    local td mb mh; _ms_env td mb mh; _fpi_start
+    export MOCK_GIT_DIFF_EXIT_2ND=1 MOCK_GIT_COMMIT_EXIT=1
+    SF_METASYNC_FINGERPRINT=shadow _ms_run 'Y\nY\n'
+    assert_exit_fail "$_MS_RC" "commit の失敗 → 中断"
+    assert_file_contains "$MOCK_CALL_LOG" "git reset -q HEAD -- sf-tools/metasync/fingerprint.json" "中断 → 指紋の状態ファイルを、インデックスから外す"
+    assert_file_contains "$MOCK_CALL_LOG" "git checkout HEAD -- sf-tools/metasync/fingerprint.json" "中断 → 指紋の状態ファイルを HEAD に戻す"
+    _fpi_stop; _ms_unset; teardown "$td" "$mb"
+}
+
+# 検知（SF_METASYNC_DETECT=shadow）と指紋（shadow）を同時に使う: 2 つの状態ファイルを別々に書く
+test_fp_with_detect() {
+    local td mb mh; _ms_env td mb mh; _fpi_start
+    mkdir -p "$td/lists"; export MOCK_SF_LIST_DIR="$td/lists" MOCK_SF_AUDIT_COUNT=0
+    export MOCK_GIT_DIFF_EXIT_2ND=1
+    SF_METASYNC_DETECT=shadow SF_METASYNC_FINGERPRINT=shadow _ms_run 'Y\nY\n'
+    assert_exit_ok "$_MS_RC" "検知と指紋を同時に使う: 正常終了"
+    assert_file_contains "$MOCK_CALL_LOG" "git add -A -- force-app sf-tools/metasync/state.json sf-tools/metasync/fingerprint.json" "2 つの状態ファイルを、どちらもステージする"
+    assert_file_contains "$MOCK_CALL_LOG" "検知・指紋の状態の更新のみ" "本文に「検知・指紋の状態の更新のみ」と書く"
+    [[ -f "$td/sf-tools/metasync/state.json" && -f "$td/sf-tools/metasync/fingerprint.json" ]] && pass "状態ファイルは、別々に 2 つできる" || fail "状態ファイルは、別々に 2 つできる"
+    _fpi_stop; _ms_unset; teardown "$td" "$mb"
+}
+
+# 検知 on・指紋 shadow: 検知は「変更なし」、指紋は「変更あり」→ 食い違いの WARNING を出して、取得を省く（指紋の状態は書かない）
+test_fp_detect_on_conflict_warning() {
+    local td mb mh; _ms_env td mb mh; _det_env 0; _fpi_start
+    _det_state; _fpi_state
+    cp "$td/sf-tools/metasync/fingerprint.json" "$td/fp.before"
+    _fpi_set ApexClass '[{"fullName":"A9","lastModifiedDate":"2026-11-01T09:00:00.000Z"}]'
+    SF_METASYNC_DETECT=on SF_METASYNC_FINGERPRINT=shadow _ms_run 'Y\nY\n'
+    assert_exit_ok "$_MS_RC" "検知 on・指紋 shadow・食い違い: 正常終了"
+    assert_output_contains "$_MS_OUT" "指紋は『変更あり』ですが、検知は『変更なし』でした" "食い違いの WARNING が出る"
+    assert_output_contains "$_MS_OUT" "全件取得を省きました" "検知が変更なしなら、取得を省く"
+    assert_file_not_contains "$MOCK_CALL_LOG" "sf project retrieve" "取得しない"
+    cmp -s "$td/sf-tools/metasync/fingerprint.json" "$td/fp.before" && pass "取得を省いたときは、指紋の状態ファイルを更新しない" || fail "取得を省いたときは、指紋の状態ファイルを更新しない"
+    _fpi_stop; _ms_unset; _det_unset; teardown "$td" "$mb"
+}
+
+# 指紋 shadow・--dry-run: 取得して計画を作るだけ。commit・push しない（指紋の状態ファイルも、コミットしない）
+test_fp_dry_run() {
+    local td mb mh; _ms_env td mb mh; _fpi_start
+    export MOCK_SF_RETRIEVE_FILES='force-app/main/default/classes/New.cls|x'
+    SF_METASYNC_FINGERPRINT=shadow _ms_run '' --dry-run -y
+    assert_exit_ok "$_MS_RC" "指紋 shadow・--dry-run: 正常終了"
+    assert_output_contains "$_MS_OUT" "一覧の指紋を作ります" "--dry-run でも、指紋は作る（読み取りのみ）"
+    assert_file_not_contains "$MOCK_CALL_LOG" "git commit" "--dry-run: commit しない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "fingerprint.json" "--dry-run: 指紋の状態ファイルを、ステージしない"
+    _fpi_stop; _ms_unset; teardown "$td" "$mb"
+}
+
+# 指紋は変わったが、ファイルの変更はなかった（空振り）→ 空振りを表示し、指紋の状態だけをコミットする
+test_fp_changed_but_no_file_change() {
+    local td mb mh; _ms_env td mb mh; _fpi_start
+    _fpi_state
+    _fpi_set ApexClass '[{"fullName":"A9","lastModifiedDate":"2026-11-01T09:00:00.000Z"}]'
+    export MOCK_GIT_DIFF_EXIT_2ND=1
+    SF_METASYNC_FINGERPRINT=shadow _ms_run 'Y\nY\n'
+    assert_exit_ok "$_MS_RC" "指紋は変更あり・ファイルの変更なし: 正常終了"
+    assert_output_contains "$_MS_OUT" "指紋の空振り" "空振り（指紋は変わったが、ファイルの変更はなかった種類）が出る"
+    assert_file_contains "$MOCK_CALL_LOG" "指紋の状態の更新のみ" "指紋の状態だけのコミットになる"
+    assert_file_not_contains "$MOCK_CALL_LOG" "git merge" "状態だけのコミットは、下流へ伝播しない"
+    _fpi_stop; _ms_unset; teardown "$td" "$mb"
+}
+
+# ------------------------------------------------------------------------------
+# 公開リポジトリの拒否・秘密情報の検査・Slack 通知（設計 16.7。P3）
+# ------------------------------------------------------------------------------
+_p3_unset() { unset SF_METASYNC_VIS_RETRY_WAIT SF_METASYNC_SECRET_SCAN SLACK_BOT_TOKEN SLACK_CHANNEL_ID MOCK_GH_VISIBILITY MOCK_GH_VISIBILITY_EXIT MOCK_CURL_RESPONSE MOCK_CURL_EXIT; }
+_p3_slack() { export SLACK_BOT_TOKEN="xoxb-TESTTOKEN123456" SLACK_CHANNEL_ID="C0TESTCHAN"; }
+# 取得結果に、秘密の疑い（AWS のアクセスキーの形）を含むファイルを 1 つ入れる
+_p3_leak() { export MOCK_GIT_DIFF_EXIT_2ND=1 MOCK_SF_RETRIEVE_FILES='force-app/main/default/classes/Leak.cls|public class Leak { String t = "AKIAABCDEFGHIJKLMNOP"; }'; }
+
+# private・internal は通る（公開範囲がログに出る）
+test_p3_visibility_ok() {
+    local td mb mh; _ms_env td mb mh
+    export MOCK_GIT_DIFF_EXIT_2ND=1 MOCK_SF_RETRIEVE_FILES='force-app/main/default/classes/New.cls|public class New {}'
+    _ms_run 'Y\nY\n'
+    assert_exit_ok "$_MS_RC" "公開範囲 private: 正常終了"
+    assert_output_contains "$_MS_OUT" "リポジトリの公開範囲: private" "公開範囲がログに出る"
+    assert_file_contains "$MOCK_CALL_LOG" "gh api repos/" "公開範囲は gh api repos/<owner>/<repo> で確認する"
+    _ms_unset; _p3_unset; teardown "$td" "$mb"
+    local td mb mh; _ms_env td mb mh
+    export MOCK_GH_VISIBILITY=internal MOCK_GIT_DIFF_EXIT_2ND=1 MOCK_SF_RETRIEVE_FILES='force-app/main/default/classes/New.cls|public class New {}'
+    _ms_run 'Y\nY\n'
+    assert_exit_ok "$_MS_RC" "公開範囲 internal: 正常終了"
+    _ms_unset; _p3_unset; teardown "$td" "$mb"
+}
+
+# 公開、または確認できない → 取得せずに止める（終了コード 5）。Slack に通知する（dry-run を除く）
+test_p3_visibility_public() {
+    local td mb mh; _ms_env td mb mh; _p3_slack
+    export MOCK_GH_VISIBILITY=public
+    _ms_run 'Y\nY\n'
+    assert_equals "$_MS_RC" "5" "公開リポジトリ → 終了コード 5"
+    assert_output_contains "$_MS_OUT" "リポジトリが公開（public）です" "公開の理由が出る"
+    assert_file_not_contains "$MOCK_CALL_LOG" "sf project retrieve" "公開リポジトリ: 取得しない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "git commit" "公開リポジトリ: コミットしない"
+    assert_file_contains "$MOCK_CALL_LOG" "https://slack.com/api/chat.postMessage" "公開リポジトリ: Slack に通知する"
+    assert_file_not_contains "$MOCK_CALL_LOG" "xoxb-TESTTOKEN123456" "Slack のトークンは、curl のコマンドラインの引数に出さない（標準入力で渡す）"
+    assert_file_contains "$MOCK_CALL_LOG" " -K - " "curl の設定は、標準入力（-K -）から渡す"
+    assert_file_contains "$MOCK_CALL_LOG" "取得は行っていません" "通知の本文に、理由が入る"
+    assert_output_not_contains "$_MS_OUT" "xoxb-TESTTOKEN123456" "Slack のトークンは、ログに出さない"
+    assert_output_contains "$_MS_OUT" "Slack に通知しました" "通知できた旨が出る"
+    _ms_unset; _p3_unset; teardown "$td" "$mb"
+    # 確認できない（gh の失敗・権限不足）→ 同じく止める
+    local td mb mh; _ms_env td mb mh; _p3_slack
+    export MOCK_GH_VISIBILITY_EXIT=1 SF_METASYNC_VIS_RETRY_WAIT=0
+    _ms_run 'Y\nY\n'
+    assert_equals "$_MS_RC" "5" "公開・非公開を確認できない → 終了コード 5"
+    assert_equals "$(grep -c 'gh api repos/' "$MOCK_CALL_LOG")" "3" "確認できないときは、3 回まで試す（一時的な API の失敗で止めない）"
+    assert_output_contains "$_MS_OUT" "確認できませんでした" "確認できない理由が出る"
+    assert_file_not_contains "$MOCK_CALL_LOG" "sf project retrieve" "確認できない: 取得しない"
+    _ms_unset; _p3_unset; teardown "$td" "$mb"
+    # --dry-run: 止めるが、Slack には通知しない
+    local td mb mh; _ms_env td mb mh; _p3_slack
+    export MOCK_GH_VISIBILITY=public
+    _ms_run '' --dry-run -y
+    assert_equals "$_MS_RC" "5" "--dry-run でも、公開リポジトリは止める"
+    assert_file_not_contains "$MOCK_CALL_LOG" "slack.com" "--dry-run: Slack に通知しない"
+    _ms_unset; _p3_unset; teardown "$td" "$mb"
+    # Slack の設定がない → WARNING にとどめて、止める
+    local td mb mh; _ms_env td mb mh
+    export MOCK_GH_VISIBILITY=public
+    _ms_run 'Y\nY\n'
+    assert_equals "$_MS_RC" "5" "Slack 未設定でも、公開リポジトリは止める"
+    assert_output_contains "$_MS_OUT" "Slack に通知できません" "Slack 未設定の WARNING が出る"
+    _ms_unset; _p3_unset; teardown "$td" "$mb"
+}
+
+# 検査 shadow（既定）: 疑いを WARNING で出すが、止めない（コミットする）
+test_p3_scan_shadow() {
+    local td mb mh; _ms_env td mb mh; _p3_slack; _p3_leak
+    _ms_run 'Y\nY\n'
+    assert_exit_ok "$_MS_RC" "検査 shadow（既定）: 疑いがあっても、正常終了"
+    assert_output_contains "$_MS_OUT" "秘密の疑い: known-token force-app/main/default/classes/Leak.cls" "疑いの規則とパスが出る"
+    assert_output_contains "$_MS_OUT" "shadow のため、止めません" "止めない旨が出る"
+    assert_output_not_contains "$_MS_OUT" "AKIAABCDEFGHIJKLMNOP" "値（秘密）は、ログに出さない"
+    assert_file_contains "$MOCK_CALL_LOG" "git commit" "shadow: コミットする"
+    assert_file_not_contains "$MOCK_CALL_LOG" "slack.com" "shadow: Slack には通知しない"
+    _ms_unset; _p3_unset; teardown "$td" "$mb"
+}
+
+# 検査 on: 疑いがあれば、何もコミットせずに止める（終了コード 4）。Slack に通知する
+test_p3_scan_on() {
+    local td mb mh; _ms_env td mb mh; _p3_slack; _p3_leak
+    SF_METASYNC_SECRET_SCAN=on _ms_run 'Y\nY\n'
+    assert_equals "$_MS_RC" "4" "検査 on: 疑いがある → 終了コード 4"
+    assert_output_contains "$_MS_OUT" "何もコミット・push せずに止めます" "止める旨が出る"
+    assert_output_not_contains "$_MS_OUT" "AKIAABCDEFGHIJKLMNOP" "値（秘密）は、ログに出さない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "git commit" "検査 on: コミットしない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "git push" "検査 on: push しない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "git add" "検査 on: ステージしない"
+    [[ ! -f "$td/force-app/main/default/classes/Leak.cls" ]] && pass "検査 on: 作業ツリーに、疑わしいファイルを書かない" || fail "検査 on: 作業ツリーに、疑わしいファイルを書かない"
+    assert_file_contains "$MOCK_CALL_LOG" "https://slack.com/api/chat.postMessage" "検査 on: Slack に通知する"
+    assert_file_contains "$MOCK_CALL_LOG" "known-token  force-app/main/default/classes/Leak.cls" "通知の本文に、規則とパスが入る"
+    assert_file_not_contains "$MOCK_CALL_LOG" "AKIAABCDEFGHIJKLMNOP" "通知にも、値（秘密）は入れない"
+    assert_output_not_contains "$_MS_OUT" "xoxb-TESTTOKEN123456" "Slack のトークンは、ログに出さない"
+    _ms_unset; _p3_unset; teardown "$td" "$mb"
+    # Slack 未設定 / 通知の失敗 → WARNING にとどめて、止める
+    local td mb mh; _ms_env td mb mh; _p3_leak
+    SF_METASYNC_SECRET_SCAN=on _ms_run 'Y\nY\n'
+    assert_equals "$_MS_RC" "4" "Slack 未設定でも、疑いがあれば止める"
+    assert_output_contains "$_MS_OUT" "Slack に通知できません" "Slack 未設定の WARNING が出る"
+    _ms_unset; _p3_unset; teardown "$td" "$mb"
+    local td mb mh; _ms_env td mb mh; _p3_slack; _p3_leak
+    export MOCK_CURL_RESPONSE='{"ok":false,"error":"invalid_auth"}'
+    SF_METASYNC_SECRET_SCAN=on _ms_run 'Y\nY\n'
+    assert_equals "$_MS_RC" "4" "Slack の通知が失敗しても、疑いがあれば止める"
+    assert_output_contains "$_MS_OUT" "Slack への通知に失敗しました（invalid_auth）" "通知の失敗の理由が出る"
+    _ms_unset; _p3_unset; teardown "$td" "$mb"
+    # --dry-run: 止めるが、Slack には通知しない
+    local td mb mh; _ms_env td mb mh; _p3_slack; _p3_leak
+    SF_METASYNC_SECRET_SCAN=on _ms_run '' --dry-run -y
+    assert_equals "$_MS_RC" "4" "検査 on・--dry-run: 疑いがあれば、終了コード 4"
+    assert_file_not_contains "$MOCK_CALL_LOG" "slack.com" "--dry-run: Slack に通知しない"
+    _ms_unset; _p3_unset; teardown "$td" "$mb"
+}
+
+# ------------------------------------------------------------------------------
+# 追加の取得（SF_METASYNC_EXTRA。設計: doc/sf-metasync-redesign.md 16 章の P2）のテスト
+#   名前を集める Metadata API は、モックのサーバー（_fpi_start）。--manifest つきの sf project retrieve は、モックの MOCK_SF_EXTRA_*
+# ------------------------------------------------------------------------------
+_ex_unset() { unset SF_METASYNC_EXTRA MOCK_SF_EXTRA_FILES MOCK_SF_EXTRA_EXIT MOCK_SF_EXTRA_ERR MOCK_SF_EXTRA_JSON; }
+# 通常の取得に、カスタムオブジェクトのファイルを 1 つ入れる（objects を、同期の対象にする）。手元に、標準オブジェクトの項目のファイルを置く
+_ex_prep() {
+    export MOCK_GIT_DIFF_EXIT_2ND=1
+    export MOCK_SF_RETRIEVE_FILES='force-app/main/default/objects/Foo__c/Foo__c.object-meta.xml|<CustomObject/>'
+    mkdir -p "$td/force-app/main/default/objects/Account/fields"
+    printf 'old\n' > "$td/force-app/main/default/objects/Account/fields/Old__c.field-meta.xml"
+}
+
+# off（既定）: 追加の取得をしない（名前を集めない・--manifest の取得をしない）
+test_extra_off_default() {
+    local td mb mh; _ms_env td mb mh; _fpi_start; _ex_prep
+    _ms_run 'Y\nY\n'
+    assert_file_not_contains "$MOCK_CALL_LOG" "--manifest" "追加の取得 off: --manifest の取得をしない"
+    assert_output_not_contains "$_MS_OUT" "追加の取得: 完了" "追加の取得 off: 追加の取得を行わない"
+    assert_equals "$(wc -l < "$FPI_DIR/requests.log" | tr -d ' ')" "0" "追加の取得 off: Metadata API を呼ばない"
+    # on で入れた標準オブジェクトの部品は、off に戻した回に消さない（保留して、理由を出す）
+    [[ -f "$td/force-app/main/default/objects/Account/fields/Old__c.field-meta.xml" ]] && pass "追加の取得 off: 標準オブジェクトの項目を、削除しない" || fail "追加の取得 off: 標準オブジェクトの項目を、削除しない"
+    assert_output_contains "$_MS_OUT" "追加の取得は行わない設定" "追加の取得 off: 保留の理由が出る"
+    _fpi_stop; _ms_unset; _ex_unset; teardown "$td" "$mb"
+}
+
+test_extra_bad_mode() {
+    local td mb mh; _ms_env td mb mh
+    SF_METASYNC_EXTRA=maybe _ms_run 'Y\nY\n'
+    assert_exit_fail "$_MS_RC" "追加の取得のモードが不正 → 中断"
+    assert_output_contains "$_MS_OUT" "off / on" "使える値が出る"
+    _ms_unset; _ex_unset; teardown "$td" "$mb"
+}
+
+# on・成功: 名前を集め、--manifest で取り、取得結果（reports）を反映する。標準オブジェクトの部品も、組織になければ削除できる
+test_extra_on_ok() {
+    local td mb mh; _ms_env td mb mh; _fpi_start; _ex_prep
+    _fpi_set ReportFolder '[{"fullName":"F1"}]'
+    _fpi_set 'Report|F1' '[{"fullName":"F1/R1"},{"fullName":"F1/R2"}]'   # R2 は、一覧にあるが、取得の応答に入らない（取れなかったレポート）
+    mkdir -p "$td/force-app/main/default/reports/F1"; printf 'r2\n' > "$td/force-app/main/default/reports/F1/R2.report-meta.xml"
+    export MOCK_SF_EXTRA_FILES='force-app/main/default/reports/F1/R1.report-meta.xml|<Report/>'
+    SF_METASYNC_EXTRA=on _ms_run 'Y\nY\n'
+    [[ -f "$td/force-app/main/default/reports/F1/R2.report-meta.xml" ]] && pass "追加の取得 on: 指定したのに取れなかったレポートは、削除しない（ディスクで確かめて保留）" || fail "追加の取得 on: 指定したのに取れなかったレポートは、削除しない"
+    assert_file_contains "$MOCK_CALL_LOG" "--manifest" "追加の取得 on: --manifest で取得する"
+    assert_output_contains "$_MS_OUT" "追加の取得: 完了" "追加の取得 on: 完了と出る"
+    assert_output_contains "$_MS_OUT" "追加の取得: 反映した" "追加の取得 on: 計画の要約に出る"
+    [[ -f "$td/force-app/main/default/reports/F1/R1.report-meta.xml" ]] && pass "追加の取得 on: 取得したレポートが、作業ツリーに入る" || fail "追加の取得 on: 取得したレポートが、作業ツリーに入る"
+    [[ ! -f "$td/force-app/main/default/objects/Account/fields/Old__c.field-meta.xml" ]] && pass "追加の取得 on・成功: 組織にない標準オブジェクトの項目は、削除する" || fail "追加の取得 on・成功: 組織にない標準オブジェクトの項目は、削除する"
+    assert_file_contains "$FPI_DIR/requests.log" "ReportFolder|" "追加の取得 on: フォルダの一覧を取る"
+    _fpi_stop; _ms_unset; _ex_unset; teardown "$td" "$mb"
+}
+
+# on・取得の失敗: 同期は続け、標準オブジェクトの部品の削除を保留する（取れなかったものを、削除と取り違えない）
+test_extra_retrieve_fails() {
+    local td mb mh; _ms_env td mb mh; _fpi_start; _ex_prep
+    export MOCK_SF_EXTRA_EXIT=1 MOCK_SF_EXTRA_ERR="boom"
+    SF_METASYNC_EXTRA=on SF_METASYNC_RETRY_WAIT=0 _ms_run 'Y\nY\n'
+    assert_output_contains "$_MS_OUT" "追加の取得が失敗しました" "追加の取得の失敗が、WARNING で出る"
+    assert_output_contains "$_MS_OUT" "追加の取得が失敗または不完全だったため" "削除を保留した旨が、計画の要約に出る"
+    [[ -f "$td/force-app/main/default/objects/Account/fields/Old__c.field-meta.xml" ]] && pass "追加の取得が失敗: 標準オブジェクトの項目を、削除しない" || fail "追加の取得が失敗: 標準オブジェクトの項目を、削除しない"
+    assert_file_contains "$MOCK_CALL_LOG" "git commit" "追加の取得が失敗でも: 通常の取得の内容は、コミットする（同期は止めない）"
+    _fpi_stop; _ms_unset; _ex_unset; teardown "$td" "$mb"
+}
+
+# on・名前を集められない（Metadata API に接続できない）: 取得せず、同じく保留
+test_extra_manifest_fails() {
+    local td mb mh; _ms_env td mb mh; _fpi_start; _ex_prep
+    export MOCK_SF_ORG_JSON='{"status":0,"result":{"alias":"testorg","id":"00D000000000001AAA","accessToken":"TESTTOKEN","instanceUrl":"http://127.0.0.1:1"}}'
+    SF_METASYNC_EXTRA=on _ms_run 'Y\nY\n'
+    assert_output_contains "$_MS_OUT" "名前を集められませんでした" "名前を集められない: WARNING が出る"
+    assert_file_not_contains "$MOCK_CALL_LOG" "--manifest" "名前を集められない: --manifest の取得をしない"
+    [[ -f "$td/force-app/main/default/objects/Account/fields/Old__c.field-meta.xml" ]] && pass "名前を集められない: 標準オブジェクトの項目を、削除しない" || fail "名前を集められない: 標準オブジェクトの項目を、削除しない"
+    _fpi_stop; _ms_unset; _ex_unset; teardown "$td" "$mb"
+}
+
+# Actions 上で GH_TOKEN がない（wf-metasync.yml が古い）→ 理由が分かる文言で止める。gh は呼ばない
+test_p3_visibility_no_token() {
+    local td mb mh; _ms_env td mb mh
+    _MS_OUT=$( ( cd "$td" && env -u GH_TOKEN -u GITHUB_TOKEN HOME="$mh" PATH="$mb:$PATH" GITHUB_ACTIONS=true GITHUB_REPOSITORY=tamashimon-org/force-test bash "$SF_TOOLS_DIR/bin/sf-metasync.sh" ) 2>&1 )
+    _MS_RC=$?
+    assert_equals "$_MS_RC" "5" "Actions で GH_TOKEN がない → 終了コード 5"
+    assert_output_contains "$_MS_OUT" "GH_TOKEN が渡されていません" "wf-metasync.yml が古い可能性を案内する"
+    assert_file_not_contains "$MOCK_CALL_LOG" "gh api repos/" "GH_TOKEN がないときは、gh を呼ばない"
+    _ms_unset; _p3_unset; teardown "$td" "$mb"
+}
+
+# Slack の本文の置き換えの書き方（Bash 5.2 以降は、置き換え側を引用しないと & が展開される）が、この Bash でも正しい
+test_p3_slack_escape_syntax() {
+    local t='a<b>c&d'
+    t=${t//&/"&amp;"}; t=${t//</"&lt;"}; t=${t//>/"&gt;"}
+    assert_equals "$t" 'a&lt;b&gt;c&amp;d' "Slack の特殊文字（& < >）の置き換えが、この Bash で正しい"
+}
+
+# 許可の一覧・検査の失敗・off・不正なモード
+test_p3_scan_misc() {
+    local td mb mh; _ms_env td mb mh; _p3_slack; _p3_leak
+    printf '# 確認済みの誤検知\nknown-token force-app/main/default/classes/*\n' > "$td/sf-tools/config/metasync-secret-allow.txt"
+    SF_METASYNC_SECRET_SCAN=on _ms_run 'Y\nY\n'
+    assert_exit_ok "$_MS_RC" "許可の一覧に当たる疑いは、on でも止めない"
+    assert_output_contains "$_MS_OUT" "許可済み 1 件" "許可済みの件数が出る"
+    assert_file_contains "$MOCK_CALL_LOG" "git commit" "許可された内容は、コミットする"
+    _ms_unset; _p3_unset; teardown "$td" "$mb"
+    # 検査そのものが失敗（許可の一覧の書式の誤り）: on なら止める（検査していないものを、コミットしない）／ shadow は止めない
+    local td mb mh; _ms_env td mb mh; _p3_slack; _p3_leak
+    printf 'known-token\n' > "$td/sf-tools/config/metasync-secret-allow.txt"
+    SF_METASYNC_SECRET_SCAN=on _ms_run 'Y\nY\n'
+    assert_equals "$_MS_RC" "4" "検査 on・検査の失敗 → 終了コード 4 で止める"
+    assert_output_contains "$_MS_OUT" "検査していない内容はコミットしない" "検査の失敗の理由が出る"
+    assert_output_contains "$_MS_OUT" "の形式が正しくありません" "検査の失敗の原因が出る"
+    assert_output_not_contains "$_MS_OUT" "\[ERROR\] \[ERROR\]" "ラベルが二重にならない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "git commit" "検査の失敗: コミットしない"
+    assert_file_contains "$MOCK_CALL_LOG" "https://slack.com/api/chat.postMessage" "検査の失敗: Slack に通知する（通知なしで止まり続けない）"
+    assert_file_contains "$MOCK_CALL_LOG" "検査そのものが失敗しました" "検査の失敗: 通知の本文に、理由が入る"
+    _ms_unset; _p3_unset; teardown "$td" "$mb"
+    local td mb mh; _ms_env td mb mh; _p3_leak
+    printf 'known-token\n' > "$td/sf-tools/config/metasync-secret-allow.txt"
+    SF_METASYNC_SECRET_SCAN=shadow _ms_run 'Y\nY\n'
+    assert_exit_ok "$_MS_RC" "検査 shadow・検査の失敗 → 止めない"
+    assert_output_contains "$_MS_OUT" "秘密情報の検査に失敗しました" "検査の失敗が WARNING で出る"
+    _ms_unset; _p3_unset; teardown "$td" "$mb"
+    # off: 検査しない
+    local td mb mh; _ms_env td mb mh; _p3_leak
+    SF_METASYNC_SECRET_SCAN=off _ms_run 'Y\nY\n'
+    assert_exit_ok "$_MS_RC" "検査 off: 正常終了"
+    assert_output_not_contains "$_MS_OUT" "秘密の検査" "検査 off: 検査しない"
+    _ms_unset; _p3_unset; teardown "$td" "$mb"
+    # 疑いがなければ、on でも通る
+    local td mb mh; _ms_env td mb mh
+    export MOCK_GIT_DIFF_EXIT_2ND=1 MOCK_SF_RETRIEVE_FILES='force-app/main/default/classes/Safe.cls|public class Safe {}'
+    SF_METASYNC_SECRET_SCAN=on _ms_run 'Y\nY\n'
+    assert_exit_ok "$_MS_RC" "検査 on・疑いなし: 正常終了"
+    assert_output_contains "$_MS_OUT" "疑い 0 件" "疑い 0 件と出る"
+    _ms_unset; _p3_unset; teardown "$td" "$mb"
+    # 不正なモード
+    local td mb mh; _ms_env td mb mh
+    SF_METASYNC_SECRET_SCAN=maybe _ms_run 'Y\nY\n'
+    assert_exit_fail "$_MS_RC" "検査のモードが不正 → 中断"
+    assert_output_contains "$_MS_OUT" "off / shadow / on" "使える値が出る"
+    _ms_unset; _p3_unset; teardown "$td" "$mb"
+}
+
 test_mirror_basic
 test_target_org_resolved_by_org_id
 test_target_org_org_id_15_vs_18_chars
@@ -757,5 +1216,29 @@ test_detect_on_changed_and_dry_run
 test_detect_failure_falls_back_to_full
 test_detect_shadow_reports_mismatch
 test_detect_state_restored_on_failure
+test_fp_off_default
+test_fp_bad_mode
+test_fp_shadow_first_run
+test_fp_shadow_miss
+test_fp_scope_change
+test_fp_shadow_hit
+test_fp_failure_does_not_stop_sync
+test_fp_state_restored_on_failure
+test_fp_with_detect
+test_fp_detect_on_conflict_warning
+test_fp_dry_run
+test_fp_changed_but_no_file_change
+test_p3_visibility_ok
+test_p3_visibility_public
+test_extra_off_default
+test_extra_bad_mode
+test_extra_on_ok
+test_extra_retrieve_fails
+test_extra_manifest_fails
+test_p3_visibility_no_token
+test_p3_slack_escape_syntax
+test_p3_scan_shadow
+test_p3_scan_on
+test_p3_scan_misc
 
 print_summary

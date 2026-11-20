@@ -212,7 +212,7 @@ sf-init.sh --owner my-org --project acme            # オーナーと XXXX を�
 
 <h3 id="in-sf">Salesforce の接続（JWT 認証）</h3>
 <p>JWT 認証は、パスワードの入力なしで、秘密鍵を使って Salesforce にログインする方法です。GitHub 上のワークフローが、自動でログインするために使います。</p>
-<p>既定は、<strong>外部クライアントアプリ</strong>（Salesforce の側に作る、「このツールからのログインを許可する」という登録。Salesforce の推奨）です。アプリの作成は、<code>sf-init</code> が自動で行います（アプリの種類は、聞かれません）。</p>
+<p>使うのは、<strong>外部クライアントアプリ</strong>（Salesforce の側に作る、「このツールからのログインを許可する」という登録。Salesforce の推奨）です。アプリの作成は、<code>sf-init</code> が自動で行います（アプリの種類は、聞かれません。従来の接続アプリケーションは、Salesforce のサポート終了を前に、使わなくなりました）。</p>
 <p>はじめに、JWT 認証に使う<strong>秘密鍵と証明書</strong>を、この PC の <code>~/.sf-jwt/force-XXXX/</code>（<code>server.key</code>・<code>server.crt</code>）に作ります。前回の実行で作ったものが残っているときは、使い続けるかを聞かれます（Y/N/q）。</p>
 <ul>
   <li><code>Y</code>: そのまま使います（ふつうは、こちら）。</li>
@@ -240,15 +240,6 @@ sf-init.sh --owner my-org --project acme            # オーナーと XXXX を�
   </tbody>
 </table>
 <p>名前の末尾の <code>PROD</code> / <code>STG</code> / <code>DEV</code> は、段階の <code>main</code> / <code>staging</code> / <code>develop</code> を表します。くわしくは、<a href="secrets.html">認証情報</a>にあります。段階と組織の種類の関係は、<a href="maintenance.html#org">構成の変更と診断</a>でも説明しています。</p>
-<div class="box warn">
-  <div class="title">従来の接続アプリケーション（<code>--legacy-connected-app</code>）</div>
-  <ul>
-    <li><code>--legacy-connected-app</code> を付けると、従来の接続アプリケーション（今後、廃止の予定）を使います。Salesforce の画面での設定（画面に手順が出ます）と、段階ごとの、コンシューマーキー・接続ユーザー名の手入力が必要です。証明書（<code>server.crt</code>）も、自分で各組織にアップロードします。</li>
-    <li>一度決まったアプリの種類は、続きから再開しても変わりません。外部クライアントアプリで始めたプロジェクトに、あとから <code>--legacy-connected-app</code> を付けると、止まります。</li>
-    <li>作った接続アプリケーションを、Salesforce の画面で「外部クライアントアプリへの移行」や「削除」をしないでください。接続ができなくなります（<code>client_identifier_invalid</code> のエラー）。問題が起きたときは、同じアプリを直さずに、別の名前で作り直します。</li>
-    <li>Developer Edition の組織では、事前承認の反映が遅れる、または失敗することがあります。本番・Sandbox での利用をおすすめします。</li>
-  </ul>
-</div>
 
 <h3 id="metasync">最初のメタデータの同期（自動）</h3>
 <p>Salesforce の接続のあとで、<code>wf-metasync</code>（組織の最新の状態を、Git に取り込むワークフロー）を GitHub で実行し、終わるのを待ちます。待っている間は、30 秒おきに経過が表示されます。続けて、同期した内容を、管理者用のクローン（<code>admin/force-XXXX</code>）に取り込みます。数分かかります（組織の大きさで、長くなります）。</p>
@@ -342,7 +333,6 @@ sf-init.sh --owner my-org --project acme            # オーナーと XXXX を�
     <tr><td><code>--reconnect &lt;段階&gt;</code></td><td>1 つの段階の、接続先の Salesforce 組織を、付け替えます（<a href="maintenance.html#reconnect">構成の変更と診断</a>）</td></tr>
     <tr><td><code>--status</code></td><td>セットアップの診断をします。<span class="badge safe">🔍 読み取りのみ</span>（<a href="maintenance.html#status">構成の変更と診断</a>）</td></tr>
     <tr><td><code>--verify</code></td><td>動作の確認をします（<a href="verify.html">動作の確認</a>）</td></tr>
-    <tr><td><code>--legacy-connected-app</code></td><td>従来の接続アプリケーション（廃止の予定。手動の入力）を使います。既定は、外部クライアントアプリ（自動で作成）。<a href="#in-sf">Salesforce の接続</a></td></tr>
     <tr><td><code>-h</code> / <code>--help</code></td><td>使い方を表示して、終わります</td></tr>
   </tbody>
 </table>

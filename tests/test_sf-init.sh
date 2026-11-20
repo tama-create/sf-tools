@@ -118,7 +118,7 @@ test_flex_layout_prompt() {
     # 先頭の 3 行が、オーナーの入力・XXXX の入力・確認（Y）。以降は、通常の入力
     { printf 'tamashimon\ntestproject\nY\n'; _make_input_3branches; } \
         | ( cd "$work" && HOME="$mock_home" PATH="$mb:$PATH" \
-              bash "$mock_home/sf-tools/bin/sf-init.sh" --legacy-connected-app ) \
+              env "${INIT_ECA_ENV[@]}" bash "$mock_home/sf-tools/bin/sf-init.sh" ) \
           > /tmp/sf-init-test-flex2.log 2>&1
     exit_code=$?
 
@@ -153,7 +153,7 @@ test_admin_branch_failure_is_not_fatal() {
     export MOCK_GIT_CHECKOUT_FAIL_BRANCH=admin
     _make_input_3branches \
         | ( cd "$work" && HOME="$mock_home" PATH="$mb:$PATH" \
-              bash "$mock_home/sf-tools/bin/sf-init.sh" --owner tamashimon --project testproject --legacy-connected-app ) \
+              env "${INIT_ECA_ENV[@]}" bash "$mock_home/sf-tools/bin/sf-init.sh" --owner tamashimon --project testproject ) \
           > /tmp/sf-init-test-adminfail.log 2>&1
     exit_code=$?
     unset MOCK_GIT_CHECKOUT_FAIL_BRANCH
@@ -268,7 +268,7 @@ test_flex_invalid_project_arg() {
     create_mock_gh_for_init "$mb"
 
     out=$( { printf 'x\n' | ( cd "$work" && HOME="$mock_home" PATH="$mb:$PATH" \
-              bash "$mock_home/sf-tools/bin/sf-init.sh" --owner tamashimon --project "bad name" --legacy-connected-app ); } 2>&1 )
+              bash "$mock_home/sf-tools/bin/sf-init.sh" --owner tamashimon --project "bad name" ); } 2>&1 )
     assert_exit_fail "$?" "空白を含むプロジェクト名 → エラー終了"
     assert_output_contains "$out" "プロジェクト名" "エラーに、プロジェクト名（XXXX）の説明が出る"
     assert_file_not_contains "$MOCK_CALL_LOG" "gh repo create" "リポジトリを作る前に、止まる"
@@ -891,7 +891,7 @@ export SF_INIT_LOGIN_URL_PROD=login   # ログイン先を、質問せずに指�
     rm -rf "$init_base"
 
     # [2] 最初からやり直す: 保存した状態を消して、Phase 1 から（Y=警告 / 2=最初から / 以降は、通常の全 Phase の入力）
-    _rc_run 5 "tamashimon/force-testproject" "--legacy-connected-app" "Y\n2\n$(_make_input_3branches | sed '1d')"
+    _rc_run 5 "tamashimon/force-testproject" "" "Y\n2\n$(_make_input_3branches | sed '1d')"
     assert_exit_ok            "$exit_code"                                                  "[2] 最初から: 正常終了する"
     assert_file_contains      "$out" "ステップ 2 / 9: プロジェクトの確認"                          "最初から: Phase 2 から実行される"
     assert_file_contains      "$MOCK_CALL_LOG" "gh repo create"                              "最初から: Phase 3 が実行される"

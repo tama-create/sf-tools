@@ -1,0 +1,90 @@
+# ==============================================================================
+# config/metasync-fingerprint.txt - 一覧（listMetadata）の指紋を取る種類の表（P1。設計 16 章）
+# ==============================================================================
+# lib/metasync.js の fingerprint（sf-metasync.sh の SF_METASYNC_FINGERPRINT=shadow）が読む。種類ごとに、組織の一覧
+# （Node 直接の SOAP の listMetadata）から、件数・最新の更新日時・名前と更新日時のハッシュ（指紋）を作り、前回と比べる。
+# 書式: 1 行に「種類名 [キー=値 ...]」（空白区切り）。# で始まる行と空行は無視する。キー:
+#   dir=<フォルダ名>    : その種類の部品が、force-app/main/default の下のどのフォルダに入るか（影の比較で、計画の変更と、
+#                         指紋の変化を結びつけるため。省略すると config/metadata-dirs.txt の表を使う。どちらにもなければ、
+#                         影の比較で「指紋の対象外」の扱いになる）
+#   folder=<種類>       : フォルダ型の種類（Report・Dashboard・EmailTemplate）。先に、この種類（例: ReportFolder）を一覧し、
+#                         フォルダごとに、部品を一覧する
+#   unfiled=<フォルダ>  : フォルダに入っていない部品の置き場所（例: unfiled$public）。folder= と一緒に使う
+# 方針（設計 16.3・16.5）:
+#   ・一覧に出るが、この組織では使えない種類（INVALID_TYPE）は、失敗ではなく「使えない」として記録する
+#   ・管理パッケージ本体の部品（manageableState = installed）は、指紋から除く
+#   ・Document・DocumentFolder は、取得の対象から外した（設計 16.3.1）ので、ここにも入れない
+#   ・子の種類（CustomField・ValidationRule など）は、親（CustomObject）の一覧では動かないため、別に一覧にする（実測 16.12）
+#   ・確認が済んだ種類だけでなく、影の比較（取得は従来どおり行い、指紋と食い違いを記録する）のため、広めに入れている。
+#     一覧の更新日時が変更に追従しない種類・常に動く種類は、影の比較の記録で見つけて、減らす
+# ==============================================================================
+
+# ---- コード・画面 ----
+ApexClass
+ApexTrigger
+ApexPage
+ApexComponent
+ApexTestSuite
+LightningComponentBundle
+AuraDefinitionBundle
+FlexiPage
+CustomTab
+CustomApplication
+QuickAction
+HomePageLayout
+HomePageComponent
+CustomHelpMenuSection
+CustomNotificationType
+Layout
+
+# ---- オブジェクトと、その子（親の一覧では動かない）----
+CustomObject
+CustomField          dir=objects
+ValidationRule       dir=objects
+RecordType           dir=objects
+ListView             dir=objects
+WebLink              dir=objects
+FieldSet             dir=objects
+CompactLayout        dir=objects
+BusinessProcess      dir=objects
+CustomMetadata
+GlobalValueSet
+CustomLabel          dir=labels
+
+# ---- 自動化・権限 ----
+Flow
+FlowDefinition
+Workflow
+WorkflowRule         dir=workflows
+WorkflowAlert        dir=workflows
+WorkflowFieldUpdate  dir=workflows
+ApprovalProcess
+CustomPermission
+PermissionSet
+PermissionSetGroup
+Profile
+Queue
+SharingCriteriaRule  dir=sharingRules
+SharingOwnerRule     dir=sharingRules
+DuplicateRule
+EmailServicesFunction
+
+# ---- 連携・接続 ----
+NamedCredential
+ExternalCredential
+ExternalDataSource
+ExternalServiceRegistration
+RemoteSiteSetting
+CorsWhitelistOrigin
+CspTrustedSite
+AuthProvider
+PlatformEventChannel
+PlatformEventChannelMember
+LightningMessageChannel
+
+# ---- レポート・メール（フォルダ型）----
+ReportType
+Letterhead
+Report          folder=ReportFolder unfiled=unfiled$public dir=reports
+Dashboard       folder=DashboardFolder dir=dashboards
+EmailTemplate   folder=EmailFolder unfiled=unfiled$public dir=email

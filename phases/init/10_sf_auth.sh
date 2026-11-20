@@ -15,15 +15,7 @@
 #                 この実行ではしない（古い証明書が残る組織が出ないように、完了済みの段階も、設定しなおす）
 #              q: die
 #          - どちらかがないとき: generate_jwt_cert で作る（RSA 2048 ビット・PKCS#1、自己署名 3650 日、CN=sf-jwt-<REPO_NAME>）
-#   1.5. アプリの種類（APP_TYPE）を決める（利用者には聞かない）
-#          - 状態ファイルに APP_TYPE があるとき: その値を使う。ただし SF_INIT_LEGACY_CONNECTED_APP=1
-#            （sf-init.sh --legacy-connected-app）で、APP_TYPE が 1 以外なら die。
-#            APP_TYPE=1 が保存済みで、SF_INIT_LEGACY_CONNECTED_APP=1 の指定がないときは、1 のまま使う
-#          - ないとき: SF_INIT_LEGACY_CONNECTED_APP=1 なら 1（接続アプリケーション）、それ以外は 2（外部クライアント
-#            アプリケーション）とし、状態ファイルに追記する（追記の失敗は die）
-#          - APP_TYPE が 1・2 以外（状態ファイルの値）なら die
-#   2.   APP_TYPE=1: 接続アプリケーションの設定手順を表示し、Enter を待つ（q は die）。
-#        APP_TYPE=2: 自動で作成する旨を表示するだけ
+#   2.   外部クライアントアプリケーションを、組織ごとに自動で作成する旨を表示する（質問はしない）
 #   3.   server.key（CR を除去）を base64 の 1 行にして、Secret SF_PRIVATE_KEY に登録する（毎回上書き。失敗は die）
 #   4.   段階ごとに登録する: メイン組織（PROD）は常に、ステージング組織（STG）は BRANCH_COUNT が 2 以上、
 #        開発組織（DEV）は 3 以上のとき
@@ -31,9 +23,8 @@
 #              ・SF_INIT_TIER_RESUME=1（sf-init.sh が、--only 以外のときに export する）
 #              ・進捗ファイル（SF_INIT_PROGRESS_FILE）に SF_INIT_DONE_TIER_<接尾辞>=1 がある
 #              ・gh secret list に SF_CONSUMER_KEY_<接尾辞> がある（一覧を取得できなければ、スキップしない）
-#          - APP_TYPE=1: register_jwt_secret（init-common.sh。コンシューマー鍵・ユーザー名を手動で入力）
-#            APP_TYPE=2: register_jwt_secret_eca（init-common.sh。ブラウザでログインし、外部クライアントアプリを
-#            deploy で作成して、コンシューマー鍵を retrieve で取得する）。どちらも、失敗は、関数の中で die する。
+#          - register_jwt_secret_eca（init-common.sh。ブラウザでログインし、外部クライアントアプリを deploy で作成して、
+#            コンシューマー鍵を retrieve で取得する）。失敗は、関数の中で die する。
 #            関数が 0 以外を返したときも、その段階で die する（以降の段階に進まない）
 #          - 成功したら、SF_INIT_TIER_RESUME=1 のときだけ、進捗ファイルに SF_INIT_DONE_TIER_<接尾辞>=1 を追記する
 #
@@ -44,7 +35,10 @@
 #   - openssl・sf（npm 版）・gh
 #
 # 【補足】
-#   - APP_TYPE=2 のブラウザでのログイン（sf org login web）は、約 2 分で時間切れになる（失敗・時間切れ・ブラウザを閉じたときは、
+#   - アプリは、外部クライアントアプリケーション（distributionState=Local。組織ごとに作る）だけを使う。
+#     従来の接続アプリケーション（sf-init.sh --legacy-connected-app）は、Salesforce のサポート終了（Summer '27）を前に、廃止した
+#   - 以前の sf-init が状態ファイルに書いた APP_TYPE は、読まない（値が残っていても、無視する）
+#   - ブラウザでのログイン（sf org login web）は、約 2 分で時間切れになる（失敗・時間切れ・ブラウザを閉じたときは、
 #     終了コードが 0 以外になり die。画面にも、その旨の警告を出す）
 #   - 登録する Secrets: SF_PRIVATE_KEY（全段階で共通）/ SF_CONSUMER_KEY_PROD・_STG・_DEV
 #   - 登録する Variables: SF_USERNAME_PROD・_STG・_DEV / SF_INSTANCE_URL_PROD・_STG・_DEV /
@@ -53,26 +47,18 @@
 #   - ログイン先は、組織の種類ではなく URL で選ぶ（3 択: login.salesforce.com / test.salesforce.com / 組織の URL。
 #     Enter は test.salesforce.com）。環境変数 SF_INIT_LOGIN_URL_<接尾辞>（login / test / URL）があれば、質問しない
 #   - 段階と組織の種類は結びつけない。ただし、Salesforce の本番組織は main にしかつなげない（org_guard）。
-#     種類を判定できない組織も、main 以外にはつなげない。APP_TYPE=2 は deploy の前に、APP_TYPE=1 は JWT 接続テストの
-#     あと・登録の前に判定する
+#     種類を判定できない組織も、main 以外にはつなげない。判定は、外部クライアントアプリを deploy する前に行う
 #   - JWT 接続テストに失敗したときは、ask_yn で「テストをスキップして登録だけ行う」かを選べる（Y で登録、N / q は die）
 #   - 環境変数:
-#       SF_INIT_JWT_RETRIES  : APP_TYPE=2 の JWT 接続テストの最大の試行回数（既定 20）
+#       SF_INIT_JWT_RETRIES  : JWT 接続テストの最大の試行回数（既定 20）
 #       SF_INIT_JWT_INTERVAL : 試行の間の待ち時間（秒。既定 30）。待つのは試行の間だけで、既定では、最大
 #                              (20 - 1) × 30 = 570 秒（約 10 分）待つ（作成したアプリの反映待ち）
 #       SF_INIT_LOGIN_URL_<PROD|STG|DEV> : ログイン先（上記）
-#       SF_INIT_LEGACY_CONNECTED_APP=1   : 従来の接続アプリケーション（手順 1.5）
 #   - 手順 1 で N を選んで鍵を作り直したときは、手順 4 の「前回完了済み」のスキップをしない（SF_INIT_TIER_RESUME=0 にする）。
 #     完了済みの段階も、設定しなおす（Secret SF_PRIVATE_KEY は新しい秘密鍵に置き換わるため、組織のアプリに以前の証明書が
 #     残ると、JWT 接続ができなくなる）
 #   - 進捗ファイルは、sf-init.sh が Phase の成功ごとに上書きする（Phase 10 が成功すると、段階の記録は消える）
-#   - 証明書（server.crt）は、APP_TYPE=1 では利用者が各組織へアップロードし、APP_TYPE=2 では deploy で登録する
-#   - 接続アプリケーションの注意:
-#       ・作成した接続アプリケーションを「外部クライアントアプリへの移行」または「削除」しないこと。
-#         OAuth の内部状態が壊れ、client_identifier_invalid エラーが発生する。
-#         問題が起きた場合は、同じアプリを修正せず、別名で新規作成すること
-#       ・Developer Edition 組織では、事前承認（pre-authorization）の反映が遅れる・失敗する場合がある。
-#         JWT Bearer Flow は Production / Sandbox 組織での使用を推奨する
+#   - 証明書（server.crt）は、外部クライアントアプリの deploy で、組織に登録する
 #   - 終了コード: 0 = OK / 1 = die
 # ==============================================================================
 
@@ -100,40 +86,6 @@ BRANCH_COUNT="${BRANCH_COUNT:-1}"
 
 # JWT 証明書の保存先
 JWT_DIR="$HOME/.sf-jwt/${REPO_NAME}"
-
-# ------------------------------------------------------------------------------
-# Step 2 案内文: 接続アプリケーション（Connected App）
-# ------------------------------------------------------------------------------
-_show_connected_app_guide() {
-    log "HEADER" "Salesforce 接続アプリケーション を設定してください。"
-    log "INFO" ""
-    log "INFO" "  ▼ アップロードする証明書ファイル（server.crt）のパス:"
-    log "INFO" "    ${JWT_DIR}/server.crt"
-    log "INFO" ""
-    log "INFO" "  ╔══════════════════════════════════════════════════╗"
-    log "INFO" "  ║  STEP A: 接続アプリケーションを作成する          ║"
-    log "INFO" "  ╚══════════════════════════════════════════════════╝"
-    log "INFO" "  1. 設定の検索窓に「アプリケーションマネージャ」と入力 → 「新規接続アプリケーション」"
-    log "INFO" "  2. 基本情報を入力（アプリケーション名: SF_TOOLS・API 参照名: SF_TOOLS・連絡先メール: 任意）"
-    log "INFO" "  3. 「OAuth 設定の有効化」にチェック"
-    log "INFO" "     コールバック URL: https://login.salesforce.com/services/oauth2/callback"
-    log "INFO" "  4. 「選択した OAuth 範囲」に以下を追加"
-    log "INFO" "     ・フルアクセス (full)"
-    log "INFO" "     ・いつでも要求を実行 (refresh_token, offline_access)"
-    log "INFO" "  5. 「デジタル署名を使用」にチェック → 上記の server.crt をアップロード"
-    log "INFO" "  6. 保存 → 次へ → [コンシューマーの詳細管理] をクリック → 「コンシューマー鍵」をコピー"
-    log "INFO" ""
-    log "INFO" "  ★ 保存後 2〜10 分待ってから STEP B へ進んでください ★"
-    log "INFO" ""
-    log "INFO" "  ╔══════════════════════════════════════════════════╗"
-    log "INFO" "  ║  STEP B: 管理画面でポリシーを設定する            ║"
-    log "INFO" "  ╚══════════════════════════════════════════════════╝"
-    log "INFO" "  設定の検索窓に「接続アプリケーションを管理」と入力 → 作成したアプリ（SF_TOOLS）をクリック"
-    log "INFO" "  ・「ポリシーを編集」→「許可されているユーザー」→「管理者が承認したユーザーは事前承認済み」→ 保存"
-    log "INFO" "  ・「プロファイルを管理する」→ 接続ユーザーのプロファイル（例: システム管理者）を追加"
-    log "INFO" ""
-    press_enter "設定が完了したら Enter を押してください（q で中断）"
-}
 
 # ------------------------------------------------------------------------------
 # メイン処理
@@ -169,48 +121,14 @@ else
 fi
 
 # --------------------------------------------------------------------------
-# Step 1.5: アプリ種別の選択
+# Step 2: 外部クライアントアプリの案内
 # --------------------------------------------------------------------------
-log "HEADER" "Salesforce アプリの種類"
-
-# アプリ種別は、利用者に聞かない（利用者は判断できないため）。
-#   既定: 外部クライアントアプリケーション（[2] Salesforce 推奨の新方式。自動で作成する）
-#   従来の接続アプリケーション（[1] 今後廃止予定）は、`sf-init.sh --legacy-connected-app`（環境変数
-#   SF_INIT_LEGACY_CONNECTED_APP=1）を指定したときだけ
-#   再実行（--resume・続きから・--only 10）では、.sf-init.env に保存済みの種別を再利用する。--legacy-connected-app の指定があり、保存済みの種別が
-#   1 以外のときだけ、中断する（保存済みが 1 で、指定がないときは、1 のまま使う）
-want_type="2"
-[[ "${SF_INIT_LEGACY_CONNECTED_APP:-}" == "1" ]] && want_type="1"
-if [[ -n "${APP_TYPE:-}" ]]; then
-    if [[ "${SF_INIT_LEGACY_CONNECTED_APP:-}" == "1" && "$APP_TYPE" != "1" ]]; then
-        die "--legacy-connected-app が指定されましたが、このプロジェクトは、外部クライアントアプリ（APP_TYPE=${APP_TYPE}）で、設定を始めています。"
-    fi
-    log "INFO" "  前回選択済みの種別を使用します: [${APP_TYPE}]"
-else
-    APP_TYPE="$want_type"
-    # .sf-init.env に書き出して --resume 時に再利用
-    # run 不使用: 状態ファイルへの追記（リダイレクト。終了コードを直接確認する）
-    echo "APP_TYPE=${APP_TYPE}" >> "$SF_INIT_ENV_FILE" \
-        || die "状態ファイルに書き込めません: ${SF_INIT_ENV_FILE}"
-fi
-
-case "$APP_TYPE" in
-    1) log "INFO" "  → 接続アプリケーション（Connected App）を使用します。" ;;
-    2) log "INFO" "  → 外部クライアントアプリケーション（External Client App）を使用します。" ;;
-    *) die "無効な選択です: ${APP_TYPE}" ;;
-esac
-
-# --------------------------------------------------------------------------
-# Step 2: アプリ種別に応じた設定案内
-# --------------------------------------------------------------------------
-if [[ "$APP_TYPE" == "1" ]]; then
-    _show_connected_app_guide
-else
-    # 外部クライアントアプリは、組織ごとに自動で作成する（Step 4: register_jwt_secret_eca）
-    log "HEADER" "外部クライアントアプリケーションは自動で作成します。"
-    log "INFO" "  各組織で、ブラウザでのログインが必要です（接続ユーザー＝管理者権限のユーザー）。"
-    log "INFO" "  アプリの作成・証明書の登録・ポリシーとプロファイルの設定・コンシューマー鍵の取得は、sf-init が自動で行います。"
-fi
+# アプリは、外部クライアントアプリケーションだけ（従来の接続アプリケーションは、廃止した）。
+#   以前の sf-init が状態ファイル（.sf-init.env）に書いた APP_TYPE は、読まない（値が残っていても、無視する）
+# 外部クライアントアプリは、組織ごとに自動で作成する（Step 4: register_jwt_secret_eca）
+log "HEADER" "外部クライアントアプリケーションは自動で作成します。"
+log "INFO" "  各組織で、ブラウザでのログインが必要です（接続ユーザー＝管理者権限のユーザー）。"
+log "INFO" "  アプリの作成・証明書の登録・ポリシーとプロファイルの設定・コンシューマー鍵の取得は、sf-init が自動で行います。"
 
 # --------------------------------------------------------------------------
 # Step 3: SF_PRIVATE_KEY を GitHub Secrets に登録
@@ -227,9 +145,8 @@ log "SUCCESS" "SF_PRIVATE_KEY を登録しました。"
 # --------------------------------------------------------------------------
 log "HEADER" "各組織の JWT 認証情報を設定します。"
 
-# アプリ種別に応じた組織ごとの登録
-#   接続アプリ（1）      : コンシューマーキー・ユーザー名を入力 → JWT 接続テスト → 登録
-#   外部クライアントアプリ（2）: 自動作成（deploy）→ コンシューマー鍵を自動取得 → JWT 接続テスト → 登録
+# 組織ごとの登録
+#   外部クライアントアプリ: 自動作成（deploy）→ コンシューマー鍵を自動取得 → JWT 接続テスト → 登録
 #   段階ごとの再開: 完了した段階は、進捗ファイル（SF_INIT_PROGRESS_FILE。admin/.sf-init-XXXX.progress）に
 #   SF_INIT_DONE_TIER_<接尾辞>=1 を記録する（SF_INIT_TIER_RESUME=1 のときだけ）。
 #   再実行では、記録があり、登録した Secret（SF_CONSUMER_KEY_<接尾辞>）が、いまもあるときだけ、その段階をスキップする
@@ -252,11 +169,7 @@ _register_org() {
         log "INFO" "  ${label}（${suffix}）は、前回、設定が完了しているため、スキップします（付け替えるときは、sf-init.sh --reconnect <段階>）。"
         return 0
     fi
-    if [[ "$APP_TYPE" == "1" ]]; then
-        register_jwt_secret "$alias" "$suffix" "$label" "${JWT_DIR}/server.key"
-    else
-        register_jwt_secret_eca "$alias" "$suffix" "$label" "${JWT_DIR}/server.key" "${JWT_DIR}/server.crt"
-    fi || return 1
+    register_jwt_secret_eca "$alias" "$suffix" "$label" "${JWT_DIR}/server.key" "${JWT_DIR}/server.crt" || return 1
     # この段階が完了したことを、記録する（途中で失敗しても、完了した段階を、やり直さないため）
     if [[ "${SF_INIT_TIER_RESUME:-}" == "1" && -n "${SF_INIT_PROGRESS_FILE:-}" ]]; then
         printf 'SF_INIT_DONE_TIER_%s=1\n' "$suffix" >> "$SF_INIT_PROGRESS_FILE" \

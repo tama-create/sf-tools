@@ -83,12 +83,12 @@ test_sf_login_failure() {
     # JWT 接続テスト失敗をシミュレート
     export MOCK_SF_LOGIN_EXIT=1
 
-    # 警告確認 → Phase2 confirm → ENV_TYPE選択 → Phase5 ブランチ選択 → PAT → Slack → Phase10 アプリ種別選択(1=接続アプリ) → Connected App press_enter → prod Sandbox? → consumer_key/username まで入力
-    # （sf org login jwt で失敗するため以降は不要）
+    # 警告確認 → Phase2 confirm → ENV_TYPE選択 → Phase5 ブランチ選択 → PAT → Slack → Phase10 main のログイン先（1）まで入力
+    # （外部クライアントアプリを作ったあと、sf org login jwt で失敗する。試行は 1 回。スキップの確認は、入力がなく中断する）
     local exit_code
-    printf 'Y\nY\n1\n1\nghp_faketoken\n\nxoxb-faketoken\nC01ABCDEFGH\n\n\n1\nfake_prod_key\nprod@example.com\n' \
+    printf 'Y\nY\n1\n1\nghp_faketoken\n\nxoxb-faketoken\nC01ABCDEFGH\n\n1\n' \
         | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
-              bash "$mock_home/sf-tools/bin/sf-init.sh" --legacy-connected-app ) > /dev/null 2>&1
+              env "${INIT_ECA_ENV[@]}" SF_INIT_JWT_RETRIES=1 bash "$mock_home/sf-tools/bin/sf-init.sh" ) > /dev/null 2>&1
     exit_code=$?
 
     assert_exit_fail "$exit_code"                                              "SF ログイン失敗で非ゼロ終了する"
@@ -151,7 +151,7 @@ test_admin_branch_push_failure_is_not_fatal() {
     export MOCK_GIT_C_PUSH_EXIT=1
     _make_input_3branches \
         | ( cd "$work" && HOME="$mock_home" PATH="$mb:$PATH" \
-              bash "$mock_home/sf-tools/bin/sf-init.sh" --owner tamashimon --project testproject --legacy-connected-app ) \
+              env "${INIT_ECA_ENV[@]}" bash "$mock_home/sf-tools/bin/sf-init.sh" --owner tamashimon --project testproject ) \
           > /tmp/sf-init-test-pushfail.log 2>&1
     exit_code=$?
     unset MOCK_GIT_C_PUSH_EXIT
@@ -186,7 +186,7 @@ test_initial_sync_failure_is_not_fatal() {
         : > "$MOCK_CALL_LOG"
         _make_input_3branches \
             | ( export "$k"; cd "$work" && HOME="$mock_home" PATH="$mb:$PATH" \
-                  bash "$mock_home/sf-tools/bin/sf-init.sh" --owner tamashimon --project testproject --legacy-connected-app ) \
+                  env "${INIT_ECA_ENV[@]}" bash "$mock_home/sf-tools/bin/sf-init.sh" --owner tamashimon --project testproject ) \
               > /tmp/sf-init-test-syncfail.log 2>&1
         exit_code=$?
         assert_exit_ok   "$exit_code"                                                         "同期に失敗しても（${k}）、セットアップは成功する"
@@ -272,7 +272,7 @@ test_initial_sync_timeout_cancels() {
     export MOCK_GH_SYNC_STATUS=in_progress SF_INIT_SYNC_TIMEOUT=2
     _make_input_3branches \
         | ( cd "$work" && HOME="$mock_home" PATH="$mb:$PATH" \
-              bash "$mock_home/sf-tools/bin/sf-init.sh" --owner tamashimon --project testproject --legacy-connected-app ) \
+              env "${INIT_ECA_ENV[@]}" bash "$mock_home/sf-tools/bin/sf-init.sh" --owner tamashimon --project testproject ) \
           > /tmp/sf-init-test-synctimeout.log 2>&1
     exit_code=$?
     unset MOCK_GH_SYNC_STATUS SF_INIT_SYNC_TIMEOUT
@@ -645,13 +645,13 @@ test_sf_tools_autoupdate() {
 }
 
 # ==============================================================================
-# テスト 28: 段階と組織の種類の独立（本番は main のみ・--status・--reconnect・--legacy-connected-app）
+# テスト 28: 段階と組織の種類の独立（本番は main のみ・--status・--reconnect・接続アプリケーションの廃止）
 # ==============================================================================
 test_org_connection() {
     echo ""
-    echo -e "${CLR_HEAD}[TEST] 段階と組織の種類の独立: 本番は main のみ / --status / --reconnect / --legacy-connected-app${CLR_RST}"
+    echo -e "${CLR_HEAD}[TEST] 段階と組織の種類の独立: 本番は main のみ / --status / --reconnect / 接続アプリケーションの廃止${CLR_RST}"
 
-    local mb mock_home out exit_code base force_dir init_base init_dir
+    local mb mock_home out out_txt exit_code base force_dir init_base init_dir
     local PROD_JSON SBX_JSON DE_JSON
     PROD_JSON='{"status":0,"result":{"records":[{"Id":"00D0000000PROD01","Name":"Acme Production","IsSandbox":false,"OrganizationType":"Enterprise Edition","TrialExpirationDate":null}]}}'
     SBX_JSON='{"status":0,"result":{"records":[{"Id":"00D0000000SBX001","Name":"Acme Sandbox","IsSandbox":true,"OrganizationType":"Enterprise Edition","TrialExpirationDate":null}]}}'
@@ -757,25 +757,10 @@ GITEOF
     assert_file_contains      "$out" "組織       : Acme Sandbox（ID 00D0000000SBX001）"         "いまの接続（組織）が表示される"
     assert_file_contains      "$MOCK_CALL_LOG" "gh variable set SF_INSTANCE_URL_PROD --body https://login.salesforce.com" "新しいログイン先が登録される"
     assert_file_contains      "$MOCK_CALL_LOG" "gh variable set SF_ORG_ID_PROD --body 00D0000000DE0001"                   "新しい組織 ID が保存される"
-    assert_file_contains      "$out" "古い組織（Acme Sandbox / ID 00D0000000SBX001）には、以前の接続に使ったアプリが、残っています" "古い組織に残るものが、案内される"
-    assert_file_contains      "$out" "外部クライアントアプリ「SF_TOOLS_force_testproject」"        "外部クライアントアプリの名前と、削除の場所が案内される"
+    assert_file_contains      "$out" "古い組織（Acme Sandbox / ID 00D0000000SBX001）には、以前の接続に使った外部クライアントアプリ「SF_TOOLS_force_testproject」が、残っています" "古い組織に残るもの（外部クライアントアプリの名前）が、案内される"
+    assert_file_contains      "$out" "外部クライアントアプリ マネージャ"                          "削除の場所が案内される"
+    assert_file_not_contains  "$out" "接続アプリケーション"                                      "廃止した接続アプリケーションの案内は、出さない"
     assert_file_contains      "$out" "自動では、削除しません"                                    "古いアプリは、自動では削除しない"
-
-    # --- C2. --reconnect main（従来の接続アプリケーション）: 古い組織に残るものを、外部クライアントアプリと断定しない ---
-    #   回帰: 以前は、--legacy-connected-app でも「外部クライアントアプリ「…」が残っています」と断定していた
-    : > "$MOCK_CALL_LOG"
-    printf 'Y\nfake_key\nuser@example.com\n' \
-        | ( cd "$force_dir" && HOME="$mock_home" PATH="$mb:$PATH" MOCK_SF_ORG_INFO="$DE_JSON" \
-              SF_INIT_LOGIN_URL_PROD=login SF_INIT_LEGACY_CONNECTED_APP=1 \
-              MOCK_GH_VAR_SF_INSTANCE_URL_PROD=https://test.salesforce.com MOCK_GH_VAR_SF_USERNAME_PROD=old@example.com \
-              MOCK_GH_VAR_SF_ORG_KIND_PROD=sandbox MOCK_GH_VAR_SF_ORG_ID_PROD=00D0000000SBX001 MOCK_GH_VAR_SF_ORG_NAME_PROD="Acme Sandbox" \
-              bash "$mock_home/sf-tools/bin/sf-init.sh" --reconnect main ) > "$out" 2>&1
-    exit_code=$?
-    assert_exit_ok            "$exit_code"                                                    "--reconnect main（従来の接続アプリ）: 正常終了する"
-    assert_file_not_contains  "$out" "外部クライアントアプリ「SF_TOOLS_force_testproject」が残っています" "従来の接続アプリ: 外部クライアントアプリが残っていると断定しない"
-    assert_file_contains      "$out" "以前の接続に使ったアプリが、残っています"                    "従来の接続アプリ: 以前の接続に使ったアプリが残ることを案内する"
-    assert_file_contains      "$out" "手動で作った接続アプリケーション"                            "従来の接続アプリ: 接続アプリケーションの削除の場所も案内する"
-    assert_file_not_contains  "$MOCK_CALL_LOG" "sf project deploy start"                       "従来の接続アプリ: 外部クライアントアプリは作らない"
 
     # --- D. --reconnect staging に、本番をつなごうとする → 拒否（何も登録しない）---
     : > "$MOCK_CALL_LOG"
@@ -800,18 +785,6 @@ GITEOF
     assert_file_contains      "$out" "組織の種類を判定できませんでした"                          "判定不能: 理由が表示される"
     assert_file_not_contains  "$MOCK_CALL_LOG" "gh secret set SF_CONSUMER_KEY_STG"             "判定不能: 何も登録しない"
     assert_file_not_contains  "$MOCK_CALL_LOG" "sf project deploy start"                       "判定不能: アプリを作らない"
-
-    # --- D3. 従来の接続アプリ（--legacy-connected-app）でも、staging に本番は、つなげない（Secrets を登録する前に拒否）---
-    : > "$MOCK_CALL_LOG"
-    printf 'Y\nfake_key\nuser@example.com\n' \
-        | ( cd "$force_dir" && HOME="$mock_home" PATH="$mb:$PATH" MOCK_SF_ORG_INFO="$PROD_JSON" \
-              SF_INIT_LOGIN_URL_STG=login SF_INIT_LEGACY_CONNECTED_APP=1 \
-              bash "$mock_home/sf-tools/bin/sf-init.sh" --reconnect staging ) > "$out" 2>&1
-    exit_code=$?
-    assert_exit_fail          "$exit_code"                                                    "従来の接続アプリ + staging に本番 → 拒否する"
-    assert_file_contains      "$MOCK_CALL_LOG" "sf org login jwt"                              "従来の接続アプリ: JWT 接続テストは、行う（組織の種類を読み取るため）"
-    assert_file_not_contains  "$MOCK_CALL_LOG" "gh secret set SF_CONSUMER_KEY_STG"             "従来の接続アプリ: Secrets を登録しない（ガードの後に、登録する）"
-    assert_file_contains      "$out" "本番組織、または、種類を判定できない組織は、つなげません"    "従来の接続アプリ: 理由が表示される"
 
     # --- D4. --add-tier staging に本番 → 拒否。ブランチも PR も作らない（接続を先に行い、できなければ、何も変更しない）---
     local base2 force_dir2
@@ -878,20 +851,31 @@ GITEOF
         bash "$mock_home/sf-tools/bin/sf-init.sh" --reconnect foo ) > "$out" 2>&1
     assert_exit_fail          "$?"                                                            "--reconnect foo → 中断する"
 
-    # --- F. --legacy-connected-app と、保存済みの種別（外部クライアントアプリ）の食い違い ---
-    rm -rf "$mock_home/.sf-jwt"   # 「既存の証明書を再利用しますか？」の質問を、出さないため
+    # --- F. 従来の接続アプリケーションの廃止: 以前の状態ファイルの APP_TYPE=1 は無視し、外部クライアントアプリで進む ---
+    rm -rf "$mock_home/.sf-jwt" "$mb/deployed_src" "$mb/jwt.cnt"   # 「既存の証明書を再利用しますか？」の質問を、出さないため
     init_base=$(_setup_init_dir "tamashimon" "testproject")
     init_dir="$init_base/home/tamashimon/testproject"
     mkdir -p "$init_dir/admin"
-    printf 'REPO_FULL_NAME="tamashimon/force-testproject"\nREPO_NAME="force-testproject"\nPROJECT_NAME="testproject"\nBRANCH_COUNT="1"\nAPP_TYPE=2\n' \
+    printf 'REPO_FULL_NAME="tamashimon/force-testproject"\nREPO_NAME="force-testproject"\nPROJECT_NAME="testproject"\nBRANCH_COUNT="1"\nAPP_TYPE=1\n' \
         > "$init_dir/admin/.sf-init-testproject.env"
+    : > "$MOCK_CALL_LOG"
     printf 'Y\n' \
-        | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
-              bash "$mock_home/sf-tools/bin/sf-init.sh" --only 10 --legacy-connected-app ) > "$out" 2>&1
+        | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" SF_INIT_LOGIN_URL_PROD=login \
+              bash "$mock_home/sf-tools/bin/sf-init.sh" --only 10 ) > "$out" 2>&1
     exit_code=$?
-    assert_exit_fail          "$exit_code"                                                    "--legacy-connected-app + 保存済みの外部クライアントアプリ → 中断する"
-    assert_file_contains      "$out" "外部クライアントアプリ（APP_TYPE=2）で、設定を始めています"      "食い違いの理由が表示される"
+    assert_exit_ok            "$exit_code"                                                    "保存済みの APP_TYPE=1 → 無視して、正常終了する"
+    assert_file_contains      "$MOCK_CALL_LOG" "sf project deploy start"                       "APP_TYPE=1 が残っていても、外部クライアントアプリを作る"
+    assert_file_not_contains  "$out" "コンシューマーキーを入力してください"                        "コンシューマーキーの手入力は、求めない"
+    assert_file_not_contains  "$out" "接続アプリケーション を設定してください"                      "接続アプリケーションの設定手順は、出さない"
     rm -rf "$init_base"
+
+    # --- F2. --legacy-connected-app は、廃止した（不明なオプションとして、何もせずに止まる）---
+    : > "$MOCK_CALL_LOG"
+    out_txt=$(printf 'Y\n' | ( cd "$base" && HOME="$mock_home" PATH="$mb:$PATH" \
+        bash "$mock_home/sf-tools/bin/sf-init.sh" --legacy-connected-app ) 2>&1)
+    assert_exit_fail          "$?"                                                            "--legacy-connected-app → 中断する"
+    assert_output_contains    "$out_txt" "不明なオプションです: --legacy-connected-app"           "--legacy-connected-app → 不明なオプションと表示する"
+    assert_file_not_contains  "$MOCK_CALL_LOG" "gh repo create"                                "--legacy-connected-app → 何も作らない"
 
     unset MOCK_CALL_LOG MOCK_SF_ORG_JSON SF_INIT_JWT_INTERVAL
     teardown "$mb" "$mock_home" "$base"

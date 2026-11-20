@@ -1920,19 +1920,19 @@ CEOF
     assert_file_not_contains "$wf" "  paths:"            "e2e.yml: push の絞り込み（paths）が残っていない（対象のパスの正本は tests/e2e/needs-e2e.sh）"
     assert_file_contains     "$wf" "  workflow_dispatch:" "e2e.yml: 手動で動かせる（rr の最初に、Claude が動かす）"
     assert_file_contains     "$wf" "  schedule:"          "e2e.yml: 定期実行は、そのまま残す"
-    # e2e の対象のパス: リリース・削除の流れに関係しない 4 ファイルは、除外する（e2e は、1 回で、テスト用の組織の無料枠を約 40 分ぶん使うため）。
-    #   対象のパスと除外の一覧の正本は tests/e2e/needs-e2e.sh。CLAUDE.md・dev-guide.md・dev-reference.md の説明（4 ファイルの名前）と、そろえておく
+    # e2e の対象のパス: リリース・削除の流れに関係しない 6 ファイルは、除外する（e2e は、1 回で、テスト用の組織の無料枠を約 40 分ぶん使うため）。
+    #   対象のパスと除外の一覧の正本は tests/e2e/needs-e2e.sh。CLAUDE.md・dev-guide.md・dev-reference.md の説明（6 ファイルの名前）と、そろえておく
     local _ex _in _ne="$SF_TOOLS_DIR/tests/e2e/needs-e2e.sh"
-    for _ex in bin/sf-metasync.sh bin/sf-upgrade.sh lib/metasync.js config/metasync-detect.txt; do
+    for _ex in bin/sf-metasync.sh bin/sf-upgrade.sh lib/metasync.js config/metasync-detect.txt config/metasync-fingerprint.txt config/metasync-extra.txt; do
         assert_file_contains "$_ne" "$_ex" "needs-e2e.sh: ${_ex} は、除外の一覧にある（リリース・削除に関係しない）"
         [[ -f "$SF_TOOLS_DIR/$_ex" ]] && pass "needs-e2e.sh: 除外した ${_ex} が、実在する（名前を変えると、除外が効かなくなる）" \
             || fail "needs-e2e.sh: 除外した ${_ex} が、実在する（名前を変えると、除外が効かなくなる）" "ファイルがない"
-        assert_file_contains "$SF_TOOLS_DIR/CLAUDE.md" "$_ex" "CLAUDE.md: 除外の 4 ファイルの説明が、needs-e2e.sh と同じ（${_ex}）"
-        assert_file_contains "$SF_TOOLS_DIR/doc/dev-guide.md" "$_ex" "dev-guide.md: 除外の 4 ファイルの説明が、needs-e2e.sh と同じ（${_ex}）"
-        assert_file_contains "$SF_TOOLS_DIR/doc/dev-reference.md" "$_ex" "dev-reference.md: 除外の 4 ファイルの説明が、needs-e2e.sh と同じ（${_ex}）"
+        assert_file_contains "$SF_TOOLS_DIR/CLAUDE.md" "$_ex" "CLAUDE.md: 除外の 6 ファイルの説明が、needs-e2e.sh と同じ（${_ex}）"
+        assert_file_contains "$SF_TOOLS_DIR/doc/dev-guide.md" "$_ex" "dev-guide.md: 除外の 6 ファイルの説明が、needs-e2e.sh と同じ（${_ex}）"
+        assert_file_contains "$SF_TOOLS_DIR/doc/dev-reference.md" "$_ex" "dev-reference.md: 除外の 6 ファイルの説明が、needs-e2e.sh と同じ（${_ex}）"
     done
     assert_equals "$(grep -c "^E2E_EXCLUDE_PATHS=" "$_ne")" "1" "needs-e2e.sh: 除外の一覧は、1 か所だけ"
-    assert_equals "$(grep "^E2E_EXCLUDE_PATHS=" "$_ne" | tr ' ' '\n' | grep -c '/')" "4" "needs-e2e.sh: 除外は、4 ファイルだけ（増やしたら、CLAUDE.md・dev-guide.md・dev-reference.md の説明も直す）"
+    assert_equals "$(grep "^E2E_EXCLUDE_PATHS=" "$_ne" | tr ' ' '\n' | grep -c '/')" "6" "needs-e2e.sh: 除外は、6 ファイルだけ（増やしたら、CLAUDE.md・dev-guide.md・dev-reference.md の説明も直す）"
     # 誤って除外すると、リリース・削除の確認が抜けるもの（共有部品・リリースの雛形・各フェーズ）は、除外していない
     for _in in lib phases hooks templates config bin tests/e2e .github/workflows/e2e.yml; do
         if grep "^E2E_TARGET_PATHS=" "$_ne" | tr ' ()' '\n\n\n' | grep -qx "$_in"; then  # 対象の一覧の 1 語と、完全一致するか
@@ -1977,7 +1977,7 @@ CEOF
 # 36. needs-e2e.sh（rr の前に、e2e が必要かを、git の差分で判定する。対象のパスの正本）
 # ------------------------------------------------------------------------------
 test_e2e_needs_e2e() {
-    echo ""; echo -e "${CLR_HEAD}[TEST] needs-e2e.sh（e2e の対象のパスの判定。文書・単体テスト・除外の 4 ファイルだけなら、不要）${CLR_RST}"
+    echo ""; echo -e "${CLR_HEAD}[TEST] needs-e2e.sh（e2e の対象のパスの判定。文書・単体テスト・除外の 6 ファイルだけなら、不要）${CLR_RST}"
     local r rc out sha root base_sha g="git -c user.name=t -c user.email=t@example.com -c commit.gpgsign=false"
     local ne="" ; r=$(mktemp -d "${TMPDIR:-/tmp}/needs-e2e-XXXXXX")
     mkdir -p "$r/tests/e2e" "$r/bin" "$r/lib" "$r/doc" "$r/config" "$r/.github/workflows"
@@ -1986,10 +1986,11 @@ test_e2e_needs_e2e() {
     git -C "$r" config core.autocrlf false   # 一時リポジトリ。Windows の改行の警告を出さない
     # 最初のコミット: 文書だけ（対象のパスを、まだ変えていない）
     echo a > "$r/doc/a.md"; $g -C "$r" add -A; $g -C "$r" commit -q -m root; root=$(git -C "$r" rev-parse HEAD)
-    # main: 配布物・e2e・除外の 4 ファイルがある状態（判定のスクリプト自体は、ここで置く。最初のコミットに入れると、対象のパスを変えた扱いになる）
+    # main: 配布物・e2e・除外の 6 ファイルがある状態（判定のスクリプト自体は、ここで置く。最初のコミットに入れると、対象のパスを変えた扱いになる）
     local f
     cp "$SF_TOOLS_DIR/tests/e2e/needs-e2e.sh" "$ne"
     for f in bin/sf-release.sh bin/sf-metasync.sh bin/sf-upgrade.sh lib/common.sh lib/metasync.js config/metasync-detect.txt \
+             config/metasync-fingerprint.txt config/metasync-extra.txt \
              tests/e2e/lib.sh tests/test_x.sh .github/workflows/e2e.yml .github/workflows/test.yml; do
         mkdir -p "$r/$(dirname "$f")"; echo a > "$r/$f"
     done
@@ -2002,10 +2003,10 @@ test_e2e_needs_e2e() {
     assert_equals "$rc" "1" "差分がない → 不要（戻り値 1）"
     assert_equals "$out" "" "差分がない → 何も表示しない"
 
-    # 文書・単体テスト・test.yml・除外の 4 ファイルだけ → 不要
-    _ne_commit doc/a.md tests/test_x.sh .github/workflows/test.yml bin/sf-metasync.sh bin/sf-upgrade.sh lib/metasync.js config/metasync-detect.txt
+    # 文書・単体テスト・test.yml・除外の 6 ファイルだけ → 不要
+    _ne_commit doc/a.md tests/test_x.sh .github/workflows/test.yml bin/sf-metasync.sh bin/sf-upgrade.sh lib/metasync.js config/metasync-detect.txt config/metasync-fingerprint.txt config/metasync-extra.txt
     out=$(bash "$ne" main development 2>&1); rc=$?
-    assert_equals "$rc" "1" "文書・単体テスト・test.yml・除外の 4 ファイルだけの変更 → 不要（戻り値 1）"
+    assert_equals "$rc" "1" "文書・単体テスト・test.yml・除外の 6 ファイルだけの変更 → 不要（戻り値 1）"
     assert_equals "$out" "" "その場合、対象のパスの変更は、表示されない"
     sha=$(bash "$ne" --last-change development 2>&1); rc=$?
     assert_equals "$sha" "$base_sha" "最後の変更: 不要な変更のあとでも、対象のパスを最後に変えたコミット（base）を返す"
@@ -2028,7 +2029,7 @@ test_e2e_needs_e2e() {
     _ne_commit lib/common.sh tests/e2e/lib.sh .github/workflows/e2e.yml
     out=$(bash "$ne" main development 2>&1); rc=$?
     assert_equals "$rc" "0" "共有部品・e2e 自体・e2e.yml の変更 → 必要"
-    assert_equals "$out" "$(printf '%s\n' .github/workflows/e2e.yml bin/sf-release.sh lib/common.sh tests/e2e/lib.sh)" "対象のファイルが、すべて表示される（除外の 4 ファイルと文書は、出ない）"
+    assert_equals "$out" "$(printf '%s\n' .github/workflows/e2e.yml bin/sf-release.sh lib/common.sh tests/e2e/lib.sh)" "対象のファイルが、すべて表示される（除外の 6 ファイルと文書は、出ない）"
 
     # 対象のパスを、一度も変えていない履歴 → 最後の変更は、なし（戻り値 1）
     out=$(bash "$ne" --last-change "$root" 2>&1); rc=$?

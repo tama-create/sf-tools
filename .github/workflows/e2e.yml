@@ -15,7 +15,7 @@ name: e2e（実環境の通し検証）
 #   ・rr の最初の手順として、development に対して、手動で動かす（workflow_dispatch。Claude が、rr の中で `gh workflow run e2e.yml --ref development` を
 #     実行し、成功を確認してから、PR を作る。CLAUDE.md 1.3.2）。ただし、e2e の対象のパスが、main との差分に含まれるときだけ
 #     （判定: bash tests/e2e/needs-e2e.sh。対象のパス = 配布物（bin/ lib/ phases/ hooks/ templates/ config/）のうち、リリース・削除の流れに関係しない
-#     4 ファイル（bin/sf-metasync.sh・bin/sf-upgrade.sh・lib/metasync.js・config/metasync-detect.txt）を除いたもの、と e2e 自体（tests/e2e/・このファイル）。
+#     6 ファイル（bin/sf-metasync.sh・bin/sf-upgrade.sh・lib/metasync.js・config/metasync-detect.txt・config/metasync-fingerprint.txt・config/metasync-extra.txt）を除いたもの、と e2e 自体（tests/e2e/・このファイル）。
 #     定義の正本は、needs-e2e.sh。CLAUDE.md 1.2・doc/dev-reference.md 9.3 も同じ）。
 #     mm（development への push）では、動かさない（push の起動は、2026-11-05 に廃止した）。
 #     動かさない理由: e2e は、1 回で、テスト用の組織（tamashimon-org。非公開のリポジトリ）の Actions の無料枠（月 2,000 分）を、約 40 分ぶん使う。

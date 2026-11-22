@@ -4,7 +4,7 @@
 # ==============================================================================
 # main の組織（sf-init で 1 番目に登録した組織。本番・Sandbox・Developer Edition のどれでもよい）から、メタデータを取得し、
 # main ブランチの「同期の対象のフォルダ」（【補足】）を、取得した内容と同じにして（追加・変更・削除）、コミットして push する。
-# push したときは、branches.txt の main 以外のブランチへ、main をマージして push する。
+# push したときは、有効な段階（branches.txt の staging / develop。get_tier_list）のブランチへ、main をマージして push する。
 # Salesforce 組織の内容を正とする。どのブランチから実行しても、main に切り替えて処理し、終了時に元のブランチへ戻る。
 # 設計: doc/sf-metasync-redesign.md
 #
@@ -108,7 +108,8 @@
 #      - 差分なし・先のコミットなし: 「完了: Salesforce 組織側に変更はありませんでした。」と表示して終了する（手順 12 は行わない）
 #      コミット・push の失敗は、中断する
 #   12. （手順 11 で push したときのみ。ただし、状態ファイルの更新だけのコミットのときは、伝播しない）
-#      branches.txt の main 以外の各ブランチへ、main を伝播する
+#      有効な段階（branches.txt の、main 以外の staging / develop。lib/project.sh の get_tier_list）の各ブランチへ、main を伝播する
+#      （段階の名前でない行は無視する。develop は、staging もあるときだけ。規則は doc/tier-scaling-design.md 3.1）
 #      - リモートに無いブランチは、WARNING を表示してスキップする
 #      - git checkout <ブランチ> → git pull origin <ブランチ> --rebase → git merge main --no-edit →
 #        git push --no-verify origin <ブランチ>。失敗したら、WARNING を表示して、そのブランチをスキップする
@@ -835,12 +836,14 @@ phase_git_sync() {
     run git push --no-verify origin "$BRANCH_NAME" || return $RET_NG
 }
 
-# 【PROPAGATE】main の変更を、branches.txt の main 以外の各ブランチへ、マージして push する（例: main → staging、main → develop）
+# 【PROPAGATE】main の変更を、有効な段階（get_tier_list）の main 以外の各ブランチへ、マージして push する（例: main → staging、main → develop）
+#   段階の有効・無効は、branches.txt の規則（doc/tier-scaling-design.md 3.1）で決める。名前でない行・staging のない develop には、伝播しない
+#   （以前は get_branch_list（全行）を使っていた。段階を外した（行を消した）ブランチに伝播しないのは、以前と同じ）
 PROPAGATED_OK=""        # 伝播できたブランチ（空白区切り）
 PROPAGATED_SKIPPED=""   # 伝播をスキップしたブランチ（ない・失敗）
 phase_propagate_downstream() {
     local downstream_branches
-    downstream_branches=$(get_branch_list | grep -v '^main$')  # VAR=$(cmd) のため run 不使用
+    downstream_branches=$(get_tier_list | grep -v '^main$')  # VAR=$(cmd) のため run 不使用
     for branch in $downstream_branches; do
         # リモートにブランチが存在するか確認（出力は不要なため直接呼び出し）
         if ! git ls-remote --exit-code --heads origin "$branch" > /dev/null 2>&1; then

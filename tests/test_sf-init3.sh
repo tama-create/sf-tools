@@ -775,7 +775,8 @@ test_wf_propagate_skip_missing_branch() {
         _wfp_step_script "merge_${b}" > "$sc"
         [[ -s "$sc" ]] && pass "${b}: ステップの本文を取り出せた" || fail "${b}: ステップの本文を取り出せた"
         : > "$base/out.txt"
-        out=$( cd "$base/work" && GITHUB_OUTPUT="$base/out.txt" bash -e "$sc" 2>&1 ); rc=$?
+        # 段階は有効として渡す（このテストは、ブランチの有無を確かめる。段階の有効・無効は tests/test_wf-tier-switch.sh）
+        out=$( cd "$base/work" && GITHUB_OUTPUT="$base/out.txt" TIER_ENABLED=true bash -e "$sc" 2>&1 ); rc=$?
         assert_exit_ok "$rc"                                             "${b} がない → 失敗にならない（終了コード 0）"
         assert_file_contains "$base/out.txt" "result=skipped"            "${b} がない → result=skipped を出力する"
         assert_output_contains "$out" "${b} ブランチがないため"          "${b} がない → スキップの旨を表示する"
@@ -787,7 +788,7 @@ test_wf_propagate_skip_missing_branch() {
     ( cd "$base/work" && git fetch -q origin 2>/dev/null )
     _wfp_step_script merge_staging > "$sc"
     : > "$base/out.txt"
-    out=$( cd "$base/work" && GITHUB_OUTPUT="$base/out.txt" bash -e -c "git config user.name t; git config user.email t@example.com; source '$sc'" 2>&1 ); rc=$?
+    out=$( cd "$base/work" && GITHUB_OUTPUT="$base/out.txt" TIER_ENABLED=true bash -e -c "git config user.name t; git config user.email t@example.com; source '$sc'" 2>&1 ); rc=$?
     assert_exit_ok "$rc"                                                 "staging がある → 伝播できる（終了コード 0）"
     assert_file_contains "$base/out.txt" "result=success"                "staging がある → result=success を出力する"
     [[ "$(git -C "$base/origin.git" show staging:b.txt 2>/dev/null)" == "b" ]] \

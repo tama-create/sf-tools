@@ -3,7 +3,7 @@
 # sf-init.sh - 新規 Salesforce プロジェクトの初期セットアップ
 # ==============================================================================
 # 新しい force-XXXX リポジトリを GitHub に作成し、sf-tools と連携させるまでの一連のセットアップ（Phase 1〜10 と後処理）を
-# 自動化する。セットアップ後の保守用のモード（--add-tier / --reconnect / --status / --verify）も持つ。管理者向けのコマンド。
+# 自動化する。セットアップ後の保守用のモード（--add-tier / --remove-tier / --reconnect / --status / --verify）も持つ。管理者向けのコマンド。
 #
 # 【使い方】
 #   cd {作業フォルダ}                                  # sf-job.sh を実行する場所（admin・force-* の中は不可）
@@ -13,6 +13,7 @@
 #
 #   cd {作業フォルダ}/admin/force-XXXX                 # 保守用のモードは、force-* の中で実行する
 #   ~/sf-tools/bin/sf-init.sh --add-tier staging|develop
+#   ~/sf-tools/bin/sf-init.sh --remove-tier staging|develop [--purge-secrets]
 #   ~/sf-tools/bin/sf-init.sh --reconnect main|staging|develop
 #   ~/sf-tools/bin/sf-init.sh --status
 #   ~/sf-tools/bin/sf-init.sh --verify [--plan] [--cleanup] [--no-metasync] [--components] [--validate-only] [--with-objects]
@@ -31,6 +32,12 @@
 #                           phases/init/NN_*.sh（NN = N の 2 桁）がなければ終了する
 #   --add-tier staging|develop
 #                         : 既存プロジェクトに staging / develop の段階を追加する（phases/init/add_tier.sh）
+#   --remove-tier staging|develop
+#                         : 既存プロジェクトから staging / develop の段階を外す（phases/init/remove_tier.sh）。branches.txt から
+#                           その段階の行を消す PR を作るだけ（ブランチ・Secrets / Variables・Ruleset・組織は変えない）。
+#                           値がなければ終了する。--add-tier と同時には指定できない（終了する）
+#     --purge-secrets     : （--remove-tier と一緒に）行を消す PR のマージ後に、その段階の接続情報（Secrets / Variables）を消す。
+#                           --remove-tier なしで指定すると終了する
 #   --reconnect <段階>    : 1 つの段階（main / staging / develop）の、接続先の Salesforce 組織を付け替える（phases/init/reconnect.sh）。
 #                           値がなければ終了する
 #   --status              : セットアップの診断（リポジトリ・ブランチ・ワークフロー・Secrets・Variables が、そろっているか。不足は、
@@ -48,12 +55,13 @@
 #     --validate-only     : （--verify --components と一緒に）検証（wf-validate = dry-run）だけ。PR は、マージせずに閉じる。組織には、何も反映しない
 #     --with-objects      : （--verify --components と一緒に）オブジェクト系も、リリースして、削除する
 #                           （削除したオブジェクトの名前は、15 日間、予約される）
-#                           ※ --plan〜--with-objects を --verify なしで指定すると終了する（--add-tier と一緒のときは、無視する）
+#                           ※ --plan〜--with-objects を --verify なしで指定すると終了する（--add-tier / --remove-tier と一緒のときは、無視する）
 #   -h, --help            : このヘルプを表示して終了する（終了コード 0）
 #
 # 【処理の流れ】
 #   1. 引数の解析と、sf の確認（sf --version の終了コードが 0 以外なら、案内を表示して終了）。
-#      --add-tier → --verify → --status → --reconnect の順で、最初に該当した 1 つだけを実行して終了する（ほかのモードの指定は無視）。
+#      --add-tier → --remove-tier → --verify → --status → --reconnect の順で、最初に該当した 1 つだけを実行して終了する（ほかのモードの指定は無視。
+#      ただし、--add-tier と --remove-tier の同時の指定・--remove-tier なしの --purge-secrets は、終了する）。
 #      以下の 2〜8 は、通常の実行（--resume / --only を含む）
 #   2. 実行場所の確認と、オーナー・XXXX の決定
 #      - カレントのフォルダ名が admin か force-*、または Git の作業ツリーの最上位が force-* なら、拒否して終了する
@@ -105,7 +113,7 @@
 #
 # 【前提条件】
 #   - 実行する場所: 通常の実行は、作業フォルダ（sf-job.sh を実行する場所。どこでもよい。おすすめ: ~/sf のような、短い名前のフォルダ）。
-#     実行した場所に admin/force-XXXX ができる。保守用のモード（--add-tier / --reconnect / --status / --verify）は、force-* の中
+#     実行した場所に admin/force-XXXX ができる。保守用のモード（--add-tier / --remove-tier / --reconnect / --status / --verify）は、force-* の中
 #   - Salesforce CLI（sf）は npm 版（npm install -g @salesforce/cli）であること。起動時に sf --version の終了コードを確認し、
 #     0 以外なら案内を表示して終了する（Windows の Git Bash で公式インストーラー版を使うと、成功しても終了コード 1 になるため）。
 #     この確認は、--help 以外のすべてのモードで行う（sf が未インストールのとき・GitHub Actions 上では、確認しない）
@@ -178,7 +186,8 @@
 #   ◆ 引数の解析
 #     - --only / --resume は、Phase 番号（1〜10 の整数。先頭の 0 は不可）だけを受け付ける。値なし・数字以外・範囲外は、
 #       エラーで終了する（終了コード 1）。--add-tier は、次の引数（- で始まらないもの）を値として受け取り、値なしは
-#       エラーで終了する（staging / develop かどうかは、add_tier.sh が確認する）。--reconnect は、次の引数を値として受け取り
+#       エラーで終了する（staging / develop かどうかは、add_tier.sh が確認する）。--remove-tier も同じ（remove_tier.sh が確認する）。
+#       --purge-secrets は、値を取らない。--reconnect は、次の引数を値として受け取り
 #       （- で始まるものも受け取る）、値なしはエラーで終了する（段階の名前かどうかは、reconnect.sh が確認する）
 #     - 知らないオプションは、使い方を表示して終了する
 #   ◆ そのほか
@@ -232,6 +241,8 @@ ORIG_ARGS=("$@")   # sf-tools を更新したあと、同じ引数で、実行�
 ONLY_PHASE=""
 RESUME_PHASE=1
 ADD_TIER_MODE=""
+REMOVE_TIER_MODE=""
+PURGE_SECRETS_MODE=0
 RECONNECT_MODE=""
 STATUS_MODE=0
 VERIFY_MODE=0
@@ -272,6 +283,15 @@ while [[ $# -gt 0 ]]; do
             ADD_TIER_MODE="$2"
             shift 2
             ;;
+        --remove-tier)
+            [[ -n "${2:-}" && "${2}" != -* ]] || die "--remove-tier には、外す段階（staging または develop）を指定してください。"
+            REMOVE_TIER_MODE="$2"
+            shift 2
+            ;;
+        --purge-secrets)
+            PURGE_SECRETS_MODE=1   # --remove-tier と一緒にだけ指定できる（下で、単独の指定を拒否する）
+            shift
+            ;;
         --reconnect)
             RECONNECT_MODE="$2"   # - で始まる値も受け取る（段階の名前かどうかは、reconnect.sh が確認する）
             [[ -n "$RECONNECT_MODE" ]] || die "--reconnect には、main・staging・develop のいずれかを指定してください。"
@@ -298,6 +318,8 @@ while [[ $# -gt 0 ]]; do
   ~/sf-tools/bin/sf-init.sh --only N               # Phase N のみ実行
   ~/sf-tools/bin/sf-init.sh --add-tier staging     # staging tier を追加
   ~/sf-tools/bin/sf-init.sh --add-tier develop     # develop tier を追加
+  ~/sf-tools/bin/sf-init.sh --remove-tier develop  # develop tier を外す（branches.txt の行を消す PR を作る）
+  ~/sf-tools/bin/sf-init.sh --remove-tier develop --purge-secrets  # 外したあと（PR のマージ後）に、接続情報を消す
   ~/sf-tools/bin/sf-init.sh --reconnect main       # main の接続先（Salesforce 組織）を付け替える
   ~/sf-tools/bin/sf-init.sh --status               # セットアップの診断と、段階ごとの接続先を一覧にする
   ~/sf-tools/bin/sf-init.sh --verify               # 動作の確認（Hello World を、各段階にリリースして、削除する。--plan / --cleanup / --no-metasync）
@@ -312,7 +334,16 @@ done
 # sf が未インストールのとき・GitHub Actions 上では、check_sf_cli は何もしない
 check_sf_cli
 
-# 保守用のモード: --add-tier → --verify → --status → --reconnect の順で、最初に該当した 1 つだけを実行して終了する
+# --add-tier と --remove-tier は、逆の操作のため、同時に指定できない（ほかのモードのように、片方を黙って無視しない）
+if [[ -n "$ADD_TIER_MODE" && -n "$REMOVE_TIER_MODE" ]]; then
+    die "--add-tier と --remove-tier は、同時に指定できません。"
+fi
+# --purge-secrets は、--remove-tier と一緒にだけ指定できる
+if [[ "$PURGE_SECRETS_MODE" -eq 1 && -z "$REMOVE_TIER_MODE" ]]; then
+    die "--purge-secrets は、--remove-tier と一緒に指定してください。"
+fi
+
+# 保守用のモード: --add-tier → --remove-tier → --verify → --status → --reconnect の順で、最初に該当した 1 つだけを実行して終了する
 # --add-tier モードは通常のフェーズループとは別処理（--verify なしの --plan などの拒否より先に判定する）
 if [[ -n "$ADD_TIER_MODE" ]]; then
     log "HEADER" "tier 追加モード: ${ADD_TIER_MODE} (${SCRIPT_NAME}.sh)"
@@ -320,6 +351,17 @@ if [[ -n "$ADD_TIER_MODE" ]]; then
     export ADD_TIER="$ADD_TIER_MODE"
     bash "${SCRIPT_DIR}/../phases/init/add_tier.sh" \
         || die "--add-tier ${ADD_TIER_MODE} が失敗しました。"  # 対話があるため run 不使用（run は出力を一時ファイルに書き出す）
+    exit $RET_OK
+fi
+
+# --remove-tier モード（段階を外す。--purge-secrets のときは、外したあとに接続情報を消す。phases/init/remove_tier.sh）
+if [[ -n "$REMOVE_TIER_MODE" ]]; then
+    log "HEADER" "tier を外すモード: ${REMOVE_TIER_MODE}$([[ "$PURGE_SECRETS_MODE" -eq 1 ]] && echo "（--purge-secrets）") (${SCRIPT_NAME}.sh)"
+    export SF_TOOLS_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+    export REMOVE_TIER="$REMOVE_TIER_MODE"
+    export REMOVE_TIER_PURGE="$PURGE_SECRETS_MODE"
+    bash "${SCRIPT_DIR}/../phases/init/remove_tier.sh" \
+        || die "--remove-tier ${REMOVE_TIER_MODE} が失敗しました。"  # 対話があるため run 不使用（run は出力を一時ファイルに書き出す）
     exit $RET_OK
 fi
 

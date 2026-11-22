@@ -83,7 +83,9 @@
     <tr><td><strong>1 階層</strong></td><td>main</td><td>小さなプロジェクト・1 人での開発</td></tr>
   </tbody>
 </table>
-<p><code>main</code> は必ず使います。<code>develop</code> を使うときは、<code>staging</code> も必要です。3 階層の場合の対応は、次のとおりです。</p>
+<p><code>main</code> は必ず使います。<code>develop</code> を使うときは、<code>staging</code> も必要です。</p>
+<p><strong>段階の有効・無効を決めるのは、GitHub の <code>main</code> の <code>branches.txt</code> だけです。</strong>伝播（<code>wf-propagate</code>・<code>wf-metasync</code>）・リリース（<code>wf-release</code>）・PR の検証（<code>wf-validate</code>）は、毎回これを読み、表にない段階には、ブランチや接続情報が残っていても、何もしません。そのため、セットアップのあとでも、<code>sf-init.sh --add-tier</code> / <code>--remove-tier</code> で、1〜3 階層の間を、いつでも増やしたり減らしたりできます（<a href="../admin/maintenance.html#remove-tier">段階を外す</a>）。</p>
+<p>3 階層の場合の対応は、次のとおりです。</p>
 <table>
   <thead><tr><th>層</th><th>組織</th><th>ブランチ</th><th>エイリアス</th><th>役割</th></tr></thead>
   <tbody>
@@ -231,7 +233,7 @@ templates/.github/workflows/  ─ sf-init →   .github/workflows/
 <p>同じマージ先へのリリースは、1 つずつ順に動きます。</p>
 
 <h3 id="propagate">wf-propagate（下位ブランチへの伝播）</h3>
-<p><code>main</code> への PR をマージすると、その変更を、下位のブランチへ自動で伝えます（<code>main → staging</code>、<code>main → develop</code>。git の merge と push。PR は通しません）。ブランチがない構成では、そのブランチへの伝播を飛ばします。</p>
+<p><code>main</code> への PR をマージすると、その変更を、下位のブランチへ自動で伝えます（<code>main → staging</code>、<code>main → develop</code>。git の merge と push。PR は通しません）。段階として無効なブランチ（<code>branches.txt</code> にない）と、ブランチがない構成では、そのブランチへの伝播を飛ばします。</p>
 <ul>
   <li><strong>Git の上の同期だけ</strong>です。Sandbox の組織への自動デプロイは、行いません（伝播は PR のマージではないので、<code>wf-release</code> は動きません）。</li>
   <li>メタデータの同期（<code>wf-metasync</code>）のボットの push では、このワークフローは動きません。同期のあとの下位への伝播は、同期のコマンド（<code>sf-metasync.sh</code>）自身が担います。</li>

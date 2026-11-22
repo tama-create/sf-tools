@@ -30,6 +30,12 @@
 #                             ... 同名の Ruleset があれば（複数あれば、すべて）削除する（常に戻り値 0）
 #   initial_metadata_sync REPO DIR
 #                             ... セットアップの最後に、wf-metasync を実行して完了を待ち、同期した内容を、管理者用のクローンに取り込む
+#   tier_text_has_line TEXT NAME
+#                             ... branches.txt の中身（TEXT）に、NAME の行があるか（CR・行の前後の空白を除いて比べる。get_tier_list と同じ）
+#   tier_text_without_line TEXT NAME
+#                             ... TEXT から、NAME の行（同じ比べ方で一致する行）だけを除いて echo する（ほかの行は、そのまま）
+#   tier_switch_wf_problems   ... origin/main の workflow が、段階の切り替え（doc/tier-scaling-design.md 3 章）に対応しているかを確かめ、
+#                                 対応していないファイル名を、空白区切りで echo する（すべて対応していれば、空）。git fetch 済みであること
 #
 # 【前提条件】
 #   - lib/common.sh を source 済みであること（log / run / die / ask_yn / read_or_quit / json_get / is_gitbash /
@@ -621,4 +627,61 @@ initial_metadata_sync() {
     run git -C "$dir" pull --ff-only origin main || { log "WARNING" "  同期した内容を、クローンに取り込めませんでした: ${dir}"; return 1; }
     log "SUCCESS" "  同期した内容を、管理者用のクローンに取り込みました。"
     return 0
+}
+
+# ------------------------------------------------------------------------------
+# 段階の切り替え（doc/tier-scaling-design.md）の共通の確かめ。remove_tier.sh・status.sh が使う
+# ------------------------------------------------------------------------------
+# tier_text_has_line TEXT NAME: TEXT（branches.txt の中身）に、NAME の行があるか（CR・前後の空白を除いて比べる）
+tier_text_has_line() {
+    local line
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        line="${line%$'\r'}"
+        line="${line#"${line%%[![:space:]]*}"}"
+        line="${line%"${line##*[![:space:]]}"}"
+        [[ "$line" == "$2" ]] && return 0
+    done <<< "$1"
+    return 1
+}
+
+# tier_text_without_line TEXT NAME: TEXT から、NAME の行（CR・前後の空白を除いて一致する行）だけを除いて echo する（ほかの行はそのまま。CR は除く）
+tier_text_without_line() {
+    local line trimmed
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        trimmed="${line%$'\r'}"
+        trimmed="${trimmed#"${trimmed%%[![:space:]]*}"}"
+        trimmed="${trimmed%"${trimmed##*[![:space:]]}"}"
+        [[ "$trimmed" == "$2" ]] && continue
+        printf '%s\n' "${line%$'\r'}"
+    done <<< "$1"
+}
+
+# _tier_wf_block CONTENT: 判定の部分（# >>> sf-tools: tier-switch v1 〜 # <<<）を、行頭の空白を除いて echo する
+_tier_wf_block() {
+    printf '%s\n' "$1" | awk '/# >>> sf-tools: tier-switch v1/{f=1} f{sub(/^[[:space:]]+/, ""); print} /# <<< sf-tools: tier-switch v1/{exit}'
+}
+
+# tier_switch_wf_problems: origin/main の workflow が、段階の切り替えに対応しているかを確かめる（doc/tier-scaling-design.md 5.2 の 3）
+#   wf-propagate.yml・wf-release.yml・wf-validate.yml: 判定の部分が、この sf-tools の雛形と同じで、判定の呼び出しの印（# sf-tools: tier-check）がある
+#   wf-metasync.yml: sf-metasync.sh を呼んでいて、workflow の中に（コメントの行を除いて）git push がない（判定は sf-metasync.sh が行う）
+#   出力: 対応していないファイル名（空白区切り。すべて対応していれば空）。origin/main は、呼び出し側が git fetch しておく
+#   git show "origin/main:<パス>" は、MSYS_NO_PATHCONV=1 を付けて呼ぶ。Windows の Git Bash は、「origin/main:.github/…」のような引数を、
+#   ネイティブの git に渡す前に、パスの並び（: 区切り）とみなして Windows のパスに書き換えることがあるため（2026-11-22 にテストで確認。
+#   macOS・Linux では、この変数は何もしない）
+tier_switch_wf_problems() {
+    local tmpl_dir="${SF_TOOLS_DIR}/templates/.github/workflows" bad="" wf remote_wf tmpl_wf rb tb remote_ms
+    for wf in wf-propagate.yml wf-release.yml wf-validate.yml; do
+        remote_wf=$(MSYS_NO_PATHCONV=1 git show "origin/main:.github/workflows/${wf}" 2>/dev/null || true)  # VAR=$(cmd) のため run 不使用（ないときは空）
+        tmpl_wf=$(cat "${tmpl_dir}/${wf}" 2>/dev/null || true)                                            # VAR=$(cmd) のため run 不使用
+        rb=$(_tier_wf_block "$remote_wf"); tb=$(_tier_wf_block "$tmpl_wf")                               # VAR=$(cmd) のため run 不使用
+        if [[ -z "$rb" || "$rb" != "$tb" ]] || ! printf '%s\n' "$remote_wf" | grep -qF '# sf-tools: tier-check'; then  # 条件チェックのため run 不使用
+            bad="${bad}${wf} "
+        fi
+    done
+    remote_ms=$(MSYS_NO_PATHCONV=1 git show "origin/main:.github/workflows/wf-metasync.yml" 2>/dev/null || true)  # VAR=$(cmd) のため run 不使用
+    if ! printf '%s\n' "$remote_ms" | grep -qF 'sf-metasync.sh' \
+       || printf '%s\n' "$remote_ms" | grep -v '^[[:space:]]*#' | grep -qF 'git push'; then  # 条件チェックのため run 不使用
+        bad="${bad}wf-metasync.yml "
+    fi
+    printf '%s' "${bad% }"
 }

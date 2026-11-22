@@ -27,7 +27,8 @@
   <thead><tr><th>やりたいこと</th><th>コマンド</th><th>説明</th></tr></thead>
   <tbody>
     <tr><td>いまの状態を調べたい（何も変えない）</td><td><code>sf-init.sh --status</code></td><td><a href="#status">セットアップを診断する</a></td></tr>
-    <tr><td>段階（staging・develop）を足したい</td><td><code>sf-init.sh --add-tier</code></td><td><a href="#add-tier">段階を足す</a></td></tr>
+    <tr><td>段階（staging・develop）を足したい・外した段階を戻したい</td><td><code>sf-init.sh --add-tier</code></td><td><a href="#add-tier">段階を足す</a></td></tr>
+    <tr><td>段階を外したい（その組織を、別の用途に回したいなど）</td><td><code>sf-init.sh --remove-tier</code></td><td><a href="#remove-tier">段階を外す</a></td></tr>
     <tr><td>接続先の Salesforce 組織を、付け替えたい</td><td><code>sf-init.sh --reconnect</code></td><td><a href="#reconnect">接続先を付け替える</a></td></tr>
     <tr><td>秘密鍵・ユーザー名などを、登録し直したい</td><td><code>sf-update-secret.sh</code></td><td><a href="secrets.html#update">再登録する</a></td></tr>
     <tr><td>ワークフローを、最新の雛形に合わせたい</td><td><code>sf-sync-wf.sh</code></td><td><a href="workflows.html#sync">雛形に合わせて更新する</a></td></tr>
@@ -100,22 +101,46 @@ sf-init.sh --add-tier develop    # main + staging → main + staging + develop</
   </ul>
 </div>
 
-<h3 id="scale-down">段階を減らすとき（手動）</h3>
-<div class="box danger">
-  <div class="title">段階を減らす操作は、自動化していません</div>
-  <ul>
-    <li>ブランチの削除・Ruleset の変更・Secrets / Variables の削除など、影響が広い操作だからです。</li>
-    <li>まちがえて削除すると、元に戻せないおそれがあります。</li>
-    <li>必要になる機会が少なく、1 回で済む手作業と判断しました。</li>
-  </ul>
+<h3 id="re-add">外した段階を戻すとき</h3>
+<p><code>--remove-tier</code> で外した段階を、もう一度 <code>--add-tier</code> で足すときは、GitHub に接続情報（<code>SF_CONSUMER_KEY_*</code>・<code>SF_USERNAME_*</code>・<code>SF_INSTANCE_URL_*</code>）が残っていれば、残っている情報（組織名・ユーザー名・ログイン先・確かめた日時）を表示して、「つなぎ直さずに、段階だけ戻しますか？」と聞きます。</p>
+<ul>
+  <li><strong>Y</strong>：ブラウザでのログインと、外部クライアントアプリの作成を省いて、<code>branches.txt</code> に行を戻す PR だけを作ります。</li>
+  <li><strong>N</strong>：最初と同じように、ブラウザでログインして、つなぎ直します。</li>
+  <li>残っている接続情報が、今も使えるか（組織のアプリが消されていないか・ユーザーが無効になっていないか）は、ここでは確かめられません（Secret の値は読めないため）。PR をマージしたあとの、最初の検証・リリースで分かります。</li>
+  <li>残っていたブランチが <code>main</code> より遅れているときは、遅れている本数を表示します。PR をマージしたあと、次に <code>main</code> へマージしたときの伝播で、<code>main</code> が取り込まれます（すぐ取り込むには、<code>wf-propagate</code> を手動で実行します）。</li>
+</ul>
+
+<h2 id="remove-tier">段階を外す（<code>--remove-tier</code>）</h2>
+<pre><code>cd {作業フォルダ}/admin/force-XXXX
+sf-init.sh --remove-tier develop                    # main + staging + develop → main + staging
+sf-init.sh --remove-tier staging                    # main + staging → main のみ（develop を先に外す）
+sf-init.sh --remove-tier develop --purge-secrets    # 外したあと（PR のマージ後）に、接続情報を消す（任意）</code></pre>
+<p>段階を外すと、その段階への<strong>伝播・リリース・PR の検証が止まります</strong>。組織を別の用途に回したいとき（検証環境の組織を、開発用に使うなど）や、段階を減らして運用を軽くしたいときに使います。最初に作った構成に関係なく、1〜3 段階の間で、いつでも減らしたり戻したりできます（戻すときは <a href="#re-add"><code>--add-tier</code></a>）。</p>
+
+<h3 id="remove-tier-how">しくみ</h3>
+<ul>
+  <li>段階の有効・無効は、GitHub の <code>main</code> の <code>sf-tools/config/branches.txt</code> だけで決まります。ワークフロー（<code>wf-propagate</code>・<code>wf-release</code>・<code>wf-validate</code>）は、毎回これを読み、表にない段階には、ブランチや接続情報が残っていても、何もしません。<code>wf-metasync</code> の伝播先も、同じ規則で決まります。</li>
+  <li><code>--remove-tier</code> がするのは、<code>branches.txt</code> から、その段階の行を消す PR を作ることだけです。PR をマージした時点で、止まります。</li>
+  <li><strong>ブランチ・Secrets / Variables・Ruleset・Salesforce 組織の中のものは、変えません。</strong>PR を閉じれば、何も変わっていない状態に戻ります。残しておけば、戻すときに、つなぎ直さずに済みます。</li>
+  <li>develop には staging が必要です。staging を外すときは、先に develop を外してください。<code>main</code> は外せません。</li>
+</ul>
+
+<h3 id="remove-tier-before">実行する前に</h3>
+<div class="box warn">
+  <div class="title">ワークフローを、新しい雛形にしておく</div>
+  <p>古いワークフローは、<code>branches.txt</code> を見ずに動くため、行を消しても止まりません。<code>--remove-tier</code> は、GitHub の <code>main</code> のワークフローが、段階の切り替えに対応しているかを確かめ、対応していなければ止まります。そのときは、sf-tools を更新し、作業用のブランチで <a href="workflows.html#sync"><code>sf-sync-wf.sh</code></a> を実行して、ワークフローを <code>main</code> まで入れてから、もう一度実行してください。</p>
 </div>
-<p>次の順番で、手作業で行います。</p>
+
+<h3 id="remove-tier-flow">流れ</h3>
 <ol class="steps">
-  <li><p>GitHub の Repository Ruleset を更新します（減らす段階のブランチを、対象から外します）。Ruleset の設定によっては、先に外さないと、ブランチを削除できません。</p></li>
-  <li><p><code>branches.txt</code> から、減らす段階を削除して、コミットしてプッシュします。</p></li>
-  <li><p>GitHub で、ブランチ（<code>staging</code> / <code>develop</code>）を削除します。</p></li>
-  <li><p>GitHub の Secrets / Variables から、その段階の <code>SF_CONSUMER_KEY_*</code>（Secret）と、<code>SF_USERNAME_*</code> / <code>SF_INSTANCE_URL_*</code> / <code>SF_ORG_*</code>（Variable）を削除します。</p></li>
+  <li><p>影響を表示します（読み取りのみ）：その段階にだけあって <code>main</code> にない変更・その段階をマージ先にする、開いている PR・その段階の接続情報の名前（値は出しません）・その段階を対象にする Ruleset。ブランチは消さないので、<code>main</code> にない変更も失われません（ただし、リリースされなくなります）。</p></li>
+  <li><p>管理者向けの警告のあと、続けるかを聞きます。</p></li>
+  <li><p>作業用のブランチ（<code>system-remove-tier-段階-日時</code>）で、<code>branches.txt</code> から、その段階の行だけを消し、PR を作ります。</p></li>
+  <li><p>作られた PR を、GitHub でマージしてください。マージした時点で、その段階への伝播・リリース・PR の検証が止まります。</p></li>
 </ol>
+
+<h3 id="purge-secrets">接続情報を消す（<code>--purge-secrets</code>。任意）</h3>
+<p>組織を別の用途に回すなど、CI から、その組織につながらないようにしたいときだけ、PR をマージしたあとに実行します。消すのは、その段階の決まった名前（<code>SF_CONSUMER_KEY_*</code>・<code>SF_USERNAME_*</code>・<code>SF_INSTANCE_URL_*</code>・<code>SF_ORG_*</code>）だけです。<code>branches.txt</code> に、まだその段階の行があるとき（PR がまだマージされていないとき）は、止まります。Secret の値は、消すと戻せません（戻すときは、<code>--add-tier</code> で新しくつなぎ直します）。一部を消せなかったときは、もう一度実行すると、残っているものだけを消します。</p>
 
 <h2 id="reconnect">接続先を付け替える（<code>--reconnect</code>）</h2>
 <pre><code>sf-init.sh --reconnect &lt;段階&gt;      # 段階: main / staging / develop</code></pre>
@@ -173,7 +198,15 @@ sf-init.sh --add-tier develop    # main + staging → main + staging + develop</
   <li>表示する接続先は、GitHub に保存された値です（いま実際にログインして確かめた値ではありません）。以前のバージョンで作ったプロジェクトなど、保存されていないものは、組織が「未確認」、種類が「種類を判定できません」と表示されます。</li>
   <li>Salesforce 側（外部クライアントアプリ・JWT 接続）は、ログインが必要なので、調べません。直近の <code>wf-metasync</code> や <code>wf-release</code> が成功していれば、接続はできています。</li>
 </ul>
-<p>足りないもの（✗）がある、または、本番の組織が <code>main</code> 以外につながっていると、終了コードは 1 になります（スクリプトから、問題を見つけられるようにするためです）。</p>
+<h3 id="status-tiers">段階の切り替え</h3>
+<p>GitHub の <code>main</code> の <code>branches.txt</code> を読んで、次を表示します。</p>
+<ul>
+  <li>有効な段階。段階の名前（<code>main</code> / <code>staging</code> / <code>develop</code>）でない行は、警告を出して無視します。<code>develop</code> があって <code>staging</code> がないときは、エラーになります（<code>develop</code> は段階として無効になります）。</li>
+  <li>外した段階に、ブランチ・接続情報・その段階を対象にする Ruleset が残っていれば、知らせます（使われません。戻すときに使います）。</li>
+  <li>GitHub の <code>main</code> のワークフローが、段階の切り替えに対応していなければ、警告します（行を消しても、止まりません）。</li>
+  <li>Variable <code>SF_TOOLS_BRANCH</code> が、未設定・<code>main</code>・<code>development</code> のどれでもなければ、警告します。</li>
+</ul>
+<p>足りないもの（✗）がある、本番の組織が <code>main</code> 以外につながっている、または、<code>staging</code> のない <code>develop</code> があると、終了コードは 1 になります（スクリプトから、問題を見つけられるようにするためです）。</p>
 
 </main>
 <aside id="toc"></aside>

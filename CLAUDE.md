@@ -163,14 +163,14 @@ git pull origin main                     # main の最新を取り込む
 | 警告ボックス表示 | `print_admin_warning`（`lib/common.sh`。赤 = `CLR_ERR` の枠）で表示する。`echo` で直書きしない（使い方は `doc/dev-reference.md` 3.4.1） |
 | `ask_yn \|\| die` | N/q で必ず中断すること（`|| die` 必須）。`lib/wizard.sh` の `wizard_confirm`（Enter / Y で進み、N / q は die）も、同等として扱う（sf-init の開始画面）|
 | `check_gh_owner "$OWNER"` | gh 認証ユーザーがリポジトリオーナーと一致するか確認（不一致は `die`。ただしオーナーが組織で、ユーザーがその有効な admin なら通過）|
-| GITHUB_ACTIONS スキップ | `GITHUB_ACTIONS=true` の場合は警告・確認をスキップして自動実行（**例外**: `sf-sync-wf.sh`・`sf-init.sh`（`--add-tier`・`--reconnect` を含む）は省略しない。`sf-typecheck.sh` と `sf-init.sh --verify` は、Actions 上では実行を拒否する）|
+| GITHUB_ACTIONS スキップ | `GITHUB_ACTIONS=true` の場合は警告・確認をスキップして自動実行（**例外**: `sf-sync-wf.sh`・`sf-init.sh`（`--add-tier`・`--remove-tier`・`--reconnect` を含む）は省略しない。`sf-typecheck.sh` と `sf-init.sh --verify` は、Actions 上では実行を拒否する）|
 | 二重確認の防止 | `SF_DEPLOY_CONFIRMED=1` を export して呼び出し先の確認をスキップ |
 
 **管理者向けコマンド一覧（警告必須）:**
 
 | スクリプト | 状態 |
 |---|---|
-| `sf-init.sh`（`--add-tier`・`--reconnect` の `phases/init/add_tier.sh`・`reconnect.sh` を含む） | ✅ 実装済み |
+| `sf-init.sh`（`--add-tier`・`--remove-tier`・`--reconnect` の `phases/init/add_tier.sh`・`remove_tier.sh`・`reconnect.sh` を含む） | ✅ 実装済み |
 | `sf-metasync.sh` | ✅ 実装済み |
 | `sf-update-secret.sh` | ✅ 実装済み |
 | `sf-sync-wf.sh` | ✅ 実装済み |
@@ -246,7 +246,7 @@ Salesforce 開発の環境構築と日々の作業を自動化するシェルス
 |---|---|
 | `bin/sf-*.sh` | 各種自動化スクリプト本体 |
 | `lib/` | 共通ライブラリ。`common.sh` が窓口（`log` / `run` / `die` など。`input.sh`・`platform.sh`・`project.sh` を読み込む）。`org.sh`・`wizard.sh`・`diag.sh`・`verify-common.sh` などは、使うスクリプトが個別に読み込む（`doc/dev-reference.md` 3） |
-| `phases/init/` | sf-init.sh のサブスクリプト（Phase 01〜10・`init-common.sh`・`--add-tier` / `--reconnect` / `--status` / `--verify` の `add_tier.sh` / `reconnect.sh` / `status.sh` / `verify.sh`） |
+| `phases/init/` | sf-init.sh のサブスクリプト（Phase 01〜10・`init-common.sh`・`--add-tier` / `--remove-tier` / `--reconnect` / `--status` / `--verify` の `add_tier.sh` / `remove_tier.sh` / `reconnect.sh` / `status.sh` / `verify.sh`） |
 | `config/changeset-types.txt` | 変更セットで扱える種類の一覧（公式の Metadata Coverage Report。「全種類を対象にする」目標の一覧。`sf-typecheck.sh --coverage` で、確認の進み具合を見る） |
 | `config/metadata-capability.txt` | メタデータの種類ごとの「リリース・削除」の可否の表（`sf-typecheck.sh` が実機で確認した結果。`sf-check.sh` が読む） |
 | `hooks/` | git フック（`pre-commit`・`pre-push`）の実体。`bin/` のスクリプトを呼ぶだけのラッパー |

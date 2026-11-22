@@ -155,7 +155,7 @@ sf-init.sh --owner my-org --project acme            # オーナーと XXXX を�
     <tr><td>3</td><td><code>main</code></td><td>小さなプロジェクトや、1 人での開発</td></tr>
   </tbody>
 </table>
-<p>あとから、段階を足すこともできます（<a href="maintenance.html#add-tier">段階を足す</a>）。減らす操作は、自動化していません。段階の考え方は、<a href="../design/cicd.html#branches">CI/CD の仕組み</a>にあります。</p>
+<p>あとから、段階を足したり（<a href="maintenance.html#add-tier">段階を足す</a>）、外したり（<a href="maintenance.html#remove-tier">段階を外す</a>）できます。最初に選んだ構成に縛られず、1〜3 段階の間で、いつでも変えられます。段階の考え方は、<a href="../design/cicd.html#branches">CI/CD の仕組み</a>にあります。</p>
 
 <h3 id="in-pat">GitHub の Token（PAT）</h3>
 <p>PAT（Personal Access Token）は、GitHub の「合鍵」のようなものです。自動で動くワークフローが、あなたの代わりに、リポジトリを更新するために使います（メタデータの同期で <code>main</code> に送るときなど。<code>main</code> は保護されていますが、リポジトリの管理者の Token なら、保護のルールを越えて送れます）。この Token は、作る <code>force-XXXX</code> のためのもので、sf-tools のリポジトリとは関係ありません。</p>

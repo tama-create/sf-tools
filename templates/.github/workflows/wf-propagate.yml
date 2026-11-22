@@ -2,8 +2,9 @@
 # wf-propagate.yml - ブランチ伝播
 # ==============================================================================
 # main への PR がマージされたら、main を staging と develop へ、PR を通さずに直接マージして push する（Git のブランチだけ。
-# Salesforce の組織には、接続しない）。staging / develop ブランチがない構成（main のみ・main + staging）では、そのブランチへの
-# 伝播をスキップする（失敗にしない）。コンフリクトしたら、マージを取り消して、Slack に通知し、ジョブを失敗させる。
+# Salesforce の組織には、接続しない）。伝播するのは、段階として有効なブランチだけ（origin/main の sf-tools/config/branches.txt に
+# あるもの。develop は staging もあるときだけ。doc/tier-scaling-design.md 3.1）。段階として無効なブランチ・ブランチがない構成では、
+# そのブランチへの伝播をスキップする（失敗にしない）。コンフリクトしたら、マージを取り消して、Slack に通知し、ジョブを失敗させる。
 # Actions の画面での名前は「[propagate] ブランチ伝播」（最上位の name:）。
 #
 # 【起動の条件】
@@ -21,7 +22,11 @@
 # 【処理の流れ】
 #   1. 全履歴（fetch-depth: 0）で、Secret PAT_TOKEN を使って、リポジトリを取得する（以降の git push も、この PAT で行う）
 #   2. コミットのユーザーを github-actions[bot]（github-actions[bot]@users.noreply.github.com）にする
+#   2.5 段階の判定（手順 3 と同じ条件のときだけ）: origin/main の branches.txt を読み、staging・develop が段階として有効かを出力する。
+#        main を取得できなければ、::error を出して、ジョブを失敗にする（伝播しない）。branches.txt がなければ、::warning を出し、
+#        今までの動き（両方とも有効として、ブランチの有無で決める）にする。段階の名前でない行は、::warning を出して無視する
 #   3. main → staging（マージ先、または実行したブランチが main のときだけ）:
+#        staging が段階として無効なら、::notice を出して、スキップする（result=skipped。ブランチがあっても、伝播しない）。
 #        origin/staging がなければ、::notice を出して、スキップする（result=skipped）。
 #        あれば、git checkout staging → git merge origin/main --no-edit → git push origin staging（result=success）。
 #        マージがコンフリクトしたら、git merge --abort して、::error を出す（result=conflict。このステップは成功で終わる）
@@ -95,13 +100,61 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
       # --------------------------------------------------------------------------
+      # Step 2.5: 段階の判定（origin/main の branches.txt。doc/tier-scaling-design.md 3.1）
+      #   出力: staging / develop（true / false）。main を取得できないときは、ジョブを失敗にする（伝播しない）
+      # --------------------------------------------------------------------------
+      - name: 段階を判定
+        id: tiers
+        if: ${{ (github.event.pull_request.base.ref || github.ref_name) == 'main' }}
+        run: |
+          # >>> sf-tools: tier-switch v1（この印の間は、wf-propagate・wf-release・wf-validate で同じ中身にする。--remove-tier・テストが比べる）
+          # load_tiers: origin/main の branches.txt から、有効な段階を読む（# の行・空行を除く。CR・行の前後の空白を除く）
+          #   main を取得できない → ::error を出して 1 を返す（呼び出し側で、ジョブを失敗にする。段階が分からないまま書き込まない）
+          #   branches.txt がない → ::warning を出し、TIERS_KNOWN=0（tier_enabled は、今までの動きのため、常に有効を返す）
+          load_tiers() {
+            git fetch origin main --depth=1 -q || { echo "::error title=段階を判定できません::main を取得できません。段階を判定できないため、止めます。"; return 1; }
+            if TIERS_RAW=$(git show FETCH_HEAD:sf-tools/config/branches.txt 2>/dev/null); then
+              TIERS=$(printf '%s\n' "$TIERS_RAW" | tr -d '\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' | grep -v '^#' | grep -v '^$' || true)
+              TIERS_KNOWN=1
+            else
+              TIERS=""; TIERS_KNOWN=0
+              echo "::warning title=段階の切り替え::main に sf-tools/config/branches.txt がありません。段階の切り替えを使わず、今までの動きにします。"
+            fi
+            for _t in $TIERS; do
+              case "$_t" in main|staging|develop) ;; *) echo "::warning title=段階の切り替え::branches.txt の「${_t}」は、段階の名前ではないため、無視します。" ;; esac
+            done
+            return 0
+          }
+          # tier_enabled 段階: 有効なら 0。main は常に有効。develop は、staging も有効なときだけ有効
+          tier_enabled() {
+            [ "$1" = "main" ] && return 0
+            [ "$TIERS_KNOWN" = 1 ] || return 0
+            case "$1" in staging|develop) ;; *) return 1 ;; esac
+            printf '%s\n' "$TIERS" | grep -qxF -- "$1" || return 1
+            if [ "$1" = "develop" ]; then printf '%s\n' "$TIERS" | grep -qxF -- staging || return 1; fi
+            return 0
+          }
+          # <<< sf-tools: tier-switch v1
+          load_tiers || exit 1                                                                     # sf-tools: tier-check
+          if tier_enabled staging; then echo "staging=true" >> "$GITHUB_OUTPUT"; else echo "staging=false" >> "$GITHUB_OUTPUT"; fi   # sf-tools: tier-check
+          if tier_enabled develop; then echo "develop=true" >> "$GITHUB_OUTPUT"; else echo "develop=false" >> "$GITHUB_OUTPUT"; fi   # sf-tools: tier-check
+
+      # --------------------------------------------------------------------------
       # Step 3: main → staging へ変更を伝播（マージ先・実行したブランチが main のときだけ）
-      #   result: success（push した）/ skipped（staging がない）/ conflict（マージを取り消した。このステップは成功で終わる）
+      #   result: success（push した）/ skipped（段階として無効・staging がない）/ conflict（マージを取り消した。このステップは成功で終わる）
       # --------------------------------------------------------------------------
       - name: main から staging へ変更を伝播
         id: merge_staging
         if: ${{ (github.event.pull_request.base.ref || github.ref_name) == 'main' }}
+        env:
+          TIER_ENABLED: ${{ steps.tiers.outputs.staging }}
         run: |
+          # branches.txt にない（段階として無効）ときは、ブランチがあっても伝播しない（doc/tier-scaling-design.md 3.2）
+          if [ "$TIER_ENABLED" != "true" ]; then                                                   # sf-tools: tier-check
+            echo "result=skipped" >> "$GITHUB_OUTPUT"
+            echo "::notice title=スキップ::staging は branches.txt にないため、段階として無効です。伝播しません。"
+            exit 0
+          fi
           # staging がない構成（main のみ）では、失敗にせずスキップする
           if ! git rev-parse --verify --quiet origin/staging >/dev/null; then
             echo "result=skipped" >> "$GITHUB_OUTPUT"
@@ -124,7 +177,15 @@ jobs:
       - name: main から develop へ変更を伝播
         id: merge_develop
         if: ${{ (github.event.pull_request.base.ref || github.ref_name) == 'main' }}
+        env:
+          TIER_ENABLED: ${{ steps.tiers.outputs.develop }}
         run: |
+          # branches.txt にない（段階として無効。staging がないときも無効）ときは、ブランチがあっても伝播しない
+          if [ "$TIER_ENABLED" != "true" ]; then                                                   # sf-tools: tier-check
+            echo "result=skipped" >> "$GITHUB_OUTPUT"
+            echo "::notice title=スキップ::develop は branches.txt にない（または staging がない）ため、段階として無効です。伝播しません。"
+            exit 0
+          fi
           # ブランチがない構成（main のみ・main + staging など）では、失敗にせずスキップする
           if ! git rev-parse --verify --quiet origin/develop >/dev/null; then
             echo "result=skipped" >> "$GITHUB_OUTPUT"

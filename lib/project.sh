@@ -18,7 +18,8 @@
 #   gh_owner_candidates MODE  ... gh のログインから、オーナーの候補を出す（MODE: admin / member）
 #   gh_existing_projects OWNER ... そのオーナーにある force-* リポジトリの XXXX を出す
 #   check_gh_owner OWNER      ... gh 認証ユーザーが期待するオーナーと一致するか確認（大文字と小文字は区別しない。組織の有効な admin も許可）
-#   get_branch_list           ... branches.txt からブランチ一覧を取得
+#   get_branch_list           ... branches.txt からブランチ一覧を取得（全行。保護の判定用）
+#   get_tier_list             ... branches.txt から、有効な段階（main / staging / develop）を決まった順で取得（伝播・診断用）
 #   is_reserved_org_alias     ... 共有環境の組織エイリアス（sf-tools の予約名）か判定
 #   is_protected_branch       ... 指定ブランチが branches.txt の保護対象か判定
 #   required_status_check_names ... ブランチ保護（Ruleset）の必須ステータスチェックの名前（ジョブ名）を、1 行に 1 つ出す
@@ -512,6 +513,65 @@ get_branch_list() {
         return $RET_OK
     fi
     echo "$branches"
+    return $RET_OK
+}
+
+# get_tier_list - branches.txt から、有効な段階（main / staging / develop）を、決まった順で echo する
+# ------------------------------------------------------------------------------
+# 【使い方】
+#   tiers=$(get_tier_list)
+#
+# 【ファイル参照先】
+#   BRANCH_LIST_FILE（get_branch_list と同じ）
+#
+# 【動作】（規則の正本は doc/tier-scaling-design.md の 3.1。workflow の tier_enabled と同じ規則）
+#   - 行末の CR と、行の前後の空白を除き、# で始まる行・空の行は読み飛ばす
+#   - 段階の名前は main / staging / develop だけ。ほかの名前の行は、WARNING を出して無視する
+#   - 同じ名前が 2 行あっても 1 つ。main の行がなくても、main は有効
+#   - develop は、staging も有効なときだけ有効（ないときは、WARNING を出して無効にする）
+#   - ファイルがない・段階の行が 1 つもないときは、main だけ（get_branch_list と同じ WARNING を出す）
+#   - echo する順は、常に main → staging → develop（branches.txt の並びには頼らない）
+#
+# 【get_branch_list との違い】
+#   get_branch_list は、branches.txt の全行（名前を問わない）を返す。保護するブランチの判定（is_protected_branch）に使う
+#   （段階を外したブランチも、誤って直接 push しないよう、保護は緩めない）。get_tier_list は、段階として動かすものを
+#   決めるところ（sf-metasync.sh の伝播・status.sh）に使う
+#
+# 【戻り値】
+#   RET_OK (0) : 常に。1 行に 1 つ echo する
+# ------------------------------------------------------------------------------
+get_tier_list() {
+    if [[ ! -f "$BRANCH_LIST_FILE" ]]; then
+        log "WARNING" "ブランチ構成ファイルが見つかりません: ${BRANCH_LIST_FILE}（デフォルト: main のみ）"
+        echo "main"
+        return $RET_OK
+    fi
+    local line has_line=0 has_staging=0 has_develop=0
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        line="${line%$'\r'}"                               # CR 除去（Windows 対応）
+        line="${line#"${line%%[![:space:]]*}"}"            # 先頭の空白を除く
+        line="${line%"${line##*[![:space:]]}"}"            # 末尾の空白を除く
+        [[ -z "$line" || "$line" == \#* ]] && continue     # 空行・コメント行スキップ
+        has_line=1
+        case "$line" in
+            main)    ;;
+            staging) has_staging=1 ;;
+            develop) has_develop=1 ;;
+            *)       log "WARNING" "${BRANCH_LIST_FILE} の「${line}」は、段階の名前（main / staging / develop）ではないため、段階としては無視します。" ;;
+        esac
+    done < "$BRANCH_LIST_FILE"
+    if [[ "$has_line" -eq 0 ]]; then
+        log "WARNING" "${BRANCH_LIST_FILE} にブランチが定義されていません。デフォルト: main のみ"
+    fi
+    echo "main"
+    [[ "$has_staging" -eq 1 ]] && echo "staging"
+    if [[ "$has_develop" -eq 1 ]]; then
+        if [[ "$has_staging" -eq 1 ]]; then
+            echo "develop"
+        else
+            log "WARNING" "${BRANCH_LIST_FILE} に develop がありますが、staging がないため、develop は段階として無効です。"
+        fi
+    fi
     return $RET_OK
 }
 

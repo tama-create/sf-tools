@@ -180,7 +180,8 @@ export PATH="$HOME/sf-tools/bin:$PATH"
 | `doc/jwt-auth-spec.md` | JWT 認証方式の仕様 |
 | `doc/wf-distribution-strategy.md` | ワークフローの配布・更新の戦略 |
 | `doc/wizard-ux-design.md` | ウィザード形式の画面（`sf-init` など）の設計 |
-| `doc/sf-logwatch-design.md` | `sf-logwatch.sh` の設計書（未実装） |
+| `doc/sf-log-design.md` | `sf-log.sh`（AI の開発サイクル用の Apex ログ取得）の設計書（未実装） |
+| `doc/tier-scaling-design.md` | 段階（main / staging / develop）の増減（`branches.txt` を唯一のスイッチにする・`sf-init.sh --remove-tier`）の設計書 |
 
 ### 6.3 sf-tools の開発者向け
 

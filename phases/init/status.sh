@@ -23,14 +23,23 @@
 #        - 同じ組織 ID の段階が、すでに表示した段階にあれば、WARNING（デプロイが、同じ組織の中で、循環する）
 #        - 保存された種類が本番（production）の段階が、main 以外にあれば、ERROR（本番組織は main のみ: F8）
 #      接続情報が、どの段階にもなければ、WARNING
+#      2・3 の対象の段階は、手元の sf-tools/config/branches.txt を、get_tier_list（lib/project.sh）の規則で読んで決める
+#      （段階の名前でない行は無視・develop は staging もあるときだけ）
+#   4. 段階の切り替え（origin/main の branches.txt。doc/tier-scaling-design.md 7 章）: git fetch origin main（失敗したら WARNING で省く）のあと
+#        - 有効な段階を表示する。段階の名前でない行は WARNING。develop があって staging がなければ ERROR（終了コード 1）
+#        - 無効の段階（staging / develop）に、ブランチ・接続情報（SF_CONSUMER_KEY / SF_USERNAME / SF_INSTANCE_URL）・その段階を対象にする
+#          Ruleset が残っていれば、INFO（使われない。戻すときに使う）
+#        - origin/main の workflow が、段階の切り替えに対応していない（init-common.sh の tier_switch_wf_problems）→ WARNING
+#        - Variable SF_TOOLS_BRANCH が、未設定・main・development のどれでもない → WARNING
+#        - origin/main に branches.txt がない → WARNING（workflow は、今までの動き）
 #
 # 【補足】
 #   - 組織の種類・ID・名前・確認日時は、sf-init.sh（または --reconnect / --add-tier）が、ログイン後に、組織から読み取って
 #     保存したもの。保存されていない（以前のバージョンで作ったプロジェクト）場合は、組織は「未確認」、種類は
 #     「種類を判定できません」と表示する。ここに表示するのは「GitHub に保存された値」であり、いま実際にログインして確認した値ではない
 #   - 管理者向けの警告・確認は、出さない（読み取りのみのため）
-#   - 終了コード: 0 = 不足なし・違反なし / 1 = 診断で不足がある（DIAG_NG が 1 以上）、または、本番組織が main 以外に
-#     つながっている（die のときも 1）
+#   - 終了コード: 0 = 不足なし・違反なし / 1 = 診断で不足がある（DIAG_NG が 1 以上）、本番組織が main 以外に
+#     つながっている、または、origin/main の branches.txt に、staging のない develop がある（die のときも 1）
 # ==============================================================================
 
 PHASE_DIR="${BASH_SOURCE[0]%/*}"
@@ -68,9 +77,13 @@ echo "" >&2
 BRANCHES_FILE="${PWD}/sf-tools/config/branches.txt"
 
 # セットアップの診断（リポジトリ・ブランチ・ワークフロー・Secrets・Variables・ブランチ保護（Ruleset）・直近の実行）
+#   対象の段階は、get_tier_list（lib/project.sh。段階の名前でない行の無視・develop は staging もあるときだけ）の規則で決める。
+#   ここでの WARNING は、下の【段階の切り替え】で origin/main について表示するため、出さない
+TIERS_LOCAL=$(get_tier_list 2>/dev/null)  # VAR=$(cmd) のため run 不使用
 diag_tiers=("main")
 for _t in staging develop; do
-    grep -qx "$_t" "$BRANCHES_FILE" 2>/dev/null && diag_tiers+=("$_t")  # 条件チェックのため run 不使用
+    printf '%s
+' "$TIERS_LOCAL" | grep -qx "$_t" && diag_tiers+=("$_t")  # 条件チェックのため run 不使用
 done
 diag_run "$REPO_FULL_NAME" "${diag_tiers[@]}"
 
@@ -89,7 +102,8 @@ for tier in main staging develop; do
         develop) suffix="DEV" ;;
     esac
     # branches.txt にない段階は、表示しない（main は、必ず表示する）
-    if [[ "$tier" != "main" ]] && ! grep -qx "$tier" "$BRANCHES_FILE" 2>/dev/null; then  # 条件チェックのため run 不使用
+    if [[ "$tier" != "main" ]] && ! printf '%s
+' "$TIERS_LOCAL" | grep -qx "$tier"; then  # 条件チェックのため run 不使用
         continue
     fi
     url=$(_var "SF_INSTANCE_URL_${suffix}")    # VAR=$(cmd) のため run 不使用
@@ -128,6 +142,69 @@ for tier in main staging develop; do
 done
 echo "" >&2
 [[ $found -eq 1 ]] || log "WARNING" "接続情報が、見つかりませんでした（sf-init.sh が、完了していない可能性があります）。"
+
+# ------------------------------------------------------------------------------
+# 段階の切り替え（origin/main の branches.txt。doc/tier-scaling-design.md 7 章）
+# ------------------------------------------------------------------------------
+echo "" >&2
+echo -e "  ${CLR_WARNING}【段階の切り替え（origin/main の branches.txt）】${CLR_RESET}" >&2
+echo "" >&2
+if run git fetch origin main; then
+    if main_txt=$(MSYS_NO_PATHCONV=1 git show "origin/main:sf-tools/config/branches.txt" 2>/dev/null); then  # VAR=$(cmd) のため run 不使用
+        # 段階の名前でない行（# の行・空行を除く）
+        while IFS= read -r _l || [[ -n "$_l" ]]; do
+            _l="${_l%$'\r'}"; _l="${_l#"${_l%%[![:space:]]*}"}"; _l="${_l%"${_l##*[![:space:]]}"}"
+            [[ -z "$_l" || "$_l" == \#* ]] && continue
+            case "$_l" in main|staging|develop) ;; *) log "WARNING" "  branches.txt の「${_l}」は、段階の名前（main / staging / develop）ではないため、段階としては無視されます。" ;; esac
+        done <<< "$main_txt"
+        en_tiers="main"
+        tier_text_has_line "$main_txt" staging && en_tiers="${en_tiers} staging"  # 条件チェックのため run 不使用
+        if tier_text_has_line "$main_txt" develop; then  # 条件チェックのため run 不使用
+            if tier_text_has_line "$main_txt" staging; then  # 条件チェックのため run 不使用
+                en_tiers="${en_tiers} develop"
+            else
+                log "ERROR" "  branches.txt に develop がありますが、staging がないため、develop は段階として無効です（develop には staging が必要です）。"
+                violation=1
+            fi
+        fi
+        log "INFO" "  有効な段階: ${en_tiers}"
+        # 無効の段階に、ブランチ・接続情報・Ruleset が残っていれば、知らせる（使われない。戻すときに使う）
+        _sn=$(gh secret list -R "$REPO_FULL_NAME" --json name --jq '.[].name' 2>/dev/null || true)    # VAR=$(cmd) のため run 不使用
+        _vn=$(gh variable list -R "$REPO_FULL_NAME" --json name --jq '.[].name' 2>/dev/null || true)  # VAR=$(cmd) のため run 不使用
+        _rs=$(gh api "repos/${REPO_FULL_NAME}/rulesets" --jq '.[] | "\(.id) \(.name)"' 2>/dev/null || true)  # VAR=$(cmd) のため run 不使用
+        for _t in staging develop; do
+            [[ " ${en_tiers} " == *" ${_t} "* ]] && continue
+            case "$_t" in staging) _sfx="STG" ;; develop) _sfx="DEV" ;; esac
+            if git ls-remote --exit-code --heads origin "$_t" > /dev/null 2>&1; then  # 条件チェックのため run 不使用
+                log "INFO" "  ${_t} ブランチは残っていますが、段階としては無効です（branches.txt にない）。"
+            fi
+            if printf '%s\n%s\n' "$_sn" "$_vn" | grep -qE "^SF_(CONSUMER_KEY|USERNAME|INSTANCE_URL)_${_sfx}$"; then  # 条件チェックのため run 不使用
+                log "INFO" "  ${_t} の接続情報が残っています（使われません。消すには sf-init.sh --remove-tier ${_t} --purge-secrets）。"
+            fi
+            while IFS= read -r _r; do
+                [[ -z "$_r" ]] && continue
+                _inc=$(gh api "repos/${REPO_FULL_NAME}/rulesets/${_r%% *}" --jq '.conditions.ref_name.include[]?' 2>/dev/null || true)  # VAR=$(cmd) のため run 不使用
+                printf '%s\n' "$_inc" | grep -qxF -- "refs/heads/${_t}" \
+                    && log "INFO" "  ${_t} を対象にする Ruleset が残っています: ${_r#* }（段階が無効のあいだは、${_t} への PR を出さないでください）。"  # 表示のみ
+            done <<< "$_rs"
+        done
+    else
+        log "WARNING" "  origin/main に sf-tools/config/branches.txt がありません（workflow は、段階の切り替えを使わず、今までの動きになります）。"
+    fi
+    _bad_wf=$(tier_switch_wf_problems)  # VAR=$(cmd) のため run 不使用（init-common.sh）
+    if [[ -n "$_bad_wf" ]]; then
+        log "WARNING" "  workflow が、段階の切り替えに対応していません（または、雛形と違います）: ${_bad_wf}"
+        log "WARNING" "    branches.txt から行を消しても、伝播・リリース・検証は止まりません。作業用のブランチで sf-sync-wf.sh を実行し、main まで入れてください。"
+    fi
+    _stb=$(_var "SF_TOOLS_BRANCH")  # VAR=$(cmd) のため run 不使用
+    case "$_stb" in
+        ""|main|development) ;;
+        *) log "WARNING" "  Variable SF_TOOLS_BRANCH が「${_stb}」です（想定は、未設定・main・development。wf-metasync が、想定しない版の sf-metasync.sh を使います）。" ;;
+    esac
+else
+    log "WARNING" "  origin/main を取得できないため、段階の切り替えの診断を省きます。"
+fi
+echo "" >&2
 log "INFO" "接続先を変えるとき: sf-init.sh --reconnect <main|staging|develop>"
 # 本番が main 以外にある、または、診断で不足があれば、非ゼロで終了する（管理者のスクリプトから、検知できるように）
 [[ $violation -eq 0 && "$DIAG_NG" -eq 0 ]] || exit $RET_NG

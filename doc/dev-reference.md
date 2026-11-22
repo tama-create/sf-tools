@@ -187,7 +187,7 @@
 > **構成**: `lib/common.sh` が窓口で、ログ（`log`）・実行（`run`）・終了（`die`）・`show_help`・`reject_unknown_args`・`print_admin_warning`・`json_get`・`_mask_secrets` / `_strip_ansi` / `_strip_term_codes` と定数を持つ。残りの関数は、責務ごとのファイルに分けてあり、`common.sh` が、最後に `input.sh` → `platform.sh` → `project.sh` の順で `source` する（呼び出し側は、`common.sh` だけを `source` すればよい。この 3 つは、単独では `source` しない）。
 > - `lib/input.sh`（対話入力: `read_input` / `read_key` / `press_enter` / `read_or_quit` / `read_secret` / `ask_yn`）
 > - `lib/platform.sh`（OS・外部コマンド: `is_gitbash` / `set_var` / `sed_inplace` / `base64_oneline` / `run_with_timeout` / `run_isolated_home` / `check_sf_cli` / `check_java_cli` / `check_vscode_extension` / `open_browser`）
-> - `lib/project.sh`（プロジェクト: `get_target_org` / `check_force_dir` / `resolve_init_identity` / `resolve_job_identity` / `check_gh_owner` / `get_branch_list` / `is_reserved_org_alias` / `is_protected_branch` / `required_status_check_names` / `ensure_sf_tools_latest` / `merge_package_xml` / 管理者用のクローンの関数など）
+> - `lib/project.sh`（プロジェクト: `get_target_org` / `check_force_dir` / `resolve_init_identity` / `resolve_job_identity` / `check_gh_owner` / `get_branch_list` / `get_tier_list` / `is_reserved_org_alias` / `is_protected_branch` / `required_status_check_names` / `ensure_sf_tools_latest` / `merge_package_xml` / 管理者用のクローンの関数など）
 >
 > `lib/org.sh`・`lib/wizard.sh`・`lib/diag.sh`・`lib/verify-common.sh`（これが `lib/verify-samples.sh` を読む）は、`common.sh` からは `source` しない。使うスクリプトが、`common.sh` のあとに個別に `source` する。`lib/typecheck.js` は、`bin/sf-typecheck.sh` が `node` で起動する（Node の標準ライブラリのみ。境界は、このファイルだけ）。
 > テスト: `common.sh`・`input.sh`・`platform.sh`・`project.sh` は `tests/test_common.sh`（`project.sh` のプロジェクトの特定は `tests/test_project-identity.sh`）。`org.sh` は `test_org.sh`、`wizard.sh` は `test_wizard.sh`、`diag.sh` は `test_diag.sh`、`verify-common.sh` は `test_verify.sh`、`typecheck.js` は `test_sf-typecheck.sh`。
@@ -230,7 +230,8 @@ source 時の動作: Bash 3.2 未満なら `exit 1` → `LOG_FILE` の確認 →
 | `gh_owner_candidates` | `gh_owner_candidates admin\|member` | `gh` のログインから、オーナー候補を出す（組織 → 自分のアカウント） |
 | `gh_existing_projects` | `gh_existing_projects OWNER` | そのオーナーの `force-*` リポジトリの XXXX を出す（`gh repo list` の最大 200 件） |
 | `check_gh_owner` | `check_gh_owner OWNER` | gh 認証ユーザーがリポジトリオーナーと一致するか確認（大文字と小文字は区別しない。不一致は die。オーナーが組織で、ユーザーがその有効な admin なら通過。gh が空を返す場合はスキップ。3.4.3） |
-| `get_branch_list` | `branches=$(get_branch_list)` | `sf-tools/config/branches.txt`（`BRANCH_LIST_FILE`）のブランチを 1 行ずつ出す（`#` の行・空行は飛ばす。ファイルがない・空なら WARNING を出して `main` だけ） |
+| `get_branch_list` | `branches=$(get_branch_list)` | `sf-tools/config/branches.txt`（`BRANCH_LIST_FILE`）のブランチを 1 行ずつ出す（`#` の行・空行は飛ばす。ファイルがない・空なら WARNING を出して `main` だけ）。保護の判定（`is_protected_branch`）に使う（全行） |
+| `get_tier_list` | `tiers=$(get_tier_list)` | 有効な段階を `main` → `staging` → `develop` の順で出す（CR・前後の空白を除く・段階の名前でない行は WARNING で無視・develop は staging もあるときだけ・ファイルがない・空なら `main` だけ）。`sf-metasync.sh` の伝播・`status.sh` が使う。規則の正本は `doc/tier-scaling-design.md` 3.1 |
 | `is_protected_branch` | `is_protected_branch BRANCH` | `get_branch_list` の一覧に、行全体で一致するか（固定の文字列。大文字と小文字は区別する） |
 | `is_reserved_org_alias` | `is_reserved_org_alias ALIAS` | 共有環境の予約名（`SF_RESERVED_ORG_ALIASES` = `prod staging develop main`）か。ローカルからのリリースの禁止に使う（名前を変えた本番組織は、`org_local_release_check` で止める） |
 | `required_status_check_names` | `required_status_check_names` | Ruleset の必須チェックの名前（ワークフローのジョブ名: 対象ファイル確認・デプロイ検証・順序チェック）を 1 行ずつ出す。ワークフロー名は含めない。Phase 9 と `lib/diag.sh` が使う |
@@ -291,7 +292,7 @@ source 時の動作: Bash 3.2 未満なら `exit 1` → `LOG_FILE` の確認 →
 
 #### 3.4.1 警告ボックス + `ask_yn || die`（管理者向けコマンドの冒頭）
 
-意図しない実行を防ぐための視覚的警告と確認プロンプト。`sf-metasync.sh`・`sf-update-secret.sh` は、`GITHUB_ACTIONS=true` の場合はスキップして自動続行する。次は、`GITHUB_ACTIONS=true` でも省略しない（Actions 上で実行する想定がない）: `sf-init.sh`（開始画面は `wizard_confirm`。`--resume N` / `--only` のときは `ask_yn`）・`sf-sync-wf.sh`・`phases/init/add_tier.sh`・`reconnect.sh`。`sf-typecheck.sh` と `phases/init/verify.sh`（`sf-init.sh --verify`）は、Actions 上では実行を拒否する。
+意図しない実行を防ぐための視覚的警告と確認プロンプト。`sf-metasync.sh`・`sf-update-secret.sh` は、`GITHUB_ACTIONS=true` の場合はスキップして自動続行する。次は、`GITHUB_ACTIONS=true` でも省略しない（Actions 上で実行する想定がない）: `sf-init.sh`（開始画面は `wizard_confirm`。`--resume N` / `--only` のときは `ask_yn`）・`sf-sync-wf.sh`・`phases/init/add_tier.sh`・`remove_tier.sh`・`reconnect.sh`。`sf-typecheck.sh` と `phases/init/verify.sh`（`sf-init.sh --verify`）は、Actions 上では実行を拒否する。
 
 ```bash
 # 管理者向けコマンドの冒頭パターン（sf-metasync / sf-update-secret）
@@ -342,7 +343,7 @@ resolve_init_identity        # GITHUB_OWNER / COMPANY_NAME をセット（--owne
 check_gh_owner "$GITHUB_OWNER"   # 認証ユーザーの一致確認
 ```
 
-- 呼び出している場所: `sf-init.sh`・`sf-update-secret.sh`・`phases/init/add_tier.sh`・`reconnect.sh`・`verify.sh`（後の 3 つは、`sf-init.sh` の `--add-tier` / `--reconnect` / `--verify` から別のプロセスで動くため、それぞれ呼ぶ）
+- 呼び出している場所: `sf-init.sh`・`sf-update-secret.sh`・`phases/init/add_tier.sh`・`remove_tier.sh`・`reconnect.sh`・`verify.sh`（後の 4 つは、`sf-init.sh` の `--add-tier` / `--remove-tier` / `--reconnect` / `--verify` から別のプロセスで動くため、それぞれ呼ぶ）
 - 組織の管理者判定は `gh api user/memberships/orgs/<オーナー>` の `role` と `state` で行う。API が失敗した場合は通過させず `die` する（安全側）
 - gh が空を返す場合（ネットワーク障害・未認証）はチェックをスキップして続行する
 - `sf-init.sh` の各 Phase（`phases/init/01_check_env.sh`〜`10_sf_auth.sh`）は、メインスクリプトで確認済みのため個別呼び出し不要
@@ -722,10 +723,20 @@ sf-init.sh --add-tier develop    # main+staging → main+staging+develop
 7. 作業用ブランチ（`system-add-tier-<tier>-<YYYYMMDDHHMMSS>`）を origin/main から作り、手順 3 で読んだ `branches.txt` の末尾に tier を追記・コミット・push し、**PR を作成する**（`main` への直接 push はしない。PR のマージで、`branches.txt` が main に反映される。マージ前に再実行すると、重複の確認では止まらず PR が 2 本できる）
 8. 実行前のブランチ（管理者用のクローンでは `admin`）に戻る。手順 6〜8 の失敗は die（作ったブランチ・カレントのブランチは、そのまま残る。再実行では、リモートの tier ブランチがあれば作らずに進む）
 
-スケールアップのみ対応・スケールダウンは対象外:
-- tier の削除（スケールダウン）は自動化していない
-- スケールダウンは影響範囲が大きく（ブランチ削除・WF 停止・Secrets 削除・Ruleset 更新）、誤操作リスクが高いため**手動運用とする**
-- 必要な場合は GitHub リポジトリ設定・`branches.txt` 編集・ローカルブランチ削除を手動で実施すること
+戻すとき（`--remove-tier` で外した段階を、もう一度足す。設計は `doc/tier-scaling-design.md` 6 章）:
+- 手順 5 の前に、その段階の接続情報（`SF_CONSUMER_KEY_<接尾辞>`（Secret）・`SF_USERNAME_<接尾辞>`・`SF_INSTANCE_URL_<接尾辞>`（Variable））が 3 つとも GitHub にあれば、残っている情報を表示して `ask_yn`「つなぎ直さずに、段階だけ戻しますか？」。Y なら手順 5 を飛ばす（`branches.txt` に行を戻す PR だけ）。N・1 つでも欠けていれば、手順 5 を行う
+- 手順 6 で、リモートに tier のブランチが残っていて main より遅れていれば、その本数を WARNING で表示する
+
+##### 4.13.1.1 `--remove-tier` による tier の取り外し
+
+既存 `force-*` プロジェクトから staging または develop を外す。`phases/init/remove_tier.sh` を呼び出す（`sf-init.sh` が `REMOVE_TIER`・`REMOVE_TIER_PURGE` を export）。設計の正本は `doc/tier-scaling-design.md`、処理の流れの正本は `phases/init/remove_tier.sh` の冒頭コメント。
+
+- **段階のスイッチは、origin/main の `branches.txt` だけ**: `wf-propagate.yml`・`wf-release.yml`・`wf-validate.yml` は、判定の部分（`# >>> sf-tools: tier-switch v1` 〜 `# <<<`。3 つで同じ中身。`tests/test_wf-tier-switch.sh` が比べる）の `load_tiers` / `tier_enabled` で、段階が有効かを決める（main は常に有効。develop は staging もあるときだけ。main への PR・main のリリースでは判定しない）。`wf-metasync.yml` は例外で、判定は `sf-metasync.sh` の伝播（`get_tier_list`）が行う
+- `--remove-tier`: origin/main の `branches.txt` で確かめる（行がない → die・develop があるのに staging → die）→ origin/main の workflow が段階の切り替えに対応しているか（`tier_switch_wf_problems`。`init-common.sh`）→ 影響の表示（main にない変更・開いている PR・接続情報の名前・Ruleset）→ 警告・`check_gh_owner`・`ask_yn` → 未コミットなら die → 作業用ブランチ `system-remove-tier-<tier>-<日時>` で行を消して PR。**ブランチ・Secrets / Variables・Ruleset・組織は変えない**
+- `--remove-tier <tier> --purge-secrets`: PR のマージ後に、決まった名前の接続情報だけを消す（origin/main にまだ行があれば die。一部の失敗は終了コード 1。再実行で残りだけ）
+- 引数: `--purge-secrets` だけ・`--add-tier` との同時指定は die。判定の順は `--add-tier` → `--remove-tier` → `--verify` → `--status` → `--reconnect`
+- Windows の Git Bash: `git show "origin/main:.github/…"` は `MSYS_NO_PATHCONV=1` を付ける（引数が Windows のパスに書き換えられるため。2026-11-22 にテストで確認）
+- テスト: `tests/test_remove-tier.sh`（実際の git リポジトリ＋gh の偽物）。e2e のシナリオ `tier-switch`（`tests/e2e/scenario.sh`）
 
 #### 4.13.2 sf-init の状態（保存ファイルと環境変数）
 
@@ -739,7 +750,7 @@ sf-init.sh --add-tier develop    # main+staging → main+staging+develop
 | `.sf-init-XXXX.env` | 入力内容（Phase 2 以降が読む。XXXX = プロジェクト名） | `KEY="値"`（各 Phase と、sf-init.sh の後処理は `source` で読み込む。フェーズループの前の判定は `_kv_value`。権限 600。Windows では効果なし） | 完了時に `*TOKEN_VALUE=` の行を消し、完了の印を付けたあと、**ファイルごと削除する**（最後まで終わったとき。途中で止まったとき・印を付けられなかったときは残る）。別のリポジトリの状態なら、残骸として扱い、最初から |
 | `.sf-init-XXXX.progress` | 進捗（どこまで成功したか。XXXX = プロジェクト名） | `KEY=値`（書き換えに外部コマンドを使わない） | `--only` では書かない。`.sf-init-XXXX.env` がないときも書かない。Phase 1 は、状態を持たないため、記録しない。完了時に、`.sf-init-XXXX.env` と一緒に削除する |
 
-保守用のモード（`add_tier.sh` / `reconnect.sh` / `status.sh` / `verify.sh`）は、状態ファイルを読まない（origin の URL から、リポジトリを求める: `parse_github_remote`）。Phase のスクリプトは、`SF_INIT_ENV_FILE` が未設定のとき、`${PWD}/.sf-init.env` を使う。
+保守用のモード（`add_tier.sh` / `remove_tier.sh` / `reconnect.sh` / `status.sh` / `verify.sh`）は、状態ファイルを読まない（origin の URL から、リポジトリを求める: `parse_github_remote`）。Phase のスクリプトは、`SF_INIT_ENV_FILE` が未設定のとき、`${PWD}/.sf-init.env` を使う。
 
 **`.sf-init-XXXX.env` のキー**
 
@@ -772,6 +783,7 @@ sf-init.sh --add-tier develop    # main+staging → main+staging+develop
 | `SF_INIT_TIER_RESUME=1` | Phase 10 の段階ごとの再開を有効にする（`--only` では、設定しない。鍵を作り直した実行では、Phase 10 が 0 にする） | `sf-init.sh` | `10_sf_auth.sh` |
 | `SF_INIT_SYNC_TIMEOUT` | 最初のメタデータの同期の待ち時間の上限（秒。既定 1200） | 利用者・テスト | `init-common.sh`（`initial_metadata_sync`） |
 | `ADD_TIER` / `RECONNECT_TIER` | `--add-tier` / `--reconnect` の値 | `sf-init.sh` | `add_tier.sh` / `reconnect.sh` |
+| `REMOVE_TIER` / `REMOVE_TIER_PURGE` | `--remove-tier` の値 / `--purge-secrets` のとき 1 | `sf-init.sh` | `remove_tier.sh` |
 | `SF_INIT_RESTARTED` | sf-tools を更新して、同じ引数で、実行しなおした（無限に、実行しなおさないため） | `sf-init.sh` | `sf-init.sh` |
 | `SF_INIT_TOOLS_CHECKED_BRANCH` | sf-tools の最新確認を済ませたブランチ（Phase 2 で、二重に確認しない） | `sf-init.sh` | `02_project_info.sh` |
 | `SF_INIT_RUNNING=1` | Phase 4 → `sf-install.sh` の初期化モード（`~/sf-tools` の `git pull`・`npm install` を飛ばし、`metadata.txt`・`branches.txt` がなければテンプレートからコピーし、`.gitmessage` を置く。フックの設置は通常どおり行う） | `04_gen_files.sh` | `sf-install.sh` |
@@ -931,7 +943,7 @@ sf-init.sh --add-tier develop    # main+staging → main+staging+develop
 | `hooks/pre-push` | `sf-prepush.sh` | 同上。組織への dry-run は行わない |
 | `sf-typecheck.sh` | `lib/typecheck.js`（`node`） | 確認の本体 |
 | `sf-init.sh` | `phases/init/01〜10_*.sh` | フェーズ順に `bash` で実行。Phase 2 が終了コード 75（sf-tools を更新）を返したら、自分を `exec` で実行しなおす（1 回だけ） |
-| `sf-init.sh --add-tier` / `--verify` / `--status` / `--reconnect` | `phases/init/add_tier.sh` / `verify.sh` / `status.sh` / `reconnect.sh` | 保守用のモード。`verify.sh`・`status.sh` は、「前回のセットアップ」の選択肢と、完了後の動作確認（`SF_VERIFY_CONFIRMED=1`）からも呼ぶ |
+| `sf-init.sh --add-tier` / `--remove-tier` / `--verify` / `--status` / `--reconnect` | `phases/init/add_tier.sh` / `remove_tier.sh` / `verify.sh` / `status.sh` / `reconnect.sh` | 保守用のモード。`verify.sh`・`status.sh` は、「前回のセットアップ」の選択肢と、完了後の動作確認（`SF_VERIFY_CONFIRMED=1`）からも呼ぶ |
 | `phases/init/04_gen_files.sh` | `sf-install.sh` | Phase 4（`SF_INIT_RUNNING` 付き。`git pull`・`npm install` はしない） |
 | `phases/init/08_initial_commit.sh` | `sf-hook.sh` | Phase 8 |
 | `sf-sync-wf.sh` | 自分（`exec`） | sf-tools を更新したあと、実行しなおす（1 回だけ） |
@@ -972,7 +984,7 @@ bash tests/e2e/bootstrap.sh                       # 鍵一式の作成（最初�
 bash tests/e2e/bootstrap.sh --add-orgs            # staging・develop のテスト用組織を、鍵一式に追加（2 層・3 層の確認に必要）
 bash tests/e2e/bootstrap.sh --refresh-orgs        # 登録済みの認証 URL の有効性を確認し、無効なものだけを、ブラウザでのログインで取り直す
 bash tests/e2e/run.sh --with-args                  # sf-init / sf-job に、引数 --owner / --project を付ける（既定は、引数なしの対話と、クローンからの自動判定）
-bash tests/e2e/run.sh --no-add-tier                # 最後の --add-tier の確認（約 4 分）を省略する
+bash tests/e2e/run.sh --no-add-tier                # 最後の --add-tier の確認（約 6 分）を省略する
 bash tests/e2e/run.sh --layout 3                  # 3 層で、段階ごとに、ワークフローを動かして確認（既定は 1 層）
 bash tests/e2e/run.sh --resume                    # 前回残したリポジトリで、Hello World の部分だけを再実行する
 bash tests/e2e/run.sh --interrupt                 # sf-init を Phase 8 でわざと失敗させ、「続きをやる」で再開してから確認する
@@ -1154,7 +1166,7 @@ sf-tools の `main` への反映は、全ユーザーへの配布と同義であ
   - `sf-init.sh` は、既定では**引数なしの対話**で実行する。先頭に、オーナーの選択 → XXXX の入力 → 確認の入力を足す（`e2e_make_identity_input OWNER XXXX`。オーナーの候補は `gh_owner_candidates admin` と同じ。複数なら位置の番号、1 つなら番号なし、なしならオーナーを入力）。`--with-args` で、引数 `--owner` / `--project` に切り替える。`sf-job.sh` も、既定は引数なし（作業フォルダの下のクローンの git remote から決まる。出力の「このフォルダの下のクローンから取得」で確認する）。
   - `sf-init` のあとの確認（新しく作ったときだけ。`--resume` の前回分は、古い形のことがある）: `admin/force-XXXX` ができた / 完了後に、状態ファイル（`.sf-init-XXXX.env` / `.progress`）が消えている / 完了の印（クローンの `git config sf-tools.setup-complete`）がある / 古い形のフォルダ（`init` / `init-*`）がない / クローンが `admin` ブランチ（ローカル）/ GitHub に `admin` がある / `origin/admin` を追跡 / 完了画面の案内（「ローカルと GitHub の両方」「`main` から古くなる」。対話のときは、XXXX だけ入力の案内も）/ `sf-sync-wf.sh --check` が `admin` で実行でき、`main`（保護ブランチ）では断られる（確認のため一時的に `main` に切り替え、`admin` に戻す）。
   - **最初のメタデータの同期の確認**（`sf-init` のあと）: 完了直後のクローン（`admin` ブランチ）に、メタデータのファイル（`.gitkeep` 以外）が入っている / `main` に「定期更新」のコミットがある / ローカルの `main` が `origin/main` と一致 / 完了画面に「同期済みです」。
-  - `--add-tier`（`_add_tier_check`）: 新しく作った**1 層**のリポジトリで、鍵一式に staging の組織があるとき、**Hello World の確認のあと**（先に行うとリポジトリが 2 層になり、リリースの確認の対象が変わるため）に、管理者用のクローン（`admin` ブランチ）で `sf-init.sh --add-tier staging`（入力: `Y` → ログイン先 `1`）を実行する。確認: コマンドの成功 / 終わったあとも `admin` ブランチ / `staging` ブランチ / Secret・Variable（`*_STG`）/ `branches.txt` を更新する PR / `main` へ直接 push していない（`main` の SHA が変わらない）。約 4 分。`--no-add-tier` で省略できる。
+  - `--add-tier`（`_add_tier_check`）: 新しく作った**1 層**のリポジトリで、鍵一式に staging の組織があるとき、**Hello World の確認のあと**（先に行うとリポジトリが 2 層になり、リリースの確認の対象が変わるため）に、管理者用のクローン（`admin` ブランチ）で `sf-init.sh --add-tier staging`（入力: `Y` → ログイン先 `1`）を実行する。確認: コマンドの成功 / 終わったあとも `admin` ブランチ / `staging` ブランチ / Secret・Variable（`*_STG`）/ `branches.txt` を更新する PR / `main` へ直接 push していない（`main` の SHA が変わらない）。続けて、管理者と同じく、その PR をマージし（`--no-actions` のときは、マージしない）、`main` の `branches.txt` に staging が入ること・マージで動く wf-release（リリース対象なしでスキップ）と wf-propagate が成功し、`staging` に `main` の最新が入ることを確かめる（段階は、`main` の `branches.txt` に入って、はじめて有効になる。このあとのシナリオ `propagate-fail`・`tier-switch` が、staging を使う。doc/tier-scaling-design.md 9.1）。約 6 分。`--no-add-tier` で省略できる。
   - **起動のしかた（Windows）:** 標準の Git Bash（`C:\Git\bin\bash.exe -l`。`MSYSTEM=UCRT64`）で起動する。`C:\Git\usr\bin\bash.exe`（`MSYSTEM=MSYS` / `MINGW64` にしても）は、`openssl` が MSYS 版になり、`sf-init` の `-subj "//CN=…"`（Git Bash の Windows 版 `openssl` 向けの書き方）が読み飛ばされて、Phase 10 の証明書の生成で失敗する（コードの不具合ではない）。`gh` は、鍵一式の `E2E_GH_USER`（テスト用の組織の管理者）のトークンを、`GH_TOKEN` に設定して実行する（gh のアクティブなアカウントは書き換えない）。確認の質問には `Y` を渡す。所要時間は約 30 分。
   - **e2e の確認のコメントの書き方:** `chk "説明" \` の次の行に、コメントを書かない（行の継続の途中のコメントは、後ろのコマンドごと消える。以前、`sf-job.sh` の確認が、常に PASS になっていた）。
 - 組織側の確認は `e2e_apex_count`（SOQL `SELECT COUNT() FROM ApexClass WHERE Name = '…'`。`totalSize` を読む）。前後で 0 → 1 → 0 になること
@@ -1234,7 +1246,7 @@ sf-tools の `main` への反映は、全ユーザーへの配布と同義であ
 
 ### 9.8 文書サイト（`site/`）
 
-利用者向けの文書（使い方・管理者向けの手順・リファレンス・設計）は、HTML の文書サイトに置く。`README.md` は、概要と、サイトへの入口だけにする（以前の README の 9 章、sf-tools の開発者向けの手順は、`doc/dev-guide.md`）。AI 向け（`CLAUDE.md`・本書）と、テストが読み込む文書（`doc/integration-test-plan.md`）は、Markdown のまま。**実装・AI への指示に使う設計書（`doc/` の `jwt-auth-spec.md`・`wf-distribution-strategy.md`・`wizard-ux-design.md`・`sf-logwatch-design.md`・`sf-cicd-strategy.md`）も、Markdown のまま**（無理に HTML にしない。公開して価値のあるものだけを、サイトに載せる）。`sf-cicd-strategy.md` の要点は、読み物として `site/design/cicd.html` にある（設計を変えたときは、両方を直す）。
+利用者向けの文書（使い方・管理者向けの手順・リファレンス・設計）は、HTML の文書サイトに置く。`README.md` は、概要と、サイトへの入口だけにする（以前の README の 9 章、sf-tools の開発者向けの手順は、`doc/dev-guide.md`）。AI 向け（`CLAUDE.md`・本書）と、テストが読み込む文書（`doc/integration-test-plan.md`）は、Markdown のまま。**実装・AI への指示に使う設計書（`doc/` の `jwt-auth-spec.md`・`wf-distribution-strategy.md`・`wizard-ux-design.md`・`sf-log-design.md`・`tier-scaling-design.md`・`sf-cicd-strategy.md`）も、Markdown のまま**（無理に HTML にしない。公開して価値のあるものだけを、サイトに載せる）。`sf-cicd-strategy.md` の要点は、読み物として `site/design/cicd.html` にある（設計を変えたときは、両方を直す）。
 
 - **構成**: `site/index.html`（トップ）・`site/guide/`（使い方ガイド・用語集: `install`・`basics`・`daily`・`glossary`）・`site/admin/`（管理者ガイド: `setup`・`maintenance`・`secrets`・`workflows`・`verify`・`troubleshooting`）・`site/reference/`（リファレンス: `commands`・`commands-dev`・`commands-auto`・`target-files`・`structure`）・`site/design/`（設計と背景: `cicd`）。ページの一覧の正本は、`site/assets/site.js` の `NAV`。共通の部分は、`site/assets/style.css`（スタイル。ダークモード・スマホ対応）と `site/assets/site.js`。ビルドの手順は、ない（手書きの静的な HTML）。
 - **ページの足し方**: ① `<head>` と骨組み（`<header id="top">`・`<nav id="side">`・`<main id="doc" class="doc">`・`<aside id="toc">`・`<footer id="foot">`・`site.js` の読み込み）を、既存のページと同じにする。② `<body data-root="...">` は、`site/` からの深さに合わせる（直下は `""`・1 階層下は `"../"`）。③ **`assets/site.js` の `NAV` に 1 行足す**（左の目次・前後のリンクは、ここだけで決まる。`h` がない項目は「準備中」と表示される）。コード中の `<` は、`&lt;` にする。④ **見出しの番号（大項目 `1.`・中項目 `1.1`・小項目 `1.1.1`）は、手で書かない**（`site.js` が h2・h3・h4 に自動で付ける）。階層は飛ばさない（h2 の次は h3、h3 の次は h4）。 ⑤ **囲み**（`<div class="box 種類">` + `<div class="title">題</div>`）は、種類で、アイコンが自動で付く（通常 = 💡、`warn` = ⚠️、`danger` = 🛑、`ok` = ✅、`next` = 👉、`admin` = 🔑 管理者専用）。題は、必ず付ける（`tests/test_site.sh` が確認する）。小さな印は `<span class="badge safe">🔍 読み取りのみ</span>`。言葉は、`site/guide/glossary.html`（用語集）にそろえる（管理者 = プロジェクト管理者・リリース = デプロイ・段階 = 環境）。

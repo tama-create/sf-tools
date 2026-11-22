@@ -28,6 +28,11 @@
 # 【処理の流れ】
 #   リリース対象確認:
 #     1. イベントの既定のコミットを取得する
+#     1.5 リリース先（PR のマージ先。手動の実行では、実行したブランチ）が main 以外なら、段階として有効かを確かめる
+#        （origin/main の sf-tools/config/branches.txt。develop は staging もあるときだけ有効。doc/tier-scaling-design.md 3.3）。
+#        PR のマージ・手動の実行の、どちらの経路も通る。無効なら skip=true（::notice。ジョブ「リリース実行」は動かない）。
+#        main を取得できなければ、::error を出して、このジョブを失敗にする（「リリース実行」は needs のため動かない）。
+#        branches.txt がなければ、::warning を出し、今までの動き（判定しない）にする
 #     2. workflow_dispatch なら、skip=false で終わる（main / staging / develop 以外のブランチなら、::warning で、
 #        リリースしない旨を表示する）
 #     3. sf-tools/release/<ソースブランチ名>/ の deploy-target.txt・remove-target.txt に、実質的な行（# の行・空行・
@@ -110,7 +115,52 @@ jobs:
           # ブランチ名・PR のタイトルなど、利用者が決められる値は、シェルのスクリプトに直接埋め込まず、環境変数で受け取る
           EVENT_NAME: ${{ github.event_name }}
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          # リリース先（PR のマージ先。手動の実行では、実行したブランチ）
+          TARGET_REF: ${{ github.event.pull_request.base.ref || github.ref_name }}
         run: |
+          # >>> sf-tools: tier-switch v1（この印の間は、wf-propagate・wf-release・wf-validate で同じ中身にする。--remove-tier・テストが比べる）
+          # load_tiers: origin/main の branches.txt から、有効な段階を読む（# の行・空行を除く。CR・行の前後の空白を除く）
+          #   main を取得できない → ::error を出して 1 を返す（呼び出し側で、ジョブを失敗にする。段階が分からないまま書き込まない）
+          #   branches.txt がない → ::warning を出し、TIERS_KNOWN=0（tier_enabled は、今までの動きのため、常に有効を返す）
+          #   main の取得は、浅いリポジトリ（checkout が既定の fetch-depth: 1）なら --depth=1 で軽く、全履歴なら --depth を付けない。
+          #   全履歴のリポジトリを --depth=1 で取得すると、リポジトリが浅くなり、main の先の履歴が切れて、wf-propagate の伝播の
+          #   マージが「refusing to merge unrelated histories」で失敗するため（2026-11-22 に e2e で確認）
+          load_tiers() {
+            if [ "$(git rev-parse --is-shallow-repository 2>/dev/null)" = "true" ]; then _depth="--depth=1"; else _depth=""; fi
+            git fetch origin main $_depth -q || { echo "::error title=段階を判定できません::main を取得できません。段階を判定できないため、止めます。"; return 1; }
+            if TIERS_RAW=$(git show FETCH_HEAD:sf-tools/config/branches.txt 2>/dev/null); then
+              TIERS=$(printf '%s\n' "$TIERS_RAW" | tr -d '\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' | grep -v '^#' | grep -v '^$' || true)
+              TIERS_KNOWN=1
+            else
+              TIERS=""; TIERS_KNOWN=0
+              echo "::warning title=段階の切り替え::main に sf-tools/config/branches.txt がありません。段階の切り替えを使わず、今までの動きにします。"
+            fi
+            for _t in $TIERS; do
+              case "$_t" in main|staging|develop) ;; *) echo "::warning title=段階の切り替え::branches.txt の「${_t}」は、段階の名前ではないため、無視します。" ;; esac
+            done
+            return 0
+          }
+          # tier_enabled 段階: 有効なら 0。main は常に有効。develop は、staging も有効なときだけ有効
+          tier_enabled() {
+            [ "$1" = "main" ] && return 0
+            [ "$TIERS_KNOWN" = 1 ] || return 0
+            case "$1" in staging|develop) ;; *) return 1 ;; esac
+            printf '%s\n' "$TIERS" | grep -qxF -- "$1" || return 1
+            if [ "$1" = "develop" ]; then printf '%s\n' "$TIERS" | grep -qxF -- staging || return 1; fi
+            return 0
+          }
+          # <<< sf-tools: tier-switch v1
+          # 段階の判定（PR のマージ・手動の実行の、どちらの経路も、必ずここを通る。doc/tier-scaling-design.md 3.3）。
+          #   main は常に有効なので、判定しない（main を取得する通信の失敗で、main のリリースを止めないため）。
+          #   main 以外で、段階として無効なら、skip=true（ジョブ「リリース実行」は動かない）。main を取得できなければ、このジョブを失敗にする
+          if [[ "$TARGET_REF" != "main" ]]; then                                                    # sf-tools: tier-check
+            load_tiers || exit 1                                                                     # sf-tools: tier-check
+            if ! tier_enabled "$TARGET_REF"; then                                                    # sf-tools: tier-check
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              echo "::notice title=リリースしません::${TARGET_REF} は branches.txt にない（develop は staging もないときを含む）ため、段階として無効です。リリースしません。"
+              exit 0
+            fi
+          fi
           # workflow_dispatch の場合は、デプロイ対象で判定しない（skip=false）。
           #   main / staging / develop 以外のブランチで実行したときは、ジョブ「リリース実行」の if: でスキップされるため、::warning で知らせる
           #   （GITHUB_REF_NAME は、ランナーが設定する、実行したブランチ名）

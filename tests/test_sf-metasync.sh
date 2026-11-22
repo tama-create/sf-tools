@@ -95,6 +95,35 @@ test_non_main_branch_switches() {
     teardown "$td" "$mb"
 }
 
+# 伝播先は、有効な段階（get_tier_list）だけ（doc/tier-scaling-design.md 3.1・9 章）
+#   引数: 1=branches.txt の中身（printf の書式）  2=伝播するはずのブランチ（空白区切り）  3=伝播しないはずのブランチ（空白区切り）  4=説明
+_ms_tier_case() {
+    local td mb mh b
+    setup_std_env td mb mh
+    create_all_mocks "$mb"
+    printf "$1" > "$td/sf-tools/config/branches.txt"
+    export MOCK_GIT_BRANCH="main"
+    export MOCK_GIT_DIFF_EXIT=0
+    export MOCK_GIT_DIFF_EXIT_2ND=1  # 変更あり → commit → 伝播
+    export MOCK_SF_ORG_JSON='{"result":{"alias":"testorg","id":"00D000000000001AAA"}}'
+    ( printf 'Y\nY\n' | ( cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-metasync.sh" ) ) > /dev/null 2>&1
+    for b in $2; do
+        assert_file_contains "$MOCK_CALL_LOG" "git push --no-verify origin ${b}" "${4}: ${b} へ伝播する"
+    done
+    for b in $3; do
+        assert_file_not_contains "$MOCK_CALL_LOG" "git push --no-verify origin ${b}" "${4}: ${b} へは伝播しない"
+    done
+    unset MOCK_GIT_BRANCH MOCK_GIT_DIFF_EXIT MOCK_GIT_DIFF_EXIT_2ND MOCK_SF_ORG_JSON
+    teardown "$td" "$mb"
+}
+test_propagate_tiers_only() {
+    _ms_tier_case 'main\nstaging\ndevelop\n' "staging develop" ""                "3 段階"
+    _ms_tier_case 'main\nstaging\n'          "staging"         "develop"         "develop の行がない（ブランチはリモートにある）"
+    _ms_tier_case 'main\ndevelop\n'          ""                "staging develop" "staging がない（develop は無効）"
+    _ms_tier_case 'main\nuat\nstaging\n'     "staging"         "uat develop"     "段階の名前でない行（uat）"
+    _ms_tier_case '# なし\n'                  ""                "staging develop" "段階の行がない"
+}
+
 # staging チェックアウト失敗 → develop は main からマージする（prev_branch バグ修正確認）
 test_staging_fail_dev_merges_main() {
     local td mb mh
@@ -227,6 +256,7 @@ test_unmapped_types_warning_is_one_line
 test_unpushed_commit_pushed
 test_non_main_branch_switches
 test_staging_fail_dev_merges_main
+test_propagate_tiers_only
 # sf の終了コードが 0 以外（インストーラー版の不具合）→ 案内を表示して中断する
 test_sf_cli_abort() {
     local td mb mh

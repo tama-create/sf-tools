@@ -19,12 +19,17 @@
 #      branches.txt は、origin/main と食い違うことがあり、それで確認すると、重複がすり抜ける）
 #   4. 管理者向けの警告（print_admin_warning）→ check_gh_owner → ask_yn（N / q は die）。GITHUB_ACTIONS=true でも省略しない
 #   5. git status --porcelain が空でなければ（未コミットの変更があれば）die
-#   6. Salesforce 組織に接続する。~/.sf-jwt/<REPO_NAME>/server.key・server.crt のどちらかがなければ die
+#   6. Salesforce 組織に接続する。ただし、その段階の接続情報（SF_CONSUMER_KEY_<接尾辞>（Secret）・SF_USERNAME_<接尾辞>・
+#      SF_INSTANCE_URL_<接尾辞>（Variable））が 3 つとも GitHub に残っていれば（--remove-tier で外した段階）、残っている情報
+#      （組織名・ユーザー名・ログイン先・確認日時）を表示して、「つなぎ直さずに、段階だけ戻しますか？」を ask_yn で聞く。
+#      Y なら、この手順を飛ばして手順 7 へ（branches.txt に行を戻す PR だけを作る）。N・1 つでも欠けているときは、つなぎ直す
+#      （doc/tier-scaling-design.md 6 章）。つなぎ直すとき、~/.sf-jwt/<REPO_NAME>/server.key・server.crt のどちらかがなければ die
 #        - register_jwt_secret_eca（init-common.sh）で、ログイン先の選択 → ブラウザでログイン → 組織の種類の読み取り →
 #          本番は main のみのガード → 外部クライアントアプリの deploy → コンシューマー鍵の retrieve → JWT 接続テスト → 登録
 #        - 関数が 0 以外を返したときも die
 #   7. 実行前のブランチを記録し（取得できなければ main）、git checkout main。origin/main は、取り直さない（手順 3 の版を使う）。
-#      origin に ADD_TIER のブランチがあれば作らない。なければ、origin/main から作って push --no-verify -u し、main に戻る
+#      origin に ADD_TIER のブランチがあれば作らない（main より遅れていれば、その本数と、取り込まれる時機を WARNING で表示する）。
+#      なければ、origin/main から作って push --no-verify -u し、main に戻る
 #      （ローカルの main は pull しない。以前は、手元の main から作っていたため、古いと、古い内容から派生した）
 #   8. 作業用ブランチ system-add-tier-<ADD_TIER>-<YYYYMMDDHHMMSS> を origin/main から作り、手順 3 で確認した
 #      origin/main の branches.txt の全行の末尾に ADD_TIER を足した内容を、一時ファイルに書いてから mv で置き換え、
@@ -165,15 +170,39 @@ fi
 # ------------------------------------------------------------------------------
 log "HEADER" "Step 1: ${LABEL} を、Salesforce 組織に接続します。"
 
-JWT_DIR="$HOME/.sf-jwt/${REPO_NAME}"
-[[ ! -f "${JWT_DIR}/server.key" ]] && die "秘密鍵が見つかりません: ${JWT_DIR}/server.key
-  sf-init Phase 10 を先に実行してください。"
-[[ ! -f "${JWT_DIR}/server.crt" ]] && die "証明書が見つかりません: ${JWT_DIR}/server.crt"
+# つなぎ直さずに戻す（doc/tier-scaling-design.md 6 章）: --remove-tier で外した段階は、接続情報（Secrets / Variables）が残っている。
+#   3 つ（SF_CONSUMER_KEY_<接尾辞>（Secret）・SF_USERNAME_<接尾辞>・SF_INSTANCE_URL_<接尾辞>（Variable））がそろっていれば、
+#   ブラウザでのログインと外部クライアントアプリの作成を省いて、branches.txt に行を戻す PR だけを作れる（Y で選ぶ）。
+#   Secret の値は読めないため、残っている接続情報が今も使えるかは、ここでは確かめられない（PR のマージ後の検証・リリースで分かる）
+SKIP_CONNECT=0
+_names_s=$(gh secret list -R "$REPO_FULL_NAME" --json name --jq '.[].name' 2>/dev/null || true)    # VAR=$(cmd) のため run 不使用（読み取りのみ。失敗は「ない」扱い）
+_names_v=$(gh variable list -R "$REPO_FULL_NAME" --json name,value --jq '.[] | "\(.name)=\(.value)"' 2>/dev/null || true)  # VAR=$(cmd) のため run 不使用
+if printf '%s\n' "$_names_s" | grep -qxF -- "SF_CONSUMER_KEY_${SUFFIX}" \
+   && printf '%s\n' "$_names_v" | grep -q "^SF_USERNAME_${SUFFIX}=" \
+   && printf '%s\n' "$_names_v" | grep -q "^SF_INSTANCE_URL_${SUFFIX}="; then  # 条件チェックのため run 不使用
+    log "INFO" "${ADD_TIER} の接続情報が、GitHub に残っています（前に --remove-tier で外した段階の可能性があります）:"
+    for _k in SF_ORG_NAME SF_USERNAME SF_INSTANCE_URL SF_ORG_CHECKED; do
+        _v=$(printf '%s\n' "$_names_v" | grep "^${_k}_${SUFFIX}=" | head -1)  # VAR=$(cmd) のため run 不使用
+        [[ -n "$_v" ]] && log "INFO" "  ${_v}"
+    done
+    log "INFO" "  残っている接続情報が今も使えるか（組織のアプリ・ユーザー）は、ここでは確かめられません。PR のマージ後の検証・リリースで分かります。"
+    if ask_yn "  つなぎ直さずに、段階だけ戻しますか？（N: ブラウザでログインして、つなぎ直す）"; then
+        SKIP_CONNECT=1
+        log "INFO" "つなぎ直さずに、段階だけ戻します（Salesforce 組織への接続は、行いません）。"
+    fi
+fi
 
-# 外部クライアントアプリケーションを、自動で作成する
-#   失敗は関数の中で die する。0 以外が返ったときも、ブランチの追加に進まない
-register_jwt_secret_eca "$ORG_ALIAS" "$SUFFIX" "$LABEL" "${JWT_DIR}/server.key" "${JWT_DIR}/server.crt" \
-    || die "${LABEL}（${SUFFIX}）の接続に失敗しました。"
+if [[ "$SKIP_CONNECT" -eq 0 ]]; then
+    JWT_DIR="$HOME/.sf-jwt/${REPO_NAME}"
+    [[ ! -f "${JWT_DIR}/server.key" ]] && die "秘密鍵が見つかりません: ${JWT_DIR}/server.key
+  sf-init Phase 10 を先に実行してください。"
+    [[ ! -f "${JWT_DIR}/server.crt" ]] && die "証明書が見つかりません: ${JWT_DIR}/server.crt"
+
+    # 外部クライアントアプリケーションを、自動で作成する
+    #   失敗は関数の中で die する。0 以外が返ったときも、ブランチの追加に進まない
+    register_jwt_secret_eca "$ORG_ALIAS" "$SUFFIX" "$LABEL" "${JWT_DIR}/server.key" "${JWT_DIR}/server.crt" \
+        || die "${LABEL}（${SUFFIX}）の接続に失敗しました。"
+fi
 
 # ------------------------------------------------------------------------------
 # 5. branches.txt の更新と、ブランチの追加
@@ -196,6 +225,13 @@ run git checkout main || die "main ブランチへの切り替えに失敗しま
 if git ls-remote --exit-code --heads origin "$ADD_TIER" > /dev/null 2>&1; then
     # 条件チェックのため run 不使用
     log "INFO" "${ADD_TIER} ブランチはリモートに既に存在します（スキップ）。"
+    # --remove-tier で残したブランチは、main より遅れていることがある（段階が無効のあいだ、伝播されないため）
+    if run git fetch origin "$ADD_TIER"; then
+        _behind=$(git rev-list --count "origin/${ADD_TIER}..origin/main" 2>/dev/null || echo "")  # VAR=$(cmd) のため run 不使用
+        if [[ -n "$_behind" && "$_behind" != "0" ]]; then
+            log "WARNING" "${ADD_TIER} ブランチは、main より ${_behind} コミット遅れています。PR をマージしたあと、次に main へマージしたときの伝播で、main が取り込まれます。すぐ取り込むには、wf-propagate を手動で実行してください。"
+        fi
+    fi
 else
     run git checkout -B "$ADD_TIER" origin/main || die "${ADD_TIER} ブランチの作成に失敗しました。"  # -B: 前回の失敗で、ローカルに同名のブランチが残っていても、作り直す
     run git push --no-verify -u origin "$ADD_TIER" \

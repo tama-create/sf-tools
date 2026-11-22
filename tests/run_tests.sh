@@ -175,7 +175,7 @@ _weight() {   # 結果は、変数 _W に入れる（$(...) で呼ぶと、Windo
         test_project-identity.sh|test_sf-metasync.sh|test_integration-coverage.sh) _W=75 ;;
         test_metasync-js.sh) _W=40 ;;   # 手元の Windows で 約 22 秒
         test_integration-rerun.sh|test_init-common.sh|test_sf-deploy.sh) _W=62 ;;
-        test_sf-job.sh|test_sf-sync-wf.sh|test_sf-next.sh|test_sf-prepush.sh|test_sf-start.sh|test_wf-sequence.sh) _W=50 ;;
+        test_sf-job.sh|test_sf-sync-wf.sh|test_sf-next.sh|test_sf-prepush.sh|test_sf-start.sh|test_wf-sequence.sh|test_wf-tier-switch.sh|test_remove-tier.sh) _W=50 ;;
         test_integration-secrets.sh|test_sf-hook.sh) _W=40 ;;
         test_sf-typecheck.sh|test_sf-push.sh|test_sf-upgrade.sh|test_org.sh|test_diag.sh|test_run-tests.sh) _W=28 ;;
         *) _W=10 ;;
@@ -220,6 +220,8 @@ TEST_FILES=(
     test_e2e2.sh
     test_sf-sync-wf.sh
     test_wf-sequence.sh
+    test_wf-tier-switch.sh
+    test_remove-tier.sh
     test_project-identity.sh
     test_integration-coverage.sh
     test_integration.sh
@@ -333,6 +335,12 @@ if [[ "${1:-}" == "--changed" ]]; then
                 ;;
             templates/.github/workflows/wf-sequence.yml)
                 _changed_tests+=("test_wf-sequence.sh" "test_sf-sync-wf.sh")
+                ;;
+            templates/.github/workflows/wf-propagate.yml|templates/.github/workflows/wf-release.yml|templates/.github/workflows/wf-validate.yml)
+                _changed_tests+=("test_wf-tier-switch.sh" "test_sf-sync-wf.sh" "test_remove-tier.sh")   # 段階の切り替えの判定（doc/tier-scaling-design.md 3 章）。remove_tier.sh が雛形の判定と比べる
+                ;;
+            phases/init/remove_tier.sh|tests/test_remove-tier.sh)
+                _changed_tests+=("test_remove-tier.sh")
                 ;;
             config/changeset-types.txt)
                 _changed_tests+=("test_sf-typecheck.sh")

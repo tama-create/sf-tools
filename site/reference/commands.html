@@ -48,7 +48,8 @@
   <thead><tr><th>コマンド</th><th>用途</th></tr></thead>
   <tbody>
     <tr><td><a href="../admin/setup.html"><code>sf-init.sh</code></a></td><td>🔑 新規プロジェクトの初期セットアップ（作業フォルダで実行。<code>admin/force-XXXX</code> ができる）</td></tr>
-    <tr><td><a href="../admin/maintenance.html#add-tier"><code>sf-init.sh --add-tier</code></a></td><td>🔑 既存のプロジェクトに、段階（staging・develop）を足す</td></tr>
+    <tr><td><a href="../admin/maintenance.html#add-tier"><code>sf-init.sh --add-tier</code></a></td><td>🔑 既存のプロジェクトに、段階（staging・develop）を足す（外した段階は、接続情報が残っていれば、つなぎ直さずに戻せる）</td></tr>
+    <tr><td><a href="../admin/maintenance.html#remove-tier"><code>sf-init.sh --remove-tier</code></a></td><td>🔑 既存のプロジェクトから、段階を外す（<code>branches.txt</code> の行を消す PR を作る。<code>--purge-secrets</code> で、外したあとに接続情報を消す）</td></tr>
     <tr><td><a href="../admin/maintenance.html#status"><code>sf-init.sh --status</code></a></td><td>セットアップの診断と、接続先の一覧（読み取りのみ。警告・確認は出ません）</td></tr>
     <tr><td><a href="../admin/maintenance.html#reconnect"><code>sf-init.sh --reconnect</code></a></td><td>🔑 1 つの段階の、接続先の Salesforce 組織を付け替える</td></tr>
     <tr><td><a href="../admin/verify.html"><code>sf-init.sh --verify</code></a></td><td>🔑 実際のリポジトリ・組織で、リリースと削除が動くことを確認する（Hello World）</td></tr>
@@ -78,6 +79,7 @@
   <tbody>
     <tr><td><code>sf-init.sh</code>（通常の実行）</td><td>開始画面で「用意ができたら Enter を押してください」（Enter / Y で進む。N / q で中断）。<code>--resume N</code>（2 以上）/ <code>--only N</code> のときは「続行しますか？」（Y / N / q）</td><td>省略しない</td><td>する（確認のあと）</td></tr>
     <tr><td><code>sf-init.sh --add-tier</code></td><td>「続行しますか？」（Y / N / q）</td><td>省略しない</td><td>する</td></tr>
+    <tr><td><code>sf-init.sh --remove-tier</code></td><td>影響を表示してから「続行しますか？」（Y / N / q）。<code>--purge-secrets</code> は、消す名前を表示してから「消しますか？」（Y / N / q）</td><td>省略しない</td><td>する</td></tr>
     <tr><td><code>sf-init.sh --reconnect</code></td><td>いまの接続を表示してから「付け替えますか？」（Y / N / q）</td><td>省略しない</td><td>する</td></tr>
     <tr><td><code>sf-init.sh --verify</code></td><td>実行内容を表示してから、Enter の確認（Enter / Y で進む。N / q で、何も変更せずに中断）。本番の組織（または種類を判定できない組織）を含むときは、文面で明示します。<code>--plan</code> は、表示だけで、確認を出しません。セットアップの最後のステップ（動作の確認）から呼ばれたときは、<code>sf-init.sh</code> 側で確認済みのため、警告・確認を出しません</td><td>実行を拒否する</td><td>する</td></tr>
     <tr><td><code>sf-update-secret.sh</code></td><td>「続行しますか？」（Y / N / q）</td><td>警告・確認を省略して実行する</td><td>する</td></tr>

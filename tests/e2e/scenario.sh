@@ -42,6 +42,14 @@
 #   sync-wf        : 管理者用のクローン（admin ブランチ）で、ワークフローを改変 → sf-sync-wf.sh --check が見つける → sf-sync-wf.sh が雛形の内容に直す
 #                    （コミット・push はしない）→ 雛形にあるファイルの --remove は拒否される・雛形にない不要なファイルは --remove で消せる（B4）。
 #                    クローンの中だけ（GitHub・組織へは、書き込まない）。終了時に、クローンの .github/workflows を、元（HEAD）に戻す
+#   tier-switch    : 段階の切り替え（doc/tier-scaling-design.md 9.1）。対象は、いちばん下の有効な段階（3 段階なら develop・
+#                    2 段階なら staging。CI の e2e は、1 層で作って --add-tier staging したリポジトリのため、staging）。
+#                    管理者用のクローンで sf-init.sh --remove-tier <対象> → PR をマージ →
+#                    main のマージで動く wf-propagate が対象に伝播しない・対象への PR の wf-validate が「デプロイ検証」を skipped にする・
+#                    そのマージの wf-release と、対象での手動の実行が「リリース実行」を skipped にする（組織に書き込まない）→
+#                    sf-init.sh --add-tier <対象>（接続情報が残っているので、つなぎ直さずに戻す）→ PR をマージ → 対象への PR が、また検証される。
+#                    2 段階以上（main の branches.txt に staging がある）のリポジトリが要る。段階を変えるため、最後に実行する。
+#                    終了時に、main の branches.txt を元に戻し、PR を閉じ、作ったブランチと、対象に足したファイルを消す（書き込みあり）
 #   manual-delete  : テスト用リポジトリの Secret（SLACK_BOT_TOKEN）と Variable（SLACK_CHANNEL_ID）を、手で削除 → sf-init.sh --status が
 #                    不足を見つけ、直し方を示す → 元に戻す → 診断が、元に戻る（書き込みあり。終了時に、必ず元に戻す）
 #
@@ -79,7 +87,7 @@ source "${E2E_SCRIPT_DIR}/lib.sh"
 # ------------------------------------------------------------------------------
 # 1. シナリオの一覧
 # ------------------------------------------------------------------------------
-SCENARIO_NAMES="log-secrets manual-delete update-secret sync-wf cross-os validate-fail dist-main metasync-diff propagate-fail restart-org"   # 実行の順番どおり
+SCENARIO_NAMES="log-secrets manual-delete update-secret sync-wf cross-os validate-fail dist-main metasync-diff propagate-fail restart-org tier-switch"   # 実行の順番どおり（tier-switch は段階を変えるため、最後）
 _scn_desc() {
     case "$1" in
         log-secrets)   echo "Actions のログ・PR のコメントに、秘密情報が出ていない（読み取りのみ）" ;;
@@ -92,6 +100,7 @@ _scn_desc() {
         cross-os)      echo "リポジトリを clone して、OS 混在の問題を確認する: CRLF がない・フックが同じ内容で実行できる・sf-sync-wf --check が成功する（読み取りのみ）" ;;
         sync-wf)       echo "sf-sync-wf が、改変したワークフローを見つけて、雛形に戻す。--remove は、雛形にあるファイルを拒否し、不要なファイルだけ消す（クローンの中だけ）" ;;
         restart-org)   echo "sf-restart で接続先を staging の組織に切り替え、sf-dryrun が新しい組織を使う → 元に戻す（ジョブのクローンの接続設定を、一時的に変える）" ;;
+        tier-switch)   echo "--remove-tier（いちばん下の段階）→ その段階への伝播・検証・リリース（PR と手動）が止まる → --add-tier（つなぎ直さずに戻す）→ また検証される（2 段階以上のリポジトリが要る）" ;;
         *) echo "" ;;
     esac
 }
@@ -105,6 +114,7 @@ _scn_writes() {
         update-secret) echo "Secret SF_PRIVATE_KEY を、同じ秘密鍵（~/.sf-jwt/${REPO_NAME}/server.key）で上書きします（値は変わりません。更新日時だけが進みます）" ;;
         sync-wf)       echo "管理者用のクローンの .github/workflows を、一時的に改変し（wf-validate.yml に 1 行・不要なファイル e2e-obsolete.yml）、sf-sync-wf.sh で直します。GitHub・組織へは書き込みません。終了時に、HEAD の状態へ戻します" ;;
         restart-org)   echo "ジョブのクローンの接続先を、sf-restart.sh で、staging の組織に切り替え（sf のエイリアス sf-tools-e2e-restart-STG を、一時的に作る）、dry-run を行います。終了時に、元の組織へ戻し、エイリアスを元の状態にします" ;;
+        tier-switch)   echo "管理者用のクローンで、いちばん下の有効な段階（3 段階なら develop・2 段階なら staging）に sf-init.sh --remove-tier と --add-tier を実行し、その PR を main にマージします（main の branches.txt から、いったんその段階がなくなります）。その段階へのテスト用の PR（e2e-ts-時刻）をマージし、wf-release をその段階で手動の実行をします（組織へは書き込まない想定）。終了時に、branches.txt を元に戻し、PR を閉じ、ブランチとその段階に足したファイルを消します" ;;
         metasync-diff) echo "テスト用の組織に Apex（SfToolsE2eHello・SfToolsE2eHelloTest）を直接デプロイし、wf-metasync を起動します。main に、その Apex のファイルが、コミットされます（main にすでにあるものは、いったん外します）。終了時に、組織の Apex を削除し、main を実行前の状態に戻します" ;;
         *) echo "" ;;
     esac
@@ -198,8 +208,61 @@ SCN_SF_TMP=""          # sf を使うシナリオの一時フォルダ（エイ�
 SCN_OBSOLETE_WF="e2e-obsolete.yml"   # sync-wf が、クローンに置く、雛形にないワークフロー（終了時に消す）
 SCN_PROP_FILE="e2e-propagate-conflict.txt"   # propagate-fail が、main・staging に置くファイル
 SCN_ALLOW_MAIN_COMMITS=0   # 1: このシナリオは、main にコミットが増えてよい（wf-metasync が反映するため）。main の SHA の比較から外す
+RESTORE_TIER_NAME="develop" # tier-switch: 対象の段階（いちばん下の有効な段階。develop か staging。後始末が使う）
+RESTORE_TIER_ORIG=""       # tier-switch: main の branches.txt の元の中身（空でなければ、終了時に、対象の段階がないとき書き戻す）
+RESTORE_TIER_BRANCHES=""   # tier-switch: 作った（または PR の head になった）ブランチ（空白区切り。終了時に消す。決まった名前の形式だけ）
+RESTORE_TIER_DEV_FILES=""  # tier-switch: 対象の段階にマージした PR のブランチ名（終了時に、そのリリース対象と、足した Hello World のファイルを、対象の段階から消す）
+RESTORE_TIER_DEV_KEEP=""   # tier-switch: 実行前から対象の段階に有った Hello World のファイル（消さない）
 _scn_restore() {
     local rc=0
+    if [[ -n "$RESTORE_PR" ]]; then
+        if e2e_gh_pr_close "$REPO_FULL" "$RESTORE_PR"; then
+            log "INFO" "  元に戻しました: PR #${RESTORE_PR} を、マージせずに閉じました"; RESTORE_PR=""
+        else
+            log "ERROR" "  PR #${RESTORE_PR} を閉じられませんでした（${REPO_FULL}）。手で閉じてください（マージしないこと）。"; rc=1
+        fi
+    fi
+    if [[ -n "$RESTORE_TIER_ORIG" ]]; then
+        # main の branches.txt に対象の段階がなければ、元の中身で書き戻す（このシナリオが変えるのは、この 1 つのファイルだけ）
+        if _scn_branches_txt | grep -qx -- "$RESTORE_TIER_NAME"; then
+            RESTORE_TIER_ORIG=""
+        elif printf '%s\n' "$RESTORE_TIER_ORIG" | verify_file_put "$REPO_FULL" main "sf-tools/config/branches.txt" "e2e: tier-switch の後始末（branches.txt を元に戻す）"; then
+            log "INFO" "  元に戻しました: main の branches.txt（${RESTORE_TIER_NAME} を戻しました）"; RESTORE_TIER_ORIG=""
+        else
+            log "ERROR" "  main の branches.txt を、元に戻せませんでした（${REPO_FULL}）。${RESTORE_TIER_NAME} の行を、手で戻してください。"; rc=1
+        fi
+    fi
+    if [[ -n "$RESTORE_TIER_DEV_FILES" ]]; then
+        # 対象の段階にマージしたリリース対象（sf-tools/release/<ブランチ>/）と、このシナリオで足した Hello World のファイルだけを消す
+        local _p _df=0
+        for _p in "sf-tools/release/${RESTORE_TIER_DEV_FILES}/deploy-target.txt" "sf-tools/release/${RESTORE_TIER_DEV_FILES}/remove-target.txt" $(verify_hello_paths); do
+            [[ " ${RESTORE_TIER_DEV_KEEP} " == *" ${_p} "* ]] && continue   # 実行前から有ったものは、消さない
+            verify_file_sha "$REPO_FULL" "$RESTORE_TIER_NAME" "$_p" >/dev/null || continue  # ないものは、消さない
+            verify_file_delete "$REPO_FULL" "$RESTORE_TIER_NAME" "$_p" "e2e: tier-switch の後始末（${_p##*/}）" || _df=1
+        done
+        if [[ $_df -eq 0 ]]; then
+            log "INFO" "  元に戻しました: ${RESTORE_TIER_NAME} に足したファイルを消しました"; RESTORE_TIER_DEV_FILES=""
+        else
+            log "ERROR" "  ${RESTORE_TIER_NAME} に足したファイルを、消せませんでした（${REPO_FULL}）。手で確認してください。"; rc=1
+        fi
+    fi
+    if [[ -n "${RESTORE_TIER_BRANCHES// /}" ]]; then
+        local _b _bf=0
+        for _b in $RESTORE_TIER_BRANCHES; do
+            # 消してよいのは、このシナリオが作る名前の形式だけ
+            if [[ ! "$_b" =~ ^(e2e-ts-[0-9]{6}b?|system-(remove|add)-tier-(develop|staging)-[0-9]{14})$ ]]; then
+                log "ERROR" "  削除対象外のブランチ名です: ${_b}"; _bf=1; continue
+            fi
+            verify_branch_sha "$REPO_FULL" "$_b" >/dev/null || continue   # すでにない（マージ時の自動削除など）
+            e2e_cancel_pr_runs "$REPO_FULL" "$_b"
+            verify_branch_delete "$REPO_FULL" "$_b" || _bf=1
+        done
+        if [[ $_bf -eq 0 ]]; then
+            log "INFO" "  元に戻しました: tier-switch のブランチを消しました"; RESTORE_TIER_BRANCHES=""
+        else
+            log "ERROR" "  tier-switch のブランチを、消せませんでした（${REPO_FULL}）: ${RESTORE_TIER_BRANCHES}"; rc=1
+        fi
+    fi
     if [[ -n "$RESTORE_SECRET" ]]; then
         # Secret の値は、読めない。鍵一式の値で戻せる SLACK_BOT_TOKEN だけを、削除の対象にしている
         if printf '%s' "$E2E_SLACK_BOT_TOKEN" | _e2e_gh_stdin secret set "$RESTORE_SECRET" -R "$REPO_FULL" >/dev/null 2>&1; then
@@ -645,6 +708,122 @@ scn_propagate_fail() {
         verify_file_sha "$REPO_FULL" "$br" "$f" >/dev/null
         _chk "${br} から、${f} が消えた" "$(( $? == 0 ? 1 : 0 ))"
     done
+}
+
+# tier-switch: 段階を外す → 伝播・リリース・検証が止まる → 戻す → また動く（doc/tier-scaling-design.md 9.1）
+#   2 段階以上のテスト用リポジトリで、いちばん下の有効な段階（3 段階なら develop・2 段階なら staging。以下「対象の段階」）を、
+#   管理者用のクローンから sf-init.sh --remove-tier・--add-tier で外して戻す（CI の e2e は、1 層で作って --add-tier staging で
+#   2 段階にしたリポジトリで動かすため、staging が対象になる）。
+#   組織に書き込まないことは、組織に書き込むジョブ（wf-validate の「デプロイ検証」・wf-release の「リリース実行」）が skipped であることで確かめる
+#   （組織へのデプロイ・検証は、この 2 つのジョブの中だけで行うため）。
+#   書き込み: main の branches.txt（PR のマージ。終了時に、必ず元の中身に戻す）・対象の段階への PR とマージ（Hello World のファイル。終了時に消す）・
+#             作業用ブランチ（終了時に消す）。ブランチ・PR・接続情報は、実行の前と同じにして終える
+_scn_branches_txt() {   # main の branches.txt の中身を返す（取得できなければ戻り値 1）
+    _e2e_gh api "repos/${REPO_FULL}/contents/sf-tools/config/branches.txt?ref=main" --jq .content 2>/dev/null | tr -d '\n' | base64 -d 2>/dev/null | tr -d '\r'  # 出力をそのまま返すため run 不使用
+}
+_scn_job_conclusion() {   # 引数: 実行 ID ジョブ名。そのジョブの結果（success / skipped / failure など）を返す
+    _e2e_gh run view "$1" -R "$REPO_FULL" --json jobs --jq ".jobs[] | select(.name == \"$2\") | .conclusion" 2>/dev/null | head -1  # 出力をそのまま返すため run 不使用
+}
+_scn_pr_by_head_prefix() {   # 引数: head ブランチ名の先頭。開いている PR の「番号 ブランチ名」を返す（最新の 1 つ）
+    _e2e_gh pr list -R "$REPO_FULL" --state open --json number,headRefName --jq ".[] | select(.headRefName | startswith(\"$1\")) | \"\(.number) \(.headRefName)\"" 2>/dev/null | head -1  # 出力をそのまま返すため run 不使用
+}
+scn_tier_switch() {
+    local work="${E2E_HOME_ROOT}/${E2E_OWNER}/${PROJECT}" clone sfinit="${SF_TOOLS_ROOT}/bin/sf-init.sh" orig t dev0 dev1 pr br b0 run1 line
+    clone="${work}/admin/${REPO_NAME}"
+    [[ -d "${clone}/.git" ]] || { SCN_SKIP="管理者用のクローン（${clone}）がありません（run.sh が作ります）"; return; }
+    [[ -z "$(git -C "$clone" status --porcelain 2>/dev/null)" ]] || { SCN_SKIP="管理者用のクローンに、未コミットの変更があります"; return; }  # VAR=$(cmd) のため run 不使用
+    orig=$(_scn_branches_txt) || orig=""  # VAR=$(cmd) のため run 不使用
+    # 対象の段階: いちばん下の有効な段階（develop は、staging もあるときだけ有効）
+    if printf '%s\n' "$orig" | grep -qx staging; then
+        if printf '%s\n' "$orig" | grep -qx develop; then t=develop; else t=staging; fi
+    else
+        SCN_SKIP="2 段階以上（main + staging）のリポジトリではありません（main の branches.txt に staging がありません）"; return
+    fi
+    dev0=$(verify_branch_sha "$REPO_FULL" "$t") || dev0=""  # VAR=$(cmd) のため run 不使用
+    [[ -n "$dev0" ]] || { SCN_SKIP="${t} ブランチがありません"; return; }
+    _scn_shims_prepare || { SCN_SKIP="一時フォルダの準備に失敗しました"; return; }
+    log "INFO" "  対象の段階: ${t}（いちばん下の有効な段階）"
+    SCN_ALLOW_MAIN_COMMITS=1        # main に、branches.txt の変更をマージする
+    RESTORE_TIER_NAME="$t"
+    RESTORE_TIER_ORIG="$orig"       # 書き込む前に登録する（途中で止まっても、終了時に、main の branches.txt を元の中身に戻す）
+
+    # --- 1・2: 対象の段階を外す → PR をマージ ---
+    e2e_run_sf_cmd "remove-tier" "$clone" "y\n" "$sfinit" --remove-tier "$t"; _chk "sf-init.sh --remove-tier ${t} が成功した" $? || return
+    grep -qF "ブランチ・Secrets / Variables・Ruleset・Salesforce 組織は、変えません" "${E2E_TMP}/remove-tier.out"; _chk "GitHub の設定を変えないことが表示された" $?
+    line=$(_scn_pr_by_head_prefix "system-remove-tier-${t}-")  # VAR=$(cmd) のため run 不使用
+    pr="${line%% *}"; br="${line#* }"
+    _chk "段階を外す PR ができた" "$([[ -n "$line" ]] && echo 0 || echo 1)" || return
+    RESTORE_TIER_BRANCHES="${RESTORE_TIER_BRANCHES} ${br}"
+    b0=$(e2e_latest_run_id "$REPO_FULL" wf-propagate.yml "$br")  # VAR=$(cmd) のため run 不使用
+    e2e_gh_pr_merge "$REPO_FULL" "$pr"; _chk "段階を外す PR をマージした" $? || return
+    _scn_branches_txt | grep -qx "$t"; _chk "main の branches.txt から ${t} が消えた" "$(( $? == 0 ? 1 : 0 ))" || return
+
+    # --- 6（マージで動く伝播）: 対象の段階には伝播しない ---
+    run1=$(e2e_wait_pr_run "$REPO_FULL" wf-propagate.yml "$br" "$b0") || run1=""  # VAR=$(cmd) のため run 不使用
+    _chk "wf-propagate が完了した（段階を外す PR のマージ）" "$([[ -n "$run1" ]] && echo 0 || echo 1)" || return
+    verify_run_log_has "$REPO_FULL" "$run1" "${t} は branches.txt にない"; _chk "wf-propagate のログに「${t} は段階として無効」が出た" $?
+    dev1=$(verify_branch_sha "$REPO_FULL" "$t") || dev1=""  # VAR=$(cmd) のため run 不使用
+    _chk "${t} の先頭が変わらない（伝播しない）" "$([[ -n "$dev1" && "$dev1" == "$dev0" ]] && echo 0 || echo 1)"
+
+    # --- 3・4: 対象の段階への PR → 検証しない → マージ → リリースしない ---
+    # 実行前から対象の段階に有る Hello World のファイル（run.sh のリリースの履歴）は、後始末で消さない
+    local _p; RESTORE_TIER_DEV_KEEP=""
+    for _p in $(verify_hello_paths); do
+        verify_file_sha "$REPO_FULL" "$t" "$_p" >/dev/null && RESTORE_TIER_DEV_KEEP="${RESTORE_TIER_DEV_KEEP} ${_p}"
+    done
+    br="e2e-ts-$(date +%H%M%S)"  # VAR=$(cmd) のため run 不使用
+    RESTORE_TIER_BRANCHES="${RESTORE_TIER_BRANCHES} ${br}"
+    verify_branch_create "$REPO_FULL" "$br" "$dev1"; _chk "テスト用ブランチ（${br}）を ${t} から作った" $? || return
+    _scn_put_hello "$br"; _chk "リリース対象（Hello World）を、ブランチに追加した" $? || return
+    b0=$(e2e_latest_run_id "$REPO_FULL" wf-validate.yml "$br")  # VAR=$(cmd) のため run 不使用
+    pr=$(e2e_gh_pr_create "$REPO_FULL" "$br" "e2e: tier-switch（無効の ${t} へ）" "$t") || pr=""  # VAR=$(cmd) のため run 不使用
+    _chk "${t} への PR を作った" "$([[ -n "$pr" ]] && echo 0 || echo 1)" || return
+    RESTORE_PR="$pr"
+    run1=$(e2e_wait_pr_run "$REPO_FULL" wf-validate.yml "$br" "$b0") || run1=""  # VAR=$(cmd) のため run 不使用
+    _chk "wf-validate が完了した（無効の ${t} への PR）" "$([[ -n "$run1" ]] && echo 0 || echo 1)" || return
+    verify_run_log_has "$REPO_FULL" "$run1" "段階として無効"; _chk "wf-validate のログに「段階として無効」が出た" $?
+    _chk "wf-validate の「デプロイ検証」が skipped（組織に検証のデプロイをしない）" "$([[ "$(_scn_job_conclusion "$run1" "デプロイ検証")" == "skipped" ]] && echo 0 || echo 1)"
+    b0=$(e2e_latest_run_id "$REPO_FULL" wf-release.yml "$br")  # VAR=$(cmd) のため run 不使用
+    e2e_gh_pr_merge "$REPO_FULL" "$pr"; _chk "${t} への PR をマージした" $? || return
+    RESTORE_PR=""; RESTORE_TIER_DEV_FILES="$br"   # 対象の段階に入った Hello World のファイルは、終了時に消す
+    run1=$(e2e_wait_pr_run "$REPO_FULL" wf-release.yml "$br" "$b0") || run1=""  # VAR=$(cmd) のため run 不使用
+    _chk "wf-release が完了した（無効の ${t} へのマージ）" "$([[ -n "$run1" ]] && echo 0 || echo 1)" || return
+    verify_run_log_has "$REPO_FULL" "$run1" "段階として無効"; _chk "wf-release のログに「段階として無効」が出た" $?
+    _chk "wf-release の「リリース実行」が skipped（組織にリリースしない）" "$([[ "$(_scn_job_conclusion "$run1" "リリース実行")" == "skipped" ]] && echo 0 || echo 1)"
+
+    # --- 5: 対象の段階で wf-release を手動の実行 → リリースしない ---
+    run1=$(verify_dispatch_workflow "$REPO_FULL" wf-release.yml "$t") || run1=""  # VAR=$(cmd) のため run 不使用
+    _chk "wf-release を ${t} で手動の実行した" "$([[ -n "$run1" ]] && echo 0 || echo 1)" || return
+    verify_wait_run "$REPO_FULL" "$run1"; _chk "wf-release（手動の実行）が完了した" $? || return
+    _chk "手動の実行でも「リリース実行」が skipped" "$([[ "$(_scn_job_conclusion "$run1" "リリース実行")" == "skipped" ]] && echo 0 || echo 1)"
+
+    # --- 7・8: 戻す（接続情報が残っているので、つなぎ直さない）→ PR をマージ ---
+    e2e_run_sf_cmd "add-tier" "$clone" "y\ny\n" "$sfinit" --add-tier "$t"; _chk "sf-init.sh --add-tier ${t}（つなぎ直さずに戻す）が成功した" $? || return
+    grep -qF "つなぎ直さずに、段階だけ戻します" "${E2E_TMP}/add-tier.out"; _chk "つなぎ直さなかった（ブラウザのログインなし）" $?
+    line=$(_scn_pr_by_head_prefix "system-add-tier-${t}-")  # VAR=$(cmd) のため run 不使用
+    pr="${line%% *}"; br="${line#* }"
+    _chk "段階を戻す PR ができた" "$([[ -n "$line" ]] && echo 0 || echo 1)" || return
+    RESTORE_TIER_BRANCHES="${RESTORE_TIER_BRANCHES} ${br}"
+    e2e_gh_pr_merge "$REPO_FULL" "$pr"; _chk "段階を戻す PR をマージした" $? || return
+    _scn_branches_txt | grep -qx "$t"; _chk "main の branches.txt に ${t} が戻った" $? || return
+    RESTORE_TIER_ORIG=""   # 戻った（終了時に書き戻さない）
+
+    # --- 9: 対象の段階への PR → また検証される ---
+    dev1=$(verify_branch_sha "$REPO_FULL" "$t") || dev1=""  # VAR=$(cmd) のため run 不使用
+    br="e2e-ts-$(date +%H%M%S)b"  # VAR=$(cmd) のため run 不使用
+    RESTORE_TIER_BRANCHES="${RESTORE_TIER_BRANCHES} ${br}"
+    verify_branch_create "$REPO_FULL" "$br" "$dev1"; _chk "テスト用ブランチ（${br}）を ${t} から作った" $? || return
+    _scn_put_hello "$br"; _chk "リリース対象を、ブランチに追加した" $? || return
+    b0=$(e2e_latest_run_id "$REPO_FULL" wf-validate.yml "$br")  # VAR=$(cmd) のため run 不使用
+    pr=$(e2e_gh_pr_create "$REPO_FULL" "$br" "e2e: tier-switch（戻した ${t} へ）" "$t") || pr=""  # VAR=$(cmd) のため run 不使用
+    _chk "${t} への PR を作った（戻したあと）" "$([[ -n "$pr" ]] && echo 0 || echo 1)" || return
+    RESTORE_PR="$pr"
+    run1=$(e2e_wait_pr_run "$REPO_FULL" wf-validate.yml "$br" "$b0") || run1=""  # VAR=$(cmd) のため run 不使用
+    _chk "wf-validate が完了した（戻した ${t} への PR）" "$([[ -n "$run1" ]] && echo 0 || echo 1)" || return
+    _chk "wf-validate の「デプロイ検証」が動いて成功した（${t} の組織で dry-run）" "$([[ "$(_scn_job_conclusion "$run1" "デプロイ検証")" == "success" ]] && echo 0 || echo 1)"
+
+    # 後始末（PR を閉じる・作ったブランチを消す・対象の段階に入れたファイルを消す）
+    _scn_restore; _chk "後始末をした（PR・ブランチ・${t} のファイル）" $?
 }
 
 # restart-org: sf-restart.sh で、ジョブのクローンの接続先を、別の組織（staging の組織）に切り替える（A8）

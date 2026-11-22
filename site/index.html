@@ -94,7 +94,7 @@
 <table>
   <thead><tr><th>役割</th><th>やること</th><th>使うもの</th></tr></thead>
   <tbody>
-    <tr><td>🔑 プロジェクト管理者（先に）</td><td>最初に 1 回、土台を作ります（GitHub のリポジトリ・ブランチと保護のルール・Salesforce への接続・Slack・認証情報・ワークフロー）。あとから、認証情報の更新・ワークフローの更新・構成の変更と診断（段階の追加・接続先の付け替え・状態の確認）・動作の確認を行います。</td><td><code>sf-init.sh</code>（<code>--add-tier</code>・<code>--reconnect</code>・<code>--status</code>・<code>--verify</code>）・<code>sf-update-secret.sh</code>・<code>sf-sync-wf.sh</code></td></tr>
+    <tr><td>🔑 プロジェクト管理者（先に）</td><td>最初に 1 回、土台を作ります（GitHub のリポジトリ・ブランチと保護のルール・Salesforce への接続・Slack・認証情報・ワークフロー）。あとから、認証情報の更新・ワークフローの更新・構成の変更と診断（段階の追加・取り外し・接続先の付け替え・状態の確認）・動作の確認を行います。</td><td><code>sf-init.sh</code>（<code>--add-tier</code>・<code>--reconnect</code>・<code>--status</code>・<code>--verify</code>）・<code>sf-update-secret.sh</code>・<code>sf-sync-wf.sh</code></td></tr>
     <tr><td>💻 開発者（管理者の準備のあと）</td><td>作業を始めて、手元で作り、自分用の組織で試して、push と PR で送ります。</td><td><code>sf-job.sh</code>・ランチャー（<code>sf-launcher.sh</code>。Check・Dryrun・Push・Next など）</td></tr>
     <tr><td>👀 業務担当</td><td>Slack に届く、結果の通知を見ます。</td><td>Slack（コマンドを使う必要は、ほとんどありません）</td></tr>
   </tbody>

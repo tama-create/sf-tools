@@ -448,6 +448,42 @@ test_is_protected_branch() {
     rm -rf "$td"
 }
 
+# get_tier_list: branches.txt から、有効な段階を決まった順で返す（doc/tier-scaling-design.md 3.1 の表と同じ期待値）
+#   引数: 1=branches.txt の中身（printf の書式。NONE ならファイルを作らない）  出力: 標準出力（段階を空白区切り）|標準エラー
+_gtl_run() {
+    local td out err
+    td=$(mktemp -d "${TMPDIR:-/tmp}/test-gtl-XXXX")
+    mkdir -p "$td/sf-tools/config"
+    [[ "$1" == "NONE" ]] || printf "$1" > "$td/sf-tools/config/branches.txt"
+    out=$( cd "$td" && bash -c "
+        readonly SCRIPT_NAME=test; readonly LOG_FILE=/dev/null; readonly LOG_MODE=NEW; export SF_INIT_MODE=1
+        source '${SF_TOOLS_DIR}/lib/common.sh'
+        get_tier_list" 2>"$td/err" | tr '\n' ' ' )
+    err=$(cat "$td/err")
+    rm -rf "$td"
+    printf '%s|%s' "${out% }" "$err"
+}
+test_get_tier_list() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] get_tier_list: 有効な段階を、決まった順で返す${CLR_RST}"
+    local r
+    r=$(_gtl_run 'NONE');                                   assert_equals "${r%%|*}" "main" "ファイルがない → main だけ"
+    assert_output_contains "${r#*|}" "見つかりません" "ファイルがない → WARNING"
+    r=$(_gtl_run '# コメントだけ\n\n');                     assert_equals "${r%%|*}" "main" "段階の行がない → main だけ"
+    assert_output_contains "${r#*|}" "定義されていません" "段階の行がない → WARNING"
+    r=$(_gtl_run 'main\nstaging\ndevelop\n');               assert_equals "${r%%|*}" "main staging develop" "3 段階"
+    r=$(_gtl_run 'main\nstaging\n');                        assert_equals "${r%%|*}" "main staging" "2 段階（develop の行なし）"
+    r=$(_gtl_run 'main\ndevelop\n');                        assert_equals "${r%%|*}" "main" "develop だけ（staging なし）→ develop は無効"
+    assert_output_contains "${r#*|}" "staging がないため" "develop だけ → WARNING"
+    r=$(_gtl_run 'main\nuat\nstaging\n');                   assert_equals "${r%%|*}" "main staging" "名前でない行（uat）は無視"
+    assert_output_contains "${r#*|}" "「uat」" "名前でない行 → WARNING"
+    r=$(_gtl_run 'main\nstaging\nstaging\n');               assert_equals "${r%%|*}" "main staging" "重複は 1 つ"
+    r=$(_gtl_run 'staging\n');                              assert_equals "${r%%|*}" "main staging" "main の行がなくても main は有効"
+    r=$(_gtl_run 'develop\nstaging\nmain\n');               assert_equals "${r%%|*}" "main staging develop" "並びは常に main → staging → develop"
+    r=$(_gtl_run '  main \r\n\tstaging\t\r\n develop\r\n'); assert_equals "${r%%|*}" "main staging develop" "CR・前後の空白を除いて判定する"
+    r=$(_gtl_run '  # develop\nmain\nstaging\n');           assert_equals "${r%%|*}" "main staging" "前に空白のあるコメント行は読み飛ばす"
+}
+
 # ------------------------------------------------------------------------------
 # check_sf_cli のテスト（sf が成功しても終了コード 1 を返す環境の検知）
 # ------------------------------------------------------------------------------
@@ -1714,6 +1750,7 @@ test_is_reserved_org_alias
 test_open_browser_gitbash
 test_open_browser_wsl_quote
 test_is_protected_branch
+test_get_tier_list
 test_check_sf_cli
 test_check_sf_cli_cache
 test_check_java_cli

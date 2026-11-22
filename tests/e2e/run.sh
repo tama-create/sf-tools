@@ -26,7 +26,10 @@
 #                    sf-job.sh は、既定では引数なしで実行し、作業フォルダの下のクローンの git remote から、プロジェクトが決まること
 #                    【--add-tier の確認】 1 層のとき（鍵一式に staging の組織があれば）、最後に、管理者用のクローン（admin ブランチ）で
 #                    sf-init.sh --add-tier staging を実行し、組織への接続・Secret / Variable・ブランチ・PR ができること、
-#                    終わったあとも admin ブランチにいること、main へ直接 push していないことを確認する（約 4 分）
+#                    終わったあとも admin ブランチにいること、main へ直接 push していないことを確認する。そのあと、管理者と同じく、
+#                    その PR をマージし（--no-actions のときは、マージしない）、main の branches.txt に staging が入ること、
+#                    マージで動く wf-release（リリース対象なしでスキップ）・wf-propagate が成功し、staging に main の最新が入ることを確認する
+#                    （段階は、main の branches.txt に入って、はじめて有効になる。このあとのシナリオが、staging を使う）（約 6 分）
 #                    【wf-sequence（順序チェック）の確認】 2 層以上のとき: ①順序どおりの PR（staging・main へ）は、成功し、警告のコメントが付かない
 #                    ②前の段階にマージしないまま main へ出した PR（順序外）は、警告（実行は成功。止めない）: PR の会話欄に ⚠️ のコメントが付き、
 #                    Slack に通知される ③環境ブランチから main への直接の PR（develop → main など）は、実行が失敗し、⛔ のコメントが付き、Slack に通知される。
@@ -63,7 +66,7 @@
 #   --resume      : 前回残したテスト用リポジトリ（最新の 1 つ）を使い、Hello World の部分（sf-job → sf-dryrun → sf-push → PR → リリース → 削除、
 #                   sf-next・sf-deploy の確認）だけを再実行する。前掃除・sf-init・wf-metasync は、行わない（約 15 分。直しの確認を、早く繰り返すため）。
 #                   ジョブ名は、毎回、時刻付きの別の名前になる。前回の残りの Hello World の Apex が、組織にあれば、最初に削除する
-#   --no-add-tier : --add-tier の確認（1 層のとき、最後に staging を足す。約 4 分）を省略する
+#   --no-add-tier : --add-tier の確認（1 層のとき、最後に staging を足し、その PR をマージする。約 6 分）を省略する
 #   --with-args   : sf-init.sh / sf-job.sh に、引数 --owner / --project を付けて実行する（既定は、引数なしの対話・自動判定）
 #   --layout N    : 新しく作るリポジトリの層数（1 = main のみ（既定）/ 2 = main + staging / 3 = main + staging + develop）。
 #                   2・3 には、鍵一式に staging（3 は develop も）の組織が必要。--resume では、リポジトリの構成を、自動で判定する
@@ -619,7 +622,8 @@ _hello_flow() {
 
 # --add-tier（管理者用のクローン = admin ブランチから、staging を追加する）の確認
 #   新しく作った 1 層のリポジトリに、staging の段階を足す。確認すること: 実行できる（組織への接続・Secret / Variable・ブランチ・PR）、
-#   終わったあとも admin ブランチにいる（main に居座らない）、main へ直接 push していない。
+#   終わったあとも admin ブランチにいる（main に居座らない）、main へ直接 push していない。そのあと、管理者と同じく PR をマージし、
+#   staging が段階として有効になる（main の branches.txt に入り、main の最新が伝播する）ことを確かめる（--no-actions のときは、マージしない）。
 #   Hello World の確認のあとに行う（先に行うと、リポジトリが 2 層になり、リリースの確認の対象が変わるため）
 _main_sha()   { _e2e_gh api "repos/${REPO_FULL}/branches/main" --jq .commit.sha 2>/dev/null; }
 _has_open_pr_titled() { _e2e_gh pr list -R "$REPO_FULL" --state open --json title --jq '.[].title' 2>/dev/null | grep -qxF -- "$1"; }
@@ -638,6 +642,35 @@ _add_tier_check() {
     chk "add-tier: Variable SF_INSTANCE_URL_${sfx} が登録された" _has_variable "SF_INSTANCE_URL_${sfx}"
     chk "add-tier: branches.txt を更新する PR が作られた" _has_open_pr_titled "chore: ${t} tier を追加"
     chk "add-tier: main へ、直接 push していない（PR を作るだけ）" test "$(_main_sha)" == "$main_before"
+    # 管理者と同じく、PR をマージする（段階は、main の branches.txt に入って、はじめて有効になる。doc/tier-scaling-design.md 3.2）。
+    #   マージしないと、staging は無効のまま（伝播・検証・リリースが止まる）で、このあとのシナリオ（propagate-fail・tier-switch）が、
+    #   staging を使えない。--no-actions のときは、ワークフローの完了を待てないため、マージしない
+    [[ $SKIP_ACTIONS -eq 0 ]] || { log "INFO" "  add-tier: PR のマージを省略しました（--no-actions）。"; return 0; }
+    local prn br b_pro b_rel pid rid
+    prn=$(_e2e_gh pr list -R "$REPO_FULL" --state open --json number,title,headRefName \
+        --jq ".[] | select(.title == \"chore: ${t} tier を追加\") | \"\(.number) \(.headRefName)\"" 2>/dev/null | head -1)  # VAR=$(cmd) のため run 不使用
+    br="${prn#* }"; prn="${prn%% *}"
+    chk "add-tier: PR の番号が分かった" test -n "$prn" || return 0
+    b_pro=$(e2e_latest_run_id "$REPO_FULL" wf-propagate.yml "$br")   # VAR=$(cmd) のため run 不使用
+    b_rel=$(e2e_latest_run_id "$REPO_FULL" wf-release.yml "$br")     # VAR=$(cmd) のため run 不使用
+    chk "add-tier: PR をマージした（管理者の操作と同じ）" e2e_gh_pr_merge "$REPO_FULL" "$prn" || return 0
+    chk "add-tier: main の branches.txt に ${t} が入った" _main_branches_has "$t"
+    # マージで動く wf-release（リリース対象のフォルダがないため、スキップして成功）と wf-propagate（main → staging）の完了を待つ。
+    #   このあとのシナリオが staging に書き込むため、伝播と重ならないようにする
+    rid=$(e2e_wait_pr_run "$REPO_FULL" wf-release.yml "$br" "$b_rel") || rid=""   # VAR=$(cmd) のため run 不使用
+    if chk "add-tier: マージ後の wf-release が実行され、完了した" test -n "$rid"; then
+        chk "add-tier: マージ後の wf-release が成功した（リリース対象なしでスキップ）" _run_ok "$rid" "add-tier: wf-release"
+    fi
+    pid=$(e2e_wait_pr_run "$REPO_FULL" wf-propagate.yml "$br" "$b_pro") || pid=""   # VAR=$(cmd) のため run 不使用
+    if chk "add-tier: マージ後の wf-propagate が実行され、完了した" test -n "$pid"; then
+        chk "add-tier: マージ後の wf-propagate が成功した" _run_ok "$pid" "add-tier: wf-propagate"
+    fi
+    chk "add-tier: ${t} が段階として有効になり、main の最新が伝播した" _branch_has_main "$t"
+}
+# main の branches.txt に、その段階の行があるか。引数: 段階
+_main_branches_has() {
+    _e2e_gh api "repos/${REPO_FULL}/contents/sf-tools/config/branches.txt?ref=main" --jq .content 2>/dev/null \
+        | tr -d '\n' | base64 -d 2>/dev/null | tr -d '\r' | grep -qx -- "$1"   # 戻り値で判定するため run 不使用
 }
 
 log "HEADER" "確認"

@@ -124,7 +124,7 @@
   <li><code>main</code> の「同期の対象のフォルダ」を、取得した内容と同じにする（追加・変更・<strong>削除</strong>）。削除には安全の守りがあり、当たったものは保留にする</li>
   <li>変更があるときだけ、コミットしてプッシュする</li>
   <li>変更がなくても、前回のプッシュが失敗して、送れていないコミットが残っているときは、確認のうえで、プッシュだけ行う</li>
-  <li>プッシュしたときは、<code>branches.txt</code> の <code>main</code> 以外の各ブランチ（<code>staging</code>・<code>develop</code> など）に、<code>main</code> をマージしてプッシュする</li>
+  <li>プッシュしたときは、有効な段階（<code>branches.txt</code> の <code>staging</code>・<code>develop</code>）の各ブランチに、<code>main</code> をマージしてプッシュする（段階の名前でない行は無視し、<code>develop</code> は <code>staging</code> もあるときだけ）</li>
   <li><code>main</code> へのプッシュも、ほかのブランチへのプッシュも、pre-push フックを通さない（<code>--no-verify</code>）。pre-push フックは、保護ブランチの上から・保護ブランチへのプッシュを必ず拒否するため、通すと失敗するからです。GitHub の保護の設定（Ruleset）は、そのまま効きます</li>
 </ul>
 <h3>処理の流れ</h3>

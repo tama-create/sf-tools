@@ -35,6 +35,8 @@ _cur() { _it_git -C "$1" symbolic-ref --short HEAD 2>/dev/null; }
 _stashes() { _it_git -C "$1" stash list | wc -l | tr -d ' '; }
 _remote_ref() { _it_git --git-dir="$IT_ORIGIN" rev-parse "refs/heads/$1" 2>/dev/null; }
 _meta() { it_run "$CL" -i 'Y\nY\n' bash "$IT_HOME/sf-tools/bin/sf-metasync.sh"; }   # 警告の確認 Y・コミットの確認 Y
+# 時計の秒が変わるまで待つ（最大 1 秒）。呼ぶ前に終わった実行の時刻と、呼んだあとに始める実行の時刻が、必ず別の秒になる
+_wait_next_second() { local s; s=$(date +%s); while [[ "$(date +%s)" == "$s" ]]; do sleep 0.1; done; }
 
 test_setup() {
     it_setup || { fail "サンドボックスの作成"; return 1; }
@@ -288,7 +290,10 @@ test_M11() {
     [[ "$(_remote_ref main)" != "$m1" ]] && pass "M11-3: origin の main に、追加のコミットが届く" || fail "M11-3: origin の main に、追加のコミットが届く"
     assert_equals "$(_remote_ref staging)" "$(_remote_ref main)" "M11-3: メタデータの変更は、staging に伝播する"
     # (4) 履歴はあるが、ファイルの変更はない → 状態だけのコミット。staging へは伝播しない
+    #     状態ファイルで回ごとに変わるのは、時刻（lastFullSyncAt。秒単位）だけ（fake の一覧は、いつも空）。M11-3 と同じ秒に動くと、
+    #     状態の中身が同じになり、状態だけのコミットができない（CI で、ときどき失敗した）。秒が変わるのを待ってから動かす
     s1=$(_remote_ref staging); m1=$(_remote_ref main)
+    _wait_next_second
     _meta
     assert_exit_ok "$IT_RC" "M11-4: 履歴あり・ファイルの変更なし → 正常終了"
     [[ "$(_remote_ref main)" != "$m1" ]] && pass "M11-4: 状態の更新だけのコミットが、main に届く" || fail "M11-4: 状態の更新だけのコミットが、main に届く"

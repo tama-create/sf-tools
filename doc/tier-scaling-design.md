@@ -46,7 +46,9 @@
 ```bash
 # >>> sf-tools: tier-switch v1（この印の間は、3 つの workflow で同じ中身にする。--remove-tier・テストが比べる）
 # origin/main の branches.txt から、有効な段階を読む（# の行・空行を除く。CR を除く。行の前後の空白を除く）
-git fetch origin main --depth=1 -q || { echo "::error::main を取得できません。段階を判定できないため、止めます。"; exit 1; }
+# 浅いリポジトリ（checkout が既定の fetch-depth: 1）なら --depth=1 で軽く、全履歴なら --depth を付けない（下の注）
+if [ "$(git rev-parse --is-shallow-repository 2>/dev/null)" = "true" ]; then _depth="--depth=1"; else _depth=""; fi
+git fetch origin main $_depth -q || { echo "::error::main を取得できません。段階を判定できないため、止めます。"; exit 1; }
 if TIERS_RAW=$(git show FETCH_HEAD:sf-tools/config/branches.txt 2>/dev/null); then
   TIERS=$(printf '%s\n' "$TIERS_RAW" | tr -d '\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' | grep -v '^#' | grep -v '^$' || true)
   TIERS_KNOWN=1
@@ -68,6 +70,7 @@ tier_enabled() {
 # <<< sf-tools: tier-switch v1
 ```
 
+- **main の取得の深さ**: 全履歴のリポジトリ（wf-propagate は `fetch-depth: 0` で取得する）を `--depth=1` で取得すると、リポジトリが浅くなり、main の先の履歴が切れる。そのあとの伝播のマージ（`git merge origin/main`）が `refusing to merge unrelated histories` で失敗する（2026-11-22 に e2e で確認。単体テストは、判定と伝播を別のリポジトリで試していたため、見つからなかった）。そのため、浅いリポジトリのときだけ `--depth=1` を付ける（`tests/test_wf-tier-switch.sh` が、同じリポジトリで判定 → 伝播を続けて確かめる）
 - **`branches.txt` の中身の規則**（段階の有効・無効を決めるところは、すべてこの規則で読む）:
   - 段階の名前は `main` / `staging` / `develop` だけ。ほかの名前の行は、段階としては無視する（`::warning`・WARNING）
   - 同じ名前が 2 行あっても 1 つとして扱う。`main` の行がなくても main は有効

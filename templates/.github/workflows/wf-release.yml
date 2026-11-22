@@ -122,8 +122,12 @@ jobs:
           # load_tiers: origin/main の branches.txt から、有効な段階を読む（# の行・空行を除く。CR・行の前後の空白を除く）
           #   main を取得できない → ::error を出して 1 を返す（呼び出し側で、ジョブを失敗にする。段階が分からないまま書き込まない）
           #   branches.txt がない → ::warning を出し、TIERS_KNOWN=0（tier_enabled は、今までの動きのため、常に有効を返す）
+          #   main の取得は、浅いリポジトリ（checkout が既定の fetch-depth: 1）なら --depth=1 で軽く、全履歴なら --depth を付けない。
+          #   全履歴のリポジトリを --depth=1 で取得すると、リポジトリが浅くなり、main の先の履歴が切れて、wf-propagate の伝播の
+          #   マージが「refusing to merge unrelated histories」で失敗するため（2026-11-22 に e2e で確認）
           load_tiers() {
-            git fetch origin main --depth=1 -q || { echo "::error title=段階を判定できません::main を取得できません。段階を判定できないため、止めます。"; return 1; }
+            if [ "$(git rev-parse --is-shallow-repository 2>/dev/null)" = "true" ]; then _depth="--depth=1"; else _depth=""; fi
+            git fetch origin main $_depth -q || { echo "::error title=段階を判定できません::main を取得できません。段階を判定できないため、止めます。"; return 1; }
             if TIERS_RAW=$(git show FETCH_HEAD:sf-tools/config/branches.txt 2>/dev/null); then
               TIERS=$(printf '%s\n' "$TIERS_RAW" | tr -d '\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' | grep -v '^#' | grep -v '^$' || true)
               TIERS_KNOWN=1

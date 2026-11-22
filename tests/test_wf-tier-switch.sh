@@ -11,6 +11,7 @@
 #   - wf-release: PR のマージ・手動の実行の両方で、無効の段階なら skip=true。main は常に今までどおり
 #   - wf-validate: マージ先ごとに、検証に使う段階の有効・無効で skip が決まる
 #   - wf-propagate: 段階の判定の出力と、無効の段階には、ブランチがあっても伝播しない
+#   - wf-propagate: 全履歴のリポジトリで、判定 → 伝播を同じリポジトリで続けて動かしても、浅くならず、伝播が成功する
 #   - branches.txt がない → 今までの動き（::warning）／ main を取得できない → 失敗（::error）／名前でない行 → ::warning
 source "$(dirname "${BASH_SOURCE[0]}")/test_helper.sh"
 echo -e "${CLR_HEAD}=== 段階の切り替え（wf-propagate・wf-release・wf-validate）===${CLR_RST}"
@@ -223,9 +224,46 @@ test_propagate() {
     rm -rf "${repo%/work}"
 }
 
+# ------------------------------------------------------------------------------
+# wf-propagate: 全履歴のリポジトリで、段階の判定 → 伝播を、同じリポジトリで続けて動かす（Actions と同じ順）
+#   判定が main を --depth=1 で取得すると、リポジトリが浅くなり、伝播のマージが「refusing to merge unrelated histories」で
+#   失敗した（2026-11-22 に e2e で確認）。判定と伝播を別のリポジトリで試すと、見つからない
+#   浅いリポジトリ（wf-release・wf-validate の check-branch。checkout の既定）では、浅いまま軽く取得する
+# ------------------------------------------------------------------------------
+test_propagate_full_history() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] wf-propagate: 全履歴のリポジトリで、判定 → 伝播を続けて動かす${CLR_RST}"
+    local repo s_tiers s_merge r before after
+    s_tiers=$(_extract wf-propagate.yml tiers)
+    s_merge=$(_extract wf-propagate.yml merge_staging)
+    repo=$(_make_repo 'main\nstaging\n')
+    git -C "$repo" fetch -q origin
+    before=$(git -C "$repo" rev-parse origin/staging)
+    r=$(_run "$repo" "$s_tiers")
+    assert_output_contains "$r" "staging=true" "全履歴: 判定 → staging は有効"
+    assert_equals "$(git -C "$repo" rev-parse --is-shallow-repository)" "false" "全履歴: 判定のあとも、浅いリポジトリにならない"
+    r=$(_run "$repo" "$s_merge" TIER_ENABLED=true GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t)
+    assert_output_contains "$r" "result=success" "全履歴: 判定に続く伝播が成功する（unrelated histories にならない）"
+    assert_output_not_contains "$r" "unrelated histories" "全履歴: 伝播のマージで「unrelated histories」が出ない"
+    git -C "$repo" fetch -q origin
+    after=$(git -C "$repo" rev-parse origin/staging)
+    [[ "$after" != "$before" ]] && pass "全履歴: origin/staging が進む" || fail "全履歴: origin/staging が進む"
+    rm -rf "${repo%/work}"
+
+    # 浅いリポジトリ: 判定できて、浅いまま（全履歴を取りに行かない）
+    repo=$(_make_repo 'main\nstaging\n')
+    git -C "$repo" fetch -q --depth=1 origin
+    assert_equals "$(git -C "$repo" rev-parse --is-shallow-repository)" "true" "浅い: 前提（浅いリポジトリにした）"
+    r=$(_run "$repo" "$s_tiers")
+    assert_output_contains "$r" "staging=true" "浅い: 判定 → staging は有効"
+    assert_equals "$(git -C "$repo" rev-parse --is-shallow-repository)" "true" "浅い: 判定のあとも、浅いまま"
+    rm -rf "${repo%/work}"
+}
+
 test_structure
 test_release
 test_validate
 test_propagate
+test_propagate_full_history
 
 print_summary

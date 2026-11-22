@@ -339,22 +339,24 @@ cd {作業フォルダ}/admin/force-XXXX
 
 ### 9.1 e2e のシナリオ tier-switch
 
-対象: run.sh が残した 3 段階のテスト用リポジトリ（main + staging + develop。3 つの別の組織）。新しい組織は使わない。
+対象: run.sh が残したテスト用リポジトリ。新しい組織は使わない。外して戻す段階（以下「対象の段階」）は、いちばん下の有効な段階（3 段階なら develop・2 段階なら staging）。CI の e2e（e2e.yml）は、1 層で作り、`--add-tier staging` の PR をマージして 2 段階にしたリポジトリで動かすため、**staging が対象になる**（2026-11-22。当初は 3 段階のリポジトリを前提にしたが、CI のリポジトリは 2 段階だったため、対象の段階を選ぶ形に直した）。
+
+前提: run.sh の `--add-tier staging` の確認は、管理者と同じく、その PR をマージする（段階は、main の `branches.txt` に入って、はじめて有効になるため。マージしないと、staging は無効のままで、このあとのシナリオ propagate-fail（main → staging のコンフリクト）も確かめられない）。
 
 | # | 操作 | 合格の条件 |
 |---|---|---|
-| 1 | 管理者用のクローンで `sf-init.sh --remove-tier develop`（確認に Y） | PR ができる。Secrets / Variables・Ruleset・ブランチが、実行の前と同じ |
-| 2 | その PR をマージする | origin/main の `branches.txt` に develop がない |
-| 3 | feature ブランチから develop への PR（デプロイ対象のある、小さな Apex）を作る | wf-validate のジョブ「対象ファイル確認」のログに「段階として無効」。ジョブ「デプロイ検証」は skipped（組織に検証のデプロイをしない） |
+| 1 | 管理者用のクローンで `sf-init.sh --remove-tier <対象の段階>`（確認に Y） | PR ができる。Secrets / Variables・Ruleset・ブランチが、実行の前と同じ |
+| 2 | その PR をマージする | origin/main の `branches.txt` に対象の段階がない |
+| 3 | feature ブランチから対象の段階への PR（デプロイ対象のある、小さな Apex）を作る | wf-validate のジョブ「対象ファイル確認」のログに「段階として無効」。ジョブ「デプロイ検証」は skipped（組織に検証のデプロイをしない） |
 | 4 | 3 の PR をマージする | wf-release のジョブ「リリース対象確認」のログに「段階として無効」。ジョブ「リリース実行」は skipped（組織にリリースしない） |
-| 5 | wf-release を develop で手動の実行 | 4 と同じ |
-| 6 | 2 のマージで動く wf-propagate を待つ | develop のステップは「段階として無効」で skipped。origin/develop の SHA が変わらない |
-| 7 | `sf-init.sh --add-tier develop`（接続情報が残っているので、「つなぎ直さずに戻す」に Y） | ブラウザのログインなしで PR ができる |
-| 8 | 7 の PR をマージする | origin/main の `branches.txt` に develop がある |
-| 9 | feature ブランチから develop への PR をもう一度作る | wf-validate の「デプロイ検証」が動き、成功する（develop の組織で dry-run）。PR は、マージせずに閉じる |
+| 5 | wf-release を対象の段階で手動の実行 | 4 と同じ |
+| 6 | 2 のマージで動く wf-propagate を待つ | 対象の段階のステップは「段階として無効」で skipped。対象の段階のブランチの SHA が変わらない |
+| 7 | `sf-init.sh --add-tier <対象の段階>`（接続情報が残っているので、「つなぎ直さずに戻す」に Y） | ブラウザのログインなしで PR ができる |
+| 8 | 7 の PR をマージする | origin/main の `branches.txt` に対象の段階がある |
+| 9 | feature ブランチから対象の段階への PR をもう一度作る | wf-validate の「デプロイ検証」が動き、成功する（対象の段階の組織で dry-run）。PR は、マージせずに閉じる |
 
 - 組織に書き込まないことは、組織に書き込むジョブ（wf-validate の「デプロイ検証」・wf-release の「リリース実行」）が skipped であることで確かめる（3・4・5）。組織へのデプロイ・検証は、この 2 つのジョブの中だけで行うため。組織の DeployRequest の前後比較（当初の案）は、develop の組織へのログインが要り、確かさも変わらないため、やめた（2026-11-22）
-- **後始末**（中断・失敗を含め、必ず行う。`_scn_restore`）: develop の行が origin/main にないまま終わったら、7・8 と同じ方法で戻す。3・9 の PR とブランチは閉じて消す。4 でマージした Apex は、develop のブランチから戻す（develop の組織には入っていない）。終了時に、Secrets / Variables・Ruleset が、実行の前と同じであることを確かめる
+- **後始末**（中断・失敗を含め、必ず行う。`_scn_restore`）: 対象の段階の行が origin/main にないまま終わったら、元の `branches.txt` の中身で書き戻す。3・9 の PR とブランチは閉じて消す。4 でマージした Apex は、対象の段階のブランチから戻す（その組織には入っていない）。終了時に、Secrets / Variables・Ruleset が、実行の前と同じであることを確かめる
 - 所要時間の目安: 10〜15 分（実装のあとに測る）。Actions の無料枠（テスト用の組織の月 2,000 分。CLAUDE.md 1.2）に収まるかを、rr の前に確かめる
 - wf-metasync の伝播は、このシナリオでは確かめない（組織からの取得に時間がかかり、push が起きるかは組織の状態しだいのため）。単体テスト（9 章の wf-metasync の項目）で確かめる
 

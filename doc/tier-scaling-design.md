@@ -337,7 +337,7 @@ cd {作業フォルダ}/admin/force-XXXX
 - **`status.sh`**: 7 章の 3 つの表示
 - **e2e**: workflow（`templates/`）を変えるので、rr の前に e2e が要る（`tests/e2e/needs-e2e.sh`）。単体テストだけでは、GitHub Actions の起動の条件・ジョブのスキップ・必須チェック・組織への接続の停止を、同時には確かめられないため、**新しいシナリオ `tier-switch` を足す**（`tests/e2e/scenario.sh`。e2e.yml の Windows のジョブが、ほかのシナリオのあと、**最後に**動かす。段階を変えるため）
 
-#### 9.1 e2e のシナリオ tier-switch
+### 9.1 e2e のシナリオ tier-switch
 
 対象: run.sh が残した 3 段階のテスト用リポジトリ（main + staging + develop。3 つの別の組織）。新しい組織は使わない。
 

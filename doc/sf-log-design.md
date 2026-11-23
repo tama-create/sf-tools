@@ -278,9 +278,11 @@ bash ~/sf-tools/bin/sf-log.sh leave --owner <印>   # sf-start の終了時: 持
  c. bash sf-log.sh begin -o <エイリアス> --owner "$SF_LOG_OWNER" を実行する（前面。sf を呼ばない）
       begin: GitHub Actions 上・予約名 → 10。手元の答え（10.2）で「取らない」→ 10（初めて・エイリアスが変わったときは、ここで Y/N を聞く）。
              持ち主の一覧（.owners）に印を足す（後始末の最中は最大 60 秒待つ）。.status を starting にし、
-             start --auto --collect を nohup で裏に起動して、0 で終わる
+             start --auto --collect --retry 1 を nohup で裏に起動して、0 で終わる
       裏の start --auto: 本番・種類を確認できない組織 → 10。答えの組織 ID と違う → 10（答えを消す）。DebugLevel・TraceFlag を準備して、
-             .status を collecting にし、そのまま collect（取得役）になる（exec）。取らない・失敗は、.status に理由を書く
+             .status を collecting にし、そのまま collect（取得役）になる（exec）。取らない・失敗は、.status に理由を書く。
+             失敗（終了コード 1。「取らない」の 10 は除く）は、持ち主が生きていれば、.status を starting に戻して「やり直しています」を書き、
+             30 秒後に 1 回だけやり直す（--retry。sf の一時的な失敗で、その日の取得が抜けないため。13.3）
     sf-start は、begin の終了コードで分ける: 0 → 自分の印なら、終了時に leave する（5.2）／10 → 何もしない（理由は sf-log.sh が表示）／
     それ以外 → WARNING「Apex ログの準備を始められませんでした」。どの場合も、ランチャーの起動に進む（ログの取得の失敗で、開発を止めない）
 ```
@@ -288,7 +290,7 @@ bash ~/sf-tools/bin/sf-log.sh leave --owner <印>   # sf-start の終了時: 持
 - 持ち主の印に、PID だけでなく起動の時刻と乱数を入れるのは、同じ PID の印が重ならないようにするため（生死は `kill -0` だけで見る。5.5）
 - 持ち主の一覧への登録は、sf-start ではなく `begin`（と `start --auto --owner`）が行う。ロックと CLOSING の待ちを、sf-log.sh の 1 か所にまとめるため。同じ印は 2 回足さない（入れ子の sf-start）
 - `begin` の確認（10.2）は、`read_key` で Y/N を聞く（`q` は「取らない」。端末でなければ聞かない。`read_key` の EOF の `die` で sf-start を止めないよう、`$( )` の中で呼ぶ）
-- **裏での起動**: `nohup bash sf-log.sh start --auto --collect … </dev/null >/dev/null 2>>"$LOG_FILE" &` のあと `disown` する（端末の入力・出力から切り離し、端末を閉じたときの SIGHUP で一緒に止まらないようにする。止めるのは、持ち主の見張りと 5.2 の後始末）。Ctrl+C の無視（`trap '' INT`）も引き継がれる。Windows の Git Bash では効くことを確かめた（13.1）。`nohup` では `$!` と、取得役が記録した PID が違うため、取得役の生死は `.collector` の PID で見る
+- **裏での起動**: `nohup bash sf-log.sh start --auto --collect --retry 1 … </dev/null >/dev/null 2>>"$LOG_FILE" &` のあと `disown` する（端末の入力・出力から切り離し、端末を閉じたときの SIGHUP で一緒に止まらないようにする。止めるのは、持ち主の見張りと 5.2 の後始末）。Ctrl+C の無視（`trap '' INT`）も引き継がれる。Windows の Git Bash では効くことを確かめた（13.1）。`nohup` では `$!` と、取得役が記録した PID が違うため、取得役の生死は `.collector` の PID で見る
 - `sf-start.sh` の冒頭コメント（【処理の流れ】）に、この流れを書く（CLAUDE.md 2.5）
 
 ### 5.2 sf-start.sh の終了時（ランチャーを q で閉じたとき）
@@ -316,6 +318,7 @@ bash ~/sf-tools/bin/sf-log.sh leave --owner <印>   # sf-start の終了時: 持
 
 - `sf-launcher.sh` のメニューの上に、`logs/apex/.status` から 1 行を表示する（例: `Apex ログ: 取得中（dev-tama・期限 15:30・今日 23 本）`／`Apex ログ: 取っていません`）
 - ランチャーは `lib/common.sh` を読まない単独の設計のため、`.status` は `キー=値` の行にして、`while read` で読めるようにする（9.2）。ファイルがなければ、何も表示しない
+- 準備中（`starting`）のあいだは、入力を 5 秒ずつ待ち（`read -t`）、`STATE` が変わったら、コマンドを動かさずにメニューを描き直す（裏の準備は、実機で約 3 分かかった。つながっても「準備中」のままだと迷うため。2026-11-23。13.3）。待ち切れと EOF は、待った時間でも見分ける（Bash 3.2 では、待ち切れの戻り値が 128 を超えないため）
 - メニューの番号・動きは変えない
 
 ### 5.5 異常終了（ウィンドウを × で閉じた・PC が止まった）
@@ -816,6 +819,10 @@ force-*/logs/apex/
   - 持ち主・取得役の生死は `kill -0` だけで見る（PID の使い回しは、12 時間の上限で守る。5.5）
   - `status` は、`.status`（表示の状態）と `.state`（取得の記録）の同じ名前のキーを、見出しで分けて出す（実機で `ORG` が 2 回出たため）
 - 2026-11-23（第 3 段）: sf-start からは、前面で `start --auto` を呼ばず、**`begin`（sf を呼ばない）だけを呼び、準備と取得役は裏で行う**（5.1）。`start --auto` は sf を約 7 回呼び、実機で約 1 分かかったため（毎回ランチャーが 1 分遅れると、sf-start が使われず、ログも取られなくなる）。確認は手元の答えとエイリアスで判定し、同じエイリアスで別の組織に入り直したことは、裏で組織 ID を照らし合わせて見つける（10.2。TAMAさんの判断: 案 B）
+- 2026-11-23（第 3 段の実機の確認のあと）: sf-start からの流れを tama-dev で通した（準備は裏で約 3 分・取得役の起動・ランチャーの q での後始末で TraceFlag が消える）。次を足した
+  - 裏の準備の失敗（終了コード 1）は、持ち主が生きていれば、30 秒後に 1 回だけやり直す（`--retry`。1 回目の起動で、sf 自身の読み込みエラー `MODULE_NOT_FOUND` で DebugLevel の検索が失敗し、その日の取得が抜けたため。5.1）
+  - ランチャーは、準備中のあいだ、状態が変わったらメニューを描き直す（5.4）
+  - 止めたら、`.status` の期限の表示（`EXPIRES_AT`）も消す
 
 ### 13.4 後回しにするもの
 

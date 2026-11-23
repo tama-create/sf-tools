@@ -13,7 +13,7 @@
 #   sf-log.sh start [-o ALIAS] [--level standard|detail] [--hours N] [-y]   # 取り始める（TraceFlag を作る・延ばす）
 #   sf-log.sh stop [-o ALIAS]                             # 止める（自分が作った TraceFlag を消す）
 #   sf-log.sh begin -o ALIAS --owner 印                   # 内部用（sf-start.sh が前面で呼ぶ。sf を呼ばずに判定し、準備と取得役を裏で起動する）
-#   sf-log.sh start --auto [--collect] [--owner 印]       # 内部用（begin が裏で呼ぶ。尋ねない。--collect なら、成功のあと取得役になる）
+#   sf-log.sh start --auto [--collect [--retry N]] [--owner 印]   # 内部用（begin が裏で呼ぶ。尋ねない。--collect なら、成功のあと取得役になる）
 #   sf-log.sh collect                                     # 内部用（裏の取得役。sf-start.sh が裏で起動する）
 #   sf-log.sh leave --owner 印                            # 内部用（sf-start.sh の終了時。持ち主の一覧から外れる）
 #
@@ -25,6 +25,8 @@
 #   --auto              : （start）sf-start.sh からの自動の取り始め。終了コード 0 = 取り始めた／10 = 取らない／1 = 失敗
 #   --owner 印          : （begin・start --auto・leave）持ち主（sf-start）の印。「PID:起動の時刻:英数字」（数字:数字:英数字）
 #   --collect           : （start --auto）準備が成功したら、同じプロセスで取得役（collect）になる（begin が使う）
+#   --retry N           : （start --auto --collect）準備が失敗したとき（終了コード 1。「取らない」の 10 は除く）に、やり直す回数（0〜3。既定 0。
+#                         begin は 1 を付ける）。持ち主が生きていて、後始末の最中でなければ、30 秒待ってから、回数を 1 減らして自分を exec する
 #   --max N             : （pull）要約に入れるログの数の上限（1 以上の整数。既定 50。超えたら新しいほうから）
 #   --since 分          : （pull）前回の pull を無視して、直近 N 分に始まったログを要約する（1 以上の整数）
 #   -v, --verbose       : コマンドの応答（出力）をコンソールにも表示する
@@ -42,7 +44,8 @@
 #        答えがない・エイリアスが変わった・注意の文面の版が変わったときは、注意を表示して Y/N で聞く（端末でない・q・N は「取らない」。
 #        端末でないときは、答えを保存しない）
 #     3. 持ち主の一覧に --owner の印を足す（後始末の最中なら、最大 60 秒待つ。終わらなければ 10）
-#     4. .status を starting にし、start --auto --collect を nohup で裏に起動して、すぐ 0 で終わる
+#     4. .status を starting にし、start --auto --collect --retry 1 を nohup で裏に起動して、すぐ 0 で終わる
+#        （ふつうの出力は捨て、エラー出力は sf-log.log に追記する）
 #   start:
 #     4. （--auto）GitHub Actions 上なら 10。尋ねない: 答え（.consent）が「取る」で、エイリアスと文面の版が同じでなければ 10。
 #        答えの組織 ID（ORG_ID）が空なら、今の組織 ID を書く。違えば（同じエイリアスで別の組織に入り直した）、答えを消して 10
@@ -64,6 +67,8 @@
 #     9. .status に STATE=collecting・期限（EXPIRES は UTC・EXPIRES_AT は PC の時刻の HH:MM。ランチャーが表示する）を書く。
 #        --collect なら、同じプロセスで collect になる（exec）。
 #     （--auto で取らない・失敗のとき）.status に理由を書き、別の組織の取得役が動いていれば、止まるよう頼む（5.3）
+#     （--retry が残っていて、失敗のとき）.status を starting に戻して WARNING（やり直しています）を書き、30 秒後にやり直す。
+#        成功したら WARNING を消す。待つあいだに持ち主が終了した・後始末が始まったら、やり直さずに失敗として終わる
 #   pull:
 #     4. 取得役（logs/apex/.collector の PID）が生きていれば、自分では取らず、依頼（logs/apex/requests/pull.<ID>）を置いて、
 #        自分の ID の応答（done.<ID>）を最大 90 秒待つ（待っても来なければ、手元にある分で要約し、その旨を書く）。
@@ -79,7 +84,7 @@
 #     4. .owners を CLOSING だけにする。取得役が生きていれば、停止の依頼（requests/stop）を置き、最大 30 秒待つ。
 #        止まらなければ TERM で止め、さらに最大 10 秒待つ。それでも生きていれば、TraceFlag は消さずに中断する
 #     5. .state の TRACE_FLAG_ID の TraceFlag を消す（すでになければ WARNING。消せなければ中断し、ID は残す）
-#     6. TRACE_FLAG_ID・.collector・.owners を消し、.status を stopped にする。DebugLevel・手元のログは消さない
+#     6. TRACE_FLAG_ID・.collector・.owners を消し、.status を stopped にする（期限の表示も消す）。DebugLevel・手元のログは消さない
 #   leave --owner 印（sf-start の終了時）:
 #     4. 持ち主の一覧から自分の印を外す。ほかの持ち主が残っていれば、何も止めずに終わる
 #     5. 誰もいなければ、CLOSING を書いて、stop の 4〜6 と同じ後始末をする。失敗は WARNING だけ（終了コードは 0）
@@ -168,7 +173,7 @@ if [[ "$CMD" == "auto" ]]; then
     [[ "$AUTO_ARG" == "on" || "$AUTO_ARG" == "off" ]] || die "auto には on か off を指定してください。"
     shift
 fi
-ORG_ARG=""; LEVEL="standard"; HOURS=2; YES=0; AUTO=0; OWNER=""; MAX_LOGS=50; SINCE_MIN=""; COLLECT_AFTER=0
+ORG_ARG=""; LEVEL="standard"; HOURS=2; YES=0; AUTO=0; OWNER=""; MAX_LOGS=50; SINCE_MIN=""; COLLECT_AFTER=0; RETRY=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -o)        [[ -n "${2:-}" && "${2:-}" != -* ]] || die "-o の値（組織のエイリアス）がありません。"; ORG_ARG="$2"; shift ;;
@@ -177,6 +182,7 @@ while [[ $# -gt 0 ]]; do
         -y)        YES=1 ;;
         --auto)    AUTO=1 ;;
         --collect) COLLECT_AFTER=1 ;;
+        --retry)   RETRY="${2:-}"; shift ;;
         --owner)   OWNER="${2:-}"; shift ;;
         --max)     MAX_LOGS="${2:-}"; shift ;;
         --since)   SINCE_MIN="${2:-}"; shift ;;
@@ -192,6 +198,8 @@ esac
 [[ ( "$CMD" != "leave" && "$CMD" != "begin" ) || -n "$OWNER" ]] || die "${CMD} には --owner が要ります。"
 [[ "$CMD" != "begin" || -n "$ORG_ARG" ]] || die "begin には -o が要ります。"
 [[ $COLLECT_AFTER -eq 0 || $AUTO -eq 1 ]] || die "--collect は start --auto だけに付けられます。"
+[[ "$RETRY" =~ ^[0-3]$ ]] || die "--retry は 0〜3 の整数です: ${RETRY}"
+[[ "$RETRY" -eq 0 || $COLLECT_AFTER -eq 1 ]] || die "--retry は start --auto --collect だけに付けられます。"
 [[ "$LEVEL" == "standard" || "$LEVEL" == "detail" ]] || die "--level は standard か detail です: ${LEVEL}"
 [[ "$HOURS" =~ ^[0-9]+$ && "$HOURS" -ge 1 && "$HOURS" -le 23 ]] || die "--hours は 1〜23 の整数です: ${HOURS}"
 [[ "$MAX_LOGS" =~ ^[0-9]+$ && "$MAX_LOGS" -ge 1 ]] || die "--max は 1 以上の整数です: ${MAX_LOGS}"
@@ -209,8 +217,8 @@ _min_iv=30; [[ $_fast -eq 1 ]] && _min_iv=1
 TICK=5; [[ $_fast -eq 1 ]] && TICK=1    # 取得役が目を覚ます間隔（秒。sf は呼ばない）
 MAX_RUN="${SF_LOG_MAX_SECONDS:-43200}"  # 取得役の上限（秒。12 時間。PID の再利用への備え。5.5）
 [[ "$MAX_RUN" =~ ^[0-9]+$ && "$MAX_RUN" -ge 1 ]] || die "SF_LOG_MAX_SECONDS は 1 以上の整数です: ${MAX_RUN}"
-PULL_WAIT=90; STOP_WAIT=30; CLOSING_WAIT=60
-[[ $_fast -eq 1 ]] && { PULL_WAIT=30; STOP_WAIT=10; CLOSING_WAIT=10; }
+PULL_WAIT=90; STOP_WAIT=30; CLOSING_WAIT=60; RETRY_WAIT=30   # RETRY_WAIT: 裏の準備の失敗から、やり直すまで（秒）
+[[ $_fast -eq 1 ]] && { PULL_WAIT=30; STOP_WAIT=10; CLOSING_WAIT=10; RETRY_WAIT=1; }
 command -v node >/dev/null 2>&1 || die "node が見つかりません（sf CLI の npm 版に必要です）。"  # 存在確認のため run 不使用
 mkdir -p "$APEX_DIR"  # run 不使用: 自分の作業フォルダを作るだけ（失敗は、次の書き込みで分かる）
 
@@ -296,12 +304,36 @@ finish_auto_or_die() {
             log "INFO" "Apex ログは取りません（${reason}）。"
             state_set "$STATUS_F" "STATE=skipped" "REASON=${reason}" "ORG=${TARGET_ORG:-}" || true   # 意図的エラー無視: 表示用
         else
+            retry_prepare "$reason"   # やり直せるときは、ここで exec する（戻らない）。やり直さないときだけ、下へ進む
             log "WARNING" "Apex ログを取れませんでした（${reason}）。"
             state_set "$STATUS_F" "STATE=error" "REASON=${reason}" "ORG=${TARGET_ORG:-}" || true      # 意図的エラー無視: 表示用
         fi
         exit "$code"
     fi
     die "$reason"
+}
+
+# 持ち主（--owner の sf-start）が、まだ一覧にいて生きているか。後始末の最中（CLOSING）なら、いないとみなす
+owner_present() {
+    [[ -n "$OWNER" ]] || return 1
+    grep -qxF -- "$OWNER" "$OWNERS_F" 2>/dev/null || return 1   # 条件チェックのため run 不使用
+    [[ -z "$(kv_get "$OWNERS_F" CLOSING)" ]] || return 1
+    pid_alive "${OWNER%%:*}"
+}
+
+# 裏の準備（begin が起動した start --auto --collect --retry N）の失敗を、やり直す（sf の一時的な失敗で、その日の取得が抜けないため。
+#   2026-11-23 に実機で、sf 自身の読み込みエラー（MODULE_NOT_FOUND）で準備が 1 回失敗し、2 回目の起動では通った）。
+#   「取らない」判断（終了コード 10）は、やり直さない（finish_auto_or_die が、終了コード 1 のときだけ呼ぶ）。
+#   持ち主がもういない・後始末の最中なら、やり直さない（戻り値 1）。やり直すときは、残りの回数を 1 減らして exec する（戻らない）
+retry_prepare() {
+    local reason="$1"
+    [[ $AUTO -eq 1 && $COLLECT_AFTER -eq 1 && $RETRY -gt 0 && -n "$ORG_ARG" ]] || return 1
+    owner_present || return 1
+    log "WARNING" "Apex ログの準備に失敗しました（${reason}）。${RETRY_WAIT} 秒後に、もう一度やります。"
+    state_set "$STATUS_F" "STATE=starting" "ORG=${ORG_ARG}" "REASON=" "WARNING=準備に失敗しました（${reason}）。やり直しています" || true   # 意図的エラー無視: 表示用
+    sleep "$RETRY_WAIT"  # run 不使用: 待つだけ（sf の一時的な失敗が収まるのを待つ）
+    owner_present || { log "INFO" "待つあいだに sf-start が終了したため、やり直しません。"; return 1; }
+    exec bash "${SCRIPT_DIR}/sf-log.sh" start --auto --collect -o "$ORG_ARG" --owner "$OWNER" --retry $((RETRY - 1))
 }
 
 # sf の --json の応答から name を読む（読めなければ「不明」）
@@ -420,7 +452,7 @@ do_cleanup() {
         log "INFO" "sf-log.sh が作った TraceFlag はありません。"
     fi
     state_set "$STATE_F" "TRACE_FLAG_ID=" || true                               # 意図的エラー無視: 次の start で作り直す
-    state_set "$STATUS_F" "STATE=stopped" "EXPIRES=" "REASON=${reason}" "BACKLOG=" || true   # 意図的エラー無視: 表示用
+    state_set "$STATUS_F" "STATE=stopped" "EXPIRES=" "EXPIRES_AT=" "REASON=${reason}" "BACKLOG=" || true   # 意図的エラー無視: 表示用（消した期限を残さない）
     rm -f "$COLLECTOR_F" 2>/dev/null || true                                    # 意図的エラー無視: 取得役の印を消す
     return 0
 }
@@ -640,7 +672,8 @@ cmd_start() {
     else
         state_set "$STATE_F" "ORG=${TARGET_ORG}" "USER_ID=${USER_ID}" "TRACE_FLAG_ID=${TF_ID}" || finish_auto_or_die 1 "手元の状態を書けません"
     fi
-    state_set "$STATUS_F" "STATE=collecting" "ORG=${TARGET_ORG}" "EXPIRES=${TF_EXPIRES}" "EXPIRES_AT=$(local_hm "$TF_EXPIRES")" "REASON=" || true   # 意図的エラー無視: 表示用
+    # WARNING= : 裏の準備のやり直し（retry_prepare）の「やり直しています」を消す
+    state_set "$STATUS_F" "STATE=collecting" "ORG=${TARGET_ORG}" "EXPIRES=${TF_EXPIRES}" "EXPIRES_AT=$(local_hm "$TF_EXPIRES")" "REASON=" "WARNING=" || true   # 意図的エラー無視: 表示用
 
     # 組織のログの量（8.6）
     vol=$(run sf data query --use-tooling-api --target-org "$TARGET_ORG" --json \
@@ -1139,7 +1172,8 @@ cmd_begin() {
     # 裏で準備し、成功したらそのまま取得役になる（本番・種類の確認・組織 ID の照らし合わせは、start --auto が行う）
     # 裏での起動のため run 不使用。端末の入力・出力から切り離す。ふつうの出力は、取得役が log で同じログに書くため捨て、
     # エラー出力（bash のエラーなど、log を通らないもの）は、このスクリプトのログに追記する（捨てると、裏の失敗を追えない）
-    nohup bash "${SCRIPT_DIR}/sf-log.sh" start --auto --collect -o "$TARGET_ORG" --owner "$OWNER" </dev/null >/dev/null 2>>"$LOG_FILE" &
+    #   --retry 1: 準備が失敗したら（「取らない」判断を除く）、持ち主が生きていれば、30 秒後に 1 回だけやり直す（retry_prepare）
+    nohup bash "${SCRIPT_DIR}/sf-log.sh" start --auto --collect --retry 1 -o "$TARGET_ORG" --owner "$OWNER" </dev/null >/dev/null 2>>"$LOG_FILE" &
     disown
     log "INFO" "Apex ログの準備を、裏で始めました（組織: ${TARGET_ORG}）。状態は、ランチャーに表示します。"
     exit 0

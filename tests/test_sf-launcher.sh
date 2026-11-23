@@ -151,4 +151,34 @@ test_apexlog_status_line() {
 }
 test_apexlog_status_line
 
+# ------------------------------------------------------------------------------
+# 準備中（starting）のあいだは、状態が変わったら、メニューを描き直す（コマンドは動かさない。read -t 5 秒ずつ）
+# ------------------------------------------------------------------------------
+test_apexlog_status_refresh() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] Apex ログ: 準備中のあいだの描き直し${CLR_RST}"
+    local td mb out t0 n
+    td=$(setup_force_dir); mb=$(setup_mock_bin)
+    export MOCK_CALL_LOG="$mb/calls.log"
+    create_all_mocks "$mb"
+    mkdir -p "$td/logs/apex"
+    printf 'STATE=starting\nORG=dev\n' > "$td/logs/apex/.status"
+    # 2 秒後に取得中へ変わる。入力の q は 8 秒後（その間に、5 秒の待ち切れが 1 回ある）
+    ( sleep 2; printf 'STATE=collecting\nORG=dev\nEXPIRES_AT=15:30\nCOUNT_TODAY=0\n' > "$td/logs/apex/.status" ) &
+    out=$(cd "$td" && { sleep 8; printf 'q'; } | PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-launcher.sh" 2>&1)
+    wait
+    [[ "$out" == *"Apex ログ: 準備中（dev）"* ]] && pass "最初は、準備中を表示する" || fail "最初は、準備中を表示する" "$out"
+    [[ "$out" == *"Apex ログ: 取得中（dev・期限 15:30・今日 0 本）"* ]] && pass "取得中に変わったら、メニューを描き直す" || fail "取得中に変わったら、メニューを描き直す" "$out"
+    n=$(printf '%s\n' "$out" | grep -c ">> Launcher <<")
+    assert_equals "$n" "2" "描き直しは 1 回だけ（取得中になったら、待ち切れで描き直さない）"
+    [[ ! -s "$mb/calls.log" ]] && pass "描き直しでは、コマンドを動かさない" || fail "描き直しでは、コマンドを動かさない" "$(cat "$mb/calls.log")"
+    # 準備中のままの EOF → すぐ終わる（待ち切れと取り違えない）
+    printf 'STATE=starting\nORG=dev\n' > "$td/logs/apex/.status"
+    t0=$SECONDS
+    out=$(cd "$td" && PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-launcher.sh" < /dev/null 2>&1); local ec=$?
+    assert_exit_ok $ec "準備中の EOF → 正常終了"
+    (( SECONDS - t0 < 4 )) && pass "準備中の EOF → 待たずに終わる" || fail "準備中の EOF → 待たずに終わる" "$((SECONDS - t0)) 秒"
+    teardown "$td" "$mb"
+}
+test_apexlog_status_refresh
+
 print_summary

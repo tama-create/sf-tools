@@ -21,6 +21,9 @@
 #      止まる: leave（最後の持ち主）・stop・持ち主が死んだ・上限の時間・印の入れ替わり（組織に何もしない）／
 #      leave: ほかの持ち主がいれば止めない／start --auto --owner: 登録・後始末の最中（CLOSING）は待つ・死んだ CLOSING は消す／
 #      別の組織の取得役が動いているときの pull は中断
+#   8. begin（sf-start の前面）: sf を呼ばない・答えがなければ 10・予約名 10・答えが on → 裏で準備して取得役になる／
+#      登録していない印の leave は何もしない／止めたら期限の表示を消す／
+#      裏の準備の失敗 → 1 回だけやり直す（成功したら WARNING を消す・失敗が続けば error・持ち主が死んでいればやり直さない）
 # ==============================================================================
 source "$(dirname "${BASH_SOURCE[0]}")/test_helper.sh"
 echo -e "${CLR_HEAD}=== sf-log.sh ===${CLR_RST}"
@@ -542,6 +545,54 @@ test_begin() {
     _run leave --owner "$MARK"
     p=$(_kv .collector PID)
     _wait_for 20 '[[ "$(_tf_count)" == "0" ]]' && pass "leave → 止めて、TraceFlag を消す" || fail "leave → 止めて、TraceFlag を消す"
+    _wait_for 10 '[[ "$(_kv .status STATE)" == "stopped" ]]'
+    assert_equals "$(_kv .status EXPIRES_AT)" "" "止めた → 期限の表示（EXPIRES_AT）を消す"
+    _done
+}
+
+# begin の裏の準備の失敗（sf の一時的な失敗）→ 1 回だけやり直す（2026-11-23 に実機で、sf の読み込みエラーで 1 回失敗した）
+test_begin_retry() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] begin: 裏の準備の失敗を 1 回だけやり直す${CLR_RST}"
+    _env
+    _live_mark
+    printf 'AUTO=on\nORG=dev\nORG_ID=\nVERSION=1\n' > "$TD/logs/apex/.consent"
+    _org_set "o.failOnce={'query:DebugLevel':'ModuleLoadError'}"
+    _run begin -o dev --owner "$MARK"
+    assert_exit_ok "$RC" "begin は 0（裏で準備を始めた）"
+    _wait_for 40 'p=$(_kv .collector PID); [[ -n "$p" ]] && _alive "$p" && [[ "$(_kv .status STATE)" == "collecting" ]]' \
+        && pass "1 回目の失敗 → やり直して、取得役になる" || fail "1 回目の失敗 → やり直して、取得役になる" "$(cat "$TD/logs/apex/.status" 2>/dev/null)"
+    assert_file_contains "$TD/sf-tools/logs/sf-log.log" "もう一度やります" "やり直すことを、ログに書く"
+    assert_equals "$(grep -c "FROM DebugLevel" "$MOCK_CALL_LOG")" "2" "DebugLevel の検索は 2 回（失敗 1 回・やり直し 1 回）"
+    assert_equals "$(_kv .status WARNING)" "" "やり直して成功 → 「やり直しています」を消す"
+    assert_equals "$(_tf_count)" "1" "TraceFlag は 1 つ"
+    _run leave --owner "$MARK"
+    _wait_for 20 '[[ "$(_tf_count)" == "0" ]]' >/dev/null
+    _done
+
+    # 失敗が続く → やり直しは 1 回だけ。.status は error
+    _env
+    _live_mark
+    printf 'AUTO=on\nORG=dev\nORG_ID=\nVERSION=1\n' > "$TD/logs/apex/.consent"
+    _org_set "o.fail={'query:DebugLevel':'ModuleLoadError'}"
+    _run begin -o dev --owner "$MARK"
+    _wait_for 40 '[[ "$(_kv .status STATE)" == "error" ]]' \
+        && pass "失敗が続く → .status を error にする" || fail "失敗が続く → .status を error にする" "$(cat "$TD/logs/apex/.status" 2>/dev/null)"
+    assert_equals "$(grep -c "FROM DebugLevel" "$MOCK_CALL_LOG")" "2" "失敗が続く → やり直しは 1 回だけ（DebugLevel の検索は 2 回）"
+    assert_equals "$(_tf_count)" "0" "失敗が続く → TraceFlag を作らない"
+    _done
+
+    # 持ち主が死んでいる → やり直さない
+    _env
+    printf 'AUTO=on\nORG=dev\nORG_ID=\nVERSION=1\n' > "$TD/logs/apex/.consent"
+    _org_set "o.fail={'query:DebugLevel':'ModuleLoadError'}"
+    _run start -o dev --auto --collect --retry 1 --owner "999999:1:dead"
+    assert_exit_fail "$RC" "持ち主が死んでいる → やり直さずに失敗"
+    assert_equals "$(grep -c "FROM DebugLevel" "$MOCK_CALL_LOG")" "1" "持ち主が死んでいる → DebugLevel の検索は 1 回"
+    # 引数の検査
+    _run start -o dev --auto --retry 1
+    assert_exit_fail "$RC" "--retry は --collect なしでは使えない"
+    _run start -o dev --auto --collect --retry 9 --owner "$MARK"
+    assert_exit_fail "$RC" "--retry 9 → 中断（0〜3）"
     _done
 }
 
@@ -557,5 +608,6 @@ test_collect_stops
 test_collect_extend
 test_register_owner
 test_begin
+test_begin_retry
 
 print_summary

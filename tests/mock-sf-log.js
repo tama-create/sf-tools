@@ -8,7 +8,8 @@
 //   - TraceFlag: ExpirationDate が「今から 30 秒」以内・StartDate 以前なら FIELD_INTEGRITY_EXCEPTION（今にはできない）
 //   - sf apex get log -n N: 全ユーザーのログの新しい順に N 本を、-d のフォルダに <ID>.log で書く。-i ID: その 1 本
 //   - 日時は「…000+0000」の形で返す
-// 失敗の注入: org.json の fail に「操作:オブジェクト」（例: "create:TraceFlag"・"query:ApexLog"・"getlog"）→ name を書く
+// 失敗の注入: org.json の fail に「操作:オブジェクト」（例: "create:TraceFlag"・"query:ApexLog"・"getlog"）→ name を書く。
+//   failOnce に書くと、1 回だけ失敗する
 // 取得の競合の注入: org.json の injectOnGetLog（ログの配列）を、最初の apex get log -n の直前に、ログに足す
 // ==============================================================================
 const fs = require('fs');
@@ -33,7 +34,11 @@ const parse = (s) => {
 const now = Date.now();
 org.seq = org.seq || 0;
 const newId = (p) => `${p}${String(++org.seq).padStart(12, '0')}AAA`;
-const failKey = (k) => org.fail && org.fail[k];
+// failOnce は 1 回だけ失敗する（使ったら消す。err が保存する）。sf の一時的な失敗のやり直しを確かめる
+const failKey = (k) => {
+    if (org.failOnce && org.failOnce[k]) { const n = org.failOnce[k]; delete org.failOnce[k]; return n; }
+    return org.fail && org.fail[k];
+};
 const values = () => {
     const o = {};
     (opt('--values') || '').split(' ').filter(Boolean).forEach(kv => { const i = kv.indexOf('='); o[kv.slice(0, i)] = kv.slice(i + 1); });

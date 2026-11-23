@@ -363,6 +363,7 @@ check_gh_owner "$GITHUB_OWNER"   # 認証ユーザーの一致確認
 - 未接続のとき: エイリアスを入力（空 Enter は再入力。`q` / EOF で中断）→ `sf alias unset vscodeOrg` → ログイン先の URL を選ぶ（`[1]` login / `[2]` test（Enter）/ `[3]` 組織の URL。`SF_INIT_LOGIN_URL_START` があれば質問しない。**エイリアスの名前では決めない**）→ `sf org logout` → `sf org login web`（WSL で wslview がなければ、`/tmp/sf-wsl-bin` にシムを一時生成してブラウザ起動）。ログインに失敗したら中断する（設定ファイルの書き込み・VS Code・ランチャーの起動は行わない）
 - `.sf/config.json` / `.sfdx/sfdx-config.json` を上書き（書き込めなければ中断）し、`code` があれば `code .` で VS Code を起動（なければ警告のみ）
 - バックグラウンドで `sf-install.sh` を実行（フック・リリースDir準備・npm install・ツール更新はすべて sf-install.sh が担当。完了は待たない）
+- Apex ログ（`~/sf-tools/bin/sf-log.sh` があるとき。`doc/sf-log-design.md` 5 章）: 持ち主の印 `SF_LOG_OWNER`（`PID:時刻:乱数`）を決め（外側の印の PID が生きていれば引き継ぐ = 入れ子）、`sf-log.sh begin -o <エイリアス> --owner <印>` を呼ぶ（sf を呼ばずにすぐ終わる。準備と取得役は裏）。0 かつ自分の印なら、`EXIT` トラップ（`_on_exit`）で `sf-log.sh leave --owner <印>` を呼ぶ。10 は何もしない・それ以外は WARNING。どれでも先へ進む
 - 続けて、前面で `sf-launcher.sh` を起動（`SF_LAUNCHER_ACTIVE=1` なら起動しない。二重起動の防止）
 - Ctrl+C は無効（`trap '' INT`。子の bash にも継承される）。終了コードは、ランチャー・バックグラウンドの sf-install.sh の結果によらず 0（中断・失敗は 1）
 - 前提: force-* フォルダで実行（`SF_INIT_MODE=1`（sf-job.sh 経由）なら確認を省略）。接続済みの組織を切り替えるときは `sf-restart.sh`
@@ -508,6 +509,7 @@ check_gh_owner "$GITHUB_OWNER"   # 認証ユーザーの一致確認
 - `SF_LAUNCHER_ACTIVE=1` をエクスポートして `sf-start.sh` からの二重起動を防止
 - `sf-launcher.sh <番号>` で、その番号を 1 回だけ実行して終了（終了コードは、実行したコマンドのもの。範囲外・スクリプトがなければ 1）
 - `sf-launcher.sh --fzf` で fzf モードも利用可能（fzf がなければ、警告を表示して終了コード 1）
+- メニューの見出しの下に、`print_apexlog_status` が `logs/apex/.status` の `STATE`・`ORG`・`EXPIRES_AT`・`COUNT_TODAY`・`REASON`・`WARNING` を `while read` で読み、1 行（と WARNING の 1 行）を表示する（source しない。ファイルがない・知らない STATE なら表示しない）
 
 ### 4.8 sf-deploy.sh
 
@@ -902,7 +904,7 @@ sf-init.sh --add-tier develop    # main+staging → main+staging+develop
 
 > 仕様の正本は、`bin/sf-log.sh` の冒頭コメント（`--help`）。設計は `doc/sf-log-design.md`（実機の確認の結果は 13.1）。ここは実装の要点。
 
-AI の開発サイクル用の Apex ログ取得（開発者向け。管理者向けの警告ボックスは不要）。2026-11-23 時点は第 2 段（手動の `start`・`pull`・`stop`・`status`・`auto` と、裏の取得役 `collect`・`leave`）。`sf-start`・`sf-restart`・ランチャーとのつなぎは、まだない。
+AI の開発サイクル用の Apex ログ取得（開発者向け。管理者向けの警告ボックスは不要）。2026-11-23 に第 3 段まで実装（手動の `start`・`pull`・`stop`・`status`・`auto`、裏の取得役 `collect`・`leave`、sf-start からの `begin`）。
 
 - **境界**: JSON の読み取り・判定・要約・日時は `lib/apexlog.js`（`summarize`・`list`・`tflist`・`time`）。シェルは、組織への問い合わせ・手元の状態・保存・終了コード
 - **手元の状態**: `logs/apex/` の `.state`・`.status`・`.consent`・`.owners`・`.index`（`キー=値`。`kv_get`・`kv_set`。書き換えは短いロック `mkdir logs/apex/.lock` の中で `state_set`）。取得は取得のロック `logs/apex/.fetch.lock`
@@ -911,7 +913,8 @@ AI の開発サイクル用の Apex ログ取得（開発者向け。管理者�
 - **要約の選び方**: `.index` から、`LAST_READ` より後（同じ秒は `LAST_READ_IDS` の ID を除く）。`--max` を超えたら新しいほう
 - **取得役（`cmd_collect`）**: `.collector`（PID・STARTED・ORG）。`TICK`（5 秒）ごとに、`owners_prune`（`kill -0`）→ 空なら `collector_finish`（CLOSING を書いて `do_cleanup … 1`）→ `MAX_RUN`（12 時間）→ `collector_should_quit`（`requests/stop`・CLOSING・印の入れ替わり）→ 間隔・`requests/pull.*`・取り残しで `fetch_round`（取得のロックが取れたときだけ）→ 追いついたら `respond_pulls`（`done.<ID>`）→ 残り 60 分未満なら `collector_extend`（`tflist` で ID・種類を確かめ、直前に `collector_should_quit`）。失敗は間隔を倍（最大 600）
 - **後始末（`do_cleanup`）**: `stop`・`leave`・取得役が共有。`stop_collector`（`requests/stop` → `STOP_WAIT` 秒 → TERM → 10 秒）→ `.state` の TraceFlag を消す → `.status` を stopped。戻り値 1 = 取得役が止まらない（TraceFlag を残す）/ 2 = 消せない。`stop`・`leave` は `.owners` に CLOSING を書いてから行い、最後に `.owners` を消す。`leave` は失敗しても 0
-- **持ち主の登録（`register_owner`）**: `start --auto --owner` が行う（設計の 5.1 では sf-start。ロックを 1 か所にまとめるため変えた）。生きている CLOSING は `CLOSING_WAIT`（60 秒）まで待ち、死んだ CLOSING は消す
+- **持ち主の登録（`register_owner`）**: `begin`（と `start --auto --owner`）が行う（ロックを 1 か所にまとめるため）。生きている CLOSING は `CLOSING_WAIT`（60 秒）まで待ち、死んだ CLOSING は消す。`leave` は、登録されていない印なら何もしない
+- **`begin`（sf-start の前面）**: sf を呼ばない（`start --auto` は実機で約 1 分かかったため）。予約名 → `consent_local`（`.consent` の `AUTO`・`ORG`（エイリアス）・`VERSION`。なければ、端末なら Y/N を聞く）→ `register_owner` → `.status` を starting → `nohup bash sf-log.sh start --auto --collect … & disown` → 0。裏の `start --auto` は `auto_consent`（尋ねない。`ORG_ID` が空なら書き、違えば答えを消して 10）のあと準備し、`--collect` なら `exec … collect`
 - **時間の設定**: `SF_LOG_INTERVAL`（既定 180）・`SF_LOG_MAX_SECONDS`（既定 43200）・`SF_LOG_TEST_FAST=1`（テスト用。間隔の下限 1・`TICK` 1・待ち時間を短く）
 - **`--auto`**: 終了コード 0 / 10（取らない）/ 1（失敗）。`finish_auto_or_die` で、手動は `die`、自動は `.status` に書いて終了コードで返す。確認は、端末でなければ聞かずに「取らない」（`read_key` の EOF の die を避ける。`$( )` の中で呼ぶ）
 

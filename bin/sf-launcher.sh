@@ -28,6 +28,10 @@
 #      VS Code のターミナル（環境変数 TERM_PROGRAM=vscode）では 6・7 を表示しない（番号 6・7 は範囲外になる）
 #   4. 選んだコマンドは、このスクリプトと同じフォルダの sf-xxx.sh を、引数なしで bash で実行する。
 #      スクリプトがなければ、警告を表示する
+#   5. メニューを表示するたびに、見出しの下に、Apex ログ（sf-log.sh）の状態を 1 行表示する（logs/apex/.status の STATE による:
+#      collecting = 取得中（組織・期限・今日の本数）/ starting = 準備中 / skipped = 取っていません / error = 取れていません /
+#      stopped = 止まっています。WARNING があれば、もう 1 行）。ファイルがない・STATE がそれ以外なら、何も表示しない。
+#      キー=値 の行を while read で読み、source しない
 #
 # 【前提条件】
 #   - force-* フォルダで実行する（処理の流れ 2）
@@ -86,10 +90,36 @@ unset _item
 # ------------------------------------------------------------------------------
 # メニュー表示
 # ------------------------------------------------------------------------------
+# Apex ログ（sf-log.sh）の状態を 1 行で表示する（logs/apex/.status。なければ何も表示しない。doc/sf-log-design.md 5.4）
+#   common.sh を読まないため、キー=値 の行を while read で読み、決まったキーだけを使う（source しない）
+print_apexlog_status() {
+    local f="logs/apex/.status" line k v state="" org="" at="" cnt="" reason="" warn="" text
+    [[ -f "$f" ]] || return 0
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        k="${line%%=*}"; v="${line#*=}"
+        case "$k" in
+            STATE) state="$v" ;; ORG) org="$v" ;; EXPIRES_AT) at="$v" ;; COUNT_TODAY) cnt="$v" ;;
+            REASON) reason="$v" ;; WARNING) warn="$v" ;;
+        esac
+    done < "$f"
+    case "$state" in
+        collecting) text="取得中（${org}${at:+・期限 ${at}}${cnt:+・今日 ${cnt} 本}）" ;;
+        starting)   text="準備中（${org}）" ;;
+        skipped)    text="取っていません${reason:+（${reason}）}" ;;
+        error)      text="取れていません${reason:+（${reason}）}" ;;
+        stopped)    text="止まっています${reason:+（${reason}）}" ;;
+        *)          return 0 ;;
+    esac
+    echo -e "${DIM}  Apex ログ: ${text}${RESET}"
+    [[ -n "$warn" ]] && echo -e "${YELLOW}  ⚠ Apex ログ: ${warn}${RESET}"
+    return 0
+}
+
 print_menu() {
     echo ""
     echo -e "${DIM}  ──────────────────────────────────────────────────${RESET}"
     echo -e "${BOLD}  >> Launcher <<${RESET}"
+    print_apexlog_status
     echo -e "${DIM}  ──────────────────────────────────────────────────${RESET}"
 
     local num=1

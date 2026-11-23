@@ -1,6 +1,6 @@
 # sf-log.sh 設計書（AI の開発サイクル用の Apex ログ取得）
 
-> **ステータス: 実装中（第 2 段まで。2026-11-23）。** `bin/sf-log.sh` に、手動の `start`（`--auto`・`--owner` を含む）・`pull`（取得役に頼む／いなければ自分で取る）・`stop`・`status`・`auto on|off` と、裏の取得役 `collect`・`leave` を実装した。要約・一覧の検査・日時の計算は `lib/apexlog.js`（テスト: `tests/test_sf-log.sh`・`tests/test_apexlog-js.sh`）。**まだないもの**: `sf-start.sh`・`sf-restart.sh`・ランチャーとのつなぎ（5 章。第 3 段）。
+> **ステータス: 実装済み（第 3 段まで。2026-11-23）。** `bin/sf-log.sh`（`begin`・`start`・`pull`・`stop`・`status`・`auto`・`collect`・`leave`）・`lib/apexlog.js`・`sf-start.sh` と `sf-launcher.sh` とのつなぎを実装した（テスト: `tests/test_sf-log.sh`・`tests/test_apexlog-js.sh`・`tests/test_sf-start.sh`・`tests/test_sf-launcher.sh`）。実機（Windows の Git Bash・開発用の Developer Edition）では、手動の段と取得役を確かめた。sf-start からの自動の流れの実機確認と、macOS・Linux での確認は、まだ（13.1）。
 > 経緯: 2026-11-21 に、旧設計（`sf-logwatch.sh`。10 秒ごとに見張り、Ctrl+C で止める、人が見る道具）を、AI が読む前提で作り直し、Codex のレビュー（4 回。8・7・3・0 件）を反映した。2026-11-22 に、TAMAさんの提案で、**ランチャーの起動中は裏で自動で取り続ける方式**を主な使い方にした（2 章）。
 > 下のコード片は、設計の段階の下書き。実装するときは、12 章の規約に合わせて書き直す。
 
@@ -267,26 +267,29 @@ bash ~/sf-tools/bin/sf-log.sh leave --owner <印>   # sf-start の終了時: 持
 
 ### 5.1 sf-start.sh の起動時
 
-`sf-start.sh` の処理の流れの 4（設定ファイルの書き込み・VS Code の起動）と 6（ランチャーの起動）の間に、次を足す。
+`sf-start.sh` の処理の流れの 5（sf-install.sh の裏での起動）と 7（ランチャーの起動）の間（6）に、次を足す。**sf-start の前面では、sf を呼ばない**（ランチャーを待たせないため。2026-11-23。13.3）。
 
 ```
  a. ~/sf-tools/bin/sf-log.sh がなければ、何もしない
  b. 持ち主の印を決める
-      環境変数 SF_LOG_OWNER（「PID:起動の時刻:乱数」）があり、その持ち主が生きている（sf-restart からの入れ子の sf-start）→ それを使う（登録はしない。外側が登録済み）
-      それ以外 → 自分の印を作り、export SF_LOG_OWNER=…。持ち主の一覧（9.2 の .owners）への登録は、c の start --auto --owner が行う
-      （ロックと CLOSING の待ちを、sf-log.sh の 1 か所にまとめるため。2026-11-23。同じ印は 2 回足さない）
- c. bash sf-log.sh start --auto --owner "$SF_LOG_OWNER" を実行する
-      0  → bash sf-log.sh collect を裏で起動する（下の「裏での起動」）
-           INFO「Apex ログを取っています（組織: …・期限: …）」
-      10 → INFO「Apex ログは取りません（理由）」（理由は sf-log.sh が表示する）。.status に理由を書く
-      1・その他 → WARNING「Apex ログを取れませんでした（sf-tools/logs/sf-log.log を参照）」。.status に「取れていません（理由）」を書く
-    どの場合も、ランチャーの起動に進む（ログの取得の失敗で、開発を止めない）
+      環境変数 SF_LOG_OWNER（「PID:起動の時刻:乱数」）があり、その PID が生きている（ランチャーの Start・Restart からの入れ子の sf-start）
+        → それを使う（後始末は外側が行う）
+      それ以外 → 自分の印を作り、export SF_LOG_OWNER=…
+ c. bash sf-log.sh begin -o <エイリアス> --owner "$SF_LOG_OWNER" を実行する（前面。sf を呼ばない）
+      begin: GitHub Actions 上・予約名 → 10。手元の答え（10.2）で「取らない」→ 10（初めて・エイリアスが変わったときは、ここで Y/N を聞く）。
+             持ち主の一覧（.owners）に印を足す（後始末の最中は最大 60 秒待つ）。.status を starting にし、
+             start --auto --collect を nohup で裏に起動して、0 で終わる
+      裏の start --auto: 本番・種類を確認できない組織 → 10。答えの組織 ID と違う → 10（答えを消す）。DebugLevel・TraceFlag を準備して、
+             .status を collecting にし、そのまま collect（取得役）になる（exec）。取らない・失敗は、.status に理由を書く
+    sf-start は、begin の終了コードで分ける: 0 → 自分の印なら、終了時に leave する（5.2）／10 → 何もしない（理由は sf-log.sh が表示）／
+    それ以外 → WARNING「Apex ログの準備を始められませんでした」。どの場合も、ランチャーの起動に進む（ログの取得の失敗で、開発を止めない）
 ```
 
-- 持ち主の印に、PID だけでなく起動の時刻と乱数を入れるのは、PID の再利用（5.5）と区別するため
-- `start --auto` の中の確認（10.2）は、`read_key` で Y/N を聞く（`q`・EOF は「取らない」扱い。`die` しない）
-- **裏での起動**: `nohup bash sf-log.sh collect </dev/null >/dev/null 2>&1 &` のあと `disown` する（端末の入力・出力から切り離し、端末を閉じたときの SIGHUP で一緒に止まらないようにする。止めるのは、持ち主の見張りと 5.2 の後始末）。Ctrl+C の無視（`trap '' INT`）も引き継がれる。`nohup`・`disown` が Windows の Git Bash・macOS・Linux で同じように効くかは、実機で確かめる（13.1）
-- `sf-start.sh` の冒頭コメント（【処理の流れ】【補足】）に、この流れを書く（CLAUDE.md 2.5）
+- 持ち主の印に、PID だけでなく起動の時刻と乱数を入れるのは、同じ PID の印が重ならないようにするため（生死は `kill -0` だけで見る。5.5）
+- 持ち主の一覧への登録は、sf-start ではなく `begin`（と `start --auto --owner`）が行う。ロックと CLOSING の待ちを、sf-log.sh の 1 か所にまとめるため。同じ印は 2 回足さない（入れ子の sf-start）
+- `begin` の確認（10.2）は、`read_key` で Y/N を聞く（`q` は「取らない」。端末でなければ聞かない。`read_key` の EOF の `die` で sf-start を止めないよう、`$( )` の中で呼ぶ）
+- **裏での起動**: `nohup bash sf-log.sh start --auto --collect … </dev/null >/dev/null 2>&1 &` のあと `disown` する（端末の入力・出力から切り離し、端末を閉じたときの SIGHUP で一緒に止まらないようにする。止めるのは、持ち主の見張りと 5.2 の後始末）。Ctrl+C の無視（`trap '' INT`）も引き継がれる。Windows の Git Bash では効くことを確かめた（13.1）。`nohup` では `$!` と、取得役が記録した PID が違うため、取得役の生死は `.collector` の PID で見る
+- `sf-start.sh` の冒頭コメント（【処理の流れ】）に、この流れを書く（CLAUDE.md 2.5）
 
 ### 5.2 sf-start.sh の終了時（ランチャーを q で閉じたとき）
 
@@ -601,7 +604,7 @@ force-*/logs/apex/
 | `.state` | `ORG`・`USER_ID`・`TRACE_FLAG_ID`（**sf-log.sh が作った** TraceFlag の ID）| `start`・`stop` |
 | | `LAST_FETCH`・`LAST_FETCH_ID`（取得のしおり: 最後に保存したログの開始時刻（UTC）と ID）・`SEEN_IDS`（直近に保存した ID） | 取得役（取得役がいないときだけ `pull`） |
 | | `LAST_READ`（前回の要約に入れた最も新しいログの開始時刻。UTC）・`LAST_READ_IDS`（その時刻と同じ秒に始まり、要約に入れたログの ID。カンマ区切り。同じ秒のログを、次の要約で落とさず・重ねないため） | `pull` |
-| `.status` | `STATE`（collecting / stopped / skipped / error）・`ORG`・`EXPIRES`・`LAST_FETCH`・`COUNT_TODAY`・`BACKLOG`（取り残しの目安）・`REASON`（取っていない理由）・`WARNING` | 取得役・`start --auto`・sf-start。ランチャーが読む（5.4） |
+| `.status` | `STATE`（starting / collecting / stopped / skipped / error）・`ORG`・`EXPIRES`（UTC）・`EXPIRES_AT`（表示用。PC の時刻の HH:MM。ランチャーは日時を計算しないため）・`LAST_FETCH`・`COUNT_TODAY`・`BACKLOG`（取り残しの目安）・`REASON`（取っていない理由）・`WARNING` | 取得役・`begin`・`start --auto`・`stop`・`leave`。ランチャーが読む（5.4） |
 | `.collector` | `PID`・`STARTED`（起動の時刻）・`ORG` | 取得役 |
 | `.owners` | 1 行に 1 つ、持ち主（起動中の sf-start）の印（`PID:起動の時刻:乱数`）。後始末の最中は `CLOSING=<印>` の行（5.2） | sf-start（足す）・`leave`（外す・`CLOSING` を書いて消す）・取得役（死んだものを外す）・`stop`（空にする・`CLOSING` を書いて消す） |
 | `.consent` | `AUTO`（on / off）・`ORG_ID`（答えた組織の ID）・`VERSION`（注意の文面の版）・`ANSWERED_AT` | `start --auto` の確認・`auto on|off` |
@@ -658,14 +661,15 @@ force-*/logs/apex/
 ### 10.2 AI への送信の確認
 
 - ログには、レコードの値・SOQL の条件・コールアウトの内容が載る。AI に読ませると、それが AI の提供元に送られる
-- **自動**: 次のどれかのとき、`start --auto` が次の注意を表示して、`read_key` で Y/N を聞く（`q`・EOF は N）。答えを `.consent` に保存し、同じ組織・同じ文面の版のあいだは、もう聞かない
+- **自動**: 次のどれかのとき、`begin`（sf-start の前面）が次の注意を表示して、`read_key` で Y/N を聞く（`q` は N。端末でなければ聞かずに「取らない」とし、答えを保存しない）。答えを `.consent`（`AUTO`・`ORG` = エイリアス・`ORG_ID`・`VERSION`）に保存し、同じエイリアス・同じ文面の版のあいだは、もう聞かない（sf を呼ばずに判定する。ランチャーを待たせないため。2026-11-23。13.3）
   - `.consent` がない（プロジェクトで初めて）
-  - つないだ組織の ID が、`.consent` の `ORG_ID` と違う（別の組織に切り替えた。データの扱いが違う組織かもしれないため）
+  - つないだ組織のエイリアスが、`.consent` の `ORG` と違う（別の組織に切り替えた）
+  - **同じエイリアスで、別の組織に入り直した**: `begin` では分からない（sf を呼ばないため）。裏の `start --auto` が、つないだ組織の ID を `.consent` の `ORG_ID` と照らし合わせ、違えば取らずに（10）答えを消す。ランチャーには「取っていません（同じエイリアスで、別の組織に入り直したため…）」と出て、次の sf-start で聞き直す。`ORG_ID` が空（答えた直後）なら、そのときの組織 ID を書く。同意のない組織のログは、手元に保存しない
   - 注意の文面の版（`VERSION`）が変わった（sf-tools の更新で、送るものや注意が変わったとき）
   - 「ランチャーの起動中、この組織の Apex ログを、裏で自動で手元に保存します。ログは AI に読ませる前提です。ダミーデータの組織で使ってください。本番のデータを写した Sandbox（Full・Partial）では、N を選んでください。あとから `sf-log.sh auto on|off` で変えられます」
 - **手動**: `start` のたびに、同じ注意を表示し、`ask_yn || die` で確認する（`-y` で省く）
 - `.consent` は、プロジェクト（force-* のフォルダ）ごとに 1 つ。答えは、最後に答えた組織の分だけを持つ（組織を行き来すると、そのたびに聞く。手間より、データの扱いの確認を優先する）。`logs/apex/` を消すと、次の `sf-start` で、もう一度聞く
-- `auto on|off` で変えたときは、その時点でつないでいる組織の ID を `ORG_ID` に書く
+- `auto on|off` で変えたときは、その時点でつないでいる組織のエイリアスを `ORG` に、ID を `ORG_ID` に書く
 - 開発者向けの道具のため、CLAUDE.md 2.4 の管理者向けの警告ボックスの対象外（`print_admin_warning` は使わない）
 
 ### 10.3 組織への書き込み
@@ -779,8 +783,8 @@ force-*/logs/apex/
 - [ ] DebugLevel・TraceFlag を扱う権限が足りないときの応答（システム管理者でないユーザーが要る）
 - [ ] **取得役と、人の sf の操作（デプロイなど）が同時に動いたとき**に、sf の認証情報の更新がぶつからないか（取得役が一定の間隔で sf を呼ぶため）
 - [ ] **PC の負荷**: 取得役の sf の起動の負荷（Windows・macOS）。Windows では sf の 1 回の起動が約 10 秒かかったため、既定の間隔を 180 秒にした（2026-11-23）。実際に使って、重ければ延ばす
-- [ ] **持ち主の見張り**: Windows の Git Bash・macOS・Linux で、`kill -0` が sf-start の生死を正しく返すか。`ps` でプロセスの起動の時刻を取れるか（取れない OS では、12 時間の上限だけで守る）
-- [ ] **裏での起動**: `nohup … &` と `disown` が、3 つの OS で効くか。ウィンドウを × で閉じたとき、取得役がどうなるか（残って後始末をするか・一緒に止まるか）
+- [ ] **持ち主の見張り**: `kill -0` が sf-start の生死を正しく返すか → **Windows の Git Bash で確認済み**（2026-11-23。持ち主の代わりの sleep と取得役で）。macOS・Linux は未確認。`ps` の起動の時刻は使わないことにした（13.3）
+- [ ] **裏での起動**: `nohup … &` と `disown` → **Windows の Git Bash で効いた**（2026-11-23。取得役が裏で動き続け、停止の依頼・leave で止まった）。**`nohup` では `$!` と、取得役が記録した PID が違った**（nohup が bash を子として起動するため）。そのため、取得役の生死は `.collector` の PID で見る（sf-start は `$!` を使わない）。macOS・Linux と、ウィンドウを × で閉じたときの動きは未確認
 - [x] **TraceFlag の種類とログの中身** → USER_DEBUG＋7 章の DebugLevel で、`System.debug` 以外の行（SOQL・DML・例外・制限）も出た。`sf apex trace create --help` の説明（「USER_DEBUG は System.debug だけ」）は、実機と合わない。USER_DEBUG のままにする（6.3）
 - [x] `ORDER BY StartTime ASC, Id ASC` が使えなかったときの代わり → 使えたので不要（8.3 から代わりの説明を外した）
 - [ ] sf-restart で組織を切り替えたとき、取得役が入れ替わり、前の組織の TraceFlag が消えるか
@@ -811,6 +815,7 @@ force-*/logs/apex/
   - 持ち主の一覧への登録は、sf-start ではなく `start --auto --owner` が行う（ロックと CLOSING の待ちを 1 か所にまとめる。5.1）
   - 持ち主・取得役の生死は `kill -0` だけで見る（PID の使い回しは、12 時間の上限で守る。5.5）
   - `status` は、`.status`（表示の状態）と `.state`（取得の記録）の同じ名前のキーを、見出しで分けて出す（実機で `ORG` が 2 回出たため）
+- 2026-11-23（第 3 段）: sf-start からは、前面で `start --auto` を呼ばず、**`begin`（sf を呼ばない）だけを呼び、準備と取得役は裏で行う**（5.1）。`start --auto` は sf を約 7 回呼び、実機で約 1 分かかったため（毎回ランチャーが 1 分遅れると、sf-start が使われず、ログも取られなくなる）。確認は手元の答えとエイリアスで判定し、同じエイリアスで別の組織に入り直したことは、裏で組織 ID を照らし合わせて見つける（10.2。TAMAさんの判断: 案 B）
 
 ### 13.4 後回しにするもの
 

@@ -12,7 +12,8 @@
 #   sf-log.sh auto on|off [-o ALIAS]                      # sf-start のときに自動で取るか（このプロジェクトの答え）を変える
 #   sf-log.sh start [-o ALIAS] [--level standard|detail] [--hours N] [-y]   # 取り始める（TraceFlag を作る・延ばす）
 #   sf-log.sh stop [-o ALIAS]                             # 止める（自分が作った TraceFlag を消す）
-#   sf-log.sh start --auto [--owner 印]                   # 内部用（sf-start.sh が呼ぶ。確認で止まらない）
+#   sf-log.sh begin -o ALIAS --owner 印                   # 内部用（sf-start.sh が前面で呼ぶ。sf を呼ばずに判定し、準備と取得役を裏で起動する）
+#   sf-log.sh start --auto [--collect] [--owner 印]       # 内部用（begin が裏で呼ぶ。尋ねない。--collect なら、成功のあと取得役になる）
 #   sf-log.sh collect                                     # 内部用（裏の取得役。sf-start.sh が裏で起動する）
 #   sf-log.sh leave --owner 印                            # 内部用（sf-start.sh の終了時。持ち主の一覧から外れる）
 #
@@ -22,7 +23,8 @@
 #   --hours N           : （start）TraceFlag の期限（時間）。1〜23 の整数（公式: 開始から 24 時間未満）。既定 2
 #   -y                  : （start）AI への送信の確認と、ほかの USER_DEBUG の TraceFlag を止める確認を省く（手動のみ）
 #   --auto              : （start）sf-start.sh からの自動の取り始め。終了コード 0 = 取り始めた／10 = 取らない／1 = 失敗
-#   --owner 印          : （start --auto・leave）持ち主（sf-start）の印。「PID:起動の時刻:英数字」（数字:数字:英数字）
+#   --owner 印          : （begin・start --auto・leave）持ち主（sf-start）の印。「PID:起動の時刻:英数字」（数字:数字:英数字）
+#   --collect           : （start --auto）準備が成功したら、同じプロセスで取得役（collect）になる（begin が使う）
 #   --max N             : （pull）要約に入れるログの数の上限（1 以上の整数。既定 50。超えたら新しいほうから）
 #   --since 分          : （pull）前回の pull を無視して、直近 N 分に始まったログを要約する（1 以上の整数）
 #   -v, --verbose       : コマンドの応答（出力）をコンソールにも表示する
@@ -34,9 +36,17 @@
 #     2. （start・pull）接続先が予約名（prod / staging / develop / main）・本番・種類を確認できない組織なら止める
 #        （手動: 中断／--auto: 終了コード 10）
 #     3. 自分のユーザー ID と組織 ID（sf org display user --json）
+#   begin（sf-start の前面。sf を呼ばない。ランチャーを待たせないため）:
+#     1. GitHub Actions 上・予約名 → 10
+#     2. このプロジェクトの答え（logs/apex/.consent の AUTO・ORG（エイリアス）・VERSION）で判定する。「取らない」→ 10。
+#        答えがない・エイリアスが変わった・注意の文面の版が変わったときは、注意を表示して Y/N で聞く（端末でない・q・N は「取らない」。
+#        端末でないときは、答えを保存しない）
+#     3. 持ち主の一覧に --owner の印を足す（後始末の最中なら、最大 60 秒待つ。終わらなければ 10）
+#     4. .status を starting にし、start --auto --collect を nohup で裏に起動して、すぐ 0 で終わる
 #   start:
-#     4. （--auto）GitHub Actions 上なら 10。このプロジェクトの答え（logs/apex/.consent）が「取らない」なら 10。
-#        答えがない・組織が変わった・注意の文面の版が変わったときは、注意を表示して Y/N で聞く（端末でない・q・N は「取らない」）
+#     4. （--auto）GitHub Actions 上なら 10。尋ねない: 答え（.consent）が「取る」で、エイリアスと文面の版が同じでなければ 10。
+#        答えの組織 ID（ORG_ID）が空なら、今の組織 ID を書く。違えば（同じエイリアスで別の組織に入り直した）、答えを消して 10
+#        （次の sf-start の begin で聞き直す。同意のない組織のログを取らない）
 #        （手動）注意を表示し、ask_yn || die（-y で省く）
 #        --owner があれば、持ち主の一覧（logs/apex/.owners）に足す（同じ印は 2 回足さない）。後始末の最中（CLOSING）なら、
 #        終わるまで最大 60 秒待つ（CLOSING の持ち主が死んでいれば消して進む。待っても終わらなければ 10）
@@ -51,6 +61,9 @@
 #     7. 組織を切り替えた（.state の ORG と違う）なら、前の組織の、sf-log.sh が作った TraceFlag を消す（消せなければ WARNING）
 #        .state に組織・ユーザー ID・TraceFlag の ID を書く（組織・ユーザーが変わったら、取得と要約の時刻を今にする）
 #     8. 組織のログの量を表示し、700MB を超えていれば WARNING（組織の上限は 1,000MB）
+#     9. .status に STATE=collecting・期限（EXPIRES は UTC・EXPIRES_AT は PC の時刻の HH:MM。ランチャーが表示する）を書く。
+#        --collect なら、同じプロセスで collect になる（exec）。
+#     （--auto で取らない・失敗のとき）.status に理由を書き、別の組織の取得役が動いていれば、止まるよう頼む（5.3）
 #   pull:
 #     4. 取得役（logs/apex/.collector の PID）が生きていれば、自分では取らず、依頼（logs/apex/requests/pull.<ID>）を置いて、
 #        自分の ID の応答（done.<ID>）を最大 90 秒待つ（待っても来なければ、手元にある分で要約し、その旨を書く）。
@@ -81,7 +94,7 @@
 #        d. TraceFlag の残りが 60 分未満なら、ID と種類を確かめてから、今から 2 時間に延ばす
 #        e. 5 分より古い依頼・応答を消す
 #   status: 取得役が動いているか、手元の状態（.status・.state）、持ち主の数、自分のユーザーの TraceFlag、自分のログの本数と合計を表示する（読み取りのみ）
-#   auto on|off: logs/apex/.consent の AUTO・ORG_ID・VERSION を書く（組織には書き込まない）
+#   auto on|off: logs/apex/.consent の AUTO・ORG（エイリアス）・ORG_ID・VERSION を書く（組織には書き込まない）
 #
 # 【前提条件】
 #   - force-* ディレクトリ（プロジェクトのルート）で実行すること
@@ -94,7 +107,7 @@
 #   - 手元のログ（logs/apex/）は Git の管理外。stop も消さない。消すときは、日付のフォルダを手で消す
 #   - 他の人のログは、本文を保存・記録・要約しない。sf apex get log -n の直後にできた他の人のログが
 #     logs/apex/.fetch/ に一瞬書かれることがあるが、中を読まずに消す（取得のたびに空にする）
-#   - sf-start.sh からの呼び出し（start --auto・collect の裏での起動・leave）と、ランチャーの表示は、まだない（設計 5 章。第 3 段で作る）
+#   - sf-start.sh が、ランチャーを開く前に begin、終了時に leave を呼ぶ（5 章）。ランチャーは .status を 1 行で表示する
 #   - 環境変数: SF_LOG_INTERVAL（取得の間隔。秒。30〜600。既定 180。sf の 1 回が約 10 秒かかるため。pull はすぐ取らせる）・
 #     SF_LOG_MAX_SECONDS（取得役の上限。秒。既定 43200 = 12 時間）・SF_LOG_TEST_FAST=1（テスト用。間隔の下限を 1 にし、待ち時間を短くする）
 #   - 持ち主の生死は kill -0 だけで見る（PID が使い回されたときは、12 時間の上限で止まる）
@@ -147,7 +160,7 @@ readonly ID_RE='^[A-Za-z0-9]{15}([A-Za-z0-9]{3})?$'
 readonly ISO_RE='^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$'
 
 CMD="${1:-}"
-[[ -n "$CMD" ]] || die "サブコマンドを指定してください（pull / status / auto / start / stop / collect / leave）。"
+[[ -n "$CMD" ]] || die "サブコマンドを指定してください（pull / status / auto / start / stop / collect / leave / begin）。"
 shift
 AUTO_ARG=""
 if [[ "$CMD" == "auto" ]]; then
@@ -155,7 +168,7 @@ if [[ "$CMD" == "auto" ]]; then
     [[ "$AUTO_ARG" == "on" || "$AUTO_ARG" == "off" ]] || die "auto には on か off を指定してください。"
     shift
 fi
-ORG_ARG=""; LEVEL="standard"; HOURS=2; YES=0; AUTO=0; OWNER=""; MAX_LOGS=50; SINCE_MIN=""
+ORG_ARG=""; LEVEL="standard"; HOURS=2; YES=0; AUTO=0; OWNER=""; MAX_LOGS=50; SINCE_MIN=""; COLLECT_AFTER=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -o)        [[ -n "${2:-}" && "${2:-}" != -* ]] || die "-o の値（組織のエイリアス）がありません。"; ORG_ARG="$2"; shift ;;
@@ -163,6 +176,7 @@ while [[ $# -gt 0 ]]; do
         --hours)   HOURS="${2:-}"; shift ;;
         -y)        YES=1 ;;
         --auto)    AUTO=1 ;;
+        --collect) COLLECT_AFTER=1 ;;
         --owner)   OWNER="${2:-}"; shift ;;
         --max)     MAX_LOGS="${2:-}"; shift ;;
         --since)   SINCE_MIN="${2:-}"; shift ;;
@@ -172,10 +186,12 @@ while [[ $# -gt 0 ]]; do
     shift
 done
 case "$CMD" in
-    start|pull|stop|status|auto|collect|leave) ;;
-    *) die "不明なサブコマンドです: ${CMD}（pull / status / auto / start / stop / collect / leave）" ;;
+    start|pull|stop|status|auto|collect|leave|begin) ;;
+    *) die "不明なサブコマンドです: ${CMD}（pull / status / auto / start / stop / collect / leave / begin）" ;;
 esac
-[[ "$CMD" != "leave" || -n "$OWNER" ]] || die "leave には --owner が要ります。"
+[[ ( "$CMD" != "leave" && "$CMD" != "begin" ) || -n "$OWNER" ]] || die "${CMD} には --owner が要ります。"
+[[ "$CMD" != "begin" || -n "$ORG_ARG" ]] || die "begin には -o が要ります。"
+[[ $COLLECT_AFTER -eq 0 || $AUTO -eq 1 ]] || die "--collect は start --auto だけに付けられます。"
 [[ "$LEVEL" == "standard" || "$LEVEL" == "detail" ]] || die "--level は standard か detail です: ${LEVEL}"
 [[ "$HOURS" =~ ^[0-9]+$ && "$HOURS" -ge 1 && "$HOURS" -le 23 ]] || die "--hours は 1〜23 の整数です: ${HOURS}"
 [[ "$MAX_LOGS" =~ ^[0-9]+$ && "$MAX_LOGS" -ge 1 ]] || die "--max は 1 以上の整数です: ${MAX_LOGS}"
@@ -258,12 +274,24 @@ state_set() {
 
 aj() { node "$AJS" "$@"; }   # lib/apexlog.js（境界は 1 か所）
 now_z() { aj time now; }
+# UTC の日時を、PC のタイムゾーンの HH:MM にする（ランチャーの表示用。ランチャーは日時を計算しない）
+local_hm() {
+    local t
+    t=$(aj time local "$1" 2>/dev/null) || return 0  # VAR=$(cmd) のため run 不使用
+    t="${t#*$'\t'}"
+    printf '%s:%s' "${t:0:2}" "${t:2:2}"
+}
 
 # 失敗・取らないときの終わり方。手動: die（取らない理由も中断）／--auto: .status に書いて、終了コードで返す
 #   引数: 終了コード（1 / 10） 理由
 finish_auto_or_die() {
     local code="$1" reason="$2"
     if [[ $AUTO -eq 1 ]]; then
+        # 別の組織の取得役が動いていれば、止まるよう頼む（つないでいない組織のログを取り続けないため。5.3。待たない）
+        local cpid; cpid=$(kv_get "$COLLECTOR_F" PID)  # VAR=$(cmd) のため run 不使用
+        if pid_alive "$cpid" && [[ -n "${TARGET_ORG:-}" && "$(kv_get "$COLLECTOR_F" ORG)" != "$TARGET_ORG" ]]; then
+            mkdir -p "$REQ_DIR" && : > "${REQ_DIR}/stop"
+        fi
         if [[ "$code" -eq 10 ]]; then
             log "INFO" "Apex ログは取りません（${reason}）。"
             state_set "$STATUS_F" "STATE=skipped" "REASON=${reason}" "ORG=${TARGET_ORG:-}" || true   # 意図的エラー無視: 表示用
@@ -429,11 +457,13 @@ prepare_org() {
 # ------------------------------------------------------------------------------
 NOTICE_TEXT="ログには、レコードの値・SOQL の条件・コールアウトの内容が載ります。ログは AI に読ませる前提で、読ませると AI の提供元に送られます。ダミーデータの組織で使ってください。本番のデータを写した Sandbox（Full・Partial）では、使わないでください。"
 
-# --auto の確認（10.2）。0 = 取る／1 = 取らない
-auto_consent() {
+# 確認（10.2）。begin（sf-start の前面）が、手元の答え（.consent の AUTO・ORG（エイリアス）・VERSION）だけで、その場で判定する
+#   （sf を呼ばない。ランチャーを待たせないため。2026-11-23。13.3）。答えがない・エイリアスが変わった・文面の版が変わったときだけ聞く。
+#   端末でない・q・N は「取らない」。0 = 取る／1 = 取らない
+consent_local() {
     local a o v ans
-    a=$(kv_get "$CONSENT_F" AUTO); o=$(kv_get "$CONSENT_F" ORG_ID); v=$(kv_get "$CONSENT_F" VERSION)  # VAR=$(cmd) のため run 不使用
-    if [[ -n "$a" && "$o" == "$ORG_ID" && "$v" == "$CONSENT_VERSION" ]]; then
+    a=$(kv_get "$CONSENT_F" AUTO); o=$(kv_get "$CONSENT_F" ORG); v=$(kv_get "$CONSENT_F" VERSION)  # VAR=$(cmd) のため run 不使用
+    if [[ -n "$a" && "$o" == "$TARGET_ORG" && "$v" == "$CONSENT_VERSION" ]]; then
         [[ "$a" == "on" ]] && return 0
         return 1
     fi
@@ -447,10 +477,29 @@ auto_consent() {
     # read_key は EOF で die するため、$( ) の中で呼ぶ（ランチャーを止めない）。q も「取らない」
     ans=$(read_key _k "  自動で取りますか？ [Y/N/q]: " "[YyNnQq]"; printf '%s' "${_k:-}") || ans=""  # VAR=$(cmd) のため run 不使用
     case "$ans" in
-        [Yy]) state_set "$CONSENT_F" "AUTO=on" "ORG_ID=${ORG_ID}" "VERSION=${CONSENT_VERSION}" "ANSWERED_AT=$(now_z)" || true; return 0 ;;
-        [Nn]|[Qq]) state_set "$CONSENT_F" "AUTO=off" "ORG_ID=${ORG_ID}" "VERSION=${CONSENT_VERSION}" "ANSWERED_AT=$(now_z)" || true; return 1 ;;
+        [Yy]) state_set "$CONSENT_F" "AUTO=on" "ORG=${TARGET_ORG}" "ORG_ID=" "VERSION=${CONSENT_VERSION}" "ANSWERED_AT=$(now_z)" || true; return 0 ;;
+        [Nn]|[Qq]) state_set "$CONSENT_F" "AUTO=off" "ORG=${TARGET_ORG}" "ORG_ID=" "VERSION=${CONSENT_VERSION}" "ANSWERED_AT=$(now_z)" || true; return 1 ;;
         *) return 1 ;;
     esac
+}
+
+# start --auto（裏）の確認。尋ねない。手元の答えが「取る」で、組織 ID が答えたときと同じなら 0
+#   組織 ID がまだ空（begin で答えた直後）なら、今の組織 ID を書く。違えば（同じエイリアスで別の組織に入り直した）、
+#   答えを消して 1（次の sf-start で、もう一度聞く。同意のない組織のログを取らない）。結果の理由: CONSENT_REASON
+CONSENT_REASON=""
+auto_consent() {
+    local a o oid v
+    a=$(kv_get "$CONSENT_F" AUTO); o=$(kv_get "$CONSENT_F" ORG); oid=$(kv_get "$CONSENT_F" ORG_ID); v=$(kv_get "$CONSENT_F" VERSION)  # VAR=$(cmd) のため run 不使用
+    if [[ -z "$a" || "$o" != "$TARGET_ORG" || "$v" != "$CONSENT_VERSION" ]]; then
+        CONSENT_REASON="この組織で自動で取るかの答えがないため（sf-start で聞きます）"; return 1
+    fi
+    if [[ "$a" != "on" ]]; then CONSENT_REASON="このプロジェクトでは、自動で取らない設定のため"; return 1; fi
+    if [[ -n "$oid" && "$oid" != "$ORG_ID" ]]; then
+        state_set "$CONSENT_F" "AUTO=" "ORG_ID=" || true   # 意図的エラー無視: 次の sf-start で聞き直す
+        CONSENT_REASON="同じエイリアスで、別の組織に入り直したため（次の sf-start で、もう一度聞きます）"; return 1
+    fi
+    if [[ -z "$oid" ]]; then state_set "$CONSENT_F" "ORG_ID=${ORG_ID}" || true; fi   # 意図的エラー無視: 次の照らし合わせに使う
+    return 0
 }
 
 debuglevel_values() {
@@ -561,7 +610,7 @@ cmd_start() {
     fi
     prepare_org full
     if [[ $AUTO -eq 1 ]]; then
-        auto_consent || finish_auto_or_die 10 "このプロジェクトでは、自動で取らない設定のため"
+        auto_consent || finish_auto_or_die 10 "$CONSENT_REASON"
     else
         log "WARNING" "$NOTICE_TEXT"
         if [[ $YES -eq 0 ]]; then ask_yn "${TARGET_ORG} の Apex ログを取り始めますか？" || die "中断しました。"; fi
@@ -591,7 +640,7 @@ cmd_start() {
     else
         state_set "$STATE_F" "ORG=${TARGET_ORG}" "USER_ID=${USER_ID}" "TRACE_FLAG_ID=${TF_ID}" || finish_auto_or_die 1 "手元の状態を書けません"
     fi
-    state_set "$STATUS_F" "STATE=collecting" "ORG=${TARGET_ORG}" "EXPIRES=${TF_EXPIRES}" "REASON=" || true   # 意図的エラー無視: 表示用
+    state_set "$STATUS_F" "STATE=collecting" "ORG=${TARGET_ORG}" "EXPIRES=${TF_EXPIRES}" "EXPIRES_AT=$(local_hm "$TF_EXPIRES")" "REASON=" || true   # 意図的エラー無視: 表示用
 
     # 組織のログの量（8.6）
     vol=$(run sf data query --use-tooling-api --target-org "$TARGET_ORG" --json \
@@ -603,6 +652,9 @@ cmd_start() {
     [[ "$n" =~ ^[0-9]+$ ]] && log "INFO" "  組織のログ: ${n} 本・$((s / 1024 / 1024))MB（上限 1,000MB）"
     if [[ "$s" -gt "$ORG_LOG_WARN_BYTES" ]]; then
         log "WARNING" "組織のログが 700MB を超えています。1,000MB を超えると、TraceFlag を作れなくなります。"
+    fi
+    if [[ $COLLECT_AFTER -eq 1 ]]; then
+        exec bash "${SCRIPT_DIR}/sf-log.sh" collect   # begin から裏で起動されたとき: 準備ができたら、そのまま取得役になる
     fi
     exit 0
 }
@@ -859,6 +911,11 @@ cmd_stop() {
 cmd_leave() {
     local n rc=0
     lock_take "$LOCK_DIR" 50 || { log "WARNING" "手元の状態のロックを取れませんでした。"; exit 0; }
+    if ! grep -qxF -- "$OWNER" "$OWNERS_F" 2>/dev/null; then  # 条件チェックのため run 不使用
+        lock_drop "$LOCK_DIR"
+        log "INFO" "持ち主の一覧に、この印はありません（何もしません）。"
+        exit 0   # 登録していない sf-start の終了で、ほかの人・手動の start の TraceFlag を消さない
+    fi
     n=$(owners_remove_locked "$OWNER")
     if [[ "$n" -gt 0 ]]; then
         lock_drop "$LOCK_DIR"
@@ -936,7 +993,7 @@ collector_extend() {
     now=$(now_z); newexp=$(aj time add "$now" --sec 7200)
     run sf data update record --use-tooling-api --sobject TraceFlag --record-id "$tf" --target-org "$TARGET_ORG" --json \
         --values "StartDate=${now} ExpirationDate=${newexp}" >/dev/null || return 1
-    state_set "$STATUS_F" "EXPIRES=${newexp}" "WARNING=" || true   # 意図的エラー無視: 表示用
+    state_set "$STATUS_F" "EXPIRES=${newexp}" "EXPIRES_AT=$(local_hm "$newexp")" "WARNING=" || true   # 意図的エラー無視: 表示用
     note_log "取得役: TraceFlag を延ばしました（期限 ${newexp}）"
     COLLECT_EXPIRES="$newexp"
 }
@@ -1054,7 +1111,7 @@ cmd_status() {
 
 cmd_auto() {
     prepare_org light
-    state_set "$CONSENT_F" "AUTO=${AUTO_ARG}" "ORG_ID=${ORG_ID}" "VERSION=${CONSENT_VERSION}" "ANSWERED_AT=$(now_z)" \
+    state_set "$CONSENT_F" "AUTO=${AUTO_ARG}" "ORG=${TARGET_ORG}" "ORG_ID=${ORG_ID}" "VERSION=${CONSENT_VERSION}" "ANSWERED_AT=$(now_z)" \
         || die "答えを書けませんでした。"
     if [[ "$AUTO_ARG" == "on" ]]; then
         log "SUCCESS" "このプロジェクトでは、sf-start のときに Apex ログを自動で取ります（組織: ${TARGET_ORG}）。"
@@ -1065,9 +1122,32 @@ cmd_auto() {
 }
 
 # ------------------------------------------------------------------------------
+# 10b. begin（5.1。sf-start の前面）: sf を呼ばずに判定し、準備と取得役を裏で起動する
+#   ランチャーを待たせないため（start --auto は sf を約 7 回呼び、実機で約 1 分かかった。2026-11-23。13.3）
+# ------------------------------------------------------------------------------
+cmd_begin() {
+    AUTO=1   # 取らないときは、終了コード 10 で返す（sf-start を止めない）
+    TARGET_ORG="$ORG_ARG"
+    if [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
+        log "INFO" "GitHub Actions の上では、Apex ログを取りません。"
+        exit 10
+    fi
+    is_reserved_org_alias "$TARGET_ORG" && finish_auto_or_die 10 "${TARGET_ORG} は共有環境（予約名）のため"
+    consent_local || finish_auto_or_die 10 "このプロジェクトでは、自動で取らない設定のため"
+    register_owner "$OWNER" || finish_auto_or_die 10 "前の後始末が終わらないため（${CLOSING_WAIT} 秒待ちました）"
+    state_set "$STATUS_F" "STATE=starting" "ORG=${TARGET_ORG}" "REASON=" "WARNING=" "EXPIRES=" "EXPIRES_AT=" "BACKLOG=" || true   # 意図的エラー無視: 表示用
+    # 裏で準備し、成功したらそのまま取得役になる（本番・種類の確認・組織 ID の照らし合わせは、start --auto が行う）
+    nohup bash "${SCRIPT_DIR}/sf-log.sh" start --auto --collect -o "$TARGET_ORG" --owner "$OWNER" </dev/null >/dev/null 2>&1 &  # 裏での起動のため run 不使用
+    disown
+    log "INFO" "Apex ログの準備を、裏で始めました（組織: ${TARGET_ORG}）。状態は、ランチャーに表示します。"
+    exit 0
+}
+
+# ------------------------------------------------------------------------------
 # 11. 入口
 # ------------------------------------------------------------------------------
 case "$CMD" in
+    begin)   cmd_begin ;;
     start)   cmd_start ;;
     pull)    cmd_pull ;;
     stop)    cmd_stop ;;

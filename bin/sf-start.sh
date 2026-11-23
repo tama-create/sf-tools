@@ -38,8 +38,16 @@
 #      sf-tools/release/{ブランチ}/ の準備と sf-tools/release/branch_name.txt の更新（main ブランチでは行わない）・
 #      npm install（package.json があるとき。node_modules/.package-lock.json が package-lock.json 以降に更新済みなら省略）・
 #      開発ツールの更新（sf-upgrade.sh。24 時間に 1 回）。詳細は sf-install.sh の冒頭コメント
-#   6. ~/sf-tools/bin/sf-launcher.sh があり、環境変数 SF_LAUNCHER_ACTIVE が 1 でなければ、前面で起動する
+#   6. Apex ログ（~/sf-tools/bin/sf-log.sh があるとき。AI が読むログを、ランチャーの起動中に裏で取る。doc/sf-log-design.md 5 章）:
+#        a. 持ち主の印を決める。環境変数 SF_LOG_OWNER（PID:起動の時刻:乱数）があり、その PID が生きていれば引き継ぐ
+#           （ランチャーの Start・Restart からの入れ子の sf-start）。それ以外は、自分の印を作って export する
+#        b. sf-log.sh begin -o {エイリアス} --owner {印} を実行する（sf を呼ばずにすぐ終わる。予約名・「自動で取らない」答えなら取らない。
+#           このプロジェクト・エイリアスで初めてのときは、AI への送信の注意を表示して Y/N で聞く）。取るときは、持ち主の一覧に登録し、
+#           TraceFlag の準備と取得役を裏で起動する。終了コード 0 = 始めた／10 = 取らない／それ以外 = 警告だけ（どれでも先に進む）
+#   7. ~/sf-tools/bin/sf-launcher.sh があり、環境変数 SF_LAUNCHER_ACTIVE が 1 でなければ、前面で起動する
 #      （sf-launcher.sh から呼ばれたときは、二重に起動しない）
+#   8. 終了時（ランチャーを q で閉じたとき・中断したとき）: 6 で自分の印を登録したときだけ、sf-log.sh leave --owner {印} を実行する
+#      （ほかの sf-start がなければ、取得役を止め、TraceFlag を消す。数十秒かかることがある。失敗は警告だけ）
 #
 # 【前提条件】
 #   - force-* フォルダ（カレントフォルダの名前が force- で始まる）で実行する。違えばエラーで終了する
@@ -93,7 +101,18 @@ check_sf_cli --cache
 
 trap '' INT  # Ctrl+C を無効化（q で中断すること。無視の設定は子プロセスにも継承される）
 # 終了時の後始末。run 不使用: EXIT トラップの中の後始末（失敗しても、終了コード・表示に影響させない）
-trap 'rm -rf /tmp/sf-wsl-bin 2>/dev/null' EXIT
+#   Apex ログ（sf-log.sh）: このプロセスが持ち主として登録したときだけ、leave で一覧から外れる（誰もいなければ、取得を止める。
+#   doc/sf-log-design.md 5.2）。入れ子の sf-start（ランチャーの Start・Restart から）は、外側の印を引き継ぐので、何もしない
+SF_LOG_SH="$HOME/sf-tools/bin/sf-log.sh"
+SF_LOG_LEAVE=0
+_on_exit() {
+    rm -rf /tmp/sf-wsl-bin 2>/dev/null
+    if [[ "$SF_LOG_LEAVE" -eq 1 && -f "$SF_LOG_SH" ]]; then
+        log "INFO" "Apex ログの後始末をしています（取得役を止め、TraceFlag を消します。数十秒かかることがあります）..."
+        bash "$SF_LOG_SH" leave --owner "$SF_LOG_OWNER" >/dev/null 2>&1 || log "WARNING" "Apex ログの後始末に失敗しました（sf-tools/logs/sf-log.log を参照）。"
+    fi
+}
+trap _on_exit EXIT
 
 # ------------------------------------------------------------------------------
 # 4. Salesforce 接続確認・ログイン
@@ -197,6 +216,27 @@ log "INFO" "  完了後に sf-tools/release/<branch>/ が準備されます（np
     fi
 ) >> "$LOG_FILE" 2>&1 &  # バックグラウンド起動のため run 不使用（出力は、このスクリプトのログに追記）
 disown   # ジョブ完了通知をターミナルに表示しない
+
+# ------------------------------------------------------------------------------
+# 6b. Apex ログ（sf-log.sh。AI が読むログを、ランチャーの起動中に裏で取る。doc/sf-log-design.md 5.1）
+#   begin は sf を呼ばずにすぐ終わり、準備（TraceFlag）と取得役は裏で動く。取れなくても、ランチャーの起動に進む
+# ------------------------------------------------------------------------------
+if [[ -f "$SF_LOG_SH" ]]; then
+    # 持ち主の印: 外側の sf-start の印が生きていれば引き継ぐ（入れ子。登録と後始末は外側が行う）。それ以外は、自分の印を作る
+    if [[ -n "${SF_LOG_OWNER:-}" ]] && kill -0 "${SF_LOG_OWNER%%:*}" 2>/dev/null; then  # 条件チェックのため run 不使用（外側の生死）
+        _sf_log_mine=0
+    else
+        export SF_LOG_OWNER="$$:$(date +%s):${RANDOM}${RANDOM}"
+        _sf_log_mine=1
+    fi
+    _sf_log_rc=0
+    bash "$SF_LOG_SH" begin -o "$ORG_ALIAS" --owner "$SF_LOG_OWNER" || _sf_log_rc=$?  # 確認の入力のため run 不使用（終了コードで分ける）
+    case "$_sf_log_rc" in
+        0)  [[ $_sf_log_mine -eq 1 ]] && SF_LOG_LEAVE=1 ;;   # 登録したので、終了時に leave する
+        10) : ;;                                              # 取らない（理由は sf-log.sh が表示した）
+        *)  log "WARNING" "Apex ログの準備を始められませんでした（sf-tools/logs/sf-log.log を参照）。" ;;
+    esac
+fi
 
 # ------------------------------------------------------------------------------
 # 7. ランチャ起動

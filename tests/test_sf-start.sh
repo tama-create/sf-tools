@@ -209,8 +209,60 @@ test_sf_cli_abort() {
     teardown "$td" "$mb" "$mh"
 }
 
+# Apex ログ（sf-log.sh）とのつなぎ: begin に印を渡し、登録したときだけ、終了時に同じ印で leave する（doc/sf-log-design.md 5 章）
+#   sf-log.sh は、呼ばれた引数を記録するだけの偽物にする（終了コードは SFLOG_RC）
+test_sf_log_begin_and_leave() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] Apex ログ（sf-log.sh begin / leave）${CLR_RST}"
+    local td mb mh out owner
+    setup_std_env td mb mh
+    create_all_mocks "$mb"
+    mkdir -p "$mh/sf-tools/bin"
+    printf '#!/bin/bash\nexit 0\n' > "$mh/sf-tools/bin/sf-launcher.sh"
+    printf '#!/bin/bash\necho "sflog $*" >> "%s"\nexit "${SFLOG_RC:-0}"\n' "$MOCK_CALL_LOG" > "$mh/sf-tools/bin/sf-log.sh"
+    echo '{"target-org":"testorg"}' > "$td/.sf/config.json"
+    export MOCK_SF_ORG_JSON='{"result":{"alias":"testorg","id":"00D000000000001AAA"}}'
+
+    # 0（始めた）→ begin に印を渡し、終了時に同じ印で leave
+    : > "$MOCK_CALL_LOG"
+    (cd "$td" && unset SF_LOG_OWNER && HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-start.sh" >/dev/null 2>&1)
+    owner=$(grep "^sflog begin" "$MOCK_CALL_LOG" | sed 's/.*--owner //')
+    [[ "$owner" =~ ^[0-9]+:[0-9]+:[0-9]+$ ]] && pass "begin に、自分の印（PID:時刻:乱数）を渡す" || fail "begin に、自分の印（PID:時刻:乱数）を渡す" "$(cat "$MOCK_CALL_LOG")"
+    assert_file_contains "$MOCK_CALL_LOG" "sflog begin -o testorg --owner" "begin に、接続先のエイリアスを渡す"
+    assert_file_contains "$MOCK_CALL_LOG" "sflog leave --owner ${owner}" "終了時に、同じ印で leave する"
+    # begin の前に、ランチャーの起動はしない（begin → launcher の順）。leave はランチャーのあと
+    # 10（取らない）→ leave しない
+    : > "$MOCK_CALL_LOG"
+    (cd "$td" && unset SF_LOG_OWNER && SFLOG_RC=10 HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-start.sh" >/dev/null 2>&1)
+    assert_file_contains "$MOCK_CALL_LOG" "sflog begin" "取らない（10）でも、begin は呼ぶ"
+    assert_file_not_contains "$MOCK_CALL_LOG" "sflog leave" "取らない（10）→ leave しない（登録していないため）"
+    # 失敗（1）→ 警告を出して進む・leave しない
+    : > "$MOCK_CALL_LOG"
+    out=$(cd "$td" && unset SF_LOG_OWNER && SFLOG_RC=1 HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-start.sh" 2>&1)
+    assert_exit_ok $? "begin の失敗でも、sf-start は 0 で終わる"
+    assert_output_contains "$out" "Apex ログの準備を始められませんでした" "begin の失敗 → 警告を表示する"
+    assert_file_not_contains "$MOCK_CALL_LOG" "sflog leave" "begin の失敗 → leave しない"
+    # 入れ子（外側の印が生きている）→ 印を引き継ぎ、leave しない
+    : > "$MOCK_CALL_LOG"
+    (cd "$td" && SF_LOG_OWNER="$$:1:outer" HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-start.sh" >/dev/null 2>&1)
+    assert_file_contains "$MOCK_CALL_LOG" "sflog begin -o testorg --owner $$:1:outer" "入れ子 → 外側の印を引き継ぐ"
+    assert_file_not_contains "$MOCK_CALL_LOG" "sflog leave" "入れ子 → leave しない（後始末は外側）"
+    # 外側の印が死んでいる → 自分の印を作る
+    : > "$MOCK_CALL_LOG"
+    local dead; bash -c 'exit 0' & dead=$!; wait "$dead"
+    (cd "$td" && SF_LOG_OWNER="${dead}:1:old" HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-start.sh" >/dev/null 2>&1)
+    assert_file_not_contains "$MOCK_CALL_LOG" "--owner ${dead}:1:old" "外側の印が死んでいる → 引き継がない"
+    assert_file_contains "$MOCK_CALL_LOG" "sflog leave" "外側の印が死んでいる → 自分で登録し、終了時に leave する"
+    # sf-log.sh がない → 呼ばない
+    rm -f "$mh/sf-tools/bin/sf-log.sh"; : > "$MOCK_CALL_LOG"
+    (cd "$td" && unset SF_LOG_OWNER && HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-start.sh" >/dev/null 2>&1)
+    assert_file_not_contains "$MOCK_CALL_LOG" "sflog" "sf-log.sh がない → 何もしない"
+    unset MOCK_SF_ORG_JSON
+    teardown "$td" "$mb" "$mh"
+}
+
 test_launcher_called
 test_sf_cli_abort
 test_outside_force_dir
+test_sf_log_begin_and_leave
 
 print_summary

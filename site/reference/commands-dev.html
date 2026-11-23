@@ -97,7 +97,9 @@ sf-job.sh [--project XXXX] [--owner OWNER]</code></pre>
   </li>
   <li><code>.sf/config.json</code> と <code>.sfdx/sfdx-config.json</code> を、そのエイリアスで上書きする（書き込めなければ中断）。<code>code .</code> で VS Code を起動する（<code>code</code> コマンドがなければ、警告だけで先へ進む）</li>
   <li><a href="commands-auto.html#sf-install"><code>sf-install.sh</code></a> を、バックグラウンドで実行する（出力は、<code>sf-start.sh</code> のログに追記）。内容は、<code>~/sf-tools</code> の <code>git pull</code>・設定ファイル（<code>metadata.txt</code>・<code>branches.txt</code>）の確認・Git フック（<code>pre-commit</code> / <code>pre-push</code>）の設置・リリース用フォルダの準備と <code>branch_name.txt</code> の更新（<code>main</code> ブランチでは行わない）・<code>npm install</code>（<code>package.json</code> があるとき。更新済みなら省略）・開発ツールの更新（<code>sf-upgrade.sh</code>。24 時間に 1 回）</li>
+  <li>Apex ログを、ランチャーの起動中に裏で取る準備をする（<a href="#sf-log"><code>sf-log.sh</code></a> があるとき）。このプロジェクト・この組織のエイリアスで初めてのときだけ、AI への送信の注意を表示して「自動で取るか」を聞きます（Y/N）。取るときは、ログを出させる設定（TraceFlag）の準備と取得を、<strong>裏で</strong>始めます（ランチャーは待たずに開きます）。共有環境の組織・本番の組織・「取らない」と答えたときは、取りません。取れなくても、先へ進みます</li>
   <li>最後に、ランチャー（<code>sf-launcher.sh</code>）を前面で起動する（ランチャーから呼ばれたときは、二重に起動しない）</li>
+  <li>終わるとき（ランチャーを <code>q</code> で閉じたとき）は、ほかに起動中の <code>sf-start.sh</code> がなければ、Apex ログの取得を止め、TraceFlag を消します（数十秒かかることがあります）</li>
 </ol>
 <h3>補足</h3>
 <ul>
@@ -118,6 +120,7 @@ sf-launcher.sh --fzf     # fzf でインクリメンタル検索</code></pre>
 <p>sf-tools の日常のコマンドを、メニューから選んで実行できます。<code>sf-start.sh</code> の最後に自動で起動します（手動でも実行できます）。<code>force-*</code> フォルダの中で使います。</p>
 <pre><code>  ──────────────────────────────────────────────────
   >> Launcher <<
+  Apex ログ: 取得中（dev-tama・期限 15:30・今日 23 本）
   ──────────────────────────────────────────────────
   [1] Check      ターゲットファイルの構文チェック
   [2] Push       変更をコミット & プッシュ
@@ -137,6 +140,7 @@ sf-launcher.sh --fzf     # fzf でインクリメンタル検索</code></pre>
   <li>フォルダの名前が <code>force-</code> で始まらなければ、警告を表示して終了します（終了コード 1。<code>-h</code> は、フォルダの外でも動きます）。</li>
   <li>メニューと <code>--fzf</code> の中では、実行したコマンドが失敗しても、ランチャーは終了しません。</li>
   <li>終了コードは、メニューを <code>q</code>・EOF で終了したとき・<code>--fzf</code> を Esc で終了したときが <code>0</code>、番号を指定したときは、実行したコマンドの終了コードです（番号が範囲外・スクリプトがないときは <code>1</code>）。</li>
+  <li>見出しの下の「Apex ログ」の 1 行は、<a href="#sf-log"><code>sf-log.sh</code></a> の状態です（取得中・準備中・取っていません・取れていません・止まっています。注意があれば、もう 1 行）。<code>logs/apex/.status</code> がなければ、表示しません。メニューを表示するたびに、読み直します。</li>
   <li>ランチャーは、ログファイルを作りません（共通のライブラリを読み込まない、単独の設計です）。</li>
 </ul>
 
@@ -405,7 +409,7 @@ sf-log.sh auto on|off [-o ALIAS]</code></pre>
   <li>AI が <code>sf-log.sh pull</code> を実行し、<code>logs/apex/latest.md</code> を読む（新しいログを取ってから、要約を作ります。組織には書き込みません）</li>
   <li>作業が終わったら、人が <code>sf-log.sh stop</code> を実行する（作った TraceFlag を消します）</li>
 </ol>
-<p>裏で取り続ける「取得役」（<code>sf-log.sh collect</code>）はできていますが、<code>sf-start.sh</code> から自動で取り始め、ランチャーを閉じたときに止める仕組みは、まだありません（作っている途中です）。いまは、上の手順で、人が <code>start</code> と <code>stop</code> を実行します。TraceFlag は、延ばさなければ期限（既定 2 時間）で切れます。</p>
+<p><strong>ふだんは、<code>sf-start.sh</code>（とランチャー）を使うだけで、自動で取られます。</strong><code>sf-start.sh</code> が、ランチャーを開く前に、裏で取り始め（初めてのときだけ「自動で取るか」を聞きます）、ランチャーを閉じると止めます。ランチャーの見出しの下に、状態が 1 行出ます。AI は、必要なときに <code>sf-log.sh pull</code> を実行するだけです。<code>sf-start.sh</code> を使わない場面では、上の手順のとおり、人が <code>start</code> と <code>stop</code> を実行します。</p>
 <h3>サブコマンド</h3>
 <ul>
   <li><code>start</code>: ログの詳しさの設定（DebugLevel <code>sf_tools_log_standard</code> など）を作るか上書きし、自分のユーザーの TraceFlag（種類 <code>USER_DEBUG</code>）を作ります。<code>sf-log.sh</code> が前に作ったものがあれば、作り直さずに期限を延ばします。
@@ -418,7 +422,7 @@ sf-log.sh auto on|off [-o ALIAS]</code></pre>
   <li><code>pull</code>: 前回の続きから、新しいログを古い順に取って保存し、前回の要約より後に始まったログの要約を作ります。要約には、エラー（行番号つき）・ログの一覧・<code>System.debug</code> の出力・入力規則のエラー・上限の 50% を超えた制限の使用量が、この順に入ります。取れなかったもの（読めなかったログ・20MB で切り詰められたログ・1 行も出なかった区分など）も、隠さずに書きます。<code>--max</code>（既定 50）を超えたときは、新しいほうから入れ、入れなかった本数を要約の先頭に書きます。<code>--since 分</code> で、直近の分を入れ直せます。</li>
   <li><code>stop</code>: <code>sf-log.sh</code> が作った TraceFlag だけを消します。ほかの TraceFlag・ログの詳しさの設定・手元のログは消しません。</li>
   <li><code>status</code>: 取得役が動いているか、手元の状態、自分のユーザーの TraceFlag（<code>sf-log.sh</code> が作ったものに印が付きます）、組織にある自分のログの本数を表示します（読み取りのみ）。</li>
-  <li><code>auto on|off</code>: このプロジェクトで、<code>sf-start.sh</code> のときに自動で取るかの答えを変えます（自動で取り始める仕組みは、まだありません）。</li>
+  <li><code>auto on|off</code>: このプロジェクトで、<code>sf-start.sh</code> のときに自動で取るかの答えを変えます（<code>off</code> にしても、動いている取得は止めません。次の <code>sf-start.sh</code> から効きます）。</li>
 </ul>
 <h3>補足</h3>
 <ul>

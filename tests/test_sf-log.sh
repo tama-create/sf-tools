@@ -181,12 +181,19 @@ test_start_auto() {
     _run start -o dev --auto
     assert_equals "$RC" "10" "auto off → 10"
     _has "$OUT" "自動で取らない設定" "auto off の理由を表示する"
-    # 組織が違う → 聞き直す（端末でないので取らない）
+    # 同じエイリアスで、答えたときと別の組織 → 取らず、答えを消す（次の sf-start の begin で聞き直す）。start --auto は尋ねない
     _run auto on -o dev
     _org_set "o.orgId='00D000000000009AAA'"
     _run start -o dev --auto
-    assert_equals "$RC" "10" "答えた組織と違う → 聞き直す（端末でない → 10）"
-    _has "$OUT" "自動で手元に保存できます" "組織が違う → 注意を表示する"
+    assert_equals "$RC" "10" "答えた組織 ID と違う → 10（取らない）"
+    _has "$OUT" "別の組織に入り直した" "組織 ID が違う理由を表示する"
+    assert_equals "$(_kv .consent AUTO)" "" "組織 ID が違う → 答えを消す（次の sf-start で聞き直す）"
+    assert_equals "$(_org '(o.traceFlags||[]).length')" "1" "組織 ID が違う → 新しい組織に TraceFlag を作らない（前の 1 つのまま）"
+    # 組織 ID がまだ空（begin で答えた直後）→ 取る。今の組織 ID を書く
+    printf 'AUTO=on\nORG=dev\nORG_ID=\nVERSION=1\n' > "$TD/logs/apex/.consent"
+    _run start -o dev --auto
+    assert_exit_ok "$RC" "答えの組織 ID が空 → 取る"
+    assert_equals "$(_kv .consent ORG_ID)" "00D000000000009AAA" "答えの組織 ID が空 → 今の組織 ID を書く"
     _done
 
     # ほかの USER_DEBUG → 触らずに 10
@@ -501,6 +508,43 @@ test_register_owner() {
     _done
 }
 
+test_begin() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] begin（sf-start の前面。sf を呼ばない）${CLR_RST}"
+    _env
+    _live_mark
+    : > "$MOCK_CALL_LOG"
+    _run begin -o dev --owner "$MARK"
+    assert_equals "$RC" "10" "答えがなく、端末でない → 10"
+    assert_file_not_exists "$TD/logs/apex/.consent" "端末でない → 答えを保存しない"
+    assert_file_not_contains "$TD/logs/apex/.owners" "$MARK" "取らない → 持ち主として登録しない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "sf data" "begin は、組織に問い合わせない（sf を呼ばない）"
+    _run begin -o develop --owner "$MARK"
+    assert_equals "$RC" "10" "予約名 → 10"
+    _run begin -o dev
+    assert_exit_fail "$RC" "--owner なし → 中断"
+    _run begin --owner "$MARK"
+    assert_exit_fail "$RC" "-o なし → 中断"
+    # 答えが on → すぐ 0 で終わり、裏で準備してから取得役になる
+    printf 'AUTO=on\nORG=dev\nORG_ID=\nVERSION=1\n' > "$TD/logs/apex/.consent"
+    _run begin -o dev --owner "$MARK"
+    assert_exit_ok "$RC" "答えが on → 0（裏で準備を始めた）"
+    _has "$OUT" "裏で始めました" "裏で始めたことを表示する"
+    assert_file_contains "$TD/logs/apex/.owners" "$MARK" "持ち主として登録する"
+    _wait_for 40 'p=$(_kv .collector PID); [[ -n "$p" ]] && _alive "$p" && [[ "$(_kv .status STATE)" == "collecting" ]]' \
+        && pass "裏で TraceFlag を準備し、そのまま取得役になる" || fail "裏で TraceFlag を準備し、そのまま取得役になる" "$(cat "$TD/logs/apex/.status" 2>/dev/null)"
+    assert_equals "$(_tf_count)" "1" "裏で TraceFlag を作る"
+    [[ "$(_kv .status EXPIRES_AT)" =~ ^[0-9]{2}:[0-9]{2}$ ]] && pass ".status に、期限の表示用の時刻（HH:MM）を書く" || fail ".status に、期限の表示用の時刻（HH:MM）を書く" "$(_kv .status EXPIRES_AT)"
+    assert_equals "$(_kv .consent ORG_ID)" "00D000000000001AAA" "裏の start --auto が、答えに組織 ID を書く"
+    # 登録していない印の leave → 何もしない
+    _run leave --owner "1:1:notmine"
+    _has "$OUT" "この印はありません" "登録していない印の leave → 何もしない"
+    assert_equals "$(_tf_count)" "1" "登録していない印の leave → TraceFlag は残る"
+    _run leave --owner "$MARK"
+    p=$(_kv .collector PID)
+    _wait_for 20 '[[ "$(_tf_count)" == "0" ]]' && pass "leave → 止めて、TraceFlag を消す" || fail "leave → 止めて、TraceFlag を消す"
+    _done
+}
+
 test_start_basic
 test_start_other_traceflags
 test_start_auto
@@ -512,5 +556,6 @@ test_collect_basic
 test_collect_stops
 test_collect_extend
 test_register_owner
+test_begin
 
 print_summary

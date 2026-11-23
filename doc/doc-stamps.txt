@@ -15,6 +15,7 @@ site/reference/commands-dev.html | bin/sf-push.sh | 1125921469-4600 | b2034a6
 site/reference/commands-dev.html | bin/sf-next.sh | 3773425382-4882 | b2034a6
 site/reference/commands-dev.html | bin/sf-restart.sh | 3849369820-2445 | b2034a6
 site/reference/commands-dev.html | bin/sf-hook.sh | 4023496098-3227 | b2034a6
+site/reference/commands-dev.html | bin/sf-log.sh | 285139357-7740 | fc7ccbd
 site/reference/commands-dev.html | bin/sf-unhook.sh | 756720157-1896 | b2034a6
 
 site/reference/commands-auto.html | bin/sf-install.sh | 1635151198-6746 | 6c904c7

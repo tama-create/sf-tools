@@ -1,0 +1,350 @@
+#!/bin/bash
+# ==============================================================================
+# test_sf-log.sh - sf-log.sh のテスト
+# ==============================================================================
+# 偽の sf（tests/mock-sf-log.js。小さな偽の組織。2026-11-23 に開発組織で確かめた TraceFlag の動きをまねる）で確かめる。
+# 設計: doc/sf-log-design.md 12 章（テスト）
+#
+# 【テストケース】
+#   1. start: DebugLevel を作る・上書きする／TraceFlag を作る・自分のものは延ばす（作り直さない）／.state・.status
+#   2. start: ほかの USER_DEBUG は、確認のあと「元の期限と今から 2 分後の早いほう」に縮め、その 1 秒後から作る（延ばさない）／
+#      N なら何も変えない／2 つ以上なら止まる／DEVELOPER_LOG には触れない／縮めたあとの作成の失敗は、元に戻さず書く
+#   3. start --auto: 答えがない・端末でない → 10（答えを保存しない）／auto on → 0／auto off → 10／組織が違う → 聞き直す／
+#      ほかの USER_DEBUG → 触らずに 10／予約名・本番 → 10（手動は中断）
+#   4. 引数の誤り（--hours・--level・--max・--since・--owner・不明なオプション・サブコマンド・--auto を pull に）
+#   5. pull: 自分のログだけを保存し、要約を作る／取りたいログより新しいログがすべて自分のものなら -n、混ざれば -i／
+#      -n の直後にできた他の人のログは保存せず、押し出された自分のログは -i で取る／想定しない名前のファイル → 失敗／
+#      一覧の失敗 → 失敗（name だけを記録）／他の人の ID を sf-log.log に残さない／51 本以上（何回かに分ける）／
+#      --max・--since・2 回目は新しいものだけ
+#   6. stop: 自分の TraceFlag だけを消す・手元のログは残す・ないとき・すでに消えているとき／status・auto on|off
+# ==============================================================================
+source "$(dirname "${BASH_SOURCE[0]}")/test_helper.sh"
+echo -e "${CLR_HEAD}=== sf-log.sh ===${CLR_RST}"
+
+SFLOG="$SF_TOOLS_DIR/bin/sf-log.sh"
+MOCKJS="$SF_TOOLS_DIR/tests/mock-sf-log.js"
+ME="005000000000001AAA"
+OTHER="005000000000002AAA"
+
+# 文字どおりに含むか（[ ] などを grep の正規表現として読ませないため）
+_has()   { [[ "$1" == *"$2"* ]] && pass "$3" || fail "$3" "'$2' が出力に含まれていない"; }
+_hasnt() { [[ "$1" == *"$2"* ]] && fail "$3" "'$2' が出力に含まれている" || pass "$3"; }
+
+# テストの環境を作る。結果: TD（force-* のフォルダ）・MB（偽の sf）・FK（偽の組織）
+_env() {
+    TD=$(setup_force_dir); MB=$(setup_mock_bin); FK=$(mktemp -d "${TMPDIR:-/tmp}/fake-org-XXXX")
+    export MOCK_CALL_LOG="$MB/calls.log"; : > "$MOCK_CALL_LOG"
+    # Windows の Node が読めるよう、パスを Windows の形にしてから渡す（cygpath がない OS では、そのまま）
+    cat > "$MB/sf" <<EOF
+#!/bin/bash
+FAKE_ORG=\$(cygpath -m "\$FAKE_ORG" 2>/dev/null || printf '%s' "\$FAKE_ORG")
+MOCK_CALL_LOG=\$(cygpath -m "\$MOCK_CALL_LOG" 2>/dev/null || printf '%s' "\$MOCK_CALL_LOG")
+export FAKE_ORG MOCK_CALL_LOG
+exec node "$MOCKJS" "\$@"
+EOF
+    chmod +x "$MB/sf"
+    printf '{"userId":"%s","orgId":"00D000000000001AAA","orgType":"Developer Edition"}\n' "$ME" > "$FK/org.json"
+}
+_done() { teardown "$TD" "$MB" "$FK"; }
+
+# sf-log.sh を実行する（標準入力は、既定で空 = 端末でない）。結果: OUT・RC
+_run() {
+    OUT=$(cd "$TD" && FAKE_ORG="$FK" PATH="$MB:$PATH" SF_TOOLS_SF_CHECK_STAMP="$FK/stamp" bash "$SFLOG" "$@" 2>&1 < /dev/null); RC=$?
+}
+# 標準入力に文字を渡して実行する。引数: 入力 引数...
+_run_in() {
+    local in="$1"; shift
+    OUT=$(cd "$TD" && printf '%s' "$in" | FAKE_ORG="$FK" PATH="$MB:$PATH" SF_TOOLS_SF_CHECK_STAMP="$FK/stamp" bash "$SFLOG" "$@" 2>&1); RC=$?
+}
+# 偽の組織を JavaScript で読む・書く。引数: 式（o が状態）。書くときは _org_set
+_org()     { node -e 'const f=process.argv[1]; const o=JSON.parse(require("fs").readFileSync(f,"utf8")); console.log(eval(process.argv[2]))' "$FK/org.json" "$1"; }
+_org_set() { node -e 'const fs=require("fs"); const f=process.argv[1]; const o=JSON.parse(fs.readFileSync(f,"utf8")); eval(process.argv[2]); fs.writeFileSync(f, JSON.stringify(o))' "$FK/org.json" "$1"; }
+# 手元の状態のファイルから 1 つ読む。引数: ファイル名（.state など） キー
+_kv() { grep "^$2=" "$TD/logs/apex/$1" 2>/dev/null | head -1 | cut -d= -f2-; }
+# ログを足す（ms は今からの秒。負なら過去）。引数: ID ユーザー 秒 [本文]
+_log() {
+    _org_set "o.logs=o.logs||[]; o.logs.push({Id:'$1',LogUserId:'$2',StartTime:new Date(Date.now()+($3)*1000).toISOString().replace(/\.\d{3}Z\$/,'Z'),Operation:'/aura',Status:'成功',LogLength:100,DurationMilliseconds:5})"
+}
+# 有効な TraceFlag を、偽の組織に直接足す（他の道具・設定画面で作られたもの）。引数: ID 種類 期限（今からの秒）
+_tf() {
+    _org_set "o.traceFlags=o.traceFlags||[]; o.traceFlags.push({Id:'$1',TracedEntityId:'$ME',LogType:'$2',DebugLevelId:'7dl000000000099AAA',StartDate:Date.now()-60000,ExpirationDate:Date.now()+($3)*1000})"
+}
+
+# ------------------------------------------------------------------------------
+test_start_basic() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] start: DebugLevel と TraceFlag を作る・延ばす${CLR_RST}"
+    _env
+    _run start -o dev -y
+    assert_exit_ok "$RC" "start が成功する"
+    assert_equals "$(_org 'o.debugLevels.length')" "1" "DebugLevel を 1 つ作る"
+    assert_equals "$(_org 'o.debugLevels[0].DeveloperName+" "+o.debugLevels[0].ApexCode+" "+o.debugLevels[0].Database')" "sf_tools_log_standard FINE INFO" "DebugLevel の名前と値（standard）"
+    assert_equals "$(_org 'o.traceFlags.length+" "+o.traceFlags[0].LogType')" "1 USER_DEBUG" "USER_DEBUG の TraceFlag を作る"
+    assert_equals "$(_org 'Math.round((o.traceFlags[0].ExpirationDate-o.traceFlags[0].StartDate)/3600000)')" "2" "期限は既定の 2 時間"
+    local tf; tf=$(_org 'o.traceFlags[0].Id')
+    assert_equals "$(_kv .state TRACE_FLAG_ID)" "$tf" ".state に、作った TraceFlag の ID を書く"
+    assert_equals "$(_kv .status STATE)" "collecting" ".status を collecting にする"
+    _has "$OUT" "Apex ログを取り始めました" "取り始めたことを表示する"
+
+    _org_set "o.debugLevels[0].ApexCode='NONE'"
+    _run start -o dev -y --hours 5 --level detail
+    assert_exit_ok "$RC" "2 回目の start（--level detail）が成功する"
+    assert_equals "$(_org 'o.debugLevels.length')" "2" "detail は、別の DebugLevel（sf_tools_log_detail）を作る"
+    _run start -o dev -y --hours 5
+    assert_equals "$(_org 'o.debugLevels.length+" "+o.debugLevels[0].ApexCode')" "2 FINE" "standard の DebugLevel は作り直さず、値を上書きする"
+    assert_equals "$(_org 'o.traceFlags.length+" "+o.traceFlags[0].Id')" "1 $tf" "自分の TraceFlag は作り直さず、延ばす（ID が同じ）"
+    assert_equals "$(_org 'Math.round((o.traceFlags[0].ExpirationDate-o.traceFlags[0].StartDate)/3600000)')" "5" "--hours 5 で延ばす"
+    _done
+}
+
+test_start_other_traceflags() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] start: ほかの TraceFlag${CLR_RST}"
+    _env
+    # ほかの USER_DEBUG（期限は 1 時間後）→ N なら何も変えない
+    _tf 7tf000000000901AAA USER_DEBUG 3600
+    _run_in "yn" start -o dev   # 1 文字目: 送信の注意に Y・2 文字目: 止める確認に N
+    assert_exit_fail "$RC" "ほかの USER_DEBUG があり、確認で N → 中断"
+    assert_equals "$(_org 'o.traceFlags.length')" "1" "N → TraceFlag を作らない"
+    _has "$OUT" "7tf000000000901AAA" "ほかの TraceFlag の ID を表示する"
+    # Y → 期限を今から 2 分後に縮め、その 1 秒後から作る
+    _run_in "yy" start -o dev   # 送信の注意に Y・止める確認に Y
+    assert_exit_ok "$RC" "Y → 成功する"
+    assert_equals "$(_org 'const t=o.traceFlags[0]; (t.ExpirationDate-Date.now() <= 125000 && t.ExpirationDate-Date.now() > 60000)')" "true" "ほかの USER_DEBUG の期限を、今から約 2 分後に縮める（消さない）"
+    assert_equals "$(_org 'o.traceFlags[1].StartDate - o.traceFlags[0].ExpirationDate')" "1000" "新しい TraceFlag は、縮めた期限の 1 秒後から始める"
+    _done
+
+    # 元の期限が 2 分より短い → 延ばさない（更新しない）
+    _env
+    _tf 7tf000000000902AAA USER_DEBUG 90
+    local before; before=$(_org 'o.traceFlags[0].ExpirationDate')
+    _run start -o dev -y
+    assert_exit_ok "$RC" "元の期限が 2 分以内でも成功する"
+    assert_equals "$(_org 'o.traceFlags[0].ExpirationDate')" "$before" "元の期限が 2 分より短ければ、延ばさない（変えない）"
+    _done
+
+    # DEVELOPER_LOG（Developer Console）には触れない
+    _env
+    _tf 7tf000000000903AAA DEVELOPER_LOG 3600
+    before=$(_org 'o.traceFlags[0].ExpirationDate')
+    _run start -o dev -y
+    assert_exit_ok "$RC" "DEVELOPER_LOG があっても、確認なしで作れる"
+    assert_equals "$(_org 'o.traceFlags.length+" "+o.traceFlags[0].ExpirationDate')" "2 $before" "DEVELOPER_LOG には触れない"
+    _done
+
+    # USER_DEBUG が 2 つ以上 → 止まる
+    _env
+    _tf 7tf000000000904AAA USER_DEBUG 3600
+    _org_set "o.traceFlags.push({Id:'7tf000000000905AAA',TracedEntityId:'$ME',LogType:'USER_DEBUG',DebugLevelId:'x',StartDate:null,ExpirationDate:Date.now()+3600000})"
+    _run start -o dev -y
+    assert_exit_fail "$RC" "有効な USER_DEBUG が 2 つ → 中断"
+    assert_equals "$(_org 'o.traceFlags.length')" "2" "2 つ → 何も作らない"
+    _done
+
+    # 縮めたあとに作成が失敗 → 元に戻さず、事実を書く
+    _env
+    _tf 7tf000000000906AAA USER_DEBUG 3600
+    _org_set "o.fail={'create:TraceFlag':'UNKNOWN_EXCEPTION'}"
+    _run start -o dev -y
+    assert_exit_fail "$RC" "作成の失敗 → 中断"
+    _has "$OUT" "縮めた TraceFlag は、元に戻していません: 7tf000000000906AAA" "縮めた ID を書く"
+    _has "$OUT" "UNKNOWN_EXCEPTION" "失敗の name を書く"
+    assert_equals "$(_kv .state TRACE_FLAG_ID)" "" "失敗 → .state に TraceFlag の ID を書かない"
+    _done
+}
+
+test_start_auto() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] start --auto${CLR_RST}"
+    _env
+    _run start -o dev --auto --owner "123:456:abc"
+    assert_equals "$RC" "10" "答えがなく、端末でない → 10（取らない）"
+    assert_file_not_exists "$TD/logs/apex/.consent" "端末でない → 答えを保存しない"
+    assert_equals "$(_org 'o.traceFlags.length')" "0" "取らない → TraceFlag を作らない"
+    assert_equals "$(_kv .status STATE)" "skipped" ".status を skipped にする"
+    _run auto on -o dev
+    assert_exit_ok "$RC" "auto on が成功する"
+    assert_equals "$(_kv .consent AUTO)" "on" ".consent の AUTO を on にする"
+    _run start -o dev --auto
+    assert_exit_ok "$RC" "auto on → start --auto が 0"
+    assert_equals "$(_org 'o.traceFlags.length')" "1" "auto on → TraceFlag を作る"
+    _run auto off -o dev
+    _run start -o dev --auto
+    assert_equals "$RC" "10" "auto off → 10"
+    _has "$OUT" "自動で取らない設定" "auto off の理由を表示する"
+    # 組織が違う → 聞き直す（端末でないので取らない）
+    _run auto on -o dev
+    _org_set "o.orgId='00D000000000009AAA'"
+    _run start -o dev --auto
+    assert_equals "$RC" "10" "答えた組織と違う → 聞き直す（端末でない → 10）"
+    _has "$OUT" "自動で手元に保存できます" "組織が違う → 注意を表示する"
+    _done
+
+    # ほかの USER_DEBUG → 触らずに 10
+    _env
+    _run auto on -o dev
+    _tf 7tf000000000911AAA USER_DEBUG 3600
+    local before; before=$(_org 'o.traceFlags[0].ExpirationDate')
+    _run start -o dev --auto
+    assert_equals "$RC" "10" "--auto: ほかの USER_DEBUG → 10"
+    assert_equals "$(_org 'o.traceFlags.length+" "+o.traceFlags[0].ExpirationDate')" "1 $before" "--auto: ほかの TraceFlag に触れない"
+    _done
+
+    # 予約名・本番
+    _env
+    _run start -o develop --auto
+    assert_equals "$RC" "10" "--auto: 予約名 → 10"
+    _run start -o develop -y
+    assert_exit_fail "$RC" "手動: 予約名 → 中断"
+    _org_set "o.orgType='Enterprise Edition'"
+    _run start -o dev --auto
+    assert_equals "$RC" "10" "--auto: 本番 → 10"
+    _run pull -o dev
+    assert_exit_fail "$RC" "pull: 本番 → 中断"
+    assert_equals "$(_org 'o.traceFlags.length')" "0" "予約名・本番 → TraceFlag を作らない"
+    _done
+}
+
+test_args() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] 引数の誤り${CLR_RST}"
+    _env
+    local a
+    for a in "start --hours 0" "start --hours 24" "start --hours x" "start --level max" "pull --max 0" "pull --since -5" \
+             "start --auto --owner bad" "pull --auto" "start --nope" "nope" "auto maybe" ""; do
+        # shellcheck disable=SC2086  # 引数を分けて渡す
+        _run $a -o dev
+        assert_exit_fail "$RC" "引数の誤り → 中断: ${a:-（なし）}"
+    done
+    assert_equals "$(_org '(o.traceFlags||[]).length')" "0" "引数の誤り → 組織に書き込まない"
+    _run --help
+    _has "$OUT" "【使い方】" "--help で冒頭コメントを表示する"
+    _done
+}
+
+test_pull() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] pull${CLR_RST}"
+    _env
+    _run start -o dev -y
+    # 自分 3 本と、その間に他の人の 1 本 → -i で 1 本ずつ（他の人の本文を取らない）
+    _log 07L000000000001AAA "$ME" 1; _log 07L000000000002AAA "$OTHER" 2; _log 07L000000000003AAA "$ME" 3; _log 07L000000000004AAA "$ME" 4
+    : > "$MOCK_CALL_LOG"
+    _run pull -o dev
+    assert_exit_ok "$RC" "pull が成功する"
+    _has "$OUT" "3 本" "要約の 1 行目（3 本）を表示する"
+    _has "$OUT" "logs/apex/latest.md" "latest.md のパスを表示する"
+    assert_file_exists "$TD/logs/apex/latest.md" "latest.md を作る"
+    assert_equals "$(ls "$TD"/logs/apex/2*/*.log 2>/dev/null | wc -l | tr -d ' ')" "3" "自分のログ 3 本だけを保存する"
+    assert_equals "$(ls "$TD"/logs/apex/2*/ | grep -c 07L000000000002AAA)" "0" "他の人のログは保存しない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "apex get log -n" "他の人のログが混ざる → -n を使わない"
+    assert_file_contains "$MOCK_CALL_LOG" "apex get log -i 07L000000000001AAA" "他の人のログが混ざる → -i で 1 本ずつ"
+    assert_file_not_contains "$TD/sf-tools/logs/sf-log.log" "$OTHER" "sf-log.log に、他の人のユーザー ID を残さない"
+    assert_file_not_contains "$TD/sf-tools/logs/sf-log.log" "07L000000000002AAA" "sf-log.log に、他の人のログの ID を残さない"
+    assert_dir_not_exists "$TD/logs/apex/.fetch" "一時フォルダを残さない"
+    assert_equals "$(wc -l < "$TD/logs/apex/.index" | tr -d ' ')" "3" "目録に 3 本"
+    # 2 回目: 新しいもの（自分だけ）→ -n で 1 回
+    _log 07L000000000005AAA "$ME" 5; _log 07L000000000006AAA "$ME" 6
+    : > "$MOCK_CALL_LOG"
+    _run pull -o dev
+    assert_exit_ok "$RC" "2 回目の pull が成功する"
+    _has "$OUT" "・2 本・" "2 回目は、新しい 2 本だけを要約する"
+    assert_equals "$(grep -c "apex get log" "$MOCK_CALL_LOG")" "1" "自分のログだけ → sf apex get log を 1 回で取る"
+    assert_file_contains "$MOCK_CALL_LOG" "apex get log -n 2" "自分のログだけ → -n 2"
+    # 3 回目: 新しいものなし
+    _run pull -o dev
+    _has "$OUT" "・0 本・" "新しいログがなければ 0 本"
+    # --since: 直近の分をもう一度
+    _run pull -o dev --since 60
+    _has "$OUT" "・5 本・" "--since 60 は、直近 60 分のログを全部入れる"
+    # --max
+    _run pull -o dev --since 60 --max 2
+    _has "$(cat "$TD/logs/apex/latest.md")" "入れなかった古いログ: 3 本" "--max を超えた分を書く"
+    _done
+}
+
+test_pull_pushed_out_and_failures() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] pull: 押し出し・失敗${CLR_RST}"
+    _env
+    _run start -o dev -y
+    _log 07L000000000011AAA "$ME" 1; _log 07L000000000012AAA "$ME" 2
+    # -n の直前に、他の人の新しいログができる（押し出し）
+    _org_set "o.injectOnGetLog=[{Id:'07L000000000019AAA',LogUserId:'$OTHER',StartTime:new Date(Date.now()+9000).toISOString().replace(/\.\d{3}Z\$/,'Z'),Operation:'x',Status:'成功',LogLength:1,DurationMilliseconds:1}]"
+    : > "$MOCK_CALL_LOG"
+    _run pull -o dev
+    assert_exit_ok "$RC" "押し出しがあっても成功する"
+    assert_file_contains "$MOCK_CALL_LOG" "apex get log -n 2" "まず -n 2 で取る"
+    assert_file_contains "$MOCK_CALL_LOG" "apex get log -i 07L000000000011AAA" "押し出された自分のログを -i で取る"
+    assert_equals "$(ls "$TD"/logs/apex/2*/*.log 2>/dev/null | wc -l | tr -d ' ')" "2" "自分のログ 2 本を保存する"
+    assert_equals "$(ls -R "$TD"/logs/apex | grep -c 07L000000000019AAA)" "0" "押し出しの代わりに入った他の人のログは、保存しない"
+    assert_dir_not_exists "$TD/logs/apex/.fetch" "一時フォルダを残さない"
+    _done
+
+    # 想定しない名前のファイル → 失敗（しおりを進めない）
+    _env
+    _run start -o dev -y
+    _log 07L000000000021AAA "$ME" 1
+    _org_set "o.junkFile='other-user.log'"
+    local before; before=$(_kv .state LAST_FETCH)
+    _run pull -o dev
+    assert_exit_fail "$RC" "想定しない名前のファイル → 失敗"
+    assert_equals "$(_kv .state LAST_FETCH)" "$before" "失敗 → しおりを進めない"
+    assert_dir_not_exists "$TD/logs/apex/.fetch" "失敗しても、一時フォルダを残さない"
+    _done
+
+    # 一覧の失敗 → name だけを記録
+    _env
+    _run start -o dev -y
+    _org_set "o.fail={'query:ApexLog':'INVALID_SESSION_ID'}"
+    _run pull -o dev
+    assert_exit_fail "$RC" "一覧の失敗 → 失敗"
+    assert_file_contains "$TD/sf-tools/logs/sf-log.log" "ApexLog の一覧: 失敗（INVALID_SESSION_ID）" "一覧の失敗は、name だけを記録する"
+    _done
+
+    # 51 本以上 → 何回かに分けて全部取る
+    _env
+    _run start -o dev -y
+    _org_set "for(let i=0;i<55;i++){o.logs.push({Id:'07L'+String(100+i).padStart(12,'0')+'AAA',LogUserId:'$ME',StartTime:new Date(Date.now()+1000+i*1000).toISOString().replace(/\.\d{3}Z\$/,'Z'),Operation:'/aura',Status:'成功',LogLength:10,DurationMilliseconds:1})}"
+    _run pull -o dev --max 100
+    assert_exit_ok "$RC" "55 本 → 成功する"
+    assert_equals "$(wc -l < "$TD/logs/apex/.index" | tr -d ' ')" "55" "55 本 → 2 回に分けて、全部保存する"
+    _done
+}
+
+test_stop_status() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] stop・status${CLR_RST}"
+    _env
+    _tf 7tf000000000921AAA DEVELOPER_LOG 3600
+    _run start -o dev -y
+    local tf; tf=$(_kv .state TRACE_FLAG_ID)
+    _log 07L000000000031AAA "$ME" 1
+    _run pull -o dev
+    _run status -o dev
+    assert_exit_ok "$RC" "status が成功する"
+    _has "$OUT" "${tf}  USER_DEBUG  active" "status: 自分の TraceFlag を表示する"
+    _has "$OUT" "（sf-log.sh が作ったもの）" "status: sf-log.sh が作ったものに印を付ける"
+    _has "$OUT" "7tf000000000921AAA  DEVELOPER_LOG" "status: ほかの TraceFlag も表示する"
+    _run stop
+    assert_exit_ok "$RC" "stop が成功する"
+    assert_equals "$(_org "o.traceFlags.map(t=>t.Id).join(',')")" "7tf000000000921AAA" "stop: 自分の TraceFlag だけを消す"
+    assert_equals "$(_kv .state TRACE_FLAG_ID)" "" "stop: .state の ID を消す"
+    assert_equals "$(_kv .status STATE)" "stopped" "stop: .status を stopped にする"
+    assert_equals "$(ls "$TD"/logs/apex/2*/*.log 2>/dev/null | wc -l | tr -d ' ')" "1" "stop: 手元のログは消さない"
+    assert_equals "$(_org 'o.debugLevels.length')" "1" "stop: DebugLevel は消さない"
+    assert_file_not_exists "$TD/logs/apex/.owners" "stop: 後始末の印を残さない"
+    _run stop
+    assert_exit_ok "$RC" "2 回目の stop も成功する"
+    _has "$OUT" "TraceFlag はありません" "2 回目: 作った TraceFlag はない"
+    # すでに消えている
+    _run start -o dev -y
+    _org_set "o.traceFlags=o.traceFlags.filter(t=>t.LogType!=='USER_DEBUG')"
+    _run stop
+    assert_exit_ok "$RC" "すでに消えていても、stop は成功する"
+    _has "$OUT" "すでにありません" "すでに消えていることを表示する"
+    _done
+}
+
+test_start_basic
+test_start_other_traceflags
+test_start_auto
+test_args
+test_pull
+test_pull_pushed_out_and_failures
+test_stop_status
+
+print_summary

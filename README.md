@@ -146,6 +146,7 @@ export PATH="$HOME/sf-tools/bin:$PATH"
 | 開発者 | `sf-dryrun.sh` / `sf-release.sh` | 反映できるかを確かめる（dry-run）/ 検証・リリースの本体（共有環境・本番の組織へは、手元からは、検証もできません） |
 | 開発者 | `sf-deploy.sh` | ⚠️ 自分用の組織へ、強制的に反映する（確認あり。共有環境・本番の組織には、使えません） |
 | 開発者 | `sf-restart.sh` | 接続先の組織を切り替える |
+| 開発者 | `sf-log.sh` | Apex ログを手元に取り、AI が読む要約を作る（個人用の開発組織だけ。`start` → `pull` → `stop`） |
 | 開発者 | `sf-launcher.sh` | 上のコマンドを、メニューの番号で選んで実行する（**おすすめ**。`sf-job.sh` / `sf-start.sh` のあとに、自動で開く） |
 | 開発者 | `sf-hook.sh` / `sf-unhook.sh` | 手元のクローンの検証フックを、有効にする / 削除する |
 | 管理者 | 🔑 `sf-init.sh` | 新しいプロジェクトを作る。段階の追加（`--add-tier`）・診断（`--status`）・接続先の付け替え（`--reconnect`）・動作の確認（`--verify`）も |
@@ -180,7 +181,7 @@ export PATH="$HOME/sf-tools/bin:$PATH"
 | `doc/jwt-auth-spec.md` | JWT 認証方式の仕様 |
 | `doc/wf-distribution-strategy.md` | ワークフローの配布・更新の戦略 |
 | `doc/wizard-ux-design.md` | ウィザード形式の画面（`sf-init` など）の設計 |
-| `doc/sf-log-design.md` | `sf-log.sh`（AI の開発サイクル用の Apex ログ取得）の設計書（未実装） |
+| `doc/sf-log-design.md` | `sf-log.sh`（AI の開発サイクル用の Apex ログ取得）の設計書（実装中: 手動の `start`・`pull`・`stop`・`status`・`auto` まで。裏の取得役と sf-start からの自動は、まだ） |
 | `doc/tier-scaling-design.md` | 段階（main / staging / develop）の増減（`branches.txt` を唯一のスイッチにする・`sf-init.sh --remove-tier`）の設計書 |
 
 ### 6.3 sf-tools の開発者向け

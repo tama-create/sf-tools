@@ -1,6 +1,6 @@
 # sf-log.sh 設計書（AI の開発サイクル用の Apex ログ取得）
 
-> **ステータス: 未実装（設計のみ）。** `bin/sf-log.sh`・`lib/apexlog.js`・`tests/test_sf-log.sh` は、まだ存在しない（2026-11-22 に確認）。未実装として触れているのは、`README.md` の設計書の一覧と、`tests/docs-facts-allow.txt`（README に、実在しないコマンド名を書くための例外）だけ。
+> **ステータス: 実装中（第 1 段まで。2026-11-23）。** 手動の `start`（`--auto` を含む）・`pull`（取得役がいないときに自分で取る）・`stop`・`status`・`auto on|off` を `bin/sf-log.sh` に、要約・一覧の検査・日時の計算を `lib/apexlog.js` に実装した（テスト: `tests/test_sf-log.sh`・`tests/test_apexlog-js.sh`）。**まだないもの**: 裏の取得役（`collect`。4.3）・`leave`（5.2）・`pull` から取得役への依頼（4.4 の 2）・`sf-start.sh` とランチャーとのつなぎ（5 章）。
 > 経緯: 2026-11-21 に、旧設計（`sf-logwatch.sh`。10 秒ごとに見張り、Ctrl+C で止める、人が見る道具）を、AI が読む前提で作り直し、Codex のレビュー（4 回。8・7・3・0 件）を反映した。2026-11-22 に、TAMAさんの提案で、**ランチャーの起動中は裏で自動で取り続ける方式**を主な使い方にした（2 章）。
 > 下のコード片は、設計の段階の下書き。実装するときは、12 章の規約に合わせて書き直す。
 
@@ -579,6 +579,7 @@ force-*/logs/apex/
   20261122/                                   ← 取得役・pull が保存したログ（ログの開始日ごと）
     143001_07LdM00000AbCdE_aura.log           ← 開始時刻_ログの ID_操作名
   .state  .status  .collector  .owners  .consent   ← 手元の状態（9.2）
+  .index                                      ← 保存したログの目録（1 行に 1 本。パス・ID・開始（UTC）・操作・状態・長さ・所要。pull が要約に入れるログを選ぶ）
   requests/                                   ← 依頼と応答（9.3）
   .fetch/                                     ← 本文の取得に使う一時フォルダ（8.4。取得のたびに空にする）
 ```
@@ -597,7 +598,7 @@ force-*/logs/apex/
 |---|---|---|
 | `.state` | `ORG`・`USER_ID`・`TRACE_FLAG_ID`（**sf-log.sh が作った** TraceFlag の ID）| `start`・`stop` |
 | | `LAST_FETCH`・`LAST_FETCH_ID`（取得のしおり: 最後に保存したログの開始時刻（UTC）と ID）・`SEEN_IDS`（直近に保存した ID） | 取得役（取得役がいないときだけ `pull`） |
-| | `LAST_READ`（前回の要約に入れた最も新しいログの開始時刻。UTC） | `pull` |
+| | `LAST_READ`（前回の要約に入れた最も新しいログの開始時刻。UTC）・`LAST_READ_IDS`（その時刻と同じ秒に始まり、要約に入れたログの ID。カンマ区切り。同じ秒のログを、次の要約で落とさず・重ねないため） | `pull` |
 | `.status` | `STATE`（collecting / stopped / skipped / error）・`ORG`・`EXPIRES`・`LAST_FETCH`・`COUNT_TODAY`・`BACKLOG`（取り残しの目安）・`REASON`（取っていない理由）・`WARNING` | 取得役・`start --auto`・sf-start。ランチャーが読む（5.4） |
 | `.collector` | `PID`・`STARTED`（起動の時刻）・`ORG` | 取得役 |
 | `.owners` | 1 行に 1 つ、持ち主（起動中の sf-start）の印（`PID:起動の時刻:乱数`）。後始末の最中は `CLOSING=<印>` の行（5.2） | sf-start（足す）・`leave`（外す・`CLOSING` を書いて消す）・取得役（死んだものを外す）・`stop`（空にする・`CLOSING` を書いて消す） |

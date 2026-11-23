@@ -898,6 +898,21 @@ sf-init.sh --add-tier develop    # main+staging → main+staging+develop
 
 テスト: `tests/test_verify.sh`・`test_verify2.sh`・`test_verify3.sh`（状態つきの gh のモック。`tests/verify-test-lib.sh`）。e2e（`tests/e2e/lib.sh`）は、PR・実行の待ち・結果の読み取り・Hello World の本文を、`lib/verify-common.sh` に委譲する。
 
+### 4.16 sf-log.sh
+
+> 仕様の正本は、`bin/sf-log.sh` の冒頭コメント（`--help`）。設計は `doc/sf-log-design.md`（実機の確認の結果は 13.1）。ここは実装の要点。
+
+AI の開発サイクル用の Apex ログ取得（開発者向け。管理者向けの警告ボックスは不要）。2026-11-23 時点は第 1 段（手動の `start`・`pull`・`stop`・`status`・`auto`）。裏の取得役（`collect`）・`leave`・`sf-start` とのつなぎは、まだない。
+
+- **境界**: JSON の読み取り・判定・要約・日時は `lib/apexlog.js`（`summarize`・`list`・`tflist`・`time`）。シェルは、組織への問い合わせ・手元の状態・保存・終了コード
+- **手元の状態**: `logs/apex/` の `.state`・`.status`・`.consent`・`.owners`・`.index`（`キー=値`。`kv_get`・`kv_set`。書き換えは短いロック `mkdir logs/apex/.lock` の中で `state_set`）。取得は取得のロック `logs/apex/.fetch.lock`
+- **TraceFlag**: 自分の USER_DEBUG（`.state` の `TRACE_FLAG_ID`）は延ばす。ほかの有効な USER_DEBUG は、手動の確認のあと `min(元の期限, 今+2 分)` に縮め、その 1 秒後から作る（`--auto` は触らずに 10）。DEVELOPER_LOG には触れない（実機で、種類が違えば重ならないことを確認）
+- **取得（`fetch_round`）**: 全ユーザーの一覧は `run` を通さず受ける（他の人の見出しを `sf-log.log`・`error.log`・画面に出さない）。`aj list` で自分 / 他の人を見分ける。取りたいログより新しいログがすべて自分のものなら `sf apex get log -n`、それ以外は `-i`。`-n` の押し出しは `-i` で補う。`logs/apex/.fetch/` は取得のたびに空にし、`<ID>.log` 以外の名前があればその回を失敗にする。しおり（`LAST_FETCH`・`LAST_FETCH_ID`）は 1 本ごとに進める
+- **要約の選び方**: `.index` から、`LAST_READ` より後（同じ秒は `LAST_READ_IDS` の ID を除く）。`--max` を超えたら新しいほう
+- **`--auto`**: 終了コード 0 / 10（取らない）/ 1（失敗）。`finish_auto_or_die` で、手動は `die`、自動は `.status` に書いて終了コードで返す。確認は、端末でなければ聞かずに「取らない」（`read_key` の EOF の die を避ける。`$( )` の中で呼ぶ）
+
+テスト: `tests/test_sf-log.sh`（偽の組織 `tests/mock-sf-log.js`。TraceFlag の重なりの拒否・期限を今にできない・`-n` の全ユーザーの新しい順・押し出しの注入・失敗の注入）。
+
 ---
 
 ## 5. ドキュメント連動ルール

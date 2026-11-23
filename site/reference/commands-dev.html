@@ -390,6 +390,44 @@ sf-launcher.sh --fzf     # fzf でインクリメンタル検索</code></pre>
   <li>ログは <code>./sf-tools/logs/sf-restart.log</code> です（実行のたびに作り直します）。</li>
 </ul>
 
+<h2 id="sf-log"><code>sf-log.sh</code></h2>
+<pre><code>sf-log.sh start [-o ALIAS] [--level standard|detail] [--hours N] [-y]
+sf-log.sh pull  [-o ALIAS] [--max N] [--since 分]
+sf-log.sh stop  [-o ALIAS]
+sf-log.sh status [-o ALIAS]
+sf-log.sh auto on|off [-o ALIAS]</code></pre>
+<p>AI（Claude Code など）に開発を任せるときに、AI が Apex ログを読めるようにする道具です。自分のユーザーの Apex ログを、<code>force-*</code> フォルダの <code>logs/apex/</code> に保存し、AI が最初に読む要約 <code>logs/apex/latest.md</code> を作ります。<code>force-*</code> フォルダの中で実行します。</p>
+<p><strong>個人用の開発組織（Developer Edition・Sandbox・スクラッチ組織）で、ダミーデータで使ってください。</strong>ログには、レコードの値や SOQL の条件が載ります。AI に読ませると、その内容は AI の提供元に送られます。共有環境の組織（エイリアスが <code>prod</code> / <code>staging</code> / <code>develop</code> / <code>main</code>）・本番の組織・種類を確認できない組織では、取りません。</p>
+<h3>使い方の流れ</h3>
+<ol>
+  <li>人が <code>sf-log.sh start</code> を実行する（ログを出させる設定（TraceFlag）を、組織に作ります。最初に、AI への送信の注意が出ます）</li>
+  <li>AI がコードを書いてデプロイし、人が画面で動きを確かめる</li>
+  <li>AI が <code>sf-log.sh pull</code> を実行し、<code>logs/apex/latest.md</code> を読む（新しいログを取ってから、要約を作ります。組織には書き込みません）</li>
+  <li>作業が終わったら、人が <code>sf-log.sh stop</code> を実行する（作った TraceFlag を消します）</li>
+</ol>
+<p><code>sf-start.sh</code> から自動で取り始める仕組みと、裏で取り続ける仕組みは、まだありません（作っている途中です）。いまは、上の手順で、人が <code>start</code> と <code>stop</code> を実行します。TraceFlag は、延ばさなければ期限（既定 2 時間）で切れます。</p>
+<h3>サブコマンド</h3>
+<ul>
+  <li><code>start</code>: ログの詳しさの設定（DebugLevel <code>sf_tools_log_standard</code> など）を作るか上書きし、自分のユーザーの TraceFlag（種類 <code>USER_DEBUG</code>）を作ります。<code>sf-log.sh</code> が前に作ったものがあれば、作り直さずに期限を延ばします。
+    <ul>
+      <li>ほかの <code>USER_DEBUG</code> の TraceFlag（設定画面で作ったものなど）があると、同時には有効にできません。そのときは、内容を表示して「止めてよいか」を聞き、期限を「元の期限」と「今から 2 分後」の早いほうに縮めてから（消しません）、そのあとに始まる TraceFlag を作ります。</li>
+      <li>Developer Console が作る TraceFlag（種類 <code>DEVELOPER_LOG</code>）には、触れません。</li>
+      <li><code>--level detail</code> は、詳しいログ（変数の値の変化など）が要るときに使います。ログが大きくなるため、既定は <code>standard</code> です。<code>--hours</code> は期限（1〜23 時間。既定 2）です。<code>-y</code> で、確認を省きます。</li>
+    </ul>
+  </li>
+  <li><code>pull</code>: 前回の続きから、新しいログを古い順に取って保存し、前回の要約より後に始まったログの要約を作ります。要約には、エラー（行番号つき）・ログの一覧・<code>System.debug</code> の出力・入力規則のエラー・上限の 50% を超えた制限の使用量が、この順に入ります。取れなかったもの（読めなかったログ・20MB で切り詰められたログ・1 行も出なかった区分など）も、隠さずに書きます。<code>--max</code>（既定 50）を超えたときは、新しいほうから入れ、入れなかった本数を要約の先頭に書きます。<code>--since 分</code> で、直近の分を入れ直せます。</li>
+  <li><code>stop</code>: <code>sf-log.sh</code> が作った TraceFlag だけを消します。ほかの TraceFlag・ログの詳しさの設定・手元のログは消しません。</li>
+  <li><code>status</code>: 手元の状態、自分のユーザーの TraceFlag（<code>sf-log.sh</code> が作ったものに印が付きます）、組織にある自分のログの本数を表示します（読み取りのみ）。</li>
+  <li><code>auto on|off</code>: このプロジェクトで、<code>sf-start.sh</code> のときに自動で取るかの答えを変えます（自動で取り始める仕組みは、まだありません）。</li>
+</ul>
+<h3>補足</h3>
+<ul>
+  <li>保存先は <code>logs/apex/&lt;日付&gt;/&lt;時刻&gt;_&lt;ログの ID&gt;_&lt;操作&gt;.log</code> です（日付と時刻は、PC の時刻）。<code>logs/</code> は Git の管理外です。<code>stop</code> でも消えないので、要らなくなったら、日付のフォルダを手で消してください。</li>
+  <li>取るのは、自分のユーザーのログだけです。他の人のログは、本文を保存・記録・要約しません。まとめて取るときに、他の人のログが一時フォルダ（<code>logs/apex/.fetch/</code>）に一瞬書かれることがありますが、中を読まずに消します。</li>
+  <li>組織のログは、24 時間で消えます。組織のログの合計が 1,000MB を超えると、TraceFlag を作れなくなるため、<code>start</code> は 700MB を超えたときに警告を出します。</li>
+  <li>終了コードは、成功が <code>0</code>、失敗・中断が <code>1</code> です。ログは <code>./sf-tools/logs/sf-log.log</code> です（追記します）。</li>
+</ul>
+
 <h2 id="sf-hook"><code>sf-hook.sh</code> / <code>sf-unhook.sh</code></h2>
 <pre><code>sf-hook.sh
 sf-unhook.sh</code></pre>

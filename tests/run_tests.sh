@@ -205,6 +205,7 @@ TEST_FILES=(
     test_sf-metasync.sh
     test_metasync-js.sh
     test_apexlog-js.sh
+    test_sf-log.sh
     test_sf-release.sh
     test_sf-deploy.sh
     test_sf-dryrun.sh
@@ -351,7 +352,10 @@ if [[ "${1:-}" == "--changed" ]]; then
                 _changed_tests+=("test_metasync-js.sh" "test_sf-metasync.sh")   # 鏡像の部品（lib/metasync.js）と、それを呼ぶ sf-metasync.sh
                 ;;
             lib/apexlog.js|tests/fixtures/apexlog/*|tests/test_apexlog-js.sh)
-                _changed_tests+=("test_apexlog-js.sh")   # sf-log.sh の要約・一覧の検査・日時の部品（doc/sf-log-design.md 6 章）
+                _changed_tests+=("test_apexlog-js.sh" "test_sf-log.sh")   # sf-log.sh の要約・一覧の検査・日時の部品（doc/sf-log-design.md 6 章）と、それを呼ぶ sf-log.sh
+                ;;
+            tests/mock-sf-log.js)
+                _changed_tests+=("test_sf-log.sh")   # sf-log.sh のテストの偽の sf（小さな偽の組織）
                 ;;
             config/metadata-capability.txt)
                 _changed_tests+=("test_sf-check.sh")

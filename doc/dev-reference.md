@@ -85,9 +85,9 @@
 | `test_project-identity.sh` | lib/project.sh のオーナー・XXXX の決め方（`parse_github_remote` / `normalize_project_name` / `discover_clones` / `gh_owner_candidates` / `resolve_init_identity` / `resolve_job_identity`） |
 | `test_sf-next.sh` | sf-next.sh |
 | `test_sf-launcher.sh` | sf-launcher.sh（`common.sh` を読み込まない standalone のランチャー） |
-| `test_security.sh` | セキュリティ修正の退行の検出（静的解析: `run` 経由の `sf org display --verbose` の禁止・`run` の一時ファイルの置き場所など。実行時: ログに `sfdxAuthUrl` が残らない・ログのフォルダが 700） |
+| `test_security.sh` | セキュリティ修正の退行の検出（静的解析: `run` 経由の `sf org display --verbose` の禁止・`run` の一時ファイルの置き場所など。実行時: ログに `sfdxAuthUrl` が残らない・ログのフォルダが 700）。`--changed` は、`bin/`・`phases/`・`lib/`・`hooks/` の変更で選ぶ（約 3 秒） |
 | `test_e2e.sh`・`test_e2e2.sh` | tests/e2e/ の安全ガードと部品（テスト関数を、2 つのファイルに、所要時間でほぼ均等に分けた。並列に動かすため。共通の部品は `tests/e2e-test-lib.sh`。実行を伴うシナリオ（manual-delete 以降）が test_e2e2.sh）（gh / sf はモック。実環境には接続しない。名前の判定・Actions 上のガード・削除関数・鍵一式の読み込み・`cleanup.sh` の既定など） |
-| `test_run-tests.sh` | tests/run_tests.sh の `--shard`（`SF_TEST_LIST_ONLY=1` で分け方だけを確かめる: 漏れ・重複がない・いつも同じ分け方・不正な指定は終了コード 2）と `--changed`（まだ `git add` していない新しいファイルも対象にする・`.gitignore` の対象は数えない。一時のリポジトリで確かめる） |
+| `test_run-tests.sh` | tests/run_tests.sh の `--shard`（`SF_TEST_LIST_ONLY=1` で分け方だけを確かめる: 漏れ・重複がない・いつも同じ分け方・不正な指定は終了コード 2）と `--changed`（まだ `git add` していない新しいファイルも対象にする・`.gitignore` の対象は数えない・配布物のコードの変更で `test_security.sh` を選ぶ。一時のリポジトリで確かめる） |
 | `test_cli_args.sh` | 全 `bin/sf-*.sh` の引数: 冒頭コメントの【オプション】を 1 つずつ値なしで渡し、15 秒以内に終わる・「不明なオプションです」と言われない。文書にないオプションでも止まらない |
 | `test_sf-check.sh` | sf-check.sh（種類の可否の判定・同梱の表 `config/metadata-capability.txt` の形式を含む） |
 | `test_integration-coverage.sh` | 結合テストのカバレッジ表（`doc/integration-test-plan.md` の 10）のガード。全コマンド・フック・ワークフローが表に載っていること、各行が「結合あり（パターンの番号が定義済み）」か「結合なし（理由が空でない）」であることを確かめる。新しいコマンドを足して、表に載せ忘れると失敗する |

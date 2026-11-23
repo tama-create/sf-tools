@@ -1137,7 +1137,9 @@ cmd_begin() {
     register_owner "$OWNER" || finish_auto_or_die 10 "前の後始末が終わらないため（${CLOSING_WAIT} 秒待ちました）"
     state_set "$STATUS_F" "STATE=starting" "ORG=${TARGET_ORG}" "REASON=" "WARNING=" "EXPIRES=" "EXPIRES_AT=" "BACKLOG=" || true   # 意図的エラー無視: 表示用
     # 裏で準備し、成功したらそのまま取得役になる（本番・種類の確認・組織 ID の照らし合わせは、start --auto が行う）
-    nohup bash "${SCRIPT_DIR}/sf-log.sh" start --auto --collect -o "$TARGET_ORG" --owner "$OWNER" </dev/null >/dev/null 2>&1 &  # 裏での起動のため run 不使用
+    # 裏での起動のため run 不使用。端末の入力・出力から切り離す。ふつうの出力は、取得役が log で同じログに書くため捨て、
+    # エラー出力（bash のエラーなど、log を通らないもの）は、このスクリプトのログに追記する（捨てると、裏の失敗を追えない）
+    nohup bash "${SCRIPT_DIR}/sf-log.sh" start --auto --collect -o "$TARGET_ORG" --owner "$OWNER" </dev/null >/dev/null 2>>"$LOG_FILE" &
     disown
     log "INFO" "Apex ログの準備を、裏で始めました（組織: ${TARGET_ORG}）。状態は、ランチャーに表示します。"
     exit 0

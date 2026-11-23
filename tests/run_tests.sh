@@ -311,6 +311,13 @@ if [[ "${1:-}" == "--changed" ]]; then
                 _changed_tests+=("test_docs_facts.sh")
                 ;;
         esac
+        # セキュリティの静的な検査（裏での起動で stderr を捨てない・mktemp など。全体を grep する。約 3 秒）: 配布物のコードが変わったとき
+        #   （ファイル名で対応しないため、選ばれず、mm の後の CI で初めて赤になったことがあった。2026-11-23）
+        case "$_file" in
+            bin/*|phases/*|lib/*|hooks/*|tests/test_security.sh)
+                _changed_tests+=("test_security.sh")
+                ;;
+        esac
         case "$_file" in
             bin/sf-*.sh)
                 # bin/sf-foo.sh → test_sf-foo.sh

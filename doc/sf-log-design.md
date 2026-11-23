@@ -288,7 +288,7 @@ bash ~/sf-tools/bin/sf-log.sh leave --owner <印>   # sf-start の終了時: 持
 - 持ち主の印に、PID だけでなく起動の時刻と乱数を入れるのは、同じ PID の印が重ならないようにするため（生死は `kill -0` だけで見る。5.5）
 - 持ち主の一覧への登録は、sf-start ではなく `begin`（と `start --auto --owner`）が行う。ロックと CLOSING の待ちを、sf-log.sh の 1 か所にまとめるため。同じ印は 2 回足さない（入れ子の sf-start）
 - `begin` の確認（10.2）は、`read_key` で Y/N を聞く（`q` は「取らない」。端末でなければ聞かない。`read_key` の EOF の `die` で sf-start を止めないよう、`$( )` の中で呼ぶ）
-- **裏での起動**: `nohup bash sf-log.sh start --auto --collect … </dev/null >/dev/null 2>&1 &` のあと `disown` する（端末の入力・出力から切り離し、端末を閉じたときの SIGHUP で一緒に止まらないようにする。止めるのは、持ち主の見張りと 5.2 の後始末）。Ctrl+C の無視（`trap '' INT`）も引き継がれる。Windows の Git Bash では効くことを確かめた（13.1）。`nohup` では `$!` と、取得役が記録した PID が違うため、取得役の生死は `.collector` の PID で見る
+- **裏での起動**: `nohup bash sf-log.sh start --auto --collect … </dev/null >/dev/null 2>>"$LOG_FILE" &` のあと `disown` する（端末の入力・出力から切り離し、端末を閉じたときの SIGHUP で一緒に止まらないようにする。止めるのは、持ち主の見張りと 5.2 の後始末）。Ctrl+C の無視（`trap '' INT`）も引き継がれる。Windows の Git Bash では効くことを確かめた（13.1）。`nohup` では `$!` と、取得役が記録した PID が違うため、取得役の生死は `.collector` の PID で見る
 - `sf-start.sh` の冒頭コメント（【処理の流れ】）に、この流れを書く（CLAUDE.md 2.5）
 
 ### 5.2 sf-start.sh の終了時（ランチャーを q で閉じたとき）

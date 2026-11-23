@@ -13,7 +13,8 @@
 #   5. 不正な指定は、終了コード 2
 #   6. 組の数が、ファイルの数より多いとき、空の組は、何もせず、成功で終わる
 #   7. SF_TEST_SKIP_INTEGRATION=1 と組み合わせても、結合テストは、外れたまま
-#   8. --changed は、まだ git add していない新しいファイルに対応するテストも選ぶ。.gitignore の対象は数えない
+#   8. --changed は、まだ git add していない新しいファイルに対応するテストも選ぶ。.gitignore の対象は数えない。
+#      配布物のコード（bin/・phases/・lib/・hooks/）の変更では、セキュリティの静的な検査（test_security.sh）も選ぶ
 # ==============================================================================
 source "$(dirname "${BASH_SOURCE[0]}")/test_helper.sh"
 echo -e "${CLR_HEAD}=== run_tests.sh --shard・--changed ===${CLR_RST}"
@@ -94,6 +95,7 @@ test_changed_untracked() {
     echo "x" > "$repo/lib/apexlog.js"
     out=$(SF_TEST_SKIP_INTEGRATION="" SF_TEST_NO_WSL=1 SF_TEST_LIST_ONLY=1 bash "$repo/tests/run_tests.sh" --changed 2>/dev/null)
     assert_output_contains "$out" "対象テスト: test_apexlog-js.sh" "まだ git add していない新しいファイルに対応するテストを、選ぶ"
+    assert_output_contains "$out" "test_security.sh" "配布物のコード（lib/）の変更 → セキュリティの静的な検査も選ぶ"
 
     # .gitignore の対象は、追跡していないファイルに数えない（対応するテストなし → 全件）
     printf 'logs/\nlib/apexlog.js\n' > "$repo/.gitignore"

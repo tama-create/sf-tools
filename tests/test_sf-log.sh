@@ -555,6 +555,7 @@ test_begin_retry() {
     echo ""; echo -e "${CLR_HEAD}[TEST] begin: 裏の準備の失敗を 1 回だけやり直す${CLR_RST}"
     _env
     _live_mark
+    mkdir -p "$TD/logs/apex"   # まだ sf-log.sh を動かしていないため、作業フォルダがない
     printf 'AUTO=on\nORG=dev\nORG_ID=\nVERSION=1\n' > "$TD/logs/apex/.consent"
     _org_set "o.failOnce={'query:DebugLevel':'ModuleLoadError'}"
     _run begin -o dev --owner "$MARK"
@@ -572,6 +573,7 @@ test_begin_retry() {
     # 失敗が続く → やり直しは 1 回だけ。.status は error
     _env
     _live_mark
+    mkdir -p "$TD/logs/apex"   # まだ sf-log.sh を動かしていないため、作業フォルダがない
     printf 'AUTO=on\nORG=dev\nORG_ID=\nVERSION=1\n' > "$TD/logs/apex/.consent"
     _org_set "o.fail={'query:DebugLevel':'ModuleLoadError'}"
     _run begin -o dev --owner "$MARK"
@@ -583,6 +585,7 @@ test_begin_retry() {
 
     # 持ち主が死んでいる → やり直さない
     _env
+    mkdir -p "$TD/logs/apex"   # まだ sf-log.sh を動かしていないため、作業フォルダがない
     printf 'AUTO=on\nORG=dev\nORG_ID=\nVERSION=1\n' > "$TD/logs/apex/.consent"
     _org_set "o.fail={'query:DebugLevel':'ModuleLoadError'}"
     _run start -o dev --auto --collect --retry 1 --owner "999999:1:dead"

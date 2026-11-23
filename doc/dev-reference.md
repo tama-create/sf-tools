@@ -76,6 +76,7 @@
 | `test_sf-start.sh` | sf-start.sh |
 | `test_sf-restart.sh` | sf-restart.sh |
 | `test_sf-metasync.sh` | sf-metasync.sh（鏡像: 取得 → 計画 → 反映・削除・取得の失敗とやり直し・`--dry-run`・保留と終了コード 3・コミット前の中断の復元） |
+| `test_apexlog-js.sh` | lib/apexlog.js（sf-log.sh の部品。summarize: エラー・一覧・System.debug・入力規則・制限・取れていないもの（読めなかったログ・読み取れなかった行・切り詰め・タイムゾーン不明・該当する行なし）・一覧の形の誤り。list: 自分 / 他の人の見分け・応答の形の誤り（エラーの文言に値を出さない）。time: now・norm・cmp・min・add。見本のログは `tests/fixtures/apexlog/`（実データなし）） |
 | `test_metasync-js.sh` | lib/metasync.js（plan: 追加・変更・削除・CRLF・残すファイル・S2〜S5・S9 の境界・S1/S8。apply: 反映・保留・根の外のパスの拒否。detect: 変更の検知（状態なし・変更なし・履歴・区分 B の変化・失敗・状態の破損）と、区分の表 `config/metasync-detect.txt` の整合） |
 | `test_sf-release.sh` | sf-release.sh |
 | `test_sf-deploy.sh` | sf-deploy.sh |
@@ -84,9 +85,9 @@
 | `test_project-identity.sh` | lib/project.sh のオーナー・XXXX の決め方（`parse_github_remote` / `normalize_project_name` / `discover_clones` / `gh_owner_candidates` / `resolve_init_identity` / `resolve_job_identity`） |
 | `test_sf-next.sh` | sf-next.sh |
 | `test_sf-launcher.sh` | sf-launcher.sh（`common.sh` を読み込まない standalone のランチャー） |
-| `test_security.sh` | セキュリティ修正の退行の検出（静的解析: `run` 経由の `sf org display --verbose` の禁止・`run` の一時ファイルの置き場所など。実行時: ログに `sfdxAuthUrl` が残らない・ログのフォルダが 700） |
+| `test_security.sh` | セキュリティ修正の退行の検出（静的解析: `run` 経由の `sf org display --verbose` の禁止・`run` の一時ファイルの置き場所など。実行時: ログに `sfdxAuthUrl` が残らない・ログのフォルダが 700）。`--changed` は、`bin/`・`phases/`・`lib/`・`hooks/` の変更で選ぶ（約 3 秒） |
 | `test_e2e.sh`・`test_e2e2.sh` | tests/e2e/ の安全ガードと部品（テスト関数を、2 つのファイルに、所要時間でほぼ均等に分けた。並列に動かすため。共通の部品は `tests/e2e-test-lib.sh`。実行を伴うシナリオ（manual-delete 以降）が test_e2e2.sh）（gh / sf はモック。実環境には接続しない。名前の判定・Actions 上のガード・削除関数・鍵一式の読み込み・`cleanup.sh` の既定など） |
-| `test_run-tests.sh` | tests/run_tests.sh の `--shard`（`SF_TEST_LIST_ONLY=1` で分け方だけを確かめる: 漏れ・重複がない・いつも同じ分け方・不正な指定は終了コード 2） |
+| `test_run-tests.sh` | tests/run_tests.sh の `--shard`（`SF_TEST_LIST_ONLY=1` で分け方だけを確かめる: 漏れ・重複がない・いつも同じ分け方・不正な指定は終了コード 2）と `--changed`（まだ `git add` していない新しいファイルも対象にする・`.gitignore` の対象は数えない・配布物のコードの変更で `test_security.sh` を選ぶ。一時のリポジトリで確かめる） |
 | `test_cli_args.sh` | 全 `bin/sf-*.sh` の引数: 冒頭コメントの【オプション】を 1 つずつ値なしで渡し、15 秒以内に終わる・「不明なオプションです」と言われない。文書にないオプションでも止まらない |
 | `test_sf-check.sh` | sf-check.sh（種類の可否の判定・同梱の表 `config/metadata-capability.txt` の形式を含む） |
 | `test_integration-coverage.sh` | 結合テストのカバレッジ表（`doc/integration-test-plan.md` の 10）のガード。全コマンド・フック・ワークフローが表に載っていること、各行が「結合あり（パターンの番号が定義済み）」か「結合なし（理由が空でない）」であることを確かめる。新しいコマンドを足して、表に載せ忘れると失敗する |
@@ -362,6 +363,7 @@ check_gh_owner "$GITHUB_OWNER"   # 認証ユーザーの一致確認
 - 未接続のとき: エイリアスを入力（空 Enter は再入力。`q` / EOF で中断）→ `sf alias unset vscodeOrg` → ログイン先の URL を選ぶ（`[1]` login / `[2]` test（Enter）/ `[3]` 組織の URL。`SF_INIT_LOGIN_URL_START` があれば質問しない。**エイリアスの名前では決めない**）→ `sf org logout` → `sf org login web`（WSL で wslview がなければ、`/tmp/sf-wsl-bin` にシムを一時生成してブラウザ起動）。ログインに失敗したら中断する（設定ファイルの書き込み・VS Code・ランチャーの起動は行わない）
 - `.sf/config.json` / `.sfdx/sfdx-config.json` を上書き（書き込めなければ中断）し、`code` があれば `code .` で VS Code を起動（なければ警告のみ）
 - バックグラウンドで `sf-install.sh` を実行（フック・リリースDir準備・npm install・ツール更新はすべて sf-install.sh が担当。完了は待たない）
+- Apex ログ（`~/sf-tools/bin/sf-log.sh` があるとき。`doc/sf-log-design.md` 5 章）: 持ち主の印 `SF_LOG_OWNER`（`PID:時刻:乱数`）を決め（外側の印の PID が生きていれば引き継ぐ = 入れ子）、`sf-log.sh begin -o <エイリアス> --owner <印>` を呼ぶ（sf を呼ばずにすぐ終わる。準備と取得役は裏）。0 かつ自分の印なら、`EXIT` トラップ（`_on_exit`）で `sf-log.sh leave --owner <印>` を呼ぶ。10 は何もしない・それ以外は WARNING。どれでも先へ進む
 - 続けて、前面で `sf-launcher.sh` を起動（`SF_LAUNCHER_ACTIVE=1` なら起動しない。二重起動の防止）
 - Ctrl+C は無効（`trap '' INT`。子の bash にも継承される）。終了コードは、ランチャー・バックグラウンドの sf-install.sh の結果によらず 0（中断・失敗は 1）
 - 前提: force-* フォルダで実行（`SF_INIT_MODE=1`（sf-job.sh 経由）なら確認を省略）。接続済みの組織を切り替えるときは `sf-restart.sh`
@@ -507,6 +509,7 @@ check_gh_owner "$GITHUB_OWNER"   # 認証ユーザーの一致確認
 - `SF_LAUNCHER_ACTIVE=1` をエクスポートして `sf-start.sh` からの二重起動を防止
 - `sf-launcher.sh <番号>` で、その番号を 1 回だけ実行して終了（終了コードは、実行したコマンドのもの。範囲外・スクリプトがなければ 1）
 - `sf-launcher.sh --fzf` で fzf モードも利用可能（fzf がなければ、警告を表示して終了コード 1）
+- メニューの見出しの下に、`print_apexlog_status` が `logs/apex/.status` の `STATE`・`ORG`・`EXPIRES_AT`・`COUNT_TODAY`・`REASON`・`WARNING` を `while read` で読み、1 行（と WARNING の 1 行）を表示する（source しない。ファイルがない・知らない STATE なら表示しない）
 
 ### 4.8 sf-deploy.sh
 
@@ -897,6 +900,26 @@ sf-init.sh --add-tier develop    # main+staging → main+staging+develop
 
 テスト: `tests/test_verify.sh`・`test_verify2.sh`・`test_verify3.sh`（状態つきの gh のモック。`tests/verify-test-lib.sh`）。e2e（`tests/e2e/lib.sh`）は、PR・実行の待ち・結果の読み取り・Hello World の本文を、`lib/verify-common.sh` に委譲する。
 
+### 4.16 sf-log.sh
+
+> 仕様の正本は、`bin/sf-log.sh` の冒頭コメント（`--help`）。設計は `doc/sf-log-design.md`（実機の確認の結果は 13.1）。ここは実装の要点。
+
+AI の開発サイクル用の Apex ログ取得（開発者向け。管理者向けの警告ボックスは不要）。2026-11-23 に第 3 段まで実装（手動の `start`・`pull`・`stop`・`status`・`auto`、裏の取得役 `collect`・`leave`、sf-start からの `begin`）。
+
+- **境界**: JSON の読み取り・判定・要約・日時は `lib/apexlog.js`（`summarize`・`list`・`tflist`・`time`）。シェルは、組織への問い合わせ・手元の状態・保存・終了コード
+- **手元の状態**: `logs/apex/` の `.state`・`.status`・`.consent`・`.owners`・`.index`（`キー=値`。`kv_get`・`kv_set`。書き換えは短いロック `mkdir logs/apex/.lock` の中で `state_set`）。取得は取得のロック `logs/apex/.fetch.lock`
+- **TraceFlag**: 自分の USER_DEBUG（`.state` の `TRACE_FLAG_ID`）は延ばす。ほかの有効な USER_DEBUG は、手動の確認のあと `min(元の期限, 今+2 分)` に縮め、その 1 秒後から作る（`--auto` は触らずに 10）。DEVELOPER_LOG には触れない（実機で、種類が違えば重ならないことを確認）
+- **取得（`fetch_round`）**: 全ユーザーの一覧は `run` を通さず受ける（他の人の見出しを `sf-log.log`・`error.log`・画面に出さない）。`aj list` で自分 / 他の人を見分ける。取りたいログより新しいログがすべて自分のものなら `sf apex get log -n`、それ以外は `-i`。`-n` の押し出しは `-i` で補う。`logs/apex/.fetch/` は取得のたびに空にし、`<ID>.log` 以外の名前があればその回を失敗にする。しおり（`LAST_FETCH`・`LAST_FETCH_ID`）は 1 本ごとに進める
+- **要約の選び方**: `.index` から、`LAST_READ` より後（同じ秒は `LAST_READ_IDS` の ID を除く）。`--max` を超えたら新しいほう
+- **取得役（`cmd_collect`）**: `.collector`（PID・STARTED・ORG）。`TICK`（5 秒）ごとに、`owners_prune`（`kill -0`）→ 空なら `collector_finish`（CLOSING を書いて `do_cleanup … 1`）→ `MAX_RUN`（12 時間）→ `collector_should_quit`（`requests/stop`・CLOSING・印の入れ替わり）→ 間隔・`requests/pull.*`・取り残しで `fetch_round`（取得のロックが取れたときだけ）→ 追いついたら `respond_pulls`（`done.<ID>`）→ 残り 60 分未満なら `collector_extend`（`tflist` で ID・種類を確かめ、直前に `collector_should_quit`）。失敗は間隔を倍（最大 600）
+- **後始末（`do_cleanup`）**: `stop`・`leave`・取得役が共有。`stop_collector`（`requests/stop` → `STOP_WAIT` 秒 → TERM → 10 秒）→ `.state` の TraceFlag を消す → `.status` を stopped。戻り値 1 = 取得役が止まらない（TraceFlag を残す）/ 2 = 消せない。`stop`・`leave` は `.owners` に CLOSING を書いてから行い、最後に `.owners` を消す。`leave` は失敗しても 0
+- **持ち主の登録（`register_owner`）**: `begin`（と `start --auto --owner`）が行う（ロックを 1 か所にまとめるため）。生きている CLOSING は `CLOSING_WAIT`（60 秒）まで待ち、死んだ CLOSING は消す。`leave` は、登録されていない印なら何もしない
+- **`begin`（sf-start の前面）**: sf を呼ばない（`start --auto` は実機で約 1 分かかったため）。予約名 → `consent_local`（`.consent` の `AUTO`・`ORG`（エイリアス）・`VERSION`。なければ、端末なら Y/N を聞く）→ `register_owner` → `.status` を starting → `nohup bash sf-log.sh start --auto --collect … & disown` → 0。裏の `start --auto` は `auto_consent`（尋ねない。`ORG_ID` が空なら書き、違えば答えを消して 10）のあと準備し、`--collect` なら `exec … collect`
+- **時間の設定**: `SF_LOG_INTERVAL`（既定 180）・`SF_LOG_MAX_SECONDS`（既定 43200）・`SF_LOG_TEST_FAST=1`（テスト用。間隔の下限 1・`TICK` 1・待ち時間を短く）
+- **`--auto`**: 終了コード 0 / 10（取らない）/ 1（失敗）。`finish_auto_or_die` で、手動は `die`、自動は `.status` に書いて終了コードで返す。確認は、端末でなければ聞かずに「取らない」（`read_key` の EOF の die を避ける。`$( )` の中で呼ぶ）
+
+テスト: `tests/test_sf-log.sh`（偽の組織 `tests/mock-sf-log.js`。TraceFlag の重なりの拒否・期限を今にできない・`-n` の全ユーザーの新しい順・押し出しの注入・失敗の注入。取得役は `_collect_bg` で裏に起動し、`_wait_for` で待つ。持ち主の代わりは `sleep`。手元の Git Bash で約 8 分・WSL で約 2 分。`run_tests.sh` の `_weight` は 420）。
+
 ---
 
 ## 5. ドキュメント連動ルール
@@ -959,7 +982,7 @@ sf-init.sh --add-tier develop    # main+staging → main+staging+develop
 
 ```bash
 bash tests/run_tests.sh                           # 全テスト実行（手元では通常は不要。mm 後に CI が全件を実行する）
-bash tests/run_tests.sh --changed                 # 変更ファイルに対応するテストのみ（開発中）
+bash tests/run_tests.sh --changed                 # 変更ファイルに対応するテストのみ（開発中。git の差分と、まだ git add していない新しいファイル。.gitignore の対象は除く）
 bash tests/run_tests.sh --jobs 4                  # 同時に動かすテストファイルの数を指定（既定: CPU の数。環境変数 SF_TEST_JOBS でも指定できる）
 bash tests/run_tests.sh --serial                  # 1 つずつ実行（並列で、原因を切り分けにくいときの確認用）
 bash tests/run_tests.sh --shard 2/6               # テストファイルを 6 組に分け、2 番目の組だけを実行する（GitHub Actions の Windows が、6 つのジョブに分けて並列に動かす。重いファイルから、いちばん軽い組へ割り当てる。目安は run_tests.sh の _weight）

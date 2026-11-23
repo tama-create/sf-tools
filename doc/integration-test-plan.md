@@ -39,7 +39,7 @@
 | 実環境で実行（うまくいく筋） | `sf-init`（通し・`--add-tier staging`）、`sf-job`、`sf-start`、`sf-install`、`sf-hook`、`sf-dryrun`、`sf-push`、`sf-prepush`、`sf-precommit`、`sf-next` |
 | 間接的に実行 | `sf-release`・`sf-check`・`sf-metasync`（`sf-dryrun` と、Actions の中で） |
 | 一部のみ | `sf-sync-wf`（`--check` のみ）、`sf-deploy`（拒否のみ） |
-| 単体テストのみ | `sf-unhook`、`sf-restart`、`sf-launcher`、`sf-update-secret`、`sf-upgrade`、`sf-init` の `--resume` / `--reconnect` / `--status` / `--only` |
+| 単体テストのみ | `sf-unhook`、`sf-restart`、`sf-launcher`、`sf-log`、`sf-update-secret`、`sf-upgrade`、`sf-init` の `--resume` / `--reconnect` / `--status` / `--only` |
 | 別枠 | `sf-typecheck`（個人用の組織で、自身が実機確認）、`sf-init --verify`（手動） |
 
 ### 2.3 e2e で確認している異常系（4 種類）
@@ -506,6 +506,7 @@ Actions 上の実行は、コマンドによって扱いが違う。「全部拒
 | `sf-update-secret` | あり | B2 | — |
 | `sf-deploy` | **一部**（拒否の経路のみ） | A12（許可される条件の確認）。拒否の経路は、e2e で確認済み | **実行の経路は、結合しない**: 共有環境への強制リリースで、危険が大きい。ガードの条件は、単体で確認する（26 件） |
 | `sf-launcher` | なし | — | 起動するコマンドを選んで呼ぶだけの、薄いメニュー。**起動先の各コマンドは、それぞれ、結合テストの対象**。メニューと起動先の対応は、単体で確認する（7 件）。対話の入力を流す結合は、価値に対して、費用が大きい |
+| `sf-log` | なし | — | 組織の TraceFlag・Apex ログを扱う道具。TraceFlag の重なりの拒否・期限を今にできないこと・`-n` の押し出し・裏の取得役など、実機で確かめた組織の動きを、**偽の組織（`tests/mock-sf-log.js`）の単体テスト**でまねて確かめる。`sf-start` との接点（`begin`・`leave` の呼び出し）は、`tests/test_sf-start.sh` で偽の `sf-log.sh` を使って確かめる。結合テスト（実 git ＋ fake）で増える確認は少ないため、作らない |
 | `sf-typecheck` | なし | — | 個人用の組織を対象にする、**単独の道具**で、他のコマンドと連動しない。唯一の接点は、結果の表（`config/metadata-capability.txt`）を `sf-check` が読むこと。**表の形式の契約テスト（単体）**で担保する。実機の確認は、別枠（Developer Edition での実機確認）で行っている |
 
 ### 10.3 フック

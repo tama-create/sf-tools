@@ -5,7 +5,8 @@
 # 使い方: bash tests/run_tests.sh [テストファイル名]
 #   引数なし → 全テストを実行（既定は並列。--serial で 1 つずつ）
 #   引数あり → 指定したテストのみ実行（例: bash run_tests.sh test_sf-hook.sh）
-#   --changed           : 変更したファイル（git の差分）に対応するテストだけを実行する（対応は、下の case 文）
+#   --changed           : 変更したファイル（git の差分と、まだ git add していない新しいファイル。.gitignore の対象は除く）に対応する
+#                         テストだけを実行する（対応は、下の case 文）
 #   --jobs N / --serial : 同時に動かすテストファイルの数（既定: CPU の数。環境変数 SF_TEST_JOBS でも指定できる。
 #                         --serial は 1 = 1 つずつ）。時間のかかるファイルから先に起動する（全体の時間を短くするため）
 #   --shard I/N         : テストファイルを N 組に分け、I 番目（1 始まり）の組だけを実行する（GitHub Actions で、複数のジョブに分けて、並列に動かすため。
@@ -152,7 +153,7 @@ if [[ -n "$SHARD" ]]; then
 fi
 
 # 時間のかかるファイル（先に起動する。最後に長いものが残って、全体が伸びるのを避ける）
-HEAVY_FIRST=(test_integration-init.sh test_integration-init2.sh test_integration-init3.sh test_integration.sh test_integration-git.sh test_sf-init.sh test_sf-init2.sh test_sf-init3.sh test_e2e.sh test_e2e2.sh test_verify.sh test_verify2.sh test_verify3.sh test_sf-release.sh test_sf-install.sh)
+HEAVY_FIRST=(test_integration-init.sh test_integration-init2.sh test_integration-init3.sh test_integration.sh test_integration-git.sh test_sf-init.sh test_sf-init2.sh test_sf-init3.sh test_e2e.sh test_e2e2.sh test_verify.sh test_verify2.sh test_verify3.sh test_sf-release.sh test_sf-install.sh test_sf-log.sh)
 
 # ファイルごとの所要時間の目安（秒。--shard が、組に分けるときの重み。未登録は 10）。
 #   値は、GitHub Actions の Windows での実測（2026-10-20・コミット 5eb8c6f の SF_TEST_TIMES=1 の [TIME] 行。ジョブの中で並列に動かした値）
@@ -174,6 +175,7 @@ _weight() {   # 結果は、変数 _W に入れる（$(...) で呼ぶと、Windo
         test_integration-next.sh|test_integration-guards.sh) _W=85 ;;
         test_project-identity.sh|test_sf-metasync.sh|test_integration-coverage.sh) _W=75 ;;
         test_metasync-js.sh) _W=40 ;;   # 手元の Windows で 約 22 秒
+        test_sf-log.sh) _W=420 ;;   # 手元の Git Bash で 約 8 分（取得役のテストは、裏のプロセスを待つ。偽の sf が Node を毎回起動する。2026-11-23。Actions で実測して直す）
         test_integration-rerun.sh|test_init-common.sh|test_sf-deploy.sh) _W=62 ;;
         test_sf-job.sh|test_sf-sync-wf.sh|test_sf-next.sh|test_sf-prepush.sh|test_sf-start.sh|test_wf-sequence.sh|test_wf-tier-switch.sh|test_remove-tier.sh) _W=50 ;;
         test_integration-secrets.sh|test_sf-hook.sh) _W=40 ;;
@@ -203,6 +205,8 @@ TEST_FILES=(
     test_sf-restart.sh
     test_sf-metasync.sh
     test_metasync-js.sh
+    test_apexlog-js.sh
+    test_sf-log.sh
     test_sf-release.sh
     test_sf-deploy.sh
     test_sf-dryrun.sh
@@ -307,6 +311,13 @@ if [[ "${1:-}" == "--changed" ]]; then
                 _changed_tests+=("test_docs_facts.sh")
                 ;;
         esac
+        # セキュリティの静的な検査（裏での起動で stderr を捨てない・mktemp など。全体を grep する。約 3 秒）: 配布物のコードが変わったとき
+        #   （ファイル名で対応しないため、選ばれず、mm の後の CI で初めて赤になったことがあった。2026-11-23）
+        case "$_file" in
+            bin/*|phases/*|lib/*|hooks/*|tests/test_security.sh)
+                _changed_tests+=("test_security.sh")
+                ;;
+        esac
         case "$_file" in
             bin/sf-*.sh)
                 # bin/sf-foo.sh → test_sf-foo.sh
@@ -348,6 +359,12 @@ if [[ "${1:-}" == "--changed" ]]; then
             lib/metasync.js|config/metadata-dirs.txt|config/metasync-detect.txt|config/metasync-fingerprint.txt|config/metasync-extra.txt|tests/mock-soap-server.js|tests/test_metasync-js.sh)
                 _changed_tests+=("test_metasync-js.sh" "test_sf-metasync.sh")   # 鏡像の部品（lib/metasync.js）と、それを呼ぶ sf-metasync.sh
                 ;;
+            lib/apexlog.js|tests/fixtures/apexlog/*|tests/test_apexlog-js.sh)
+                _changed_tests+=("test_apexlog-js.sh" "test_sf-log.sh")   # sf-log.sh の要約・一覧の検査・日時の部品（doc/sf-log-design.md 6 章）と、それを呼ぶ sf-log.sh
+                ;;
+            tests/mock-sf-log.js)
+                _changed_tests+=("test_sf-log.sh")   # sf-log.sh のテストの偽の sf（小さな偽の組織）
+                ;;
             config/metadata-capability.txt)
                 _changed_tests+=("test_sf-check.sh")
                 ;;
@@ -381,7 +398,10 @@ if [[ "${1:-}" == "--changed" ]]; then
                 break
                 ;;
         esac
-    done < <(git -C "$TESTS_DIR/.." diff --name-only HEAD 2>/dev/null)
+    # 対象のファイル: 最後のコミットからの差分（変更・削除・git add 済みの新しいファイル）と、まだ git add していない新しいファイル
+    #   （git diff は、追跡していないファイルを出さない。新しく足した部品・テストのテストが、mm の前に動かないことがあったため、
+    #   git ls-files --others で足す。.gitignore の対象（logs/ など）は --exclude-standard で除く。重なりは、下の sort -u で除く）
+    done < <(git -C "$TESTS_DIR/.." diff --name-only HEAD 2>/dev/null; git -C "$TESTS_DIR/.." ls-files --others --exclude-standard 2>/dev/null)
 
     if [[ $_run_all -eq 0 && ${#_changed_tests[@]} -gt 0 ]]; then
         # 重複排除

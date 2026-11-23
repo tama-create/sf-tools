@@ -1,6 +1,6 @@
 # sf-log.sh 設計書（AI の開発サイクル用の Apex ログ取得）
 
-> **ステータス: 未実装（設計のみ）。** `bin/sf-log.sh`・`lib/apexlog.js`・`tests/test_sf-log.sh` は、まだ存在しない（2026-11-22 に確認）。未実装として触れているのは、`README.md` の設計書の一覧と、`tests/docs-facts-allow.txt`（README に、実在しないコマンド名を書くための例外）だけ。
+> **ステータス: 実装済み（第 3 段まで。2026-11-23）。** `bin/sf-log.sh`（`begin`・`start`・`pull`・`stop`・`status`・`auto`・`collect`・`leave`）・`lib/apexlog.js`・`sf-start.sh` と `sf-launcher.sh` とのつなぎを実装した（テスト: `tests/test_sf-log.sh`・`tests/test_apexlog-js.sh`・`tests/test_sf-start.sh`・`tests/test_sf-launcher.sh`）。実機（Windows の Git Bash・開発用の Developer Edition）では、手動の段と取得役を確かめた。sf-start からの自動の流れの実機確認と、macOS・Linux での確認は、まだ（13.1）。
 > 経緯: 2026-11-21 に、旧設計（`sf-logwatch.sh`。10 秒ごとに見張り、Ctrl+C で止める、人が見る道具）を、AI が読む前提で作り直し、Codex のレビュー（4 回。8・7・3・0 件）を反映した。2026-11-22 に、TAMAさんの提案で、**ランチャーの起動中は裏で自動で取り続ける方式**を主な使い方にした（2 章）。
 > 下のコード片は、設計の段階の下書き。実装するときは、12 章の規約に合わせて書き直す。
 
@@ -25,7 +25,7 @@ AI がコードを書く → AI がデプロイする → 人が画面で動き�
 
 ```
 sf-start（組織に接続）──→ 裏の取得役（collector）を起動 ──→ ランチャー（いつもどおり）
-                           │  1 分ごと: 新しいログを手元に保存         │
+                           │  3 分ごと: 新しいログを手元に保存         │
                            │  期限が近づいたら: TraceFlag を延ばす     │ q で終了
                            ▼                                        ▼
                      手元に溜まる  ←── AI が質問を受けたら pull（すぐ要約を読める）
@@ -68,7 +68,7 @@ sf-start（組織に接続）──→ 裏の取得役（collector）を起動 �
 | | 2026-11-21 版 | 本設計 | 理由 |
 |---|---|---|---|
 | ログの取り始め | 人が作業の始めに `sf-log.sh start` | `sf-start` が、組織に接続したあとに自動で始める | 毎回コマンドを打つのは手間で、覚えることも増える（TAMAさんの指摘） |
-| ログの取得 | AI の `pull` のたびに、組織から取る | 裏の取得役が 1 分ごとに手元へ保存し、`pull` は直前の分を取り足して要約するだけ | 質問されたとき、すぐ答えられる。1 件の取得に数秒かかる（Windows）ため、まとめて取ると待たされる |
+| ログの取得 | AI の `pull` のたびに、組織から取る | 裏の取得役が一定の間隔（既定 3 分。2026-11-23 に 1 分から変更。13.3）で手元へ保存し、`pull` は直前の分を取り足して要約するだけ | 質問されたとき、すぐ答えられる。1 件の取得に数秒かかる（Windows）ため、まとめて取ると待たされる |
 | TraceFlag の期限 | 2 時間。切れたら人が `start` | 2 時間。取得役が、期限が近づくたびに延ばす | 長い作業でも切れない。異常終了で延ばす役が止まれば、2 時間で自然に切れる（5.5） |
 | AI への送信の確認 | `start` のたび | プロジェクトごとに最初の 1 回（答えを覚える） | 毎回聞かれるのは手間。一度は確認すべき |
 | 同時実行 | 対応しない | 取得役と `pull` は同時に動く前提。手元の取得の状態を書くのは、取得役だけにする。依頼は ID つき（9.3） | 裏で常に動くため |
@@ -112,7 +112,8 @@ bash ~/sf-tools/bin/sf-log.sh leave --owner <印>   # sf-start の終了時: 持
 | `--since <分>` | `pull` | 前回の pull を無視して、直近 N 分のログを要約する。1 以上の整数 |
 
 - `--help` / `-h` は、他のコマンドと同じ（冒頭コメントの第 2 ブロック）
-- 取得の間隔は、環境変数 `SF_LOG_INTERVAL`（秒。30〜600。既定 60）で変えられる（PC が重いとき用。4.3）
+- 取得の間隔は、環境変数 `SF_LOG_INTERVAL`（秒。30〜600。既定 180）で変えられる（4.3）。既定を 60 から 180 にしたのは、sf の 1 回の呼び出しが約 10 秒かかり（13.1）、1 回の取得に 20〜30 秒かかるため。`pull` は取得役にすぐ取らせるので、間隔を延ばしても、AI が読むログは古くならない（2026-11-23。13.3）
+- `SF_LOG_MAX_SECONDS`（取得役の上限。秒。既定 43200 = 12 時間）・`SF_LOG_TEST_FAST=1`（テスト用。間隔の下限を 1 秒にし、目を覚ます間隔と待ち時間を短くする）
 
 ---
 
@@ -149,27 +150,25 @@ bash ~/sf-tools/bin/sf-log.sh leave --owner <印>   # sf-start の終了時: 持
            → DebugLevelId・StartDate（今）・ExpirationDate（今から --hours 時間）を更新
            （一致する ID があっても、TracedEntityId・LogType が違えば、自分が作ったものとみなさない。b へ）
       b. a に当たらなかったときは、いま有効な TraceFlag（StartDate が空か今以前、かつ ExpirationDate が今より後）を、種類（LogType）で分ける
-           ・同じ種類（LogType）の有効なものが 2 つ以上 → 手動: die／自動: 終了コード 10
-             （公式の制約は「1 つの対象（TracedEntityId）で、同時に有効な TraceFlag は 1 つだけ」。同じユーザー・同じ種類で 2 つ有効なのは、その制約と食い違うため、推測で触らない。
-              種類の違うもの（USER_DEBUG と DEVELOPER_LOG）が同時に有効でありうるかは、実機で確かめる。13.1）
+           （同時に有効にできないのは、同じ対象・同じ種類で期間が重なるものだけ。種類が違えば（USER_DEBUG と DEVELOPER_LOG）同時に有効にできる。2026-11-23 に実機で確認。13.1）
+           ・USER_DEBUG が 2 つ以上 → 手動: die／自動: 終了コード 10（Salesforce が重なりを拒否するため、ありえない状態。推測で触らない）
            ・USER_DEBUG が 1 つ（人が設定画面で作ったもの・別の道具のもの）
-                → 止めないと、新しいものを作れない（同じ種類・同じ対象。8.6）
+                → そのままでは、新しいものを作れない（同じ種類で期間が重なる。8.6）
                 → 手動: 表示と確認（下の ※）のあと、止める。そのあと c へ
                 → 自動: 触らない。WARNING（ID・期限と、「sf-log.sh start で置き換えられます」）を出して、終了コード 10
-           ・DEVELOPER_LOG が 1 つ（Developer Console が作ったもの）
-                → まず止めずに c を試す（種類が違えば、作れる可能性がある。13.1）
-                → c が「有効な TraceFlag がある」旨で失敗したとき
-                     手動: 表示と確認（※）のあと、止めて、c をもう一度だけ試す
-                     自動: 触らない。WARNING を出して、終了コード 10
-           ・USER_DEBUG と DEVELOPER_LOG が 1 つずつ → 上の 2 つの扱いを、USER_DEBUG → DEVELOPER_LOG の順に行う
-           ・上のどれでもない種類（CLASS_TRACING など。ユーザーを対象にする種類ではない）→ 手動: die／自動: 終了コード 10
+           ・DEVELOPER_LOG（Developer Console が作ったもの）・ほかの種類（CLASS_TRACING など）→ 触らない（USER_DEBUG の作成とぶつからない）
            ・ない → c へ
-           ※ 表示と確認: ID・種類・DebugLevel の名前・開始・期限と、種類ごとの説明
-               （USER_DEBUG:「設定画面などで作られた、このユーザーのログの設定です」／DEVELOPER_LOG:「Developer Console が作った設定です。Developer Console を開き直すと、作り直されます」）を表示し、
+           ※ 表示と確認: ID・DebugLevel の名前・開始・期限と、「設定画面などで作られた、このユーザーのログの設定です」を表示し、
                「止めてよいか」を ask_yn || die（-y で省く）
-             止める = 期限を今にする（消さない。8.2）。失敗 → die（新しい TraceFlag は作らず、状態ファイルも変えない）
+             止める = 期限を「元の期限」と「今から 2 分後」の早いほうにする（消さない。期限を今にはできない。元の期限が 2 分以内なら、更新しない。8.2）。
+               更新の失敗 → die（新しい TraceFlag は作らず、状態ファイルも変えない）
            （期限切れ・これから始まるもの（StartDate が今より後）は、対象にしない）
-      c. 作る（LogType=USER_DEBUG・StartDate=今・ExpirationDate=今から --hours 時間）。失敗 → 手動: die／自動: 終了コード 1（状態ファイルは変えない）
+      c. 作る（LogType=USER_DEBUG・ExpirationDate=StartDate から --hours 時間）。StartDate は、ふだんは今。b で止めたときは、止めたものの期限（縮めた後。縮めなかったときは元の期限）の 1 秒後。
+         ただし、作る直前に今の時刻と比べ、その StartDate が今より前になっていたとき（＝止めたものの期限がもう過ぎている）だけ、今にする（止めたものは、もう有効でないため重ならない）。
+         止めたものの期限がまだ先なら、StartDate を今に寄せない（重なって作成に失敗するため）
+         失敗 → 手動: die／自動: 終了コード 1（状態ファイルは変えない）
+           b で人の TraceFlag を縮めたあとに c が失敗したときは、縮めた期限を元に戻さない（人は「止めてよい」と確認済み）。
+           die のメッセージと error.log に、縮めた TraceFlag の ID・元の期限・縮めた期限を、事実として書く
  4. 状態ファイル（9.2）に、組織・ユーザー ID・TraceFlag の ID を書く
     （取得・要約の時刻は、ない、または接続先が変わったときだけ、今で初期化する）
  5. 組織のログの量を表示し、多ければ WARNING（8.6）
@@ -177,12 +176,13 @@ bash ~/sf-tools/bin/sf-log.sh leave --owner <印>   # sf-start の終了時: 持
 
 **自動（`--auto`）の終了コード**: 0 = 取り始めた／10 = 取らない（答えが「取らない」・本番・予約名・種類不明・ほかの TraceFlag がある）／1 = 失敗。**どれでも、呼び出し側（sf-start.sh）は止まらない**（5.1）。自動では `die` を使わず、`ask_yn` も使わない（`q` で `die` するため、sf-start が中断してしまう）。
 
-- 止める候補を USER_DEBUG と DEVELOPER_LOG だけにするのは、ユーザーを対象にできる、ログを作る種類がこの 2 つだから（公式。CLASS_TRACING はクラス・トリガーが対象で、ログを作らない。PROFILING は将来用）
-- DEVELOPER_LOG を、作成に失敗したときだけ止めるのは、人の Developer Console の設定に、必要なときだけ触れるため。止めてよい理由は、①自分のユーザーの設定であること ②手動の `start` を打つのは人で、種類と説明を見て確認すること ③Developer Console を開き直せば作り直されること
+- 止める候補を USER_DEBUG だけにするのは、作ろうとする種類と同じで、期間が重なると作れないのが USER_DEBUG だけだから（2026-11-23 に実機で確認。13.1）。DEVELOPER_LOG（Developer Console）は、USER_DEBUG が有効なままでも作れ、その逆も同じだったため、人の Developer Console の設定には触れない
 - **自動では、ほかの TraceFlag に一切触れない。** 自動は確認の場面を作らない方針のため（確認なしで人の設定を変えない）。取れないときは WARNING で知らせ、人が手動の `start` で置き換えられるようにする
-- 3b で消さずに期限を切るのは、人が作った設定（DebugLevel の割り当てなど）を、記録として残すため
-- これから始まる TraceFlag を対象にしないのは、期限を今にすると、`StartDate` より前の期限になり、Salesforce に拒否されうるため。そのような TraceFlag があって c の作成に失敗したら、手動は `die`、自動は終了コード 1
-- c の失敗が「有効な TraceFlag がある」ためかどうかは、sf の JSON の応答のエラーのコード（`name` など）で見分ける。文言では判定しない（言語・版で変わるため）。どのキーにどの値が入るかは、実機で確かめる（13.1）。見分けられなければ、手動は DEVELOPER_LOG も USER_DEBUG と同じく先に確認して止める方式に、自動は DEVELOPER_LOG があれば取らない方式に変える
+- 3b で消さずに期限を縮めるのは、人が作った設定（DebugLevel の割り当てなど）を、記録として残すため。期限を「今」にすると Salesforce が拒否する（今・今から 5 秒後は拒否、今から 60 秒後は受け付けた。2026-11-23 に実機で確認）ため、時計のずれも見込んで 2 分後にする。止めたものの期限までの最大 2 分のログも、同じユーザーのログなので、取得役が取る（その間は、止めたものの詳しさで出る）
+- 「元の期限」と「今から 2 分後」の早いほうにするのは、元の期限が 2 分より短いとき、人の設定を延ばしてしまわないため
+- c の `StartDate` を、止めたものの期限の 1 秒後にするのは、同じ種類で期間を重ねないため（期限ちょうどを重なりとみなすかは、まだ確かめていないため、1 秒あける。13.1）。止めたものの期限から c の作成までの間（sf の呼び出しの遅れ）は、どちらの TraceFlag も有効でないため、ログが出ない（数秒〜数十秒。13.1 の確認では、sf の 1 回の呼び出しが約 10 秒）
+- これから始まる TraceFlag を対象にしないのは、期限を縮めると `StartDate` より前の期限になりうるため。そのような TraceFlag と期間が重なって c の作成に失敗したら、手動は `die`、自動は終了コード 1
+- 作成の失敗の理由は、sf の JSON の応答の `name` で見分ける（重なり・期限の誤りは `FIELD_INTEGRITY_EXCEPTION`。2026-11-23 に実機で確認）。文言（`message`）では判定しない（ユーザーの言語で変わる。実機では日本語で返った）
 
 ### 4.3 collect（裏の取得役）
 
@@ -201,8 +201,9 @@ bash ~/sf-tools/bin/sf-log.sh leave --owner <印>   # sf-start の終了時: 持
          この確かめは、各回の最初と、組織に書き込む直前（d の延長の前）に必ず行う（止められた取得役が、消された TraceFlag を延ばし直さないため）
       c. 前回の取得から SF_LOG_INTERVAL 秒たった、pull の依頼（9.3）がある、または前回の取得で取り残しがある → 取得する:
            ・取得のロック（9.3）を取る。取れなければ（取得役がいないと思った pull が取得中）、この回は飛ばす
-           ・前回の続き（取得のしおり。8.3）から、古い順に最大 50 本の一覧を取り、本文を 1 件ずつ手元に保存する（8.4・9.1。置き換えで保存する。9.3）
-           ・1 件保存するごとに、しおり（LAST_FETCH・LAST_FETCH_ID）を進める（途中で止まっても、保存した分は取り直さない）
+           ・前回の続き（取得のしおり。8.3）から、古い順に最大 50 本の一覧を取り、自分のログの本文を手元に保存する
+             （ふだんは sf の 1 回の呼び出しでまとめて取る。8.4・9.1。置き換えで保存する。9.3）
+           ・古い順に 1 件保存するごとに、しおり（LAST_FETCH・LAST_FETCH_ID）を進める（途中で止まっても、保存した分は取り直さない）
            ・50 本を超えて残っていれば、待たずに次の回で続きを取る（取り残しの本数の目安を .status に書く）
            ・追いついたら（残りがない）、pull の依頼の ID ごとに応答（9.3）を書く
       d. TraceFlag の残りが 60 分未満なら → 今から 2 時間に延ばす（4.2 の 3a と同じ確かめ方。自分が作ったものだけ）
@@ -266,25 +267,31 @@ bash ~/sf-tools/bin/sf-log.sh leave --owner <印>   # sf-start の終了時: 持
 
 ### 5.1 sf-start.sh の起動時
 
-`sf-start.sh` の処理の流れの 4（設定ファイルの書き込み・VS Code の起動）と 6（ランチャーの起動）の間に、次を足す。
+`sf-start.sh` の処理の流れの 5（sf-install.sh の裏での起動）と 7（ランチャーの起動）の間（6）に、次を足す。**sf-start の前面では、sf を呼ばない**（ランチャーを待たせないため。2026-11-23。13.3）。
 
 ```
  a. ~/sf-tools/bin/sf-log.sh がなければ、何もしない
  b. 持ち主の印を決める
-      環境変数 SF_LOG_OWNER（「PID:起動の時刻:乱数」）があり、その持ち主が生きている（sf-restart からの入れ子の sf-start）→ それを使う（登録はしない。外側が登録済み）
-      それ以外 → 自分の印を作り、export SF_LOG_OWNER=…。持ち主の一覧（9.2 の .owners）に、自分の印を足す（9.3 のロックの中で）
- c. bash sf-log.sh start --auto --owner "$SF_LOG_OWNER" を実行する
-      0  → bash sf-log.sh collect を裏で起動する（下の「裏での起動」）
-           INFO「Apex ログを取っています（組織: …・期限: …）」
-      10 → INFO「Apex ログは取りません（理由）」（理由は sf-log.sh が表示する）。.status に理由を書く
-      1・その他 → WARNING「Apex ログを取れませんでした（sf-tools/logs/sf-log.log を参照）」。.status に「取れていません（理由）」を書く
-    どの場合も、ランチャーの起動に進む（ログの取得の失敗で、開発を止めない）
+      環境変数 SF_LOG_OWNER（「PID:起動の時刻:乱数」）があり、その PID が生きている（ランチャーの Start・Restart からの入れ子の sf-start）
+        → それを使う（後始末は外側が行う）
+      それ以外 → 自分の印を作り、export SF_LOG_OWNER=…
+ c. bash sf-log.sh begin -o <エイリアス> --owner "$SF_LOG_OWNER" を実行する（前面。sf を呼ばない）
+      begin: GitHub Actions 上・予約名 → 10。手元の答え（10.2）で「取らない」→ 10（初めて・エイリアスが変わったときは、ここで Y/N を聞く）。
+             持ち主の一覧（.owners）に印を足す（後始末の最中は最大 60 秒待つ）。.status を starting にし、
+             start --auto --collect --retry 1 を nohup で裏に起動して、0 で終わる
+      裏の start --auto: 本番・種類を確認できない組織 → 10。答えの組織 ID と違う → 10（答えを消す）。DebugLevel・TraceFlag を準備して、
+             .status を collecting にし、そのまま collect（取得役）になる（exec）。取らない・失敗は、.status に理由を書く。
+             失敗（終了コード 1。「取らない」の 10 は除く）は、持ち主が生きていれば、.status を starting に戻して「やり直しています」を書き、
+             30 秒後に 1 回だけやり直す（--retry。sf の一時的な失敗で、その日の取得が抜けないため。13.3）
+    sf-start は、begin の終了コードで分ける: 0 → 自分の印なら、終了時に leave する（5.2）／10 → 何もしない（理由は sf-log.sh が表示）／
+    それ以外 → WARNING「Apex ログの準備を始められませんでした」。どの場合も、ランチャーの起動に進む（ログの取得の失敗で、開発を止めない）
 ```
 
-- 持ち主の印に、PID だけでなく起動の時刻と乱数を入れるのは、PID の再利用（5.5）と区別するため
-- `start --auto` の中の確認（10.2）は、`read_key` で Y/N を聞く（`q`・EOF は「取らない」扱い。`die` しない）
-- **裏での起動**: `nohup bash sf-log.sh collect </dev/null >/dev/null 2>&1 &` のあと `disown` する（端末の入力・出力から切り離し、端末を閉じたときの SIGHUP で一緒に止まらないようにする。止めるのは、持ち主の見張りと 5.2 の後始末）。Ctrl+C の無視（`trap '' INT`）も引き継がれる。`nohup`・`disown` が Windows の Git Bash・macOS・Linux で同じように効くかは、実機で確かめる（13.1）
-- `sf-start.sh` の冒頭コメント（【処理の流れ】【補足】）に、この流れを書く（CLAUDE.md 2.5）
+- 持ち主の印に、PID だけでなく起動の時刻と乱数を入れるのは、同じ PID の印が重ならないようにするため（生死は `kill -0` だけで見る。5.5）
+- 持ち主の一覧への登録は、sf-start ではなく `begin`（と `start --auto --owner`）が行う。ロックと CLOSING の待ちを、sf-log.sh の 1 か所にまとめるため。同じ印は 2 回足さない（入れ子の sf-start）
+- `begin` の確認（10.2）は、`read_key` で Y/N を聞く（`q` は「取らない」。端末でなければ聞かない。`read_key` の EOF の `die` で sf-start を止めないよう、`$( )` の中で呼ぶ）
+- **裏での起動**: `nohup bash sf-log.sh start --auto --collect --retry 1 … </dev/null >/dev/null 2>>"$LOG_FILE" &` のあと `disown` する（端末の入力・出力から切り離し、端末を閉じたときの SIGHUP で一緒に止まらないようにする。止めるのは、持ち主の見張りと 5.2 の後始末）。Ctrl+C の無視（`trap '' INT`）も引き継がれる。Windows の Git Bash では効くことを確かめた（13.1）。`nohup` では `$!` と、取得役が記録した PID が違うため、取得役の生死は `.collector` の PID で見る
+- `sf-start.sh` の冒頭コメント（【処理の流れ】）に、この流れを書く（CLAUDE.md 2.5）
 
 ### 5.2 sf-start.sh の終了時（ランチャーを q で閉じたとき）
 
@@ -311,6 +318,7 @@ bash ~/sf-tools/bin/sf-log.sh leave --owner <印>   # sf-start の終了時: 持
 
 - `sf-launcher.sh` のメニューの上に、`logs/apex/.status` から 1 行を表示する（例: `Apex ログ: 取得中（dev-tama・期限 15:30・今日 23 本）`／`Apex ログ: 取っていません`）
 - ランチャーは `lib/common.sh` を読まない単独の設計のため、`.status` は `キー=値` の行にして、`while read` で読めるようにする（9.2）。ファイルがなければ、何も表示しない
+- 準備中（`starting`）のあいだは、入力を 5 秒ずつ待ち（`read -t`）、`STATE` が変わったら、コマンドを動かさずにメニューを描き直す（裏の準備は、実機で約 3 分かかった。つながっても「準備中」のままだと迷うため。2026-11-23。13.3）。待ち切れと EOF は、待った時間でも見分ける（Bash 3.2 では、待ち切れの戻り値が 128 を超えないため）
 - メニューの番号・動きは変えない
 
 ### 5.5 異常終了（ウィンドウを × で閉じた・PC が止まった）
@@ -320,7 +328,7 @@ bash ~/sf-tools/bin/sf-log.sh leave --owner <印>   # sf-start の終了時: 持
 | sf-start の後始末（5.2）が動かない | 取得役が、持ち主の見張り（4.3 の 2a）で、死んだ持ち主を一覧から外す。一覧が空になれば、自分で後始末をして止まる |
 | 取得役も一緒に止まった | TraceFlag を延ばす役がいなくなるため、**最大 2 時間で自然に切れる**（期限を短くしている理由） |
 | 取得役の印・持ち主の一覧が残った | 次の sf-start で、印の PID が死んでいれば、書き直して起動する（4.3 の 1）。死んだ持ち主は外す |
-| 死んだ sf-start の PID が、別のプロセスに再利用された | `kill -0` だけでは「生きている」に見える。そこで、持ち主の印の起動の時刻を、`ps` で取れる OS では比べる（違えば死んだとみなす）。取れない・確かめられないときに備え、取得役は起動から 12 時間で必ず止まる（4.3）。そのあと TraceFlag は最大 2 時間で切れる |
+| 死んだ sf-start の PID が、別のプロセスに再利用された | `kill -0` だけでは「生きている」に見える。**生死は `kill -0` だけで見る**（`ps` での起動の時刻の比べ方は、OS ごとに違い、Windows の Git Bash で確かめる手段が乏しいため、使わない。2026-11-23。13.3）。その代わり、取得役は起動から 12 時間で必ず止まる（4.3）。そのあと TraceFlag は最大 2 時間で切れる |
 
 - 持ち主の見張り（`kill -0`・`ps` での起動の時刻）が、Windows の Git Bash・macOS・Linux で期待どおりに動くかは、実機で確かめる（13.1）
 
@@ -359,7 +367,7 @@ bash ~/sf-tools/bin/sf-log.sh leave --owner <印>   # sf-start の終了時: 持
 ## 6. 切り詰め・出なかった区分（20MB で切られた・該当する行が 1 行もなかった区分）
 ```
 
-### 6.3 拾う行（候補。実機で確かめる。13.1）
+### 6.3 拾う行（2026-11-23 に実機で確認。入力規則・フローは未確認）
 
 | 区分 | ログの行の種類（候補） |
 |---|---|
@@ -370,7 +378,18 @@ bash ~/sf-tools/bin/sf-log.sh leave --owner <印>   # sf-start の終了時: 持
 | 制限 | `LIMIT_USAGE_FOR_NS`・`CUMULATIVE_LIMIT_USAGE` |
 | 件数 | `SOQL_EXECUTE_BEGIN`・`DML_BEGIN` |
 
-- どの行が、どの区分のどの詳しさで出るかは、行ごとに決まっている（公式のイベントの一覧）。7 章の値で、上の行が出るかは**未確認**。実装の最初に、開発組織の実ログで確かめ、出ない行があれば 7 章の値を直す
+- どの行が、どの区分のどの詳しさで出るかは、行ごとに決まっている（公式のイベントの一覧）。**2026-11-23 に、開発組織で 7 章の `standard`（USER_DEBUG の TraceFlag）の実ログを確かめた**（Developer Edition・API 68.0・sf 2.157.8・Windows での観測。版や組織の種類で変わりうる。下の行の形は、解析の前提にするが、**想定と違う行は、推測で読まずに「読み取れなかった行」に入れる**（下の箇条）。要約は、1 行も出なかった区分を「該当する行なし（詳しさが足りずに出なかった可能性もある）」と書くので、未確認の区分（入力規則・フロー）で行が出なくても、AI が「エラーなし」と取り違えない）:
+  - 出た: `USER_DEBUG`・`SOQL_EXECUTE_BEGIN`・`DML_BEGIN`・`FATAL_ERROR`・`CUMULATIVE_LIMIT_USAGE`・`LIMIT_USAGE_FOR_NS`・`CODE_UNIT_STARTED` / `CODE_UNIT_FINISHED`
+  - `EXCEPTION_THROWN` は、`throw` した例外と DML の失敗では出た（捕まえても出る）。実行時の例外（null の参照など）では、捕まえても捕まえなくても出なかった。捕まえなかった例外は `FATAL_ERROR` で分かる
+  - 入力規則・フローの行は、組織にそれらを作る必要があるため、まだ確かめていない（13.1）
+- **行の形**（実ログで確かめた。要約の解析は、これに合わせる）:
+  - 1 行目は、API の版と詳しさ（例: `68.0 APEX_CODE,FINE;APEX_PROFILING,INFO;…`）。匿名 Apex では、続いて `Execute Anonymous: <コード>` の行が並ぶ
+  - イベントの行は `<時刻> (<ナノ秒>)|<種類>|<項目>|…`。**時刻は、ログのユーザーのタイムゾーン**（UTC ではない。`USER_INFO` の行にタイムゾーンが出る）
+    - 要約では、行の時刻を、日付のない「その日の時刻」として表示するだけに使い、UTC に直さない。ログがいつ始まったかは、一覧（8.3）の `StartTime`（UTC）を正とする
+    - `USER_INFO` の行がない・タイムゾーンを読めないときは、時刻を推測で直さず、「タイムゾーン不明」と添えてそのまま出す
+  - 種類のあとに `|` が続かない行がある（`CUMULATIVE_LIMIT_USAGE`・`EXECUTION_STARTED` など）
+  - **複数行にまたがるイベントがある**: `LIMIT_USAGE_FOR_NS`（続きの行が空白 2 つで始まる）・`FATAL_ERROR`（例外の文言のあと、空行と `AnonymousBlock: line 4, column 1` などのスタックトレース）。時刻で始まらない行は、直前のイベントの続きとして読む
+- **`sf apex run` で動かした匿名 Apex のログは、TraceFlag の詳しさにならない**（sf が自分の詳しさ `APEX_CODE,DEBUG;APEX_PROFILING,INFO` を付けて呼ぶため。SOQL・DML の行が出なかった）。Tooling API の `executeAnonymous` を直接呼ぶ（`sf api request rest "/services/data/v68.0/tooling/executeAnonymous/?anonymousBody=<URL エンコード>"`）と、TraceFlag の詳しさで出た（2026-11-23 に確認。11.2）
 - テストには、実ログをもとに手で作った小さな見本（実データを含まない）を使う。見本は、確かめたログの形に固定する
 - 要約は、上の区分のうち 1 行も出なかったものを「該当する行なし（詳しさが足りずに出なかった可能性もある）」と書く（エラーが無かったのか、詳しさが足りずに出なかったのかを、AI が区別できるように）
 - **読み取りの失敗は、「該当する行なし」と分けて書く**: 行の形が想定と違って読めなかった（区切りが違う・知らない種類の行）ときは、その本数と、本文のファイルへのリンクを「読み取れなかった行」として書く。読めない行があっても、要約は作る（ほかの行は読む）
@@ -397,23 +416,23 @@ bash ~/sf-tools/bin/sf-log.sh leave --owner <印>   # sf-start の終了時: 持
 | System | DEBUG | DEBUG |
 | Visualforce | INFO | FINE |
 
-- 上の値は、**仮の値**。6.3 の行が出るかを実機で確かめ、その結果で決める（13.1）
+- `standard` の値で、6.3 の行が出ることを、2026-11-23 に開発組織で確かめた（入力規則・フローの行は未確認）。`detail` の値は、まだ仮の値
 - `detail` は、変数の値の変化などが要るときだけ、手動の `start --level detail` で使う。15 分で 1,000MB の上限（8.6）に近づきやすいため、既定にしない
-- 公式の項目には、ほかに `DataAccess`・`Nba`・`Wave` がある。指定しない項目の扱い（既定の値になるか）は、実機で確かめる
+- 公式の項目には、ほかに `DataAccess`・`Nba`・`Wave` がある。指定しないと `INFO` になった（2026-11-23 に実機で確認）。上書きのときも指定しない（作ったときの `INFO` のまま）
 
 ---
 
 ## 8. Salesforce API 操作
 
 > JSON は `json_get`（`lib/common.sh`）で読む。`grep` / `sed` で読まない（CLAUDE.md 2.2）。
-> フラグは sf 2.157.8 の `--help` で確認した（`sf apex get log` の `-i`・`-n`・`-d`、`sf apex list log` は `-o` のみ）。応答の JSON のフィールド名は、実装時に確かめる（13.1）。
+> フラグは sf 2.157.8 の `--help` で確認した（`sf apex get log` の `-i`・`-n`・`-d`、`sf apex list log` は `-o` のみ）。応答の JSON のフィールド名は、2026-11-23 に実機で確かめた（8.2）。
 
 **TraceFlag を `sf apex trace` ではなく `sf data …`（Tooling API の直接の操作）で扱う理由**
 
 sf には `sf apex trace create` / `delete` / `list` がある（sf 2.157.8 の `--help` で確認。`create` は `-i`（対象）・`-d`（DebugLevel の名前）・`-l`（`DEVELOPER_LOG` / `USER_DEBUG`。既定は `DEVELOPER_LOG`）・`--duration`（分。既定 30・最大 1440））。それでも直接の操作にするのは:
 
 - **延ばす（更新する）コマンドがない**。取得役は、自分の TraceFlag の期限を延ばし続ける（4.3）。作り直すと ID が変わり、「自分が作ったものだけを触る」確かめ（4.2 の 3a）が崩れる
-- 期限を今にして止める（消さずに止める。4.2 の 3b）操作がない
+- 期限を縮めて止める（消さずに止める。4.2 の 3b）操作がない
 - 検索の条件（自分のユーザー・種類・期限）と、取る項目を、こちらで決められる
 - なお、`--duration` の最大 1440 分（24 時間ちょうど）は、Tooling API の「24 時間未満」と食い違う。本書は、厳しいほう（24 時間未満）に合わせる
 
@@ -423,10 +442,10 @@ sf には `sf apex trace create` / `delete` / `list` がある（sf 2.157.8 の 
 |---|---|
 | sf の終了コードが 0 以外 | 手動: `die`／自動・取得役: その回を失敗として扱う（4.2・4.3）。どちらも、`run` が失敗を `error.log` に記録し、状態ファイルは変えない |
 | 出力を `json_get` で読めない（JSON でない・期待したキーがない） | 上と同じ（推測で進めない） |
-| 検索（`sf data query`）の件数 | `result.totalSize` で判定する（想定。13.1 で確かめる）。0 件・1 件・2 件以上を、呼び出しごとに決めた扱いに分ける（DebugLevel の 2 件以上・ほかの有効な TraceFlag の 2 件以上は、手動 `die`／自動 取らない） |
-| 作成（`sf data create record`）の ID | `result.id`（想定。13.1 で確かめる）。取れなければ失敗 |
+| 検索（`sf data query`）の件数 | `result.totalSize` で判定する（2026-11-23 に実機で確認）。0 件・1 件・2 件以上を、呼び出しごとに決めた扱いに分ける（DebugLevel の 2 件以上・ほかの有効な TraceFlag の 2 件以上は、手動 `die`／自動 取らない） |
+| 作成（`sf data create record`）の ID | `result.id`（2026-11-23 に実機で確認）。取れなければ失敗 |
 | 検索の文に埋め込む値 | **埋め込む前に、形を検査する**。形が違えば失敗（引用符などで逃がさず、決まった形の値しか通さない）。ユーザー ID・TraceFlag の ID: 英数字 15 文字か 18 文字／DebugLevel の名前: `standard`・`detail` から作る決まった 2 つだけ／日時: `YYYY-MM-DDTHH:MM:SSZ`／件数・分・時間・PID: 1 以上の整数（`--hours` は 1〜23）／持ち主の印: `数字:数字:英数字`。状態ファイル・sf の応答から読んだ値も、信用せずに同じ検査をする（`LAST_FETCH`・`LAST_READ` だけは、形が違えば、直近 30 分に戻す。`LAST_FETCH_ID` は、形が違えば空にする） |
-| 出力の受け取り | `VAR=$(run ... --json)` で受ける（`run` は、標準エラーも混ぜて返す。`json_get` は、全体が JSON でなければ、最初の `{` から最後の `}` までを読む。`lib/common.sh`）。ログの本文だけは、この方法で受けない（8.4） |
+| 出力の受け取り | `VAR=$(run ... --json)` で受ける（例外: 全ユーザーのログの一覧（8.3）は、他の人の見出しを記録しないため、`run` を通さない。`run` は、標準エラーも混ぜて返す。`json_get` は、全体が JSON でなければ、最初の `{` から最後の `}` までを読む。`lib/common.sh`。sf の更新のお知らせ（`»   Warning: @salesforce/cli update available …`）は標準エラーに出て、中括弧を含まないので、混ざっても読める。2026-11-23 に確認）。ログの本文だけは、この方法で受けない（8.4） |
 
 ### 8.1 DebugLevel（探す・上書きする・作る）
 
@@ -454,53 +473,79 @@ TF_JSON=$(run sf data query --use-tooling-api --target-org "$TARGET_ORG" --json 
 # 自分が作ったもの（状態ファイルの ID）→ 延ばす（start・collect）
 run sf data update record --use-tooling-api --sobject TraceFlag --record-id "$TF_ID" --target-org "$TARGET_ORG" \
   --values "DebugLevelId=${DL_ID} StartDate=${NOW} ExpirationDate=${EXPIRY}"
-# ほかの有効な TraceFlag（手動の確認のあと）→ 期限を今にして止める
+# ほかの有効な USER_DEBUG（手動の確認のあと）→ 期限を「元の期限」と「今から 2 分後」の早いほうに縮める（今にはできない。元の期限が早ければ更新しない）
 run sf data update record --use-tooling-api --sobject TraceFlag --record-id "$OTHER_ID" --target-org "$TARGET_ORG" \
-  --values "ExpirationDate=${NOW}"
+  --values "ExpirationDate=${NEW_EXPIRY}"
 # ない → 作る
 run sf data create record --use-tooling-api --sobject TraceFlag --target-org "$TARGET_ORG" --json \
   --values "TracedEntityId=${USER_ID} LogType=USER_DEBUG DebugLevelId=${DL_ID} StartDate=${NOW} ExpirationDate=${EXPIRY}"
 ```
 
-- 日時は、Node で ISO 8601（UTC）を作る（6.4）。Tooling API が受け付ける形式かは、実装時に確かめる
+- 日時は、Node で `YYYY-MM-DDTHH:MM:SSZ`（UTC。ミリ秒なし）を作る（6.4）。この形で受け付けられた。読み直すと `2026-11-23T02:04:12.000+0000` の形で返る（末尾が `Z` でない。比べるときは Node で読む）（2026-11-23 に実機で確認）
 - `LogType` は、作成後に変えられない（公式。更新の対象ではない）。そのため、ほかの種類の TraceFlag を USER_DEBUG に「書き換える」ことはせず、止めてから作る
-- 「期限を今にする」で止まるか（`ExpirationDate` は `StartDate` より後でないといけない可能性）は、実機で確かめる。止まらなければ、`StartDate` も合わせて動かすか、確認のうえで消す方式に変える（13.1）
+- **期限を「今」にして止めることはできない**: `ExpirationDate` を今・今から 5 秒後にすると `FIELD_INTEGRITY_EXCEPTION`（「ExpirationDate は将来の日付にしてください」）で拒否され、今から 60 秒後は受け付けた（2026-11-23 に実機で確認）。そのため、止めるときは、時計のずれも見込んで 2 分後に縮める（元の期限のほうが早ければ、そのまま。4.2 の 3b）。`StartDate` より前の期限も拒否される（`MULTIPLE_API_ERRORS`）
+- 応答: 作成・更新・削除は `result.id`・`result.success`（成功）／`status`=1・`name`・`message`（失敗）。検索は `result.records`・`result.totalSize`・`result.done`（2026-11-23 に実機で確認）
+- 親の項目 `DebugLevel.DeveloperName` は、検索で取れる（2026-11-23 に実機で確認）
 - 取得役が延ばす前にも、ID・`TracedEntityId`・`LogType` を確かめる（4.3 の 2d。人が途中で置き換えた TraceFlag を延ばさない）
 
 ### 8.3 新しいログの一覧
 
 ```bash
-LIST_JSON=$(run sf data query --use-tooling-api --target-org "$TARGET_ORG" --json \
-  --query "SELECT Id, StartTime, Operation, Request, Status, LogLength, DurationMilliseconds FROM ApexLog \
-           WHERE LogUserId = '${USER_ID}' \
-             AND (StartTime > ${LAST_FETCH} OR (StartTime = ${LAST_FETCH} AND Id > '${LAST_FETCH_ID}')) \
-           ORDER BY StartTime ASC, Id ASC LIMIT 51")
+# run を使わない（応答に他の人のログの見出しが入るため。run は出力を sf-log.log に記録し、画面にも流す）。VAR=$(cmd) の例外（CLAUDE.md 2.1）
+# 終了コードは if で受ける（set -e のもとでも、失敗の記録まで進むため）
+if LIST_JSON=$(sf data query --use-tooling-api --target-org "$TARGET_ORG" --json \
+  --query "SELECT Id, LogUserId, StartTime, Operation, Request, Status, LogLength, DurationMilliseconds FROM ApexLog \
+           WHERE StartTime > ${LAST_FETCH} OR (StartTime = ${LAST_FETCH} AND Id > '${LAST_FETCH_ID}') \
+           ORDER BY StartTime ASC, Id ASC LIMIT 51" 2>/dev/null); then
+  # json_get で result.totalSize・result.records を読む。読めない（JSON でない・キーがない）→ 下の else と同じく失敗（name は「不明」）
+  # result.records が配列でない・各要素の Id・LogUserId・StartTime が 8 章冒頭の表の形でない → 失敗（推測で進めない）
+  # 自分のログ = LogUserId が USER_ID と一致するもの（15 文字・18 文字の違いは、先頭 15 文字で比べる）。それ以外は他の人のログ（8.4）
+  # 読めたら、件数（全体・自分のログ）だけを sf-log.log に書いて、続ける
+  :
+else
+  # json_get で name を読む（読めなければ「不明」）。name だけを sf-log.log と .status に書き、その回を失敗にする（手動: die／取得役: 4.3 の 2e）
+  :
+fi
 ```
 
-- **古い順に、しおりから続きを取る**（取りこぼさない。4.3）。しおりは、最後に保存したログの `StartTime`（`LAST_FETCH`）と `Id`（`LAST_FETCH_ID`）
+- **この検索だけは `run` を通さない**。`run` は、出力の全文を `sf-log.log` に記録し、失敗時は `error.log` にも書き、画面にも流す（`lib/common.sh`）。この応答には他の人のログの見出し（ID・ユーザー ID・時刻・操作の名前・大きさ）が入るため、記録に残さない（10.3）
+  - 代わりに、`sf-log.log` には、自分で、コマンドの種類（「ApexLog の一覧」）・終了コード・件数（全体・自分のログ）だけを書く。検索の文は、しおりの値を含むだけなので、書いてよい
+  - 失敗（終了コードが 0 以外・`json_get` で読めない）のときは、応答の `name` だけを `sf-log.log` と `.status` に書く（`message` は書かない。値が入りうるため）。標準エラーは捨てる（sf の更新のお知らせなど。中身は記録しない）
+  - 応答は変数にだけ持ち、ファイルに書かない。自分のログの見出しは、保存するときに 9.1 のファイル名と要約の一覧に使う
+
+- **一覧は、全ユーザーのログの見出し（ID・ユーザー・時刻・操作の名前・大きさ）を取り、本文を保存するのは自分のログ（`LogUserId` が自分）だけ**。全ユーザーにするのは、本文をまとめて取る `sf apex get log -n`（8.4）が全ユーザーの新しい順に取るため、取りたいログより新しいログに、他の人のログが混ざっていないかを見分ける必要があるから。他の人のログは、見出しでしおりを進めるだけ（10.3）
+- **古い順に、しおりから続きを取る**（取りこぼさない。4.3）。しおりは「処理済みの見出しのしおり」: 最後に処理した（自分のログなら保存した、他の人のログなら飛ばした）見出しの `StartTime`（`LAST_FETCH`）と `Id`（`LAST_FETCH_ID`）
+  - 他の人のログが続くと、自分のログがなくても、しおりの処理が進むだけの回がある（1 回 50 本ずつ。一人用の開発組織（10.1）では、まれ）
   - **しおりの境目を、検索の条件そのものに入れる**（「しおりより後の時刻」か「しおりと同じ時刻で、ID がしおりより後」）。保存済みのログは、検索の結果に入らない。そのため、同じ時刻のログがいくら多くても、51 本目の有無で「残りがある」を正しく判定できる（手元で除いてから数える方式だと、保存済みのものが 51 本並んだときに、残りを見落とす）
   - しおりがまだない（初めて・初期化した）ときは、`StartTime >= <初期化した時刻>` だけで取る（`LAST_FETCH_ID` が空のため）
   - 念のため、直近に保存した ID（`SEEN_IDS`）でも重複を除く（保存したが、しおりを書く前に止まった場合）
-  - 並びは `StartTime` と `Id` の 2 つで決める（同じ時刻のログの順を、毎回同じにする）。`Id` の大小の比較（`Id > '…'`）と、この並びが、ApexLog で使えるかは、実機で確かめる（13.1）
+  - 並びは `StartTime` と `Id` の 2 つで決める（同じ時刻のログの順を、毎回同じにする）。`Id` の大小の比較（`Id > '…'`）・この並び・`LIMIT`・日時 `2026-11-21T05:30:00Z` の書き方は、ApexLog で使えた（2026-11-23 に実機で確認。13.1）
 - 1 回の上限は 50 本。`LIMIT 51` にして、51 本目があれば「まだ残りがある」とわかる（本数の集計の検索は使わない）。残りがあれば、取得役は待たずに次の回で続きを取る。`.status` には「残り 50 本以上」のように書く
 - 1 件保存するごとに、しおりを進める（途中で失敗しても、保存した分は取り直さない。失敗したログから、次の回でやり直す）
-- **実機で使えなかったときの代わり**（13.1）:
-  - `Id > '…'` か `ORDER BY StartTime ASC, Id ASC` が使えない → 条件を `StartTime >= ${LAST_FETCH}` に、並びを `ORDER BY StartTime ASC` にし、`LIMIT` を付けずに、しおりの時刻以降を全部取る。手元で `Id` で並べ替え、しおりの境目（同じ時刻で ID がしおり以下）を除いてから、古い順に 50 本を保存する。残りの有無は、除いたあとの本数で判定する（全部を取っているので、見落とさない）
-  - `LIMIT` が使えない → 同じく、付けずに全部取り、手元で 50 本に区切る
-  - 上の代わりは、取得役が 1 分ごとに取っていれば、1 回の件数は少ない。取得役が長く止まっていたあとだけ、1 回の検索の応答が大きくなる（sf の応答の大きさの限度は、実機で確かめる）
-  - 日時の書き方が通らない → 13.1 で確かめた書き方に合わせる（形の検査は、8 章の冒頭の表のまま）
+- `Status` は、ユーザーの言語で返る（日本語のユーザーでは「成功」。失敗は例外の文言）。成功・失敗の判定に使わない（2026-11-23 に実機で確認）。`Operation` は、画面の操作や API のパス（例: `/services/data/v68.0/tooling/executeAnonymous/`）
 - **新しいほうを優先する**（意図した決定）のは、組織から取るときではなく、`pull` が要約に入れるログを選ぶとき（`--max`。4.4 の 3）。取得役は止まらずに動き続けるため、組織から取る段階で古いものを飛ばす必要がない（2026-11-22 に変更。13.3）
 
 ### 8.4 本文の取得
 
 ```bash
+# ふだん（まとめて取る）: 一覧（8.3）の中で、取りたいログより新しいログが、すべて自分のログのとき
+run sf apex get log -n "$N" -d "$TMP_DIR" --target-org "$TARGET_ORG"
+# それ以外（取りたいログより新しいログに、他の人のログが混ざる・一覧が 51 本で残りがある・-n で足りなかった）: 1 本ずつ
 run sf apex get log -i "$LOG_ID" -d "$TMP_DIR" --target-org "$TARGET_ORG"
 ```
 
-- 1 件ごとに、空の一時フォルダ（`$TMP_DIR`）を作って `-d` に渡す。sf が書いたファイル（フォルダの中のただ 1 つのファイル）を見つけ、9.1 の名前に変えて、日付のフォルダへ移す。ファイル名の決まり（`<ID>.log` など）には頼らない。ファイルが 1 つでないときは、その回を失敗として扱う
-- 一時フォルダは `trap ... EXIT` で消す（CLAUDE.md 2.2）
-- 本文を `$(run ...)` で受けない。`run` は、出力をすべて `LOG_FILE` に記録し、標準エラーも混ぜる（`lib/common.sh`）。本文が `sf-log.log` に丸ごと残り、sf の警告も混ざるため
-- 1 件ずつ sf を起動すると遅い（Windows で 1 件数秒）。件数が多いときに、まとめて取る方法（`-n` で直近 N 本を一度に取り、ID で選ぶなど）は、実装時に測って決める（13.1）
+- **sf の起動が遅いため、ふだんはまとめて取る**: 1 本ずつ取ると、1 本 10〜11 秒かかった（Windows。そのほとんどが sf の起動）。`-n 2` で 2 本まとめても 12.7 秒だった（2026-11-23 に実機で確認）。一定の間隔で取る取得役では、1 本ずつでは追いつかないことがある
+- **1 回の取得の対象は、一覧（8.3）を取った時点で決めて、固定する**（取りたい ID の集まり＝一覧の中の自分のログ）。取得の途中でできたログは、その回では扱わず、次の回に、しおりから取る
+- **`-n` は、全ユーザーのログの新しい順に N 本を取る**。`N` は、一覧の中の、取りたい自分のログのうち最も古いものから、一覧の最後までの本数にする。この範囲に他の人のログが 1 本でもあれば、`-n` は使わず、自分のログを `-i` で 1 本ずつ取る。一覧が 51 本で残りがあるとき（取得役が長く止まっていたあと）も、`-n` の範囲が一覧の外に広がるため、`-i` で取る
+- **一覧を取ったあと `-n` を呼ぶまでに新しいログができると、`-n` の N 本から、取りたいログのうち古いものが押し出され、代わりに新しいログ（他の人のものもありうる）が入る**。そのため、取れたファイルを、固定した取りたい ID と照らし合わせる:
+  - 取りたい ID のファイル → 保存する
+  - それ以外のファイル（押し出しの代わりに入った新しいログ）→ 中を読まずに、一時フォルダからすぐ消す（自分のログなら、次の回に取り直す）
+  - 足りない ID → その回のうちに `-i` で 1 本ずつ取る（`-i` は、ID を指定するので、他の人のログは入らない）
+  - **このため、`-n` を使うと、他の人のログの本文が、一時フォルダに一瞬だけ書かれることがある**（一覧と `-n` の間の数秒に、他の人のログができたとき）。保存・記録・要約には入れない（10.3）。一人用の開発組織（10.1）では、他の人のログはまれ。`-i` だけにすると、1 本 10 秒かかり、取得役が追いつかないため、この取り扱いを選ぶ（2026-11-23 決定。13.3）
+- 一時フォルダ（`$TMP_DIR`）は、OS の一時フォルダではなく、決まった場所 `logs/apex/.fetch/`（9.1）にする。**取得のたびに、取得のロック（9.3）を持った状態で、まず中を空にしてから** `-d` に渡す。途中で止まった（PC が止まった・強制終了した）ときに、`-n` で混ざった他の人のログの本文が残っても、次の取得の最初に必ず消えるようにするため（OS の一時フォルダだと、どこに残ったか分からなくなる）。取得のロックは同時に 1 つしか持てないので、ほかの取得の途中のファイルを消すことはない。`logs/` は Git の管理外（9.1）。sf は、ログを `<ログの ID>.log` の名前で書く（`-n`・`-i` とも。2026-11-23 に sf 2.157.8 で確認）。`-n` では、ファイル名から ID を取るほかに対応を知る手段がない（`--json` の応答は本文の配列で、ID を含まない）ため、この名前に頼る。名前が `<ID の形（英数字 15 か 18 文字）>.log` でないファイルが 1 つでもあれば、その回を失敗として扱う（推測で対応させない）
+- 取れたファイルを、9.1 の名前に変えて、日付のフォルダへ移す
+- 一時フォルダの中は、取得の終わりにも `trap ... EXIT` で空にする（CLAUDE.md 2.2）。フォルダ自体は残してよい
+- 本文を `$(run ...)` で受けない。`run` は、出力をすべて `LOG_FILE` に記録し、標準エラーも混ぜる（`lib/common.sh`）。本文が `sf-log.log` に丸ごと残り、sf の警告も混ざるため。`-d` で書かせ、`--json` を付けない（`-d` があり `--json` がないとき、sf が標準出力に書くのは「Log files written to <フォルダ>」の 1 行だけ。`--json` を付けると、応答に本文が入る。2026-11-23 に確認）。そのため `run` で包んでも、本文は `sf-log.log` に残らない
 
 ### 8.5 TraceFlag の削除（stop）
 
@@ -515,12 +560,12 @@ run sf data delete record --use-tooling-api --sobject TraceFlag --record-id "$TF
 | 制限 | 内容 | sf-log.sh の対応 |
 |---|---|---|
 | 1 本のログの大きさ | 20MB まで。超えると古い行から削られる | 要約に「切り詰めあり」と書く（`LogLength` で判定） |
-| 保存期間 | システムのデバッグログは 24 時間 | 取得役が 1 分ごとに手元へ保存する。組織のログは 24 時間で消えるので、組織に溜まり続けない |
+| 保存期間 | システムのデバッグログは 24 時間 | 取得役が一定の間隔（既定 3 分）で手元へ保存する。組織のログは 24 時間で消えるので、組織に溜まり続けない |
 | 15 分の生成量 | 15 分で 1,000MB を超えると、TraceFlag が無効にされる | 既定を `standard` にする（7 章） |
 | 組織のログの総量 | 1,000MB を超えると、TraceFlag の追加・編集ができなくなる | `start`・`status` で量を表示し、多ければ WARNING。古いログの削除は未決（13.2） |
 | TraceFlag の期限 | `ExpirationDate` は `StartDate` から 24 時間未満（`StartDate` が空なら、今から 24 時間未満） | `--hours` を 1〜23 の整数に限る。取得役は 2 時間ずつ延ばす |
-| TraceFlag の数 | 1 つの対象（ユーザー・クラス・トリガー）で、同時に有効な TraceFlag は 1 つだけ | 自分が作ったものだけを延ばす・消す。ほかのものは、手動では確認して止め、自動では触らない（4.2） |
-| Developer Console | 開くと、そのユーザーに `DEVELOPER_LOG` の TraceFlag を作る | 同上。取得中に Developer Console を開くと、どうなるかは実機で確かめる（13.1）。延ばせなくなったら、取得役が `.status` に WARNING を書く |
+| TraceFlag の数 | 公式は「1 つの対象で、同時に有効な TraceFlag は 1 つだけ」。実機では、**同じ対象・同じ種類で期間が重なるものだけ**が拒否され（`FIELD_INTEGRITY_EXCEPTION`）、種類が違えば（USER_DEBUG と DEVELOPER_LOG）同時に有効にできた（2026-11-23 に確認） | 自分が作ったものだけを延ばす・消す。ほかの USER_DEBUG は、手動では確認して止め、自動では触らない。ほかの種類には触れない（4.2） |
+| Developer Console | 開くと、そのユーザーに `DEVELOPER_LOG` の TraceFlag を作る | 種類が違うので、USER_DEBUG とぶつからない（上の行）。両方が有効なときに、どちらの詳しさでログが出るか・取得中に Developer Console を開くとどうなるかは、まだ確かめていない（13.1）。延ばせなくなったら、取得役が `.status` に WARNING を書く |
 | `LogType` | 作成後は変えられない（更新の対象ではない） | 書き換えず、止めてから作る（8.2） |
 
 出典:
@@ -542,7 +587,9 @@ force-*/logs/apex/
   20261122/                                   ← 取得役・pull が保存したログ（ログの開始日ごと）
     143001_07LdM00000AbCdE_aura.log           ← 開始時刻_ログの ID_操作名
   .state  .status  .collector  .owners  .consent   ← 手元の状態（9.2）
+  .index                                      ← 保存したログの目録（1 行に 1 本。パス・ID・開始（UTC）・操作・状態・長さ・所要。pull が要約に入れるログを選ぶ）
   requests/                                   ← 依頼と応答（9.3）
+  .fetch/                                     ← 本文の取得に使う一時フォルダ（8.4。取得のたびに空にする）
 ```
 
 - `templates/.gitignore` の `logs` により、Git の管理外になる
@@ -559,8 +606,8 @@ force-*/logs/apex/
 |---|---|---|
 | `.state` | `ORG`・`USER_ID`・`TRACE_FLAG_ID`（**sf-log.sh が作った** TraceFlag の ID）| `start`・`stop` |
 | | `LAST_FETCH`・`LAST_FETCH_ID`（取得のしおり: 最後に保存したログの開始時刻（UTC）と ID）・`SEEN_IDS`（直近に保存した ID） | 取得役（取得役がいないときだけ `pull`） |
-| | `LAST_READ`（前回の要約に入れた最も新しいログの開始時刻。UTC） | `pull` |
-| `.status` | `STATE`（collecting / stopped / skipped / error）・`ORG`・`EXPIRES`・`LAST_FETCH`・`COUNT_TODAY`・`BACKLOG`（取り残しの目安）・`REASON`（取っていない理由）・`WARNING` | 取得役・`start --auto`・sf-start。ランチャーが読む（5.4） |
+| | `LAST_READ`（前回の要約に入れた最も新しいログの開始時刻。UTC）・`LAST_READ_IDS`（その時刻と同じ秒に始まり、要約に入れたログの ID。カンマ区切り。同じ秒のログを、次の要約で落とさず・重ねないため） | `pull` |
+| `.status` | `STATE`（starting / collecting / stopped / skipped / error）・`ORG`・`EXPIRES`（UTC）・`EXPIRES_AT`（表示用。PC の時刻の HH:MM。ランチャーは日時を計算しないため）・`LAST_FETCH`・`COUNT_TODAY`・`BACKLOG`（取り残しの目安）・`REASON`（取っていない理由）・`WARNING` | 取得役・`begin`・`start --auto`・`stop`・`leave`。ランチャーが読む（5.4） |
 | `.collector` | `PID`・`STARTED`（起動の時刻）・`ORG` | 取得役 |
 | `.owners` | 1 行に 1 つ、持ち主（起動中の sf-start）の印（`PID:起動の時刻:乱数`）。後始末の最中は `CLOSING=<印>` の行（5.2） | sf-start（足す）・`leave`（外す・`CLOSING` を書いて消す）・取得役（死んだものを外す）・`stop`（空にする・`CLOSING` を書いて消す） |
 | `.consent` | `AUTO`（on / off）・`ORG_ID`（答えた組織の ID）・`VERSION`（注意の文面の版）・`ANSWERED_AT` | `start --auto` の確認・`auto on|off` |
@@ -617,14 +664,15 @@ force-*/logs/apex/
 ### 10.2 AI への送信の確認
 
 - ログには、レコードの値・SOQL の条件・コールアウトの内容が載る。AI に読ませると、それが AI の提供元に送られる
-- **自動**: 次のどれかのとき、`start --auto` が次の注意を表示して、`read_key` で Y/N を聞く（`q`・EOF は N）。答えを `.consent` に保存し、同じ組織・同じ文面の版のあいだは、もう聞かない
+- **自動**: 次のどれかのとき、`begin`（sf-start の前面）が次の注意を表示して、`read_key` で Y/N を聞く（`q` は N。端末でなければ聞かずに「取らない」とし、答えを保存しない）。答えを `.consent`（`AUTO`・`ORG` = エイリアス・`ORG_ID`・`VERSION`）に保存し、同じエイリアス・同じ文面の版のあいだは、もう聞かない（sf を呼ばずに判定する。ランチャーを待たせないため。2026-11-23。13.3）
   - `.consent` がない（プロジェクトで初めて）
-  - つないだ組織の ID が、`.consent` の `ORG_ID` と違う（別の組織に切り替えた。データの扱いが違う組織かもしれないため）
+  - つないだ組織のエイリアスが、`.consent` の `ORG` と違う（別の組織に切り替えた）
+  - **同じエイリアスで、別の組織に入り直した**: `begin` では分からない（sf を呼ばないため）。裏の `start --auto` が、つないだ組織の ID を `.consent` の `ORG_ID` と照らし合わせ、違えば取らずに（10）答えを消す。ランチャーには「取っていません（同じエイリアスで、別の組織に入り直したため…）」と出て、次の sf-start で聞き直す。`ORG_ID` が空（答えた直後）なら、そのときの組織 ID を書く。同意のない組織のログは、手元に保存しない
   - 注意の文面の版（`VERSION`）が変わった（sf-tools の更新で、送るものや注意が変わったとき）
   - 「ランチャーの起動中、この組織の Apex ログを、裏で自動で手元に保存します。ログは AI に読ませる前提です。ダミーデータの組織で使ってください。本番のデータを写した Sandbox（Full・Partial）では、N を選んでください。あとから `sf-log.sh auto on|off` で変えられます」
 - **手動**: `start` のたびに、同じ注意を表示し、`ask_yn || die` で確認する（`-y` で省く）
 - `.consent` は、プロジェクト（force-* のフォルダ）ごとに 1 つ。答えは、最後に答えた組織の分だけを持つ（組織を行き来すると、そのたびに聞く。手間より、データの扱いの確認を優先する）。`logs/apex/` を消すと、次の `sf-start` で、もう一度聞く
-- `auto on|off` で変えたときは、その時点でつないでいる組織の ID を `ORG_ID` に書く
+- `auto on|off` で変えたときは、その時点でつないでいる組織のエイリアスを `ORG` に、ID を `ORG_ID` に書く
 - 開発者向けの道具のため、CLAUDE.md 2.4 の管理者向けの警告ボックスの対象外（`print_admin_warning` は使わない）
 
 ### 10.3 組織への書き込み
@@ -632,8 +680,11 @@ force-*/logs/apex/
 - 書き込むのは、次だけ:
   - `sf_tools_log_*` の DebugLevel（作る・上書きする）
   - 自分のユーザーの TraceFlag（sf-log.sh が作ったものを、作る・延ばす・消す）
-  - 自分のユーザーの、ほかの有効な TraceFlag（**手動の**確認のあと、期限を今にして止める。消さない。自動では触らない）
-- 他の人の TraceFlag・ログには触れない（検索の条件を、自分のユーザー ID に限る）
+  - 自分のユーザーの、ほかの有効な USER_DEBUG の TraceFlag（**手動の**確認のあと、期限を 2 分後に縮めて止める。消さない。自動では触らない）
+- 他の人の TraceFlag には触れない（検索の条件を、自分のユーザー ID に限る）
+- 他の人のログは、**本文を保存・記録・要約しない**。新しいログの一覧（8.3）だけは、全ユーザーの見出し（ID・ユーザー・時刻・操作の名前・大きさ）を読む（本文をまとめて取れるかを見分けるため。8.4）。見出しは、しおりを進めるのに使うだけで、手元に保存しない（一覧の検索は `run` を通さず、応答を `sf-log.log`・`error.log` に記録しない。8.3）。しおり（`.state` の `LAST_FETCH`・`LAST_FETCH_ID`）には、他の人のログの時刻と ID が入りうるが、次の検索の起点に使うだけ
+- ただし、本文をまとめて取る `-n`（8.4）では、一覧を取った直後に他の人のログができると、その本文が一時フォルダ（`logs/apex/.fetch/`）に書かれることがある。中を読まずに、すぐ消す。途中で止まって残っても、次の取得の最初に消す（8.4）。「本文を取らない」とは言い切れないため、この形で書く
+- この取り扱いを許すのは、sf-log.sh が、ダミーデータの一人用の開発組織で使う前提だから（10.1 で本番・共有の組織を止め、10.2 の確認で、本番のデータを写した Sandbox では使わないよう求める）。他の人のログの本文が一時的にでも PC に書かれては困る組織では、そもそも sf-log.sh を使わない
 
 ---
 
@@ -653,6 +704,9 @@ force-*/logs/apex/
 3. 人に、確かめる操作を具体的に伝え、終わったら知らせてもらう
 4. `sf-log.sh pull` を実行し、`logs/apex/latest.md` を読む。必要なら、要約に書かれた本文の行だけを開く。要約の先頭に「入れなかった古いログ」があれば、必要なときだけ `--since` で入れ直す
 5. 直して 2 に戻る。直らない原因が分からないときは、人に `sf-log.sh start --level detail` を頼む（詳しいログに切り替える）
+   - AI が自分で Apex を試しに動かすときは、`sf apex run` ではなく、Tooling API の `executeAnonymous` を直接呼ぶ（`sf api request rest "/services/data/v68.0/tooling/executeAnonymous/?anonymousBody=<URL エンコードしたコード>"`）。`sf apex run` は、sf が自分の詳しさでログを出すため、SOQL・DML などの行が出ない（6.3）
+   - **動かす前に、毎回、人の了承を取る**（読み取りだけのコードも）。了承を求めるときは、接続先の組織（エイリアス・組織 ID）と、動かす Apex の全文を見せる。組織でコードを動かすことは、データの書き換え（DML）・非同期の処理の登録・外部への通信になりうるため
+   - `executeAnonymous` は、コードを URL の引数（GET）でしか受け取らない。長いコード（URL エンコード後に約 16KB を超えるもの）は、URL の長さの上限で失敗しうる。長いコードは、クラスにしてデプロイしてから呼ぶ
 6. AI は、`start`・`stop`・`auto` を実行しない（組織への書き込みと、取るかどうかの判断は、人に残す）
 
 ### 11.3 取れないもの（手順書に書く）
@@ -660,7 +714,7 @@ force-*/logs/apex/
 - **LWC・Aura の画面側のエラー**（ブラウザのコンソール）は、Apex のログに残らない。人に、ブラウザの開発者ツールのコンソールの内容を貼ってもらう
 - **別のユーザーで動く処理**: プラットフォームイベントのトリガー（Automated Process ユーザー）・他の人がスケジュールしたジョブは、自分のユーザーの TraceFlag では取れない
 - 非同期の処理（Queueable・Batch・future）は、実行の時刻がずれる。`pull` を少し待ってから呼ぶ
-- 取得中に人が Developer Console を開くと、TraceFlag が置き換わる可能性がある（8.6）。ログが取れなくなったら、`status` で確かめる
+- 取得中に人が Developer Console を開くと、別の種類（DEVELOPER_LOG）の TraceFlag が作られる。USER_DEBUG とはぶつからないが、ログの詳しさがどうなるかは未確認（8.6）。ログの行が足りないと感じたら、`status` で確かめる
 
 ---
 
@@ -675,7 +729,10 @@ force-*/logs/apex/
 - **テスト**: `tests/test_helper.sh` の `create_mock_sf` で sf をモックにする。要約（`lib/apexlog.js`）は、実ログをもとに手で作った小さな見本（実データを含まない）で確かめる（6.3）。少なくとも次を確かめる:
   - 予約名・本番・種類不明で、手動は止まり、自動は「取らない」で終わる
   - `stop` が、状態ファイルにない TraceFlag を消さない
-  - 手動: ほかの TraceFlag があるとき、確認なしでは止めない。有効なものが 2 つ以上なら止める。DEVELOPER_LOG は、作れなかったときだけ確認して止める
+  - 手動: ほかの USER_DEBUG があるとき、確認なしでは止めない。止めるときは、期限を「元の期限」と「今から 2 分後」の早いほうにし（延ばさない）、新しい TraceFlag をその期限から始める（その期限が過ぎていれば今から）。縮めたあとに作成が失敗しても、元に戻さず、ID・元の期限・縮めた期限を書く。USER_DEBUG が 2 つ以上なら止まる（die）。DEVELOPER_LOG・ほかの種類には触れない
+  - 取得: 全ユーザーの一覧の応答（他の人のログの ID・ユーザー ID）が、`sf-log.log`・`error.log`・画面に出ない（成功・失敗とも）
+  - 取得: 取りたい ID は一覧の時点で固定する。取りたいログより新しいログがすべて自分のものなら `-n` で 1 回で取り、他の人のログが混ざる・一覧に残りがあるときは `-i` で取る。`-n` で押し出されて足りない ID は、その回に `-i` で取る。取りたい ID 以外のファイルは、中を読まずに消し、保存・記録しない。`<ID>.log` の形でないファイルがあれば、その回を失敗にする
+  - 要約: 複数行にまたがるイベント（`FATAL_ERROR`・`LIMIT_USAGE_FOR_NS`）・後ろに `|` が付かない行を読める。行の時刻を、ログのユーザーのタイムゾーンとして表示する。`USER_INFO` の行がないときは「タイムゾーン不明」と添える
   - 自動: ほかの TraceFlag に触れない（更新も削除もしない）
   - 自動: 確認で `q` を押しても、sf-start が中断しない
   - 検索の文に埋め込む値（ID・日時・件数・PID）の形が違えば、失敗として扱う（状態ファイルを書き換えた場合を含む）
@@ -711,24 +768,30 @@ force-*/logs/apex/
 
 ### 13.1 実機で確かめること（実装の最初に、開発組織で行う）
 
-- [ ] 「有効な TraceFlag は 1 つだけ」が、`LogType` が違っても当たるか（Developer Console の `DEVELOPER_LOG` があるとき、`USER_DEBUG` を作れるか）。作れないとき、sf の JSON の応答に、どのエラーのコードが入るか（4.2 の 3b・3c）
-- [ ] 取得中に Developer Console を開くと、sf-log.sh の TraceFlag がどうなるか
-- [ ] `ExpirationDate` を今にして TraceFlag を止められるか（8.2）
-- [ ] `sf data query --use-tooling-api --json`・`sf data create record --json`・`sf data update record`・`sf org display --json` の応答のフィールド名
-- [ ] `sf apex get log -d` が書くファイルと、1 件あたりの所要時間（Windows・macOS）
-- [ ] 7 章の `standard` で、6.3 の行が出るか。1 回の画面操作で出るログの本数と大きさ。1 日の開発で手元に溜まる量。指定しない項目（`DataAccess` など）の扱い
-- [ ] 日時の形式（SOQL の `StartTime >= 2026-11-21T05:30:00Z` の書き方・TraceFlag の `StartDate` / `ExpirationDate`）
-- [ ] Tooling API の ApexLog で、`LIMIT`・`ORDER BY StartTime ASC, Id ASC`・`Id > '…'`（ID の大小の比較）が使えるか（公式の文書に、Tooling API の一部のオブジェクトでは `LIMIT` などが使えないとある。8.3）
-- [ ] TraceFlag の検索で、`DebugLevel.DeveloperName`（親の項目）を取れるか（8.2）
-- [ ] これから始まる TraceFlag（`StartDate` が今より後）があるとき、新しい TraceFlag を作れるか（4.2）
-- [ ] DebugLevel・TraceFlag を扱う権限が足りないときの応答
-- [ ] **取得役と、人の sf の操作（デプロイなど）が同時に動いたとき**に、sf の認証情報の更新がぶつからないか（取得役が 1 分ごとに sf を呼ぶため）
-- [ ] **PC の負荷**: 1 分ごとの sf の起動の負荷（Windows・macOS）。重ければ、既定の間隔を延ばす
-- [ ] **持ち主の見張り**: Windows の Git Bash・macOS・Linux で、`kill -0` が sf-start の生死を正しく返すか。`ps` でプロセスの起動の時刻を取れるか（取れない OS では、12 時間の上限だけで守る）
-- [ ] **裏での起動**: `nohup … &` と `disown` が、3 つの OS で効くか。ウィンドウを × で閉じたとき、取得役がどうなるか（残って後始末をするか・一緒に止まるか）
-- [ ] **TraceFlag の種類とログの中身**: `sf apex trace create --help` は「USER_DEBUG は `System.debug` の行だけを取る」と説明するが、Tooling API の文書では、中身は DebugLevel で決まり、USER_DEBUG は「そのユーザーの操作のログ」。USER_DEBUG＋7 章の DebugLevel で、6.3 の行（例外・SOQL・DML など）が出るかを確かめる。出なければ、種類を `DEVELOPER_LOG` にするかを決め直す（4.2 の扱いも変わる）
-- [ ] `ORDER BY StartTime ASC, Id ASC` が使えなかったときの代わり（8.3）が、同じ時刻のログが多いときにも正しく動くか
+2026-11-23 に、開発用の Developer Edition（sf 2.157.8・Windows）で確かめた。結果は、各章に書いた。
+
+- [x] 「有効な TraceFlag は 1 つだけ」が、`LogType` が違っても当たるか → 当たらない。USER_DEBUG が有効でも DEVELOPER_LOG を作れた。同じ種類で期間が重なると `FIELD_INTEGRITY_EXCEPTION`（`name`。`message` はユーザーの言語）（4.2・8.6）
+- [ ] 取得中に Developer Console を開くと、sf-log.sh の TraceFlag がどうなるか。USER_DEBUG と DEVELOPER_LOG が両方有効なとき、どちらの詳しさでログが出るか（人に画面を開いてもらって確かめる）
+- [x] `ExpirationDate` を今にして TraceFlag を止められるか → 止められない（今・今から 5 秒後は拒否。60 秒後は受け付けた）。2 分後に縮める方式にした（8.2）
+- [x] `sf data query --use-tooling-api --json`・`sf data create record --json`・`sf data update record`・`sf data delete record`・`sf org display --json` の応答のフィールド名（8.2・8 章の冒頭の表）。`sf org display --json` の `result` は `id`・`apiVersion`・`accessToken`・`instanceUrl`・`username`・`clientId`・`connectedStatus`・`alias`（`accessToken` を記録に出さない）
+- [x] `sf apex get log -d` が書くファイルと、1 件あたりの所要時間 → `<ID>.log`。1 本 10〜11 秒・`-n 2` で 12.7 秒（Windows）。まとめて取る方式にした（8.4）。macOS は未測定
+- [x] 7 章の `standard` で、6.3 の行が出るか → 出る（入力規則・フローの行は未確認）。指定しない項目は `INFO`（6.3・7 章）
+- [ ] 入力規則・フローの行（`VALIDATION_*`・`FLOW_ELEMENT_ERROR`）が `standard` で出るか（組織に入力規則・フローを作って確かめる。作るのは人の了承のあと）
+- [ ] 新しい TraceFlag の `StartDate` を、止めたもの（同じ種類）の `ExpirationDate` ちょうどにしたとき、重なりとして拒否されるか（いまは 1 秒あけている。4.2 の c）
+- [ ] 1 回の画面操作で出るログの本数と大きさ・1 日の開発で手元に溜まる量（実装のあと、ふだんの開発で測る）
+- [x] 日時の形式 → SOQL は `StartTime >= 2026-11-21T05:30:00Z`、TraceFlag は `YYYY-MM-DDTHH:MM:SSZ` で通る。読み直すと `…000+0000`（8.2）
+- [x] Tooling API の ApexLog で、`LIMIT`・`ORDER BY StartTime ASC, Id ASC`・`Id > '…'` が使えるか → 使える（8.3）
+- [x] TraceFlag の検索で、`DebugLevel.DeveloperName` を取れるか → 取れる（8.2）
+- [x] これから始まる TraceFlag があるとき、新しい TraceFlag を作れるか → 「同じ種類で期間が重なるものだけが拒否される」ことが分かったため、重ならなければ作れる（4.2 の 3b の扱いのまま）
+- [ ] DebugLevel・TraceFlag を扱う権限が足りないときの応答（システム管理者でないユーザーが要る）
+- [ ] **取得役と、人の sf の操作（デプロイなど）が同時に動いたとき**に、sf の認証情報の更新がぶつからないか（取得役が一定の間隔で sf を呼ぶため）
+- [ ] **PC の負荷**: 取得役の sf の起動の負荷（Windows・macOS）。Windows では sf の 1 回の起動が約 10 秒かかったため、既定の間隔を 180 秒にした（2026-11-23）。実際に使って、重ければ延ばす
+- [ ] **持ち主の見張り**: `kill -0` が sf-start の生死を正しく返すか → **Windows の Git Bash で確認済み**（2026-11-23。持ち主の代わりの sleep と取得役で）。macOS・Linux は未確認。`ps` の起動の時刻は使わないことにした（13.3）
+- [ ] **裏での起動**: `nohup … &` と `disown` → **Windows の Git Bash で効いた**（2026-11-23。取得役が裏で動き続け、停止の依頼・leave で止まった）。**`nohup` では `$!` と、取得役が記録した PID が違った**（nohup が bash を子として起動するため）。そのため、取得役の生死は `.collector` の PID で見る（sf-start は `$!` を使わない）。macOS・Linux と、ウィンドウを × で閉じたときの動きは未確認
+- [x] **TraceFlag の種類とログの中身** → USER_DEBUG＋7 章の DebugLevel で、`System.debug` 以外の行（SOQL・DML・例外・制限）も出た。`sf apex trace create --help` の説明（「USER_DEBUG は System.debug だけ」）は、実機と合わない。USER_DEBUG のままにする（6.3）
+- [x] `ORDER BY StartTime ASC, Id ASC` が使えなかったときの代わり → 使えたので不要（8.3 から代わりの説明を外した）
 - [ ] sf-restart で組織を切り替えたとき、取得役が入れ替わり、前の組織の TraceFlag が消えるか
+- [ ] `sf apex get log -n` の範囲の決め方（8.4）が、ログが次々にできるときにも、取りこぼさず・他の人の本文を取らずに動くか（実装のあと、開発組織で確かめる）
 
 ### 13.2 決めること
 
@@ -744,6 +807,22 @@ force-*/logs/apex/
 - 2026-11-22: 取得役は、起動中の sf-start の一覧が空になったら止まる。起動から 12 時間でも止まる（PID の再利用への備え。5.5）
 - 2026-11-22: AI への送信の確認は、プロジェクト・組織・文面の版ごとに 1 回（10.2）
 - 2026-11-22: ランチャーの起動中は、`sf-start` が裏で自動で取り続ける（1.2・5 章）。AI への送信の確認は、プロジェクトごとに最初の 1 回。自動では、ほかの TraceFlag に触れない。ログの取得の失敗で、ランチャーを止めない
+- 2026-11-23: 実機の確認（13.1）の結果で、次を変えた
+  - ほかの USER_DEBUG を止めるときは、期限を「今」ではなく 2 分後に縮め、新しい TraceFlag はその期限から始める（期限を今にできないため。4.2・8.2）
+  - DEVELOPER_LOG（Developer Console）には触れない（種類が違えばぶつからないため。4.2）
+  - 本文は、ふだん `sf apex get log -n` でまとめて取る（1 本ずつでは sf の起動で 1 本 10 秒かかるため）。そのため、一覧は全ユーザーの見出しを読む（8.3・8.4）。`-n` では、一覧の直後にできた他の人のログの本文が一時フォルダに書かれうるが、中を読まずにすぐ消し、保存・記録・要約に入れない（10.3。Codex の指摘で、「本文を取らない」から言い方を正した）
+  - ほかの USER_DEBUG を縮めたあとで自分の作成に失敗しても、元の期限に戻さない（人は「止めてよい」と確認済み。事実を die と error.log に書く。4.2）
+  - AI が試しに Apex を動かすときは、`sf apex run` ではなく Tooling API の `executeAnonymous` を使う（11.2）
+- 2026-11-23（第 2 段の実装）: 次を決めた
+  - 取得の間隔の既定を 60 秒から 180 秒にする（sf の 1 回が約 10 秒。pull はすぐ取らせるので、AI が読むログは古くならない。3.2）
+  - 持ち主の一覧への登録は、sf-start ではなく `start --auto --owner` が行う（ロックと CLOSING の待ちを 1 か所にまとめる。5.1）
+  - 持ち主・取得役の生死は `kill -0` だけで見る（PID の使い回しは、12 時間の上限で守る。5.5）
+  - `status` は、`.status`（表示の状態）と `.state`（取得の記録）の同じ名前のキーを、見出しで分けて出す（実機で `ORG` が 2 回出たため）
+- 2026-11-23（第 3 段）: sf-start からは、前面で `start --auto` を呼ばず、**`begin`（sf を呼ばない）だけを呼び、準備と取得役は裏で行う**（5.1）。`start --auto` は sf を約 7 回呼び、実機で約 1 分かかったため（毎回ランチャーが 1 分遅れると、sf-start が使われず、ログも取られなくなる）。確認は手元の答えとエイリアスで判定し、同じエイリアスで別の組織に入り直したことは、裏で組織 ID を照らし合わせて見つける（10.2。TAMAさんの判断: 案 B）
+- 2026-11-23（第 3 段の実機の確認のあと）: sf-start からの流れを tama-dev で通した（準備は裏で約 3 分・取得役の起動・ランチャーの q での後始末で TraceFlag が消える）。次を足した
+  - 裏の準備の失敗（終了コード 1）は、持ち主が生きていれば、30 秒後に 1 回だけやり直す（`--retry`。1 回目の起動で、sf 自身の読み込みエラー `MODULE_NOT_FOUND` で DebugLevel の検索が失敗し、その日の取得が抜けたため。5.1）
+  - ランチャーは、準備中のあいだ、状態が変わったらメニューを描き直す（5.4）
+  - 止めたら、`.status` の期限の表示（`EXPIRES_AT`）も消す
 
 ### 13.4 後回しにするもの
 

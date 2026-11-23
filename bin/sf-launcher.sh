@@ -28,6 +28,12 @@
 #      VS Code のターミナル（環境変数 TERM_PROGRAM=vscode）では 6・7 を表示しない（番号 6・7 は範囲外になる）
 #   4. 選んだコマンドは、このスクリプトと同じフォルダの sf-xxx.sh を、引数なしで bash で実行する。
 #      スクリプトがなければ、警告を表示する
+#   5. メニューを表示するたびに、見出しの下に、Apex ログ（sf-log.sh）の状態を 1 行表示する（logs/apex/.status の STATE による:
+#      collecting = 取得中（組織・期限・今日の本数）/ starting = 準備中 / skipped = 取っていません / error = 取れていません /
+#      stopped = 止まっています。WARNING があれば、もう 1 行）。ファイルがない・STATE がそれ以外なら、何も表示しない。
+#      キー=値 の行を while read で読み、source しない。
+#      準備中（starting）のあいだは、入力を 5 秒ずつ待ち（read -t）、STATE が変わったら、コマンドを動かさずにメニューを描き直す
+#      （裏の準備は数分かかることがあり、つながっても「準備中」のままだと迷うため）。待ち切れと EOF は、待った時間でも見分ける（Bash 3.2）
 #
 # 【前提条件】
 #   - force-* フォルダで実行する（処理の流れ 2）
@@ -86,10 +92,47 @@ unset _item
 # ------------------------------------------------------------------------------
 # メニュー表示
 # ------------------------------------------------------------------------------
+# Apex ログ（sf-log.sh）の状態を 1 行で表示する（logs/apex/.status。なければ何も表示しない。doc/sf-log-design.md 5.4）
+#   common.sh を読まないため、キー=値 の行を while read で読み、決まったキーだけを使う（source しない）
+print_apexlog_status() {
+    local f="logs/apex/.status" line k v state="" org="" at="" cnt="" reason="" warn="" text
+    [[ -f "$f" ]] || return 0
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        k="${line%%=*}"; v="${line#*=}"
+        case "$k" in
+            STATE) state="$v" ;; ORG) org="$v" ;; EXPIRES_AT) at="$v" ;; COUNT_TODAY) cnt="$v" ;;
+            REASON) reason="$v" ;; WARNING) warn="$v" ;;
+        esac
+    done < "$f"
+    case "$state" in
+        collecting) text="取得中（${org}${at:+・期限 ${at}}${cnt:+・今日 ${cnt} 本}）" ;;
+        starting)   text="準備中（${org}）" ;;
+        skipped)    text="取っていません${reason:+（${reason}）}" ;;
+        error)      text="取れていません${reason:+（${reason}）}" ;;
+        stopped)    text="止まっています${reason:+（${reason}）}" ;;
+        *)          return 0 ;;
+    esac
+    echo -e "${DIM}  Apex ログ: ${text}${RESET}"
+    [[ -n "$warn" ]] && echo -e "${YELLOW}  ⚠ Apex ログ: ${warn}${RESET}"
+    return 0
+}
+
+# Apex ログの状態（.status の STATE）だけを読む（なければ空）。準備中のあいだの描き直しの判定に使う
+apexlog_state() {
+    local f="logs/apex/.status" line
+    [[ -f "$f" ]] || return 0
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        [[ "$line" == STATE=* ]] && { printf '%s' "${line#STATE=}"; return 0; }
+    done < "$f"
+    return 0
+}
+APEXLOG_REFRESH=5   # 準備中のあいだ、状態を見直す間隔（秒）
+
 print_menu() {
     echo ""
     echo -e "${DIM}  ──────────────────────────────────────────────────${RESET}"
     echo -e "${BOLD}  >> Launcher <<${RESET}"
+    print_apexlog_status
     echo -e "${DIM}  ──────────────────────────────────────────────────${RESET}"
 
     local num=1
@@ -187,12 +230,28 @@ main() {
         print_menu
 
         local count="${#MENU_ITEMS[@]}"
-        local input cmd
+        local input cmd shown t0 rc redraw=0
+        shown=$(apexlog_state)   # 表示した Apex ログの状態（準備中のあいだは、変わったら描き直す）
 
         # 入力ループ（1文字即時入力・無効入力は行クリアして待機）
         while true; do
             printf "  番号を入力 (1-%d / q で終了): " "$count"
-            read -rsn1 input || { printf "\n"; exit 0; }  # EOF → 正常終了
+            if [[ "$shown" == "starting" ]]; then
+                # 準備中: APEXLOG_REFRESH 秒ずつ待ち、状態が変わったら、メニューを描き直す（裏の準備は数分かかることがある。2026-11-23）
+                t0=$SECONDS; rc=0
+                read -rsn1 -t "$APEXLOG_REFRESH" input || rc=$?
+                if [[ $rc -ne 0 ]]; then
+                    # 待ち切れ（Bash 4 以降は 128 より大きい。Bash 3.2 は 1 のため、待った時間でも見分ける）と EOF を分ける
+                    if (( rc > 128 || SECONDS - t0 >= APEXLOG_REFRESH - 1 )); then
+                        printf "\r\033[K"
+                        [[ "$(apexlog_state)" == "starting" ]] && continue
+                        printf "\n"; redraw=1; break
+                    fi
+                    printf "\n"; exit 0   # EOF → 正常終了
+                fi
+            else
+                read -rsn1 input || { printf "\n"; exit 0; }  # EOF → 正常終了
+            fi
 
             # 空 Enter / 数字・q 以外 → 行クリアして待機（エコーしない）
             if [[ -z "$input" ]] || ! [[ "$input" =~ ^[0-9qQ]$ ]]; then
@@ -216,6 +275,7 @@ main() {
             break
         done
 
+        [[ $redraw -eq 1 ]] && continue   # Apex ログの状態が変わった → コマンドは動かさず、メニューを描き直す
         run_command "$cmd"
     done
 }

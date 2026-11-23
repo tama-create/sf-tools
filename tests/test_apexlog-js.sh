@@ -39,7 +39,7 @@ _list() {
 }
 # 要約を作る。引数: 追加のオプション。結果: $_OUT（標準出力と標準エラー）・$_RC
 _sum() {
-    _OUT=$(TZ=Asia/Tokyo node "$AJS" summarize --list "$_LIST" --base "$SF_TOOLS_DIR" --now 2026-11-23T02:30:00Z "$@" 2>&1); _RC=$?
+    _OUT=$(node "$AJS" summarize --list "$_LIST" --base "$SF_TOOLS_DIR" --now 2026-11-23T02:30:00Z --local-offset 540 "$@" 2>&1); _RC=$?
 }
 
 # ------------------------------------------------------------------------------
@@ -52,7 +52,13 @@ test_summarize_errors() {
           odd.log 07L000000000004AAA 2026-11-23T02:09:00Z Api 成功 900 10
     _sum
     assert_exit_ok "$_RC" "要約を作れる"
-    _has "$_OUT" "# Apex ログの要約（2026-11-23 11:30:00 作成・4 本・エラー 5）" "見出し: 作成時刻（PC のタイムゾーン）・本数・エラーの数（まとめる前）"
+    _has "$_OUT" "# Apex ログの要約（2026-11-23 11:30:00 作成・4 本・エラー 5）" "見出し: 作成時刻（--local-offset の時差）・本数・エラーの数（まとめる前）"
+    # PC のタイムゾーンが UTC でも、--local-offset の時差で表示する（GitHub Actions の Windows と同じ状態を、TZ で作る）
+    local o2
+    o2=$(TZ=UTC node "$AJS" summarize --list "$_LIST" --base "$SF_TOOLS_DIR" --now 2026-11-23T02:30:00Z --local-offset 540 2>&1)
+    _has "$o2" "（2026-11-23 11:30:00 作成・" "--local-offset は、PC のタイムゾーン（TZ=UTC）より優先する"
+    o2=$(node "$AJS" summarize --list "$_LIST" --base "$SF_TOOLS_DIR" --local-offset 900 2>&1)
+    [[ $? -ne 0 ]] && pass "--local-offset の範囲外（900）→ 終了コード 1" || fail "--local-offset の範囲外（900）→ 終了コード 1"
     _has "$_OUT" "[$FX/fatal.log:10] FATAL_ERROR System.NullPointerException: Attempt to de-reference a null object" "FATAL_ERROR: 行番号つきの参照と文言"
     _has "$_OUT" "場所: AnonymousBlock: line 4, column 1（直前の CODE_UNIT: execute_anonymous_apex）" "FATAL_ERROR: 続きの行のスタックトレースを場所にする"
     _has "$_OUT" "EXCEPTION_THROWN System.IllegalArgumentException: MARK 自分で投げた例外" "EXCEPTION_THROWN: 文言"

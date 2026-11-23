@@ -5,7 +5,8 @@
 # 使い方: bash tests/run_tests.sh [テストファイル名]
 #   引数なし → 全テストを実行（既定は並列。--serial で 1 つずつ）
 #   引数あり → 指定したテストのみ実行（例: bash run_tests.sh test_sf-hook.sh）
-#   --changed           : 変更したファイル（git の差分）に対応するテストだけを実行する（対応は、下の case 文）
+#   --changed           : 変更したファイル（git の差分と、まだ git add していない新しいファイル。.gitignore の対象は除く）に対応する
+#                         テストだけを実行する（対応は、下の case 文）
 #   --jobs N / --serial : 同時に動かすテストファイルの数（既定: CPU の数。環境変数 SF_TEST_JOBS でも指定できる。
 #                         --serial は 1 = 1 つずつ）。時間のかかるファイルから先に起動する（全体の時間を短くするため）
 #   --shard I/N         : テストファイルを N 組に分け、I 番目（1 始まり）の組だけを実行する（GitHub Actions で、複数のジョブに分けて、並列に動かすため。
@@ -203,6 +204,7 @@ TEST_FILES=(
     test_sf-restart.sh
     test_sf-metasync.sh
     test_metasync-js.sh
+    test_apexlog-js.sh
     test_sf-release.sh
     test_sf-deploy.sh
     test_sf-dryrun.sh
@@ -348,6 +350,9 @@ if [[ "${1:-}" == "--changed" ]]; then
             lib/metasync.js|config/metadata-dirs.txt|config/metasync-detect.txt|config/metasync-fingerprint.txt|config/metasync-extra.txt|tests/mock-soap-server.js|tests/test_metasync-js.sh)
                 _changed_tests+=("test_metasync-js.sh" "test_sf-metasync.sh")   # 鏡像の部品（lib/metasync.js）と、それを呼ぶ sf-metasync.sh
                 ;;
+            lib/apexlog.js|tests/fixtures/apexlog/*|tests/test_apexlog-js.sh)
+                _changed_tests+=("test_apexlog-js.sh")   # sf-log.sh の要約・一覧の検査・日時の部品（doc/sf-log-design.md 6 章）
+                ;;
             config/metadata-capability.txt)
                 _changed_tests+=("test_sf-check.sh")
                 ;;
@@ -381,7 +386,10 @@ if [[ "${1:-}" == "--changed" ]]; then
                 break
                 ;;
         esac
-    done < <(git -C "$TESTS_DIR/.." diff --name-only HEAD 2>/dev/null)
+    # 対象のファイル: 最後のコミットからの差分（変更・削除・git add 済みの新しいファイル）と、まだ git add していない新しいファイル
+    #   （git diff は、追跡していないファイルを出さない。新しく足した部品・テストのテストが、mm の前に動かないことがあったため、
+    #   git ls-files --others で足す。.gitignore の対象（logs/ など）は --exclude-standard で除く。重なりは、下の sort -u で除く）
+    done < <(git -C "$TESTS_DIR/.." diff --name-only HEAD 2>/dev/null; git -C "$TESTS_DIR/.." ls-files --others --exclude-standard 2>/dev/null)
 
     if [[ $_run_all -eq 0 && ${#_changed_tests[@]} -gt 0 ]]; then
         # 重複排除

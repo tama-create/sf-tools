@@ -76,6 +76,7 @@
 | `test_sf-start.sh` | sf-start.sh |
 | `test_sf-restart.sh` | sf-restart.sh |
 | `test_sf-metasync.sh` | sf-metasync.sh（鏡像: 取得 → 計画 → 反映・削除・取得の失敗とやり直し・`--dry-run`・保留と終了コード 3・コミット前の中断の復元） |
+| `test_apexlog-js.sh` | lib/apexlog.js（sf-log.sh の部品。summarize: エラー・一覧・System.debug・入力規則・制限・取れていないもの（読めなかったログ・読み取れなかった行・切り詰め・タイムゾーン不明・該当する行なし）・一覧の形の誤り。list: 自分 / 他の人の見分け・応答の形の誤り（エラーの文言に値を出さない）。time: now・norm・cmp・min・add。見本のログは `tests/fixtures/apexlog/`（実データなし）） |
 | `test_metasync-js.sh` | lib/metasync.js（plan: 追加・変更・削除・CRLF・残すファイル・S2〜S5・S9 の境界・S1/S8。apply: 反映・保留・根の外のパスの拒否。detect: 変更の検知（状態なし・変更なし・履歴・区分 B の変化・失敗・状態の破損）と、区分の表 `config/metasync-detect.txt` の整合） |
 | `test_sf-release.sh` | sf-release.sh |
 | `test_sf-deploy.sh` | sf-deploy.sh |
@@ -86,7 +87,7 @@
 | `test_sf-launcher.sh` | sf-launcher.sh（`common.sh` を読み込まない standalone のランチャー） |
 | `test_security.sh` | セキュリティ修正の退行の検出（静的解析: `run` 経由の `sf org display --verbose` の禁止・`run` の一時ファイルの置き場所など。実行時: ログに `sfdxAuthUrl` が残らない・ログのフォルダが 700） |
 | `test_e2e.sh`・`test_e2e2.sh` | tests/e2e/ の安全ガードと部品（テスト関数を、2 つのファイルに、所要時間でほぼ均等に分けた。並列に動かすため。共通の部品は `tests/e2e-test-lib.sh`。実行を伴うシナリオ（manual-delete 以降）が test_e2e2.sh）（gh / sf はモック。実環境には接続しない。名前の判定・Actions 上のガード・削除関数・鍵一式の読み込み・`cleanup.sh` の既定など） |
-| `test_run-tests.sh` | tests/run_tests.sh の `--shard`（`SF_TEST_LIST_ONLY=1` で分け方だけを確かめる: 漏れ・重複がない・いつも同じ分け方・不正な指定は終了コード 2） |
+| `test_run-tests.sh` | tests/run_tests.sh の `--shard`（`SF_TEST_LIST_ONLY=1` で分け方だけを確かめる: 漏れ・重複がない・いつも同じ分け方・不正な指定は終了コード 2）と `--changed`（まだ `git add` していない新しいファイルも対象にする・`.gitignore` の対象は数えない。一時のリポジトリで確かめる） |
 | `test_cli_args.sh` | 全 `bin/sf-*.sh` の引数: 冒頭コメントの【オプション】を 1 つずつ値なしで渡し、15 秒以内に終わる・「不明なオプションです」と言われない。文書にないオプションでも止まらない |
 | `test_sf-check.sh` | sf-check.sh（種類の可否の判定・同梱の表 `config/metadata-capability.txt` の形式を含む） |
 | `test_integration-coverage.sh` | 結合テストのカバレッジ表（`doc/integration-test-plan.md` の 10）のガード。全コマンド・フック・ワークフローが表に載っていること、各行が「結合あり（パターンの番号が定義済み）」か「結合なし（理由が空でない）」であることを確かめる。新しいコマンドを足して、表に載せ忘れると失敗する |
@@ -959,7 +960,7 @@ sf-init.sh --add-tier develop    # main+staging → main+staging+develop
 
 ```bash
 bash tests/run_tests.sh                           # 全テスト実行（手元では通常は不要。mm 後に CI が全件を実行する）
-bash tests/run_tests.sh --changed                 # 変更ファイルに対応するテストのみ（開発中）
+bash tests/run_tests.sh --changed                 # 変更ファイルに対応するテストのみ（開発中。git の差分と、まだ git add していない新しいファイル。.gitignore の対象は除く）
 bash tests/run_tests.sh --jobs 4                  # 同時に動かすテストファイルの数を指定（既定: CPU の数。環境変数 SF_TEST_JOBS でも指定できる）
 bash tests/run_tests.sh --serial                  # 1 つずつ実行（並列で、原因を切り分けにくいときの確認用）
 bash tests/run_tests.sh --shard 2/6               # テストファイルを 6 組に分け、2 番目の組だけを実行する（GitHub Actions の Windows が、6 つのジョブに分けて並列に動かす。重いファイルから、いちばん軽い組へ割り当てる。目安は run_tests.sh の _weight）

@@ -1,6 +1,6 @@
 #!/bin/bash
 # ==============================================================================
-# test_run-tests.sh - tests/run_tests.sh の --shard（テストファイルを N 組に分けて、I 番目だけ実行する）のテスト
+# test_run-tests.sh - tests/run_tests.sh の --shard（テストファイルを N 組に分けて、I 番目だけ実行する）と --changed のテスト
 # ==============================================================================
 # 実際のテストは動かさない（SF_TEST_LIST_ONLY=1: 対象のファイル名を表示して終わる）。
 # GitHub Actions の Windows で、複数のジョブに分けて並列に動かすときの、分け方が正しいことを確かめる。
@@ -13,9 +13,10 @@
 #   5. 不正な指定は、終了コード 2
 #   6. 組の数が、ファイルの数より多いとき、空の組は、何もせず、成功で終わる
 #   7. SF_TEST_SKIP_INTEGRATION=1 と組み合わせても、結合テストは、外れたまま
+#   8. --changed は、まだ git add していない新しいファイルに対応するテストも選ぶ。.gitignore の対象は数えない
 # ==============================================================================
 source "$(dirname "${BASH_SOURCE[0]}")/test_helper.sh"
-echo -e "${CLR_HEAD}=== run_tests.sh --shard ===${CLR_RST}"
+echo -e "${CLR_HEAD}=== run_tests.sh --shard・--changed ===${CLR_RST}"
 
 RT="$SF_TOOLS_DIR/tests/run_tests.sh"
 # 対象のファイル名を、1 行ずつ返す（実行はしない）。引数: run_tests.sh への引数
@@ -74,8 +75,37 @@ test_shard_empty_and_skip() {
     fi
 }
 
+# --changed は、まだ git add していない新しいファイルも、対象に入れる（.gitignore の対象は除く）
+#   本物のリポジトリに、追跡していないファイルを作らないため、一時フォルダに、run_tests.sh だけを置いた小さなリポジトリを作って確かめる
+test_changed_untracked() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] --changed: まだ git add していない新しいファイル${CLR_RST}"
+    local repo out
+    repo=$(mktemp -d "${TMPDIR:-/tmp}/test-rt-changed-XXXX")
+    mkdir -p "$repo/tests" "$repo/lib"
+    cp "$RT" "$repo/tests/run_tests.sh"
+    printf 'logs/\n' > "$repo/.gitignore"   # run_tests.sh が書く logs/ を、追跡していないファイルに数えないため（本物と同じ）
+    (
+        cd "$repo" || exit 1
+        git init -q && git config core.autocrlf false && git add -A \
+            && git -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -q -m init
+    ) || { fail "--changed: 一時のリポジトリを作れた"; rm -rf "$repo"; return; }
+
+    # 追跡していない新しいファイル（lib/apexlog.js）に対応するテストが、選ばれる
+    echo "x" > "$repo/lib/apexlog.js"
+    out=$(SF_TEST_SKIP_INTEGRATION="" SF_TEST_NO_WSL=1 SF_TEST_LIST_ONLY=1 bash "$repo/tests/run_tests.sh" --changed 2>/dev/null)
+    assert_output_contains "$out" "対象テスト: test_apexlog-js.sh" "まだ git add していない新しいファイルに対応するテストを、選ぶ"
+
+    # .gitignore の対象は、追跡していないファイルに数えない（対応するテストなし → 全件）
+    printf 'logs/\nlib/apexlog.js\n' > "$repo/.gitignore"
+    git -C "$repo" -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -q -am ignore
+    out=$(SF_TEST_SKIP_INTEGRATION="" SF_TEST_NO_WSL=1 SF_TEST_LIST_ONLY=1 bash "$repo/tests/run_tests.sh" --changed 2>/dev/null)
+    assert_output_contains "$out" "変更ファイルに対応するテストなし" ".gitignore の対象のファイルは、追跡していないファイルに数えない"
+    rm -rf "$repo"
+}
+
 test_shard_partition
 test_shard_invalid
 test_shard_empty_and_skip
+test_changed_untracked
 
 print_summary

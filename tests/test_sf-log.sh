@@ -17,6 +17,10 @@
 #      一覧の失敗 → 失敗（name だけを記録）／他の人の ID を sf-log.log に残さない／51 本以上（何回かに分ける）／
 #      --max・--since・2 回目は新しいものだけ
 #   6. stop: 自分の TraceFlag だけを消す・手元のログは残す・ないとき・すでに消えているとき／status・auto on|off
+#   7. collect（取得役）: 裏で取る・二重に起動しない・pull は取得役に頼む・TraceFlag を延ばす（残り 60 分未満）／
+#      止まる: leave（最後の持ち主）・stop・持ち主が死んだ・上限の時間・印の入れ替わり（組織に何もしない）／
+#      leave: ほかの持ち主がいれば止めない／start --auto --owner: 登録・後始末の最中（CLOSING）は待つ・死んだ CLOSING は消す／
+#      別の組織の取得役が動いているときの pull は中断
 # ==============================================================================
 source "$(dirname "${BASH_SOURCE[0]}")/test_helper.sh"
 echo -e "${CLR_HEAD}=== sf-log.sh ===${CLR_RST}"
@@ -45,16 +49,24 @@ EOF
     chmod +x "$MB/sf"
     printf '{"userId":"%s","orgId":"00D000000000001AAA","orgType":"Developer Edition"}\n' "$ME" > "$FK/org.json"
 }
-_done() { teardown "$TD" "$MB" "$FK"; }
+# 後片付け。取得役・持ち主の代わりの sleep が残っていれば止める
+_done() {
+    local p
+    p=$(grep '^PID=' "$TD/logs/apex/.collector" 2>/dev/null | cut -d= -f2)
+    [[ -n "$p" ]] && kill "$p" 2>/dev/null
+    for p in ${SLEEPERS:-}; do kill "$p" 2>/dev/null; done
+    SLEEPERS=""
+    teardown "$TD" "$MB" "$FK"
+}
 
 # sf-log.sh を実行する（標準入力は、既定で空 = 端末でない）。結果: OUT・RC
 _run() {
-    OUT=$(cd "$TD" && FAKE_ORG="$FK" PATH="$MB:$PATH" SF_TOOLS_SF_CHECK_STAMP="$FK/stamp" bash "$SFLOG" "$@" 2>&1 < /dev/null); RC=$?
+    OUT=$(cd "$TD" && FAKE_ORG="$FK" PATH="$MB:$PATH" SF_TOOLS_SF_CHECK_STAMP="$FK/stamp" SF_LOG_TEST_FAST=1 bash "$SFLOG" "$@" 2>&1 < /dev/null); RC=$?
 }
 # 標準入力に文字を渡して実行する。引数: 入力 引数...
 _run_in() {
     local in="$1"; shift
-    OUT=$(cd "$TD" && printf '%s' "$in" | FAKE_ORG="$FK" PATH="$MB:$PATH" SF_TOOLS_SF_CHECK_STAMP="$FK/stamp" bash "$SFLOG" "$@" 2>&1); RC=$?
+    OUT=$(cd "$TD" && printf '%s' "$in" | FAKE_ORG="$FK" PATH="$MB:$PATH" SF_TOOLS_SF_CHECK_STAMP="$FK/stamp" SF_LOG_TEST_FAST=1 bash "$SFLOG" "$@" 2>&1); RC=$?
 }
 # 偽の組織を JavaScript で読む・書く。引数: 式（o が状態）。書くときは _org_set
 _org()     { node -e 'const f=process.argv[1]; const o=JSON.parse(require("fs").readFileSync(f,"utf8")); console.log(eval(process.argv[2]))' "$FK/org.json" "$1"; }
@@ -339,6 +351,156 @@ test_stop_status() {
     _done
 }
 
+# ------------------------------------------------------------------------------
+# collect（取得役）
+# ------------------------------------------------------------------------------
+# 取得役を裏で起動する（exec で、記録された PID と $! を同じにする）。引数: 追加の環境変数（K=V。任意）
+_collect_bg() {
+    (cd "$TD" && exec env FAKE_ORG="$FK" PATH="$MB:$PATH" SF_TOOLS_SF_CHECK_STAMP="$FK/stamp" SF_LOG_TEST_FAST=1 SF_LOG_INTERVAL=2 "$@" \
+        bash "$SFLOG" collect </dev/null >/dev/null 2>&1) &
+    CPID=$!
+}
+# 条件が成り立つまで待つ。引数: 秒 条件（eval する）
+_wait_for() { local i; for ((i = 0; i < $1 * 5; i++)); do eval "$2" && return 0; sleep 0.2; done; return 1; }
+# 生きている持ち主の代わり（sleep）の印を作る。結果: MARK
+_live_mark() { sleep 600 & SLEEPERS="${SLEEPERS:-} $!"; MARK="$!:$(date +%s):t$RANDOM"; }
+_alive() { kill -0 "$1" 2>/dev/null; }
+_tf_count() { _org '(o.traceFlags||[]).filter(t=>t.LogType==="USER_DEBUG").length'; }
+
+test_collect_basic() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] collect: 裏で取る・pull は取得役に頼む・leave${CLR_RST}"
+    _env
+    _run auto on -o dev
+    _live_mark; local m1="$MARK"
+    _run start -o dev --auto --owner "$m1"
+    assert_exit_ok "$RC" "start --auto --owner が成功する"
+    assert_file_contains "$TD/logs/apex/.owners" "$m1" "持ち主の一覧に、印を足す"
+    _collect_bg
+    _wait_for 15 '[[ "$(_kv .collector PID)" == "$CPID" ]]' && pass "取得役が印（.collector）を書く" || fail "取得役が印（.collector）を書く"
+    _log 07L000000000041AAA "$ME" 1; _log 07L000000000042AAA "$OTHER" 2; _log 07L000000000043AAA "$ME" 3
+    _wait_for 30 '[[ "$(wc -l < "$TD/logs/apex/.index" 2>/dev/null | tr -d " ")" == "2" ]]' \
+        && pass "取得役が、自分のログ 2 本を、裏で保存する" || fail "取得役が、自分のログ 2 本を、裏で保存する" "$(cat "$TD/logs/apex/.index" 2>/dev/null)"
+    _run collect
+    assert_exit_ok "$RC" "2 つ目の collect は、すぐ終わる（成功）"
+    assert_equals "$(_kv .collector PID)" "$CPID" "2 つ目の collect は、印を書き換えない"
+    # pull は取得役に頼む（直前のログも取ってもらう）
+    _log 07L000000000044AAA "$ME" 4
+    _run pull -o dev
+    assert_exit_ok "$RC" "取得役がいるときの pull が成功する"
+    _has "$(cat "$TD/logs/apex/latest.md")" "取得役: 動作中" "要約に、取得役が動作中と書く"
+    _has "$(cat "$TD/logs/apex/latest.md")" "07L000000000044AAA" "pull の直前のログも、取得役が取って要約に入る"
+    # ほかの持ち主がいれば、leave は何も止めない
+    _live_mark; local m2="$MARK"
+    _run start -o dev --auto --owner "$m2"
+    _run leave --owner "$m2"
+    assert_exit_ok "$RC" "leave（ほかの持ち主あり）が成功する"
+    _has "$OUT" "止めません" "ほかの持ち主がいる → 止めないと表示する"
+    _alive "$CPID" && pass "ほかの持ち主がいる → 取得役は動いたまま" || fail "ほかの持ち主がいる → 取得役は動いたまま"
+    assert_equals "$(_tf_count)" "1" "ほかの持ち主がいる → TraceFlag は残る"
+    # 最後の持ち主の leave → 止める
+    _run leave --owner "$m1"
+    assert_exit_ok "$RC" "最後の leave が成功する"
+    _wait_for 15 '! _alive "$CPID"' && pass "最後の leave → 取得役が止まる" || fail "最後の leave → 取得役が止まる"
+    assert_equals "$(_tf_count)" "0" "最後の leave → TraceFlag を消す"
+    assert_file_not_exists "$TD/logs/apex/.owners" "最後の leave → 持ち主の一覧（と CLOSING）を消す"
+    assert_equals "$(_kv .status STATE)" "stopped" "最後の leave → .status を stopped にする"
+    _done
+}
+
+test_collect_stops() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] collect: 止まり方${CLR_RST}"
+    # 持ち主が死んだ → 自分で後始末をして止まる
+    _env
+    _run auto on -o dev
+    local dead; bash -c 'exit 0' & dead=$!; wait "$dead"
+    _run start -o dev --auto --owner "${dead}:1:dead"
+    _collect_bg
+    _wait_for 20 '! _alive "$CPID"' && pass "持ち主が死んだ → 取得役が止まる" || fail "持ち主が死んだ → 取得役が止まる"
+    assert_equals "$(_tf_count)" "0" "持ち主が死んだ → 取得役が TraceFlag を消す"
+    _has "$(_kv .status REASON)" "持ち主" ".status に、止まった理由を書く"
+    _done
+
+    # stop → 取得役を止めて、TraceFlag を消す
+    _env
+    _run auto on -o dev; _live_mark
+    _run start -o dev --auto --owner "$MARK"
+    _collect_bg
+    _wait_for 15 '[[ "$(_kv .collector PID)" == "$CPID" ]]'
+    _run stop
+    assert_exit_ok "$RC" "取得役がいるときの stop が成功する"
+    _wait_for 15 '! _alive "$CPID"' && pass "stop → 取得役が止まる" || fail "stop → 取得役が止まる"
+    assert_equals "$(_tf_count)" "0" "stop → TraceFlag を消す"
+    _done
+
+    # 上限の時間（12 時間の代わりに 2 秒）
+    _env
+    _run auto on -o dev; _live_mark
+    _run start -o dev --auto --owner "$MARK"
+    _collect_bg SF_LOG_MAX_SECONDS=2
+    _wait_for 20 '! _alive "$CPID"' && pass "上限の時間 → 取得役が止まる" || fail "上限の時間 → 取得役が止まる"
+    assert_equals "$(_tf_count)" "0" "上限の時間 → TraceFlag を消す"
+    _has "$(_kv .status REASON)" "12 時間" ".status に、12 時間で止まったと書く"
+    _done
+
+    # 印が入れ替わった → 組織に何もせずに止まる
+    _env
+    _run auto on -o dev; _live_mark
+    _run start -o dev --auto --owner "$MARK"
+    _collect_bg
+    _wait_for 15 '[[ "$(_kv .collector PID)" == "$CPID" ]]'
+    printf 'PID=1\nSTARTED=1\nORG=dev\n' > "$TD/logs/apex/.collector"
+    _wait_for 15 '! _alive "$CPID"' && pass "印が入れ替わった → 取得役が止まる" || fail "印が入れ替わった → 取得役が止まる"
+    assert_equals "$(_tf_count)" "1" "印が入れ替わった → TraceFlag には触れない"
+    rm -f "$TD/logs/apex/.collector"
+    _done
+}
+
+test_collect_extend() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] collect: TraceFlag を延ばす${CLR_RST}"
+    _env
+    _run auto on -o dev; _live_mark
+    _run start -o dev --auto --owner "$MARK"
+    # 残り 10 分にする（偽の組織と .status の両方）
+    _org_set "const t=o.traceFlags.find(x=>x.LogType==='USER_DEBUG'); t.ExpirationDate=Date.now()+600000"
+    local exp10; exp10=$(_org "new Date(o.traceFlags.find(x=>x.LogType==='USER_DEBUG').ExpirationDate).toISOString().replace(/\\.\\d{3}Z\$/,'Z')")
+    sed -i.bak "s/^EXPIRES=.*/EXPIRES=${exp10}/" "$TD/logs/apex/.status" && rm -f "$TD/logs/apex/.status.bak"
+    _collect_bg
+    _wait_for 30 '[[ "$(_org "(o.traceFlags.find(x=>x.LogType===\"USER_DEBUG\").ExpirationDate - Date.now()) > 6000000")" == "true" ]]' \
+        && pass "残り 60 分未満 → 今から約 2 時間に延ばす" || fail "残り 60 分未満 → 今から約 2 時間に延ばす"
+    _wait_for 10 '[[ "$(_kv .status EXPIRES)" != "$exp10" ]]' && pass "延ばした期限を .status に書く" || fail "延ばした期限を .status に書く"
+    _done
+}
+
+test_register_owner() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] start --auto --owner: 後始末の最中${CLR_RST}"
+    _env
+    _run auto on -o dev
+    _live_mark; local closer="$MARK"
+    printf 'CLOSING=%s\n' "$closer" > "$TD/logs/apex/.owners"
+    _live_mark
+    _run start -o dev --auto --owner "$MARK"
+    assert_equals "$RC" "10" "後始末の最中（生きている CLOSING）→ 待っても終わらなければ 10"
+    assert_equals "$(_tf_count)" "0" "後始末の最中 → TraceFlag を作らない"
+    # 死んだ CLOSING → 消して進む
+    local dead; bash -c 'exit 0' & dead=$!; wait "$dead"
+    printf 'CLOSING=%s:1:old\n' "$dead" > "$TD/logs/apex/.owners"
+    _run start -o dev --auto --owner "$MARK"
+    assert_exit_ok "$RC" "死んだ CLOSING → 消して登録し、取り始める"
+    assert_file_not_contains "$TD/logs/apex/.owners" "CLOSING=" "死んだ CLOSING を消す"
+    assert_file_contains "$TD/logs/apex/.owners" "$MARK" "自分の印を足す"
+    # 同じ印は 2 回足さない（入れ子の sf-start）
+    _run start -o dev --auto --owner "$MARK"
+    assert_equals "$(grep -c -- "$MARK" "$TD/logs/apex/.owners")" "1" "同じ印は 2 回足さない"
+    # 別の組織の取得役が動いているときの pull は中断
+    _live_mark
+    printf 'PID=%s\nSTARTED=1\nORG=other-org\n' "${MARK%%:*}" > "$TD/logs/apex/.collector"
+    _run pull -o dev
+    assert_exit_fail "$RC" "別の組織の取得役が動いている → pull は中断"
+    _has "$OUT" "別の組織（other-org）" "どの組織の取得役かを表示する"
+    rm -f "$TD/logs/apex/.collector"
+    _done
+}
+
 test_start_basic
 test_start_other_traceflags
 test_start_auto
@@ -346,5 +508,9 @@ test_args
 test_pull
 test_pull_pushed_out_and_failures
 test_stop_status
+test_collect_basic
+test_collect_stops
+test_collect_extend
+test_register_owner
 
 print_summary

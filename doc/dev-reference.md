@@ -902,16 +902,20 @@ sf-init.sh --add-tier develop    # main+staging → main+staging+develop
 
 > 仕様の正本は、`bin/sf-log.sh` の冒頭コメント（`--help`）。設計は `doc/sf-log-design.md`（実機の確認の結果は 13.1）。ここは実装の要点。
 
-AI の開発サイクル用の Apex ログ取得（開発者向け。管理者向けの警告ボックスは不要）。2026-11-23 時点は第 1 段（手動の `start`・`pull`・`stop`・`status`・`auto`）。裏の取得役（`collect`）・`leave`・`sf-start` とのつなぎは、まだない。
+AI の開発サイクル用の Apex ログ取得（開発者向け。管理者向けの警告ボックスは不要）。2026-11-23 時点は第 2 段（手動の `start`・`pull`・`stop`・`status`・`auto` と、裏の取得役 `collect`・`leave`）。`sf-start`・`sf-restart`・ランチャーとのつなぎは、まだない。
 
 - **境界**: JSON の読み取り・判定・要約・日時は `lib/apexlog.js`（`summarize`・`list`・`tflist`・`time`）。シェルは、組織への問い合わせ・手元の状態・保存・終了コード
 - **手元の状態**: `logs/apex/` の `.state`・`.status`・`.consent`・`.owners`・`.index`（`キー=値`。`kv_get`・`kv_set`。書き換えは短いロック `mkdir logs/apex/.lock` の中で `state_set`）。取得は取得のロック `logs/apex/.fetch.lock`
 - **TraceFlag**: 自分の USER_DEBUG（`.state` の `TRACE_FLAG_ID`）は延ばす。ほかの有効な USER_DEBUG は、手動の確認のあと `min(元の期限, 今+2 分)` に縮め、その 1 秒後から作る（`--auto` は触らずに 10）。DEVELOPER_LOG には触れない（実機で、種類が違えば重ならないことを確認）
 - **取得（`fetch_round`）**: 全ユーザーの一覧は `run` を通さず受ける（他の人の見出しを `sf-log.log`・`error.log`・画面に出さない）。`aj list` で自分 / 他の人を見分ける。取りたいログより新しいログがすべて自分のものなら `sf apex get log -n`、それ以外は `-i`。`-n` の押し出しは `-i` で補う。`logs/apex/.fetch/` は取得のたびに空にし、`<ID>.log` 以外の名前があればその回を失敗にする。しおり（`LAST_FETCH`・`LAST_FETCH_ID`）は 1 本ごとに進める
 - **要約の選び方**: `.index` から、`LAST_READ` より後（同じ秒は `LAST_READ_IDS` の ID を除く）。`--max` を超えたら新しいほう
+- **取得役（`cmd_collect`）**: `.collector`（PID・STARTED・ORG）。`TICK`（5 秒）ごとに、`owners_prune`（`kill -0`）→ 空なら `collector_finish`（CLOSING を書いて `do_cleanup … 1`）→ `MAX_RUN`（12 時間）→ `collector_should_quit`（`requests/stop`・CLOSING・印の入れ替わり）→ 間隔・`requests/pull.*`・取り残しで `fetch_round`（取得のロックが取れたときだけ）→ 追いついたら `respond_pulls`（`done.<ID>`）→ 残り 60 分未満なら `collector_extend`（`tflist` で ID・種類を確かめ、直前に `collector_should_quit`）。失敗は間隔を倍（最大 600）
+- **後始末（`do_cleanup`）**: `stop`・`leave`・取得役が共有。`stop_collector`（`requests/stop` → `STOP_WAIT` 秒 → TERM → 10 秒）→ `.state` の TraceFlag を消す → `.status` を stopped。戻り値 1 = 取得役が止まらない（TraceFlag を残す）/ 2 = 消せない。`stop`・`leave` は `.owners` に CLOSING を書いてから行い、最後に `.owners` を消す。`leave` は失敗しても 0
+- **持ち主の登録（`register_owner`）**: `start --auto --owner` が行う（設計の 5.1 では sf-start。ロックを 1 か所にまとめるため変えた）。生きている CLOSING は `CLOSING_WAIT`（60 秒）まで待ち、死んだ CLOSING は消す
+- **時間の設定**: `SF_LOG_INTERVAL`（既定 180）・`SF_LOG_MAX_SECONDS`（既定 43200）・`SF_LOG_TEST_FAST=1`（テスト用。間隔の下限 1・`TICK` 1・待ち時間を短く）
 - **`--auto`**: 終了コード 0 / 10（取らない）/ 1（失敗）。`finish_auto_or_die` で、手動は `die`、自動は `.status` に書いて終了コードで返す。確認は、端末でなければ聞かずに「取らない」（`read_key` の EOF の die を避ける。`$( )` の中で呼ぶ）
 
-テスト: `tests/test_sf-log.sh`（偽の組織 `tests/mock-sf-log.js`。TraceFlag の重なりの拒否・期限を今にできない・`-n` の全ユーザーの新しい順・押し出しの注入・失敗の注入）。
+テスト: `tests/test_sf-log.sh`（偽の組織 `tests/mock-sf-log.js`。TraceFlag の重なりの拒否・期限を今にできない・`-n` の全ユーザーの新しい順・押し出しの注入・失敗の注入。取得役は `_collect_bg` で裏に起動し、`_wait_for` で待つ。持ち主の代わりは `sleep`。手元の Git Bash で約 8 分・WSL で約 2 分。`run_tests.sh` の `_weight` は 420）。
 
 ---
 

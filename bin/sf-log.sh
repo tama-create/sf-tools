@@ -13,6 +13,8 @@
 #   sf-log.sh start [-o ALIAS] [--level standard|detail] [--hours N] [-y]   # 取り始める（TraceFlag を作る・延ばす）
 #   sf-log.sh stop [-o ALIAS]                             # 止める（自分が作った TraceFlag を消す）
 #   sf-log.sh start --auto [--owner 印]                   # 内部用（sf-start.sh が呼ぶ。確認で止まらない）
+#   sf-log.sh collect                                     # 内部用（裏の取得役。sf-start.sh が裏で起動する）
+#   sf-log.sh leave --owner 印                            # 内部用（sf-start.sh の終了時。持ち主の一覧から外れる）
 #
 # 【オプション】
 #   -o ALIAS            : 接続先の組織のエイリアス（省略時: 環境変数 SF_TARGET_ORG > sf org display の alias）
@@ -20,7 +22,7 @@
 #   --hours N           : （start）TraceFlag の期限（時間）。1〜23 の整数（公式: 開始から 24 時間未満）。既定 2
 #   -y                  : （start）AI への送信の確認と、ほかの USER_DEBUG の TraceFlag を止める確認を省く（手動のみ）
 #   --auto              : （start）sf-start.sh からの自動の取り始め。終了コード 0 = 取り始めた／10 = 取らない／1 = 失敗
-#   --owner 印          : （start --auto）持ち主（sf-start）の印。「数字:数字:英数字」
+#   --owner 印          : （start --auto・leave）持ち主（sf-start）の印。「PID:起動の時刻:英数字」（数字:数字:英数字）
 #   --max N             : （pull）要約に入れるログの数の上限（1 以上の整数。既定 50。超えたら新しいほうから）
 #   --since 分          : （pull）前回の pull を無視して、直近 N 分に始まったログを要約する（1 以上の整数）
 #   -v, --verbose       : コマンドの応答（出力）をコンソールにも表示する
@@ -36,6 +38,8 @@
 #     4. （--auto）GitHub Actions 上なら 10。このプロジェクトの答え（logs/apex/.consent）が「取らない」なら 10。
 #        答えがない・組織が変わった・注意の文面の版が変わったときは、注意を表示して Y/N で聞く（端末でない・q・N は「取らない」）
 #        （手動）注意を表示し、ask_yn || die（-y で省く）
+#        --owner があれば、持ち主の一覧（logs/apex/.owners）に足す（同じ印は 2 回足さない）。後始末の最中（CLOSING）なら、
+#        終わるまで最大 60 秒待つ（CLOSING の持ち主が死んでいれば消して進む。待っても終わらなければ 10）
 #     5. DebugLevel「sf_tools_log_<level>」を名前で探し、あれば 7 章の値で上書き、なければ作る（2 つ以上なら止める）
 #     6. 自分のユーザーの TraceFlag を探す（lib/apexlog.js tflist で、有効・期限切れ・これから始まるものに分ける）
 #        a. .state の TRACE_FLAG_ID と一致する USER_DEBUG → DebugLevel・開始（今）・期限（今から --hours 時間）を更新
@@ -44,10 +48,13 @@
 #           DEVELOPER_LOG・ほかの種類には触れない（USER_DEBUG とぶつからない）
 #        c. 作る（USER_DEBUG。開始は今。b で縮めたときは、その期限の 1 秒後。それが過ぎていれば今）。
 #           b で縮めたあとに作成が失敗しても、元に戻さない（縮めた ID・元の期限・縮めた期限を書く）
-#     7. .state に組織・ユーザー ID・TraceFlag の ID を書く（組織・ユーザーが変わったら、取得と要約の時刻を今にする）
+#     7. 組織を切り替えた（.state の ORG と違う）なら、前の組織の、sf-log.sh が作った TraceFlag を消す（消せなければ WARNING）
+#        .state に組織・ユーザー ID・TraceFlag の ID を書く（組織・ユーザーが変わったら、取得と要約の時刻を今にする）
 #     8. 組織のログの量を表示し、700MB を超えていれば WARNING（組織の上限は 1,000MB）
 #   pull:
-#     4. 取得のロック（logs/apex/.fetch.lock。最大 90 秒待つ）を持ち、しおり（.state の LAST_FETCH・LAST_FETCH_ID）から
+#     4. 取得役（logs/apex/.collector の PID）が生きていれば、自分では取らず、依頼（logs/apex/requests/pull.<ID>）を置いて、
+#        自分の ID の応答（done.<ID>）を最大 90 秒待つ（待っても来なければ、手元にある分で要約し、その旨を書く）。
+#        別の組織の取得役なら中断する。取得役がいなければ、取得のロック（logs/apex/.fetch.lock。最大 90 秒待つ）を持ち、しおり（.state の LAST_FETCH・LAST_FETCH_ID）から
 #        古い順に取る（1 回 50 本。最大 4 回 = 200 本）。一覧は全ユーザーの見出し（run を通さない。他の人の ID を記録しない）、
 #        本文は自分のログだけを保存する。取りたいログより新しいログがすべて自分のものなら sf apex get log -n でまとめて、
 #        それ以外は -i で 1 本ずつ取る。本文は logs/apex/.fetch/ に書かせ、取りたい ID 以外は中を読まずに消す
@@ -55,10 +62,25 @@
 #     6. 目録から、前回の要約（.state の LAST_READ）より後に始まったログを選ぶ（--since なら直近 N 分。--max を超えたら新しいほう）
 #     7. 要約を作り（node lib/apexlog.js summarize）、logs/apex/summaries/<時刻>.md と logs/apex/latest.md に書く
 #     8. 要約に入れた最も新しいログの開始時刻を LAST_READ にする。要約の 1 行目と latest.md のパスを表示する
-#   stop:
-#     4. .owners に CLOSING を書き、.state の TRACE_FLAG_ID の TraceFlag を消す（すでになければ WARNING）
-#     5. TRACE_FLAG_ID・.owners を消し、.status を stopped にする。DebugLevel・手元のログは消さない
-#   status: 手元の状態（.status・.state）、自分のユーザーの TraceFlag、自分のログの本数と合計を表示する（読み取りのみ）
+#   stop（人の判断。持ち主の一覧にかかわらず止める）:
+#     4. .owners を CLOSING だけにする。取得役が生きていれば、停止の依頼（requests/stop）を置き、最大 30 秒待つ。
+#        止まらなければ TERM で止め、さらに最大 10 秒待つ。それでも生きていれば、TraceFlag は消さずに中断する
+#     5. .state の TRACE_FLAG_ID の TraceFlag を消す（すでになければ WARNING。消せなければ中断し、ID は残す）
+#     6. TRACE_FLAG_ID・.collector・.owners を消し、.status を stopped にする。DebugLevel・手元のログは消さない
+#   leave --owner 印（sf-start の終了時）:
+#     4. 持ち主の一覧から自分の印を外す。ほかの持ち主が残っていれば、何も止めずに終わる
+#     5. 誰もいなければ、CLOSING を書いて、stop の 4〜6 と同じ後始末をする。失敗は WARNING だけ（終了コードは 0）
+#   collect（裏の取得役。.state の組織・ユーザーで取る。出力は sf-log.log と .status だけ）:
+#     4. 取得役の印（.collector）を確かめる: 同じ組織の取得役が生きていれば、何もせずに終わる。別の組織なら、止めてもらって入れ替わる
+#     5. 5 秒ごとに目を覚まし、次を繰り返す（sf を呼ぶのは、取得と延長のときだけ）:
+#        a. 持ち主の見張り: 死んだ持ち主（kill -0）を一覧から外す。一覧が空 → 自分で後始末（TraceFlag を消す）をして止まる。
+#           起動から 12 時間（SF_LOG_MAX_SECONDS）でも、同じく止まる
+#        b. 停止の依頼・CLOSING・印の入れ替わり → 組織に何もせずに止まる（延長の直前にも確かめる）
+#        c. 間隔（SF_LOG_INTERVAL）が来た・pull の依頼がある・取り残しがある → 取得のロックが取れたら、pull と同じ方法で 1 回取る。
+#           追いついたら、待っている pull に応答する。失敗したら、次の取得までの間隔を倍にする（最大 600 秒）
+#        d. TraceFlag の残りが 60 分未満なら、ID と種類を確かめてから、今から 2 時間に延ばす
+#        e. 5 分より古い依頼・応答を消す
+#   status: 取得役が動いているか、手元の状態（.status・.state）、持ち主の数、自分のユーザーの TraceFlag、自分のログの本数と合計を表示する（読み取りのみ）
 #   auto on|off: logs/apex/.consent の AUTO・ORG_ID・VERSION を書く（組織には書き込まない）
 #
 # 【前提条件】
@@ -72,7 +94,10 @@
 #   - 手元のログ（logs/apex/）は Git の管理外。stop も消さない。消すときは、日付のフォルダを手で消す
 #   - 他の人のログは、本文を保存・記録・要約しない。sf apex get log -n の直後にできた他の人のログが
 #     logs/apex/.fetch/ に一瞬書かれることがあるが、中を読まずに消す（取得のたびに空にする）
-#   - 裏の取得役（collect）・sf-start からの後始末（leave）・ランチャーの表示は、まだない（設計 4.3・5 章。第 2 段で作る）
+#   - sf-start.sh からの呼び出し（start --auto・collect の裏での起動・leave）と、ランチャーの表示は、まだない（設計 5 章。第 3 段で作る）
+#   - 環境変数: SF_LOG_INTERVAL（取得の間隔。秒。30〜600。既定 180。sf の 1 回が約 10 秒かかるため。pull はすぐ取らせる）・
+#     SF_LOG_MAX_SECONDS（取得役の上限。秒。既定 43200 = 12 時間）・SF_LOG_TEST_FAST=1（テスト用。間隔の下限を 1 にし、待ち時間を短くする）
+#   - 持ち主の生死は kill -0 だけで見る（PID が使い回されたときは、12 時間の上限で止まる）
 #   - ログ: ./sf-tools/logs/sf-log.log（追記）
 # ==============================================================================
 
@@ -115,13 +140,14 @@ readonly INDEX_F="${APEX_DIR}/.index"
 readonly LOCK_DIR="${APEX_DIR}/.lock"
 readonly FETCH_LOCK="${APEX_DIR}/.fetch.lock"
 readonly FETCH_TMP="${APEX_DIR}/.fetch"
+readonly REQ_DIR="${APEX_DIR}/requests"
 readonly CONSENT_VERSION="1"            # AI への送信の注意の文面の版（変えたら上げる。10.2）
 readonly ORG_LOG_WARN_BYTES=$((700 * 1024 * 1024))
 readonly ID_RE='^[A-Za-z0-9]{15}([A-Za-z0-9]{3})?$'
 readonly ISO_RE='^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$'
 
 CMD="${1:-}"
-[[ -n "$CMD" ]] || die "サブコマンドを指定してください（pull / status / auto / start / stop）。"
+[[ -n "$CMD" ]] || die "サブコマンドを指定してください（pull / status / auto / start / stop / collect / leave）。"
 shift
 AUTO_ARG=""
 if [[ "$CMD" == "auto" ]]; then
@@ -146,9 +172,10 @@ while [[ $# -gt 0 ]]; do
     shift
 done
 case "$CMD" in
-    start|pull|stop|status|auto) ;;
-    *) die "不明なサブコマンドです: ${CMD}（pull / status / auto / start / stop）" ;;
+    start|pull|stop|status|auto|collect|leave) ;;
+    *) die "不明なサブコマンドです: ${CMD}（pull / status / auto / start / stop / collect / leave）" ;;
 esac
+[[ "$CMD" != "leave" || -n "$OWNER" ]] || die "leave には --owner が要ります。"
 [[ "$LEVEL" == "standard" || "$LEVEL" == "detail" ]] || die "--level は standard か detail です: ${LEVEL}"
 [[ "$HOURS" =~ ^[0-9]+$ && "$HOURS" -ge 1 && "$HOURS" -le 23 ]] || die "--hours は 1〜23 の整数です: ${HOURS}"
 [[ "$MAX_LOGS" =~ ^[0-9]+$ && "$MAX_LOGS" -ge 1 ]] || die "--max は 1 以上の整数です: ${MAX_LOGS}"
@@ -158,6 +185,16 @@ if [[ $AUTO -eq 1 ]]; then
     [[ "$CMD" == "start" ]] || die "--auto は start だけに付けられます。"
     LEVEL="standard"; YES=0
 fi
+# 取得役の時間（4.3）。SF_LOG_TEST_FAST=1 はテスト用（下限を外し、目を覚ます間隔と待ち時間を短くする）
+_fast=0; [[ "${SF_LOG_TEST_FAST:-}" == "1" ]] && _fast=1
+INTERVAL="${SF_LOG_INTERVAL:-180}"      # 取得の間隔（秒）。sf の 1 回が約 10 秒かかるため、既定 180（2026-11-23。pull はすぐ取らせる）
+_min_iv=30; [[ $_fast -eq 1 ]] && _min_iv=1
+[[ "$INTERVAL" =~ ^[0-9]+$ && "$INTERVAL" -ge $_min_iv && "$INTERVAL" -le 600 ]] || die "SF_LOG_INTERVAL は ${_min_iv}〜600（秒）の整数です: ${INTERVAL}"
+TICK=5; [[ $_fast -eq 1 ]] && TICK=1    # 取得役が目を覚ます間隔（秒。sf は呼ばない）
+MAX_RUN="${SF_LOG_MAX_SECONDS:-43200}"  # 取得役の上限（秒。12 時間。PID の再利用への備え。5.5）
+[[ "$MAX_RUN" =~ ^[0-9]+$ && "$MAX_RUN" -ge 1 ]] || die "SF_LOG_MAX_SECONDS は 1 以上の整数です: ${MAX_RUN}"
+PULL_WAIT=90; STOP_WAIT=30; CLOSING_WAIT=60
+[[ $_fast -eq 1 ]] && { PULL_WAIT=30; STOP_WAIT=10; CLOSING_WAIT=10; }
 command -v node >/dev/null 2>&1 || die "node が見つかりません（sf CLI の npm 版に必要です）。"  # 存在確認のため run 不使用
 mkdir -p "$APEX_DIR"  # run 不使用: 自分の作業フォルダを作るだけ（失敗は、次の書き込みで分かる）
 
@@ -241,6 +278,124 @@ finish_auto_or_die() {
 
 # sf の --json の応答から name を読む（読めなければ「不明」）
 sf_err_name() { local n; n=$(json_get "$1" name 2>/dev/null) || n=""; printf '%s' "${n:-不明}"; }  # VAR=$(cmd) のため run 不使用
+
+# プロセスが生きているか（kill -0。PID が使い回されたときは「生きている」に見えるため、取得役は 12 時間で必ず止まる。5.5）
+pid_alive() { [[ "$1" =~ ^[0-9]+$ ]] && kill -0 "$1" 2>/dev/null; }  # 条件チェックのため run 不使用
+
+# 持ち主の一覧（.owners）から、死んだ持ち主を外す（短いロックの中）。出力: 生きている持ち主の数。後始末の最中（CLOSING）なら -1
+owners_prune() {
+    local line alive=() dead=0 closing="" tmp="${OWNERS_F}.tmp.$$"
+    lock_take "$LOCK_DIR" 50 || { echo "?"; return 1; }
+    if [[ -f "$OWNERS_F" ]]; then
+        while IFS= read -r line || [[ -n "$line" ]]; do
+            line="${line%$'\r'}"
+            [[ -n "$line" ]] || continue
+            if [[ "$line" == CLOSING=* ]]; then closing="$line"; continue; fi
+            if pid_alive "${line%%:*}"; then alive+=("$line"); else dead=1; fi
+        done < "$OWNERS_F"
+        if [[ $dead -eq 1 ]]; then
+            : > "$tmp"
+            [[ -n "$closing" ]] && printf '%s\n' "$closing" >> "$tmp"
+            [[ ${#alive[@]} -gt 0 ]] && printf '%s\n' "${alive[@]}" >> "$tmp"
+            mv -f "$tmp" "$OWNERS_F"
+        fi
+    fi
+    lock_drop "$LOCK_DIR"
+    if [[ -n "$closing" ]]; then echo "-1"; else echo "${#alive[@]}"; fi
+}
+
+# 持ち主の一覧から 1 行を外し、残りの持ち主（CLOSING 以外）の数を出す（短いロックの中で呼ぶ）。引数: 外す行（空なら外さない）
+owners_remove_locked() {
+    local rm_line="$1" line n=0 tmp="${OWNERS_F}.tmp.$$"
+    : > "$tmp"
+    if [[ -f "$OWNERS_F" ]]; then
+        while IFS= read -r line || [[ -n "$line" ]]; do
+            line="${line%$'\r'}"
+            [[ -n "$line" && "$line" != "$rm_line" ]] || continue
+            printf '%s\n' "$line" >> "$tmp"
+            [[ "$line" == CLOSING=* ]] || n=$((n + 1))
+        done < "$OWNERS_F"
+    fi
+    mv -f "$tmp" "$OWNERS_F"
+    echo "$n"
+}
+
+# 持ち主の一覧に、自分の印を足す（5.1 の b。start --auto --owner）。後始末の最中（CLOSING）なら、終わるまで最大 60 秒待つ。
+#   CLOSING の印の持ち主が死んでいれば、古いものとして消して進む。足せなければ 1
+register_owner() {
+    local mark="$1" waited=0 closing
+    while true; do
+        lock_take "$LOCK_DIR" 50 || return 1
+        closing=$(kv_get "$OWNERS_F" CLOSING)  # VAR=$(cmd) のため run 不使用
+        if [[ -n "$closing" ]] && pid_alive "${closing%%:*}"; then
+            lock_drop "$LOCK_DIR"
+            [[ $waited -ge $((CLOSING_WAIT * 5)) ]] && return 1
+            waited=$((waited + 1)); sleep 0.2  # run 不使用: 後始末が終わるのを待つだけ
+            continue
+        fi
+        [[ -n "$closing" ]] && owners_remove_locked "CLOSING=${closing}" >/dev/null
+        if ! grep -qxF -- "$mark" "$OWNERS_F" 2>/dev/null; then  # 条件チェックのため run 不使用（同じ印を 2 回足さない。入れ子の sf-start）
+            printf '%s\n' "$mark" >> "$OWNERS_F"
+        fi
+        lock_drop "$LOCK_DIR"
+        return 0
+    done
+}
+
+# 取得役に止まるよう頼み、止まるのを待つ（4.5 の 1）。止まった・いない = 0／止まらない = 1
+stop_collector() {
+    local pid i
+    pid=$(kv_get "$COLLECTOR_F" PID)  # VAR=$(cmd) のため run 不使用
+    pid_alive "$pid" || return 0
+    [[ "$pid" == "$$" ]] && return 0
+    mkdir -p "$REQ_DIR" && : > "${REQ_DIR}/stop"
+    for ((i = 0; i < STOP_WAIT; i++)); do
+        pid_alive "$pid" || { rm -f "${REQ_DIR}/stop"; return 0; }
+        sleep 1  # run 不使用: 止まるのを待つだけ
+    done
+    kill -TERM "$pid" 2>/dev/null || true  # 意図的エラー無視: すでに止まっていることがある
+    for ((i = 0; i < 10; i++)); do
+        pid_alive "$pid" || { rm -f "${REQ_DIR}/stop"; return 0; }
+        sleep 1  # run 不使用: 止まるのを待つだけ
+    done
+    return 1
+}
+
+# 後始末（4.5 の 1〜4。stop・leave・取得役の自分の後始末）。引数: 理由（.status の REASON）・self（取得役自身なら 1）
+#   戻り値: 0 = 済んだ／1 = 取得役が止まらない（TraceFlag は残した）／2 = TraceFlag を消せなかった（ID は残した）
+do_cleanup() {
+    local reason="$1" self="${2:-0}" org tf j name
+    if [[ "$self" != "1" ]] && ! stop_collector; then
+        log "WARNING" "取得役が止まりません（PID $(kv_get "$COLLECTOR_F" PID)）。TraceFlag は残しました（最大 2 時間で切れます）。"
+        state_set "$STATUS_F" "STATE=error" "REASON=取得役が止まりません" || true   # 意図的エラー無視: 表示用
+        return 1
+    fi
+    org=$(kv_get "$STATE_F" ORG); tf=$(kv_get "$STATE_F" TRACE_FLAG_ID)  # VAR=$(cmd) のため run 不使用
+    [[ -n "$ORG_ARG" ]] && org="$ORG_ARG"   # 消す先は、TraceFlag を作った組織（.state の ORG）。-o があれば、それ
+    if [[ "$tf" =~ $ID_RE ]]; then
+        check_sf_cli --cache
+        if [[ -z "$org" ]]; then org=$(get_target_org "") || { log "WARNING" "接続先の組織エイリアスを特定できません。"; return 2; }; fi
+        if j=$(run sf data delete record --use-tooling-api --sobject TraceFlag --record-id "$tf" --target-org "$org" --json); then
+            log "SUCCESS" "TraceFlag を消しました（${tf}・組織: ${org}）。"
+        else
+            name=$(sf_err_name "$j")
+            case "$name" in
+                *NOT_FOUND*|*ENTITY_IS_DELETED*|*INVALID_CROSS_REFERENCE_KEY*)
+                    log "WARNING" "TraceFlag（${tf}）は、すでにありません（${name}）。" ;;
+                *)
+                    log "WARNING" "TraceFlag（${tf}）を消せませんでした（${name}）。最大 2 時間で切れます。"
+                    state_set "$STATUS_F" "STATE=error" "REASON=TraceFlag を消せませんでした（${name}）" || true   # 意図的エラー無視: 表示用
+                    return 2 ;;
+            esac
+        fi
+    else
+        log "INFO" "sf-log.sh が作った TraceFlag はありません。"
+    fi
+    state_set "$STATE_F" "TRACE_FLAG_ID=" || true                               # 意図的エラー無視: 次の start で作り直す
+    state_set "$STATUS_F" "STATE=stopped" "EXPIRES=" "REASON=${reason}" "BACKLOG=" || true   # 意図的エラー無視: 表示用
+    rm -f "$COLLECTOR_F" 2>/dev/null || true                                    # 意図的エラー無視: 取得役の印を消す
+    return 0
+}
 
 # ------------------------------------------------------------------------------
 # 5. 接続先の確認（4.1）
@@ -399,7 +554,7 @@ ensure_traceflag() {
 }
 
 cmd_start() {
-    local prev_org prev_user now vol n s
+    local prev_org prev_user prev_tf now vol n s
     if [[ $AUTO -eq 1 && "${GITHUB_ACTIONS:-}" == "true" ]]; then
         log "INFO" "GitHub Actions の上では、Apex ログを取りません。"
         exit 10
@@ -411,11 +566,24 @@ cmd_start() {
         log "WARNING" "$NOTICE_TEXT"
         if [[ $YES -eq 0 ]]; then ask_yn "${TARGET_ORG} の Apex ログを取り始めますか？" || die "中断しました。"; fi
     fi
+    # 持ち主（sf-start）の登録（5.1 の b）。後始末の最中なら、終わってから登録する（古い後始末が、新しい TraceFlag を消さないため）
+    if [[ -n "$OWNER" ]]; then
+        register_owner "$OWNER" || finish_auto_or_die 10 "前の後始末が終わらないため（${CLOSING_WAIT} 秒待ちました）"
+    fi
+    prev_org=$(kv_get "$STATE_F" ORG); prev_user=$(kv_get "$STATE_F" USER_ID); prev_tf=$(kv_get "$STATE_F" TRACE_FLAG_ID)  # VAR=$(cmd) のため run 不使用
     ensure_debuglevel
     ensure_traceflag
 
+    # 組織を切り替えた（sf-restart）: 前の組織の、sf-log.sh が作った TraceFlag を消す（5.3。消せなければ、最大 2 時間で切れる）
+    if [[ -n "$prev_org" && "$prev_org" != "$TARGET_ORG" && "$prev_tf" =~ $ID_RE ]]; then
+        if run sf data delete record --use-tooling-api --sobject TraceFlag --record-id "$prev_tf" --target-org "$prev_org" --json >/dev/null; then
+            log "INFO" "前の組織（${prev_org}）の TraceFlag（${prev_tf}）を消しました。"
+        else
+            log "WARNING" "前の組織（${prev_org}）の TraceFlag（${prev_tf}）を消せませんでした（最大 2 時間で切れます）。"
+        fi
+    fi
+
     # .state（組織・ユーザーが変わったら、取得と要約の時刻を今にする）
-    prev_org=$(kv_get "$STATE_F" ORG); prev_user=$(kv_get "$STATE_F" USER_ID)  # VAR=$(cmd) のため run 不使用
     now=$(now_z)
     if [[ "$prev_org" != "$TARGET_ORG" || "$prev_user" != "$USER_ID" || -z "$(kv_get "$STATE_F" LAST_FETCH)" ]]; then
         state_set "$STATE_F" "ORG=${TARGET_ORG}" "USER_ID=${USER_ID}" "TRACE_FLAG_ID=${TF_ID}" \
@@ -556,8 +724,29 @@ fetch_round() {
 # ------------------------------------------------------------------------------
 # 8. pull（4.4）
 # ------------------------------------------------------------------------------
+# 取得役に、取得を頼む（9.3）。依頼は ID つきのファイル（一時ファイルに書いてから mv）。自分の ID の応答だけを待つ
+#   出力: ok / error / timeout
+request_collector() {
+    local id i res cpid
+    id="$$_$(date +%s)_${RANDOM}"
+    mkdir -p "$REQ_DIR" || { echo "timeout"; return 0; }
+    printf 'AT=%s\n' "$(date +%s)" > "${REQ_DIR}/.pull.${id}.tmp" && mv -f "${REQ_DIR}/.pull.${id}.tmp" "${REQ_DIR}/pull.${id}"
+    cpid=$(kv_get "$COLLECTOR_F" PID)  # VAR=$(cmd) のため run 不使用
+    for ((i = 0; i < PULL_WAIT; i++)); do
+        if [[ -f "${REQ_DIR}/done.${id}" ]]; then
+            res=$(kv_get "${REQ_DIR}/done.${id}" RESULT)  # VAR=$(cmd) のため run 不使用
+            rm -f "${REQ_DIR}/done.${id}"
+            echo "${res:-error}"; return 0
+        fi
+        pid_alive "$cpid" || break
+        sleep 1  # run 不使用: 応答を待つだけ
+    done
+    rm -f "${REQ_DIR}/pull.${id}"
+    echo "timeout"
+}
+
 cmd_pull() {
-    local rc=0 round since read_ids now notes=() sel tmp_list cnt omitted first_om last_om newest ts out_md hdr
+    local rc=0 round since read_ids now notes=() sel tmp_list cnt omitted first_om last_om newest ts out_md hdr cpid corg res v
     prepare_org full
     # しおりが別の組織・ユーザーのものなら、今から取り直す（別の組織の時刻・ID を使わない）
     if [[ "$(kv_get "$STATE_F" ORG)" != "$TARGET_ORG" || "$(kv_get "$STATE_F" USER_ID)" != "$USER_ID" ]]; then
@@ -566,16 +755,31 @@ cmd_pull() {
             "LAST_READ=" "LAST_READ_IDS=" || die "手元の状態を書けません。"
     fi
 
-    # 取得（取得のロックを持つ。最大 90 秒待つ）
-    lock_take "$FETCH_LOCK" 450 || die "取得のロックを取れませんでした（${FETCH_LOCK}。ほかの取得が終わりません）。"
-    for round in 1 2 3 4; do
-        rc=0; fetch_round || rc=$?
-        [[ $rc -eq 2 ]] || break
-    done
-    lock_drop "$FETCH_LOCK"
-    [[ $rc -eq 1 ]] && die "ログを取得できませんでした（sf-tools/logs/sf-log.log を参照）。"
-    [[ $rc -eq 2 ]] && notes+=("取り込みの残りがあります（200 本を超えました）。もう一度 sf-log.sh pull を実行すると、続きを取ります。")
-    notes+=("取得役: 動いていません（この pull が、組織から直接取りました）")
+    cpid=$(kv_get "$COLLECTOR_F" PID); corg=$(kv_get "$COLLECTOR_F" ORG)  # VAR=$(cmd) のため run 不使用
+    if pid_alive "$cpid"; then
+        # 取得役が生きている → 自分では取らず、取得役に頼む（組織から取って、しおりを書くのは取得役だけ。9.3）
+        [[ "$corg" == "$TARGET_ORG" ]] || die "取得役が、別の組織（${corg}）で動いています（PID ${cpid}）。"
+        res=$(request_collector)  # VAR=$(cmd) のため run 不使用
+        case "$res" in
+            ok)    notes+=("取得役: 動作中（最後の取得 $(kv_get "$STATUS_F" LAST_FETCH)）") ;;
+            error) notes+=("取得役: 直前の取得に失敗しています（sf-tools/logs/sf-log.log を参照）。手元にある分で要約しました") ;;
+            *)     log "WARNING" "取得役の取り込みが、${PULL_WAIT} 秒で終わりませんでした。手元にある分で要約します。"
+                   notes+=("取り込みが終わっていません（残り約 $(kv_get "$STATUS_F" BACKLOG) 本）。手元にある分で要約しました。少し待って、もう一度 pull してください") ;;
+        esac
+    else
+        # 取得役がいない → 自分で取る（取得のロックを持つ。最大 90 秒待つ）
+        lock_take "$FETCH_LOCK" 450 || die "取得のロックを取れませんでした（${FETCH_LOCK}。ほかの取得が終わりません）。"
+        for round in 1 2 3 4; do
+            rc=0; fetch_round || rc=$?
+            [[ $rc -eq 2 ]] || break
+        done
+        lock_drop "$FETCH_LOCK"
+        [[ $rc -eq 1 ]] && die "ログを取得できませんでした（sf-tools/logs/sf-log.log を参照）。"
+        [[ $rc -eq 2 ]] && notes+=("取り込みの残りがあります（200 本を超えました）。もう一度 sf-log.sh pull を実行すると、続きを取ります。")
+        notes+=("取得役: 動いていません（この pull が、組織から直接取りました）")
+    fi
+    [[ -n "$(kv_get "$STATE_F" TRACE_FLAG_ID)" ]] || notes+=("sf-log.sh の TraceFlag がありません（新しいログは出ません）。人に sf-start か sf-log.sh start を頼んでください")
+    v=$(kv_get "$STATUS_F" EXPIRES); [[ -n "$v" ]] && notes+=("TraceFlag の期限: ${v}（UTC）")  # VAR=$(cmd) のため run 不使用
 
     # 要約に入れるログを選ぶ
     now=$(now_z)
@@ -632,49 +836,199 @@ cmd_pull() {
 # 9. stop（4.5）
 # ------------------------------------------------------------------------------
 cmd_stop() {
-    local org tf j name mark
-    org=$(kv_get "$STATE_F" ORG); tf=$(kv_get "$STATE_F" TRACE_FLAG_ID)  # VAR=$(cmd) のため run 不使用
+    local mark rc=0
+    # 人の判断で止める: 持ち主の一覧にかかわらず止める（一覧も空にする）。後始末の最中は CLOSING を書く（5.2）
     mark="$$:$(date +%s):stop"
-    state_set "$OWNERS_F" "CLOSING=${mark}" || true   # 意図的エラー無視: 後始末の最中の印（なくても止める）
-    if [[ "$tf" =~ $ID_RE ]]; then
-        # 消す先は、TraceFlag を作った組織（.state の ORG）。-o があれば、それを使う
-        [[ -n "$ORG_ARG" ]] && org="$ORG_ARG"
-        check_sf_cli --cache
-        if [[ -z "$org" ]]; then org=$(get_target_org "") || die "接続先の組織エイリアスを特定できません。"; fi
-        if j=$(run sf data delete record --use-tooling-api --sobject TraceFlag --record-id "$tf" --target-org "$org" --json); then
-            log "SUCCESS" "TraceFlag を消しました（${tf}・組織: ${org}）。"
-        else
-            name=$(sf_err_name "$j")
-            case "$name" in
-                *NOT_FOUND*|*ENTITY_IS_DELETED*|*INVALID_CROSS_REFERENCE_KEY*)
-                    log "WARNING" "TraceFlag（${tf}）は、すでにありません（${name}）。" ;;
-                *)
-                    rm -f "$OWNERS_F" 2>/dev/null || true   # 意図的エラー無視: 後始末の印を外す
-                    die "TraceFlag（${tf}）を消せませんでした（${name}）。" ;;
-            esac
-        fi
-    else
-        log "INFO" "sf-log.sh が作った TraceFlag はありません。"
+    if lock_take "$LOCK_DIR" 50; then
+        printf 'CLOSING=%s\n' "$mark" > "$OWNERS_F"
+        lock_drop "$LOCK_DIR"
     fi
-    state_set "$STATE_F" "TRACE_FLAG_ID=" || true      # 意図的エラー無視: 次の start で作り直す
-    state_set "$STATUS_F" "STATE=stopped" "EXPIRES=" "REASON=" || true   # 意図的エラー無視: 表示用
-    rm -f "$OWNERS_F" "$COLLECTOR_F" 2>/dev/null || true   # 意図的エラー無視: 一覧と印を空にする
+    do_cleanup "sf-log.sh stop で止めました" || rc=$?
+    rm -f "$OWNERS_F" 2>/dev/null || true   # 意図的エラー無視: 一覧（と CLOSING）を消す
+    case "$rc" in
+        1) die "取得役が止まらないため、TraceFlag を残しました。" ;;
+        2) die "TraceFlag を消せませんでした（sf-tools/logs/sf-log.log を参照）。" ;;
+    esac
     log "INFO" "手元のログ（${APEX_DIR}/）は残しました。"
     exit 0
+}
+
+# ------------------------------------------------------------------------------
+# 9b. leave（5.2。sf-start の終了時）: 持ち主の一覧から自分を外し、誰もいなければ止める
+# ------------------------------------------------------------------------------
+cmd_leave() {
+    local n rc=0
+    lock_take "$LOCK_DIR" 50 || { log "WARNING" "手元の状態のロックを取れませんでした。"; exit 0; }
+    n=$(owners_remove_locked "$OWNER")
+    if [[ "$n" -gt 0 ]]; then
+        lock_drop "$LOCK_DIR"
+        log "INFO" "ほかの sf-start が起動中のため、Apex ログの取得は止めません。"
+        exit 0
+    fi
+    printf 'CLOSING=%s\n' "$OWNER" >> "$OWNERS_F"   # 後始末の最中（新しい sf-start は、終わるまで登録を待つ）
+    lock_drop "$LOCK_DIR"
+    do_cleanup "すべての sf-start が終了したため" || rc=$?
+    rm -f "$OWNERS_F" 2>/dev/null || true   # 意図的エラー無視: CLOSING を消す
+    [[ $rc -eq 0 ]] || log "WARNING" "Apex ログの後始末が、最後まで終わりませんでした（sf-tools/logs/sf-log.log を参照）。"
+    exit 0   # sf-start の終了を止めない（WARNING だけ）
+}
+
+# ------------------------------------------------------------------------------
+# 9c. collect（4.3。裏の取得役）。sf-start.sh が、start --auto の成功のあとに裏で起動する。人は打たない
+# ------------------------------------------------------------------------------
+# 取得役が止まるべきか（停止の依頼・後始末の最中・印の入れ替わり）。止まるべき = 0
+collector_should_quit() {
+    if [[ -f "${REQ_DIR}/stop" ]]; then rm -f "${REQ_DIR}/stop"; note_log "取得役: 停止の依頼で止まります"; return 0; fi
+    [[ -n "$(kv_get "$OWNERS_F" CLOSING)" ]] && { note_log "取得役: 後始末の最中のため止まります"; return 0; }
+    [[ "$(kv_get "$COLLECTOR_F" PID)" == "$$" ]] || { note_log "取得役: 印が入れ替わったため止まります"; return 0; }
+    return 1
+}
+
+# 取得役が自分で後始末をして止まる（持ち主がいなくなった・12 時間）。引数: 理由
+collector_finish() {
+    local reason="$1"
+    lock_take "$LOCK_DIR" 50 || exit 1
+    if [[ -n "$(kv_get "$OWNERS_F" CLOSING)" ]]; then lock_drop "$LOCK_DIR"; exit 0; fi   # ほかの人が後始末をしている
+    printf 'CLOSING=%s\n' "$$:$(date +%s):collector" >> "$OWNERS_F"
+    lock_drop "$LOCK_DIR"
+    note_log "取得役: ${reason}"
+    do_cleanup "$reason" 1 || true   # 意図的エラー無視: 取得役は表示先がない（.status と sf-log.log に書く）
+    rm -f "$OWNERS_F" 2>/dev/null || true   # 意図的エラー無視: CLOSING を消す
+    exit 0
+}
+
+# pull の依頼があるか（compgen -G は使わない。Bash 3.2 で確実に使えるとは限らないため）
+has_pull_request() {
+    local f
+    for f in "${REQ_DIR}"/pull.*; do [[ -e "$f" ]] && return 0; done
+    return 1
+}
+
+# 待っている pull に応答する（9.3）。引数: ok / error
+respond_pulls() {
+    local f id
+    for f in "${REQ_DIR}"/pull.*; do
+        [[ -e "$f" ]] || continue
+        id="${f##*/pull.}"
+        if [[ "$id" =~ ^[0-9]+_[0-9]+_[0-9]+$ ]]; then
+            printf 'RESULT=%s\n' "$1" > "${REQ_DIR}/.done.${id}.tmp" && mv -f "${REQ_DIR}/.done.${id}.tmp" "${REQ_DIR}/done.${id}"
+        fi
+        rm -f "$f"
+    done
+}
+
+# 自分の TraceFlag を延ばす（4.3 の 2d）。延ばす前に、ID・種類を確かめる（人が置き換えたものを延ばさない）
+collector_extend() {
+    local tf j tsv id type st ex state dl found=0 now newexp
+    tf=$(kv_get "$STATE_F" TRACE_FLAG_ID)  # VAR=$(cmd) のため run 不使用
+    [[ "$tf" =~ $ID_RE ]] || { state_set "$STATUS_F" "WARNING=TraceFlag がないため、延ばせません" || true; return 1; }
+    j=$(run sf data query --use-tooling-api --target-org "$TARGET_ORG" --json \
+        --query "SELECT Id, LogType, StartDate, ExpirationDate, DebugLevel.DeveloperName FROM TraceFlag WHERE TracedEntityId = '${USER_ID}'") || return 1
+    tsv=$(printf '%s' "$j" | aj tflist 2>/dev/null) || return 1
+    while IFS=$'\t' read -r id type st ex state dl; do
+        [[ "$id" == "$tf" && "$type" == "USER_DEBUG" ]] && found=1
+    done <<< "$tsv"
+    if [[ $found -eq 0 ]]; then
+        state_set "$STATUS_F" "WARNING=自分の TraceFlag が消えた・置き換わったため、延ばせません" || true   # 意図的エラー無視: 表示用
+        return 1
+    fi
+    collector_should_quit && exit 0   # 書き込む直前にも確かめる（消された TraceFlag を延ばし直さない）
+    now=$(now_z); newexp=$(aj time add "$now" --sec 7200)
+    run sf data update record --use-tooling-api --sobject TraceFlag --record-id "$tf" --target-org "$TARGET_ORG" --json \
+        --values "StartDate=${now} ExpirationDate=${newexp}" >/dev/null || return 1
+    state_set "$STATUS_F" "EXPIRES=${newexp}" "WARNING=" || true   # 意図的エラー無視: 表示用
+    note_log "取得役: TraceFlag を延ばしました（期限 ${newexp}）"
+    COLLECT_EXPIRES="$newexp"
+}
+
+cmd_collect() {
+    local org user started pid corg i now next=0 backoff rc n first=1 today cnt soon
+    trap '' INT   # Ctrl+C を無視する（止めるのは、持ち主の見張りと、stop・leave）
+    org=$(kv_get "$STATE_F" ORG); user=$(kv_get "$STATE_F" USER_ID)  # VAR=$(cmd) のため run 不使用
+    [[ -n "$org" && "$user" =~ $ID_RE ]] || { note_log "取得役: .state に組織・ユーザーがありません"; exit 1; }
+    TARGET_ORG="$org"; USER_ID="$user"
+    started=$(date +%s)
+    mkdir -p "$REQ_DIR" || exit 1
+
+    # 1. 取得役の印（二重に動かさない。別の組織の取得役なら、止めてもらって入れ替わる）
+    lock_take "$LOCK_DIR" 50 || exit 1
+    pid=$(kv_get "$COLLECTOR_F" PID); corg=$(kv_get "$COLLECTOR_F" ORG)  # VAR=$(cmd) のため run 不使用
+    if pid_alive "$pid" && [[ "$pid" != "$$" ]]; then
+        if [[ "$corg" == "$org" ]]; then
+            lock_drop "$LOCK_DIR"; note_log "取得役: すでに動いています（PID ${pid}）"; exit 0
+        fi
+        : > "${REQ_DIR}/stop"
+        lock_drop "$LOCK_DIR"
+        for ((i = 0; i < STOP_WAIT; i++)); do pid_alive "$pid" || break; sleep 1; done  # run 不使用: 止まるのを待つだけ
+        pid_alive "$pid" && { note_log "取得役: 前の取得役（PID ${pid}）が止まりません"; exit 1; }
+        lock_take "$LOCK_DIR" 50 || exit 1
+    fi
+    rm -f "${REQ_DIR}/stop"
+    kv_set "$COLLECTOR_F" "PID=$$" "STARTED=${started}" "ORG=${org}"
+    lock_drop "$LOCK_DIR"
+    state_set "$STATUS_F" "STATE=collecting" "ORG=${org}" "REASON=" "WARNING=" || true   # 意図的エラー無視: 表示用
+    note_log "取得役: 起動しました（PID $$・組織 ${org}・間隔 ${INTERVAL} 秒）"
+    COLLECT_EXPIRES=$(kv_get "$STATUS_F" EXPIRES)  # VAR=$(cmd) のため run 不使用
+    backoff=$INTERVAL
+
+    # 2. 繰り返す
+    while true; do
+        [[ $first -eq 1 ]] || sleep "$TICK"  # run 不使用: 目を覚ますまで待つだけ（sf は呼ばない）
+        first=0
+        now=$(date +%s)
+        # a. 持ち主の見張り
+        n=$(owners_prune)
+        [[ "$n" == "-1" ]] && { note_log "取得役: 後始末の最中のため止まります"; exit 0; }
+        [[ "$n" == "0" ]] && collector_finish "持ち主（sf-start）がいなくなったため、止まりました"
+        [[ $((now - started)) -ge $MAX_RUN ]] && collector_finish "12 時間で止まりました。sf-start をやり直すと再開します"
+        # b. 停止の依頼・後始末の最中・印の入れ替わり
+        collector_should_quit && exit 0
+        # c. 取得（間隔が来た・pull の依頼がある・前回の取り残しがある）
+        if [[ $now -ge $next ]] || has_pull_request; then
+            if lock_take "$FETCH_LOCK" 1; then
+                rc=0; fetch_round || rc=$?
+                lock_drop "$FETCH_LOCK"
+                today=$(date +%Y%m%d)
+                cnt=$(find "${APEX_DIR}/${today}" -maxdepth 1 -name '*.log' 2>/dev/null | wc -l | tr -d ' ')  # VAR=$(cmd) のため run 不使用
+                case "$rc" in
+                    0) respond_pulls ok; backoff=$INTERVAL; next=$(( $(date +%s) + INTERVAL ))
+                       state_set "$STATUS_F" "STATE=collecting" "LAST_FETCH=$(date '+%H:%M')" "COUNT_TODAY=${cnt}" "BACKLOG=0" "WARNING=" || true ;;
+                    2) next=0
+                       state_set "$STATUS_F" "LAST_FETCH=$(date '+%H:%M')" "COUNT_TODAY=${cnt}" "BACKLOG=50 本以上" || true ;;
+                    *) respond_pulls error; backoff=$(( backoff * 2 > 600 ? 600 : backoff * 2 )); next=$(( $(date +%s) + backoff ))
+                       state_set "$STATUS_F" "WARNING=取得に失敗しました（${backoff} 秒後にやり直します）" || true ;;
+                esac
+                # d. TraceFlag の残りが 60 分未満なら、今から 2 時間に延ばす（取得のあとに確かめる）
+                if [[ "$COLLECT_EXPIRES" =~ $ISO_RE ]]; then
+                    soon=$(aj time add "$(now_z)" --sec 3600)
+                    if [[ "$(aj time cmp "$COLLECT_EXPIRES" "$soon")" == "-1" ]]; then
+                        collector_extend || note_log "取得役: TraceFlag を延ばせませんでした"
+                    fi
+                fi
+            fi
+        fi
+        # 5 分より古い依頼・応答を消す（pull が待つのをやめたあとの残り）
+        find "$REQ_DIR" -type f -mmin +5 -exec rm -f {} + 2>/dev/null || true   # 意図的エラー無視: 掃除だけ
+    done
 }
 
 # ------------------------------------------------------------------------------
 # 10. status（4.6）・auto（4.7）
 # ------------------------------------------------------------------------------
 cmd_status() {
-    local k v j tsv id type st ex state dl mine n s
+    local k v j tsv id type st ex state dl mine n s cpid
     echo "Apex ログ（sf-log.sh）の状態"
-    for k in STATE ORG EXPIRES REASON WARNING; do
-        v=$(kv_get "$STATUS_F" "$k"); [[ -n "$v" ]] && echo "  ${k}: ${v}"   # VAR=$(cmd) のため run 不使用
+    cpid=$(kv_get "$COLLECTOR_F" PID)  # VAR=$(cmd) のため run 不使用
+    if pid_alive "$cpid"; then echo "  取得役: 動作中（PID ${cpid}・組織 $(kv_get "$COLLECTOR_F" ORG)・間隔 ${INTERVAL} 秒）"
+    else echo "  取得役: 動いていません"; fi
+    # 表示の状態（.status）と、取得の記録（.state）。同じ名前のキーがあるため、どちらの値かを見出しで分ける
+    for k in STATE ORG EXPIRES LAST_FETCH COUNT_TODAY BACKLOG REASON WARNING; do
+        v=$(kv_get "$STATUS_F" "$k"); [[ -n "$v" ]] && echo "  表示の状態 ${k}: ${v}"   # VAR=$(cmd) のため run 不使用
     done
     for k in ORG TRACE_FLAG_ID LAST_FETCH LAST_READ; do
-        v=$(kv_get "$STATE_F" "$k"); [[ -n "$v" ]] && echo "  ${k}: ${v}"   # VAR=$(cmd) のため run 不使用
+        v=$(kv_get "$STATE_F" "$k"); [[ -n "$v" ]] && echo "  取得の記録 ${k}: ${v}"   # VAR=$(cmd) のため run 不使用
     done
+    v=$(grep -c -v '^CLOSING=' "$OWNERS_F" 2>/dev/null || true); echo "  持ち主（起動中の sf-start）: ${v:-0}"   # VAR=$(cmd) のため run 不使用
     v=$(kv_get "$CONSENT_F" AUTO); echo "  自動（sf-start のとき）: ${v:-まだ答えていません}"
     if [[ -f "$INDEX_F" ]]; then echo "  手元のログ: $(wc -l < "$INDEX_F" | tr -d ' ') 本"; fi
     [[ -f "${APEX_DIR}/latest.md" ]] && echo "  最新の要約: ${APEX_DIR}/latest.md"
@@ -714,9 +1068,11 @@ cmd_auto() {
 # 11. 入口
 # ------------------------------------------------------------------------------
 case "$CMD" in
-    start)  cmd_start ;;
-    pull)   cmd_pull ;;
-    stop)   cmd_stop ;;
-    status) cmd_status ;;
-    auto)   cmd_auto ;;
+    start)   cmd_start ;;
+    pull)    cmd_pull ;;
+    stop)    cmd_stop ;;
+    status)  cmd_status ;;
+    auto)    cmd_auto ;;
+    collect) cmd_collect ;;
+    leave)   cmd_leave ;;
 esac

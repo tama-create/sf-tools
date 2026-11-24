@@ -86,6 +86,22 @@ _tf() {
 }
 
 # ------------------------------------------------------------------------------
+# start が「取得中」を書くとき、今日の本数も数え直す（前回の値を残さない。ランチャーは取得中に変わった時点で 1 回だけ描き直す。2026-11-24）
+test_start_count_today() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] start: 今日の本数（COUNT_TODAY）を数え直して書く${CLR_RST}"
+    _env
+    local today; today=$(date +%Y%m%d)
+    mkdir -p "$TD/logs/apex/$today"
+    : > "$TD/logs/apex/$today/100000_07L000000000001AAA_a.log"
+    : > "$TD/logs/apex/$today/100001_07L000000000002AAA_b.log"
+    printf 'STATE=stopped\nCOUNT_TODAY=0\n' > "$TD/logs/apex/.status"
+    _run start -o dev -y
+    assert_exit_ok "$RC" "start が成功する"
+    assert_equals "$(_kv .status STATE)" "collecting" ".status を collecting にする"
+    assert_equals "$(_kv .status COUNT_TODAY)" "2" "前回の 0 を残さず、今日のフォルダの本数を書く"
+    _done
+}
+
 test_start_basic() {
     echo ""; echo -e "${CLR_HEAD}[TEST] start: DebugLevel と TraceFlag を作る・延ばす${CLR_RST}"
     _env
@@ -600,6 +616,7 @@ test_begin_retry() {
 }
 
 test_start_basic
+test_start_count_today
 test_start_other_traceflags
 test_start_auto
 test_args

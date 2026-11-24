@@ -64,7 +64,8 @@
 #     7. 組織を切り替えた（.state の ORG と違う）なら、前の組織の、sf-log.sh が作った TraceFlag を消す（消せなければ WARNING）
 #        .state に組織・ユーザー ID・TraceFlag の ID を書く（組織・ユーザーが変わったら、取得と要約の時刻を今にする）
 #     8. 組織のログの量を表示し、700MB を超えていれば WARNING（組織の上限は 1,000MB）
-#     9. .status に STATE=collecting・期限（EXPIRES は UTC・EXPIRES_AT は PC の時刻の HH:MM。ランチャーが表示する）を書く。
+#     9. .status に STATE=collecting・期限（EXPIRES は UTC・EXPIRES_AT は PC の時刻の HH:MM。ランチャーが表示する）・
+#        今日の本数（COUNT_TODAY。今日の日付のフォルダの *.log の数。前回の値を残さない）を書く。
 #        --collect なら、同じプロセスで collect になる（exec）。
 #     （--auto で取らない・失敗のとき）.status に理由を書き、別の組織の取得役が動いていれば、止まるよう頼む（5.3）
 #     （--retry が残っていて、失敗のとき）.status を starting に戻して WARNING（やり直しています）を書き、30 秒後にやり直す。
@@ -288,6 +289,10 @@ local_hm() {
     t=$(aj time local "$1" 2>/dev/null) || return 0  # VAR=$(cmd) のため run 不使用
     t="${t#*$'\t'}"
     printf '%s:%s' "${t:0:2}" "${t:2:2}"
+}
+# 今日（PC の日付）の保存済みのログの本数（ランチャーの「今日 N 本」。begin と取得役で同じ数え方にする）
+count_today() {
+    find "${APEX_DIR}/$(date +%Y%m%d)" -maxdepth 1 -name '*.log' 2>/dev/null | wc -l | tr -d ' '
 }
 
 # 失敗・取らないときの終わり方。手動: die（取らない理由も中断）／--auto: .status に書いて、終了コードで返す
@@ -673,7 +678,8 @@ cmd_start() {
         state_set "$STATE_F" "ORG=${TARGET_ORG}" "USER_ID=${USER_ID}" "TRACE_FLAG_ID=${TF_ID}" || finish_auto_or_die 1 "手元の状態を書けません"
     fi
     # WARNING= : 裏の準備のやり直し（retry_prepare）の「やり直しています」を消す
-    state_set "$STATUS_F" "STATE=collecting" "ORG=${TARGET_ORG}" "EXPIRES=${TF_EXPIRES}" "EXPIRES_AT=$(local_hm "$TF_EXPIRES")" "REASON=" "WARNING=" || true   # 意図的エラー無視: 表示用
+    # COUNT_TODAY: 前回の値（前の日など）を残さない。ランチャーは「取得中」に変わった時点で 1 回だけ描き直すため、ここで正しい数を書く
+    state_set "$STATUS_F" "STATE=collecting" "ORG=${TARGET_ORG}" "EXPIRES=${TF_EXPIRES}" "EXPIRES_AT=$(local_hm "$TF_EXPIRES")" "COUNT_TODAY=$(count_today)" "REASON=" "WARNING=" || true   # 意図的エラー無視: 表示用
 
     # 組織のログの量（8.6）
     vol=$(run sf data query --use-tooling-api --target-org "$TARGET_ORG" --json \
@@ -1078,8 +1084,7 @@ cmd_collect() {
             if lock_take "$FETCH_LOCK" 1; then
                 rc=0; fetch_round || rc=$?
                 lock_drop "$FETCH_LOCK"
-                today=$(date +%Y%m%d)
-                cnt=$(find "${APEX_DIR}/${today}" -maxdepth 1 -name '*.log' 2>/dev/null | wc -l | tr -d ' ')  # VAR=$(cmd) のため run 不使用
+                cnt=$(count_today)  # VAR=$(cmd) のため run 不使用
                 case "$rc" in
                     0) respond_pulls ok; backoff=$INTERVAL; next=$(( $(date +%s) + INTERVAL ))
                        state_set "$STATUS_F" "STATE=collecting" "LAST_FETCH=$(date '+%H:%M')" "COUNT_TODAY=${cnt}" "BACKLOG=0" "WARNING=" || true ;;

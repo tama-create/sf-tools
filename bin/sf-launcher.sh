@@ -31,6 +31,8 @@
 #   5. メニューを表示するたびに、見出しの下に、デバッグログ（sf-log.sh）の状態を 1 行表示する（logs/apex/.status の STATE による:
 #      collecting = 取得中（組織・期限・今日の本数）/ starting = 準備中 / skipped = 取っていません / error = 取れていません /
 #      stopped = 止まっています。WARNING があれば、もう 1 行）。ファイルがない・STATE がそれ以外なら、何も表示しない。
+#      色は状態で変える（取得中 = 太字の緑 / 準備中 = 太字の水色 / 取れていません = 太字の赤 / 取っていません・止まっています = 黄色。
+#      メニューの中で目立たせ、ひと目で取れているかが分かるようにする）
 #      キー=値 の行を while read で読み、source しない。
 #      準備中（starting）のあいだは、入力を 5 秒ずつ待ち（read -t）、STATE が変わったら、コマンドを動かさずにメニューを描き直す
 #      （裏の準備は数分かかることがあり、つながっても「準備中」のままだと迷うため）。待ち切れと EOF は、待った時間でも見分ける（Bash 3.2）
@@ -62,6 +64,7 @@ BOLD='\033[1m'
 CYAN='\033[0;36m'
 YELLOW='\033[0;33m'
 GREEN='\033[0;32m'
+RED='\033[0;31m'
 DIM='\033[2m'
 RESET='\033[0m'
 
@@ -95,7 +98,7 @@ unset _item
 # デバッグログ（sf-log.sh）の状態を 1 行で表示する（logs/apex/.status。なければ何も表示しない。doc/sf-log-design.md 5.4）
 #   common.sh を読まないため、キー=値 の行を while read で読み、決まったキーだけを使う（source しない）
 print_apexlog_status() {
-    local f="logs/apex/.status" line k v state="" org="" at="" cnt="" reason="" warn="" text
+    local f="logs/apex/.status" line k v state="" org="" at="" cnt="" reason="" warn="" text color
     [[ -f "$f" ]] || return 0
     while IFS= read -r line || [[ -n "$line" ]]; do
         k="${line%%=*}"; v="${line#*=}"
@@ -105,14 +108,15 @@ print_apexlog_status() {
         esac
     done < "$f"
     case "$state" in
-        collecting) text="取得中（${org}${at:+・期限 ${at}}${cnt:+・今日 ${cnt} 本}）" ;;
-        starting)   text="準備中（${org}）" ;;
-        skipped)    text="取っていません${reason:+（${reason}）}" ;;
-        error)      text="取れていません${reason:+（${reason}）}" ;;
-        stopped)    text="止まっています${reason:+（${reason}）}" ;;
+        collecting) text="取得中（${org}${at:+・期限 ${at}}${cnt:+・今日 ${cnt} 本}）"; color="${BOLD}${GREEN}" ;;
+        starting)   text="準備中（${org}）"; color="${BOLD}${CYAN}" ;;
+        skipped)    text="取っていません${reason:+（${reason}）}"; color="${YELLOW}" ;;
+        error)      text="取れていません${reason:+（${reason}）}"; color="${BOLD}${RED}" ;;
+        stopped)    text="止まっています${reason:+（${reason}）}"; color="${YELLOW}" ;;
         *)          return 0 ;;
     esac
-    echo -e "${DIM}  デバッグログ: ${text}${RESET}"
+    # 色は状態で変える（以前は薄い灰色で、メニューの中で目立たなかった。2026-11-24）
+    echo -e "${color}  デバッグログ: ${text}${RESET}"
     [[ -n "$warn" ]] && echo -e "${YELLOW}  ⚠ デバッグログ: ${warn}${RESET}"
     return 0
 }

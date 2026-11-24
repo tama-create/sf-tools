@@ -30,6 +30,7 @@ echo -e "${CLR_HEAD}=== sf-log.sh ===${CLR_RST}"
 
 SFLOG="$SF_TOOLS_DIR/bin/sf-log.sh"
 MOCKJS="$SF_TOOLS_DIR/tests/mock-sf-log.js"
+LOCKJS="$SF_TOOLS_DIR/tests/mock-org-lock.js"   # 偽の組織の読み書きのロック（偽の sf と _org_set で取り合わない）
 ME="005000000000001AAA"
 OTHER="005000000000002AAA"
 
@@ -41,6 +42,8 @@ _hasnt() { [[ "$1" == *"$2"* ]] && fail "$3" "'$2' が出力に含まれてい�
 _env() {
     TD=$(setup_force_dir); MB=$(setup_mock_bin); FK=$(mktemp -d "${TMPDIR:-/tmp}/fake-org-XXXX")
     export MOCK_CALL_LOG="$MB/calls.log"; : > "$MOCK_CALL_LOG"
+    # sf の更新のロックは、本物のホームのものを見ない（手元で sf-upgrade.sh が動いていても、テストを待たせない）
+    export SF_TOOLS_UPGRADE_LOCK="$FK/upgrade.lock"
     # Windows の Node が読めるよう、パスを Windows の形にしてから渡す（cygpath がない OS では、そのまま）
     cat > "$MB/sf" <<EOF
 #!/bin/bash
@@ -73,7 +76,8 @@ _run_in() {
 }
 # 偽の組織を JavaScript で読む・書く。引数: 式（o が状態）。書くときは _org_set
 _org()     { node -e 'const f=process.argv[1]; const o=JSON.parse(require("fs").readFileSync(f,"utf8")); console.log(eval(process.argv[2]))' "$FK/org.json" "$1"; }
-_org_set() { node -e 'const fs=require("fs"); const f=process.argv[1]; const o=JSON.parse(fs.readFileSync(f,"utf8")); eval(process.argv[2]); fs.writeFileSync(f, JSON.stringify(o))' "$FK/org.json" "$1"; }
+# _org_set は、偽の sf と同じロックを取ってから読み書きする（ロックなしだと、取得役の偽の sf が、足したログを古い状態の書き戻しで消すことがあった。2026-11-24）
+_org_set() { node -e 'const fs=require("fs"); const L=require(process.argv[3]); const f=process.argv[1]; L.lock(f); const o=JSON.parse(fs.readFileSync(f,"utf8")); eval(process.argv[2]); L.writeAtomic(f, JSON.stringify(o))' "$FK/org.json" "$1" "$LOCKJS"; }
 # 手元の状態のファイルから 1 つ読む。引数: ファイル名（.state など） キー
 _kv() { grep "^$2=" "$TD/logs/apex/$1" 2>/dev/null | head -1 | cut -d= -f2-; }
 # ログを足す（ms は今からの秒。負なら過去）。引数: ID ユーザー 秒 [本文]
@@ -86,6 +90,94 @@ _tf() {
 }
 
 # ------------------------------------------------------------------------------
+# 偽の組織の読み書きのロック（tests/mock-org-lock.js）。ロックがあるあいだは書かずに待ち、強制終了で残った古いロックは取り直す
+test_mock_org_lock() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] テストの道具: 偽の組織の読み書きのロック${CLR_RST}"
+    _env
+    printf '{}' > "$FK/org.json"
+    mkdir "$FK/org.json.lock"
+    _org_set "o.x=1" & local bp=$!
+    sleep 2
+    assert_equals "$(_org 'o.x')" "undefined" "ロックがあるあいだは、書かずに待つ"
+    rmdir "$FK/org.json.lock"
+    wait "$bp"
+    assert_equals "$(_org 'o.x')" "1" "ロックが外れたら、書く"
+    assert_file_not_exists "$FK/org.json.lock" "書いたあと、ロックを外す"
+    # 強制終了で残ったロック（10 秒より古い）→ 取り直して書く
+    mkdir "$FK/org.json.lock"
+    node -e 'const fs=require("fs"); const t=(Date.now()-60000)/1000; fs.utimesSync(process.argv[1], t, t)' "$FK/org.json.lock"
+    _org_set "o.y=2"
+    assert_equals "$(_org 'o.y')" "2" "古いロック → 取り直して書く"
+    # 偽の sf も、同じロックを取る（読むだけの呼び出しでも、待つ）
+    mkdir "$FK/org.json.lock"
+    ( cd "$TD" && FAKE_ORG="$FK" PATH="$MB:$PATH" "$MB/sf" --version >/dev/null 2>&1 ) & bp=$!
+    sleep 2
+    _alive "$bp" && pass "偽の sf も、ロックがあるあいだは待つ" || fail "偽の sf も、ロックがあるあいだは待つ"
+    rmdir "$FK/org.json.lock"
+    wait "$bp"
+    assert_file_not_exists "$FK/org.json.lock" "偽の sf も、終わったらロックを外す"
+    _done
+}
+
+# start は、sf の更新（sf-upgrade.sh）が動いているあいだ、sf を呼ばずに待つ（入れ替えの途中に sf を呼ぶと失敗する。2026-11-24）
+test_start_waits_for_upgrade() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] start: sf の更新が終わるのを待つ${CLR_RST}"
+    _env
+    local sp t0
+    # 3 秒で終わる「sf の更新」の代わり
+    sleep 3 & sp=$!; SLEEPERS="$SLEEPERS $sp"
+    printf 'PID=%s\n' "$sp" > "$SF_TOOLS_UPGRADE_LOCK"
+    t0=$SECONDS
+    _run start -o dev -y
+    assert_exit_ok "$RC" "更新が終わったら、start が成功する"
+    [[ $((SECONDS - t0)) -ge 2 ]] && pass "更新が終わるまで待つ" || fail "更新が終わるまで待つ" "$((SECONDS - t0)) 秒"
+    _has "$OUT" "sf の更新（sf-upgrade.sh）が終わるのを待ちます" "待つことを表示する"
+    _has "$OUT" "sf の更新が終わりました" "終わったことを表示する"
+    # 死んだ PID のロック → 待たない
+    printf 'PID=%s\n' "$sp" > "$SF_TOOLS_UPGRADE_LOCK"
+    _run start -o dev -y
+    assert_exit_ok "$RC" "死んだ PID のロック → そのまま成功する"
+    _hasnt "$OUT" "終わるのを待ちます" "死んだ PID のロック → 待たない"
+    _done
+}
+
+# 待つあいだに持ち主（sf-start）がいなくなったら、準備をやめる（--auto。テスト用の上限は 10 秒）
+test_start_upgrade_owner_left() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] start --auto: 更新を待つあいだに sf-start が終わったら、準備をやめる${CLR_RST}"
+    _env
+    local sp op mark
+    sleep 30 & sp=$!; SLEEPERS="$SLEEPERS $sp"
+    printf 'PID=%s\n' "$sp" > "$SF_TOOLS_UPGRADE_LOCK"
+    mkdir -p "$TD/logs/apex"
+    printf 'AUTO=on\nORG=dev\nORG_ID=\nVERSION=1\n' > "$TD/logs/apex/.consent"
+    # 持ち主（sf-start の代わり）は、待ち始めたあとの 2 秒で終わる
+    sleep 2 & op=$!; SLEEPERS="$SLEEPERS $op"
+    mark="${op}:$(date +%s):t$RANDOM"
+    printf '%s\n' "$mark" > "$TD/logs/apex/.owners"
+    : > "$MOCK_CALL_LOG"
+    _run start -o dev --auto --owner "$mark"
+    assert_exit_ok "$RC" "持ち主がいない → 0 で終わる"
+    _has "$OUT" "準備をやめます" "準備をやめたことを表示する"
+    assert_file_not_contains "$MOCK_CALL_LOG" "sf data" "組織に問い合わせない"
+    _done
+}
+
+# start が「取得中」を書くとき、今日の本数も数え直す（前回の値を残さない。ランチャーは取得中に変わった時点で 1 回だけ描き直す。2026-11-24）
+test_start_count_today() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] start: 今日の本数（COUNT_TODAY）を数え直して書く${CLR_RST}"
+    _env
+    local today; today=$(date +%Y%m%d)
+    mkdir -p "$TD/logs/apex/$today"
+    : > "$TD/logs/apex/$today/100000_07L000000000001AAA_a.log"
+    : > "$TD/logs/apex/$today/100001_07L000000000002AAA_b.log"
+    printf 'STATE=stopped\nCOUNT_TODAY=0\n' > "$TD/logs/apex/.status"
+    _run start -o dev -y
+    assert_exit_ok "$RC" "start が成功する"
+    assert_equals "$(_kv .status STATE)" "collecting" ".status を collecting にする"
+    assert_equals "$(_kv .status COUNT_TODAY)" "2" "前回の 0 を残さず、今日のフォルダの本数を書く"
+    _done
+}
+
 test_start_basic() {
     echo ""; echo -e "${CLR_HEAD}[TEST] start: DebugLevel と TraceFlag を作る・延ばす${CLR_RST}"
     _env
@@ -600,6 +692,10 @@ test_begin_retry() {
 }
 
 test_start_basic
+test_start_count_today
+test_start_waits_for_upgrade
+test_mock_org_lock
+test_start_upgrade_owner_left
 test_start_other_traceflags
 test_start_auto
 test_args

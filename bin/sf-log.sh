@@ -34,6 +34,10 @@
 #
 # 【処理の流れ】
 #   共通（status・auto 以外）:
+#     0. （start のみ）sf の更新（sf-upgrade.sh。ロック ~/.sf-tools-upgrade.lock の PID が生きている）が動いていれば、
+#        終わるまで最大 10 分待つ（sf の入れ替えの途中に sf を呼ぶと、部品が見つからずに失敗するため。2026-11-24。
+#        sf-start は、sf-install.sh（その中で sf-upgrade.sh）と begin を同時に裏で動かす）。.status の WARNING に、待っていることを書く。
+#        待つあいだに持ち主（--owner）がいなくなれば、準備をやめて 0 で終わる。待ち切れなければ、WARNING を出して進む
 #     1. sf の確認（check_sf_cli --cache）・接続先の決定（get_target_org）
 #     2. （start・pull）接続先が予約名（prod / staging / develop / main）・本番・種類を確認できない組織なら止める
 #        （手動: 中断／--auto: 終了コード 10）
@@ -64,7 +68,8 @@
 #     7. 組織を切り替えた（.state の ORG と違う）なら、前の組織の、sf-log.sh が作った TraceFlag を消す（消せなければ WARNING）
 #        .state に組織・ユーザー ID・TraceFlag の ID を書く（組織・ユーザーが変わったら、取得と要約の時刻を今にする）
 #     8. 組織のログの量を表示し、700MB を超えていれば WARNING（組織の上限は 1,000MB）
-#     9. .status に STATE=collecting・期限（EXPIRES は UTC・EXPIRES_AT は PC の時刻の HH:MM。ランチャーが表示する）を書く。
+#     9. .status に STATE=collecting・期限（EXPIRES は UTC・EXPIRES_AT は PC の時刻の HH:MM。ランチャーが表示する）・
+#        今日の本数（COUNT_TODAY。今日の日付のフォルダの *.log の数。前回の値を残さない）を書く。
 #        --collect なら、同じプロセスで collect になる（exec）。
 #     （--auto で取らない・失敗のとき）.status に理由を書き、別の組織の取得役が動いていれば、止まるよう頼む（5.3）
 #     （--retry が残っていて、失敗のとき）.status を starting に戻して WARNING（やり直しています）を書き、30 秒後にやり直す。
@@ -95,6 +100,7 @@
 #           起動から 12 時間（SF_LOG_MAX_SECONDS）でも、同じく止まる
 #        b. 停止の依頼・CLOSING・印の入れ替わり → 組織に何もせずに止まる（延長の直前にも確かめる）
 #        c. 間隔（SF_LOG_INTERVAL）が来た・pull の依頼がある・取り残しがある → 取得のロックが取れたら、pull と同じ方法で 1 回取る。
+#           sf の更新（sf-upgrade.sh）が動いているあいだは、取らずに次に回す（start の 0 と同じ理由）。
 #           追いついたら、待っている pull に応答する。失敗したら、次の取得までの間隔を倍にする（最大 600 秒）
 #        d. TraceFlag の残りが 60 分未満なら、ID と種類を確かめてから、今から 2 時間に延ばす
 #        e. 5 分より古い依頼・応答を消す
@@ -114,7 +120,8 @@
 #     logs/apex/.fetch/ に一瞬書かれることがあるが、中を読まずに消す（取得のたびに空にする）
 #   - sf-start.sh が、ランチャーを開く前に begin、終了時に leave を呼ぶ（5 章）。ランチャーは .status を 1 行で表示する
 #   - 環境変数: SF_LOG_INTERVAL（取得の間隔。秒。30〜600。既定 180。sf の 1 回が約 10 秒かかるため。pull はすぐ取らせる）・
-#     SF_LOG_MAX_SECONDS（取得役の上限。秒。既定 43200 = 12 時間）・SF_LOG_TEST_FAST=1（テスト用。間隔の下限を 1 にし、待ち時間を短くする）
+#     SF_LOG_MAX_SECONDS（取得役の上限。秒。既定 43200 = 12 時間）・SF_LOG_TEST_FAST=1（テスト用。間隔の下限を 1 にし、待ち時間を短くする）・
+#     SF_TOOLS_UPGRADE_LOCK（sf の更新のロックの場所。既定 ~/.sf-tools-upgrade.lock。sf-upgrade.sh と同じ。テストで差し替える）
 #   - 持ち主の生死は kill -0 だけで見る（PID が使い回されたときは、12 時間の上限で止まる）
 #   - ログ: ./sf-tools/logs/sf-log.log（追記）
 # ==============================================================================
@@ -218,7 +225,10 @@ TICK=5; [[ $_fast -eq 1 ]] && TICK=1    # 取得役が目を覚ます間隔（�
 MAX_RUN="${SF_LOG_MAX_SECONDS:-43200}"  # 取得役の上限（秒。12 時間。PID の再利用への備え。5.5）
 [[ "$MAX_RUN" =~ ^[0-9]+$ && "$MAX_RUN" -ge 1 ]] || die "SF_LOG_MAX_SECONDS は 1 以上の整数です: ${MAX_RUN}"
 PULL_WAIT=90; STOP_WAIT=30; CLOSING_WAIT=60; RETRY_WAIT=30   # RETRY_WAIT: 裏の準備の失敗から、やり直すまで（秒）
-[[ $_fast -eq 1 ]] && { PULL_WAIT=30; STOP_WAIT=10; CLOSING_WAIT=10; RETRY_WAIT=1; }
+UPGRADE_WAIT=600   # sf の更新（sf-upgrade.sh）が終わるのを待つ上限（秒）。WSL の実機で、sf の入れ替えに約 3 分かかった（2026-11-24）
+[[ $_fast -eq 1 ]] && { PULL_WAIT=30; STOP_WAIT=10; CLOSING_WAIT=10; RETRY_WAIT=1; UPGRADE_WAIT=10; }
+# sf の更新のロック（sf-upgrade.sh が、動いているあいだ PID を書く。場所は sf-upgrade.sh と同じ）
+UPGRADE_LOCK="${SF_TOOLS_UPGRADE_LOCK:-${HOME}/.sf-tools-upgrade.lock}"
 command -v node >/dev/null 2>&1 || die "node が見つかりません（sf CLI の npm 版に必要です）。"  # 存在確認のため run 不使用
 mkdir -p "$APEX_DIR"  # run 不使用: 自分の作業フォルダを作るだけ（失敗は、次の書き込みで分かる）
 
@@ -289,6 +299,10 @@ local_hm() {
     t="${t#*$'\t'}"
     printf '%s:%s' "${t:0:2}" "${t:2:2}"
 }
+# 今日（PC の日付）の保存済みのログの本数（ランチャーの「今日 N 本」。begin と取得役で同じ数え方にする）
+count_today() {
+    find "${APEX_DIR}/$(date +%Y%m%d)" -maxdepth 1 -name '*.log' 2>/dev/null | wc -l | tr -d ' '
+}
 
 # 失敗・取らないときの終わり方。手動: die（取らない理由も中断）／--auto: .status に書いて、終了コードで返す
 #   引数: 終了コード（1 / 10） 理由
@@ -341,6 +355,34 @@ sf_err_name() { local n; n=$(json_get "$1" name 2>/dev/null) || n=""; printf '%s
 
 # プロセスが生きているか（kill -0。PID が使い回されたときは「生きている」に見えるため、取得役は 12 時間で必ず止まる。5.5）
 pid_alive() { [[ "$1" =~ ^[0-9]+$ ]] && kill -0 "$1" 2>/dev/null; }  # 条件チェックのため run 不使用
+
+# sf の更新（sf-upgrade.sh）が動いているか（ロックの PID が生きている）。sf の入れ替えの途中に sf を呼ばないため（2026-11-24）
+upgrade_running() { pid_alive "$(kv_get "$UPGRADE_LOCK" PID)"; }
+
+# sf の更新が終わるのを待つ（start の最初。最大 UPGRADE_WAIT 秒）。待つあいだに持ち主がいなくなれば、準備をやめて 0 で終わる。
+#   2026-11-24 に WSL の実機で、sf-start が裏で動かす sf-upgrade.sh（npm install -g @salesforce/cli@latest）と、裏の準備が重なり、
+#   sf の部品が見つからずに準備が失敗した。やり直しでは、入れ替えの途中で消えていた WSL の sf の代わりに、PATH の後ろの
+#   Windows の sf を拾い、とても遅くなった
+wait_sf_upgrade() {
+    local waited=0
+    upgrade_running || return 0
+    log "INFO" "sf の更新（sf-upgrade.sh）が終わるのを待ちます（最大 ${UPGRADE_WAIT} 秒）..."
+    [[ $AUTO -eq 1 ]] && { state_set "$STATUS_F" "WARNING=sf の更新が終わるのを待っています" || true; }   # 意図的エラー無視: 表示用
+    while upgrade_running; do
+        if [[ -n "$OWNER" ]] && ! owner_present; then
+            log "INFO" "待つあいだに sf-start が終了したため、準備をやめます。"
+            exit 0
+        fi
+        if [[ $waited -ge $UPGRADE_WAIT ]]; then
+            log "WARNING" "sf の更新が ${UPGRADE_WAIT} 秒たっても終わりません。待たずに進みます。"
+            return 0
+        fi
+        sleep "$TICK"  # run 不使用: 待つだけ
+        waited=$((waited + TICK))
+    done
+    log "INFO" "sf の更新が終わりました（${waited} 秒待ちました）。"
+    return 0
+}
 
 # 持ち主の一覧（.owners）から、死んだ持ち主を外す（短いロックの中）。出力: 生きている持ち主の数。後始末の最中（CLOSING）なら -1
 owners_prune() {
@@ -640,6 +682,7 @@ cmd_start() {
         log "INFO" "GitHub Actions の上では、デバッグログを取りません。"
         exit 10
     fi
+    wait_sf_upgrade   # sf の入れ替えの途中に、sf を呼ばない（処理の流れ 0）
     prepare_org full
     if [[ $AUTO -eq 1 ]]; then
         auto_consent || finish_auto_or_die 10 "$CONSENT_REASON"
@@ -673,7 +716,8 @@ cmd_start() {
         state_set "$STATE_F" "ORG=${TARGET_ORG}" "USER_ID=${USER_ID}" "TRACE_FLAG_ID=${TF_ID}" || finish_auto_or_die 1 "手元の状態を書けません"
     fi
     # WARNING= : 裏の準備のやり直し（retry_prepare）の「やり直しています」を消す
-    state_set "$STATUS_F" "STATE=collecting" "ORG=${TARGET_ORG}" "EXPIRES=${TF_EXPIRES}" "EXPIRES_AT=$(local_hm "$TF_EXPIRES")" "REASON=" "WARNING=" || true   # 意図的エラー無視: 表示用
+    # COUNT_TODAY: 前回の値（前の日など）を残さない。ランチャーは「取得中」に変わった時点で 1 回だけ描き直すため、ここで正しい数を書く
+    state_set "$STATUS_F" "STATE=collecting" "ORG=${TARGET_ORG}" "EXPIRES=${TF_EXPIRES}" "EXPIRES_AT=$(local_hm "$TF_EXPIRES")" "COUNT_TODAY=$(count_today)" "REASON=" "WARNING=" || true   # 意図的エラー無視: 表示用
 
     # 組織のログの量（8.6）
     vol=$(run sf data query --use-tooling-api --target-org "$TARGET_ORG" --json \
@@ -1074,12 +1118,12 @@ cmd_collect() {
         # b. 停止の依頼・後始末の最中・印の入れ替わり
         collector_should_quit && exit 0
         # c. 取得（間隔が来た・pull の依頼がある・前回の取り残しがある）
-        if [[ $now -ge $next ]] || has_pull_request; then
+        # sf の更新（sf-upgrade.sh）が動いているあいだは、取らずに次に回す（sf の入れ替えの途中に、sf を呼ばない）
+        if { [[ $now -ge $next ]] || has_pull_request; } && ! upgrade_running; then
             if lock_take "$FETCH_LOCK" 1; then
                 rc=0; fetch_round || rc=$?
                 lock_drop "$FETCH_LOCK"
-                today=$(date +%Y%m%d)
-                cnt=$(find "${APEX_DIR}/${today}" -maxdepth 1 -name '*.log' 2>/dev/null | wc -l | tr -d ' ')  # VAR=$(cmd) のため run 不使用
+                cnt=$(count_today)  # VAR=$(cmd) のため run 不使用
                 case "$rc" in
                     0) respond_pulls ok; backoff=$INTERVAL; next=$(( $(date +%s) + INTERVAL ))
                        state_set "$STATUS_F" "STATE=collecting" "LAST_FETCH=$(date '+%H:%M')" "COUNT_TODAY=${cnt}" "BACKLOG=0" "WARNING=" || true ;;

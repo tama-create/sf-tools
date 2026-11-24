@@ -26,10 +26,14 @@ fi
 
 # WSL で /mnt/ 配下（Windows FS）から実行された場合、ネイティブ FS に同期して再実行
 # /mnt/c/ 経由の tar / rsync は 9P プロトコルのオーバーヘッドで極めて遅いため、
-# ~/sf-tools（ext4）に一度同期してから実行することで大幅に高速化する。
+# テスト専用のフォルダ ~/.cache/sf-tools-test（ext4）に一度同期してから実行することで大幅に高速化する。
+# ~/sf-tools には写さない: WSL で sf-tools を本当に使う人の ~/sf-tools（sf-install.sh が git pull で最新化する）を、
+# 作りかけのコードで上書きし、--delete で WSL にしかないファイルも消してしまうため（2026-11-24 に、写した未コミットの変更が
+# sf-install.sh の git pull を止め、WSL の sf-start が古い版で動いた）
 if [[ "$(uname -s)" == "Linux" ]] && [[ "${BASH_SOURCE[0]}" == /mnt/* ]]; then
     _src="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-    _dst="${HOME}/sf-tools"
+    _dst="${HOME}/.cache/sf-tools-test"
+    mkdir -p "$_dst"
     echo "  [run_tests] WSL ネイティブ FS に同期中: ${_dst} ..."
     rsync -a --delete "${_src}/" "${_dst}/"
     exec bash "${_dst}/tests/run_tests.sh" "$@"
@@ -362,8 +366,8 @@ if [[ "${1:-}" == "--changed" ]]; then
             lib/apexlog.js|tests/fixtures/apexlog/*|tests/test_apexlog-js.sh)
                 _changed_tests+=("test_apexlog-js.sh" "test_sf-log.sh")   # sf-log.sh の要約・一覧の検査・日時の部品（doc/sf-log-design.md 6 章）と、それを呼ぶ sf-log.sh
                 ;;
-            tests/mock-sf-log.js)
-                _changed_tests+=("test_sf-log.sh")   # sf-log.sh のテストの偽の sf（小さな偽の組織）
+            tests/mock-sf-log.js|tests/mock-org-lock.js)
+                _changed_tests+=("test_sf-log.sh")   # sf-log.sh のテストの偽の sf（小さな偽の組織）と、その読み書きのロック
                 ;;
             config/metadata-capability.txt)
                 _changed_tests+=("test_sf-check.sh")

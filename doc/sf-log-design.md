@@ -756,9 +756,9 @@ force-*/logs/apex/
 - `~/sf-tools/doc/ai-dev-loop.md`（sf-tools のリポジトリ内）に置く
   - force-* の `CLAUDE.md` などには、「開発のサイクルは `~/sf-tools/doc/ai-dev-loop.md` に従う」の 1 行だけを書く
   - 理由: 手順を直したとき、各利用者の `git pull` で届く（`templates/` に置くと、`sf-init` を実行した時点の写しのまま古くなる）
-- force-* の AI の指示ファイルに、その 1 行をどう入れるか（`sf-init` が足すか、利用者が手で書くか）は、未決（13.2）
+- force-* の AI の指示ファイルへの入れ方（2026-11-24 に決定。13.2）: `templates/` に `CLAUDE.md`（`@~/sf-tools/doc/ai-dev-loop.md` の 1 行。Claude Code が手順書を読み込む）と `AGENTS.md`（Codex など向けに、同じことを文で書いた 1 行）を置く。新しく作る force-* には、`sf-init` の Phase 3 が写す（force-* のリポジトリにコミットされ、チーム全員の AI に届く）。すでにある force-* は、その 2 つのファイルを手でコピーしてコミットする（文書サイトの commands-dev に書いた）
 
-### 11.2 中身（案）
+### 11.2 中身（`doc/ai-dev-loop.md` に書いた。2026-11-24）
 
 1. 人は `sf-start` で作業を始める（ログは自動で取られる）。AI は、最初に `sf-log.sh status` で、取得役が動いているかを確かめる。動いていなければ、理由（取らない組織・答えが「取らない」・ほかの TraceFlag）を人に伝える
 2. コードを書き、`sf-deploy.sh` でデプロイする
@@ -860,7 +860,7 @@ force-*/logs/apex/
 ### 13.2 決めること
 
 - [ ] 組織に溜まった自分のログを消す機能（`stop --purge` など。1,000MB の上限への対策）を付けるか。組織のデータの削除になるため、付けるなら確認つき
-- [ ] force-* の AI の指示ファイルに、手順書への 1 行をどう入れるか（11.1）
+- [x] force-* の AI の指示ファイルに、手順書への 1 行をどう入れるか（11.1）→ `templates/` の `CLAUDE.md`・`AGENTS.md`（2026-11-24）
 - [ ] 手元の古いログを、日数で自動で消すか（9.4）
 
 ### 13.3 決めたこと

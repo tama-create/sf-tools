@@ -75,6 +75,8 @@
 │       ├── wf-propagate.yml             ★   ブランチの伝播（main → staging・develop）
 │       └── wf-metasync.yml              ★   メタデータの自動同期（組織 → main）
 ├── .vscode/                             ★ 推奨設定・拡張機能・デバッグ設定
+├── AGENTS.md                            ★ AI（Codex など）への 1 行の案内（~/sf-tools/doc/ai-dev-loop.md を読む）
+├── CLAUDE.md                            ★ AI（Claude Code）への 1 行の案内（@~/sf-tools/doc/ai-dev-loop.md で、手順書を読み込む）
 ├── config/
 │   └── project-scratch-def.json
 ├── .gitmessage                          ★ コミットメッセージの雛形（sf-init の Phase 4 で、sf-install.sh が templates/gitmessage から作る。
@@ -168,6 +170,7 @@
 │   ├── .github/
 │   │   └── workflows/          ← 自己完結型 CI/CD ワークフロー
 │   ├── .vscode/
+│   ├── AGENTS.md / CLAUDE.md   ← AI への 1 行の案内（手順書 doc/ai-dev-loop.md を指すだけ。手順書は git pull で最新になる）
 │   ├── config/
 │   ├── eslint.config.js
 │   ├── force-app/

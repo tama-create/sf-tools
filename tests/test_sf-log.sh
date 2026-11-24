@@ -469,6 +469,131 @@ _live_mark() { sleep 600 & SLEEPERS="${SLEEPERS:-} $!"; MARK="$!:$(date +%s):t$R
 _alive() { kill -0 "$1" 2>/dev/null; }
 _tf_count() { _org '(o.traceFlags||[]).filter(t=>t.LogType==="USER_DEBUG").length'; }
 
+# ------------------------------------------------------------------------------
+# 遅れて現れるログの拾い直し（doc/sf-log-design.md 8.3）。ApexLog は処理が終わってから一覧に現れる（2026-11-24 に実機で確認）
+# ------------------------------------------------------------------------------
+# 遅れて現れるログを足す（visibleAt まで、一覧・本文に出ない）。引数: ID ユーザー 開始（今からの秒） 現れるまで（今からの秒）
+_late_log() {
+    _org_set "o.logs=o.logs||[]; o.logs.push({Id:'$1',LogUserId:'$2',StartTime:new Date(Date.now()+($3)*1000).toISOString().replace(/\.\d{3}Z\$/,'Z'),Operation:'/long',Status:'成功',LogLength:100,DurationMilliseconds:9000,visibleAt:Date.now()+($4)*1000})"
+}
+
+test_late_recheck() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] 拾い直し: 遅れて現れた自分のログを取り、要約に入れる${CLR_RST}"
+    _env
+    _run start -o dev -y
+    # 長い処理 L（開始 +1 秒・4 秒後に現れる）と、あとから始まった短い処理 S（開始 +2 秒・すぐ見える）。他の人の遅れたログ O も
+    _late_log 07L000000000070AAA "$ME" 1 4
+    _late_log 07L000000000072AAA "$OTHER" 1 4
+    _log 07L000000000071AAA "$ME" 2
+    _run pull -o dev
+    assert_exit_ok "$RC" "1 回目の pull が成功する"
+    assert_equals "$(wc -l < "$TD/logs/apex/.index" | tr -d ' ')" "1" "1 回目は、見えている短い処理だけを取る"
+    _has "$(cat "$TD/logs/apex/latest.md")" "07L000000000071AAA" "1 回目の要約に、短い処理が入る"
+    sleep 5
+    : > "$MOCK_CALL_LOG"
+    _run pull -o dev
+    assert_exit_ok "$RC" "2 回目の pull が成功する"
+    assert_file_contains "$TD/logs/apex/.index" "07L000000000070AAA" "遅れて現れた長い処理のログを、拾い直して目録に入れる"
+    assert_file_contains "$MOCK_CALL_LOG" "LogUserId = '${ME}' AND StartTime >=" "拾い直しの検索は、自分のログだけ（LogUserId で絞る）"
+    assert_file_contains "$MOCK_CALL_LOG" "apex get log -i 07L000000000070AAA" "拾い直しは、-i で 1 本ずつ取る"
+    _has "$(cat "$TD/logs/apex/latest.md")" "07L000000000070AAA" "開始が前回の要約より前でも、要約に入れる（目録に足された順で選ぶ）"
+    _hasnt "$(cat "$TD/logs/apex/latest.md")" "07L000000000071AAA" "前回の要約に入れたログは、もう入れない"
+    assert_equals "$(ls "$TD"/logs/apex/2*/ | grep -c 07L000000000072AAA)" "0" "他の人の遅れたログは、取らない"
+    assert_file_not_contains "$TD/sf-tools/logs/sf-log.log" "07L000000000072AAA" "sf-log.log に、他の人のログの ID を残さない"
+    assert_file_contains "$TD/sf-tools/logs/sf-log.log" "1 本を拾い直しました" "拾い直した本数を sf-log.log に書く"
+    assert_equals "$(_kv .state LATE_FROM)" "" "成功したら、LATE_FROM は空"
+    _done
+}
+
+test_late_recheck_failure() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] 拾い直し: 失敗したら LATE_FROM を残し、次の回に取り戻す${CLR_RST}"
+    _env
+    _run start -o dev -y
+    # しおりが 30 分より古く、LATE_FROM もない（新しいログもない）→ 拾い直しの検索をしない
+    grep -v '^LAST_FETCH=' "$TD/logs/apex/.state" > "$TD/st.t"; printf 'LAST_FETCH=2020-01-01T00:00:00Z\n' >> "$TD/st.t"; mv "$TD/st.t" "$TD/logs/apex/.state"
+    _org_set "o.lateQueries=0"
+    _run pull -o dev
+    assert_exit_ok "$RC" "しおりが古くても、pull は成功する"
+    assert_equals "$(_org 'o.lateQueries||0')" "0" "しおりが 30 分より古く、LATE_FROM もない → 拾い直しの検索をしない"
+    _late_log 07L000000000080AAA "$ME" 1 3
+    _log 07L000000000081AAA "$ME" 2
+    _run pull -o dev
+    sleep 4
+    _org_set "o.failOnce={'query:ApexLogLate':'UNKNOWN_EXCEPTION'}"
+    _run pull -o dev
+    assert_exit_ok "$RC" "拾い直しが失敗しても、pull は成功する"
+    _has "$(cat "$TD/logs/apex/latest.md")" "拾い直しに失敗しました" "失敗を、要約の先頭に書く"
+    [[ "$(_kv .state LATE_FROM)" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T ]] && pass "失敗した回の下限を LATE_FROM に残す" || fail "失敗した回の下限を LATE_FROM に残す" "$(_kv .state LATE_FROM)"
+    assert_file_not_contains "$TD/logs/apex/.index" "07L000000000080AAA" "失敗した回は、拾い直せていない"
+    _run pull -o dev
+    assert_file_contains "$TD/logs/apex/.index" "07L000000000080AAA" "次の回に、拾い直す"
+    assert_equals "$(_kv .state LATE_FROM)" "" "拾い直しが成功したら、LATE_FROM を消す"
+    _has "$(cat "$TD/logs/apex/latest.md")" "07L000000000080AAA" "拾い直したログを、要約に入れる"
+    # LATE_FROM が 24 時間より古い → 消して、知らせる
+    grep -v '^LATE_FROM=' "$TD/logs/apex/.state" > "$TD/st.t"; printf 'LATE_FROM=2020-01-01T00:00:00Z\n' >> "$TD/st.t"; mv "$TD/st.t" "$TD/logs/apex/.state"
+    _run pull -o dev
+    assert_equals "$(_kv .state LATE_FROM)" "" "LATE_FROM が 24 時間より古ければ、消す"
+    _has "$(cat "$TD/logs/apex/latest.md")" "24 時間続いた" "LATE_FROM を消したことを、要約の先頭に書く"
+    _done
+}
+
+test_pull_read_marks() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] pull: 要約のしおり（目録の行・古い形からの移し・行のずれ・--since・要約のロック）${CLR_RST}"
+    _env
+    _run start -o dev -y
+    _log 07L000000000091AAA "$ME" 1; _log 07L000000000092AAA "$ME" 2; _log 07L000000000093AAA "$ME" 3
+    _run pull -o dev
+    assert_equals "$(_kv .state LAST_READ_LINE)" "3" "要約のしおりは、読んだ目録の最後の行の番号"
+    assert_equals "$(_kv .state LAST_READ_ID)" "$(sed -n 3p "$TD/logs/apex/.index" | cut -f2)" "LAST_READ_ID は、その行のログの ID"
+    # 古い形（LAST_READ・LAST_READ_IDS）からの移し: 2 行目と 3 行目を同じ秒にし、2 行目だけを要約に入れたことにする
+    local t1="2026-01-01T00:00:01Z" t2="2026-01-01T00:00:02Z" id2 id3
+    id2=$(sed -n 2p "$TD/logs/apex/.index" | cut -f2); id3=$(sed -n 3p "$TD/logs/apex/.index" | cut -f2)
+    awk -F'\t' -v OFS='\t' -v a="$t1" -v b="$t2" 'NR == 1 { $3 = a } NR >= 2 { $3 = b } { print }' "$TD/logs/apex/.index" > "$TD/idx.t" && mv "$TD/idx.t" "$TD/logs/apex/.index"
+    grep -v '^LAST_READ' "$TD/logs/apex/.state" > "$TD/st.t"; printf 'LAST_READ=%s\nLAST_READ_IDS=%s\n' "$t2" "$id2" >> "$TD/st.t"; mv "$TD/st.t" "$TD/logs/apex/.state"
+    _run pull -o dev
+    _has "$OUT" "・1 本・" "移し: 同じ秒で、要約に入れていないログ（3 行目）だけを入れる"
+    _has "$(cat "$TD/logs/apex/latest.md")" "$id3" "移し: 3 行目のログが要約に入る"
+    assert_equals "$(_kv .state LAST_READ_LINE)" "3" "移したあと、新しい形のしおりを書く"
+    assert_equals "$(_kv .state LAST_READ)" "" "移したあと、古い形のしおりを消す"
+    # 行のずれ（目録を手で直し、先頭に行が入った）→ ID で行を探し直す。
+    #   差し込む行は、拾い直しの範囲の外（2020 年・架空の ID）にする（範囲の中の自分のログを目録から消すと、拾い直しが足し直すため）
+    { printf '%s\t07L000000000099AAA\t2020-01-01T00:00:00Z\t/old\t成功\t1\t1\n' "logs/apex/20200101/000000_07L000000000099AAA_old.log"; cat "$TD/logs/apex/.index"; } > "$TD/idx.t" && mv "$TD/idx.t" "$TD/logs/apex/.index"
+    _run pull -o dev
+    _has "$OUT" "探し直しました" "行がずれたら、ID で行を探し直す"
+    _has "$OUT" "・0 本・" "探し直した行より後に、新しいログはない"
+    assert_equals "$(_kv .state LAST_READ_LINE)" "4" "しおりを、今の目録の行に合わせる"
+    # --since は、しおりを使わず、進めない（2026-01-01 の 3 本と、新しい 1 本。2020 年の行は入らない）
+    _log 07L000000000094AAA "$ME" 4
+    _run pull -o dev --since 600000
+    _has "$OUT" "・4 本・" "--since は、しおりを使わず、目録の全行から直近 N 分を選ぶ"
+    assert_equals "$(_kv .state LAST_READ_LINE)" "4" "--since は、しおりを進めない"
+    # 要約のロックが取れない（ほかの pull が動いている）→ しおりを読まず・進めずに、直近 30 分で要約する
+    _live_mark
+    mkdir "$TD/logs/apex/.read.lock" && printf '%s\n' "${MARK%%:*}" > "$TD/logs/apex/.read.lock/pid"
+    _run pull -o dev
+    _has "$OUT" "要約のロックを取れませんでした" "要約のロックが取れなければ、その旨を表示する"
+    assert_equals "$(_kv .state LAST_READ_LINE)" "4" "ロックが取れなければ、しおりを進めない"
+    rm -rf "$TD/logs/apex/.read.lock"
+    _run pull -o dev
+    assert_equals "$(_kv .state LAST_READ_LINE)" "5" "ロックが外れたら、しおりを進める"
+    assert_dir_not_exists "$TD/logs/apex/.read.lock" "要約のロックを残さない"
+    _done
+}
+
+test_collect_late() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] collect: 取得役も、遅れて現れたログを拾い直す${CLR_RST}"
+    _env
+    _run auto on -o dev
+    _live_mark; local m1="$MARK"
+    _run start -o dev --auto --owner "$m1"
+    _late_log 07L000000000075AAA "$ME" 1 5
+    _log 07L000000000076AAA "$ME" 2
+    _collect_bg
+    _wait_for 40 'grep -q 07L000000000076AAA "$TD/logs/apex/.index" 2>/dev/null' && pass "取得役が、短い処理のログを取る" || fail "取得役が、短い処理のログを取る"
+    _wait_for 40 'grep -q 07L000000000075AAA "$TD/logs/apex/.index" 2>/dev/null' && pass "取得役が、遅れて現れた長い処理のログを拾い直す" || fail "取得役が、遅れて現れた長い処理のログを拾い直す" "$(cat "$TD/logs/apex/.index" 2>/dev/null)"
+    _done
+}
+
 test_collect_basic() {
     echo ""; echo -e "${CLR_HEAD}[TEST] collect: 裏で取る・pull は取得役に頼む・leave${CLR_RST}"
     _env
@@ -701,8 +826,12 @@ test_start_auto
 test_args
 test_pull
 test_pull_pushed_out_and_failures
+test_late_recheck
+test_late_recheck_failure
+test_pull_read_marks
 test_stop_status
 test_collect_basic
+test_collect_late
 test_collect_stops
 test_collect_extend
 test_register_owner

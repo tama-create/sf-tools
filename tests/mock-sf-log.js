@@ -12,6 +12,9 @@
 // 失敗の注入: org.json の fail に「操作:オブジェクト」（例: "create:TraceFlag"・"query:ApexLog"・"getlog"）→ name を書く。
 //   failOnce に書くと、1 回だけ失敗する
 // 取得の競合の注入: org.json の injectOnGetLog（ログの配列）を、最初の apex get log -n の直前に、ログに足す
+// 遅れて現れるログ: ログに visibleAt（ミリ秒）があれば、その時刻までは一覧・本文に出ない（処理が終わってから一覧に現れる。
+//   2026-11-24 に開発組織で確かめた。doc/sf-log-design.md 8.3）。拾い直しの検索（LogUserId と StartTime の範囲・新しい順）も解釈する。
+//   拾い直しの検索だけを失敗させるには、fail / failOnce に "query:ApexLogLate"
 // ==============================================================================
 const fs = require('fs');
 const path = require('path');
@@ -35,6 +38,7 @@ const parse = (s) => {
     return m ? Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]) : null;
 };
 const now = Date.now();
+const visible = (l) => !l.visibleAt || l.visibleAt <= now;   // 遅れて現れるログ（visibleAt までは見えない）
 org.seq = org.seq || 0;
 const newId = (p) => `${p}${String(++org.seq).padStart(12, '0')}AAA`;
 // failOnce は 1 回だけ失敗する（使ったら消す。err が保存する）。sf の一時的な失敗のやり直しを確かめる
@@ -84,9 +88,27 @@ if (cmd === 'data query') {
         const ls = org.logs.filter(l => !u || l.LogUserId === u[1]);
         ok({ records: [{ n: ls.length, s: ls.length ? ls.reduce((a, l) => a + l.LogLength, 0) : null }], totalSize: 1, done: true });
     }
+    const late = /LogUserId = '([^']+)' AND StartTime >= (\S+) AND StartTime <= (\S+)/.exec(q);
+    if (late && /FROM ApexLog/.test(q)) {
+        // 拾い直しの検索（自分のログだけ・範囲・新しい順。ページ送りは「StartTime と Id がこれより前」）
+        if (failKey('query:ApexLogLate')) err(failKey('query:ApexLogLate'));
+        if (failKey('query:ApexLog')) err(failKey('query:ApexLog'));
+        const lo = parse(late[2]), hi = parse(late[3]);
+        let ls = org.logs.filter(l => visible(l) && l.LogUserId === late[1] && parse(l.StartTime) >= lo && parse(l.StartTime) <= hi);
+        if ((m = /AND \(StartTime < (\S+) OR \(StartTime = (\S+) AND Id < '([^']+)'\)\)/.exec(q))) {
+            const t = parse(m[1]), id = m[3];
+            ls = ls.filter(l => parse(l.StartTime) < t || (parse(l.StartTime) === t && l.Id < id));
+        }
+        ls.sort((a, b) => (parse(b.StartTime) - parse(a.StartTime)) || (a.Id < b.Id ? 1 : a.Id > b.Id ? -1 : 0));
+        const lim = /LIMIT (\d+)/.exec(q);
+        if (lim) ls = ls.slice(0, +lim[1]);
+        org.lateQueries = (org.lateQueries || 0) + 1;
+        ok({ records: ls.map(l => ({ attributes: { type: 'ApexLog' }, Id: l.Id, LogUserId: l.LogUserId, StartTime: sfTime(parse(l.StartTime)), Operation: l.Operation,
+            Request: 'Api', Status: l.Status, LogLength: l.LogLength, DurationMilliseconds: l.DurationMilliseconds })), totalSize: ls.length, done: true });
+    }
     if (/FROM ApexLog/.test(q)) {
         if (failKey('query:ApexLog')) err(failKey('query:ApexLog'));
-        let ls = org.logs.slice();
+        let ls = org.logs.filter(visible);
         if ((m = /StartTime > (\S+) OR \(StartTime = (\S+) AND Id > '([^']+)'\)/.exec(q))) {
             const t = parse(m[1]), id = m[3];
             ls = ls.filter(l => parse(l.StartTime) > t || (parse(l.StartTime) === t && l.Id > id));
@@ -168,9 +190,9 @@ if (cmd === 'apex get') {
     let pick;
     if (n !== undefined) {
         if (org.injectOnGetLog && org.injectOnGetLog.length) { org.logs.push(...org.injectOnGetLog); org.injectOnGetLog = []; }
-        pick = org.logs.slice().sort((a, b) => (parse(b.StartTime) - parse(a.StartTime)) || (a.Id < b.Id ? 1 : -1)).slice(0, +n);
+        pick = org.logs.filter(visible).sort((a, b) => (parse(b.StartTime) - parse(a.StartTime)) || (a.Id < b.Id ? 1 : -1)).slice(0, +n);
     } else {
-        pick = org.logs.filter(l => l.Id === id);
+        pick = org.logs.filter(l => l.Id === id && visible(l));
     }
     if (org.junkFile) fs.writeFileSync(path.join(d, org.junkFile), 'x');
     pick.forEach(l => fs.writeFileSync(path.join(d, `${l.Id}.log`), l.body || `68.0 APEX_CODE,FINE\n12:00:00.1 (1)|USER_INFO|[EXTERNAL]|x|u|(GMT+09:00) 日本標準時 (Asia/Tokyo)|GMT+09:00\n12:00:00.1 (2)|USER_DEBUG|[1]|DEBUG|${l.Id}\n`));

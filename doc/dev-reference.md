@@ -911,7 +911,8 @@ AI の開発サイクル用のデバッグログ取得（開発者向け。管�
 - **手元の状態**: `logs/apex/` の `.state`・`.status`・`.consent`・`.owners`・`.index`（`キー=値`。`kv_get`・`kv_set`。書き換えは短いロック `mkdir logs/apex/.lock` の中で `state_set`）。取得は取得のロック `logs/apex/.fetch.lock`
 - **TraceFlag**: 自分の USER_DEBUG（`.state` の `TRACE_FLAG_ID`）は延ばす。ほかの有効な USER_DEBUG は、手動の確認のあと `min(元の期限, 今+2 分)` に縮め、その 1 秒後から作る（`--auto` は触らずに 10）。DEVELOPER_LOG には触れない（実機で、種類が違えば重ならないことを確認）
 - **取得（`fetch_round`）**: 全ユーザーの一覧は `run` を通さず受ける（他の人の見出しを `sf-log.log`・`error.log`・画面に出さない）。`aj list` で自分 / 他の人を見分ける。取りたいログより新しいログがすべて自分のものなら `sf apex get log -n`、それ以外は `-i`。`-n` の押し出しは `-i` で補う。`logs/apex/.fetch/` は取得のたびに空にし、`<ID>.log` 以外の名前があればその回を失敗にする。しおり（`LAST_FETCH`・`LAST_FETCH_ID`）は 1 本ごとに進める
-- **要約の選び方**: `.index` から、`LAST_READ` より後（同じ秒は `LAST_READ_IDS` の ID を除く）。`--max` を超えたら新しいほう
+- **拾い直し（`late_recheck`。2026-11-24）**: ApexLog は処理が終わってから一覧に現れるため、長い処理のログは、しおり（開始時刻）の方式では取りこぼす（tama-dev で実証）。`fetch_round` が追いついた回（戻り値 0）に、取得のロックを持ったまま 1 回だけ呼ぶ。範囲は「今から `LATE_WINDOW`（30 分）前」と `.state` の `LATE_FROM` の早いほうから `LAST_FETCH` まで、`LogUserId` で自分のログだけ、新しい順に `LATE_PAGE`（200）本ずつ最大 `LATE_MAX_PAGES`（5）回。目録にない ID を `-i` で取る（`-n` は使わない）。失敗 → `LATE_FROM` に下限を残す。成功 → 消す。結果の知らせは `LATE_WARN`（取得役は `.status` の `WARNING`・`LATE_WARNING`、`pull` は要約の先頭）。取得役は、拾い直しのあとで `respond_pulls` する
+- **要約の選び方（2026-11-24 に変更）**: 要約のロック（`.read.lock`。`READ_TRIES`）を取ってから、しおり（`.state` の `LAST_READ_LINE`・`LAST_READ_ID`）を読む。目録は `index_snapshot`（改行で終わる行だけ）で 1 回だけ読み、`LAST_READ_LINE` 行目より後を選ぶ（開始時刻ではなく、目録に足された順）。行の ID が合わなければ ID で探し直す。使えなければ・ロックが取れなければ・`--since` なら、開始時刻で直近 30 分（N 分）。古い `LAST_READ`・`LAST_READ_IDS` は、最初の `pull` で移す。成功したら `index_mark` で進める（`--since`・ロックなしは進めない）。`--max` を超えたら新しいほう
 - **取得役（`cmd_collect`）**: `.collector`（PID・STARTED・ORG）。`TICK`（5 秒）ごとに、`owners_prune`（`kill -0`）→ 空なら `collector_finish`（CLOSING を書いて `do_cleanup … 1`）→ `MAX_RUN`（12 時間）→ `collector_should_quit`（`requests/stop`・CLOSING・印の入れ替わり）→ 間隔・`requests/pull.*`・取り残しで `fetch_round`（取得のロックが取れたときだけ）→ 追いついたら `respond_pulls`（`done.<ID>`）→ 残り 60 分未満なら `collector_extend`（`tflist` で ID・種類を確かめ、直前に `collector_should_quit`）。失敗は間隔を倍（最大 600）
 - **後始末（`do_cleanup`）**: `stop`・`leave`・取得役が共有。`stop_collector`（`requests/stop` → `STOP_WAIT` 秒 → TERM → 10 秒）→ `.state` の TraceFlag を消す → `.status` を stopped。戻り値 1 = 取得役が止まらない（TraceFlag を残す）/ 2 = 消せない。`stop`・`leave` は `.owners` に CLOSING を書いてから行い、最後に `.owners` を消す。`leave` は失敗しても 0
 - **持ち主の登録（`register_owner`）**: `begin`（と `start --auto --owner`）が行う（ロックを 1 か所にまとめるため）。生きている CLOSING は `CLOSING_WAIT`（60 秒）まで待ち、死んだ CLOSING は消す。`leave` は、登録されていない印なら何もしない
@@ -919,7 +920,7 @@ AI の開発サイクル用のデバッグログ取得（開発者向け。管�
 - **時間の設定**: `SF_LOG_INTERVAL`（既定 180）・`SF_LOG_MAX_SECONDS`（既定 43200）・`SF_LOG_TEST_FAST=1`（テスト用。間隔の下限 1・`TICK` 1・待ち時間を短く）
 - **`--auto`**: 終了コード 0 / 10（取らない）/ 1（失敗）。`finish_auto_or_die` で、手動は `die`、自動は `.status` に書いて終了コードで返す。確認は、端末でなければ聞かずに「取らない」（`read_key` の EOF の die を避ける。`$( )` の中で呼ぶ）
 
-テスト: `tests/test_sf-log.sh`（偽の組織 `tests/mock-sf-log.js`。偽の組織の `org.json` は、偽の sf とテストの `_org_set` が、`tests/mock-org-lock.js` のロックを取ってから読み書きする（ロックなしだと、偽の sf が古い状態を書き戻し、テストが足したログを消して、取得役のテストが揺れた。2026-11-24）。TraceFlag の重なりの拒否・期限を今にできない・`-n` の全ユーザーの新しい順・押し出しの注入・失敗の注入。取得役は `_collect_bg` で裏に起動し、`_wait_for` で待つ。持ち主の代わりは `sleep`。手元の Git Bash で約 8 分・WSL で約 2 分。`run_tests.sh` の `_weight` は 420）。
+テスト: `tests/test_sf-log.sh`（偽の組織 `tests/mock-sf-log.js`。偽の組織の `org.json` は、偽の sf とテストの `_org_set` が、`tests/mock-org-lock.js` のロックを取ってから読み書きする（ロックなしだと、偽の sf が古い状態を書き戻し、テストが足したログを消して、取得役のテストが揺れた。2026-11-24）。TraceFlag の重なりの拒否・期限を今にできない・`-n` の全ユーザーの新しい順・押し出しの注入・失敗の注入・遅れて現れるログ（`visibleAt`）と拾い直しの検索（2026-11-24）。取得役は `_collect_bg` で裏に起動し、`_wait_for` で待つ。持ち主の代わりは `sleep`。手元の Git Bash で約 8 分・WSL で約 2 分。`run_tests.sh` の `_weight` は 420）。
 
 ---
 

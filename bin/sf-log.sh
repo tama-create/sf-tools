@@ -80,11 +80,27 @@
 #        別の組織の取得役なら中断する。取得役がいなければ、取得のロック（logs/apex/.fetch.lock。最大 90 秒待つ）を持ち、しおり（.state の LAST_FETCH・LAST_FETCH_ID）から
 #        古い順に取る（1 回 50 本。最大 4 回 = 200 本）。一覧は全ユーザーの見出し（run を通さない。他の人の ID を記録しない）、
 #        本文は自分のログだけを保存する。取りたいログより新しいログがすべて自分のものなら sf apex get log -n でまとめて、
-#        それ以外は -i で 1 本ずつ取る。本文は logs/apex/.fetch/ に書かせ、取りたい ID 以外は中を読まずに消す
+#        それ以外は -i で 1 本ずつ取る。本文は logs/apex/.fetch/ に書かせ、取りたい ID 以外は中を読まずに消す。
+#        追いついたら（残りがなければ）、取得のロックを持ったまま、遅れて現れたログを拾い直す（下の「拾い直し」）
 #     5. 保存: logs/apex/<日付>/<時刻>_<ID>_<操作>.log（日付・時刻は PC のタイムゾーン）と、目録 logs/apex/.index
-#     6. 目録から、前回の要約（.state の LAST_READ）より後に始まったログを選ぶ（--since なら直近 N 分。--max を超えたら新しいほう）
+#     6. 要約のロック（logs/apex/.read.lock。最大 90 秒）を取り、そのあとで、しおり（.state の LAST_READ_LINE・LAST_READ_ID）を読む。
+#        目録は 1 回だけ読み、改行で終わる行だけを使う。選び方（開始時刻ではなく、目録に足された順）:
+#          --since: しおりを使わず、目録の全行から直近 N 分に始まったログ
+#          しおりが使えない（ない・形が違う・LAST_READ_ID が見つからない）・ロックが取れない: 目録の全行から直近 30 分に始まったログ（WARNING）
+#          それ以外: LAST_READ_LINE 行目より後のすべての行（LAST_READ_LINE 行目の ID が LAST_READ_ID と違えば、ID で行を探し直す）
+#        古い .state（LAST_READ・LAST_READ_IDS）は、開始が LAST_READ より前の行と、同じ秒で LAST_READ_IDS にある行を「見た」として移す。
+#        --max を超えたら、開始時刻の新しいほう。要約の中は開始時刻の順
 #     7. 要約を作り（node lib/apexlog.js summarize）、logs/apex/summaries/<時刻>.md と logs/apex/latest.md に書く
-#     8. 要約に入れた最も新しいログの開始時刻を LAST_READ にする。要約の 1 行目と latest.md のパスを表示する
+#     8. 成功したら（--since とロックが取れないときを除く）、読んだ目録の最後の行の番号と ID を LAST_READ_LINE・LAST_READ_ID にし、
+#        要約のロックを外す。要約の 1 行目と latest.md のパスを表示する
+#   拾い直し（取得役と pull の自分での取得。通常の取得が追いついた回に 1 回。doc/sf-log-design.md 8.3）:
+#     ApexLog は処理が終わってから一覧に現れる（Id と StartTime は始まったときのもの）。長い処理のログは、しおりより前に
+#     始まっていて、通常の取得では二度と取れないため、「今から 30 分前」（前の回の失敗で残した .state の LATE_FROM があれば、
+#     その早いほう）から、しおりまでに始まった自分のログ（LogUserId で絞る。他の人の見出しは入らない）を、新しい順に 200 本ずつ
+#     （最大 5 回 = 1,000 本）問い合わせ、目録にない ID を -i で 1 本ずつ取る（-n は使わない）。しおりは動かさない。
+#     しおりが 30 分より古く、LATE_FROM もなければ、動かさない。失敗したら、その回の下限を LATE_FROM に残す（次の回にやり直す。
+#     成功で消す。24 時間より古ければ消して WARNING）。1,000 本で範囲の終わりに届かなければ、限界として WARNING（LATE_FROM は消す）。
+#     WARNING は sf-log.log と .status（WARNING・LATE_WARNING）に書き、pull は要約の先頭に書く
 #   stop（人の判断。持ち主の一覧にかかわらず止める）:
 #     4. .owners を CLOSING だけにする。取得役が生きていれば、停止の依頼（requests/stop）を置き、最大 30 秒待つ。
 #        止まらなければ TERM で止め、さらに最大 10 秒待つ。それでも生きていれば、TraceFlag は消さずに中断する
@@ -101,6 +117,7 @@
 #        b. 停止の依頼・CLOSING・印の入れ替わり → 組織に何もせずに止まる（延長の直前にも確かめる）
 #        c. 間隔（SF_LOG_INTERVAL）が来た・pull の依頼がある・取り残しがある → 取得のロックが取れたら、pull と同じ方法で 1 回取る。
 #           sf の更新（sf-upgrade.sh）が動いているあいだは、取らずに次に回す（start の 0 と同じ理由）。
+#           追いついた回は、取得のロックを持ったまま拾い直し（pull の「拾い直し」）をし、目録に書き終えてから、待っている pull に応える。
 #           追いついたら、待っている pull に応答する。失敗したら、次の取得までの間隔を倍にする（最大 600 秒）
 #        d. TraceFlag の残りが 60 分未満なら、ID と種類を確かめてから、今から 2 時間に延ばす
 #        e. 5 分より古い依頼・応答を消す
@@ -165,6 +182,8 @@ readonly INDEX_F="${APEX_DIR}/.index"
 readonly LOCK_DIR="${APEX_DIR}/.lock"
 readonly FETCH_LOCK="${APEX_DIR}/.fetch.lock"
 readonly FETCH_TMP="${APEX_DIR}/.fetch"
+readonly READ_LOCK="${APEX_DIR}/.read.lock"   # 要約のロック（pull が、しおりを読んでから書くまで。4.4 の 3）
+readonly LATE_WINDOW=1800 LATE_PAGE=200 LATE_MAX_PAGES=5 LATE_MAX_AGE=86400   # 拾い直し（8.3）: 30 分・200 本ずつ・最大 5 回・LATE_FROM は 24 時間まで
 readonly REQ_DIR="${APEX_DIR}/requests"
 readonly CONSENT_VERSION="1"            # AI への送信の注意の文面の版（変えたら上げる。10.2）
 readonly ORG_LOG_WARN_BYTES=$((700 * 1024 * 1024))
@@ -226,7 +245,8 @@ MAX_RUN="${SF_LOG_MAX_SECONDS:-43200}"  # 取得役の上限（秒。12 時間�
 [[ "$MAX_RUN" =~ ^[0-9]+$ && "$MAX_RUN" -ge 1 ]] || die "SF_LOG_MAX_SECONDS は 1 以上の整数です: ${MAX_RUN}"
 PULL_WAIT=90; STOP_WAIT=30; CLOSING_WAIT=60; RETRY_WAIT=30   # RETRY_WAIT: 裏の準備の失敗から、やり直すまで（秒）
 UPGRADE_WAIT=600   # sf の更新（sf-upgrade.sh）が終わるのを待つ上限（秒）。WSL の実機で、sf の入れ替えに約 3 分かかった（2026-11-24）
-[[ $_fast -eq 1 ]] && { PULL_WAIT=30; STOP_WAIT=10; CLOSING_WAIT=10; RETRY_WAIT=1; UPGRADE_WAIT=10; }
+READ_TRIES=450     # 要約のロックを待つ回数（0.2 秒ごと。最大 90 秒）
+[[ $_fast -eq 1 ]] && { PULL_WAIT=30; STOP_WAIT=10; CLOSING_WAIT=10; RETRY_WAIT=1; UPGRADE_WAIT=10; READ_TRIES=10; }
 # sf の更新のロック（sf-upgrade.sh が、動いているあいだ PID を書く。場所は sf-upgrade.sh と同じ）
 UPGRADE_LOCK="${SF_TOOLS_UPGRADE_LOCK:-${HOME}/.sf-tools-upgrade.lock}"
 command -v node >/dev/null 2>&1 || die "node が見つかりません（sf CLI の npm 版に必要です）。"  # 存在確認のため run 不使用
@@ -707,11 +727,13 @@ cmd_start() {
         fi
     fi
 
-    # .state（組織・ユーザーが変わったら、取得と要約の時刻を今にする）
+    # .state（組織・ユーザーが変わったら、取得のしおりを今に、要約のしおりを今の目録の最後の行にする）
     now=$(now_z)
     if [[ "$prev_org" != "$TARGET_ORG" || "$prev_user" != "$USER_ID" || -z "$(kv_get "$STATE_F" LAST_FETCH)" ]]; then
+        local mark; mark=$(index_mark_now)  # VAR=$(cmd) のため run 不使用
         state_set "$STATE_F" "ORG=${TARGET_ORG}" "USER_ID=${USER_ID}" "TRACE_FLAG_ID=${TF_ID}" \
-            "LAST_FETCH=${now}" "LAST_FETCH_ID=" "LAST_READ=${now}" "LAST_READ_IDS=" || finish_auto_or_die 1 "手元の状態を書けません"
+            "LAST_FETCH=${now}" "LAST_FETCH_ID=" "LATE_FROM=" "LAST_READ_LINE=${mark%%$'\t'*}" "LAST_READ_ID=${mark#*$'\t'}" \
+            "LAST_READ=" "LAST_READ_IDS=" || finish_auto_or_die 1 "手元の状態を書けません"
     else
         state_set "$STATE_F" "ORG=${TARGET_ORG}" "USER_ID=${USER_ID}" "TRACE_FLAG_ID=${TF_ID}" || finish_auto_or_die 1 "手元の状態を書けません"
     fi
@@ -766,6 +788,31 @@ save_one() {
 
 # sf-log.log にだけ書く（画面に出さない。取得の件数など）
 note_log() { printf '[%s] [INFO] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$1" >> "$LOG_FILE"; }
+note_warn() { printf '[%s] [WARNING] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$1" >> "$LOG_FILE"; }
+
+# 目録（.index）の写しを作る（改行で終わる行だけ。取得役が書いている途中の行を読まないため。4.4 の 3）。引数: 写しのファイル
+index_snapshot() {
+    local out="$1"
+    : > "$out" || return 1
+    [[ -f "$INDEX_F" ]] || return 0
+    cp "$INDEX_F" "$out" || return 1
+    if [[ -s "$out" && -n "$(tail -c 1 "$out")" ]]; then   # 最後が改行で終わらない → 書きかけの行を除く
+        sed '$d' "$out" > "${out}.t" && mv -f "${out}.t" "$out" || return 1
+    fi
+}
+# 目録（の写し）の行数と、最後の行のログの ID（タブ区切り。空なら「0<タブ>」）。要約のしおり（LAST_READ_LINE・LAST_READ_ID）にする
+index_mark() {
+    [[ -s "$1" ]] || { printf '0\t'; return 0; }
+    awk -F'\t' 'END { printf "%d\t%s", NR, $2 }' "$1"
+}
+# 今の目録の印（start・組織の切り替えで、要約のしおりを「今」にするため）
+index_mark_now() {
+    local t m
+    t=$(mktemp "${TMPDIR:-/tmp}/sf-log-idx.XXXXXX") || { printf '0\t'; return 0; }  # VAR=$(cmd) のため run 不使用
+    if index_snapshot "$t"; then m=$(index_mark "$t"); else m=$'0\t'; fi  # VAR=$(cmd) のため run 不使用
+    rm -f "$t" "${t}.t" 2>/dev/null || true   # 意図的エラー無視: 一時ファイルの後始末
+    printf '%s' "$m"
+}
 
 # 1 回の取得。戻り値: 0 = 追いついた／2 = まだ残りがある／1 = 失敗
 fetch_round() {
@@ -850,6 +897,85 @@ fetch_round() {
     return 0
 }
 
+# 遅れて現れるログの拾い直し（doc/sf-log-design.md 8.3。冒頭コメントの「拾い直し」）。
+#   取得のロックを持ったまま、通常の取得が追いついた回（fetch_round が 0）に 1 回だけ呼ぶ。
+#   結果: LATE_WARN（空 = 知らせることなし）。戻り値は常に 0（失敗しても、その回の取得は成功として扱う。しおりは進めてある）
+#   2026-11-24 に tama-dev で、9.5 秒の匿名 Apex のログが、あとから始まった短い処理のログより遅れて一覧に現れることを確かめた
+late_recheck() {
+    local last now lower lf page=0 before_st="" before_id="" where q lj tsv n got=0 seen=0 failed=0 full=0 i f
+    local ids=() mine=() starts=() lens=() durs=() ops=() stats=() id m st len dur op status
+    LATE_WARN=""
+    last=$(kv_get "$STATE_F" LAST_FETCH)  # VAR=$(cmd) のため run 不使用
+    [[ "$last" =~ $ISO_RE ]] || return 0
+    now=$(now_z); lower=$(aj time add "$now" --sec "-${LATE_WINDOW}")  # VAR=$(cmd) のため run 不使用
+    lf=$(kv_get "$STATE_F" LATE_FROM)  # VAR=$(cmd) のため run 不使用
+    if [[ -n "$lf" && ! "$lf" =~ $ISO_RE ]]; then state_set "$STATE_F" "LATE_FROM=" || true; lf=""; fi   # 意図的エラー無視: 形が違えば消すだけ
+    if [[ -n "$lf" && "$(aj time cmp "$lf" "$(aj time add "$now" --sec "-${LATE_MAX_AGE}")")" == "-1" ]]; then
+        state_set "$STATE_F" "LATE_FROM=" || true   # 意図的エラー無視: 次の回にも同じ判定で消える
+        LATE_WARN="遅れて現れたログの拾い直しの失敗が 24 時間続いたため、${lf}（UTC）からの分の拾い直しをやめました"
+        note_warn "拾い直し: ${LATE_WARN}"
+        lf=""
+    fi
+    # しおりが 30 分より古く、前の回の失敗もなければ、範囲が空（しおりより後は、通常の取得が取る）
+    if [[ -z "$lf" && "$(aj time cmp "$last" "$lower")" == "-1" ]]; then return 0; fi
+    [[ -n "$lf" && "$(aj time cmp "$lf" "$lower")" == "-1" ]] && lower="$lf"
+    if [[ "$(aj time cmp "$lower" "$last")" == "1" ]]; then state_set "$STATE_F" "LATE_FROM=" || true; return 0; fi   # 意図的エラー無視: 範囲が空
+
+    while [[ $page -lt $LATE_MAX_PAGES ]]; do
+        page=$((page + 1))
+        where="LogUserId = '${USER_ID}' AND StartTime >= ${lower} AND StartTime <= ${last}"
+        [[ -n "$before_st" ]] && where="${where} AND (StartTime < ${before_st} OR (StartTime = ${before_st} AND Id < '${before_id}'))"
+        q="SELECT Id, LogUserId, StartTime, Operation, Request, Status, LogLength, DurationMilliseconds FROM ApexLog WHERE ${where} ORDER BY StartTime DESC, Id DESC LIMIT ${LATE_PAGE}"
+        # run を通さない（8.3 の一覧と扱いをそろえる。応答は自分のログの見出しだけ）
+        if ! lj=$(sf data query --use-tooling-api --target-org "$TARGET_ORG" --json --query "$q" 2>/dev/null); then  # VAR=$(cmd) のため run 不使用（上の理由）
+            note_warn "拾い直し: 一覧の失敗（$(sf_err_name "$lj")）"; failed=1; break
+        fi
+        if ! tsv=$(printf '%s' "$lj" | aj list --user "$USER_ID" 2>/dev/null); then  # VAR=$(cmd) のため run 不使用
+            note_warn "拾い直し: 一覧の応答の形が正しくありません"; failed=1; break
+        fi
+        lj=""
+        # 先に配列へ読む（本文の取得の sf が、標準入力の残りを読まないため）
+        ids=(); mine=(); starts=(); lens=(); durs=(); ops=(); stats=()
+        while IFS=$'\t' read -r id m st len dur op status; do
+            [[ -n "$id" ]] || continue
+            ids+=("$id"); mine+=("$m"); starts+=("$st"); lens+=("$len"); durs+=("$dur"); ops+=("$op"); stats+=("$status")
+        done <<< "$tsv"
+        tsv=""
+        n=${#ids[@]}
+        for ((i = 0; i < n; i++)); do
+            before_st="${starts[i]}"; before_id="${ids[i]}"
+            [[ "${mine[i]}" == "1" ]] || continue   # 念のため（検索は自分のログだけ）
+            seen=$((seen + 1))
+            grep -qF -- "	${ids[i]}	" "$INDEX_F" 2>/dev/null && continue  # 条件チェックのため run 不使用（目録にあれば取らない）
+            # -i で 1 本だけ取る（ID を指定するので、他の人のログは入らない）
+            { rm -rf "$FETCH_TMP" && mkdir -p "${FETCH_TMP}/one"; } || { failed=1; break; }
+            run sf apex get log -i "${ids[i]}" -d "${FETCH_TMP}/one" --target-org "$TARGET_ORG" >/dev/null || { failed=1; break; }
+            f="${FETCH_TMP}/one/${ids[i]}.log"
+            [[ -f "$f" ]] || { note_warn "拾い直し: ${ids[i]} のファイルがありません"; failed=1; break; }
+            save_one "$f" "${ids[i]}" "${starts[i]}" "${ops[i]}" "${stats[i]}" "${lens[i]}" "${durs[i]}" || { failed=1; break; }
+            got=$((got + 1))
+        done
+        [[ $failed -eq 1 ]] && break
+        [[ $n -lt $LATE_PAGE ]] && break
+        [[ $page -ge $LATE_MAX_PAGES ]] && full=1
+    done
+    rm -rf "$FETCH_TMP" 2>/dev/null || true   # 意図的エラー無視: 次の取得の最初にも空にする
+    note_log "拾い直し: 自分のログ ${seen} 本を見て、${got} 本を拾い直しました（${lower}〜${last}。UTC）"
+    if [[ $failed -eq 1 ]]; then
+        # その回の下限を残す（範囲の下限は毎回進むため、残さないと、失敗したログが次の回には範囲の外に出ることがある）
+        state_set "$STATE_F" "LATE_FROM=${lower}" || true   # 意図的エラー無視: 書けなければ、次の回は「今から 30 分前」から
+        LATE_WARN="${LATE_WARN:+${LATE_WARN}。}遅れて現れたログの拾い直しに失敗しました（次の回に、${lower}（UTC）からやり直します）"
+        note_warn "拾い直し: ${LATE_WARN}"
+        return 0
+    fi
+    state_set "$STATE_F" "LATE_FROM=" || true   # 意図的エラー無視: 残っても、次の回に拾い直すだけ
+    if [[ $full -eq 1 ]]; then
+        LATE_WARN="${LATE_WARN:+${LATE_WARN}。}拾い直しの範囲に自分のログが $((LATE_PAGE * LATE_MAX_PAGES)) 本を超えてあったため、${lower}〜${before_st}（UTC）に始まったログの一部は、拾い直していないかもしれません"
+        note_warn "拾い直し: ${LATE_WARN}"
+    fi
+    return 0
+}
+
 # ------------------------------------------------------------------------------
 # 8. pull（4.4）
 # ------------------------------------------------------------------------------
@@ -875,13 +1001,15 @@ request_collector() {
 }
 
 cmd_pull() {
-    local rc=0 round since read_ids now notes=() sel tmp_list cnt omitted first_om last_om newest ts out_md hdr cpid corg res v
+    local rc=0 round since now notes=() tmp_list snap cnt omitted first_om last_om ts out_md hdr cpid corg res v mark
+    local mode rl rid old at found base
     prepare_org full
     # しおりが別の組織・ユーザーのものなら、今から取り直す（別の組織の時刻・ID を使わない）
     if [[ "$(kv_get "$STATE_F" ORG)" != "$TARGET_ORG" || "$(kv_get "$STATE_F" USER_ID)" != "$USER_ID" ]]; then
         now=$(now_z)
+        mark=$(index_mark_now)  # VAR=$(cmd) のため run 不使用
         state_set "$STATE_F" "ORG=${TARGET_ORG}" "USER_ID=${USER_ID}" "LAST_FETCH=$(aj time add "$now" --sec -1800)" "LAST_FETCH_ID=" \
-            "LAST_READ=" "LAST_READ_IDS=" || die "手元の状態を書けません。"
+            "LATE_FROM=" "LAST_READ_LINE=${mark%%$'\t'*}" "LAST_READ_ID=${mark#*$'\t'}" "LAST_READ=" "LAST_READ_IDS=" || die "手元の状態を書けません。"
     fi
 
     cpid=$(kv_get "$COLLECTOR_F" PID); corg=$(kv_get "$COLLECTOR_F" ORG)  # VAR=$(cmd) のため run 不使用
@@ -890,7 +1018,8 @@ cmd_pull() {
         [[ "$corg" == "$TARGET_ORG" ]] || die "取得役が、別の組織（${corg}）で動いています（PID ${cpid}）。"
         res=$(request_collector)  # VAR=$(cmd) のため run 不使用
         case "$res" in
-            ok)    notes+=("取得役: 動作中（最後の取得 $(kv_get "$STATUS_F" LAST_FETCH)）") ;;
+            ok)    notes+=("取得役: 動作中（最後の取得 $(kv_get "$STATUS_F" LAST_FETCH)）")
+                   v=$(kv_get "$STATUS_F" LATE_WARNING); [[ -n "$v" ]] && notes+=("$v") ;;  # VAR=$(cmd) のため run 不使用
             error) notes+=("取得役: 直前の取得に失敗しています（sf-tools/logs/sf-log.log を参照）。手元にある分で要約しました") ;;
             *)     log "WARNING" "取得役の取り込みが、${PULL_WAIT} 秒で終わりませんでした。手元にある分で要約します。"
                    notes+=("取り込みが終わっていません（残り約 $(kv_get "$STATUS_F" BACKLOG) 本）。手元にある分で要約しました。少し待って、もう一度 pull してください") ;;
@@ -902,7 +1031,10 @@ cmd_pull() {
             rc=0; fetch_round || rc=$?
             [[ $rc -eq 2 ]] || break
         done
+        LATE_WARN=""
+        [[ $rc -eq 0 ]] && late_recheck   # 追いついたときだけ（200 本の上限で止まったら、次の回に回す。8.3）
         lock_drop "$FETCH_LOCK"
+        [[ -n "$LATE_WARN" ]] && notes+=("$LATE_WARN")
         [[ $rc -eq 1 ]] && die "ログを取得できませんでした（sf-tools/logs/sf-log.log を参照）。"
         [[ $rc -eq 2 ]] && notes+=("取り込みの残りがあります（200 本を超えました）。もう一度 sf-log.sh pull を実行すると、続きを取ります。")
         notes+=("取得役: 動いていません（この pull が、組織から直接取りました）")
@@ -910,24 +1042,56 @@ cmd_pull() {
     [[ -n "$(kv_get "$STATE_F" TRACE_FLAG_ID)" ]] || notes+=("sf-log.sh の TraceFlag がありません（新しいログは出ません）。人に sf-start か sf-log.sh start を頼んでください")
     v=$(kv_get "$STATUS_F" EXPIRES); [[ -n "$v" ]] && notes+=("TraceFlag の期限: ${v}（UTC）")  # VAR=$(cmd) のため run 不使用
 
-    # 要約に入れるログを選ぶ
+    # 要約に入れるログを選ぶ（4.4 の 3）。要約のロックを取ってから、しおりを読む（同時に動く pull が、先にしおりを進めることがあるため）。
+    #   開始時刻ではなく、目録に足された順で選ぶ（遅れて拾い直したログ（8.3）は、開始時刻が、前回の要約のログより前のことがある）
     now=$(now_z)
-    if [[ -n "$SINCE_MIN" ]]; then
-        since=$(aj time add "$now" --sec "-$((SINCE_MIN * 60))"); read_ids=""
+    tmp_list=$(mktemp "${TMPDIR:-/tmp}/sf-log-list.XXXXXX") || die "一時ファイルを作れません。"
+    snap=$(mktemp "${TMPDIR:-/tmp}/sf-log-snap.XXXXXX") || { rm -f "$tmp_list"; die "一時ファイルを作れません。"; }
+    READ_LOCK_HELD=0
+    trap 'rm -f "$tmp_list" "$snap" "${snap}.t"; [[ ${READ_LOCK_HELD:-0} -eq 1 ]] && lock_drop "$READ_LOCK"' EXIT
+    if lock_take "$READ_LOCK" "$READ_TRIES"; then
+        READ_LOCK_HELD=1
     else
-        since=$(kv_get "$STATE_F" LAST_READ); read_ids=$(kv_get "$STATE_F" LAST_READ_IDS)  # VAR=$(cmd) のため run 不使用
-        if [[ ! "$since" =~ $ISO_RE || "$(aj time cmp "$since" "$(aj time add "$now" --sec 300)")" == "1" ]]; then
-            [[ -n "$since" ]] && log "WARNING" "前回の要約の時刻（${since}）が正しくないため、直近 30 分を対象にします。"
-            since=$(aj time add "$now" --sec -1800); read_ids=""
+        log "WARNING" "要約のロックを取れませんでした（${READ_LOCK}）。しおりを読まず・進めずに要約します。"
+        notes+=("要約のロックを取れませんでした（ほかの pull が動いています）。しおりを進めずに、直近 ${SINCE_MIN:-30} 分に始まったログで要約しました")
+    fi
+    index_snapshot "$snap" || die "目録（${INDEX_F}）を読めません。"
+    mode="time"; since=""
+    if [[ -n "$SINCE_MIN" ]]; then
+        since=$(aj time add "$now" --sec "-$((SINCE_MIN * 60))")
+    elif [[ $READ_LOCK_HELD -eq 1 ]]; then
+        rl=$(kv_get "$STATE_F" LAST_READ_LINE); rid=$(kv_get "$STATE_F" LAST_READ_ID)  # VAR=$(cmd) のため run 不使用
+        old=$(kv_get "$STATE_F" LAST_READ)  # VAR=$(cmd) のため run 不使用
+        if [[ -z "$rl" && "$old" =~ $ISO_RE ]]; then
+            # 古い .state からの移す（9.2）: 開始が LAST_READ より前の行と、同じ秒で LAST_READ_IDS にある行を「見た」とする
+            rl=$(awk -F'\t' -v s="$old" -v ids=",$(kv_get "$STATE_F" LAST_READ_IDS)," \
+                '!(($3 < s) || ($3 == s && index(ids, "," $2 ",") > 0)) { print NR - 1; f = 1; exit } END { if (!f) print NR }' "$snap")
+            rid=""; [[ "$rl" -gt 0 ]] && rid=$(awk -F'\t' -v n="$rl" 'NR == n { print $2; exit }' "$snap")
+            log "INFO" "要約のしおりを、新しい形（目録の ${rl} 行目）に移しました。"
+        fi
+        if [[ "$rl" == "0" && -z "$rid" ]]; then
+            mode="line"; base=0
+        elif [[ "$rl" =~ ^[0-9]+$ && "$rid" =~ $ID_RE ]]; then
+            at=$(awk -F'\t' -v n="$rl" 'NR == n { print $2; exit }' "$snap")
+            if [[ "$at" == "$rid" ]]; then
+                mode="line"; base="$rl"
+            else
+                found=$(awk -F'\t' -v id="$rid" '$2 == id { print NR; exit }' "$snap")
+                if [[ -n "$found" ]]; then
+                    log "WARNING" "目録の行がずれていたため、要約のしおりの行を探し直しました（${rl} → ${found} 行目）。"
+                    mode="line"; base="$found"
+                fi
+            fi
+        fi
+        if [[ "$mode" != "line" ]]; then
+            [[ -n "${rl}${rid}" ]] && log "WARNING" "前回の要約のしおりが使えないため、直近 30 分に始まったログを対象にします。"
         fi
     fi
-    tmp_list=$(mktemp "${TMPDIR:-/tmp}/sf-log-list.XXXXXX") || die "一時ファイルを作れません。"
-    trap 'rm -f "$tmp_list"' EXIT
-    if [[ -f "$INDEX_F" ]]; then
-        # 開始が since より後（同じ秒は、前回の要約に入れた ID を除く）。開始・ID の順に並べる
-        awk -F'\t' -v s="$since" -v ids=",${read_ids}," -v strict="$([[ -n "$SINCE_MIN" ]] && echo 0 || echo 1)" \
-            '($3 > s) || ($3 == s && (strict == 0 || index(ids, "," $2 ",") == 0))' "$INDEX_F" \
-            | LC_ALL=C sort -t$'\t' -k3,3 -k2,2 > "$tmp_list"  # 選ぶだけ（失敗は、下の件数で分かる）
+    if [[ "$mode" == "line" ]]; then
+        awk -F'\t' -v b="$base" 'NR > b' "$snap" | LC_ALL=C sort -t$'\t' -k3,3 -k2,2 > "$tmp_list"  # 選ぶだけ（失敗は、下の件数で分かる）
+    else
+        [[ -n "$since" ]] || since=$(aj time add "$now" --sec -1800)
+        awk -F'\t' -v s="$since" '$3 >= s' "$snap" | LC_ALL=C sort -t$'\t' -k3,3 -k2,2 > "$tmp_list"  # 選ぶだけ（同上）
     fi
     cnt=$(wc -l < "$tmp_list" | tr -d ' ')
     if [[ "$cnt" -gt "$MAX_LOGS" ]]; then
@@ -947,15 +1111,13 @@ cmd_pull() {
     mv -f "${out_md}.tmp" "$out_md" && cp "$out_md" "${APEX_DIR}/latest.md.tmp" && mv -f "${APEX_DIR}/latest.md.tmp" "${APEX_DIR}/latest.md" \
         || die "要約を書けませんでした。"
 
-    # 要約に入れた最も新しいログの開始時刻を、次の起点にする（成功したときだけ）
-    if [[ -s "$tmp_list" ]]; then
-        newest=$(tail -1 "$tmp_list" | cut -f3)
-        read_ids=$(awk -F'\t' -v s="$newest" '$3 == s {printf "%s%s", (n++ ? "," : ""), $2}' "$tmp_list")
-        if [[ "$newest" == "$(kv_get "$STATE_F" LAST_READ)" && -z "$SINCE_MIN" ]]; then
-            read_ids="$(kv_get "$STATE_F" LAST_READ_IDS),${read_ids}"; read_ids="${read_ids#,}"
-        fi
-        state_set "$STATE_F" "LAST_READ=${newest}" "LAST_READ_IDS=${read_ids}" || log "WARNING" "前回の要約の時刻を書けませんでした。"
+    # 要約のしおりを、読んだ目録の最後の行に進める（成功したときだけ。--since・ロックが取れないときは進めない。4.4 の 5）
+    if [[ $READ_LOCK_HELD -eq 1 && -z "$SINCE_MIN" ]]; then
+        mark=$(index_mark "$snap")  # VAR=$(cmd) のため run 不使用
+        state_set "$STATE_F" "LAST_READ_LINE=${mark%%$'\t'*}" "LAST_READ_ID=${mark#*$'\t'}" "LAST_READ=" "LAST_READ_IDS=" \
+            || log "WARNING" "要約のしおりを書けませんでした。"
     fi
+    if [[ $READ_LOCK_HELD -eq 1 ]]; then lock_drop "$READ_LOCK"; READ_LOCK_HELD=0; fi
     hdr=$(head -1 "${APEX_DIR}/latest.md")
     printf '%s\n%s\n' "${hdr#\# }" "${APEX_DIR}/latest.md"
     exit 0
@@ -1122,11 +1284,13 @@ cmd_collect() {
         if { [[ $now -ge $next ]] || has_pull_request; } && ! upgrade_running; then
             if lock_take "$FETCH_LOCK" 1; then
                 rc=0; fetch_round || rc=$?
+                LATE_WARN=""
+                [[ $rc -eq 0 ]] && late_recheck   # 追いついた回だけ。目録に書き終えてから、下で pull に応える（9.3）
                 lock_drop "$FETCH_LOCK"
                 cnt=$(count_today)  # VAR=$(cmd) のため run 不使用
                 case "$rc" in
                     0) respond_pulls ok; backoff=$INTERVAL; next=$(( $(date +%s) + INTERVAL ))
-                       state_set "$STATUS_F" "STATE=collecting" "LAST_FETCH=$(date '+%H:%M')" "COUNT_TODAY=${cnt}" "BACKLOG=0" "WARNING=" || true ;;
+                       state_set "$STATUS_F" "STATE=collecting" "LAST_FETCH=$(date '+%H:%M')" "COUNT_TODAY=${cnt}" "BACKLOG=0" "WARNING=${LATE_WARN}" "LATE_WARNING=${LATE_WARN}" || true ;;
                     2) next=0
                        state_set "$STATUS_F" "LAST_FETCH=$(date '+%H:%M')" "COUNT_TODAY=${cnt}" "BACKLOG=50 本以上" || true ;;
                     *) respond_pulls error; backoff=$(( backoff * 2 > 600 ? 600 : backoff * 2 )); next=$(( $(date +%s) + backoff ))
@@ -1159,7 +1323,7 @@ cmd_status() {
     for k in STATE ORG EXPIRES LAST_FETCH COUNT_TODAY BACKLOG REASON WARNING; do
         v=$(kv_get "$STATUS_F" "$k"); [[ -n "$v" ]] && echo "  表示の状態 ${k}: ${v}"   # VAR=$(cmd) のため run 不使用
     done
-    for k in ORG TRACE_FLAG_ID LAST_FETCH LAST_READ; do
+    for k in ORG TRACE_FLAG_ID LAST_FETCH LATE_FROM LAST_READ_LINE; do
         v=$(kv_get "$STATE_F" "$k"); [[ -n "$v" ]] && echo "  取得の記録 ${k}: ${v}"   # VAR=$(cmd) のため run 不使用
     done
     v=$(grep -c -v '^CLOSING=' "$OWNERS_F" 2>/dev/null || true); echo "  持ち主（起動中の sf-start）: ${v:-0}"   # VAR=$(cmd) のため run 不使用

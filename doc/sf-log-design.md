@@ -756,7 +756,7 @@ force-*/logs/apex/
 - `~/sf-tools/doc/ai-dev-loop.md`（sf-tools のリポジトリ内）に置く
   - force-* の `CLAUDE.md` などには、「開発のサイクルは `~/sf-tools/doc/ai-dev-loop.md` に従う」の 1 行だけを書く
   - 理由: 手順を直したとき、各利用者の `git pull` で届く（`templates/` に置くと、`sf-init` を実行した時点の写しのまま古くなる）
-- force-* の AI の指示ファイルへの入れ方（2026-11-24 に決定。13.2）: `templates/` に `CLAUDE.md`（`@~/sf-tools/doc/ai-dev-loop.md` の 1 行。Claude Code が手順書を読み込む）と `AGENTS.md`（Codex など向けに、同じことを文で書いた 1 行）を置く。新しく作る force-* には、`sf-init` の Phase 3 が写す（force-* のリポジトリにコミットされ、チーム全員の AI に届く）。すでにある force-* は、その 2 つのファイルを手でコピーしてコミットする（文書サイトの commands-dev に書いた）
+- force-* の AI の指示ファイルへの入れ方（2026-11-24 に決定。13.2）: `templates/` に `CLAUDE.md`（`@~/sf-tools/doc/ai-dev-loop.md` の 1 行。Claude Code が手順書を読み込む）と `AGENTS.md`（Codex など向けに、同じことを文で書いた 1 行）を置く。新しく作る force-* には、`sf-init` の Phase 3 が写す（force-* のリポジトリにコミットされ、チーム全員の AI に届く）。すでにある force-* は、その 2 つのファイルを手でコピーしてコミットする（文書サイトの commands-dev に書いた）。雛形には「この行は消さないでください」の注意を入れ、プロジェクト独自の決まりは、その下に自由に書き足せる。`sf-start.sh` は、起動のたびに、その行があるかを確かめ、なければ WARNING で知らせる（書き換えない）。手順書は、デバッグログのサイクルに加え、sf-tools のコマンドの使い分け（AI が実行してよいもの・人に頼むもの・実行しないもの）も書く（2026-11-24。TAMAさんの依頼）
 
 ### 11.2 中身（`doc/ai-dev-loop.md` に書いた。2026-11-24）
 

@@ -32,7 +32,10 @@
 #           WSL で wslview がないときは、powershell.exe でブラウザを開く wslview を /tmp/sf-wsl-bin に作り、PATH の先頭に加える
 #        ログインに失敗したら、中断する（終了コード 1。設定ファイルの書き込み・VS Code の起動・ランチャーの起動は、行わない）
 #   4. .sf/config.json（{"target-org": エイリアス}）と .sfdx/sfdx-config.json（{"defaultusername": エイリアス}）を
-#      上書きする（書き込めなければ中断）。code コマンドがあれば code . で VS Code を起動する（なければ警告のみ）
+#      上書きする（書き込めなければ中断）。code コマンドがあれば code . で VS Code を起動する（なければ警告のみ）。
+#      続けて、AI 向けの案内（プロジェクトのルートの CLAUDE.md に「@~/sf-tools/doc/ai-dev-loop.md」の行、AGENTS.md に
+#      「~/sf-tools/doc/ai-dev-loop.md」を含む行）があるかを確かめ、なければ WARNING で、足し方を案内する（ファイルは書き換えない。
+#      書き換えると、リポジトリに未コミットの変更ができるため）
 #   5. ~/sf-tools/bin/sf-install.sh があれば、バックグラウンドで実行する（出力は、このスクリプトのログに追記）。
 #      内容: ~/sf-tools の git pull・設定ファイルの確認・Git フック（pre-commit / pre-push）の設置・
 #      sf-tools/release/{ブランチ}/ の準備と sf-tools/release/branch_name.txt の更新（main ブランチでは行わない）・
@@ -196,6 +199,16 @@ if command -v code >/dev/null 2>&1; then
     log "SUCCESS" "VS Code を起動しました。"
 else
     log "WARNING" "'code' コマンドが見つかりません。VS Code を手動で起動してください。"
+fi
+
+# AI 向けの案内（処理の流れの 4）: force-* の CLAUDE.md・AGENTS.md に、手順書 ~/sf-tools/doc/ai-dev-loop.md を指す行があるか。
+#   なければ知らせるだけ（書き換えない）。雛形は ~/sf-tools/templates/ の CLAUDE.md・AGENTS.md（sf-init が新しい force-* に写す）
+_ai_missing=""
+grep -qF '@~/sf-tools/doc/ai-dev-loop.md' CLAUDE.md 2>/dev/null || _ai_missing="CLAUDE.md"   # 条件チェックのため run 不使用
+grep -qF '~/sf-tools/doc/ai-dev-loop.md' AGENTS.md 2>/dev/null || _ai_missing="${_ai_missing:+${_ai_missing}・}AGENTS.md"   # 条件チェックのため run 不使用
+if [[ -n "$_ai_missing" ]]; then
+    log "WARNING" "AI 向けの案内（${_ai_missing} の、手順書 ~/sf-tools/doc/ai-dev-loop.md を指す行）がありません。AI が sf-tools の使い方を知らないまま作業します。"
+    log "WARNING" "  ~/sf-tools/templates/ の ${_ai_missing} の行を、プロジェクトのルートの同じ名前のファイルに足して（ファイルがなければコピーして）、コミットしてください。"
 fi
 
 # ------------------------------------------------------------------------------

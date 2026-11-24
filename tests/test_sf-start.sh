@@ -148,6 +148,33 @@ test_login_url_not_by_alias() {
 }
 
 # sf-start.sh → sf-launcher.sh が呼ばれる
+# AI 向けの案内（CLAUDE.md・AGENTS.md の、手順書を指す行）がなければ、WARNING で知らせる（書き換えない）
+test_ai_guide_check() {
+    local td mb mh out
+    setup_std_env td mb mh
+    create_all_mocks "$mb"
+    mkdir -p "$mh/sf-tools/bin"
+    printf '#!/bin/bash\nexit 0\n' > "$mh/sf-tools/bin/sf-launcher.sh"; chmod +x "$mh/sf-tools/bin/sf-launcher.sh"
+    rm -f "$mh/sf-tools/bin/sf-log.sh"
+    echo '{"target-org":"testorg"}' > "$td/.sf/config.json"
+    export MOCK_SF_ORG_JSON='{"result":{"alias":"testorg","id":"00D000000000001AAA"}}'
+    # どちらもない → 両方の名前で知らせる
+    out=$(cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-start.sh" 2>&1 < /dev/null)
+    assert_output_contains "$out" "AI 向けの案内（CLAUDE.md・AGENTS.md の" "案内がなければ、両方のファイルの名前で知らせる"
+    assert_file_not_exists "$td/CLAUDE.md" "ファイルを作らない（書き換えない）"
+    # 雛形と同じ → 知らせない
+    cp "$SF_TOOLS_DIR/templates/CLAUDE.md" "$SF_TOOLS_DIR/templates/AGENTS.md" "$td/"
+    out=$(cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-start.sh" 2>&1 < /dev/null)
+    assert_output_not_contains "$out" "AI 向けの案内" "雛形の行があれば、知らせない"
+    # プロジェクト独自の決まりを書き足しても、行が残っていれば知らせない。行を消したら知らせる
+    printf '# このプロジェクトの決まり\n- 命名は XXX\n' >> "$td/CLAUDE.md"
+    grep -v 'ai-dev-loop' "$td/AGENTS.md" > "$td/AGENTS.md.t" && mv "$td/AGENTS.md.t" "$td/AGENTS.md"
+    out=$(cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-start.sh" 2>&1 < /dev/null)
+    assert_output_contains "$out" "AI 向けの案内（AGENTS.md の" "行を消したファイルだけを知らせる（書き足しは問題にしない）"
+    unset MOCK_SF_ORG_JSON
+    teardown "$td" "$mb" "$mh"
+}
+
 test_launcher_called() {
     local td mb mh
     setup_std_env td mb mh
@@ -261,6 +288,7 @@ test_sf_log_begin_and_leave() {
 }
 
 test_launcher_called
+test_ai_guide_check
 test_sf_cli_abort
 test_outside_force_dir
 test_sf_log_begin_and_leave

@@ -4,19 +4,19 @@
 #   コマンド（bin/sf-*.sh）は、どれかの文書の基になっていること（tests/docs-stamp.sh --check が確認する）。
 # 文書を足したら、その文書の基になるコードを、ここに足す（- のままで足し、文書を読み直してから --update する）。
 
-site/reference/commands-dev.html | bin/sf-job.sh | 3104353950-6410 | b3c4eb3
-site/reference/commands-dev.html | bin/sf-start.sh | 1573455021-6812 | b3c4eb3
-site/reference/commands-dev.html | bin/sf-launcher.sh | 1532413299-4317 | b3c4eb3
-site/reference/commands-dev.html | bin/sf-check.sh | 334649645-7163 | b3c4eb3
-site/reference/commands-dev.html | bin/sf-dryrun.sh | 2320821728-2196 | b3c4eb3
-site/reference/commands-dev.html | bin/sf-release.sh | 1358071720-8047 | b3c4eb3
-site/reference/commands-dev.html | bin/sf-deploy.sh | 3942495165-4530 | b3c4eb3
-site/reference/commands-dev.html | bin/sf-push.sh | 1125921469-4600 | b3c4eb3
-site/reference/commands-dev.html | bin/sf-next.sh | 3773425382-4882 | b3c4eb3
-site/reference/commands-dev.html | bin/sf-restart.sh | 3849369820-2445 | b3c4eb3
-site/reference/commands-dev.html | bin/sf-hook.sh | 4023496098-3227 | b3c4eb3
-site/reference/commands-dev.html | bin/sf-log.sh | 2609214605-17882 | b3c4eb3
-site/reference/commands-dev.html | bin/sf-unhook.sh | 756720157-1896 | b3c4eb3
+site/reference/commands-dev.html | bin/sf-job.sh | 3104353950-6410 | 5b20e70
+site/reference/commands-dev.html | bin/sf-start.sh | 3052177791-7228 | 5b20e70
+site/reference/commands-dev.html | bin/sf-launcher.sh | 1532413299-4317 | 5b20e70
+site/reference/commands-dev.html | bin/sf-check.sh | 334649645-7163 | 5b20e70
+site/reference/commands-dev.html | bin/sf-dryrun.sh | 2320821728-2196 | 5b20e70
+site/reference/commands-dev.html | bin/sf-release.sh | 1358071720-8047 | 5b20e70
+site/reference/commands-dev.html | bin/sf-deploy.sh | 3942495165-4530 | 5b20e70
+site/reference/commands-dev.html | bin/sf-push.sh | 1125921469-4600 | 5b20e70
+site/reference/commands-dev.html | bin/sf-next.sh | 3773425382-4882 | 5b20e70
+site/reference/commands-dev.html | bin/sf-restart.sh | 3849369820-2445 | 5b20e70
+site/reference/commands-dev.html | bin/sf-hook.sh | 4023496098-3227 | 5b20e70
+site/reference/commands-dev.html | bin/sf-log.sh | 2609214605-17882 | 5b20e70
+site/reference/commands-dev.html | bin/sf-unhook.sh | 756720157-1896 | 5b20e70
 
 site/reference/commands-auto.html | bin/sf-install.sh | 1635151198-6746 | 0277207
 site/reference/commands-auto.html | bin/sf-upgrade.sh | 1489370091-5002 | 0277207
@@ -27,8 +27,8 @@ site/reference/commands-auto.html | bin/sf-metasync.sh | 2635827350-25190 | 0277
 site/reference/target-files.html | bin/sf-check.sh | 334649645-7163 | b2034a6
 site/reference/target-files.html | bin/sf-release.sh | 1358071720-8047 | b2034a6
 
-site/guide/basics.html | bin/sf-job.sh | 3104353950-6410 | cceb149
-site/guide/basics.html | bin/sf-start.sh | 1573455021-6812 | cceb149
+site/guide/basics.html | bin/sf-job.sh | 3104353950-6410 | 5b20e70
+site/guide/basics.html | bin/sf-start.sh | 3052177791-7228 | 5b20e70
 
 site/guide/daily.html | bin/sf-dryrun.sh | 2320821728-2196 | b2034a6
 site/guide/daily.html | bin/sf-deploy.sh | 3942495165-4530 | b2034a6
@@ -55,9 +55,9 @@ site/admin/verify.html | phases/init/verify.sh | 1817113336-12401 | b2034a6
 site/admin/verify.html | bin/sf-typecheck.sh | 2610487361-7160 | b2034a6
 site/admin/verify.html | lib/typecheck.js | 3564138558-5155 | b2034a6
 
-site/guide/install.html | bin/sf-upgrade.sh | 1489370091-5002 | 0277207
-site/guide/install.html | bin/sf-install.sh | 1635151198-6746 | 0277207
-site/guide/install.html | bin/sf-start.sh | 1573455021-6812 | 0277207
+site/guide/install.html | bin/sf-upgrade.sh | 1489370091-5002 | 5b20e70
+site/guide/install.html | bin/sf-install.sh | 1635151198-6746 | 5b20e70
+site/guide/install.html | bin/sf-start.sh | 3052177791-7228 | 5b20e70
 
 site/admin/troubleshooting.html | bin/sf-job.sh | 3104353950-6410 | fc9cbb5
 site/admin/troubleshooting.html | bin/sf-push.sh | 1125921469-4600 | fc9cbb5

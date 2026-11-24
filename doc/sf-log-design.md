@@ -379,11 +379,13 @@ bash ~/sf-tools/bin/sf-log.sh leave --owner <印>   # sf-start の終了時: 持
 | 14:30:01 | /aura（AccountController.save） | Attempt to de-reference... | 1.2MB | 340ms | 12/100 | 3/150 | logs/apex/20261122/143001_07LdM00000AbCdE_aura.log |
 
 ## 3. System.debug の出力（新しい順・最大 50 行）
-## 4. フロー・入力規則
+## 4. フロー・入力規則・重複ルール
 - [logs/apex/20261122/143001_07LdM00000AbCdE_aura.log:120] フロー Account_After_Save: 開始 2・完了 1・エラー 1・要素: Check_Type（FlowDecision）、Set_Description（FlowRecordUpdate）
 - [logs/apex/20261122/143001_07LdM00000AbCdE_aura.log:5] 入力規則 Account_Check: 評価 2・通過 1・停止 1
 - 入力規則のエラー: 1 件
   - [logs/apex/20261122/143001_07LdM00000AbCdE_aura.log:41] VALIDATION_FAIL（規則: Account_Check）
+- [logs/apex/20261122/143001_07LdM00000AbCdE_aura.log:15] 重複ルール Standard Account Duplicate Rule（Account・INSERT）: 保存の中で 1 回（保存しようとした 1 件のうち、重複あり 1 件）・保存の後で 1 回（重複あり 1 件）・見つかった重複: 001aj00004KokWj・動作: 許可（警告・記録）
+- 保存の中で重複ありのとき、Apex・API の保存は、許可の指定（DuplicateRuleHeader.allowSave）がなければ止められます（…）
 - フローのエラー（FLOW_ELEMENT_ERROR）の文言は、上の 1 に入れています
 ## 5. 制限の使用量（上限の 50% を超えたものだけ）
 ## 6. 切り詰め・出なかった区分（20MB で切られた・該当する行が 1 行もなかった区分）
@@ -391,14 +393,16 @@ bash ~/sf-tools/bin/sf-log.sh leave --owner <印>   # sf-start の終了時: 持
 
 - 一覧の「操作」の括弧には、最初の CODE_UNIT に加えて、そのログの中のフロー・入力規則の名前を添える（例: `/services/data/v68.0/sobjects/Account（Validation:Account:new／フロー: Account_After_Save／入力規則: Account_Check）`）。1 回の保存が何本かのログに分かれ、最初の CODE_UNIT だけでは、フローを含むログが入力規則の処理に見えるため（6.3）
 - 4 のフローは、完了の行がない実行（エラーで止まった・ログの終わりで切れた）があるため、成功の数を推し量らず、開始・完了・エラーの行の数だけを書く
+- 4 の重複ルールは、**保存の中**（`DML_BEGIN`〜`DML_END` の中）と**保存の後**（保存のあとの、記録のための検出。巻き戻したあとにも出た）を分けて数える（足し合わせると、同じ保存を二重に数えるため）。一覧の「操作」の括弧には「重複: ルール名」を添える
 
-### 6.3 拾う行（2026-11-23 に実機で確認。入力規則・フローは 2026-11-24 に確認）
+### 6.3 拾う行（2026-11-23 に実機で確認。入力規則・フロー・重複ルールは 2026-11-24 に確認）
 
 | 区分 | ログの行の種類 |
 |---|---|
 | エラー | `EXCEPTION_THROWN`・`FATAL_ERROR`・`FLOW_ELEMENT_ERROR` |
 | 入力規則 | `VALIDATION_FAIL`・`VALIDATION_RULE`・`VALIDATION_ERROR`（評価の数には `VALIDATION_PASS` も数える） |
 | フロー | `FLOW_START_INTERVIEW_BEGIN`・`FLOW_ELEMENT_BEGIN`・`FLOW_ELEMENT_ERROR`（実行の ID とフローの名前を結ぶため、`FLOW_CREATE_INTERVIEW_END`・`FLOW_INTERVIEW_FINISHED` も読む） |
+| 重複ルール | `DUPLICATE_DETECTION_RULE_INVOCATION`（`DuplicateRuleName:…`・`DmlType:…`）。そのあとの `DUPLICATE_DETECTION_MATCH_INVOCATION_DETAILS`（`EntityType`・`ActionTaken`・`DuplicateRecordIds`）と `…_SUMMARY`（`NumRecordsToBeSaved`・`NumRecordsToBeSavedWithDuplicates`・`NumDuplicateRecordsFound`）を、直前のルールに結ぶ（`DUPLICATE_DETECTION_END` で切る）。項目は「キー:値」 |
 | デバッグ出力 | `USER_DEBUG` |
 | 流れ | `CODE_UNIT_STARTED` / `CODE_UNIT_FINISHED`（エラーの「直前の処理」を示すため） |
 | 制限 | `LIMIT_USAGE_FOR_NS`・`CUMULATIVE_LIMIT_USAGE` |
@@ -900,6 +904,11 @@ force-*/logs/apex/
   - Codex のレビュー（6 回目・2 件。すべて採った）: 要約のロックが取れないときも `--since` を効かせる・`LAST_READ_LINE=0`（まだ何も見ていない。`LAST_READ_ID` は空）を定め、移行で全部の行を見たときは最後の行にする
   - Codex のレビュー（5 回目・2 件。すべて採った）: `--since` のときは、しおりを使わず、目録の全行から直近 N 分を選ぶ・しおりが使えないときは、目録の全行から直近 30 分を選ぶ（4.4 の 3 に、選び方を 3 つに分けて書いた）
   - Codex のレビュー（4 回目・2 件。すべて採った）: `pull` は、要約のロックを取ってから、しおりを読む（4.4 の 1 から 3 に移した）・1,000 本に達したときは、限界として拾い直しを成功とし、`LATE_FROM` を消す
+
+- 2026-11-24（TAMAさんの依頼）: 要約の 4 に重複ルールを足した（6.2・6.3）。tama-dev で、標準の取引先の重複ルール（動作 `Allow_[Alert,Report]`）を確かめた:
+  - 動作が「許可（警告・記録）」でも、匿名 Apex の保存は、`DuplicateRuleHeader.allowSave` がなければ止められた（`DUPLICATES_DETECTED`「Use one of these records?」）。ふつうの `insert` は `EXCEPTION_THROWN` が出る（1 のエラーに入る）。部分保存（`Database.insert(…, false)`）は、失敗を示す行が出ない（重複ルールの行だけが手がかり）
+  - 重複が見つかると、`MATCH_INVOCATION_DETAILS`（動作・重複したレコードの ID）と `SUMMARY`（件数）が出る。`allowSave` で保存すると、保存の中では照合の行が出ず、処理の最後に（セーブポイントで巻き戻したあとでも）もう一度の検出が出て、そこに一致が出た
+  - 動作の言い換えは、実機で見た語（`Allow`・`Alert`・`Report`）だけ。ほかの語（止めるルールの動作など）は、確かめていないため、そのまま書く
 
 ### 13.4 後回しにするもの
 

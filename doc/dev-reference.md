@@ -76,7 +76,7 @@
 | `test_sf-start.sh` | sf-start.sh |
 | `test_sf-restart.sh` | sf-restart.sh |
 | `test_sf-metasync.sh` | sf-metasync.sh（鏡像: 取得 → 計画 → 反映・削除・取得の失敗とやり直し・`--dry-run`・保留と終了コード 3・コミット前の中断の復元） |
-| `test_apexlog-js.sh` | lib/apexlog.js（sf-log.sh の部品。summarize: エラー・一覧・System.debug・入力規則・フロー（開始・完了・エラーと要素。フローのエラーを実行に結ぶ・リンクのタグを外す）・制限・取れていないもの（読めなかったログ・読み取れなかった行・切り詰め・タイムゾーン不明・該当する行なし）・一覧の形の誤り。list: 自分 / 他の人の見分け・応答の形の誤り（エラーの文言に値を出さない）。time: now・norm・cmp・min・add。見本のログは `tests/fixtures/apexlog/`（実データなし）） |
+| `test_apexlog-js.sh` | lib/apexlog.js（sf-log.sh の部品。summarize: エラー・一覧・System.debug・入力規則・フロー（開始・完了・エラーと要素。フローのエラーを実行に結ぶ・リンクのタグを外す）・重複ルール（保存の中と保存の後を分ける・見つかった重複・動作の言い換え・止められる注意）・制限・取れていないもの（読めなかったログ・読み取れなかった行・切り詰め・タイムゾーン不明・該当する行なし）・一覧の形の誤り。list: 自分 / 他の人の見分け・応答の形の誤り（エラーの文言に値を出さない）。time: now・norm・cmp・min・add。見本のログは `tests/fixtures/apexlog/`（実データなし）） |
 | `test_metasync-js.sh` | lib/metasync.js（plan: 追加・変更・削除・CRLF・残すファイル・S2〜S5・S9 の境界・S1/S8。apply: 反映・保留・根の外のパスの拒否。detect: 変更の検知（状態なし・変更なし・履歴・区分 B の変化・失敗・状態の破損）と、区分の表 `config/metasync-detect.txt` の整合） |
 | `test_sf-release.sh` | sf-release.sh |
 | `test_sf-deploy.sh` | sf-deploy.sh |

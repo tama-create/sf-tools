@@ -104,7 +104,7 @@ test_summarize_flow() {
     _sum
     assert_exit_ok "$_RC" "要約を作れる"
     _has "$_OUT" "/services/data/v68.0/sobjects/Account（Validation:Account:new／フロー: Account_After_Save／入力規則: Account_Check） |" "一覧: 操作に、最初の CODE_UNIT と、ログの中のフロー・入力規則の名前を添える"
-    _has "$_OUT" "## 4. フロー・入力規則" "4 の見出し"
+    _has "$_OUT" "## 4. フロー・入力規則・重複ルール" "4 の見出し"
     _has "$_OUT" "- [$FX/flow.log:16] フロー Account_After_Save: 開始 2・完了 1・エラー 1・要素: Check_Type（FlowDecision）、Set_Description（FlowRecordUpdate）" "フロー: 開始・完了・エラーの数と、実行した要素（最初の開始の場所）"
     _has "$_OUT" "- [$FX/flow.log:5] 入力規則 Account_Check: 評価 2・通過 1・停止 1" "入力規則: 評価・通過・停止の数"
     _has "$_OUT" "- 入力規則のエラー: 1 件" "入力規則のエラーの数"
@@ -114,14 +114,32 @@ test_summarize_flow() {
     _has "$_OUT" "場所: フロー Account_After_Save の要素 Set_Description（FlowRecordUpdate）（直前の CODE_UNIT: Flow:Account）" "フローのエラー: 同じ要素を最後に始めた実行のフローに結ぶ"
     _has "$_OUT" "MARK <a href='x'>そのまま</a> List<String>" "System.debug の < > は、そのまま残す"
     _has "$_OUT" "エラー 1）" "見出しのエラーの数に、フローのエラーを数える"
-    # 区分は CATEGORIES の順（エラー・入力規則・フロー・…・制限・件数）。「）: 制限・件数」なら、その前の区分は出ている
-    _has "$_OUT" "（詳しさが足りずに出なかった可能性もある）: 制限・件数" "フロー・入力規則・エラーの行があれば、出なかった区分に入れない（制限・件数だけ）"
+    # 区分は CATEGORIES の順（エラー・入力規則・フロー・重複ルール・…・制限・件数）。「）: 重複ルール・制限・件数」なら、その前の区分は出ている
+    _has "$_OUT" "（詳しさが足りずに出なかった可能性もある）: 重複ルール・制限・件数" "フロー・入力規則・エラーの行があれば、出なかった区分に入れない（重複ルール・制限・件数だけ）"
     # フロー・入力規則の行がないログ
     _list ok.log 07L000000000001AAA 2026-11-23T02:06:40Z Api 成功 3074 644
     _sum
     _has "$_OUT" "- フロー: なし" "フローがなければ、なしと書く"
     _has "$_OUT" "- 入力規則: なし" "入力規則がなければ、なしと書く"
     _has "$_OUT" "- 入力規則のエラー: なし" "入力規則のエラーがなければ、なしと書く"
+    _has "$_OUT" "- 重複ルール: なし" "重複ルールがなければ、なしと書く"
+    _hasnt "$_OUT" "allowSave" "重複ありの保存がなければ、止められる注意を書かない"
+    rm -f "$_LIST"
+}
+
+# 重複ルール（2026-11-24 に tama-dev で確かめた形をまねた duplicate.log。6.3）
+test_summarize_duplicate() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] summarize: 重複ルール${CLR_RST}"
+    _list duplicate.log 07L000000000007AAA 2026-11-24T03:00:00Z "/services/data/v68.0/tooling/executeAnonymous/" 成功 3000 10
+    _sum
+    assert_exit_ok "$_RC" "要約を作れる"
+    _has "$_OUT" "（execute_anonymous_apex／重複: Standard Account Duplicate Rule・Standard Contact Duplicate Rule） |" "一覧: 操作に、重複ルールの名前を添える"
+    _has "$_OUT" "- [$FX/duplicate.log:9] 重複ルール Standard Account Duplicate Rule（Account・INSERT）: 保存の中で 1 回（保存しようとした 1 件のうち、重複あり 1 件）・保存の後で 1 回（重複あり 1 件）・見つかった重複: 001000000000001・動作: 許可（警告・記録）" "重複ルール: 保存の中と保存の後を分けて数え、見つかった重複と動作を書く"
+    _has "$_OUT" "- [$FX/duplicate.log:19] 重複ルール Standard Contact Duplicate Rule（Contact・INSERT）: 保存の中で 1 回（保存しようとした 2 件のうち、重複あり 0 件）・動作: 許可（警告・記録）" "重複がないルール: 見つかった重複を書かない"
+    _has "$_OUT" "許可の指定（DuplicateRuleHeader.allowSave）がなければ止められます" "保存の中で重複ありなら、止められる注意を書く"
+    _has "$_OUT" "DUPLICATES_DETECTED, Use one of these records?" "止められたときの例外は、1 のエラーに入る"
+    _hasnt "$_OUT" "出なかった可能性もある）: エラー・入力規則・フロー・重複ルール" "重複ルールの行があれば、出なかった区分に入れない"
     rm -f "$_LIST"
 }
 
@@ -272,6 +290,7 @@ test_time() {
 test_summarize_errors
 test_summarize_list_debug_limits
 test_summarize_flow
+test_summarize_duplicate
 test_summarize_gaps
 test_summarize_bad_list
 test_list

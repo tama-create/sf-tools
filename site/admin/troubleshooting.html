@@ -45,6 +45,8 @@
     <tr><td><code>sf-upgrade.sh</code> が「Salesforce CLI のアップデートに失敗しました」「書き込めません」と出る</td><td><a href="#dev-npm-perm">npm の入れ先に書き込めない</a></td></tr>
     <tr><td>「npm の最新版は、今の Node では入れられません」と出る</td><td><a href="#dev-npm-node">npm が、Node に合わない</a></td></tr>
     <tr><td><code>sf</code> を入れ直したのに古いまま・プロジェクトの中に <code>%APPDATA%</code> というフォルダができた</td><td><a href="#dev-sf-path"><code>sf</code> の場所がおかしい</a></td></tr>
+    <tr><td>デバッグログ（<code>sf-log.sh</code>）が「別の環境（wsl）で、デバッグログを取っています」と出て、動かない・取り始めない</td><td><a href="#dev-log-runtime">Git Bash と WSL の混在</a></td></tr>
+    <tr><td><code>sf-log.sh</code> が「手元の状態のロックを取れませんでした」「取得のロックを取れませんでした」と出る</td><td><a href="#dev-log-lock">残ったロック</a></td></tr>
     <tr><td>どれにも当てはまらない・直らない（不具合だと思う）</td><td><a href="#report">ログの渡し方</a></td></tr>
   </tbody>
 </table>
@@ -268,6 +270,21 @@
   <li><strong>古い <code>sf</code> が、先に見つかっている。</strong><code>type -a sf</code> で場所を確かめます。2 行以上出るときは、古い方（<code>C:\Program Files\nodejs</code> や <code>C:\sf</code> など）を消します（<a href="../guide/install.html#npm-switch">入れ替え</a>）。</li>
   <li><strong><code>npm config set prefix "%APPDATA%\npm"</code> と、書いてしまった。</strong>Git Bash では、<code>%APPDATA%</code> が展開されず、「いま居るフォルダの下の <code>%APPDATA%</code> という名前のフォルダ」に、<code>sf</code> が入ります。入れ先を、実際のパス（<code>C:\Users\（ユーザー名）\AppData\Roaming\npm</code>）で設定し直して、<code>sf</code> を入れ直します。できてしまったフォルダは、プロジェクトの中で、<code>git status</code> に <code>%APPDATA%/</code> と出ます。<strong>コミットしないで</strong>ください。内容を確かめてから、削除します。</li>
 </ul>
+
+<h3 id="dev-log-runtime">デバッグログが「別の環境（wsl）で、デバッグログを取っています」と出る</h3>
+<p>同じプロジェクトを、Windows の Git Bash と WSL の両方から開いたときに出ます。デバッグログ（<code>logs/apex/</code>）は、<strong>同時には 1 つの環境だけ</strong>が扱います（2 つの環境は、おたがいのプロセスが見えないため、混ぜると、取得がぶつかったり、相手の取得を止めたりするからです）。表示された環境（例: wsl）で sf-start が動いているあいだ、ほかの環境では、<code>sf-log.sh status</code> だけが答え、ほかのコマンドは何もしません。AI のコマンドも、sf-start と同じ環境で実行します。</p>
+<p>別の環境に切り替えるときは、次のどれかにします。</p>
+<ul>
+  <li><strong>扱っている環境で、sf-start（ランチャー）を終える。</strong>デバッグログの後始末がされ、すぐに別の環境で始められます。</li>
+  <li>急ぐときは、扱っている環境で <code>bash ~/sf-tools/bin/sf-log.sh stop</code> を実行します。</li>
+  <li>扱っていた環境のウィンドウを × で閉じた・PC が止まったときは、<strong>30 分</strong>待つと、別の環境で始められます（扱っていた環境の「生きている合図」が 30 分途絶えたら、止まったとみなします）。</li>
+</ul>
+<p>「別の環境（不明（古い形の記録））」と出るときは、sf-tools を更新する前から動いていた取得役の記録です。どの環境のものか分からないため、起動から <strong>12 時間</strong>は、動いているものとみなします。待てないときは、<strong>どの環境でも sf-start が動いていないことを確かめてから</strong>、プロジェクトの <code>logs/apex/.collector</code> を消します。sf-tools を更新したら、各環境で sf-start を終えてから起動し直すのが確実です。</p>
+<p>いまの状態は、<code>bash ~/sf-tools/bin/sf-log.sh status</code> で確かめられます（「取得役: 別の環境（wsl）で動作中（最後の合図は N 秒前）」・「取得役の起動待ち」・「状態不明」など）。</p>
+
+<h3 id="dev-log-lock"><code>sf-log.sh</code> が、ロックを取れずに止まる</h3>
+<p><code>sf-log.sh</code> は、手元の状態を書き換えるあいだ、<code>logs/apex/</code> の中にロックのフォルダ（<code>.lock</code>・<code>.fetch.lock</code>・<code>.read.lock</code>）を作ります。中の <code>pid</code> ファイルに、持ち主のプロセスの番号・環境・取った時刻を書き、持ち主がいなくなったロックは、自動で片付けます（別の環境のロックは、取った時刻から 10 分たってから）。</p>
+<p><code>pid</code> ファイルがない・中身が読めないロックは、持ち主が分からないため、自動では片付けません。何度やっても止まるときは、<strong>どの環境でも sf-start と <code>sf-log.sh</code> が動いていないことを確かめてから</strong>、表示されたロックのフォルダ（例: <code>logs/apex/.lock</code>）を消します。</p>
 
 <h3 id="crlf">CRLF の警告が出る</h3>
 <p>Windows と、ほかの環境の、改行コード（行の終わりの印）の違いを知らせる、Git の警告です。動作には影響しないので、そのままで大丈夫です。</p>

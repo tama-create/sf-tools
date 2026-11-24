@@ -253,7 +253,9 @@ test_sf_log_begin_and_leave() {
     : > "$MOCK_CALL_LOG"
     (cd "$td" && unset SF_LOG_OWNER && HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-start.sh" >/dev/null 2>&1)
     owner=$(grep "^sflog begin" "$MOCK_CALL_LOG" | sed 's/.*--owner //')
-    [[ "$owner" =~ ^[0-9]+:[0-9]+:[0-9]+$ ]] && pass "begin に、自分の印（PID:時刻:乱数）を渡す" || fail "begin に、自分の印（PID:時刻:乱数）を渡す" "$(cat "$MOCK_CALL_LOG")"
+    [[ "$owner" =~ ^[0-9]+:[0-9]+:(gitbash|wsl|macos|linux|unknown)[0-9]+$ ]] && pass "begin に、自分の印（PID:時刻:環境の名前と乱数）を渡す" || fail "begin に、自分の印（PID:時刻:環境の名前と乱数）を渡す" "$(cat "$MOCK_CALL_LOG")"
+    local rt; rt=$(bash -c "readonly SCRIPT_NAME=t LOG_FILE=/dev/null LOG_MODE=NEW; export SF_INIT_MODE=1; source '$SF_TOOLS_DIR/lib/common.sh'; detect_runtime" 2>/dev/null)
+    [[ "${owner##*:}" == "${rt}"* ]] && pass "印の 3 つ目の頭は、動いている環境の名前（${rt}。doc/sf-log-design.md 5.6）" || fail "印の 3 つ目の頭は、動いている環境の名前" "${owner} / ${rt}"
     assert_file_contains "$MOCK_CALL_LOG" "sflog begin -o testorg --owner" "begin に、接続先のエイリアスを渡す"
     assert_file_contains "$MOCK_CALL_LOG" "sflog leave --owner ${owner}" "終了時に、同じ印で leave する"
     # begin の前に、ランチャーの起動はしない（begin → launcher の順）。leave はランチャーのあと

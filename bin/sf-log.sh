@@ -23,7 +23,8 @@
 #   --hours N           : （start）TraceFlag の期限（時間）。1〜23 の整数（公式: 開始から 24 時間未満）。既定 2
 #   -y                  : （start）AI への送信の確認と、ほかの USER_DEBUG の TraceFlag を止める確認を省く（手動のみ）
 #   --auto              : （start）sf-start.sh からの自動の取り始め。終了コード 0 = 取り始めた／10 = 取らない／1 = 失敗
-#   --owner 印          : （begin・start --auto・leave）持ち主（sf-start）の印。「PID:起動の時刻:英数字」（数字:数字:英数字）
+#   --owner 印          : （begin・start --auto・leave）持ち主（sf-start）の印。「PID:起動の時刻:環境の名前と乱数」（数字:数字:英数字。
+#                         例 1234:1795500000:wsl8f3a。環境の名前は gitbash / wsl / macos / linux / unknown。doc/sf-log-design.md 5.6）
 #   --collect           : （start --auto）準備が成功したら、同じプロセスで取得役（collect）になる（begin が使う）
 #   --retry N           : （start --auto --collect）準備が失敗したとき（終了コード 1。「取らない」の 10 は除く）に、やり直す回数（0〜3。既定 0。
 #                         begin は 1 を付ける）。持ち主が生きていて、後始末の最中でなければ、30 秒待ってから、回数を 1 減らして自分を exec する
@@ -38,6 +39,14 @@
 #        終わるまで最大 10 分待つ（sf の入れ替えの途中に sf を呼ぶと、部品が見つからずに失敗するため。2026-11-24。
 #        sf-start は、sf-install.sh（その中で sf-upgrade.sh）と begin を同時に裏で動かす）。.status の WARNING に、待っていることを書く。
 #        待つあいだに持ち主（--owner）がいなくなれば、準備をやめて 0 で終わる。待ち切れなければ、WARNING を出して進む
+#     1a. 環境の判断（status 以外。0 より前。Git Bash と WSL の混在。doc/sf-log-design.md 5.6）: 手元のファイル（.collector・.claim）だけを
+#        読み、別の環境が、このプロジェクトのログを扱っていれば、ファイル・ロック・組織に触れずに終える
+#        （begin・start --auto: 終了コード 10／leave・collect: 0／start・pull・stop・auto: 中断）。別の環境が扱っている、とみなすのは:
+#          a. 名乗り（.claim）の RUNTIME が自分と違い、AT が 30 分以内（読めない・未来の時刻を含む）
+#          b. .collector の STARTED が 12 時間以内（読めない記録・12 時間より古い記録は、止まったもの）で、
+#             RUNTIME がない（この変更の前の取得役。kill -0 によらず「環境不明」）か、RUNTIME が自分と違い、HEARTBEAT が 30 分以内（同上）
+#        環境の名前（detect_runtime）は、unknown 同士でも同じとみなさない。記録の名前が 4 つ（gitbash / wsl / macos / linux）以外なら「環境不明」。
+#        自分の環境が unknown のときは、この判断をしない（これまでの動き）
 #     1. sf の確認（check_sf_cli --cache）・接続先の決定（get_target_org）
 #     2. （start・pull）接続先が予約名（prod / staging / develop / main）・本番・種類を確認できない組織なら止める
 #        （手動: 中断／--auto: 終了コード 10）
@@ -47,7 +56,9 @@
 #     2. このプロジェクトの答え（logs/apex/.consent の AUTO・ORG（エイリアス）・VERSION）で判定する。「取らない」→ 10。
 #        答えがない・エイリアスが変わった・注意の文面の版が変わったときは、注意を表示して Y/N で聞く（端末でない・q・N は「取らない」。
 #        端末でないときは、答えを保存しない）
-#     3. 持ち主の一覧に --owner の印を足す（後始末の最中なら、最大 60 秒待つ。終わらなければ 10）
+#     3. 持ち主の一覧に --owner の印を足す（後始末の最中なら、最大 60 秒待つ。終わらなければ 10）。同じ短いロックの中で、別の環境が
+#        扱っていないかを確かめ直し（扱っていれば、何も書かずに 10）、扱う環境の名乗り（.claim の RUNTIME・OWNER・AT）を書いてから足す。
+#        同じ環境の名乗りがあり、その印の持ち主が生きていれば、印は変えずに AT だけ今にする
 #     4. .status を starting にし、start --auto --collect --retry 1 を nohup で裏に起動して、すぐ 0 で終わる
 #        （ふつうの出力は捨て、エラー出力は sf-log.log に追記する）
 #   start:
@@ -55,8 +66,9 @@
 #        答えの組織 ID（ORG_ID）が空なら、今の組織 ID を書く。違えば（同じエイリアスで別の組織に入り直した）、答えを消して 10
 #        （次の sf-start の begin で聞き直す。同意のない組織のログを取らない）
 #        （手動）注意を表示し、ask_yn || die（-y で省く）
-#        --owner があれば、持ち主の一覧（logs/apex/.owners）に足す（同じ印は 2 回足さない）。後始末の最中（CLOSING）なら、
-#        終わるまで最大 60 秒待つ（CLOSING の持ち主が死んでいれば消して進む。待っても終わらなければ 10）
+#        --owner があれば、持ち主の一覧（logs/apex/.owners）に足す（同じ印は 2 回足さない。begin の 3 と同じ。名乗りも書く）。
+#        後始末の最中（CLOSING）なら、終わるまで最大 60 秒待つ（CLOSING の持ち主が死んでいれば（別の環境の印を含む）消して進む。
+#        待っても終わらなければ 10）
 #     5. DebugLevel「sf_tools_log_<level>」を名前で探し、あれば 7 章の値で上書き、なければ作る（2 つ以上なら止める）
 #     6. 自分のユーザーの TraceFlag を探す（lib/apexlog.js tflist で、有効・期限切れ・これから始まるものに分ける）
 #        a. .state の TRACE_FLAG_ID と一致する USER_DEBUG → DebugLevel・開始（今）・期限（今から --hours 時間）を更新
@@ -71,7 +83,9 @@
 #     9. .status に STATE=collecting・期限（EXPIRES は UTC・EXPIRES_AT は PC の時刻の HH:MM。ランチャーが表示する）・
 #        今日の本数（COUNT_TODAY。今日の日付のフォルダの *.log の数。前回の値を残さない）を書く。
 #        --collect なら、同じプロセスで collect になる（exec）。
-#     （--auto で取らない・失敗のとき）.status に理由を書き、別の組織の取得役が動いていれば、止まるよう頼む（5.3）
+#     （--auto で取らない・失敗のとき）.status に理由を書き、別の組織の取得役（この環境のもの）が動いていれば、止まるよう頼む（5.3）。
+#        自分の名乗り（.claim の OWNER が自分の印）は、同じ環境のほかの生きている持ち主がいなくて、この環境の取得役も動いていなければ消す
+#        （別の環境を 30 分待たせない）。sf の更新を待つあいだに持ち主がいなくなって準備をやめるときも、同じく消す
 #     （--retry が残っていて、失敗のとき）.status を starting に戻して WARNING（やり直しています）を書き、30 秒後にやり直す。
 #        成功したら WARNING を消す。待つあいだに持ち主が終了した・後始末が始まったら、やり直さずに失敗として終わる
 #   pull:
@@ -101,18 +115,23 @@
 #     しおりが 30 分より古く、LATE_FROM もなければ、動かさない。失敗したら、その回の下限を LATE_FROM に残す（次の回にやり直す。
 #     成功で消す。24 時間より古ければ消して WARNING）。1,000 本で範囲の終わりに届かなければ、限界として WARNING（LATE_FROM は消す）。
 #     WARNING は sf-log.log と .status（WARNING・LATE_WARNING）に書き、pull は要約の先頭に書く
-#   stop（人の判断。持ち主の一覧にかかわらず止める）:
+#   stop（人の判断。持ち主の一覧にかかわらず止める。別の環境の取得役には、何も送らない）:
 #     4. .owners を CLOSING だけにする。取得役が生きていれば、停止の依頼（requests/stop）を置き、最大 30 秒待つ。
 #        止まらなければ TERM で止め、さらに最大 10 秒待つ。それでも生きていれば、TraceFlag は消さずに中断する
 #     5. .state の TRACE_FLAG_ID の TraceFlag を消す（すでになければ WARNING。消せなければ中断し、ID は残す）
-#     6. TRACE_FLAG_ID・.collector・.owners を消し、.status を stopped にする（期限の表示も消す）。DebugLevel・手元のログは消さない
+#     6. TRACE_FLAG_ID・.collector・.owners を消し、.status を stopped にする（期限の表示も消す）。DebugLevel・手元のログは消さない。
+#        後始末が済んだら、最後に名乗り（.claim）を消す（.owners を消したあと。別の環境は、そのあとで名乗れる）
 #   leave --owner 印（sf-start の終了時）:
 #     4. 持ち主の一覧から自分の印を外す。ほかの持ち主が残っていれば、何も止めずに終わる
-#     5. 誰もいなければ、CLOSING を書いて、stop の 4〜6 と同じ後始末をする。失敗は WARNING だけ（終了コードは 0）
+#     5. 誰もいなければ、CLOSING を書いて、stop の 4〜6 と同じ後始末をする（名乗りも最後に消す）。失敗は WARNING だけ（終了コードは 0）
 #   collect（裏の取得役。.state の組織・ユーザーで取る。出力は sf-log.log と .status だけ）:
-#     4. 取得役の印（.collector）を確かめる: 同じ組織の取得役が生きていれば、何もせずに終わる。別の組織なら、止めてもらって入れ替わる
-#     5. 5 秒ごとに目を覚まし、次を繰り返す（sf を呼ぶのは、取得と延長のときだけ）:
-#        a. 持ち主の見張り: 死んだ持ち主（kill -0）を一覧から外す。一覧が空 → 自分で後始末（TraceFlag を消す）をして止まる。
+#     4. 取得役の印（.collector）を確かめる（短いロックの中で、別の環境が扱っていないかも確かめ直す。扱っていれば 0 で終わる）:
+#        同じ組織の取得役（この環境のもの）が生きていれば、何もせずに終わる。別の組織なら、止めてもらって入れ替わる。
+#        印には PID・STARTED・ORG・RUNTIME（環境の名前）・HEARTBEAT（生きている合図。エポック秒）を書き、名乗りの AT も今にする
+#     5. 5 秒ごとに目を覚まし、次を繰り返す（sf を呼ぶのは、取得と延長のときだけ）。目を覚ますたび・sf を呼ぶ直前・ログを 1 本保存する
+#        たびに、合図（HEARTBEAT）と名乗りの AT を書き直す（30 秒より短い間隔では書かない。別の環境は、30 分途絶えたら止まったとみなす）:
+#        a. 持ち主の見張り: 死んだ持ち主（kill -0）と、環境の名前が自分と違う印（前に別の環境で使ったときの残り）を一覧から外す。
+#           一覧が空 → 自分で後始末（TraceFlag を消す）をして止まる。
 #           起動から 12 時間（SF_LOG_MAX_SECONDS）でも、同じく止まる
 #        b. 停止の依頼・CLOSING・印の入れ替わり → 組織に何もせずに止まる（延長の直前にも確かめる）
 #        c. 間隔（SF_LOG_INTERVAL）が来た・pull の依頼がある・取り残しがある → 取得のロックが取れたら、pull と同じ方法で 1 回取る。
@@ -121,7 +140,9 @@
 #           追いついたら、待っている pull に応答する。失敗したら、次の取得までの間隔を倍にする（最大 600 秒）
 #        d. TraceFlag の残りが 60 分未満なら、ID と種類を確かめてから、今から 2 時間に延ばす
 #        e. 5 分より古い依頼・応答を消す
-#   status: 取得役が動いているか、手元の状態（.status・.state）、持ち主の数、自分のユーザーの TraceFlag、自分のログの本数と合計を表示する（読み取りのみ）
+#   status: 取得役が動いているか、手元の状態（.status・.state）、持ち主の数、自分のユーザーの TraceFlag、自分のログの本数と合計を表示する（読み取りのみ）。
+#     取得役の行: 別の環境が扱っていれば「別の環境（X）で動作中（最後の合図は N 秒前）」、名乗りだけなら「取得役の起動待ち」、
+#     古い形・形の正しくない記録は「状態不明」。.status の ORG が接続先と違えば「状態不明」。組織に問い合わせできなくても、止めずにその旨を表示する
 #   auto on|off: logs/apex/.consent の AUTO・ORG（エイリアス）・ORG_ID・VERSION を書く（組織には書き込まない）
 #
 # 【前提条件】
@@ -138,8 +159,13 @@
 #   - sf-start.sh が、ランチャーを開く前に begin、終了時に leave を呼ぶ（5 章）。ランチャーは .status を 1 行で表示する
 #   - 環境変数: SF_LOG_INTERVAL（取得の間隔。秒。30〜600。既定 180。sf の 1 回が約 10 秒かかるため。pull はすぐ取らせる）・
 #     SF_LOG_MAX_SECONDS（取得役の上限。秒。既定 43200 = 12 時間）・SF_LOG_TEST_FAST=1（テスト用。間隔の下限を 1 にし、待ち時間を短くする）・
-#     SF_TOOLS_UPGRADE_LOCK（sf の更新のロックの場所。既定 ~/.sf-tools-upgrade.lock。sf-upgrade.sh と同じ。テストで差し替える）
-#   - 持ち主の生死は kill -0 だけで見る（PID が使い回されたときは、12 時間の上限で止まる）
+#     SF_TOOLS_UPGRADE_LOCK（sf の更新のロックの場所。既定 ~/.sf-tools-upgrade.lock。sf-upgrade.sh と同じ。テストで差し替える）・
+#     SF_LOG_TEST_RUNTIME（テスト用。自分の環境の名前を決める。英小文字だけ）
+#   - 持ち主の生死は kill -0 で見る（PID が使い回されたときは、12 時間の上限で止まる）。別の環境（Git Bash と WSL）の PID は見えないため、
+#     環境の名前で見分ける（1a・doc/sf-log-design.md 5.6）。1 つのプロジェクトのログは、同時には 1 つの環境だけが扱う
+#   - ロック（.lock・.fetch.lock・.read.lock。mkdir）の pid ファイルは「PID 環境 取った時刻（エポック秒）」の 1 行（一時ファイルから置き換える）。
+#     同じ環境（または環境のない古い形）なら PID が死んでいれば、別の環境なら取った時刻から 10 分より古ければ、残ったロックとして消す。
+#     pid ファイルがない・形が違う・時刻が未来のロックは、奪わずに、それぞれの上限まで待つ
 #   - ログ: ./sf-tools/logs/sf-log.log（追記）
 # ==============================================================================
 
@@ -183,6 +209,8 @@ readonly LOCK_DIR="${APEX_DIR}/.lock"
 readonly FETCH_LOCK="${APEX_DIR}/.fetch.lock"
 readonly FETCH_TMP="${APEX_DIR}/.fetch"
 readonly READ_LOCK="${APEX_DIR}/.read.lock"   # 要約のロック（pull が、しおりを読んでから書くまで。4.4 の 3）
+readonly CLAIM_F="${APEX_DIR}/.claim"         # 扱う環境の名乗り（5.6。begin・start --auto が書き、取得役が AT を書き直す）
+readonly MIX_STALE=1800 FOREIGN_LOCK_AGE=600   # 5.6: 別の環境の合図・名乗りは 30 分、別の環境のロックは 10 分で、古いとみなす
 readonly LATE_WINDOW=1800 LATE_PAGE=200 LATE_MAX_PAGES=5 LATE_MAX_AGE=86400   # 拾い直し（8.3）: 30 分・200 本ずつ・最大 5 回・LATE_FROM は 24 時間まで
 readonly REQ_DIR="${APEX_DIR}/requests"
 readonly CONSENT_VERSION="1"            # AI への送信の注意の文面の版（変えたら上げる。10.2）
@@ -249,6 +277,12 @@ READ_TRIES=450     # 要約のロックを待つ回数（0.2 秒ごと。最大 
 [[ $_fast -eq 1 ]] && { PULL_WAIT=30; STOP_WAIT=10; CLOSING_WAIT=10; RETRY_WAIT=1; UPGRADE_WAIT=10; READ_TRIES=10; }
 # sf の更新のロック（sf-upgrade.sh が、動いているあいだ PID を書く。場所は sf-upgrade.sh と同じ）
 UPGRADE_LOCK="${SF_TOOLS_UPGRADE_LOCK:-${HOME}/.sf-tools-upgrade.lock}"
+# 動いている環境（5.6。gitbash / wsl / macos / linux / unknown）。SF_LOG_TEST_RUNTIME はテスト用（別の環境の代わりをする）
+RUNTIME_SELF=$(detect_runtime)  # VAR=$(cmd) のため run 不使用
+[[ -n "${SF_LOG_TEST_RUNTIME:-}" ]] && RUNTIME_SELF="$SF_LOG_TEST_RUNTIME"
+[[ "$RUNTIME_SELF" =~ ^[a-z]+$ ]] || die "環境の名前の形が正しくありません: ${RUNTIME_SELF}"
+HB_EVERY=30; [[ $_fast -eq 1 ]] && HB_EVERY=1   # 取得役が合図（HEARTBEAT）を書く最短の間隔（秒。目安の 30 分より十分に短い）
+IS_COLLECTOR=0; HB_LAST=0
 command -v node >/dev/null 2>&1 || die "node が見つかりません（sf CLI の npm 版に必要です）。"  # 存在確認のため run 不使用
 mkdir -p "$APEX_DIR"  # run 不使用: 自分の作業フォルダを作るだけ（失敗は、次の書き込みで分かる）
 
@@ -283,13 +317,16 @@ kv_set() {
     mv -f "$tmp" "$f"
 }
 
-# ロック（mkdir。macOS に flock がないため）。中に PID を書き、その PID が死んでいれば古いロックとして消す
+# ロック（mkdir。macOS に flock がないため）。中の pid ファイルに「PID 環境 取った時刻（エポック秒）」を書く（5.6）。
+#   古いロックとして消すのは、次のときだけ: 環境が自分と同じ（または環境のない古い形）で、その PID が死んでいる／
+#   環境が自分と違い、取った時刻から 10 分より古い（別の環境の PID は見えないため）。
+#   pid ファイルがない・形が違う・時刻が未来のロックは、奪わずに待つ（上限まで待って取れなければ 1）
 #   引数: フォルダ 待つ回数（0.2 秒ごと）。取れなければ 1
 lock_take() {
-    local d="$1" tries="$2" i=0 pid
+    local d="$1" tries="$2" i=0 line
     while ! mkdir "$d" 2>/dev/null; do  # 条件チェックのため run 不使用（作れたら自分のもの）
-        pid=$(cat "$d/pid" 2>/dev/null || true)  # VAR=$(cmd) のため run 不使用
-        if [[ "$pid" =~ ^[0-9]+$ ]] && ! kill -0 "$pid" 2>/dev/null; then  # 条件チェックのため run 不使用（持ち主の生死）
+        line=$(cat "$d/pid" 2>/dev/null || true)  # VAR=$(cmd) のため run 不使用
+        if lock_is_stale "$line"; then
             rm -rf "$d" 2>/dev/null || true   # 意図的エラー無視: 古いロック（ほかの人が先に消すこともある）
             continue
         fi
@@ -297,7 +334,21 @@ lock_take() {
         [[ $i -ge $tries ]] && return 1
         sleep 0.2  # run 不使用: 待つだけ
     done
-    printf '%s\n' "$$" > "$d/pid"
+    # 一時ファイルに書いてから置き換える（書きかけの pid ファイルを、ほかの人に読ませない）
+    printf '%s %s %s\n' "$$" "$RUNTIME_SELF" "$(date +%s)" > "$d/pid.tmp.$$" && mv -f "$d/pid.tmp.$$" "$d/pid"
+}
+# ロックの pid ファイルの 1 行から、古いロックかを判断する（lock_take）。古い = 0
+lock_is_stale() {
+    local pid rt at rest now
+    read -r pid rt at rest <<< "$1"
+    [[ "$pid" =~ ^[0-9]+$ ]] || return 1
+    if [[ -z "$rt" || "$RUNTIME_SELF" == "unknown" ]] || same_rt "$rt"; then
+        ! kill -0 "$pid" 2>/dev/null   # 条件チェックのため run 不使用（同じ環境・古い形: 持ち主の生死）
+        return
+    fi
+    [[ "$at" =~ ^[0-9]+$ ]] || return 1
+    now=$(date +%s)  # VAR=$(cmd) のため run 不使用
+    [[ $at -le $now && $((now - at)) -gt $FOREIGN_LOCK_AGE ]]
 }
 lock_drop() { rm -rf "$1" 2>/dev/null || true; }  # 意図的エラー無視: 自分のロックを外すだけ
 
@@ -330,7 +381,7 @@ finish_auto_or_die() {
     local code="$1" reason="$2"
     if [[ $AUTO -eq 1 ]]; then
         # 別の組織の取得役が動いていれば、止まるよう頼む（つないでいない組織のログを取り続けないため。5.3。待たない）
-        local cpid; cpid=$(kv_get "$COLLECTOR_F" PID)  # VAR=$(cmd) のため run 不使用
+        local cpid; cpid=$(collector_pid_local)  # VAR=$(cmd) のため run 不使用
         if pid_alive "$cpid" && [[ -n "${TARGET_ORG:-}" && "$(kv_get "$COLLECTOR_F" ORG)" != "$TARGET_ORG" ]]; then
             mkdir -p "$REQ_DIR" && : > "${REQ_DIR}/stop"
         fi
@@ -342,9 +393,25 @@ finish_auto_or_die() {
             log "WARNING" "デバッグログを取れませんでした（${reason}）。"
             state_set "$STATUS_F" "STATE=error" "REASON=${reason}" "ORG=${TARGET_ORG:-}" || true      # 意図的エラー無視: 表示用
         fi
+        claim_release   # 取得役が立たない: 自分の名乗りを消す（5.6。別の環境を 30 分待たせない）
         exit "$code"
     fi
     die "$reason"
+}
+
+# 別の環境が扱っているときの終わり方（5.6）。.status・.owners・名乗りに触れない（扱っている環境の表示を、上書きしない）
+#   begin・start --auto: 終了コード 10／leave・collect: 0／それ以外（start・pull・stop・auto）: 中断
+refuse_other_runtime() {
+    case "$CMD" in
+        begin|start)
+            if [[ "$CMD" == "begin" || $AUTO -eq 1 ]]; then
+                log "INFO" "別の環境（${OTHER_RT}）で、デバッグログを取っています。この環境では取りません。"
+                exit 10
+            fi ;;
+        leave)   log "INFO" "別の環境（${OTHER_RT}）で、デバッグログを取っています。この環境では何もしません。"; exit 0 ;;
+        collect) note_log "取得役: 別の環境（${OTHER_RT}）が扱っているため、起動しません"; exit 0 ;;
+    esac
+    die "別の環境（${OTHER_RT}）で、デバッグログを取っています。"
 }
 
 # 持ち主（--owner の sf-start）が、まだ一覧にいて生きているか。後始末の最中（CLOSING）なら、いないとみなす
@@ -376,6 +443,128 @@ sf_err_name() { local n; n=$(json_get "$1" name 2>/dev/null) || n=""; printf '%s
 # プロセスが生きているか（kill -0。PID が使い回されたときは「生きている」に見えるため、取得役は 12 時間で必ず止まる。5.5）
 pid_alive() { [[ "$1" =~ ^[0-9]+$ ]] && kill -0 "$1" 2>/dev/null; }  # 条件チェックのため run 不使用
 
+# ---- 環境の混在（5.6）。1 つのプロジェクトのログは、同時には 1 つの環境だけが扱う ----
+# 記録の環境の名前が、決まった 4 つのどれかか（unknown・空・不正な値は「環境不明」）
+rt_known() { case "$1" in gitbash|wsl|macos|linux) return 0 ;; esac; return 1; }
+# 記録の環境が、自分と同じか（unknown は、unknown 同士でも同じとみなさない）
+same_rt() { [[ "$RUNTIME_SELF" != "unknown" && "$1" == "$RUNTIME_SELF" ]]; }
+# 表示用の環境の名前
+rt_label() { if rt_known "$1"; then printf '%s' "$1"; elif [[ -z "$1" ]]; then printf '不明（古い形の記録）'; else printf '不明'; fi; }
+# 持ち主の印（PID:起動の時刻:環境の名前と乱数）が生きているか。環境の名前が自分と違う印は、生きていないとみなす
+#   （別の環境の PID は、自分の環境の kill -0 では分からない。名乗りのない別の環境は、印を登録しないため、残りだけ）。
+#   環境の名前のない古い印は、これまでどおり kill -0。自分の環境が unknown のときは、環境を見ない（これまでの動き）
+mark_alive() {
+    local r="${1##*:}" rt=""
+    case "$r" in gitbash*) rt=gitbash ;; wsl*) rt=wsl ;; macos*) rt=macos ;; linux*) rt=linux ;; unknown*) rt=unknown ;; esac
+    if [[ -n "$rt" && "$RUNTIME_SELF" != "unknown" ]] && ! same_rt "$rt"; then return 1; fi
+    pid_alive "${1%%:*}"
+}
+# 取得役の PID（この環境のものだけ。別の環境の記録なら空。環境の記録のない古い形は、これまでどおり PID を出す）。
+#   別の環境の PID に、kill -0・TERM を使わないため（たまたま同じ番号の、関係のないプロセスがある）
+collector_pid_local() {
+    local rt; rt=$(kv_get "$COLLECTOR_F" RUNTIME)  # VAR=$(cmd) のため run 不使用
+    if [[ -n "$rt" && "$RUNTIME_SELF" != "unknown" ]] && ! same_rt "$rt"; then return 0; fi
+    kv_get "$COLLECTOR_F" PID
+}
+# 時刻（エポック秒）が、今から sec 秒以内か。読めない・未来の時刻も「以内」とみなす（分からないものは、扱っているかもしれない側に倒す）
+#   引数: 時刻 秒 今
+_recent() { [[ ! "$1" =~ ^[0-9]+$ ]] || [[ $1 -gt $3 ]] || [[ $(($3 - $1)) -le $2 ]]; }
+# 別の環境が、このプロジェクトのログを扱っているか（5.6 の判断。上から順に見る）。扱っている = 0。
+#   結果: OTHER_RT（表示用の環境の名前）・OTHER_AGO（最後の合図・名乗りから何秒前か。分からなければ空）・OTHER_SRC（claim / collector）
+#   自分の環境が unknown のときは、判断しない（1 を返す。これまでの動き）
+other_runtime_active() {
+    local now rt at started hb
+    OTHER_RT=""; OTHER_AGO=""; OTHER_SRC=""
+    [[ "$RUNTIME_SELF" == "unknown" ]] && return 1
+    now=$(date +%s)  # VAR=$(cmd) のため run 不使用
+    # 1. 名乗り（.claim）が別の環境で、30 分以内（読めない・未来の時刻を含む）
+    if [[ -f "$CLAIM_F" ]]; then
+        rt=$(kv_get "$CLAIM_F" RUNTIME); at=$(kv_get "$CLAIM_F" AT)  # VAR=$(cmd) のため run 不使用
+        if ! same_rt "$rt" && _recent "$at" "$MIX_STALE" "$now"; then
+            OTHER_RT=$(rt_label "$rt"); OTHER_SRC="claim"
+            [[ "$at" =~ ^[0-9]+$ && $at -le $now ]] && OTHER_AGO=$((now - at))
+            return 0
+        fi
+    fi
+    # 2. 取得役の記録がない
+    [[ -f "$COLLECTOR_F" ]] || return 1
+    # 3. 起動の時刻が読めない・12 時間（取得役の上限）より古い → 止まったものとみなす
+    started=$(kv_get "$COLLECTOR_F" STARTED)  # VAR=$(cmd) のため run 不使用
+    [[ "$started" =~ ^[0-9]+$ ]] || return 1
+    [[ $started -le $now && $((now - started)) -ge $MAX_RUN ]] && return 1
+    rt=$(kv_get "$COLLECTOR_F" RUNTIME)  # VAR=$(cmd) のため run 不使用
+    # 4. 環境の記録がない（この変更の前の取得役）→ kill -0 によらず「環境不明が扱っている」
+    if [[ -z "$rt" ]]; then OTHER_RT=$(rt_label ""); OTHER_SRC="collector"; return 0; fi
+    # 5. 自分と同じ環境 → これまでどおり（kill -0 は、呼び出し側が見る）
+    same_rt "$rt" && return 1
+    # 6. 別の環境 → 合図が 30 分以内（読めない・未来の時刻を含む）なら、扱っている
+    hb=$(kv_get "$COLLECTOR_F" HEARTBEAT)  # VAR=$(cmd) のため run 不使用
+    _recent "$hb" "$MIX_STALE" "$now" || return 1
+    OTHER_RT=$(rt_label "$rt"); OTHER_SRC="collector"
+    [[ "$hb" =~ ^[0-9]+$ && $hb -le $now ]] && OTHER_AGO=$((now - hb))
+    return 0
+}
+# 持ち主の一覧に、指定した印のほかに、同じ環境の生きている印があるか（名乗りを消すかの判断）。ある = 0
+same_env_owner_other() {
+    local line
+    [[ -f "$OWNERS_F" ]] || return 1
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        line="${line%$'\r'}"
+        [[ -n "$line" && "$line" != CLOSING=* && "$line" != "$1" ]] || continue
+        mark_alive "$line" && return 0
+    done < "$OWNERS_F"
+    return 1
+}
+# 名乗り（.claim）を書く・書き直す（短いロック .lock の中で呼ぶ）。引数: 印 今
+#   同じ環境の名乗りがあり、その印の持ち主が生きていれば、印は変えずに AT だけ今にする（入れ子・2 つ目の sf-start）
+claim_write_locked() {
+    local mark="$1" now="$2" cown
+    if [[ -f "$CLAIM_F" ]] && same_rt "$(kv_get "$CLAIM_F" RUNTIME)"; then
+        cown=$(kv_get "$CLAIM_F" OWNER)  # VAR=$(cmd) のため run 不使用
+        if [[ -n "$cown" ]] && grep -qxF -- "$cown" "$OWNERS_F" 2>/dev/null && mark_alive "$cown"; then  # 条件チェックのため run 不使用
+            kv_set "$CLAIM_F" "AT=${now}"
+            return
+        fi
+    fi
+    kv_set "$CLAIM_F" "RUNTIME=${RUNTIME_SELF}" "OWNER=${mark}" "AT=${now}"
+}
+# 取り始めに失敗して取得役が立たないときに、自分の名乗りを消す（start --auto・begin の失敗。5.6）。
+#   消すのは、名乗りの印が自分の印で、同じ環境のほかの生きている持ち主がいなくて、この環境の取得役も動いていないときだけ
+claim_release() {
+    [[ -n "$OWNER" && -f "$CLAIM_F" ]] || return 0
+    lock_take "$LOCK_DIR" 50 || return 0
+    if [[ "$(kv_get "$CLAIM_F" OWNER)" == "$OWNER" ]] && ! same_env_owner_other "$OWNER" && ! pid_alive "$(collector_pid_local)"; then
+        rm -f "$CLAIM_F" 2>/dev/null || true   # 意図的エラー無視: 消せなくても、30 分で古いとみなされる
+    fi
+    lock_drop "$LOCK_DIR"
+}
+# 取得役の生きている合図（.collector の HEARTBEAT）と、名乗りの AT を書き直す（5.6）。取得役のときだけ。
+#   目を覚ますたび・sf を呼ぶ直前・ログを 1 本保存するたびに呼ぶ（HB_EVERY 秒より短い間隔では書かない）
+heartbeat() {
+    local now
+    [[ $IS_COLLECTOR -eq 1 ]] || return 0
+    now=$(date +%s)  # VAR=$(cmd) のため run 不使用
+    [[ $((now - HB_LAST)) -ge $HB_EVERY ]] || return 0
+    lock_take "$LOCK_DIR" 5 || return 0   # 取れなければ、次の機会に書く
+    if [[ "$(kv_get "$COLLECTOR_F" PID)" == "$$" ]]; then   # 後始末で消えた印を、書き直して作り直さない
+        kv_set "$COLLECTOR_F" "HEARTBEAT=${now}"
+        claim_refresh_locked "$now"
+    fi
+    lock_drop "$LOCK_DIR"
+    HB_LAST=$now
+}
+# 取得役が、名乗りの AT を書き直す（短いロックの中）。名乗りがない・古い別の環境のものなら、自分の環境で書く。
+#   新しい別の環境の名乗りには触れない
+claim_refresh_locked() {
+    local now="$1" rt
+    rt=$(kv_get "$CLAIM_F" RUNTIME)  # VAR=$(cmd) のため run 不使用
+    if [[ -f "$CLAIM_F" ]] && same_rt "$rt"; then
+        kv_set "$CLAIM_F" "AT=${now}"
+    elif [[ ! -f "$CLAIM_F" ]] || ! _recent "$(kv_get "$CLAIM_F" AT)" "$MIX_STALE" "$now"; then
+        kv_set "$CLAIM_F" "RUNTIME=${RUNTIME_SELF}" "OWNER=$$:$(date +%s):collector" "AT=${now}"
+    fi
+}
+
 # sf の更新（sf-upgrade.sh）が動いているか（ロックの PID が生きている）。sf の入れ替えの途中に sf を呼ばないため（2026-11-24）
 upgrade_running() { pid_alive "$(kv_get "$UPGRADE_LOCK" PID)"; }
 
@@ -391,6 +580,7 @@ wait_sf_upgrade() {
     while upgrade_running; do
         if [[ -n "$OWNER" ]] && ! owner_present; then
             log "INFO" "待つあいだに sf-start が終了したため、準備をやめます。"
+            claim_release   # 取得役が立たない: 自分の名乗りを消す（5.6）
             exit 0
         fi
         if [[ $waited -ge $UPGRADE_WAIT ]]; then
@@ -404,7 +594,7 @@ wait_sf_upgrade() {
     return 0
 }
 
-# 持ち主の一覧（.owners）から、死んだ持ち主を外す（短いロックの中）。出力: 生きている持ち主の数。後始末の最中（CLOSING）なら -1
+# 持ち主の一覧（.owners）から、死んだ持ち主（と、別の環境の印。5.6）を外す（短いロックの中）。出力: 生きている持ち主の数。後始末の最中（CLOSING）なら -1
 owners_prune() {
     local line alive=() dead=0 closing="" tmp="${OWNERS_F}.tmp.$$"
     lock_take "$LOCK_DIR" 50 || { echo "?"; return 1; }
@@ -413,7 +603,7 @@ owners_prune() {
             line="${line%$'\r'}"
             [[ -n "$line" ]] || continue
             if [[ "$line" == CLOSING=* ]]; then closing="$line"; continue; fi
-            if pid_alive "${line%%:*}"; then alive+=("$line"); else dead=1; fi
+            if mark_alive "$line"; then alive+=("$line"); else dead=1; fi   # 別の環境の印は、残りとして外す（5.6）
         done < "$OWNERS_F"
         if [[ $dead -eq 1 ]]; then
             : > "$tmp"
@@ -442,20 +632,24 @@ owners_remove_locked() {
     echo "$n"
 }
 
-# 持ち主の一覧に、自分の印を足す（5.1 の b。start --auto --owner）。後始末の最中（CLOSING）なら、終わるまで最大 60 秒待つ。
-#   CLOSING の印の持ち主が死んでいれば、古いものとして消して進む。足せなければ 1
+# 持ち主の一覧に、自分の印を足す（5.1 の b。begin・start --auto --owner）。後始末の最中（CLOSING）なら、終わるまで最大 60 秒待つ。
+#   CLOSING の印の持ち主が死んでいれば（別の環境の印を含む）、古いものとして消して進む。
+#   同じロックの中で、別の環境が扱っていないかを、もう一度確かめ（5.6）、扱う環境の名乗り（.claim）を書いてから、印を足す。
+#   戻り値: 0 = 足した／1 = 足せない（後始末が終わらない・ロックが取れない）／2 = 別の環境が扱っている（何も書かない）
 register_owner() {
     local mark="$1" waited=0 closing
     while true; do
         lock_take "$LOCK_DIR" 50 || return 1
+        if other_runtime_active; then lock_drop "$LOCK_DIR"; return 2; fi   # 後始末の最中の別の環境も、名乗りが残るため、ここで分かる
         closing=$(kv_get "$OWNERS_F" CLOSING)  # VAR=$(cmd) のため run 不使用
-        if [[ -n "$closing" ]] && pid_alive "${closing%%:*}"; then
+        if [[ -n "$closing" ]] && mark_alive "$closing"; then
             lock_drop "$LOCK_DIR"
             [[ $waited -ge $((CLOSING_WAIT * 5)) ]] && return 1
             waited=$((waited + 1)); sleep 0.2  # run 不使用: 後始末が終わるのを待つだけ
             continue
         fi
         [[ -n "$closing" ]] && owners_remove_locked "CLOSING=${closing}" >/dev/null
+        claim_write_locked "$mark" "$(date +%s)"
         if ! grep -qxF -- "$mark" "$OWNERS_F" 2>/dev/null; then  # 条件チェックのため run 不使用（同じ印を 2 回足さない。入れ子の sf-start）
             printf '%s\n' "$mark" >> "$OWNERS_F"
         fi
@@ -467,7 +661,7 @@ register_owner() {
 # 取得役に止まるよう頼み、止まるのを待つ（4.5 の 1）。止まった・いない = 0／止まらない = 1
 stop_collector() {
     local pid i
-    pid=$(kv_get "$COLLECTOR_F" PID)  # VAR=$(cmd) のため run 不使用
+    pid=$(collector_pid_local)  # VAR=$(cmd) のため run 不使用（別の環境の PID には、何も送らない。5.6）
     pid_alive "$pid" || return 0
     [[ "$pid" == "$$" ]] && return 0
     mkdir -p "$REQ_DIR" && : > "${REQ_DIR}/stop"
@@ -697,7 +891,7 @@ ensure_traceflag() {
 }
 
 cmd_start() {
-    local prev_org prev_user prev_tf now vol n s
+    local prev_org prev_user prev_tf now vol n s rc
     if [[ $AUTO -eq 1 && "${GITHUB_ACTIONS:-}" == "true" ]]; then
         log "INFO" "GitHub Actions の上では、デバッグログを取りません。"
         exit 10
@@ -712,7 +906,9 @@ cmd_start() {
     fi
     # 持ち主（sf-start）の登録（5.1 の b）。後始末の最中なら、終わってから登録する（古い後始末が、新しい TraceFlag を消さないため）
     if [[ -n "$OWNER" ]]; then
-        register_owner "$OWNER" || finish_auto_or_die 10 "前の後始末が終わらないため（${CLOSING_WAIT} 秒待ちました）"
+        rc=0; register_owner "$OWNER" || rc=$?
+        [[ $rc -eq 2 ]] && refuse_other_runtime   # 同じロックの中で、別の環境が名乗っていた（5.6）
+        [[ $rc -eq 0 ]] || finish_auto_or_die 10 "前の後始末が終わらないため（${CLOSING_WAIT} 秒待ちました）"
     fi
     prev_org=$(kv_get "$STATE_F" ORG); prev_user=$(kv_get "$STATE_F" USER_ID); prev_tf=$(kv_get "$STATE_F" TRACE_FLAG_ID)  # VAR=$(cmd) のため run 不使用
     ensure_debuglevel
@@ -784,6 +980,7 @@ save_one() {
     if ! grep -qF -- "	${id}	" "$INDEX_F" 2>/dev/null; then  # 条件チェックのため run 不使用（目録に同じ ID があれば足さない）
         printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "${dir}/${name}" "$id" "$st" "$op" "$status" "$len" "$dur" >> "$INDEX_F"
     fi
+    heartbeat   # ログを 1 本保存するたび（5.6。取得役のときだけ書く）
 }
 
 # sf-log.log にだけ書く（画面に出さない。取得の件数など）
@@ -828,6 +1025,7 @@ fetch_round() {
         where="StartTime >= ${last}"
     fi
     q="SELECT Id, LogUserId, StartTime, Operation, Request, Status, LogLength, DurationMilliseconds FROM ApexLog WHERE ${where} ORDER BY StartTime ASC, Id ASC LIMIT 51"
+    heartbeat   # sf を呼ぶ直前（5.6。取得役のときだけ書く）
     # run を通さない（応答に他の人のログの見出しが入るため。run は出力を sf-log.log・error.log・画面に出す。8.3）
     if lj=$(sf data query --use-tooling-api --target-org "$TARGET_ORG" --json --query "$q" 2>/dev/null); then  # VAR=$(cmd) のため run 不使用（上の理由）
         if ! tsv=$(printf '%s' "$lj" | aj list --user "$USER_ID" 2>/dev/null); then  # VAR=$(cmd) のため run 不使用
@@ -867,6 +1065,7 @@ fetch_round() {
     # 本文を取る。一時フォルダは、取得のロックを持った状態で、毎回まず空にする（他の人の本文を残さない。8.4）
     rm -rf "$FETCH_TMP" && mkdir -p "$FETCH_TMP" || return 1
     if [[ $more -eq 0 && $others_after -eq 0 ]]; then
+        heartbeat
         run sf apex get log -n "$((total - first))" -d "$FETCH_TMP" --target-org "$TARGET_ORG" >/dev/null || { rm -rf "$FETCH_TMP"; return 1; }
     fi
     for f in "$FETCH_TMP"/* "$FETCH_TMP"/.[!.]*; do
@@ -883,6 +1082,7 @@ fetch_round() {
             if [[ ! -f "$f" ]]; then
                 # -n で押し出された・1 本ずつ取る場合（-i は ID を指定するので、他の人のログは入らない）
                 rm -rf "${FETCH_TMP}/one" && mkdir -p "${FETCH_TMP}/one" || { rc=1; break; }
+                heartbeat
                 run sf apex get log -i "${ids[i]}" -d "${FETCH_TMP}/one" --target-org "$TARGET_ORG" >/dev/null || { rc=1; break; }
                 [[ -f "${FETCH_TMP}/one/${ids[i]}.log" ]] || { note_log "本文の取得: ${ids[i]} のファイルがありません"; rc=1; break; }
                 f="${FETCH_TMP}/one/${ids[i]}.log"
@@ -927,6 +1127,7 @@ late_recheck() {
         [[ -n "$before_st" ]] && where="${where} AND (StartTime < ${before_st} OR (StartTime = ${before_st} AND Id < '${before_id}'))"
         q="SELECT Id, LogUserId, StartTime, Operation, Request, Status, LogLength, DurationMilliseconds FROM ApexLog WHERE ${where} ORDER BY StartTime DESC, Id DESC LIMIT ${LATE_PAGE}"
         # run を通さない（8.3 の一覧と扱いをそろえる。応答は自分のログの見出しだけ）
+        heartbeat
         if ! lj=$(sf data query --use-tooling-api --target-org "$TARGET_ORG" --json --query "$q" 2>/dev/null); then  # VAR=$(cmd) のため run 不使用（上の理由）
             note_warn "拾い直し: 一覧の失敗（$(sf_err_name "$lj")）"; failed=1; break
         fi
@@ -949,6 +1150,7 @@ late_recheck() {
             grep -qF -- "	${ids[i]}	" "$INDEX_F" 2>/dev/null && continue  # 条件チェックのため run 不使用（目録にあれば取らない）
             # -i で 1 本だけ取る（ID を指定するので、他の人のログは入らない）
             { rm -rf "$FETCH_TMP" && mkdir -p "${FETCH_TMP}/one"; } || { failed=1; break; }
+            heartbeat
             run sf apex get log -i "${ids[i]}" -d "${FETCH_TMP}/one" --target-org "$TARGET_ORG" >/dev/null || { failed=1; break; }
             f="${FETCH_TMP}/one/${ids[i]}.log"
             [[ -f "$f" ]] || { note_warn "拾い直し: ${ids[i]} のファイルがありません"; failed=1; break; }
@@ -986,7 +1188,7 @@ request_collector() {
     id="$$_$(date +%s)_${RANDOM}"
     mkdir -p "$REQ_DIR" || { echo "timeout"; return 0; }
     printf 'AT=%s\n' "$(date +%s)" > "${REQ_DIR}/.pull.${id}.tmp" && mv -f "${REQ_DIR}/.pull.${id}.tmp" "${REQ_DIR}/pull.${id}"
-    cpid=$(kv_get "$COLLECTOR_F" PID)  # VAR=$(cmd) のため run 不使用
+    cpid=$(collector_pid_local)  # VAR=$(cmd) のため run 不使用
     for ((i = 0; i < PULL_WAIT; i++)); do
         if [[ -f "${REQ_DIR}/done.${id}" ]]; then
             res=$(kv_get "${REQ_DIR}/done.${id}" RESULT)  # VAR=$(cmd) のため run 不使用
@@ -1012,7 +1214,7 @@ cmd_pull() {
             "LATE_FROM=" "LAST_READ_LINE=${mark%%$'\t'*}" "LAST_READ_ID=${mark#*$'\t'}" "LAST_READ=" "LAST_READ_IDS=" || die "手元の状態を書けません。"
     fi
 
-    cpid=$(kv_get "$COLLECTOR_F" PID); corg=$(kv_get "$COLLECTOR_F" ORG)  # VAR=$(cmd) のため run 不使用
+    cpid=$(collector_pid_local); corg=$(kv_get "$COLLECTOR_F" ORG)  # VAR=$(cmd) のため run 不使用
     if pid_alive "$cpid"; then
         # 取得役が生きている → 自分では取らず、取得役に頼む（組織から取って、しおりを書くのは取得役だけ。9.3）
         [[ "$corg" == "$TARGET_ORG" ]] || die "取得役が、別の組織（${corg}）で動いています（PID ${cpid}）。"
@@ -1136,6 +1338,7 @@ cmd_stop() {
     fi
     do_cleanup "sf-log.sh stop で止めました" || rc=$?
     rm -f "$OWNERS_F" 2>/dev/null || true   # 意図的エラー無視: 一覧（と CLOSING）を消す
+    [[ $rc -eq 0 ]] && rm -f "$CLAIM_F" 2>/dev/null   # 名乗りは最後に消す（5.6。別の環境は、このあとで名乗れる）
     case "$rc" in
         1) die "取得役が止まらないため、TraceFlag を残しました。" ;;
         2) die "TraceFlag を消せませんでした（sf-tools/logs/sf-log.log を参照）。" ;;
@@ -1165,6 +1368,7 @@ cmd_leave() {
     lock_drop "$LOCK_DIR"
     do_cleanup "すべての sf-start が終了したため" || rc=$?
     rm -f "$OWNERS_F" 2>/dev/null || true   # 意図的エラー無視: CLOSING を消す
+    [[ $rc -eq 0 ]] && rm -f "$CLAIM_F" 2>/dev/null   # 名乗りは最後に消す（5.6。別の環境は、このあとで名乗れる）
     [[ $rc -eq 0 ]] || log "WARNING" "デバッグログの後始末が、最後まで終わりませんでした（sf-tools/logs/sf-log.log を参照）。"
     exit 0   # sf-start の終了を止めない（WARNING だけ）
 }
@@ -1188,8 +1392,10 @@ collector_finish() {
     printf 'CLOSING=%s\n' "$$:$(date +%s):collector" >> "$OWNERS_F"
     lock_drop "$LOCK_DIR"
     note_log "取得役: ${reason}"
-    do_cleanup "$reason" 1 || true   # 意図的エラー無視: 取得役は表示先がない（.status と sf-log.log に書く）
+    local rc=0
+    do_cleanup "$reason" 1 || rc=$?   # 失敗は、取得役は表示先がない（.status と sf-log.log に書く）
     rm -f "$OWNERS_F" 2>/dev/null || true   # 意図的エラー無視: CLOSING を消す
+    [[ $rc -eq 0 ]] && rm -f "$CLAIM_F" 2>/dev/null   # 名乗りは最後に消す（5.6）
     exit 0
 }
 
@@ -1218,6 +1424,7 @@ collector_extend() {
     local tf j tsv id type st ex state dl found=0 now newexp
     tf=$(kv_get "$STATE_F" TRACE_FLAG_ID)  # VAR=$(cmd) のため run 不使用
     [[ "$tf" =~ $ID_RE ]] || { state_set "$STATUS_F" "WARNING=TraceFlag がないため、延ばせません" || true; return 1; }
+    heartbeat
     j=$(run sf data query --use-tooling-api --target-org "$TARGET_ORG" --json \
         --query "SELECT Id, LogType, StartDate, ExpirationDate, DebugLevel.DeveloperName FROM TraceFlag WHERE TracedEntityId = '${USER_ID}'") || return 1
     tsv=$(printf '%s' "$j" | aj tflist 2>/dev/null) || return 1
@@ -1230,6 +1437,7 @@ collector_extend() {
     fi
     collector_should_quit && exit 0   # 書き込む直前にも確かめる（消された TraceFlag を延ばし直さない）
     now=$(now_z); newexp=$(aj time add "$now" --sec 7200)
+    heartbeat
     run sf data update record --use-tooling-api --sobject TraceFlag --record-id "$tf" --target-org "$TARGET_ORG" --json \
         --values "StartDate=${now} ExpirationDate=${newexp}" >/dev/null || return 1
     state_set "$STATUS_F" "EXPIRES=${newexp}" "EXPIRES_AT=$(local_hm "$newexp")" "WARNING=" || true   # 意図的エラー無視: 表示用
@@ -1248,7 +1456,8 @@ cmd_collect() {
 
     # 1. 取得役の印（二重に動かさない。別の組織の取得役なら、止めてもらって入れ替わる）
     lock_take "$LOCK_DIR" 50 || exit 1
-    pid=$(kv_get "$COLLECTOR_F" PID); corg=$(kv_get "$COLLECTOR_F" ORG)  # VAR=$(cmd) のため run 不使用
+    if other_runtime_active; then lock_drop "$LOCK_DIR"; refuse_other_runtime; fi   # 印を書くロックの中で、もう一度（5.6）
+    pid=$(collector_pid_local); corg=$(kv_get "$COLLECTOR_F" ORG)  # VAR=$(cmd) のため run 不使用
     if pid_alive "$pid" && [[ "$pid" != "$$" ]]; then
         if [[ "$corg" == "$org" ]]; then
             lock_drop "$LOCK_DIR"; note_log "取得役: すでに動いています（PID ${pid}）"; exit 0
@@ -1258,10 +1467,14 @@ cmd_collect() {
         for ((i = 0; i < STOP_WAIT; i++)); do pid_alive "$pid" || break; sleep 1; done  # run 不使用: 止まるのを待つだけ
         pid_alive "$pid" && { note_log "取得役: 前の取得役（PID ${pid}）が止まりません"; exit 1; }
         lock_take "$LOCK_DIR" 50 || exit 1
+        if other_runtime_active; then lock_drop "$LOCK_DIR"; refuse_other_runtime; fi
     fi
     rm -f "${REQ_DIR}/stop"
-    kv_set "$COLLECTOR_F" "PID=$$" "STARTED=${started}" "ORG=${org}"
+    # RUNTIME・HEARTBEAT: 別の環境から、扱っている環境と、生きているかが分かるように（5.6）
+    kv_set "$COLLECTOR_F" "PID=$$" "STARTED=${started}" "ORG=${org}" "RUNTIME=${RUNTIME_SELF}" "HEARTBEAT=${started}"
+    claim_refresh_locked "$started"
     lock_drop "$LOCK_DIR"
+    IS_COLLECTOR=1; HB_LAST=$started
     state_set "$STATUS_F" "STATE=collecting" "ORG=${org}" "REASON=" "WARNING=" || true   # 意図的エラー無視: 表示用
     note_log "取得役: 起動しました（PID $$・組織 ${org}・間隔 ${INTERVAL} 秒）"
     COLLECT_EXPIRES=$(kv_get "$STATUS_F" EXPIRES)  # VAR=$(cmd) のため run 不使用
@@ -1271,6 +1484,7 @@ cmd_collect() {
     while true; do
         [[ $first -eq 1 ]] || sleep "$TICK"  # run 不使用: 目を覚ますまで待つだけ（sf は呼ばない）
         first=0
+        heartbeat   # 生きている合図（5.6）
         now=$(date +%s)
         # a. 持ち主の見張り
         n=$(owners_prune)
@@ -1313,12 +1527,46 @@ cmd_collect() {
 # ------------------------------------------------------------------------------
 # 10. status（4.6）・auto（4.7）
 # ------------------------------------------------------------------------------
+# 「N 秒前」の表示（分からなければ、そう書く）
+ago_text() { if [[ "$1" =~ ^[0-9]+$ ]]; then printf '%s 秒前' "$1"; else printf '時刻が分からない'; fi; }
+
+# status の取得役の行（5.6）。別の環境が扱っているか・記録が読めるかで、言い切らない
+status_collector_line() {
+    local cpid now hb crt
+    now=$(date +%s)  # VAR=$(cmd) のため run 不使用
+    if other_runtime_active; then
+        crt=$(kv_get "$COLLECTOR_F" RUNTIME)  # VAR=$(cmd) のため run 不使用
+        if [[ "$OTHER_SRC" == "claim" && ( ! -f "$COLLECTOR_F" || "$crt" != "$(kv_get "$CLAIM_F" RUNTIME)" ) ]]; then
+            echo "  取得役: 取得役の起動待ち（環境 ${OTHER_RT}・名乗りは $(ago_text "$OTHER_AGO")）"
+        elif [[ "$OTHER_SRC" == "collector" && -z "$crt" ]]; then
+            echo "  取得役: 状態不明（環境の記録のない、古い形の取得役の記録です。起動から 12 時間は、動いているものとみなします）"
+        else
+            hb=$(kv_get "$COLLECTOR_F" HEARTBEAT)  # VAR=$(cmd) のため run 不使用
+            [[ "$hb" =~ ^[0-9]+$ && $hb -le $now ]] && hb=$((now - hb)) || hb=""
+            echo "  取得役: 別の環境（${OTHER_RT}）で動作中（最後の合図は $(ago_text "$hb")・組織 $(kv_get "$COLLECTOR_F" ORG)）"
+        fi
+        return 0
+    fi
+    if [[ -f "$COLLECTOR_F" ]] && ! [[ "$(kv_get "$COLLECTOR_F" PID)" =~ ^[0-9]+$ && "$(kv_get "$COLLECTOR_F" STARTED)" =~ ^[0-9]+$ ]]; then
+        echo "  取得役: 状態不明（${COLLECTOR_F} の形が正しくありません）"
+        return 0
+    fi
+    cpid=$(collector_pid_local)  # VAR=$(cmd) のため run 不使用
+    if pid_alive "$cpid"; then
+        echo "  取得役: 動作中（PID ${cpid}・組織 $(kv_get "$COLLECTOR_F" ORG)・間隔 ${INTERVAL} 秒）"
+    elif [[ -f "$CLAIM_F" ]] && same_rt "$(kv_get "$CLAIM_F" RUNTIME)"; then
+        hb=$(kv_get "$CLAIM_F" AT)  # VAR=$(cmd) のため run 不使用
+        [[ "$hb" =~ ^[0-9]+$ && $hb -le $now ]] && hb=$((now - hb)) || hb=""
+        echo "  取得役: 取得役の起動待ち（この環境・名乗りは $(ago_text "$hb")）"
+    else
+        echo "  取得役: 動いていません"
+    fi
+}
+
 cmd_status() {
-    local k v j tsv id type st ex state dl mine n s cpid
+    local k v j tsv id type st ex state dl mine n s
     echo "デバッグログ（sf-log.sh）の状態"
-    cpid=$(kv_get "$COLLECTOR_F" PID)  # VAR=$(cmd) のため run 不使用
-    if pid_alive "$cpid"; then echo "  取得役: 動作中（PID ${cpid}・組織 $(kv_get "$COLLECTOR_F" ORG)・間隔 ${INTERVAL} 秒）"
-    else echo "  取得役: 動いていません"; fi
+    status_collector_line
     # 表示の状態（.status）と、取得の記録（.state）。同じ名前のキーがあるため、どちらの値かを見出しで分ける
     for k in STATE ORG EXPIRES LAST_FETCH COUNT_TODAY BACKLOG REASON WARNING; do
         v=$(kv_get "$STATUS_F" "$k"); [[ -n "$v" ]] && echo "  表示の状態 ${k}: ${v}"   # VAR=$(cmd) のため run 不使用
@@ -1331,13 +1579,21 @@ cmd_status() {
     if [[ -f "$INDEX_F" ]]; then echo "  手元のログ: $(wc -l < "$INDEX_F" | tr -d ' ') 本"; fi
     [[ -f "${APEX_DIR}/latest.md" ]] && echo "  最新の要約: ${APEX_DIR}/latest.md"
     prepare_org light
+    # 表示の状態（.status）が、別の組織の古い記録なら、言い切らない（5.6）
+    v=$(kv_get "$STATUS_F" ORG)  # VAR=$(cmd) のため run 不使用
+    [[ -n "$v" && "$v" != "$TARGET_ORG" ]] && echo "  表示の状態: 状態不明（別の組織（${v}）の記録です。接続先は ${TARGET_ORG}）"
     mine=$(kv_get "$STATE_F" TRACE_FLAG_ID)  # VAR=$(cmd) のため run 不使用
-    j=$(run sf data query --use-tooling-api --target-org "$TARGET_ORG" --json \
-        --query "SELECT Id, LogType, StartDate, ExpirationDate, DebugLevel.DeveloperName FROM TraceFlag WHERE TracedEntityId = '${USER_ID}'") \
-        || die "TraceFlag を検索できません（$(sf_err_name "$j")）。"
-    tsv=$(printf '%s' "$j" | aj tflist) || die "TraceFlag の検索の応答の形が正しくありません。"
-    echo "  このユーザーの TraceFlag（組織: ${TARGET_ORG}）:"
-    [[ -n "$tsv" ]] || echo "    なし"
+    # 組織への問い合わせに失敗しても、止めずに、その旨を表示する（手元の状態は、上で表示済み）
+    tsv=""
+    if ! j=$(run sf data query --use-tooling-api --target-org "$TARGET_ORG" --json \
+        --query "SELECT Id, LogType, StartDate, ExpirationDate, DebugLevel.DeveloperName FROM TraceFlag WHERE TracedEntityId = '${USER_ID}'"); then
+        echo "  このユーザーの TraceFlag: 組織に問い合わせできませんでした（$(sf_err_name "$j")）"
+    elif ! tsv=$(printf '%s' "$j" | aj tflist); then
+        echo "  このユーザーの TraceFlag: 検索の応答の形が正しくありません"; tsv=""
+    else
+        echo "  このユーザーの TraceFlag（組織: ${TARGET_ORG}）:"
+        [[ -n "$tsv" ]] || echo "    なし"
+    fi
     while IFS=$'\t' read -r id type st ex state dl; do
         [[ -n "$id" ]] || continue
         echo "    ${id}  ${type}  ${state}  期限 ${ex}  ${dl}$([[ "$id" == "$mine" ]] && echo '  （sf-log.sh が作ったもの）')"
@@ -1375,7 +1631,10 @@ cmd_begin() {
     fi
     is_reserved_org_alias "$TARGET_ORG" && finish_auto_or_die 10 "${TARGET_ORG} は共有環境（予約名）のため"
     consent_local || finish_auto_or_die 10 "このプロジェクトでは、自動で取らない設定のため"
-    register_owner "$OWNER" || finish_auto_or_die 10 "前の後始末が終わらないため（${CLOSING_WAIT} 秒待ちました）"
+    local rc=0
+    register_owner "$OWNER" || rc=$?
+    [[ $rc -eq 2 ]] && refuse_other_runtime   # 同じロックの中で、別の環境が名乗っていた（5.6）
+    [[ $rc -eq 0 ]] || finish_auto_or_die 10 "前の後始末が終わらないため（${CLOSING_WAIT} 秒待ちました）"
     state_set "$STATUS_F" "STATE=starting" "ORG=${TARGET_ORG}" "REASON=" "WARNING=" "EXPIRES=" "EXPIRES_AT=" "BACKLOG=" || true   # 意図的エラー無視: 表示用
     # 裏で準備し、成功したらそのまま取得役になる（本番・種類の確認・組織 ID の照らし合わせは、start --auto が行う）
     # 裏での起動のため run 不使用。端末の入力・出力から切り離す。ふつうの出力は、取得役が log で同じログに書くため捨て、
@@ -1390,6 +1649,8 @@ cmd_begin() {
 # ------------------------------------------------------------------------------
 # 11. 入口
 # ------------------------------------------------------------------------------
+# 環境の判断（4.1 の 1a・5.6）: 手元のファイル（.collector・.claim）だけを読む。別の環境が扱っていれば、status 以外は、ここで終える
+if [[ "$CMD" != "status" ]] && other_runtime_active; then refuse_other_runtime; fi
 case "$CMD" in
     begin)   cmd_begin ;;
     start)   cmd_start ;;

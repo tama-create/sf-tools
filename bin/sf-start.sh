@@ -42,8 +42,9 @@
 #      npm install（package.json があるとき。node_modules/.package-lock.json が package-lock.json 以降に更新済みなら省略）・
 #      開発ツールの更新（sf-upgrade.sh。24 時間に 1 回）。詳細は sf-install.sh の冒頭コメント
 #   6. デバッグログ（~/sf-tools/bin/sf-log.sh があるとき。AI が読むログを、ランチャーの起動中に裏で取る。doc/sf-log-design.md 5 章）:
-#        a. 持ち主の印を決める。環境変数 SF_LOG_OWNER（PID:起動の時刻:乱数）があり、その PID が生きていれば引き継ぐ
+#        a. 持ち主の印を決める。環境変数 SF_LOG_OWNER（PID:起動の時刻:環境の名前と乱数）があり、その PID が生きていれば引き継ぐ
 #           （ランチャーの Start・Restart からの入れ子の sf-start）。それ以外は、自分の印を作って export する
+#           （乱数の頭に、環境の名前（detect_runtime。gitbash / wsl など）を付ける。Git Bash と WSL の混在の見分け。doc/sf-log-design.md 5.6）
 #        b. sf-log.sh begin -o {エイリアス} --owner {印} を実行する（sf を呼ばずにすぐ終わる。予約名・「自動で取らない」答えなら取らない。
 #           このプロジェクト・エイリアスで初めてのときは、AI への送信の注意を表示して Y/N で聞く）。取るときは、持ち主の一覧に登録し、
 #           TraceFlag の準備と取得役を裏で起動する。終了コード 0 = 始めた／10 = 取らない／それ以外 = 警告だけ（どれでも先に進む）
@@ -241,7 +242,7 @@ if [[ -f "$SF_LOG_SH" ]]; then
     if [[ -n "${SF_LOG_OWNER:-}" ]] && kill -0 "${SF_LOG_OWNER%%:*}" 2>/dev/null; then  # 条件チェックのため run 不使用（外側の生死）
         _sf_log_mine=0
     else
-        export SF_LOG_OWNER="$$:$(date +%s):${RANDOM}${RANDOM}"
+        export SF_LOG_OWNER="$$:$(date +%s):$(detect_runtime)${RANDOM}${RANDOM}"   # 環境の名前を頭に（5.6）
         _sf_log_mine=1
     fi
     _sf_log_rc=0

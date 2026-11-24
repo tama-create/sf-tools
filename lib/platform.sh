@@ -7,6 +7,7 @@
 #
 # 【提供する関数】
 #   is_gitbash                     ... Windows の Git Bash か判定（$OSTYPE が msys / mingw / cygwin）
+#   detect_runtime                 ... 動いている環境の名前を出す（gitbash / wsl / macos / linux / unknown）
 #   set_var VARNAME VALUE          ... 指定した名前の変数に代入する（nameref の代わり。Bash 3.2 で動く）
 #   sed_inplace SCRIPT FILE        ... ファイルを、その場で置換する（GNU / BSD の sed 共通）
 #   base64_oneline                 ... 標準入力を base64 にして、1 行で出す（GNU の -w 0 は macOS にないため、改行を tr で除く）
@@ -26,6 +27,26 @@
 # 【使い方】  if is_gitbash; then ...
 # ------------------------------------------------------------------------------
 is_gitbash() { [[ "$OSTYPE" == "msys"* || "$OSTYPE" == "mingw"* || "$OSTYPE" == "cygwin"* ]]; }
+
+# detect_runtime - 動いている環境の名前を、標準出力に 1 行で出す
+# ------------------------------------------------------------------------------
+# 同じフォルダを Windows の Git Bash と WSL の両方から使うとき、相手の PID は自分の環境から見えない（kill -0 が
+# 「死んでいる」と答える）。どの環境の記録かを見分けるために使う（sf-log.sh。doc/sf-log-design.md 5.6）。
+#   gitbash : $OSTYPE が msys / mingw / cygwin（is_gitbash）
+#   macos   : $OSTYPE が darwin
+#   wsl     : $OSTYPE が linux で、/proc/version に microsoft がある
+#   linux   : $OSTYPE が linux で、それ以外
+#   unknown : 上のどれでもない（呼び出し側は、どの環境とも同じとみなさない）
+# 【使い方】  rt=$(detect_runtime)
+# ------------------------------------------------------------------------------
+detect_runtime() {
+    if is_gitbash; then echo gitbash
+    elif [[ "$OSTYPE" == "darwin"* ]]; then echo macos
+    elif [[ "$OSTYPE" == "linux"* ]]; then
+        if grep -qi microsoft /proc/version 2>/dev/null; then echo wsl; else echo linux; fi  # 条件チェックのため run 不使用
+    else echo unknown
+    fi
+}
 
 # set_var - 呼び出し元が指定した名前の変数に、値を代入する（nameref（local -n）の代わり。Bash 3.2 で動く）
 # ------------------------------------------------------------------------------

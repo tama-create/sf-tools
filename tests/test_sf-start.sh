@@ -209,10 +209,10 @@ test_sf_cli_abort() {
     teardown "$td" "$mb" "$mh"
 }
 
-# Apex ログ（sf-log.sh）とのつなぎ: begin に印を渡し、登録したときだけ、終了時に同じ印で leave する（doc/sf-log-design.md 5 章）
+# デバッグログ（sf-log.sh）とのつなぎ: begin に印を渡し、登録したときだけ、終了時に同じ印で leave する（doc/sf-log-design.md 5 章）
 #   sf-log.sh は、呼ばれた引数を記録するだけの偽物にする（終了コードは SFLOG_RC）
 test_sf_log_begin_and_leave() {
-    echo ""; echo -e "${CLR_HEAD}[TEST] Apex ログ（sf-log.sh begin / leave）${CLR_RST}"
+    echo ""; echo -e "${CLR_HEAD}[TEST] デバッグログ（sf-log.sh begin / leave）${CLR_RST}"
     local td mb mh out owner
     setup_std_env td mb mh
     create_all_mocks "$mb"
@@ -239,7 +239,7 @@ test_sf_log_begin_and_leave() {
     : > "$MOCK_CALL_LOG"
     out=$(cd "$td" && unset SF_LOG_OWNER && SFLOG_RC=1 HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-start.sh" 2>&1)
     assert_exit_ok $? "begin の失敗でも、sf-start は 0 で終わる"
-    assert_output_contains "$out" "Apex ログの準備を始められませんでした" "begin の失敗 → 警告を表示する"
+    assert_output_contains "$out" "デバッグログの準備を始められませんでした" "begin の失敗 → 警告を表示する"
     assert_file_not_contains "$MOCK_CALL_LOG" "sflog leave" "begin の失敗 → leave しない"
     # 入れ子（外側の印が生きている）→ 印を引き継ぎ、leave しない
     : > "$MOCK_CALL_LOG"

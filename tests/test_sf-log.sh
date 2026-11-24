@@ -98,7 +98,7 @@ test_start_basic() {
     local tf; tf=$(_org 'o.traceFlags[0].Id')
     assert_equals "$(_kv .state TRACE_FLAG_ID)" "$tf" ".state に、作った TraceFlag の ID を書く"
     assert_equals "$(_kv .status STATE)" "collecting" ".status を collecting にする"
-    _has "$OUT" "Apex ログを取り始めました" "取り始めたことを表示する"
+    _has "$OUT" "デバッグログを取り始めました" "取り始めたことを表示する"
 
     _org_set "o.debugLevels[0].ApexCode='NONE'"
     _run start -o dev -y --hours 5 --level detail

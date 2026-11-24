@@ -1,8 +1,8 @@
 #!/bin/bash
 # ==============================================================================
-# sf-log.sh - AI の開発サイクル用に、Apex ログを手元に取り、AI 向けの要約を作る
+# sf-log.sh - AI の開発サイクル用に、デバッグログを手元に取り、AI 向けの要約を作る
 # ==============================================================================
-# 自分のユーザーの Apex ログを、TraceFlag で出させて手元（logs/apex/）に保存し、AI が最初に読む要約
+# 自分のユーザーのデバッグログ（ApexLog。Apex だけでなく、フロー・入力規則・重複ルールなど、1 回の処理の動きの記録）を、TraceFlag で出させて手元（logs/apex/）に保存し、AI が最初に読む要約
 # （logs/apex/latest.md）を作る。ログを読むのは人ではなく AI（Claude Code など）。
 # 設計: doc/sf-log-design.md（要約・一覧の検査・日時の計算は lib/apexlog.js）
 #
@@ -301,11 +301,11 @@ finish_auto_or_die() {
             mkdir -p "$REQ_DIR" && : > "${REQ_DIR}/stop"
         fi
         if [[ "$code" -eq 10 ]]; then
-            log "INFO" "Apex ログは取りません（${reason}）。"
+            log "INFO" "デバッグログは取りません（${reason}）。"
             state_set "$STATUS_F" "STATE=skipped" "REASON=${reason}" "ORG=${TARGET_ORG:-}" || true   # 意図的エラー無視: 表示用
         else
             retry_prepare "$reason"   # やり直せるときは、ここで exec する（戻らない）。やり直さないときだけ、下へ進む
-            log "WARNING" "Apex ログを取れませんでした（${reason}）。"
+            log "WARNING" "デバッグログを取れませんでした（${reason}）。"
             state_set "$STATUS_F" "STATE=error" "REASON=${reason}" "ORG=${TARGET_ORG:-}" || true      # 意図的エラー無視: 表示用
         fi
         exit "$code"
@@ -329,7 +329,7 @@ retry_prepare() {
     local reason="$1"
     [[ $AUTO -eq 1 && $COLLECT_AFTER -eq 1 && $RETRY -gt 0 && -n "$ORG_ARG" ]] || return 1
     owner_present || return 1
-    log "WARNING" "Apex ログの準備に失敗しました（${reason}）。${RETRY_WAIT} 秒後に、もう一度やります。"
+    log "WARNING" "デバッグログの準備に失敗しました（${reason}）。${RETRY_WAIT} 秒後に、もう一度やります。"
     state_set "$STATUS_F" "STATE=starting" "ORG=${ORG_ARG}" "REASON=" "WARNING=準備に失敗しました（${reason}）。やり直しています" || true   # 意図的エラー無視: 表示用
     sleep "$RETRY_WAIT"  # run 不使用: 待つだけ（sf の一時的な失敗が収まるのを待つ）
     owner_present || { log "INFO" "待つあいだに sf-start が終了したため、やり直しません。"; return 1; }
@@ -499,7 +499,7 @@ consent_local() {
         [[ "$a" == "on" ]] && return 0
         return 1
     fi
-    log "INFO" "ランチャーの起動中、この組織（${TARGET_ORG}）の Apex ログを、裏で自動で手元に保存できます。"
+    log "INFO" "ランチャーの起動中、この組織（${TARGET_ORG}）のデバッグログを、裏で自動で手元に保存できます。"
     log "INFO" "  ${NOTICE_TEXT}"
     log "INFO" "  あとから sf-log.sh auto on|off で変えられます。"
     if [[ ! -t 0 ]]; then
@@ -637,7 +637,7 @@ ensure_traceflag() {
 cmd_start() {
     local prev_org prev_user prev_tf now vol n s
     if [[ $AUTO -eq 1 && "${GITHUB_ACTIONS:-}" == "true" ]]; then
-        log "INFO" "GitHub Actions の上では、Apex ログを取りません。"
+        log "INFO" "GitHub Actions の上では、デバッグログを取りません。"
         exit 10
     fi
     prepare_org full
@@ -645,7 +645,7 @@ cmd_start() {
         auto_consent || finish_auto_or_die 10 "$CONSENT_REASON"
     else
         log "WARNING" "$NOTICE_TEXT"
-        if [[ $YES -eq 0 ]]; then ask_yn "${TARGET_ORG} の Apex ログを取り始めますか？" || die "中断しました。"; fi
+        if [[ $YES -eq 0 ]]; then ask_yn "${TARGET_ORG} のデバッグログを取り始めますか？" || die "中断しました。"; fi
     fi
     # 持ち主（sf-start）の登録（5.1 の b）。後始末の最中なら、終わってから登録する（古い後始末が、新しい TraceFlag を消さないため）
     if [[ -n "$OWNER" ]]; then
@@ -681,7 +681,7 @@ cmd_start() {
     n=$(json_get "$vol" result.records.0.n 2>/dev/null) || n=""   # VAR=$(cmd) のため run 不使用
     s=$(json_get "$vol" result.records.0.s 2>/dev/null) || s=""   # VAR=$(cmd) のため run 不使用
     [[ "$s" =~ ^[0-9]+$ ]] || s=0
-    log "SUCCESS" "Apex ログを取り始めました（組織: ${TARGET_ORG}・TraceFlag: ${TF_ID}・期限: ${TF_EXPIRES}（UTC））。"
+    log "SUCCESS" "デバッグログを取り始めました（組織: ${TARGET_ORG}・TraceFlag: ${TF_ID}・期限: ${TF_EXPIRES}（UTC））。"
     [[ "$n" =~ ^[0-9]+$ ]] && log "INFO" "  組織のログ: ${n} 本・$((s / 1024 / 1024))MB（上限 1,000MB）"
     if [[ "$s" -gt "$ORG_LOG_WARN_BYTES" ]]; then
         log "WARNING" "組織のログが 700MB を超えています。1,000MB を超えると、TraceFlag を作れなくなります。"
@@ -952,14 +952,14 @@ cmd_leave() {
     n=$(owners_remove_locked "$OWNER")
     if [[ "$n" -gt 0 ]]; then
         lock_drop "$LOCK_DIR"
-        log "INFO" "ほかの sf-start が起動中のため、Apex ログの取得は止めません。"
+        log "INFO" "ほかの sf-start が起動中のため、デバッグログの取得は止めません。"
         exit 0
     fi
     printf 'CLOSING=%s\n' "$OWNER" >> "$OWNERS_F"   # 後始末の最中（新しい sf-start は、終わるまで登録を待つ）
     lock_drop "$LOCK_DIR"
     do_cleanup "すべての sf-start が終了したため" || rc=$?
     rm -f "$OWNERS_F" 2>/dev/null || true   # 意図的エラー無視: CLOSING を消す
-    [[ $rc -eq 0 ]] || log "WARNING" "Apex ログの後始末が、最後まで終わりませんでした（sf-tools/logs/sf-log.log を参照）。"
+    [[ $rc -eq 0 ]] || log "WARNING" "デバッグログの後始末が、最後まで終わりませんでした（sf-tools/logs/sf-log.log を参照）。"
     exit 0   # sf-start の終了を止めない（WARNING だけ）
 }
 
@@ -1107,7 +1107,7 @@ cmd_collect() {
 # ------------------------------------------------------------------------------
 cmd_status() {
     local k v j tsv id type st ex state dl mine n s cpid
-    echo "Apex ログ（sf-log.sh）の状態"
+    echo "デバッグログ（sf-log.sh）の状態"
     cpid=$(kv_get "$COLLECTOR_F" PID)  # VAR=$(cmd) のため run 不使用
     if pid_alive "$cpid"; then echo "  取得役: 動作中（PID ${cpid}・組織 $(kv_get "$COLLECTOR_F" ORG)・間隔 ${INTERVAL} 秒）"
     else echo "  取得役: 動いていません"; fi
@@ -1147,9 +1147,9 @@ cmd_auto() {
     state_set "$CONSENT_F" "AUTO=${AUTO_ARG}" "ORG=${TARGET_ORG}" "ORG_ID=${ORG_ID}" "VERSION=${CONSENT_VERSION}" "ANSWERED_AT=$(now_z)" \
         || die "答えを書けませんでした。"
     if [[ "$AUTO_ARG" == "on" ]]; then
-        log "SUCCESS" "このプロジェクトでは、sf-start のときに Apex ログを自動で取ります（組織: ${TARGET_ORG}）。"
+        log "SUCCESS" "このプロジェクトでは、sf-start のときにデバッグログを自動で取ります（組織: ${TARGET_ORG}）。"
     else
-        log "SUCCESS" "このプロジェクトでは、sf-start のときに Apex ログを取りません（動いている取得は止めません。今止めるなら sf-log.sh stop）。"
+        log "SUCCESS" "このプロジェクトでは、sf-start のときにデバッグログを取りません（動いている取得は止めません。今止めるなら sf-log.sh stop）。"
     fi
     exit 0
 }
@@ -1162,7 +1162,7 @@ cmd_begin() {
     AUTO=1   # 取らないときは、終了コード 10 で返す（sf-start を止めない）
     TARGET_ORG="$ORG_ARG"
     if [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
-        log "INFO" "GitHub Actions の上では、Apex ログを取りません。"
+        log "INFO" "GitHub Actions の上では、デバッグログを取りません。"
         exit 10
     fi
     is_reserved_org_alias "$TARGET_ORG" && finish_auto_or_die 10 "${TARGET_ORG} は共有環境（予約名）のため"
@@ -1175,7 +1175,7 @@ cmd_begin() {
     #   --retry 1: 準備が失敗したら（「取らない」判断を除く）、持ち主が生きていれば、30 秒後に 1 回だけやり直す（retry_prepare）
     nohup bash "${SCRIPT_DIR}/sf-log.sh" start --auto --collect --retry 1 -o "$TARGET_ORG" --owner "$OWNER" </dev/null >/dev/null 2>>"$LOG_FILE" &
     disown
-    log "INFO" "Apex ログの準備を、裏で始めました（組織: ${TARGET_ORG}）。状態は、ランチャーに表示します。"
+    log "INFO" "デバッグログの準備を、裏で始めました（組織: ${TARGET_ORG}）。状態は、ランチャーに表示します。"
     exit 0
 }
 

@@ -28,7 +28,7 @@
 #      VS Code のターミナル（環境変数 TERM_PROGRAM=vscode）では 6・7 を表示しない（番号 6・7 は範囲外になる）
 #   4. 選んだコマンドは、このスクリプトと同じフォルダの sf-xxx.sh を、引数なしで bash で実行する。
 #      スクリプトがなければ、警告を表示する
-#   5. メニューを表示するたびに、見出しの下に、Apex ログ（sf-log.sh）の状態を 1 行表示する（logs/apex/.status の STATE による:
+#   5. メニューを表示するたびに、見出しの下に、デバッグログ（sf-log.sh）の状態を 1 行表示する（logs/apex/.status の STATE による:
 #      collecting = 取得中（組織・期限・今日の本数）/ starting = 準備中 / skipped = 取っていません / error = 取れていません /
 #      stopped = 止まっています。WARNING があれば、もう 1 行）。ファイルがない・STATE がそれ以外なら、何も表示しない。
 #      キー=値 の行を while read で読み、source しない。
@@ -92,7 +92,7 @@ unset _item
 # ------------------------------------------------------------------------------
 # メニュー表示
 # ------------------------------------------------------------------------------
-# Apex ログ（sf-log.sh）の状態を 1 行で表示する（logs/apex/.status。なければ何も表示しない。doc/sf-log-design.md 5.4）
+# デバッグログ（sf-log.sh）の状態を 1 行で表示する（logs/apex/.status。なければ何も表示しない。doc/sf-log-design.md 5.4）
 #   common.sh を読まないため、キー=値 の行を while read で読み、決まったキーだけを使う（source しない）
 print_apexlog_status() {
     local f="logs/apex/.status" line k v state="" org="" at="" cnt="" reason="" warn="" text
@@ -112,12 +112,12 @@ print_apexlog_status() {
         stopped)    text="止まっています${reason:+（${reason}）}" ;;
         *)          return 0 ;;
     esac
-    echo -e "${DIM}  Apex ログ: ${text}${RESET}"
-    [[ -n "$warn" ]] && echo -e "${YELLOW}  ⚠ Apex ログ: ${warn}${RESET}"
+    echo -e "${DIM}  デバッグログ: ${text}${RESET}"
+    [[ -n "$warn" ]] && echo -e "${YELLOW}  ⚠ デバッグログ: ${warn}${RESET}"
     return 0
 }
 
-# Apex ログの状態（.status の STATE）だけを読む（なければ空）。準備中のあいだの描き直しの判定に使う
+# デバッグログの状態（.status の STATE）だけを読む（なければ空）。準備中のあいだの描き直しの判定に使う
 apexlog_state() {
     local f="logs/apex/.status" line
     [[ -f "$f" ]] || return 0
@@ -231,7 +231,7 @@ main() {
 
         local count="${#MENU_ITEMS[@]}"
         local input cmd shown t0 rc redraw=0
-        shown=$(apexlog_state)   # 表示した Apex ログの状態（準備中のあいだは、変わったら描き直す）
+        shown=$(apexlog_state)   # 表示したデバッグログの状態（準備中のあいだは、変わったら描き直す）
 
         # 入力ループ（1文字即時入力・無効入力は行クリアして待機）
         while true; do
@@ -275,7 +275,7 @@ main() {
             break
         done
 
-        [[ $redraw -eq 1 ]] && continue   # Apex ログの状態が変わった → コマンドは動かさず、メニューを描き直す
+        [[ $redraw -eq 1 ]] && continue   # デバッグログの状態が変わった → コマンドは動かさず、メニューを描き直す
         run_command "$cmd"
     done
 }

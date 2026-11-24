@@ -9,6 +9,9 @@
 #   1. summarize: エラー（FATAL_ERROR の複数行・EXCEPTION_THROWN・FLOW_ELEMENT_ERROR・同じものをまとめる・場所と CODE_UNIT）
 #   2. summarize: ログの一覧（操作・最初の CODE_UNIT・SOQL / DML の使用量・長さ・PC のタイムゾーンでの開始時刻）
 #   3. summarize: System.debug（新しい順・複数行の続き）・入力規則（規則の名前）・制限（50% を超えたもの）
+#   3b. summarize: フロー・入力規則（flow.log。実機の形: フローごとの開始・完了・エラーと要素・入力規則ごとの評価・通過・停止・
+#      FLOW_ELEMENT_ERROR を、同じ要素を最後に始めた実行のフローに結ぶ・文言のリンクのタグを外す・System.debug の < > は残す・
+#      一覧の操作に、フロー・入力規則の名前を添える）。実機と違う並びの FLOW_ELEMENT_ERROR（odd.log）は、推測で読まずに並べる
 #   4. summarize: 取れていないものを隠さない（--note・読めなかったログ・読み取れなかった行・20MB の切り詰め・タイムゾーン不明・
 #      該当する行なしの区分・対象のログなし）
 #   5. summarize: 一覧の形の誤り（列の数・ID・日時・数値）・--list なし → 終了コード 1
@@ -52,7 +55,7 @@ test_summarize_errors() {
           odd.log 07L000000000004AAA 2026-11-23T02:09:00Z Api 成功 900 10
     _sum
     assert_exit_ok "$_RC" "要約を作れる"
-    _has "$_OUT" "# Apex ログの要約（2026-11-23 11:30:00 作成・4 本・エラー 5）" "見出し: 作成時刻（--local-offset の時差）・本数・エラーの数（まとめる前）"
+    _has "$_OUT" "# デバッグログの要約（2026-11-23 11:30:00 作成・4 本・エラー 5）" "見出し: 作成時刻（--local-offset の時差）・本数・エラーの数（まとめる前）"
     # PC のタイムゾーンが UTC でも、--local-offset の時差で表示する（GitHub Actions の Windows と同じ状態を、TZ で作る）
     local o2
     o2=$(TZ=UTC node "$AJS" summarize --list "$_LIST" --base "$SF_TOOLS_DIR" --now 2026-11-23T02:30:00Z --local-offset 540 2>&1)
@@ -64,7 +67,7 @@ test_summarize_errors() {
     _has "$_OUT" "EXCEPTION_THROWN System.IllegalArgumentException: MARK 自分で投げた例外" "EXCEPTION_THROWN: 文言"
     _has "$_OUT" "場所: 行 2（直前の CODE_UNIT: AccountService.updateRating）" "EXCEPTION_THROWN: 行と、入れ子の内側の CODE_UNIT"
     _has "$_OUT" "（同じものが 2 件）" "同じ種類と文言のエラーは 1 つにまとめる"
-    _has "$_OUT" "FLOW_ELEMENT_ERROR FlowRecordUpdate / Update_Account / この項目は更新できません" "フローのエラーも、エラーに入れる"
+    _has "$_OUT" "FLOW_ELEMENT_ERROR FlowRecordUpdate / Update_Account / この項目は更新できません" "フローのエラーも、エラーに入れる（実機と違う並びは、推測で読まずに項目を並べる）"
     # エラーが先（1 の見出しが、2 の見出しより前）
     local p1 p2
     p1=$(printf '%s\n' "$_OUT" | grep -n '^## 1. エラー' | cut -d: -f1)
@@ -94,6 +97,34 @@ test_summarize_list_debug_limits() {
     rm -f "$_LIST"
 }
 
+test_summarize_flow() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] summarize: フロー・入力規則${CLR_RST}"
+    _list flow.log 07L000000000006AAA 2026-11-23T23:00:36Z "/services/data/v68.0/sobjects/Account" 成功 4183 943
+    _sum
+    assert_exit_ok "$_RC" "要約を作れる"
+    _has "$_OUT" "/services/data/v68.0/sobjects/Account（Validation:Account:new／フロー: Account_After_Save／入力規則: Account_Check） |" "一覧: 操作に、最初の CODE_UNIT と、ログの中のフロー・入力規則の名前を添える"
+    _has "$_OUT" "## 4. フロー・入力規則" "4 の見出し"
+    _has "$_OUT" "- [$FX/flow.log:16] フロー Account_After_Save: 開始 2・完了 1・エラー 1・要素: Check_Type（FlowDecision）、Set_Description（FlowRecordUpdate）" "フロー: 開始・完了・エラーの数と、実行した要素（最初の開始の場所）"
+    _has "$_OUT" "- [$FX/flow.log:5] 入力規則 Account_Check: 評価 2・通過 1・停止 1" "入力規則: 評価・通過・停止の数"
+    _has "$_OUT" "- 入力規則のエラー: 1 件" "入力規則のエラーの数"
+    _has "$_OUT" "  - [$FX/flow.log:41] VALIDATION_FAIL（規則: Account_Check）" "入力規則のエラー: 場所と規則の名前"
+    _has "$_OUT" "[$FX/flow.log:44] FLOW_ELEMENT_ERROR フローで次のレコードの更新が試行されました: 001000000000002。次のエラーが発生しました: FIELD_CUSTOM_VALIDATION_EXCEPTION: 保存できません。詳細は 『開発者ガイド』を参照してください。" "フローのエラー: 文言（リンクのタグは外し、中の文字は残す）"
+    _hasnt "$_OUT" "<a href='https://example.com" "フローのエラー: リンクのタグを残さない"
+    _has "$_OUT" "場所: フロー Account_After_Save の要素 Set_Description（FlowRecordUpdate）（直前の CODE_UNIT: Flow:Account）" "フローのエラー: 同じ要素を最後に始めた実行のフローに結ぶ"
+    _has "$_OUT" "MARK <a href='x'>そのまま</a> List<String>" "System.debug の < > は、そのまま残す"
+    _has "$_OUT" "エラー 1）" "見出しのエラーの数に、フローのエラーを数える"
+    # 区分は CATEGORIES の順（エラー・入力規則・フロー・…・制限・件数）。「）: 制限・件数」なら、その前の区分は出ている
+    _has "$_OUT" "（詳しさが足りずに出なかった可能性もある）: 制限・件数" "フロー・入力規則・エラーの行があれば、出なかった区分に入れない（制限・件数だけ）"
+    # フロー・入力規則の行がないログ
+    _list ok.log 07L000000000001AAA 2026-11-23T02:06:40Z Api 成功 3074 644
+    _sum
+    _has "$_OUT" "- フロー: なし" "フローがなければ、なしと書く"
+    _has "$_OUT" "- 入力規則: なし" "入力規則がなければ、なしと書く"
+    _has "$_OUT" "- 入力規則のエラー: なし" "入力規則のエラーがなければ、なしと書く"
+    rm -f "$_LIST"
+}
+
 test_summarize_gaps() {
     echo ""
     echo -e "${CLR_HEAD}[TEST] summarize: 取れていないものを隠さない${CLR_RST}"
@@ -110,10 +141,10 @@ test_summarize_gaps() {
     _has "$_OUT" "> 20MB で切り詰められたログ: 1 本" "20MB 以上のログを、切り詰めとして書く"
     _has "$_OUT" "- 切り詰めあり: $FX/odd.log（20.0MB）" "切り詰めのログの場所"
     _has "$_OUT" "> タイムゾーン不明のログ: 1 本" "USER_INFO のないログは、タイムゾーン不明と書く"
-    # 該当する行なし（ok.log だけ: エラー・入力規則の行がない）
+    # 該当する行なし（ok.log だけ: エラー・入力規則・フローの行がない）
     _list ok.log 07L000000000001AAA 2026-11-23T02:06:40Z Api 成功 3074 644
     _sum
-    _has "$_OUT" "該当する行なし（詳しさが足りずに出なかった可能性もある）: エラー・入力規則" "1 行も出なかった区分を書く"
+    _has "$_OUT" "該当する行なし（詳しさが足りずに出なかった可能性もある）: エラー・入力規則・フロー" "1 行も出なかった区分を書く"
     _hasnt "$_OUT" "タイムゾーン不明" "USER_INFO があれば、タイムゾーン不明と書かない"
     # 対象のログなし
     : > "$_LIST"
@@ -240,6 +271,7 @@ test_time() {
 
 test_summarize_errors
 test_summarize_list_debug_limits
+test_summarize_flow
 test_summarize_gaps
 test_summarize_bad_list
 test_list

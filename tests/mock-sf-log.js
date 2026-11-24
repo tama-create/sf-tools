@@ -3,6 +3,7 @@
 // mock-sf-log.js - tests/test_sf-log.sh 用の偽の sf（小さな偽の組織）
 // ==============================================================================
 // 状態は、環境変数 FAKE_ORG のフォルダの org.json に持つ（呼び出しごとに読み書きする）。呼び出しは MOCK_CALL_LOG に 1 行ずつ書く。
+// 読む前にロックを取り、終わるまで持つ（tests/mock-org-lock.js。テストの _org_set が足したログを、古い状態の書き戻しで消さないため）
 // 2026-11-23 に開発組織で確かめた動き（doc/sf-log-design.md 13.1）をまねる:
 //   - TraceFlag: 同じ対象・同じ種類（LogType）で期間が重なると FIELD_INTEGRITY_EXCEPTION。種類が違えば作れる
 //   - TraceFlag: ExpirationDate が「今から 30 秒」以内・StartDate 以前なら FIELD_INTEGRITY_EXCEPTION（今にはできない）
@@ -20,8 +21,10 @@ const file = path.join(dir, 'org.json');
 const args = process.argv.slice(2);
 if (process.env.MOCK_CALL_LOG) fs.appendFileSync(process.env.MOCK_CALL_LOG, 'sf ' + args.join(' ') + '\n');
 
+const { lock, writeAtomic } = require('./mock-org-lock');
+lock(file);   // プロセスの終了時に外れる
 const org = JSON.parse(fs.readFileSync(file, 'utf8'));
-const save = () => fs.writeFileSync(file, JSON.stringify(org, null, 1));
+const save = () => writeAtomic(file, JSON.stringify(org, null, 1));
 const out = (o) => { process.stdout.write(JSON.stringify(o) + '\n'); };
 const ok = (result) => { out({ status: 0, result, warnings: [] }); save(); process.exit(0); };
 const err = (name, message) => { out({ status: 1, name, message: message || name, exitCode: 1 }); save(); process.exit(1); };

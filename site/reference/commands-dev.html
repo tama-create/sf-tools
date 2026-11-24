@@ -409,7 +409,7 @@ sf-log.sh auto on|off [-o ALIAS]</code></pre>
   <li>AI が <code>sf-log.sh pull</code> を実行し、<code>logs/apex/latest.md</code> を読む（新しいログを取ってから、要約を作ります。組織には書き込みません）</li>
   <li>作業が終わったら、人が <code>sf-log.sh stop</code> を実行する（作った TraceFlag を消します）</li>
 </ol>
-<p><strong>ふだんは、<code>sf-start.sh</code>（とランチャー）を使うだけで、自動で取られます。</strong><code>sf-start.sh</code> が、ランチャーを開く前に、裏で取り始め（初めてのときだけ「自動で取るか」を聞きます）、ランチャーを閉じると止めます。裏の準備が、sf の一時的な失敗で止まったときは、30 秒後に 1 回だけやり直します。ランチャーの見出しの下に、状態が 1 行出ます。AI は、必要なときに <code>sf-log.sh pull</code> を実行するだけです。<code>sf-start.sh</code> を使わない場面では、上の手順のとおり、人が <code>start</code> と <code>stop</code> を実行します。</p>
+<p><strong>ふだんは、<code>sf-start.sh</code>（とランチャー）を使うだけで、自動で取られます。</strong><code>sf-start.sh</code> が、ランチャーを開く前に、裏で取り始め（初めてのときだけ「自動で取るか」を聞きます）、ランチャーを閉じると止めます。裏で <code>sf</code> の更新（<code>sf-upgrade.sh</code>。24 時間に 1 回）が動いているあいだは、それが終わるのを待ってから準備します（最大 10 分。ランチャーに「sf の更新が終わるのを待っています」と出ます）。裏の準備が、sf の一時的な失敗で止まったときは、30 秒後に 1 回だけやり直します。ランチャーの見出しの下に、状態が 1 行出ます。AI は、必要なときに <code>sf-log.sh pull</code> を実行するだけです。<code>sf-start.sh</code> を使わない場面では、上の手順のとおり、人が <code>start</code> と <code>stop</code> を実行します。</p>
 <h3>サブコマンド</h3>
 <ul>
   <li><code>start</code>: ログの詳しさの設定（DebugLevel <code>sf_tools_log_standard</code> など）を作るか上書きし、自分のユーザーの TraceFlag（種類 <code>USER_DEBUG</code>）を作ります。<code>sf-log.sh</code> が前に作ったものがあれば、作り直さずに期限を延ばします。

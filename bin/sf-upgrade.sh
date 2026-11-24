@@ -16,6 +16,10 @@
 #   ※ そのほかの引数は、「不明なオプションです」と表示して中断する
 #
 # 【処理の流れ】
+#   0. sf の更新のロック（~/.sf-tools-upgrade.lock。環境変数 SF_TOOLS_UPGRADE_LOCK で差し替え可）を見る:
+#        ほかの sf-upgrade.sh が動いている（ロックの PID が生きている）: 何もせずに終わる（INFO。終了コード 0）
+#        それ以外: 自分の PID を書き、終了時（EXIT）に消す（自分の PID のときだけ）。
+#        sf-log.sh は、このロックがあるあいだ、sf を呼ばずに待つ（sf の入れ替えの途中に sf を呼ぶと失敗するため。2026-11-24）
 #   1. npm を確認する（npm が無ければ、WARNING を表示してスキップ）
 #        現在の版（npm --version）と最新の版（npm view npm version）が同じ: 何もしない（INFO）
 #        違うとき、npm install -g npm@latest で更新する（出力は取っておく。--dry-run の試し打ちはしない。補足）
@@ -75,6 +79,23 @@ if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
 fi
 source "$COMMON_LIB"
 reject_unknown_args "$@"   # -v / --verbose 以外の引数は、不明なオプションとして中断する
+
+# ------------------------------------------------------------------------------
+# sf の更新のロック（処理の流れ 0）。sf-log.sh が読む（場所・形は sf-log.sh の UPGRADE_LOCK と同じ。PID=<数字> の 1 行）
+# ------------------------------------------------------------------------------
+UPGRADE_LOCK="${SF_TOOLS_UPGRADE_LOCK:-${HOME}/.sf-tools-upgrade.lock}"
+_lock_pid=$(sed -n 's/^PID=//p' "$UPGRADE_LOCK" 2>/dev/null | head -n 1)  # VAR=$(cmd) のため run 不使用
+if [[ "$_lock_pid" =~ ^[0-9]+$ && "$_lock_pid" != "$$" ]] && kill -0 "$_lock_pid" 2>/dev/null; then  # 条件チェックのため run 不使用
+    log "INFO" "ほかの sf-upgrade.sh（PID ${_lock_pid}）が動いているため、何もせずに終わります。"
+    exit 0
+fi
+# 自分の PID のときだけ消す（ほかの sf-upgrade.sh が書き直したロックを消さない）
+_release_upgrade_lock() {
+    [[ "$(sed -n 's/^PID=//p' "$UPGRADE_LOCK" 2>/dev/null | head -n 1)" == "$$" ]] && rm -f "$UPGRADE_LOCK" 2>/dev/null  # 後始末のため run 不使用
+    return 0
+}
+trap _release_upgrade_lock EXIT
+printf 'PID=%s\n' "$$" > "$UPGRADE_LOCK" 2>/dev/null || log "WARNING" "sf の更新のロックを書けません（${UPGRADE_LOCK}）。続行します。"  # 書けなくても更新は続ける（sf-log.sh が待たないだけ）
 
 # ==============================================================================
 # メイン処理

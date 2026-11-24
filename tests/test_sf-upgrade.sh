@@ -5,6 +5,10 @@
 source "$(dirname "${BASH_SOURCE[0]}")/test_helper.sh"
 echo -e "${CLR_HEAD}=== sf-upgrade.sh ===${CLR_RST}"
 
+# sf の更新のロックは、本物のホーム（~/.sf-tools-upgrade.lock）に書かない（動いている sf-log.sh を待たせないため）
+SF_TOOLS_UPGRADE_LOCK="$(mktemp -d "${TMPDIR:-/tmp}/upgrade-lock-XXXX")/upgrade.lock"
+export SF_TOOLS_UPGRADE_LOCK
+
 # 正常実行 → npm / sf / git が呼び出される
 test_normal_run() {
     local td mb mh
@@ -116,6 +120,45 @@ test_npm_sf_updated_by_npm() {
     (cd "$td" && PATH="$mb:$PATH" MOCK_NPM_LS_EXIT=0 bash "$SF_TOOLS_DIR/bin/sf-upgrade.sh") > /dev/null 2>&1
     assert_file_contains     "$MOCK_CALL_LOG" "npm install -g @salesforce/cli@latest" "npm 版 → npm install -g @salesforce/cli@latest で更新する"
     assert_file_not_contains "$MOCK_CALL_LOG" "sf update" "npm 版 → sf update は使わない"
+    teardown "$td" "$mb"
+}
+
+# sf の更新のロック: 動いているあいだは自分の PID を書き、終わったら消す。ほかの sf-upgrade.sh が動いていれば、何もしない（2026-11-24）
+test_upgrade_lock() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] sf の更新のロック${CLR_RST}"
+    local td mb mh out ec sp
+    setup_std_env td mb mh
+    create_all_mocks "$mb"
+    # npm で sf を入れ替えている最中のロックの中身を、控えに写す（本物の npm のモックは、そのあとで呼ぶ）
+    mv "$mb/npm" "$mb/npm.real"
+    cat > "$mb/npm" <<EOF
+#!/bin/bash
+[[ "\$*" == *"@salesforce/cli@latest"* ]] && cat "\$SF_TOOLS_UPGRADE_LOCK" > "$td/lock-during.txt" 2>/dev/null
+exec "$mb/npm.real" "\$@"
+EOF
+    chmod +x "$mb/npm"
+    rm -f "$SF_TOOLS_UPGRADE_LOCK"
+    (cd "$td" && PATH="$mb:$PATH" MOCK_NPM_LS_EXIT=0 bash "$SF_TOOLS_DIR/bin/sf-upgrade.sh") > /dev/null 2>&1
+    assert_file_contains "$td/lock-during.txt" "PID=" "sf を入れ替えているあいだ、ロックに PID を書く"
+    assert_file_not_exists "$SF_TOOLS_UPGRADE_LOCK" "終わったら、ロックを消す"
+
+    # ほかの sf-upgrade.sh が動いている（ロックの PID が生きている）→ 何もしない
+    sleep 30 & sp=$!
+    printf 'PID=%s\n' "$sp" > "$SF_TOOLS_UPGRADE_LOCK"
+    : > "$MOCK_CALL_LOG"
+    out=$(cd "$td" && PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-upgrade.sh" 2>&1); ec=$?
+    assert_exit_ok $ec "ほかの sf-upgrade.sh が動いている → 終了コード 0"
+    assert_output_contains "$out" "ほかの sf-upgrade.sh" "ほかの sf-upgrade.sh が動いている → その旨を表示する"
+    assert_file_not_contains "$MOCK_CALL_LOG" "npm install" "ほかの sf-upgrade.sh が動いている → 更新しない"
+    assert_file_contains "$SF_TOOLS_UPGRADE_LOCK" "PID=${sp}" "ほかの sf-upgrade.sh のロックは消さない"
+    kill "$sp" 2>/dev/null; wait "$sp" 2>/dev/null
+
+    # 死んだ PID のロックが残っている → 気にせず更新し、終わったら消す
+    printf 'PID=%s\n' "$sp" > "$SF_TOOLS_UPGRADE_LOCK"
+    : > "$MOCK_CALL_LOG"
+    (cd "$td" && PATH="$mb:$PATH" MOCK_NPM_LS_EXIT=0 bash "$SF_TOOLS_DIR/bin/sf-upgrade.sh") > /dev/null 2>&1
+    assert_file_contains "$MOCK_CALL_LOG" "npm install -g @salesforce/cli@latest" "死んだ PID のロック → 更新する"
+    assert_file_not_exists "$SF_TOOLS_UPGRADE_LOCK" "死んだ PID のロック → 終わったら消す"
     teardown "$td" "$mb"
 }
 
@@ -301,6 +344,7 @@ test_no_sf
 test_git_update_is_last
 test_git_update_on_gitbash
 test_npm_sf_updated_by_npm
+test_upgrade_lock
 test_non_npm_sf_updated_by_sf_update
 test_npm_up_to_date
 test_npm_updated_when_compatible

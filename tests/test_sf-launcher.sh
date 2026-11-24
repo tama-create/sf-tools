@@ -123,30 +123,30 @@ test_nonnumber_arg
 test_quit_interactive
 
 # ------------------------------------------------------------------------------
-# Apex ログ（sf-log.sh）の状態の 1 行（logs/apex/.status。doc/sf-log-design.md 5.4）
+# デバッグログ（sf-log.sh）の状態の 1 行（logs/apex/.status。doc/sf-log-design.md 5.4）
 # ------------------------------------------------------------------------------
 test_apexlog_status_line() {
-    echo ""; echo -e "${CLR_HEAD}[TEST] Apex ログの状態の 1 行${CLR_RST}"
+    echo ""; echo -e "${CLR_HEAD}[TEST] デバッグログの状態の 1 行${CLR_RST}"
     local td mb out
     td=$(setup_force_dir); mb=$(setup_mock_bin)
     export MOCK_CALL_LOG="$mb/calls.log"
     create_all_mocks "$mb"
     out=$(cd "$td" && echo "q" | PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-launcher.sh" 2>&1)
-    assert_output_not_contains "$out" "Apex ログ" ".status がない → 何も表示しない"
+    assert_output_not_contains "$out" "デバッグログ" ".status がない → 何も表示しない"
     mkdir -p "$td/logs/apex"
     printf 'STATE=collecting\nORG=dev\nEXPIRES=2026-11-23T06:30:00Z\nEXPIRES_AT=15:30\nCOUNT_TODAY=3\nWARNING=\n' > "$td/logs/apex/.status"
     out=$(cd "$td" && echo "q" | PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-launcher.sh" 2>&1)
-    [[ "$out" == *"Apex ログ: 取得中（dev・期限 15:30・今日 3 本）"* ]] && pass "取得中 → 組織・期限・今日の本数を表示する" || fail "取得中 → 組織・期限・今日の本数を表示する" "$out"
+    [[ "$out" == *"デバッグログ: 取得中（dev・期限 15:30・今日 3 本）"* ]] && pass "取得中 → 組織・期限・今日の本数を表示する" || fail "取得中 → 組織・期限・今日の本数を表示する" "$out"
     printf 'STATE=skipped\nREASON=このプロジェクトでは、自動で取らない設定のため\n' > "$td/logs/apex/.status"
     out=$(cd "$td" && echo "q" | PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-launcher.sh" 2>&1)
-    [[ "$out" == *"Apex ログ: 取っていません（このプロジェクトでは、自動で取らない設定のため）"* ]] && pass "取らない → 理由を表示する" || fail "取らない → 理由を表示する" "$out"
+    [[ "$out" == *"デバッグログ: 取っていません（このプロジェクトでは、自動で取らない設定のため）"* ]] && pass "取らない → 理由を表示する" || fail "取らない → 理由を表示する" "$out"
     printf 'STATE=collecting\nORG=dev\nWARNING=取得に失敗しました（120 秒後にやり直します）\n' > "$td/logs/apex/.status"
     out=$(cd "$td" && echo "q" | PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-launcher.sh" 2>&1)
-    [[ "$out" == *"⚠ Apex ログ: 取得に失敗しました"* ]] && pass "WARNING → もう 1 行表示する" || fail "WARNING → もう 1 行表示する" "$out"
+    [[ "$out" == *"⚠ デバッグログ: 取得に失敗しました"* ]] && pass "WARNING → もう 1 行表示する" || fail "WARNING → もう 1 行表示する" "$out"
     printf 'STATE=$(touch injected)\n' > "$td/logs/apex/.status"
     out=$(cd "$td" && echo "q" | PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-launcher.sh" 2>&1)
     assert_file_not_exists "$td/injected" ".status を source しない（中身を実行しない）"
-    assert_output_not_contains "$out" "Apex ログ" "知らない STATE → 何も表示しない"
+    assert_output_not_contains "$out" "デバッグログ" "知らない STATE → 何も表示しない"
     teardown "$td" "$mb"
 }
 test_apexlog_status_line
@@ -155,7 +155,7 @@ test_apexlog_status_line
 # 準備中（starting）のあいだは、状態が変わったら、メニューを描き直す（コマンドは動かさない。read -t 5 秒ずつ）
 # ------------------------------------------------------------------------------
 test_apexlog_status_refresh() {
-    echo ""; echo -e "${CLR_HEAD}[TEST] Apex ログ: 準備中のあいだの描き直し${CLR_RST}"
+    echo ""; echo -e "${CLR_HEAD}[TEST] デバッグログ: 準備中のあいだの描き直し${CLR_RST}"
     local td mb out t0 n
     td=$(setup_force_dir); mb=$(setup_mock_bin)
     export MOCK_CALL_LOG="$mb/calls.log"
@@ -166,8 +166,8 @@ test_apexlog_status_refresh() {
     ( sleep 2; printf 'STATE=collecting\nORG=dev\nEXPIRES_AT=15:30\nCOUNT_TODAY=0\n' > "$td/logs/apex/.status" ) &
     out=$(cd "$td" && { sleep 8; printf 'q'; } | PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-launcher.sh" 2>&1)
     wait
-    [[ "$out" == *"Apex ログ: 準備中（dev）"* ]] && pass "最初は、準備中を表示する" || fail "最初は、準備中を表示する" "$out"
-    [[ "$out" == *"Apex ログ: 取得中（dev・期限 15:30・今日 0 本）"* ]] && pass "取得中に変わったら、メニューを描き直す" || fail "取得中に変わったら、メニューを描き直す" "$out"
+    [[ "$out" == *"デバッグログ: 準備中（dev）"* ]] && pass "最初は、準備中を表示する" || fail "最初は、準備中を表示する" "$out"
+    [[ "$out" == *"デバッグログ: 取得中（dev・期限 15:30・今日 0 本）"* ]] && pass "取得中に変わったら、メニューを描き直す" || fail "取得中に変わったら、メニューを描き直す" "$out"
     n=$(printf '%s\n' "$out" | grep -c ">> Launcher <<")
     assert_equals "$n" "2" "描き直しは 1 回だけ（取得中になったら、待ち切れで描き直さない）"
     [[ ! -s "$mb/calls.log" ]] && pass "描き直しでは、コマンドを動かさない" || fail "描き直しでは、コマンドを動かさない" "$(cat "$mb/calls.log")"

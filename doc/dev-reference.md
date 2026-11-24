@@ -76,7 +76,7 @@
 | `test_sf-start.sh` | sf-start.sh |
 | `test_sf-restart.sh` | sf-restart.sh |
 | `test_sf-metasync.sh` | sf-metasync.sh（鏡像: 取得 → 計画 → 反映・削除・取得の失敗とやり直し・`--dry-run`・保留と終了コード 3・コミット前の中断の復元） |
-| `test_apexlog-js.sh` | lib/apexlog.js（sf-log.sh の部品。summarize: エラー・一覧・System.debug・入力規則・制限・取れていないもの（読めなかったログ・読み取れなかった行・切り詰め・タイムゾーン不明・該当する行なし）・一覧の形の誤り。list: 自分 / 他の人の見分け・応答の形の誤り（エラーの文言に値を出さない）。time: now・norm・cmp・min・add。見本のログは `tests/fixtures/apexlog/`（実データなし）） |
+| `test_apexlog-js.sh` | lib/apexlog.js（sf-log.sh の部品。summarize: エラー・一覧・System.debug・入力規則・フロー（開始・完了・エラーと要素。フローのエラーを実行に結ぶ・リンクのタグを外す）・制限・取れていないもの（読めなかったログ・読み取れなかった行・切り詰め・タイムゾーン不明・該当する行なし）・一覧の形の誤り。list: 自分 / 他の人の見分け・応答の形の誤り（エラーの文言に値を出さない）。time: now・norm・cmp・min・add。見本のログは `tests/fixtures/apexlog/`（実データなし）） |
 | `test_metasync-js.sh` | lib/metasync.js（plan: 追加・変更・削除・CRLF・残すファイル・S2〜S5・S9 の境界・S1/S8。apply: 反映・保留・根の外のパスの拒否。detect: 変更の検知（状態なし・変更なし・履歴・区分 B の変化・失敗・状態の破損）と、区分の表 `config/metasync-detect.txt` の整合） |
 | `test_sf-release.sh` | sf-release.sh |
 | `test_sf-deploy.sh` | sf-deploy.sh |
@@ -363,7 +363,7 @@ check_gh_owner "$GITHUB_OWNER"   # 認証ユーザーの一致確認
 - 未接続のとき: エイリアスを入力（空 Enter は再入力。`q` / EOF で中断）→ `sf alias unset vscodeOrg` → ログイン先の URL を選ぶ（`[1]` login / `[2]` test（Enter）/ `[3]` 組織の URL。`SF_INIT_LOGIN_URL_START` があれば質問しない。**エイリアスの名前では決めない**）→ `sf org logout` → `sf org login web`（WSL で wslview がなければ、`/tmp/sf-wsl-bin` にシムを一時生成してブラウザ起動）。ログインに失敗したら中断する（設定ファイルの書き込み・VS Code・ランチャーの起動は行わない）
 - `.sf/config.json` / `.sfdx/sfdx-config.json` を上書き（書き込めなければ中断）し、`code` があれば `code .` で VS Code を起動（なければ警告のみ）
 - バックグラウンドで `sf-install.sh` を実行（フック・リリースDir準備・npm install・ツール更新はすべて sf-install.sh が担当。完了は待たない）
-- Apex ログ（`~/sf-tools/bin/sf-log.sh` があるとき。`doc/sf-log-design.md` 5 章）: 持ち主の印 `SF_LOG_OWNER`（`PID:時刻:乱数`）を決め（外側の印の PID が生きていれば引き継ぐ = 入れ子）、`sf-log.sh begin -o <エイリアス> --owner <印>` を呼ぶ（sf を呼ばずにすぐ終わる。準備と取得役は裏）。0 かつ自分の印なら、`EXIT` トラップ（`_on_exit`）で `sf-log.sh leave --owner <印>` を呼ぶ。10 は何もしない・それ以外は WARNING。どれでも先へ進む
+- デバッグログ（`~/sf-tools/bin/sf-log.sh` があるとき。`doc/sf-log-design.md` 5 章）: 持ち主の印 `SF_LOG_OWNER`（`PID:時刻:乱数`）を決め（外側の印の PID が生きていれば引き継ぐ = 入れ子）、`sf-log.sh begin -o <エイリアス> --owner <印>` を呼ぶ（sf を呼ばずにすぐ終わる。準備と取得役は裏）。0 かつ自分の印なら、`EXIT` トラップ（`_on_exit`）で `sf-log.sh leave --owner <印>` を呼ぶ。10 は何もしない・それ以外は WARNING。どれでも先へ進む
 - 続けて、前面で `sf-launcher.sh` を起動（`SF_LAUNCHER_ACTIVE=1` なら起動しない。二重起動の防止）
 - Ctrl+C は無効（`trap '' INT`。子の bash にも継承される）。終了コードは、ランチャー・バックグラウンドの sf-install.sh の結果によらず 0（中断・失敗は 1）
 - 前提: force-* フォルダで実行（`SF_INIT_MODE=1`（sf-job.sh 経由）なら確認を省略）。接続済みの組織を切り替えるときは `sf-restart.sh`
@@ -904,7 +904,7 @@ sf-init.sh --add-tier develop    # main+staging → main+staging+develop
 
 > 仕様の正本は、`bin/sf-log.sh` の冒頭コメント（`--help`）。設計は `doc/sf-log-design.md`（実機の確認の結果は 13.1）。ここは実装の要点。
 
-AI の開発サイクル用の Apex ログ取得（開発者向け。管理者向けの警告ボックスは不要）。2026-11-23 に第 3 段まで実装（手動の `start`・`pull`・`stop`・`status`・`auto`、裏の取得役 `collect`・`leave`、sf-start からの `begin`）。
+AI の開発サイクル用のデバッグログ取得（開発者向け。管理者向けの警告ボックスは不要）。2026-11-23 に第 3 段まで実装（手動の `start`・`pull`・`stop`・`status`・`auto`、裏の取得役 `collect`・`leave`、sf-start からの `begin`）。
 
 - **境界**: JSON の読み取り・判定・要約・日時は `lib/apexlog.js`（`summarize`・`list`・`tflist`・`time`）。シェルは、組織への問い合わせ・手元の状態・保存・終了コード
 - **手元の状態**: `logs/apex/` の `.state`・`.status`・`.consent`・`.owners`・`.index`（`キー=値`。`kv_get`・`kv_set`。書き換えは短いロック `mkdir logs/apex/.lock` の中で `state_set`）。取得は取得のロック `logs/apex/.fetch.lock`

@@ -1,4 +1,4 @@
-# sf-log.sh 設計書（AI の開発サイクル用の Apex ログ取得）
+# sf-log.sh 設計書（AI の開発サイクル用のデバッグログ取得）
 
 > **ステータス: 実装済み（第 3 段まで。2026-11-23）。** `bin/sf-log.sh`（`begin`・`start`・`pull`・`stop`・`status`・`auto`・`collect`・`leave`）・`lib/apexlog.js`・`sf-start.sh` と `sf-launcher.sh` とのつなぎを実装した（テスト: `tests/test_sf-log.sh`・`tests/test_apexlog-js.sh`・`tests/test_sf-start.sh`・`tests/test_sf-launcher.sh`）。実機（Windows の Git Bash・開発用の Developer Edition）では、手動の段と取得役を確かめた。sf-start からの自動の流れの実機確認と、macOS・Linux での確認は、まだ（13.1）。
 > 経緯: 2026-11-21 に、旧設計（`sf-logwatch.sh`。10 秒ごとに見張り、Ctrl+C で止める、人が見る道具）を、AI が読む前提で作り直し、Codex のレビュー（4 回。8・7・3・0 件）を反映した。2026-11-22 に、TAMAさんの提案で、**ランチャーの起動中は裏で自動で取り続ける方式**を主な使い方にした（2 章）。
@@ -18,6 +18,7 @@ AI がコードを書く → AI がデプロイする → 人が画面で動き�
 
 - ログを読むのは、人ではなく AI。そのため、ログの本文に加えて、**AI が最初に読む要約**を作る（6 章）
 - 取るのは、実行した人のユーザーのログだけ
+- 取るのは Salesforce のデバッグログ（`ApexLog`）。名前は Apex でも、Apex だけでなく、フロー・入力規則・重複ルールなど、1 回の処理の中の動きが載る（区分ごとの詳しさは 7 章。2026-11-24 に、フロー・入力規則の行を実機で確認した: 6.3）
 
 ### 1.2 使い方の全体像
 
@@ -284,7 +285,7 @@ bash ~/sf-tools/bin/sf-log.sh leave --owner <印>   # sf-start の終了時: 持
              失敗（終了コード 1。「取らない」の 10 は除く）は、持ち主が生きていれば、.status を starting に戻して「やり直しています」を書き、
              30 秒後に 1 回だけやり直す（--retry。sf の一時的な失敗で、その日の取得が抜けないため。13.3）
     sf-start は、begin の終了コードで分ける: 0 → 自分の印なら、終了時に leave する（5.2）／10 → 何もしない（理由は sf-log.sh が表示）／
-    それ以外 → WARNING「Apex ログの準備を始められませんでした」。どの場合も、ランチャーの起動に進む（ログの取得の失敗で、開発を止めない）
+    それ以外 → WARNING「デバッグログの準備を始められませんでした」。どの場合も、ランチャーの起動に進む（ログの取得の失敗で、開発を止めない）
 ```
 
 - 持ち主の印に、PID だけでなく起動の時刻と乱数を入れるのは、同じ PID の印が重ならないようにするため（生死は `kill -0` だけで見る。5.5）
@@ -316,7 +317,7 @@ bash ~/sf-tools/bin/sf-log.sh leave --owner <印>   # sf-start の終了時: 持
 
 ### 5.4 ランチャーの表示
 
-- `sf-launcher.sh` のメニューの上に、`logs/apex/.status` から 1 行を表示する（例: `Apex ログ: 取得中（dev-tama・期限 15:30・今日 23 本）`／`Apex ログ: 取っていません`）
+- `sf-launcher.sh` のメニューの上に、`logs/apex/.status` から 1 行を表示する（例: `デバッグログ: 取得中（dev-tama・期限 15:30・今日 23 本）`／`デバッグログ: 取っていません`）
 - ランチャーは `lib/common.sh` を読まない単独の設計のため、`.status` は `キー=値` の行にして、`while read` で読めるようにする（9.2）。ファイルがなければ、何も表示しない
 - 準備中（`starting`）のあいだは、入力を 5 秒ずつ待ち（`read -t`）、`STATE` が変わったら、コマンドを動かさずにメニューを描き直す（裏の準備は、実機で約 3 分かかった。つながっても「準備中」のままだと迷うため。2026-11-23。13.3）。待ち切れと EOF は、待った時間でも見分ける（Bash 3.2 では、待ち切れの戻り値が 128 を超えないため）
 - メニューの番号・動きは変えない
@@ -347,7 +348,7 @@ bash ~/sf-tools/bin/sf-log.sh leave --owner <印>   # sf-start の終了時: 持
 ### 6.2 中身（案）
 
 ```markdown
-# Apex ログの要約（2026-11-22 14:30:05 作成・3 本・エラー 1）
+# デバッグログの要約（2026-11-22 14:30:05 作成・3 本・エラー 1）
 
 > 取得役: 動作中（最後の取得 14:30:03）。TraceFlag の期限 16:12
 > 入れなかった古いログ: 12 本（13:02〜14:10）。入れるには `sf-log.sh pull --since 90`
@@ -362,26 +363,43 @@ bash ~/sf-tools/bin/sf-log.sh leave --owner <印>   # sf-start の終了時: 持
 | 14:30:01 | /aura（AccountController.save） | Attempt to de-reference... | 1.2MB | 340ms | 12/100 | 3/150 | logs/apex/20261122/143001_07LdM00000AbCdE_aura.log |
 
 ## 3. System.debug の出力（新しい順・最大 50 行）
-## 4. 入力規則・フローのエラー
+## 4. フロー・入力規則
+- [logs/apex/20261122/143001_07LdM00000AbCdE_aura.log:120] フロー Account_After_Save: 開始 2・完了 1・エラー 1・要素: Check_Type（FlowDecision）、Set_Description（FlowRecordUpdate）
+- [logs/apex/20261122/143001_07LdM00000AbCdE_aura.log:5] 入力規則 Account_Check: 評価 2・通過 1・停止 1
+- 入力規則のエラー: 1 件
+  - [logs/apex/20261122/143001_07LdM00000AbCdE_aura.log:41] VALIDATION_FAIL（規則: Account_Check）
+- フローのエラー（FLOW_ELEMENT_ERROR）の文言は、上の 1 に入れています
 ## 5. 制限の使用量（上限の 50% を超えたものだけ）
 ## 6. 切り詰め・出なかった区分（20MB で切られた・該当する行が 1 行もなかった区分）
 ```
 
-### 6.3 拾う行（2026-11-23 に実機で確認。入力規則・フローは未確認）
+- 一覧の「操作」の括弧には、最初の CODE_UNIT に加えて、そのログの中のフロー・入力規則の名前を添える（例: `/services/data/v68.0/sobjects/Account（Validation:Account:new／フロー: Account_After_Save／入力規則: Account_Check）`）。1 回の保存が何本かのログに分かれ、最初の CODE_UNIT だけでは、フローを含むログが入力規則の処理に見えるため（6.3）
+- 4 のフローは、完了の行がない実行（エラーで止まった・ログの終わりで切れた）があるため、成功の数を推し量らず、開始・完了・エラーの行の数だけを書く
 
-| 区分 | ログの行の種類（候補） |
+### 6.3 拾う行（2026-11-23 に実機で確認。入力規則・フローは 2026-11-24 に確認）
+
+| 区分 | ログの行の種類 |
 |---|---|
 | エラー | `EXCEPTION_THROWN`・`FATAL_ERROR`・`FLOW_ELEMENT_ERROR` |
-| 入力規則 | `VALIDATION_FAIL`・`VALIDATION_RULE`・`VALIDATION_ERROR` |
+| 入力規則 | `VALIDATION_FAIL`・`VALIDATION_RULE`・`VALIDATION_ERROR`（評価の数には `VALIDATION_PASS` も数える） |
+| フロー | `FLOW_START_INTERVIEW_BEGIN`・`FLOW_ELEMENT_BEGIN`・`FLOW_ELEMENT_ERROR`（実行の ID とフローの名前を結ぶため、`FLOW_CREATE_INTERVIEW_END`・`FLOW_INTERVIEW_FINISHED` も読む） |
 | デバッグ出力 | `USER_DEBUG` |
 | 流れ | `CODE_UNIT_STARTED` / `CODE_UNIT_FINISHED`（エラーの「直前の処理」を示すため） |
 | 制限 | `LIMIT_USAGE_FOR_NS`・`CUMULATIVE_LIMIT_USAGE` |
 | 件数 | `SOQL_EXECUTE_BEGIN`・`DML_BEGIN` |
 
-- どの行が、どの区分のどの詳しさで出るかは、行ごとに決まっている（公式のイベントの一覧）。**2026-11-23 に、開発組織で 7 章の `standard`（USER_DEBUG の TraceFlag）の実ログを確かめた**（Developer Edition・API 68.0・sf 2.157.8・Windows での観測。版や組織の種類で変わりうる。下の行の形は、解析の前提にするが、**想定と違う行は、推測で読まずに「読み取れなかった行」に入れる**（下の箇条）。要約は、1 行も出なかった区分を「該当する行なし（詳しさが足りずに出なかった可能性もある）」と書くので、未確認の区分（入力規則・フロー）で行が出なくても、AI が「エラーなし」と取り違えない）:
+- どの行が、どの区分のどの詳しさで出るかは、行ごとに決まっている（公式のイベントの一覧）。**2026-11-23 に、開発組織で 7 章の `standard`（USER_DEBUG の TraceFlag）の実ログを確かめた**（Developer Edition・API 68.0・sf 2.157.8・Windows での観測。版や組織の種類で変わりうる。下の行の形は、解析の前提にするが、**想定と違う行は、推測で読まずに「読み取れなかった行」に入れる**（下の箇条）。要約は、1 行も出なかった区分を「該当する行なし（詳しさが足りずに出なかった可能性もある）」と書くので、行が出なかった区分を、AI が「エラーなし」と取り違えない）:
   - 出た: `USER_DEBUG`・`SOQL_EXECUTE_BEGIN`・`DML_BEGIN`・`FATAL_ERROR`・`CUMULATIVE_LIMIT_USAGE`・`LIMIT_USAGE_FOR_NS`・`CODE_UNIT_STARTED` / `CODE_UNIT_FINISHED`
   - `EXCEPTION_THROWN` は、`throw` した例外と DML の失敗では出た（捕まえても出る）。実行時の例外（null の参照など）では、捕まえても捕まえなくても出なかった。捕まえなかった例外は `FATAL_ERROR` で分かる
-  - 入力規則・フローの行は、組織にそれらを作る必要があるため、まだ確かめていない（13.1）
+  - **入力規則・フローの行も、`standard` で出た**（2026-11-24。開発組織に、一時の入力規則と、Account の作成後に動くレコードトリガーフローを作り、API での作成と `executeAnonymous` の両方で動かした。13.1）:
+    - 入力規則: `VALIDATION_RULE|<ID>|<規則の名前>`・`VALIDATION_FORMULA|<式>|<項目>=<値>`・`VALIDATION_PASS` / `VALIDATION_FAIL`
+    - フロー: `FLOW_CREATE_INTERVIEW_END|<実行の ID>|<フローの名前>`・`FLOW_START_INTERVIEW_BEGIN|<実行の ID>|<フローの名前>`・`FLOW_ELEMENT_BEGIN|<実行の ID>|<要素の種類>|<要素の名前>`（要素の種類は `FlowRecordUpdate` など `Flow` で始まる）・`FLOW_INTERVIEW_FINISHED|<実行の ID>|<フローの名前>`
+    - フローの失敗: `FLOW_ELEMENT_ERROR|<文言>|<要素の種類>|<要素の名前>`。**実行の ID を持たない**ため、同じ要素を最後に始めた実行のフローに結ぶ。失敗した実行には `FLOW_INTERVIEW_FINISHED` が出ない。文言に HTML のリンク（`<a href=…>…</a>`）が混じるため、要約ではタグを外す（ほかの `<` `>` は残す）。並びが違う行は、推測で読まずに項目をそのまま並べる
+    - 重複ルールの行（`DUPLICATE_DETECTION_*`）も出る（要約には入れない）
+    - 1 回の保存（API の作成 1 回）が、2〜3 本のログに分かれた（`Flow:Account` だけの短いログ・入力規則とフローを含むログ・`limit check` のログ）
+    - ログの `Status` は、入力規則やフローで保存が止まっても「成功」（例外が外に出ないため。8.3 のとおり、判定に使わない）
+    - `detail`（`Workflow=FINER`）では、`FLOW_VALUE_ASSIGNMENT`（変数の値。`$Record` の全項目を含む）・条件の結果・要素ごとの制限の使用量（`FLOW_*_LIMIT_USAGE`）が増えた
+    - 自分のユーザー以外（自動化ユーザーなど）が動かすフロー（スケジュール・プラットフォームイベントなど）は、TraceFlag が自分のユーザーにだけ付くため取れない（未確認。11.3）
 - **行の形**（実ログで確かめた。要約の解析は、これに合わせる）:
   - 1 行目は、API の版と詳しさ（例: `68.0 APEX_CODE,FINE;APEX_PROFILING,INFO;…`）。匿名 Apex では、続いて `Execute Anonymous: <コード>` の行が並ぶ
   - イベントの行は `<時刻> (<ナノ秒>)|<種類>|<項目>|…`。**時刻は、ログのユーザーのタイムゾーン**（UTC ではない。`USER_INFO` の行にタイムゾーンが出る）
@@ -416,7 +434,7 @@ bash ~/sf-tools/bin/sf-log.sh leave --owner <印>   # sf-start の終了時: 持
 | System | DEBUG | DEBUG |
 | Visualforce | INFO | FINE |
 
-- `standard` の値で、6.3 の行が出ることを、2026-11-23 に開発組織で確かめた（入力規則・フローの行は未確認）。`detail` の値は、まだ仮の値
+- `standard` の値で、6.3 の行が出ることを、2026-11-23 に開発組織で確かめた（入力規則・フローの行は 2026-11-24）。`detail` でフローの変数の値が増えることも、2026-11-24 に確かめた（6.3）。`detail` のほかの区分の値は、まだ仮の値
 - `detail` は、変数の値の変化などが要るときだけ、手動の `start --level detail` で使う。15 分で 1,000MB の上限（8.6）に近づきやすいため、既定にしない
 - 公式の項目には、ほかに `DataAccess`・`Nba`・`Wave` がある。指定しないと `INFO` になった（2026-11-23 に実機で確認）。上書きのときも指定しない（作ったときの `INFO` のまま）
 
@@ -669,7 +687,7 @@ force-*/logs/apex/
   - つないだ組織のエイリアスが、`.consent` の `ORG` と違う（別の組織に切り替えた）
   - **同じエイリアスで、別の組織に入り直した**: `begin` では分からない（sf を呼ばないため）。裏の `start --auto` が、つないだ組織の ID を `.consent` の `ORG_ID` と照らし合わせ、違えば取らずに（10）答えを消す。ランチャーには「取っていません（同じエイリアスで、別の組織に入り直したため…）」と出て、次の sf-start で聞き直す。`ORG_ID` が空（答えた直後）なら、そのときの組織 ID を書く。同意のない組織のログは、手元に保存しない
   - 注意の文面の版（`VERSION`）が変わった（sf-tools の更新で、送るものや注意が変わったとき）
-  - 「ランチャーの起動中、この組織の Apex ログを、裏で自動で手元に保存します。ログは AI に読ませる前提です。ダミーデータの組織で使ってください。本番のデータを写した Sandbox（Full・Partial）では、N を選んでください。あとから `sf-log.sh auto on|off` で変えられます」
+  - 「ランチャーの起動中、この組織のデバッグログを、裏で自動で手元に保存します。ログは AI に読ませる前提です。ダミーデータの組織で使ってください。本番のデータを写した Sandbox（Full・Partial）では、N を選んでください。あとから `sf-log.sh auto on|off` で変えられます」
 - **手動**: `start` のたびに、同じ注意を表示し、`ask_yn || die` で確認する（`-y` で省く）
 - `.consent` は、プロジェクト（force-* のフォルダ）ごとに 1 つ。答えは、最後に答えた組織の分だけを持つ（組織を行き来すると、そのたびに聞く。手間より、データの扱いの確認を優先する）。`logs/apex/` を消すと、次の `sf-start` で、もう一度聞く
 - `auto on|off` で変えたときは、その時点でつないでいる組織のエイリアスを `ORG` に、ID を `ORG_ID` に書く
@@ -707,12 +725,13 @@ force-*/logs/apex/
    - AI が自分で Apex を試しに動かすときは、`sf apex run` ではなく、Tooling API の `executeAnonymous` を直接呼ぶ（`sf api request rest "/services/data/v68.0/tooling/executeAnonymous/?anonymousBody=<URL エンコードしたコード>"`）。`sf apex run` は、sf が自分の詳しさでログを出すため、SOQL・DML などの行が出ない（6.3）
    - **動かす前に、毎回、人の了承を取る**（読み取りだけのコードも）。了承を求めるときは、接続先の組織（エイリアス・組織 ID）と、動かす Apex の全文を見せる。組織でコードを動かすことは、データの書き換え（DML）・非同期の処理の登録・外部への通信になりうるため
    - `executeAnonymous` は、コードを URL の引数（GET）でしか受け取らない。長いコード（URL エンコード後に約 16KB を超えるもの）は、URL の長さの上限で失敗しうる。長いコードは、クラスにしてデプロイしてから呼ぶ
+   - Windows の Git Bash では、`/` で始まる引数が、Windows のパスに書き換えられることがある（2026-11-24。`?` のない `/services/data/…` が `NOT_FOUND` になった。`?` のある `executeAnonymous` の URL は通った）。`sf api request rest` は、`MSYS_NO_PATHCONV=1` を付けて呼ぶ
 6. AI は、`start`・`stop`・`auto` を実行しない（組織への書き込みと、取るかどうかの判断は、人に残す）
 
 ### 11.3 取れないもの（手順書に書く）
 
-- **LWC・Aura の画面側のエラー**（ブラウザのコンソール）は、Apex のログに残らない。人に、ブラウザの開発者ツールのコンソールの内容を貼ってもらう
-- **別のユーザーで動く処理**: プラットフォームイベントのトリガー（Automated Process ユーザー）・他の人がスケジュールしたジョブは、自分のユーザーの TraceFlag では取れない
+- **LWC・Aura の画面側のエラー**（ブラウザのコンソール）は、デバッグログに残らない。人に、ブラウザの開発者ツールのコンソールの内容を貼ってもらう
+- **別のユーザーで動く処理**: プラットフォームイベントのトリガー（Automated Process ユーザー）・スケジュールで動くフロー・プラットフォームイベントで動くフロー・他の人がスケジュールしたジョブは、自分のユーザーの TraceFlag では取れない
 - 非同期の処理（Queueable・Batch・future）は、実行の時刻がずれる。`pull` を少し待ってから呼ぶ
 - 取得中に人が Developer Console を開くと、別の種類（DEVELOPER_LOG）の TraceFlag が作られる。USER_DEBUG とはぶつからないが、ログの詳しさがどうなるかは未確認（8.6）。ログの行が足りないと感じたら、`status` で確かめる
 
@@ -775,8 +794,8 @@ force-*/logs/apex/
 - [x] `ExpirationDate` を今にして TraceFlag を止められるか → 止められない（今・今から 5 秒後は拒否。60 秒後は受け付けた）。2 分後に縮める方式にした（8.2）
 - [x] `sf data query --use-tooling-api --json`・`sf data create record --json`・`sf data update record`・`sf data delete record`・`sf org display --json` の応答のフィールド名（8.2・8 章の冒頭の表）。`sf org display --json` の `result` は `id`・`apiVersion`・`accessToken`・`instanceUrl`・`username`・`clientId`・`connectedStatus`・`alias`（`accessToken` を記録に出さない）
 - [x] `sf apex get log -d` が書くファイルと、1 件あたりの所要時間 → `<ID>.log`。1 本 10〜11 秒・`-n 2` で 12.7 秒（Windows）。まとめて取る方式にした（8.4）。macOS は未測定
-- [x] 7 章の `standard` で、6.3 の行が出るか → 出る（入力規則・フローの行は未確認）。指定しない項目は `INFO`（6.3・7 章）
-- [ ] 入力規則・フローの行（`VALIDATION_*`・`FLOW_ELEMENT_ERROR`）が `standard` で出るか（組織に入力規則・フローを作って確かめる。作るのは人の了承のあと）
+- [x] 7 章の `standard` で、6.3 の行が出るか → 出る。指定しない項目は `INFO`（6.3・7 章）
+- [x] 入力規則・フローの行（`VALIDATION_*`・`FLOW_*`・`FLOW_ELEMENT_ERROR`）が `standard` で出るか → 出る（2026-11-24。TAMAさんの了承のもと、一時の入力規則とレコードトリガーフローを作って確かめた。行の形は 6.3）
 - [ ] 新しい TraceFlag の `StartDate` を、止めたもの（同じ種類）の `ExpirationDate` ちょうどにしたとき、重なりとして拒否されるか（いまは 1 秒あけている。4.2 の c）
 - [ ] 1 回の画面操作で出るログの本数と大きさ・1 日の開発で手元に溜まる量（実装のあと、ふだんの開発で測る）
 - [x] 日時の形式 → SOQL は `StartTime >= 2026-11-21T05:30:00Z`、TraceFlag は `YYYY-MM-DDTHH:MM:SSZ` で通る。読み直すと `…000+0000`（8.2）
@@ -823,6 +842,9 @@ force-*/logs/apex/
   - 裏の準備の失敗（終了コード 1）は、持ち主が生きていれば、30 秒後に 1 回だけやり直す（`--retry`。1 回目の起動で、sf 自身の読み込みエラー `MODULE_NOT_FOUND` で DebugLevel の検索が失敗し、その日の取得が抜けたため。5.1）
   - ランチャーは、準備中のあいだ、状態が変わったらメニューを描き直す（5.4）
   - 止めたら、`.status` の期限の表示（`EXPIRES_AT`）も消す
+- 2026-11-24（TAMAさんの指摘: Apex 以外のログも要る）: tama-dev で、フロー・入力規則の行が `standard` で出ることを確かめた（6.3）。次を変えた
+  - 表示名を「Apex ログ」から「デバッグログ」にした（Apex だけでなく、フロー・入力規則なども載るため。Salesforce の画面の呼び名とも同じ）。オブジェクト名 `ApexLog`・保存先 `logs/apex/`・ファイル名 `apexlog.js` は変えない（手元の状態と、既にある記録をそのまま使うため）
+  - 要約の 4 を「フロー・入力規則」にし、フローごとの開始・完了・エラーと実行した要素、入力規則ごとの評価・通過・停止を書く。一覧の操作に、フロー・入力規則の名前を添える。フローのエラーの文言から、リンクのタグを外す（6.2・6.3）
 
 ### 13.4 後回しにするもの
 

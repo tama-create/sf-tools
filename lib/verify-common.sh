@@ -33,6 +33,8 @@
 #   VERIFY_WF_TIMEOUT      ワークフローの完了を待つ上限（秒。既定 1200。E2E_WF_TIMEOUT も使える）
 #   VERIFY_RUN_FIND_TRIES  ワークフローの起動を待つ回数（既定 24。E2E_RUN_FIND_TRIES も使える）
 #   VERIFY_CONCLUSION_TRIES 結果の読み取りのやり直しの回数（既定 6。E2E_CONCLUSION_TRIES も使える）
+#   VERIFY_LOG_TRIES       verify_run_log_has の、ログの読み直しの回数（既定 12。間隔は VERIFY_POLL_SEC。完了の直後は、
+#                          ログ全体がまだ返らないことがあるため。E2E_LOG_TRIES も使える）
 #   VERIFY_DISPATCH_TRIES  ワークフローの手動起動・起動した実行の検索の、それぞれの回数（既定 12。登録直後は、認識まで少しかかる。
 #                          E2E_ の代わりの名前はない）
 # ==============================================================================
@@ -265,7 +267,20 @@ verify_wait_run() {
     return 1
 }
 # 実行のログに、文字列（固定）が含まれるか（含まれれば戻り値 0）。引数: リポジトリ 実行 ID 文字列
-verify_run_log_has() { verify_gh run view "$2" -R "$1" --log 2>/dev/null | grep -qF -- "$3"; }  # 戻り値で判定するため run 不使用（ログ全体を、画面・ログファイルに出さない）
+#   完了の直後は、GitHub がログ全体をまだ返さないことがある（2026-11-25 の e2e で、完了の約 2 秒後に読んで文言がなく、
+#   あとで読み直すと出ていた）。見つからなければ、VERIFY_LOG_TRIES 回まで、VERIFY_POLL_SEC 秒おきに読み直す
+#   （既定 12 回・5 秒おき = 最大約 55 秒）。文言が本当に出ないときは、その分だけ遅れて、戻り値 1
+verify_run_log_has() {
+    local i tries="${VERIFY_LOG_TRIES:-${E2E_LOG_TRIES:-12}}" poll
+    poll=$(_sfv_poll)
+    [[ "$tries" =~ ^[1-9][0-9]*$ ]] || tries=12
+    for (( i = 1; i <= tries; i++ )); do
+        # 戻り値で判定するため run 不使用（ログ全体を、画面・ログファイルに出さない）
+        if verify_gh run view "$2" -R "$1" --log 2>/dev/null | grep -qF -- "$3"; then return 0; fi
+        if (( i < tries )); then sleep "$poll"; fi  # run 不使用: 待機
+    done
+    return 1
+}
 
 # ------------------------------------------------------------------------------
 # GitHub の API で、ブランチの作成・ファイルの追加・削除を行う（ローカルに clone しない。フックにも影響されない）

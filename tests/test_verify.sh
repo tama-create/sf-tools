@@ -20,7 +20,8 @@
 #   8.  失敗                        : 検証が失敗 → マージしない・案内を表示・削除のみのやり直しを案内する
 #   9.  取り違えの検出               : ログに、その段階の接続ユーザーが出ていない → 失敗する
 #   10. --cleanup                   : 削除のみ（PR 3 本）
-#   11. lib/verify-common.sh の部品     : Hello World の本文・基準の実行 ID より新しい実行だけを対象にする
+#   11. lib/verify-common.sh の部品     : Hello World の本文・基準の実行 ID より新しい実行だけを対象にする・
+#                                    ログの文言は、完了の直後に見つからなければ、読み直す（VERIFY_LOG_TRIES 回まで）
 #   12. --components               : パターン別のサンプルを、develop だけにリリースして削除する（PR 3 本）。--validate-only は、
 #                                    マージせずに閉じる。develop がない構成は、拒否する。既存の labels は、上書きしない
 #   13. lib/verify-samples.sh      : サンプルのパス・本文・リリース対象・削除対象（段階 1 → 段階 2）
@@ -347,7 +348,22 @@ test_lib() {
         # 本文: 末尾が .cls-meta.xml のパスは、クラス名を問わず、メタデータ。それ以外は戻り値 1
         verify_hello_content_for "x/Other.cls-meta.xml" | grep -q "<ApexClass" && echo "META_ANY=ok"
         verify_hello_content_for "x/Other.cls" > /dev/null; echo "OTHER_RC=$?"
+        # ログの読み直し: 1 回目は空（完了の直後で、ログ全体がまだ返らない）→ 2 回目に出る → 戻り値 0・2 回で終わる
+        _cnt="$HM/log-calls"; : > "$_cnt"
+        verify_gh() { echo x >> "$_cnt"; [[ $(wc -l < "$_cnt") -ge 2 ]] && echo "##[notice]段階として無効です"; return 0; }
+        verify_run_log_has o/r 1 "段階として無効"; echo "LOG_LATE_RC=$? CALLS=$(wc -l < "$_cnt" | tr -d ' ')"
+        # 出ないときは、VERIFY_LOG_TRIES 回まで読み直して、戻り値 1
+        : > "$_cnt"
+        verify_gh() { echo x >> "$_cnt"; echo "ほかの行"; return 0; }
+        VERIFY_LOG_TRIES=3 verify_run_log_has o/r 1 "段階として無効"; echo "LOG_NONE_RC=$? CALLS=$(wc -l < "$_cnt" | tr -d ' ')"
+        # 1 回目で見つかれば、読み直さない
+        : > "$_cnt"
+        verify_gh() { echo x >> "$_cnt"; echo "段階として無効"; return 0; }
+        verify_run_log_has o/r 1 "段階として無効"; echo "LOG_NOW_RC=$? CALLS=$(wc -l < "$_cnt" | tr -d ' ')"
     ) 2>&1 )
+    assert_output_contains "$out" "LOG_LATE_RC=0 CALLS=2" "ログの読み直し: 完了の直後にログがまだなくても、読み直して見つける"
+    assert_output_contains "$out" "LOG_NONE_RC=1 CALLS=3" "ログの読み直し: 出なければ、VERIFY_LOG_TRIES 回まで読み直して、戻り値 1"
+    assert_output_contains "$out" "LOG_NOW_RC=0 CALLS=1"  "ログの読み直し: 1 回目で見つかれば、読み直さない"
     [[ "$out" == *"PR_CR=[12] RC=0"* ]]  && pass "PR の作成: 行末に CR があっても、番号を返す" || fail "PR の作成: 行末に CR があっても、番号を返す" "$out"
     [[ "$out" == *"PR_NONUM=[] RC=1"* ]] && pass "PR の作成: 番号が取れなければ、戻り値 1" || fail "PR の作成: 番号が取れなければ、戻り値 1" "$out"
     assert_output_contains "$out" "META_ANY=ok"      "本文: 末尾が .cls-meta.xml のパスは、メタデータの本文"

@@ -61,7 +61,7 @@
 </ul>
 
 <h2 id="force">force-* プロジェクトの構成</h2>
-<p>雛形のファイルは、<code>sf-init.sh</code> の Phase 3（<a href="../admin/setup.html#phase-map">ステップとの対応</a>） が、sf-tools の <code>templates/</code> からコピーします（<code>.gitmessage</code> と、<code>sf-tools/release/</code> の中は、<code>sf-install.sh</code> が作ります）。★ は、sf-tools 独自のもの（または、sf-tools 用に設定したもの）で、それ以外は、<code>sf project generate</code> が作る標準の構成と同じものです。☆ は、git の対象外で、それぞれのクローンで作られるものです。</p>
+<p>雛形のファイルは、<code>sf-init.sh</code> の Phase 3（<a href="../admin/setup.html#phase-map">ステップとの対応</a>） が、sf-tools の <code>templates/</code> からコピーします（<code>.gitmessage</code> と、<code>sf-tools/release/</code> の中は、<code>sf-install.sh</code> が、sf-tools の <code>config/install/</code> の雛形から作ります）。★ は、sf-tools 独自のもの（または、sf-tools 用に設定したもの）で、それ以外は、<code>sf project generate</code> が作る標準の構成と同じものです。☆ は、git の対象外で、それぞれのクローンで作られるものです。</p>
 <pre><code>force-XXXX/
 ├── .forceignore
 ├── .gitattributes                       ★ 改行コードの設定
@@ -79,7 +79,7 @@
 ├── CLAUDE.md                            ★ AI（Claude Code）への 1 行の案内（@~/sf-tools/doc/ai-dev-loop.md で、手順書を読み込む）
 ├── config/
 │   └── project-scratch-def.json
-├── .gitmessage                          ★ コミットメッセージの雛形（sf-init の Phase 4 で、sf-install.sh が templates/gitmessage から作る。
+├── .gitmessage                          ★ コミットメッセージの雛形（sf-init の Phase 4 で、sf-install.sh が config/install/gitmessage から作る。
 │                                            commit.template の設定は、管理者用のクローンだけ）
 ├── eslint.config.js
 ├── force-app/                           ← Salesforce のメタデータ本体
@@ -162,7 +162,8 @@
 ├── hooks/
 │   ├── pre-push                ← sf-hook.sh がプロジェクト側（.git/hooks/）へコピー（bin/sf-prepush.sh を呼ぶだけのラッパー）
 │   └── pre-commit              ← 同じく、sf-hook.sh がコピー（bin/sf-precommit.sh を呼ぶだけのラッパー）
-├── templates/                  ← force-* プロジェクトの雛形（唯一の正本。sf-init.sh の Phase 3 が、すべてコピーする）
+├── templates/                  ← force-* プロジェクトの雛形（唯一の正本。sf-init.sh の Phase 3 が、すべてコピーする。
+│                                  force-* にそのまま置くものだけを入れる。名前や場所を変えて使うものは config/install/）
 │   ├── .forceignore
 │   ├── .gitattributes
 │   ├── .gitignore
@@ -174,16 +175,18 @@
 │   ├── config/
 │   ├── eslint.config.js
 │   ├── force-app/
-│   ├── gitmessage              ← コミットメッセージの雛形（sf-install.sh が .gitmessage にコピーする）
 │   ├── jest.config.js
 │   ├── README.md               ← プロジェクトの README の雛形
 │   ├── package.json
 │   ├── scripts/
 │   ├── sfdx-project.json       ← __REPO_NAME__ プレースホルダーあり
 │   └── sf-tools/
-│       ├── config/             ← metadata.txt / branches.txt 雛形
-│       └── release/__BRANCH__/ ← deploy-target.txt / remove-target.txt 雛形
+│       └── config/             ← metadata.txt / branches.txt 雛形
 ├── config/                     ← sf-tools 自身の設定・データ（force-* には配布されない）
+│   ├── install/                ← sf-install.sh が、名前や場所を変えて force-* に置く雛形（templates/ には置かない。
+│   │   │                           Phase 3 が丸ごとコピーすると、force-* に不要な写しが残るため）
+│   │   ├── gitmessage          ← コミットメッセージの雛形（sf-init のとき、.gitmessage として置く）
+│   │   └── release/            ← deploy-target.txt / remove-target.txt の雛形（作業ブランチごとに、sf-tools/release/&lt;ブランチ名&gt;/ へコピー）
 │   ├── metadata-dirs.txt       ← メタデータの種類 → フォルダ名の表（sf-metasync.sh が、同期の対象のフォルダを決めるために参照）
 │   ├── metasync-detect.txt     ← メタデータの種類ごとの、変更の検知の区分の表（sf-metasync.sh の変更の検知が参照。A = 履歴 / B = 更新日時の一覧）
 │   ├── metadata-capability.txt ← メタデータの種類ごとの、リリース・削除の可否の表（sf-typecheck.sh が確認。sf-check.sh が参照）

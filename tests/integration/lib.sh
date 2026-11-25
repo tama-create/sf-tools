@@ -533,7 +533,7 @@ it_make_clone() {
     [[ $IT_RC -eq 0 ]] || return 1
     mkdir -p "$IT_CL/sf-tools/release/$branch"
     printf '%s\n' "$branch" > "$IT_CL/sf-tools/release/branch_name.txt"
-    cp "$IT_HOME/sf-tools/templates/sf-tools/release/__BRANCH__/"*.txt "$IT_CL/sf-tools/release/$branch/"
+    cp "$IT_HOME/sf-tools/config/install/release/"*.txt "$IT_CL/sf-tools/release/$branch/"   # sf-install.sh の phase_setup_release_dir と同じコピー元
     mkdir -p "$IT_CL/force-app/main/default/classes"
     return 0
 }

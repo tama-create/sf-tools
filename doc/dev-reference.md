@@ -438,8 +438,8 @@ check_gh_owner "$GITHUB_OWNER"   # 認証ユーザーの一致確認
 2. `~/sf-tools` を、現在のブランチ（取得できなければ `main`）で `git pull origin <ブランチ>`（失敗は WARNING で続行）。`sf-init.sh` から実行中（`SF_INIT_RUNNING` あり）はスキップする（実行中の `sf-init.sh` が書き換わると、bash の読み位置がずれるため）
 3. `./sf-tools/config/metadata.txt`・`branches.txt` の確認: `sf-init.sh` から実行中は、ないものだけテンプレートからコピー（失敗は中断）。それ以外は、どちらかがなければ中断する（プロジェクトの破損として扱い、生成しない）
 4. `sf-hook.sh` で Git Hook（pre-commit / pre-push）をインストール（失敗は WARNING で続行）
-5. `release/<branch>/` と `branch_name.txt` を準備（detached HEAD では何もしない。`main` では `release/` と `.gitkeep` だけ作り、`release/<branch>/`・`branch_name.txt` は作成・更新しない）
-6. `sf-init.sh` から実行中のみ、`templates/gitmessage` を `.gitmessage` にコピーし、`git config commit.template .gitmessage`（失敗は WARNING で続行）
+5. `release/<branch>/` と `branch_name.txt` を準備（detached HEAD では何もしない。`main` では `release/` と `.gitkeep` だけ作り、`release/<branch>/`・`branch_name.txt` は作成・更新しない）。deploy-target.txt・remove-target.txt がなければ、`config/install/release/` からコピーする（手順 6 の `gitmessage` も同じく `config/install/` に置く。`templates/` は Phase 3 が丸ごと force-* にコピーするため、名前や場所を変えて使うコピー元は置かない）
+6. `sf-init.sh` から実行中のみ、`config/install/gitmessage` を `.gitmessage` にコピーし、`git config commit.template .gitmessage`（失敗は WARNING で続行）
 7. `package.json` がある場合は `npm install`（失敗は WARNING で続行）。`sf-init.sh` から実行中は、初期セットアップ用の一時フォルダなのでスキップする（約 90 秒の短縮）。`node_modules/.package-lock.json` の更新時刻が `package-lock.json` 以上のときもスキップ（`_get_mtime`）
 8. `~/.sf-tools-last-update` がない、または 24 時間以上経過していれば `sf-upgrade.sh` をバックグラウンド起動（引数なし。標準出力は捨て、標準エラーは `sf-install.log` に追記）。スタンプは、起動を確認できた時点で更新する（完了の時点ではない）
 
@@ -656,7 +656,7 @@ tr -d '\r' < "$key_file" | base64_oneline | gh secret set "SF_PRIVATE_KEY" -R "$
 実行フロー（Phase。各 Phase の詳細は、`phases/init/NN_*.sh` の冒頭コメント）:
 1. 環境チェック（カレントが `admin` か・`git` / `gh` / `node` / `npm` / `sf` / `code` の有無・`gh auth status`（失敗なら `gh auth login`））。状態ファイルに何も書かない。「続きをやる」では、続きの Phase の前に毎回実行する
 2. プロジェクト情報の確認（引数・対話で決めたオーナーと XXXX。`SF_INIT_OWNER` / `SF_INIT_PROJECT` が必須）→ 確認（`ask_yn`）→ sf-tools の版の選択（1 = 配布版 `main` / 2 = 開発版 `development`。GitHub Actions が使う sf-tools のブランチ）→ sf-tools のブランチと最新化の確認（上記。更新したら終了コード 75）→ `.sf-init-XXXX.env` を上書きで作り、7 つのキーを書き出し
-3. リポジトリ作成（`gh repo create --private` + `git clone -c core.longpaths=true`。すでにあれば作成・クローンをせずに使う）→ `templates/` の全ファイル（`.github/workflows/` のワークフローを含む）を `cp -r` でコピー（同名は上書き）→ `sfdx-project.json` の `__REPO_NAME__` を置換
+3. リポジトリ作成（`gh repo create --private` + `git clone -c core.longpaths=true`。すでにあれば作成・クローンをせずに使う）→ `templates/` の全ファイル（`.github/workflows/` のワークフローを含む）を `cp -r` でコピー（同名は上書き。除外はしない。`templates/` には force-* にそのまま置くものだけを入れる決まり）→ `sfdx-project.json` の `__REPO_NAME__` を置換
 4. ファイル生成（`SF_INIT_RUNNING=1` で `sf-install.sh` を実行。`sf-install.sh` が `sf-hook.sh` でフックを設置する。`npm install`・`~/sf-tools` の pull はしない）
 5. ブランチ構成（対話選択 → branches.txt を書き直す（コメント行だけを残す）→ `BRANCH_COUNT` を追記。リモートのブランチは Phase 8 が作る）
 6. PAT_TOKEN の設定（`phases/init/06_pat_token.sh`。force-* のリポジトリ用の Token であり、sf-tools（公開リポジトリ）とは無関係）。流れ: Token を作るべきアカウント（`REPO_FULL_NAME` のオーナー。組織なら管理者）を表示 → 手順を表示し、`open_browser` で Token の作成ページを開く（Note・Scopes・Expiration は URL のパラメータで入力済み。「発行済みの Token があるか」は聞かない: Token の値は作成直後の 1 回しか表示されないため。保存してある Token を貼ってもよい）→ `read_secret`（画面に表示しない）→ Token を GitHub に問い合わせて検証（`verify_pat_token`。Token は環境変数 `GH_TOKEN` で `gh` に渡し、コマンドの引数に出さない。①`gh api user` でログイン名を取得できるか ②応答に `X-OAuth-Scopes` ヘッダーがあるか〔ない Fine-grained は不可〕 ③スコープに `repo`・`workflow` があるか ④`repos/<REPO_FULL_NAME>` の `permissions.admin` が `true` か〔個人ならオーナー、組織なら組織の管理者〕。NG なら理由を表示し、貼り直し（合計 3 回まで。3 回とも NG なら die））→ `gh secret set PAT_TOKEN`（標準入力で渡す）→ `.sf-init-XXXX.env` に `PAT_TOKEN_VALUE` を追記（Phase 8 の push で使用）

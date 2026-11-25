@@ -181,8 +181,46 @@ test_deploy_remove_target_created() {
 
     assert_file_exists "$td/sf-tools/release/feature/test/deploy-target.txt" "deploy-target.txt が作成された"
     assert_file_exists "$td/sf-tools/release/feature/test/remove-target.txt" "remove-target.txt が作成された"
+    if cmp -s "$td/sf-tools/release/feature/test/deploy-target.txt" "$SF_TOOLS_DIR/config/install/release/deploy-target.txt"; then
+        pass "deploy-target.txt の中身は config/install/release/ の雛形と同じ"
+    else
+        fail "deploy-target.txt の中身は config/install/release/ の雛形と同じ" "中身が違う"
+    fi
     unset MOCK_GIT_BRANCH
     teardown "$td" "$mb" "$mh"
+}
+
+# 決まり: templates/ には、force-* にそのまま置くものだけを入れる（sf-init の Phase 3 が、除外なしで丸ごとコピーするため）。
+#   sf-install.sh が名前や場所を変えて使うコピー元は、config/install/ に置く。
+#   以前は templates/sf-tools/release/__BRANCH__/ と templates/gitmessage に置いていて、force-* に不要な写しが残っていた
+test_templates_only_force_files() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] templates/ には force-* にそのまま置くものだけ・コピー元は config/install/${CLR_RST}"
+    local f
+    for f in config/install/release/deploy-target.txt config/install/release/remove-target.txt config/install/gitmessage; do
+        assert_file_exists "$SF_TOOLS_DIR/$f" "コピー元がある: $f"
+    done
+    # templates/ に、コピー元の写し・仮の名前（__BRANCH__ など、__ で始まるフォルダ）を置かない
+    if [[ -e "$SF_TOOLS_DIR/templates/gitmessage" ]]; then
+        fail "templates/ に gitmessage を置かない" "templates/gitmessage がある"
+    else
+        pass "templates/ に gitmessage を置かない"
+    fi
+    local stray
+    stray=$(cd "$SF_TOOLS_DIR/templates" && find . -type d -name '__*' | head -3)  # VAR=$(cmd) のため run 不使用
+    if [[ -n "$stray" ]]; then
+        fail "templates/ に __ で始まる仮の名前のフォルダを置かない" "$stray"
+    else
+        pass "templates/ に __ で始まる仮の名前のフォルダを置かない"
+    fi
+    # sf-install.sh が templates/ から読むのは、同じ名前・同じ場所に置く sf-tools/config/ だけ
+    local refs
+    refs=$(grep -v '^[[:space:]]*#' "$SF_TOOLS_DIR/bin/sf-install.sh" | grep -o 'sf-tools/templates/[^"]*' | grep -v '^sf-tools/templates/sf-tools/config/' | head -3)  # VAR=$(cmd) のため run 不使用
+    if [[ -n "$refs" ]]; then
+        fail "sf-install.sh は templates/ をコピー元にしない（sf-tools/config/ を除く）" "$refs"
+    else
+        pass "sf-install.sh は templates/ をコピー元にしない（sf-tools/config/ を除く）"
+    fi
 }
 
 # .gitmessage が作成され git config に設定される
@@ -194,6 +232,11 @@ test_gitmessage_created() {
     cd "$td" && SF_INIT_RUNNING=1 HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-install.sh" 2>&1 >/dev/null
 
     assert_file_exists "$td/.gitmessage" ".gitmessage が作成された"
+    if cmp -s "$td/.gitmessage" "$SF_TOOLS_DIR/config/install/gitmessage"; then
+        pass ".gitmessage の中身は config/install/gitmessage と同じ"
+    else
+        fail ".gitmessage の中身は config/install/gitmessage と同じ" "中身が違う"
+    fi
     assert_file_contains "$MOCK_CALL_LOG" "config commit.template" "git config commit.template が呼び出された"
     teardown "$td" "$mb" "$mh"
 }
@@ -204,7 +247,7 @@ test_release_dir_init_fail() {
     setup_std_env td mb mh
     create_all_mocks "$mb"
     export MOCK_GIT_BRANCH="feature/test"
-    rm -f "$mh/sf-tools/templates/sf-tools/release/__BRANCH__/deploy-target.txt"
+    rm -f "$mh/sf-tools/config/install/release/deploy-target.txt"
 
     local out; out=$(cd "$td" && SF_INIT_RUNNING=1 HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-install.sh" 2>&1)
 
@@ -349,7 +392,7 @@ test_gitmessage_template_missing() {
     local td mb mh out
     setup_std_env td mb mh
     create_all_mocks "$mb"
-    rm -f "$mh/sf-tools/templates/gitmessage"
+    rm -f "$mh/sf-tools/config/install/gitmessage"
 
     out=$(cd "$td" && SF_INIT_RUNNING=1 HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-install.sh" 2>&1)
     assert_output_contains "$out" "gitmessage テンプレートが見つかりません" "テンプレートなし → 理由が表示される"
@@ -377,6 +420,7 @@ test_gitmessage_config_fail() {
 }
 
 test_normal_run
+test_templates_only_force_files
 test_release_dir_detached_head
 test_gitmessage_template_missing
 test_gitmessage_config_fail

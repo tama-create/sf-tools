@@ -301,7 +301,7 @@ sf-tools/release/<作業用ブランチ名>/   ← force-* のリポジトリの
 └── remove-target.txt    # 削除対象
 ```
 
-作業用ブランチで `sf-install.sh`（`sf-start.sh` が実行する）が、ディレクトリを作り、ファイルがなければ雛形（`templates/sf-tools/release/__BRANCH__/`）からコピーする。`main` では作らない。
+作業用ブランチで `sf-install.sh`（`sf-start.sh` が実行する）が、ディレクトリを作り、ファイルがなければ雛形（`config/install/release/`。sf-init が丸ごとコピーする `templates/` には置かない）からコピーする。`main` では作らない。
 
 `sf-tools/release/branch_name.txt` にブランチ名を書き込むことで、どの release ディレクトリを参照するかを sf-release.sh・sf-check.sh に伝える（Git の管理外の手元のファイル。ローカルでは `sf-install.sh`、GitHub Actions では wf-validate・wf-release が、ソースブランチ名を書く）。
 

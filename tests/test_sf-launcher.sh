@@ -113,6 +113,38 @@ test_quit_interactive() {
 }
 
 # ------------------------------------------------------------------------------
+# メニューの並び: 日々の作業の順（Check → Dryrun → Deploy → Push → Next）。Start・Restart は線の下（2026-11-26 に並べ替え）。
+# VS Code の中では Start・Restart と線を出さない
+# ------------------------------------------------------------------------------
+test_menu_order() {
+    local td mb out plain
+    td=$(setup_force_dir); mb=$(setup_mock_bin)
+    export MOCK_CALL_LOG="$mb/calls.log"
+    create_all_mocks "$mb"
+
+    out=$(cd "$td" && printf "q" | TERM_PROGRAM= PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-launcher.sh" 2>&1)
+    plain=$(printf '%s\n' "$out" | sed $'s/\033\\[[0-9;]*m//g')
+    local order
+    order=$(printf '%s\n' "$plain" | grep -oE '\[[0-9]\] [A-Za-z]+' | tr '\n' ' ')
+    assert_equals "$order" "[1] Check [2] Dryrun [3] Deploy [4] Push [5] Next [6] Start [7] Restart " "番号は、作業の順（Check・Dryrun・Deploy・Push・Next）、その下に Start・Restart"
+    # Next と Start の間に、短い線がある
+    printf '%s\n' "$plain" | grep -A1 '\[5\] Next' | tail -1 | grep -q '^  ──────────$' \
+        && pass "Next と Start の間に線を引く" || fail "Next と Start の間に線を引く" "$plain"
+    # 番号の直接指定も、新しい並び（2 = Dryrun）で動く
+    out=$(cd "$td" && PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-launcher.sh" 2 2>&1)
+    [[ "$out" == *"▶ sf-dryrun"* ]] && pass "番号 2 → sf-dryrun を動かす" || fail "番号 2 → sf-dryrun を動かす" "$(printf '%s' "$out" | head -5)"
+
+    # VS Code の中: Start・Restart と、線を出さない
+    out=$(cd "$td" && printf "q" | TERM_PROGRAM=vscode PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-launcher.sh" 2>&1)
+    plain=$(printf '%s\n' "$out" | sed $'s/\033\\[[0-9;]*m//g')
+    order=$(printf '%s\n' "$plain" | grep -oE '\[[0-9]\] [A-Za-z]+' | tr '\n' ' ')
+    assert_equals "$order" "[1] Check [2] Dryrun [3] Deploy [4] Push [5] Next " "VS Code の中: 1〜5 だけ"
+    printf '%s\n' "$plain" | grep -q '^  ──────────$' \
+        && fail "VS Code の中: 線を引かない" "$plain" || pass "VS Code の中: 線を引かない"
+    teardown "$td" "$mb"
+}
+
+# ------------------------------------------------------------------------------
 # 実行
 # ------------------------------------------------------------------------------
 test_not_in_force_dir
@@ -121,6 +153,7 @@ test_out_of_range_number
 test_leading_zero_number
 test_nonnumber_arg
 test_quit_interactive
+test_menu_order
 
 # ------------------------------------------------------------------------------
 # デバッグログ（sf-log.sh）の状態の 1 行（logs/apex/.status。doc/sf-log-design.md 5.4）

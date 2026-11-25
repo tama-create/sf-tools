@@ -423,6 +423,8 @@ bash ~/sf-tools/bin/sf-log.sh leave --owner <印>   # sf-start の終了時: 持
 ## 4. フロー・入力規則・重複ルール
 - [logs/apex/20261122/143001_07LdM00000AbCdE_aura.log:120] フロー Account_After_Save: 開始 2・完了 1・エラー 1・要素: Check_Type（FlowDecision）、Set_Description（FlowRecordUpdate）
 - [logs/apex/20261122/143001_07LdM00000AbCdE_aura.log:140] フロー Account_Before_Save: 開始 1・完了 1・エラー 1（うちカスタムエラー 1）・要素: Has_Duplicate（FlowDecision）、Error_Duplicate（FlowCustomError）
+- [logs/apex/20261122/143005_07LdM00000AbCdF_aura.log:9] フロー Loan_Return: 開始 1・完了 0・エラー 0・画面待ち 1・続き 1・要素: Get_Active_Loan（FlowRecordLookup）、Update_Loan（FlowRecordUpdate）
+- 画面待ち・続き: 画面フローは、画面を出すたびに止まり、画面ごとに要求（ログ）が分かれます。完了の行はログに出ないため、…（あるときだけ、この説明の行を書く）
 - [logs/apex/20261122/143001_07LdM00000AbCdE_aura.log:5] 入力規則 Account_Check: 評価 2・通過 1・停止 1
 - [logs/apex/20261122/143001_07LdM00000AbCdE_aura.log:15] 重複ルール Standard Account Duplicate Rule（Account・INSERT）: 保存の中で 1 回（保存しようとした 1 件のうち、重複あり 1 件）・保存の後で 1 回（重複あり 1 件）・見つかった重複: 001aj00004KokWj・動作: 許可（警告・記録）
 - 保存の中で重複ありのとき、Apex・API の保存は、許可の指定（DuplicateRuleHeader.allowSave）がなければ止められます（…）
@@ -436,6 +438,7 @@ bash ~/sf-tools/bin/sf-log.sh leave --owner <印>   # sf-start の終了時: 持
   - フローのカスタムエラー（Custom Error 要素）は、レコードトリガーフロー（保存前・保存後・削除前）でだけ使え、実行すると、もとの変更を巻き戻す（公式の Custom Error Element・Default Flow Error Handling）。そのため、要素を実行したら「保存を止めた」と読む。文言はログに出ないので、フローと要素の名前を書き、定義を見るよう案内する
   - エラーは「種類と文言」でまとめるため、カスタムエラーの文言にはフローと要素の名前、入力規則の停止の文言には規則の名前を入れる（別の要素・規則を 1 つにまとめない）
 - 4 のフローは、完了の行がない実行（エラーで止まった・ログの終わりで切れた）があるため、成功の数を推し量らず、開始・完了・エラーの行の数だけを書く。カスタムエラーで止めた実行にも完了の行が出るため、エラーの数に「うちカスタムエラー N」と添える
+- 4 の**画面フロー**: 開始の終わり（`FLOW_START_INTERVIEW_END`）まで進み、完了もエラーもない実行を「画面待ち N」と数える。前の画面の続きの要求（開始の行がなく、要素の行だけがある）は、全部のログの実行の ID で開始したフローに結び、「続き N」と数え、その要素もフローの要素に入れる（ログ 1 本・実行 1 つにつき、続き 1）。開始したログが要約の対象にないときは、結ばない（推測しない）。画面待ち・続きは、あるときだけ書き、一覧の下に説明の行を 1 つ書く。正常に終わった画面フローが「完了 0」に見え、AI が「途中で止まった」と読み違えるのを防ぐため（2026-11-26 の実証テスト）
 - 2 の所要は、一覧（8.3）の `DurationMilliseconds` をそのまま書く。ただし、ログの中の経過（行の `(<ナノ秒>)` のいちばん大きい値。処理の始まりからの経過）より **1 時間以上長い**ときは、`346530840ms（ログの中は 9835ms ※）` のように添え、表の下に「実際の所要ではない可能性」と書く。2026-11-25 に tama-dev で、操作が `N/A`（`ENTERING_MANAGED_PKG` の行だけ・Location は Monitoring）のログで、ログの中が約 10 秒なのに、ApexLog の `DurationMilliseconds` が 346530840（約 96 時間）だった（組織に問い合わせて、Salesforce の値そのものと確かめた）。普通のログは、Salesforce の値がログの中の経過の数倍（小さいログでは 100 倍）で、差は大きくても約 21 秒だったため、倍率ではなく差で見る。読めないログは比べない
 - 4 の重複ルールは、**保存の中**（`DML_BEGIN`〜`DML_END` の中）と**保存の後**（保存のあとの、記録のための検出。巻き戻したあとにも出た）を分けて数える（足し合わせると、同じ保存を二重に数えるため）。一覧の「操作」の括弧には「重複: ルール名」を添える
 
@@ -460,6 +463,7 @@ bash ~/sf-tools/bin/sf-log.sh leave --owner <印>   # sf-start の終了時: 持
     - フロー: `FLOW_CREATE_INTERVIEW_END|<実行の ID>|<フローの名前>`・`FLOW_START_INTERVIEW_BEGIN|<実行の ID>|<フローの名前>`・`FLOW_ELEMENT_BEGIN|<実行の ID>|<要素の種類>|<要素の名前>`（要素の種類は `FlowRecordUpdate` など `Flow` で始まる）・`FLOW_INTERVIEW_FINISHED|<実行の ID>|<フローの名前>`
     - フローの失敗: `FLOW_ELEMENT_ERROR|<文言>|<要素の種類>|<要素の名前>`。**実行の ID を持たない**ため、同じ要素を最後に始めた実行のフローに結ぶ。失敗した実行には `FLOW_INTERVIEW_FINISHED` が出ない。文言に HTML のリンク（`<a href=…>…</a>`）が混じるため、要約ではタグを外す（ほかの `<` `>` は残す）。並びが違う行は、推測で読まずに項目をそのまま並べる
     - **フローのカスタムエラー**（2026-11-25 に tama-dev で確認。force-test-win の実証テスト）: `FLOW_ELEMENT_BEGIN|<実行の ID>|FlowCustomError|<要素の名前>`・`FLOW_ELEMENT_DEFERRED|FlowCustomError|<要素の名前>`・`FLOW_ELEMENT_END|…`・`FLOW_BULK_ELEMENT_BEGIN` / `END|FlowCustomError|<要素の名前>|0|0` だけが出る。**文言は出ない**。`FLOW_ELEMENT_ERROR` も出ず、**そのあとに `FLOW_INTERVIEW_FINISHED` が出る**（完了に見える）。保存した行（`DML_BEGIN`）もない。要約は、`FLOW_ELEMENT_BEGIN` の要素の種類で見分ける（実行ごとに 1 行。まとめて保存したときは、件数が実行の数になる）
+    - **画面フロー**（2026-11-26 に tama-dev で確認。force-test-win の段階 2 の画面フロー `Loan_Return`）: 画面を出すたびに、要求（ログ）が分かれる。最初の要求には `FLOW_CREATE_INTERVIEW_END`・`FLOW_START_INTERVIEW_BEGIN`・要素の行・`FLOW_START_INTERVIEW_END` が出て、`FLOW_INTERVIEW_FINISHED` は出ない。「次へ」の要求には、開始の行がなく、同じ実行の ID の `FLOW_ELEMENT_BEGIN`（例: `FlowRecordUpdate|Update_Loan`）から始まる（中で動いたレコードトリガーフローは、別の実行の ID で、開始から完了まで出る）。最後の画面の「完了」の要求のログ（305B）には、フローの行が何も出ない。**正常に終わっても、完了の行は出ない**
     - 入力規則の停止 `VALIDATION_FAIL` にも、文言は出ない（項目なし）。直前の `VALIDATION_FORMULA` に、式と項目の値が出る
     - 重複ルールの行（`DUPLICATE_DETECTION_*`）も出る（要約には入れない）
     - 1 回の保存（API の作成 1 回）が、2〜3 本のログに分かれた（`Flow:Account` だけの短いログ・入力規則とフローを含むログ・`limit check` のログ）
@@ -904,6 +908,7 @@ force-*/logs/apex/
 - [x] **長い処理のログの現れ方** → 処理が終わってから一覧に現れる（`Id`・`StartTime` は始まったとき）。tama-dev で、9.5 秒の匿名 Apex（05:10:53 開始）を、あとから始まった短い処理 3 本が見えている時点の一覧で探し、なかった。終わったあとに現れた（2026-11-24。組織の中から ApexLog を検索し、`System.assert(false, 一覧)` の失敗の文言で返す「観察役」の匿名 Apex で確認）。しおりの方式では取りこぼすため、拾い直しを足す（8.3）
 - [x] 拾い直し（8.3）が、実装のあと、開発組織で、長い処理のログを取り、要約に入れるか → 2026-11-24 に WSL の取得役で確認（短い処理を先に取り、11 秒の長い処理のログを拾い直した）
 - [x] **フローのカスタムエラーと、所要の値**（2026-11-25。force-test-win の JOB-EQL-1 の実証テスト・tama-dev）→ カスタムエラーの要素は、`FLOW_ELEMENT_BEGIN` などの要素の行だけで、文言も `FLOW_ELEMENT_ERROR` も出ず、`FLOW_INTERVIEW_FINISHED` が出た（6.3）。要約の 1 が「なし」になっていたため、カスタムエラーと入力規則の停止を 1 に入れた（6.2）。操作 `N/A` のログの `DurationMilliseconds` が 346530840（約 96 時間。ログの中は約 10 秒）で、ApexLog の値そのものだった（読み取りの問い合わせで確認）。要約は値をそのまま書き、ログの中の経過より 1 時間以上長ければ ※ を添える（6.2）
+- [x] **画面フローの完了**（2026-11-26。force-test-win の JOB-EQL-1 の段階 2・tama-dev）→ 画面フロー `Loan_Return` を 2 回、正常に終えたのに、要約の 4 が「開始 2・完了 0」で、「次へ」で動いた更新の要素 `Update_Loan` も出なかった。画面フローには完了の行が出ず、続きの要求には開始の行がない（6.3）。「画面待ち」「続き」を数え、続きの要素を全部のログの実行の ID で結ぶようにした（6.2）
 - [x] 環境の混在（5.6）: WSL で取得中に、Windows の Git Bash から sf-start・`pull`・`stop`・`status`／その逆／片方の取得役が止まって 30 分たったあとに、もう一方で sf-start／2 つの環境で、ほぼ同時に sf-start → 2026-11-25 に tama-dev で確認（ad95ed5。30 項目）。WSL で取得中の Git Bash からは、`status` だけが「別の環境（wsl）で動作中（最後の合図は N 秒前）」と答え、`pull`・`stop`・`start` は中断、`begin` は 10、`leave` は 0。`.status`・`.owners`・`.state` は変わらず、TraceFlag は 1 つのまま。WSL の `pull` は取得役に頼んで成功。WSL の後始末で、名乗り・取得役の印・TraceFlag が消え、すぐ Git Bash で始められた。逆向き（Git Bash で取得中の WSL から）も同じ。ほぼ同時の `begin` は、WSL が 0・Git Bash が 10 で、取得役・TraceFlag は 1 つだけ。この変更の前の版で動いていた WSL の取得役（古い形の記録）に対しても、Git Bash から「別の環境（不明（古い形の記録））」として断り、何も書かなかった。「30 分たったあと」は待たずに、単体テスト（合図を 2,000 秒前にした記録）で確かめた。実機の注意: `wsl.exe` の呼び出しが終わると、その中で裏に起動したプロセス（`sleep` など）も終わる（持ち主の代わりは、`wsl.exe` を前面で動かし続けた）
 
 ### 13.2 決めること

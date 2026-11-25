@@ -123,15 +123,16 @@ sf-launcher.sh --fzf     # fzf でインクリメンタル検索</code></pre>
   デバッグログ: 取得中（dev-tama・期限 15:30・今日 23 本）
   ──────────────────────────────────────────────────
   [1] Check      ターゲットファイルの構文チェック
-  [2] Push       変更をコミット & プッシュ
-  [3] Next       次の PR 先ブランチを確認
-  [4] Dryrun     現在接続中の組織へリリース検証
-  [5] Deploy     現在接続中の組織へリリース
+  [2] Dryrun     現在接続中の組織へリリース検証
+  [3] Deploy     現在接続中の組織へリリース
+  [4] Push       変更をコミット & プッシュ
+  [5] Next       次の PR 先ブランチを確認
+  ──────────
   [6] Start      開発環境を起動（Salesforce ログイン・VSCode 起動）
   [7] Restart    接続組織を切り替えて Start 実行
   ──────────────────────────────────────────────────
   番号を入力 (1-7 / q で終了):</code></pre>
-<p>番号ごとに実行するのは、<code>sf-check.sh</code>・<code>sf-push.sh</code>・<code>sf-next.sh</code>・<code>sf-dryrun.sh</code>・<code>sf-deploy.sh</code>・<code>sf-start.sh</code>・<code>sf-restart.sh</code> です。VS Code のターミナル（環境変数 <code>TERM_PROGRAM=vscode</code>）では、<code>[6] Start</code> と <code>[7] Restart</code> は表示されません（二重に起動しないため。番号の 6・7 は、範囲外になります）。</p>
+<p>番号ごとに実行するのは、<code>sf-check.sh</code>・<code>sf-dryrun.sh</code>・<code>sf-deploy.sh</code>・<code>sf-push.sh</code>・<code>sf-next.sh</code>・<code>sf-start.sh</code>・<code>sf-restart.sh</code> です。1〜5 は、日々の作業の順（確かめる → 試す → 反映 → コミット → PR）に並べ、1 日の最初・組織の切り替えのときだけ使う 6・7 との間に線を引いています。VS Code のターミナル（環境変数 <code>TERM_PROGRAM=vscode</code>）では、<code>[6] Start</code> と <code>[7] Restart</code> は表示されません（二重に起動しないため。番号の 6・7 は、範囲外になります）。</p>
 <ul>
   <li>メニューでは、番号を 1 文字入力すると（Enter 不要）実行し、終わるとメニューに戻ります。<code>q</code> で終了します。範囲外の数字や、数字と <code>q</code> 以外の入力は、無視されます。</li>
   <li>番号を直接指定したとき（<code>sf-launcher.sh 4</code> など）は、そのコマンドを 1 回だけ実行して終わります。番号は、数字だけを受け付け、10 進数として扱います（<code>08</code> は 8）。見るのは 1 つ目の引数だけで、数字以外の引数（<code>-h</code> / <code>--help</code> / <code>--fzf</code> 以外）は、エラー（終了コード 1）です。</li>
@@ -194,7 +195,7 @@ sf-launcher.sh --fzf     # fzf でインクリメンタル検索</code></pre>
 
 <h2 id="sf-dryrun"><code>sf-dryrun.sh</code></h2>
 <pre><code>sf-dryrun.sh [オプション]</code></pre>
-<p><code>sf-release.sh</code> のラッパーで、dry-run（検証だけ）専用のコマンドです。ランチャーの <code>[4] Dryrun</code> から呼ばれます。</p>
+<p><code>sf-release.sh</code> のラッパーで、dry-run（検証だけ）専用のコマンドです。ランチャーの <code>[2] Dryrun</code> から呼ばれます。</p>
 <ul>
   <li>このスクリプト自身は、オプションを付け足しません。<code>sf-release.sh</code> の既定が dry-run なので、オプションなしで呼ぶだけで、検証が実行されます。直接 <code>sf-release.sh</code> を実行しても、同じ動作になります。</li>
   <li>受け取った引数は、すべてそのまま <code>sf-release.sh</code> に渡します（<code>-n</code>・<code>-t</code>・<code>-v</code>・<code>-f</code>・<code>-j</code> など）。このスクリプトは引数を検査しません。不明なオプションは、<code>sf-release.sh</code> が中断します。2 つ目以降の <code>-h</code> / <code>--help</code> も、<code>sf-release.sh</code> に渡ります。</li>

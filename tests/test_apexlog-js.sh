@@ -14,6 +14,8 @@
 #      一覧の操作に、フロー・入力規則の名前を添える・VALIDATION_FAIL を 1 に入れる）。実機と違う並びの FLOW_ELEMENT_ERROR（odd.log）は、推測で読まずに並べる
 #   3c. summarize: フローのカスタムエラー（customerror.log。2026-11-25 に実機で見た形: FlowCustomError の要素を実行した行だけで、文言はない。
 #      1 に入れる・同じ要素はまとめる・6 で「エラーの行なし」と書かない・4 で「うちカスタムエラー」と添える）
+#   3c'. summarize: 画面フロー（screenflow1.log・screenflow2.log。2026-11-26 に実機で見た形: 画面で止まった実行は完了の行がない →「画面待ち」・
+#      開始の行がない続きの要求の要素を、ほかのログの実行の ID で結ぶ →「続き」と要素・説明の行・開始したログがなければ結ばない）
 #   3d. summarize: 所要の印（Salesforce の所要が、ログの中の経過より 1 時間以上長いときだけ ※ と注意。境目・読めないログ）
 #   4. summarize: 取れていないものを隠さない（--note・読めなかったログ・読み取れなかった行・20MB の切り詰め・タイムゾーン不明・
 #      該当する行なしの区分・対象のログなし）
@@ -146,6 +148,28 @@ test_summarize_custom_error() {
     _hasnt "$_OUT" "- なし（エラーの行は" "カスタムエラーがあれば、1 を「なし」にしない"
     _has "$_OUT" "フロー Loan_Before_Save: 開始 2・完了 2・エラー 2（うちカスタムエラー 2）・要素: Has_Other_Loan（FlowDecision）、Error_Duplicate（FlowCustomError）" "4: 完了の行が出ても、エラーとカスタムエラーの内訳を書く"
     _hasnt "$_OUT" "出なかった可能性もある）: エラー" "カスタムエラーだけでも、6 で「エラーの行なし」と書かない"
+    rm -f "$_LIST"
+}
+
+# 画面フロー（2026-11-26 に tama-dev で見た形をまねた screenflow1.log・screenflow2.log。6.3）:
+#   1 本目 = 画面を出して止まった要求（開始・開始の終わりはあるが、完了の行がない）
+#   2 本目 = 「次へ」の続きの要求（開始の行がなく、1 本目の実行の ID で、要素 Update_Loan だけが出る。中で保存前のフローが動いて完了する）
+test_summarize_screen_flow() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] summarize: 画面フロー（画面待ち・続き）${CLR_RST}"
+    _list screenflow1.log 07L000000000010AAA 2026-11-25T15:07:36Z /aura 成功 2000 141 \
+          screenflow2.log 07L000000000011AAA 2026-11-25T15:07:49Z /aura 成功 7000 287
+    _sum
+    assert_exit_ok "$_RC" "要約を作れる"
+    _has "$_OUT" "フロー Loan_Return: 開始 1・完了 0・エラー 0・画面待ち 1・続き 1・要素: Get_Active_Loan（FlowRecordLookup）、Has_Active_Loan（FlowDecision）、Update_Loan（FlowRecordUpdate）" "画面待ち・続きを数え、続きの要求の要素（別のログ）も、開始したフローの要素に入れる"
+    _has "$_OUT" "フロー Loan_Before_Save: 開始 1・完了 1・エラー 0・要素: Is_OnLoan（FlowDecision）" "完了まで進んだフローには、画面待ち・続きを書かない"
+    _has "$_OUT" "- 画面待ち・続き: 画面フローは、画面を出すたびに止まり" "画面待ち・続きがあれば、説明の行を書く"
+    _has "$_OUT" "- [$FX/screenflow1.log:9] フロー Loan_Return:" "場所は、最初の開始の行"
+    # 続きのログだけ（開始したログが、要約の対象にない）: 結べないので、フローに入れない（推測しない）
+    _list screenflow2.log 07L000000000011AAA 2026-11-25T15:07:49Z /aura 成功 7000 287
+    _sum
+    _hasnt "$_OUT" "フロー Loan_Return" "開始したログがなければ、続きの要素を、どのフローにも入れない"
+    _hasnt "$_OUT" "画面待ち・続き:" "画面待ち・続きがなければ、説明の行を書かない"
     rm -f "$_LIST"
 }
 
@@ -337,6 +361,7 @@ test_summarize_errors
 test_summarize_list_debug_limits
 test_summarize_flow
 test_summarize_custom_error
+test_summarize_screen_flow
 test_summarize_duration_odd
 test_summarize_duplicate
 test_summarize_gaps

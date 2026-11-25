@@ -61,7 +61,8 @@
 #     SF_INSTANCE_URL_PROD : main の組織の接続 URL（https://login.salesforce.com 等）
 #     SF_TOOLS_BRANCH      : clone する sf-tools のブランチ（任意。未設定なら main。Phase 9 は development のときだけ登録する）
 #     SF_METASYNC_DETECT   : 変更の検知のモード（任意。off / shadow / on。未設定なら off = 従来どおり、毎回、全件取得）
-#     SF_METASYNC_FINGERPRINT : 一覧の指紋のモード（任意。off / shadow。未設定なら off。shadow は、指紋と実際の変更の食い違いをログに記録する。取得は省かない）
+#     SF_METASYNC_FINGERPRINT : 一覧の指紋のモード（任意。off / shadow / on。未設定なら off。shadow は、指紋と実際の変更の食い違いをログに記録する。取得は省かない。
+#                            on は、指紋が「変更なし」なら取得を省く。指紋の対象外の種類（Settings など）だけの変更は、毎日 1 回の --full の回に反映される）
 #     SF_METASYNC_SECRET_SCAN : 秘密情報の検査のモード（任意。off / shadow / on。未設定なら shadow = 検査して WARNING を出すが、止めない。
 #                            on = 疑いがあれば、何もコミット・push せずに止め、Slack に通知する）
 #     SF_METASYNC_EXTRA    : 追加の取得のモード（任意。off / on。未設定なら off。on は、レポート・ダッシュボード・メールテンプレート・StandardValueSet・標準オブジェクト上の

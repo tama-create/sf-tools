@@ -22,7 +22,7 @@ site/reference/commands-auto.html | bin/sf-install.sh | 1635151198-6746 | 027720
 site/reference/commands-auto.html | bin/sf-upgrade.sh | 1489370091-5002 | 0277207
 site/reference/commands-auto.html | bin/sf-prepush.sh | 2137767055-4495 | 0277207
 site/reference/commands-auto.html | bin/sf-precommit.sh | 2396654912-1585 | 0277207
-site/reference/commands-auto.html | bin/sf-metasync.sh | 2635827350-25190 | 0277207
+site/reference/commands-auto.html | bin/sf-metasync.sh | 1670318031-26335 | 00619c1
 
 site/reference/target-files.html | bin/sf-check.sh | 334649645-7163 | b2034a6
 site/reference/target-files.html | bin/sf-release.sh | 1358071720-8047 | b2034a6
@@ -72,7 +72,7 @@ site/reference/commands.html | bin/sf-init.sh | 4143046044-23496 | 9640759
 site/reference/commands.html | bin/sf-update-secret.sh | 1262693024-6313 | 9640759
 site/reference/commands.html | bin/sf-sync-wf.sh | 2612271841-6183 | 9640759
 site/reference/commands.html | bin/sf-typecheck.sh | 2610487361-7160 | 9640759
-site/reference/commands.html | bin/sf-metasync.sh | 2635827350-25190 | 9640759
+site/reference/commands.html | bin/sf-metasync.sh | 1670318031-26335 | 00619c1
 site/reference/commands.html | phases/init/verify.sh | 1817113336-12401 | 9640759
 site/reference/commands.html | phases/init/add_tier.sh | 818736844-7560 | 9640759
 site/reference/commands.html | phases/init/remove_tier.sh | 15038481-6773 | 9640759
@@ -83,7 +83,7 @@ site/index.html | bin/sf-init.sh | 4143046044-23496 | 9640759
 site/guide/glossary.html | bin/sf-launcher.sh | 1532413299-4317 | 9640759
 site/guide/glossary.html | bin/sf-job.sh | 3104353950-6410 | 9640759
 site/guide/glossary.html | bin/sf-release.sh | 1358071720-8047 | 9640759
-site/design/cicd.html | bin/sf-metasync.sh | 2635827350-25190 | 0277207
+site/design/cicd.html | bin/sf-metasync.sh | 1670318031-26335 | 00619c1
 site/design/cicd.html | bin/sf-release.sh | 1358071720-8047 | 0277207
 site/design/cicd.html | bin/sf-next.sh | 3773425382-4882 | 0277207
 site/design/cicd.html | bin/sf-prepush.sh | 2137767055-4495 | 0277207

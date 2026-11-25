@@ -55,16 +55,20 @@
 #      一時フォルダ（${TMPDIR:-/tmp}/sf-metasync-XXXXXX）に、sfdx-project.json と .forceignore（あれば）を写す。
 #      作業ツリーには、まだ何も書かない。
 #      続けて、環境変数 SF_METASYNC_DETECT が shadow または on のとき、変更の検知を行う（node lib/metasync.js detect。読み取りのみ。
-#      設定変更の履歴と、更新日時の一覧で、組織に変更があるかを、全件取得の前に調べる）。on で、結果が「変更なし」のとき
-#      （--full・--dry-run でなく、未プッシュのコミットがないとき）は、手順 6 以降を行わず、終了する（コミット・push・伝播はしない）。
+#      設定変更の履歴と、更新日時の一覧で、組織に変更があるかを、全件取得の前に調べる）。on で、結果が「変更なし」のときは、取得を
+#      省く（下の「取得を省くのは」の条件。指紋も on なら、指紋も変更なしのときだけ）。
 #      検知の失敗・不明・変更ありは、すべて、手順 6 の全件取得に進む（検知は、取得を省くための手がかりで、失敗が取りこぼしにならない）。
-#      続けて、環境変数 SF_METASYNC_FINGERPRINT が shadow のとき、一覧の指紋を作る（node lib/metasync.js fingerprint。読み取りのみ。
+#      続けて、環境変数 SF_METASYNC_FINGERPRINT が shadow または on のとき、一覧の指紋を作る（node lib/metasync.js fingerprint。読み取りのみ。
 #      config/metasync-fingerprint.txt の種類ごとに、組織の一覧を Node 直接の SOAP（listMetadata）で取り、件数・最新の更新日時・
 #      名前と更新日時のハッシュを、前回（./sf-tools/metasync/fingerprint.json）と比べる。管理パッケージ本体の部品は除く）。
 #      取得の範囲（metadata.txt の種類と、SF_METASYNC_EXTRA が on のときの config/metasync-extra.txt）が前回と変わった回は、不明にする
 #      （組織が同じでも、ファイルが増減するため。影の比較で、見逃しに数えない）。
 #      shadow は、取得を省かない（影の比較）。指紋の失敗・不明は、取得を止めない（WARNING を出して、全件取得に進む）。
-#      検知 on で「検知は変更なし」なのに、指紋が「変更あり」のときは、食い違いの WARNING を出して（検知の見逃しの可能性）、検知に従って終了する
+#      取得を省くのは、検知・指紋のうち on のものが 1 つ以上あり、on のものが「すべて」変更なしのときだけ（--full・--dry-run でなく、
+#      未プッシュのコミットがないとき）。このときは、手順 6 以降を行わず、終了する（コミット・push・伝播はしない）。
+#      on のものが 1 つでも、変更あり・不明・行わなかった（表がない）なら、全件取得する（検知と指紋が両方 on で、結果が分かれたときも）。
+#      shadow のものは、判定に使わない。shadow のものが「変更あり」なのに、on のものが「変更なし」で省くときは、食い違いの WARNING を出す
+#      （on のものの見逃しの可能性。毎日の --full で反映される）
 #   6. 組織からメタデータを取得する: 一時フォルダで sf project retrieve start --target-org prod --ignore-conflicts --json に、
 #      metadata.txt の全種類を --metadata で指定して実行する。取得先は一時フォルダのため、失敗しても作業ツリーは変わらない。
 #      終了コードが 0 以外で、応答が一時的なエラー（MetadataTransferError・ERROR_HTTP_404・接続の切断・503 など）なら、60 秒待って
@@ -131,8 +135,11 @@
 #     （ないと、履歴の問い合わせが失敗し、毎回、全件取得になる）
 #
 # 【補足】
-#   - 一覧の指紋（設計: doc/sf-metasync-redesign.md 16 章の P1）: 環境変数 SF_METASYNC_FINGERPRINT（既定 off）。off = 行わない ／
-#     shadow = 指紋を作って前回と比べ、実際の変更との食い違い（見逃し）を、ログに記録する。取得は、常に行う（取得を省く動作は、まだない）。
+#   - 一覧の指紋（設計: doc/sf-metasync-redesign.md 16 章の P1・P4）: 環境変数 SF_METASYNC_FINGERPRINT（既定 off）。off = 行わない ／
+#     shadow = 指紋を作って前回と比べ、実際の変更との食い違い（見逃し）を、ログに記録する。取得は、常に行う ／
+#     on = shadow と同じことに加え、指紋が「変更なし」のとき、取得を省く（手順 5）。指紋の表（config/metasync-fingerprint.txt）にない種類
+#     （Settings・SharingRules・ConnectedApp・StandardValueSet・AssignmentRules など）だけの変更は、毎日の --full の回まで反映されない
+#     （GitHub Actions では、平日の日本時間 9:00。金曜の夕方の変更は、月曜の朝）。設定変更の履歴で補うなら、SF_METASYNC_DETECT も on にする。
 #     状態は ./sf-tools/metasync/fingerprint.json（変更あり・不明の回にだけ更新する。状態の更新だけのコミットは、下流へ伝播しない）。
 #     接続: sf org display のアクセストークンで、Node から SOAP を直接呼ぶ（現行の sf は、org display のトークンを伏せ字で返すため、
 #     そのときは、最初から sf org auth show-access-token で取る。本物が返る古い sf では、期限切れのときだけ取り直す。
@@ -142,7 +149,7 @@
 #     影の比較の「見逃し」は、指紋を取ったあとに組織が変わった回にも出る（次の回の「空振り」と対で見る）。
 #   - 変更の検知: 環境変数 SF_METASYNC_DETECT（既定 off）。off = 行わない（従来どおり、毎回、全件取得）／
 #     shadow = 検知の結果をログに出すが、取得は常に行う（検知が「変更なし」なのに、実際は変更があったときは、WARNING で
-#     その一覧を出す。運用の前の確かめ用）／ on = 「変更なし」のとき、取得を省く。種類ごとの区分は config/metasync-detect.txt
+#     その一覧を出す。運用の前の確かめ用）／ on = 「変更なし」のとき、取得を省く（指紋も on なら、両方が変更なしのときだけ）。種類ごとの区分は config/metasync-detect.txt
 #     （A 履歴・B 更新日時の一覧。表にない種類は C = 毎日の全件取得でだけ反映される。最大約 1 日の遅れ）。
 #     off 以外では、状態を ./sf-tools/metasync/state.json に持つ（最後に全件取得した時刻と、区分 B の記録。変更あり・不明の
 #     全件取得のあとにだけ更新するため、変更のない回は、コミットを作らない。ファイルが変わらず、状態だけが変わるときは、
@@ -249,11 +256,11 @@ readonly DETECT_MODE="${SF_METASYNC_DETECT:-off}"
 [[ "$DETECT_MODE" == "off" || "$DETECT_MODE" == "shadow" || "$DETECT_MODE" == "on" ]] \
     || die "SF_METASYNC_DETECT は off / shadow / on のどれかにしてください: ${DETECT_MODE}"
 
-# 一覧の指紋のモード（設計 16 章の P1。off = 行わない（既定）／ shadow = 指紋を作って前回と比べ、実際の変更との食い違いを記録する。
-#   取得は常に行う（取得を省く動作は、まだない））
+# 一覧の指紋のモード（設計 16 章の P1・P4。off = 行わない（既定）／ shadow = 指紋を作って前回と比べ、実際の変更との食い違いを記録する。
+#   取得は常に行う／ on = shadow と同じことに加え、指紋が「変更なし」なら取得を省く（P4））
 readonly FP_MODE="${SF_METASYNC_FINGERPRINT:-off}"
-[[ "$FP_MODE" == "off" || "$FP_MODE" == "shadow" ]] \
-    || die "SF_METASYNC_FINGERPRINT は off / shadow のどちらかにしてください: ${FP_MODE}"
+[[ "$FP_MODE" == "off" || "$FP_MODE" == "shadow" || "$FP_MODE" == "on" ]] \
+    || die "SF_METASYNC_FINGERPRINT は off / shadow / on のどれかにしてください: ${FP_MODE}"
 
 # 秘密情報の検査のモード（設計 16.7。off = 行わない／ shadow = 検査して、疑いを WARNING で出すが、止めない（既定。誤検知を測る期間）／
 #   on = 疑いがあれば、何もコミット・push せず、全体を止める（終了コード 4）。止めたら Slack に通知する）
@@ -554,9 +561,10 @@ phase_detect_changes() {
     return $RET_OK
 }
 
-# 【FINGERPRINT】一覧の指紋を作り、前回と比べる（手順 5。SF_METASYNC_FINGERPRINT が shadow のとき。読み取りのみ）
+# 【FINGERPRINT】一覧の指紋を作り、前回と比べる（手順 5。SF_METASYNC_FINGERPRINT が shadow・on のとき。読み取りのみ）
 #   結果は FP_RC に入る: 0 = 変更なし ／ 10 = 変更あり ／ 11 = 不明 ／ -1 = 行わなかった（off・表がない）。
-#   shadow は、取得を省かない（影の比較）。失敗は、取得を止めない（WARNING を出して、全件取得に進む）
+#   取得を省くかは、呼び出し側（手順 5 の判定）が決める（on で 0 のときだけ省く。shadow は、取得を省かない影の比較）。
+#   失敗は、取得を止めない（WARNING を出して、不明として全件取得に進む）
 FP_RC=-1
 FP_STATE_NEW=""
 FP_REPORT=""
@@ -580,7 +588,7 @@ phase_fingerprint() {
     FP_RC=$?
     _log_node_lines "$out"
     if [[ $FP_RC -ne 0 && $FP_RC -ne 10 ]]; then
-        [[ $FP_RC -eq 11 ]] || log "WARNING" "指紋の作成が異常終了しました（終了コード ${FP_RC}）。不明として扱います（取得には影響しません）。"
+        [[ $FP_RC -eq 11 ]] || log "WARNING" "指紋の作成が異常終了しました（終了コード ${FP_RC}）。不明として扱います（取得は、省かずに行います）。"
         FP_RC=11
     fi
     return $RET_OK
@@ -916,24 +924,44 @@ log "SUCCESS" "Git 更新完了"
 phase_prepare_work      || die "取得先の一時プロジェクトの準備に失敗しました。"
 log "SUCCESS" "一時プロジェクトの準備完了（パッケージのフォルダ: ${PKG_PATH}）"
 
-# 変更の検知（手順 5）。on で「変更なし」なら、取得を省いて終了する。--full・--dry-run のとき、および未プッシュのコミットが
-#   あるとき（前回の push の失敗。phase_git_sync が push だけ行う）は、省かない
+# 変更の検知と一覧の指紋（手順 5）。取得を省くのは、on の仕組み（検知・指紋）が 1 つ以上あり、on の仕組みが「すべて」変更なし（0）のときだけ
+#   （どちらかが on で、変更あり・不明・行わなかったなら、全件取得する。shadow の仕組みは、記録だけで、判定に使わない）。
+#   --full・--dry-run のとき、および未プッシュのコミットがあるとき（前回の push の失敗。phase_git_sync が push だけ行う）は、省かない
 phase_detect_changes
 phase_fingerprint
-if [[ "$DETECT_MODE" == "on" && "$DETECT_RC" -eq 0 ]]; then
+SKIP_OK=0      # 1 = on の仕組みが、すべて「変更なし」
+SKIP_BY=""     # 省く根拠の表示（検知 ／ 一覧の指紋 ／ 検知と一覧の指紋）
+if [[ "$DETECT_MODE" == "on" || "$FP_MODE" == "on" ]]; then
+    SKIP_OK=1
+    [[ "$DETECT_MODE" == "on" && "$DETECT_RC" -ne 0 ]] && SKIP_OK=0
+    [[ "$FP_MODE" == "on" && "$FP_RC" -ne 0 ]] && SKIP_OK=0
+    if [[ "$DETECT_MODE" == "on" && "$FP_MODE" == "on" ]]; then SKIP_BY="検知と一覧の指紋"
+    elif [[ "$DETECT_MODE" == "on" ]]; then SKIP_BY="検知"
+    else SKIP_BY="一覧の指紋"
+    fi
+    # 片方が on で「変更なし」、もう片方が on で「変更あり」・不明: 全件取得する（どちらかの見逃しを、取得で補う）
+    if [[ "$SKIP_OK" -eq 0 && "$DETECT_MODE" == "on" && "$FP_MODE" == "on" && ( "$DETECT_RC" -eq 0 || "$FP_RC" -eq 0 ) ]]; then
+        log "INFO" "検知と一覧の指紋の結果が分かれたため（検知: ${DETECT_RC} ／ 指紋: ${FP_RC}。0 = 変更なし）、全件取得します。"
+    fi
+fi
+if [[ "$SKIP_OK" -eq 1 ]]; then
     UNPUSHED=$(git rev-list --count "origin/${BRANCH_NAME}..HEAD" 2>/dev/null || echo 0)  # VAR=$(cmd) のため run 不使用
     if [[ "$FULL" -eq 1 ]]; then
-        log "INFO" "--full が指定されているため、検知の結果にかかわらず、全件取得します。"
+        log "INFO" "--full が指定されているため、${SKIP_BY}の結果にかかわらず、全件取得します。"
     elif [[ "$DRY_RUN" -eq 1 ]]; then
-        log "INFO" "--dry-run のため、検知の結果にかかわらず、全件取得して計画を作ります（本番の実行では、取得を省きます）。"
+        log "INFO" "--dry-run のため、${SKIP_BY}の結果にかかわらず、全件取得して計画を作ります（本番の実行では、取得を省きます）。"
     elif [[ "$UNPUSHED" =~ ^[0-9]+$ && "$UNPUSHED" -gt 0 ]]; then
-        log "INFO" "未プッシュのコミットがあるため、検知の結果にかかわらず、全件取得します。"
+        log "INFO" "未プッシュのコミットがあるため、${SKIP_BY}の結果にかかわらず、全件取得します。"
     else
-        # 指紋が「変更あり」なのに、検知が「変更なし」: 食い違い。検知の見逃しの可能性があるため、記録に残す（取得は省く。指紋の状態は書かない）
-        if [[ "$FP_RC" -eq 10 ]]; then
+        # shadow の仕組みが「変更あり」なのに、on の仕組みが「変更なし」: 食い違い。on の仕組みの見逃しの可能性があるため、記録に残す
+        #   （取得は省く。shadow の仕組みの状態は書かない。毎日の --full で反映される）
+        if [[ "$FP_MODE" == "shadow" && "$FP_RC" -eq 10 ]]; then
             log "WARNING" "指紋は『変更あり』ですが、検知は『変更なし』でした。検知の見逃しの可能性があります（今回は取得を省きます。毎日の --full で反映されます）。"
         fi
-        log "SUCCESS" "完了: 検知の結果、Salesforce 組織側に変更はありませんでした（全件取得を省きました）。"
+        if [[ "$DETECT_MODE" == "shadow" && "$DETECT_RC" -eq 10 ]]; then
+            log "WARNING" "検知は『変更あり』ですが、指紋は『変更なし』でした。指紋の見逃しの可能性があります（今回は取得を省きます。毎日の --full で反映されます）。"
+        fi
+        log "SUCCESS" "完了: ${SKIP_BY}の結果、Salesforce 組織側に変更はありませんでした（全件取得を省きました）。"
         exit $RET_OK
     fi
 fi

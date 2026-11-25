@@ -812,12 +812,12 @@ test_fp_off_default() {
     _fpi_stop; _ms_unset; teardown "$td" "$mb"
 }
 
-# 不正なモード（on は、まだない）→ 中断
+# 不正なモード → 中断
 test_fp_bad_mode() {
     local td mb mh; _ms_env td mb mh
-    SF_METASYNC_FINGERPRINT=on _ms_run 'Y\nY\n'
-    assert_exit_fail "$_MS_RC" "指紋のモードが不正（on は、まだない）→ 中断"
-    assert_output_contains "$_MS_OUT" "off / shadow" "指紋のモードが不正 → 使える値が出る"
+    SF_METASYNC_FINGERPRINT=maybe _ms_run 'Y\nY\n'
+    assert_exit_fail "$_MS_RC" "指紋のモードが不正 → 中断"
+    assert_output_contains "$_MS_OUT" "off / shadow / on" "指紋のモードが不正 → 使える値が出る"
     _ms_unset; teardown "$td" "$mb"
 }
 
@@ -968,6 +968,132 @@ test_fp_changed_but_no_file_change() {
     assert_file_contains "$MOCK_CALL_LOG" "指紋の状態の更新のみ" "指紋の状態だけのコミットになる"
     assert_file_not_contains "$MOCK_CALL_LOG" "git merge" "状態だけのコミットは、下流へ伝播しない"
     _fpi_stop; _ms_unset; teardown "$td" "$mb"
+}
+
+# ------------------------------------------------------------------------------
+# 指紋 on（設計 16 章の P4）: 指紋が「変更なし」なら、取得を省く
+# ------------------------------------------------------------------------------
+# on・変更なし → 取得を省いて終了（コミット・push・伝播しない）。指紋の状態ファイルは変わらない
+test_fp_on_unchanged_skips() {
+    local td mb mh; _ms_env td mb mh; _fpi_start
+    _fpi_state
+    cp "$td/sf-tools/metasync/fingerprint.json" "$td/fp.before"
+    SF_METASYNC_FINGERPRINT=on _ms_run 'Y\nY\n'
+    assert_exit_ok "$_MS_RC" "指紋 on・変更なし: 正常終了"
+    assert_output_contains "$_MS_OUT" "一覧の指紋の結果、Salesforce 組織側に変更はありませんでした（全件取得を省きました）" "指紋 on・変更なし: 取得を省いたと表示される"
+    assert_file_not_contains "$MOCK_CALL_LOG" "sf project retrieve" "指紋 on・変更なし: 取得しない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "git commit" "指紋 on・変更なし: commit しない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "git push" "指紋 on・変更なし: push しない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "git merge" "指紋 on・変更なし: 伝播しない"
+    cmp -s "$td/sf-tools/metasync/fingerprint.json" "$td/fp.before" && pass "指紋 on・変更なし: 状態ファイルは変わらない" || fail "指紋 on・変更なし: 状態ファイルは変わらない"
+    _fpi_stop; _ms_unset; teardown "$td" "$mb"
+}
+
+# on・状態なし（不明）→ 全件取得して、指紋の状態を書く
+test_fp_on_first_run_retrieves() {
+    local td mb mh; _ms_env td mb mh; _fpi_start
+    export MOCK_GIT_DIFF_EXIT_2ND=1
+    SF_METASYNC_FINGERPRINT=on _ms_run 'Y\nY\n'
+    assert_exit_ok "$_MS_RC" "指紋 on・状態なし: 正常終了"
+    assert_file_contains "$MOCK_CALL_LOG" "sf project retrieve start" "指紋 on・状態なし（不明）: 全件取得する"
+    [[ -f "$td/sf-tools/metasync/fingerprint.json" ]] && pass "指紋 on・状態なし: 状態ファイルを書く" || fail "指紋 on・状態なし: 状態ファイルを書く"
+    assert_output_not_contains "$_MS_OUT" "全件取得を省きました" "指紋 on・状態なし: 取得を省かない"
+    _fpi_stop; _ms_unset; teardown "$td" "$mb"
+}
+
+# on・変更あり → 全件取得して反映し、指紋の状態を更新する（取得した回は、影の比較も出す）
+test_fp_on_changed_retrieves() {
+    local td mb mh; _ms_env td mb mh; _fpi_start
+    _fpi_state
+    cp "$td/sf-tools/metasync/fingerprint.json" "$td/fp.before"
+    _fpi_set ApexClass '[{"fullName":"A9","lastModifiedDate":"2026-11-01T09:00:00.000Z"}]'
+    export MOCK_GIT_DIFF_EXIT_2ND=1
+    export MOCK_SF_RETRIEVE_FILES='force-app/main/default/classes/New.cls|x'
+    SF_METASYNC_FINGERPRINT=on _ms_run 'Y\nY\n'
+    assert_exit_ok "$_MS_RC" "指紋 on・変更あり: 正常終了"
+    assert_file_contains "$MOCK_CALL_LOG" "sf project retrieve start" "指紋 on・変更あり: 全件取得する"
+    [[ -f "$td/force-app/main/default/classes/New.cls" ]] && pass "指紋 on・変更あり: 取得結果を反映する" || fail "指紋 on・変更あり: 取得結果を反映する"
+    if cmp -s "$td/sf-tools/metasync/fingerprint.json" "$td/fp.before"; then fail "指紋 on・変更あり: 状態ファイルを更新する"; else pass "指紋 on・変更あり: 状態ファイルを更新する"; fi
+    assert_output_contains "$_MS_OUT" "検知できた 1（1 件）" "指紋 on でも、取得した回は影の比較を出す"
+    _fpi_stop; _ms_unset; teardown "$td" "$mb"
+}
+
+# on・指紋の失敗（接続できない）→ 不明として、全件取得する
+test_fp_on_failure_retrieves() {
+    local td mb mh; _ms_env td mb mh; _fpi_start
+    _fpi_state
+    # 使われていないポート（1）に向けて、接続の失敗を再現する
+    export MOCK_SF_ORG_JSON='{"status":0,"result":{"alias":"testorg","id":"00D000000000001AAA","accessToken":"TESTTOKEN","instanceUrl":"http://127.0.0.1:1"}}'
+    SF_METASYNC_FINGERPRINT=on _ms_run 'Y\nY\n'
+    assert_exit_ok "$_MS_RC" "指紋 on・失敗: 正常終了"
+    assert_file_contains "$MOCK_CALL_LOG" "sf project retrieve start" "指紋 on・失敗（不明）: 全件取得する"
+    assert_output_not_contains "$_MS_OUT" "全件取得を省きました" "指紋 on・失敗: 取得を省かない"
+    _fpi_stop; _ms_unset; teardown "$td" "$mb"
+}
+
+# on・変更なしでも、--full・--dry-run・未プッシュのコミットありのときは、取得する
+test_fp_on_unchanged_but_forced() {
+    local td mb mh; _ms_env td mb mh; _fpi_start
+    _fpi_state
+    SF_METASYNC_FINGERPRINT=on _ms_run 'Y\nY\n' --full
+    assert_exit_ok "$_MS_RC" "指紋 on・変更なし・--full: 正常終了"
+    assert_output_contains "$_MS_OUT" "が指定されているため、一覧の指紋の結果にかかわらず" "--full: 省かない理由が出る"   # 先頭の -- は grep のオプションに読まれるため外す
+    assert_file_contains "$MOCK_CALL_LOG" "sf project retrieve start" "指紋 on・変更なし・--full: 取得する"
+    : > "$MOCK_CALL_LOG"
+    SF_METASYNC_FINGERPRINT=on _ms_run '' --dry-run -y
+    assert_exit_ok "$_MS_RC" "指紋 on・変更なし・--dry-run: 正常終了"
+    assert_file_contains "$MOCK_CALL_LOG" "sf project retrieve start" "指紋 on・変更なし・--dry-run: 取得する"
+    assert_file_not_contains "$MOCK_CALL_LOG" "git commit" "指紋 on・--dry-run: commit しない"
+    : > "$MOCK_CALL_LOG"
+    export MOCK_GIT_REV_LIST_COUNT=2   # 未プッシュのコミットが 2 件
+    SF_METASYNC_FINGERPRINT=on _ms_run 'Y\nY\n'
+    assert_output_contains "$_MS_OUT" "未プッシュのコミットがあるため、一覧の指紋の結果にかかわらず" "未プッシュあり: 省かない理由が出る"
+    assert_file_contains "$MOCK_CALL_LOG" "sf project retrieve start" "指紋 on・変更なし・未プッシュあり: 取得する"
+    unset MOCK_GIT_REV_LIST_COUNT
+    _fpi_stop; _ms_unset; teardown "$td" "$mb"
+}
+
+# 検知 on・指紋 on: 両方が変更なし → 省く ／ 検知は変更なし・指紋は変更あり → 全件取得する
+#   （検知 on・指紋 shadow のときは、検知に従って省く。test_fp_detect_on_conflict_warning）
+test_fp_on_with_detect_on() {
+    local td mb mh; _ms_env td mb mh; _det_env 0; _fpi_start
+    _det_state; _fpi_state
+    SF_METASYNC_DETECT=on SF_METASYNC_FINGERPRINT=on _ms_run 'Y\nY\n'
+    assert_exit_ok "$_MS_RC" "検知 on・指紋 on・両方変更なし: 正常終了"
+    assert_output_contains "$_MS_OUT" "検知と一覧の指紋の結果、Salesforce 組織側に変更はありませんでした" "両方変更なし: 取得を省く"
+    assert_file_not_contains "$MOCK_CALL_LOG" "sf project retrieve" "両方変更なし: 取得しない"
+    : > "$MOCK_CALL_LOG"
+    _fpi_set ApexClass '[{"fullName":"A9","lastModifiedDate":"2026-11-01T09:00:00.000Z"}]'
+    SF_METASYNC_DETECT=on SF_METASYNC_FINGERPRINT=on _ms_run 'Y\nY\n'
+    assert_exit_ok "$_MS_RC" "検知 変更なし・指紋 変更あり: 正常終了"
+    assert_output_contains "$_MS_OUT" "検知と一覧の指紋の結果が分かれたため" "検知 変更なし・指紋 変更あり: 分かれたと表示される"
+    assert_file_contains "$MOCK_CALL_LOG" "sf project retrieve start" "検知 変更なし・指紋 変更あり: 取得する"
+    _fpi_stop; _ms_unset; _det_unset; teardown "$td" "$mb"
+}
+
+# 検知 on・指紋 on: 検知は変更あり（設定変更の履歴に記録）・指紋は変更なし → 全件取得する（履歴が、指紋の対象外の種類の変更を補う）
+test_fp_on_with_detect_on_reverse() {
+    local td mb mh; _ms_env td mb mh; _det_env 0; _fpi_start
+    _det_state; _fpi_state
+    export MOCK_SF_AUDIT_COUNT=1   # 設定変更の履歴に記録あり → 検知は「変更あり」
+    SF_METASYNC_DETECT=on SF_METASYNC_FINGERPRINT=on _ms_run 'Y\nY\n'
+    assert_exit_ok "$_MS_RC" "検知 変更あり・指紋 変更なし: 正常終了"
+    assert_output_contains "$_MS_OUT" "検知と一覧の指紋の結果が分かれたため" "検知 変更あり・指紋 変更なし: 分かれたと表示される"
+    assert_file_contains "$MOCK_CALL_LOG" "sf project retrieve start" "検知 変更あり・指紋 変更なし: 取得する"
+    _fpi_stop; _ms_unset; _det_unset; teardown "$td" "$mb"
+}
+
+# 検知 shadow・指紋 on: 指紋で決める。検知が「変更あり」でも省き、食い違いの WARNING を出す
+test_fp_on_with_detect_shadow() {
+    local td mb mh; _ms_env td mb mh; _det_env 0; _fpi_start
+    _det_state; _fpi_state
+    export MOCK_SF_AUDIT_COUNT=1   # 設定変更の履歴に記録あり → 検知は「変更あり」
+    SF_METASYNC_DETECT=shadow SF_METASYNC_FINGERPRINT=on _ms_run 'Y\nY\n'
+    assert_exit_ok "$_MS_RC" "検知 shadow・指紋 on: 正常終了"
+    assert_output_contains "$_MS_OUT" "検知は『変更あり』ですが、指紋は『変更なし』でした" "検知 shadow が変更あり: 食い違いの WARNING が出る"
+    assert_output_contains "$_MS_OUT" "一覧の指紋の結果、Salesforce 組織側に変更はありませんでした" "検知 shadow は判定に使わず、指紋で省く"
+    assert_file_not_contains "$MOCK_CALL_LOG" "sf project retrieve" "検知 shadow・指紋 on・変更なし: 取得しない"
+    _fpi_stop; _ms_unset; _det_unset; teardown "$td" "$mb"
 }
 
 # ------------------------------------------------------------------------------
@@ -1258,6 +1384,14 @@ test_fp_with_detect
 test_fp_detect_on_conflict_warning
 test_fp_dry_run
 test_fp_changed_but_no_file_change
+test_fp_on_unchanged_skips
+test_fp_on_first_run_retrieves
+test_fp_on_changed_retrieves
+test_fp_on_failure_retrieves
+test_fp_on_unchanged_but_forced
+test_fp_on_with_detect_on
+test_fp_on_with_detect_on_reverse
+test_fp_on_with_detect_shadow
 test_p3_visibility_ok
 test_p3_visibility_public
 test_extra_off_default

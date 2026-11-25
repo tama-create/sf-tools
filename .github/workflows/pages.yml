@@ -4,6 +4,10 @@ name: 文書サイトの公開（GitHub Pages）
 # 動く条件: main に site/ の変更が入ったとき（rr のあと）。手動でも動かせる（workflow_dispatch）。
 # 必要な設定（リポジトリの Settings → Pages → Source を「GitHub Actions」にする。最初の 1 回だけ）。
 # 公開は main の内容だけ（development の途中経過は出ない）。
+# アップロードのあと、公開の前に、アップロードしたもの（github-pages）が API から見えるまで待つ。
+#   2026-11-25 から、アップロードの完了の直後は、一覧に出るまでわずかに遅れるようになった。
+#   deploy-pages は 1 回しか問い合わせないため、待たないと「No artifacts named "github-pages"」で毎回失敗する
+#   （再実行しても同じ。部品のバージョンは、成功していた 11-24 と同じだった）。
 on:
   push:
     branches: [main]
@@ -16,6 +20,7 @@ permissions:
   contents: read
   pages: write
   id-token: write
+  actions: read   # アップロードしたものが見えるかを、API で確かめるため（読み取りのみ）
 
 # 同時に 2 つ公開しない（古いものを止めず、順に動かす）
 concurrency:
@@ -41,6 +46,24 @@ jobs:
         uses: actions/upload-pages-artifact@v5
         with:
           path: site
+
+      # 見えるまで、5 秒おきに最大 2 分問い合わせる。見えなければ、ここで失敗させる（公開を空振りさせない）
+      - name: アップロードしたものが見えるまで待つ
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          for i in $(seq 1 24); do
+            n=$(gh api "repos/${REPO}/actions/runs/${RUN_ID}/artifacts" --jq '[.artifacts[] | select(.name == "github-pages")] | length' || echo 0)
+            if [ "${n:-0}" -ge 1 ]; then
+              echo "github-pages が見えました（${i} 回目の問い合わせ）"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::2 分待っても、アップロードした github-pages が見えません"
+          exit 1
 
       - name: 公開
         id: deployment

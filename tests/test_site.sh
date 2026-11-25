@@ -11,7 +11,7 @@
 #   3. 目次（assets/site.js の NAV）のリンクが、実在する。すべてのページが、目次に載っている（孤立したページがない）
 #   4. 改行が LF だけ（CR が混ざっていない）
 #   5. コードのブロックの中に、エスケープしていない「<」がない（ブラウザで、タグとして消えてしまうため）
-#   6. 公開用のワークフロー（pages.yml）が、site/ を公開する
+#   6. 公開用のワークフロー（pages.yml）が、site/ を公開する（アップロードと公開の間に、見えるまで待つ手順がある）
 #   7. 見出し: 番号を手で書かない（大項目 1. / 中項目 1.1 / 小項目 1.1.1 は、assets/site.js が自動で付ける）・階層を飛ばさない（h2 → h3 → h4）
 #   8. 囲み（<div class="box ...">）に、必ず題（<div class="title">）がある（アイコンは、題の前に、スタイルが自動で付ける）
 # ==============================================================================
@@ -121,6 +121,18 @@ test_site_pages_workflow() {
     assert_file_contains "$wf" "- 'site/**'"             "pages.yml: site/ の変更で動く"
     assert_file_contains "$wf" "pages: write"            "pages.yml: Pages への書き込み権限を、このワークフローだけに与える"
     assert_file_not_contains "$wf" "pull_request"        "pages.yml: pull_request では動かさない（権限を渡さない）"
+    assert_file_contains "$wf" "name: アップロードしたものが見えるまで待つ" "pages.yml: 公開の前に、アップロードしたものが見えるまで待つ（2026-11-25 からの遅れ対策）"
+    assert_file_contains "$wf" "actions: read"           "pages.yml: 待つ手順のため、Actions の読み取り権限がある"
+    # 待つ手順が、アップロードと公開の間にある（順番が逆だと、待つ意味がない）
+    local up wait dep
+    up=$(grep -n "uses: actions/upload-pages-artifact" "$wf" | head -1 | cut -d: -f1)
+    wait=$(grep -n "name: アップロードしたものが見えるまで待つ" "$wf" | head -1 | cut -d: -f1)
+    dep=$(grep -n "uses: actions/deploy-pages" "$wf" | head -1 | cut -d: -f1)
+    if [[ -n "$up" && -n "$wait" && -n "$dep" && "$up" -lt "$wait" && "$wait" -lt "$dep" ]]; then
+        pass "pages.yml: 待つ手順が、アップロードと公開の間にある"
+    else
+        fail "pages.yml: 待つ手順が、アップロードと公開の間にある（up=$up wait=$wait deploy=$dep）"
+    fi
 }
 
 test_site_headings() {

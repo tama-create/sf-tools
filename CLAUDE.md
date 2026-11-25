@@ -251,7 +251,8 @@ Salesforce 開発の環境構築と日々の作業を自動化するシェルス
 | `config/changeset-types.txt` | 変更セットで扱える種類の一覧（公式の Metadata Coverage Report。「全種類を対象にする」目標の一覧。`sf-typecheck.sh --coverage` で、確認の進み具合を見る） |
 | `config/metadata-capability.txt` | メタデータの種類ごとの「リリース・削除」の可否の表（`sf-typecheck.sh` が実機で確認した結果。`sf-check.sh` が読む） |
 | `hooks/` | git フック（`pre-commit`・`pre-push`）の実体。`bin/` のスクリプトを呼ぶだけのラッパー |
-| `templates/` | force-* へ配布する雛形。**参照は sf-init（Phase 3・sf-init から実行中の `sf-install.sh`）と `sf-sync-wf.sh`（ワークフロー）だけ**。日常運用で参照してよいのは、`sf-install.sh` の `phase_setup_release_dir`（release の雛形）のみ |
+| `templates/` | force-* へ配布する雛形。**force-* にそのまま置くもの（同じ名前・同じ場所）だけを入れる**（Phase 3 が丸ごとコピーするため）。**参照は sf-init（Phase 3・sf-init から実行中の `sf-install.sh`）と `sf-sync-wf.sh`（ワークフロー）だけ** |
+| `config/install/` | `sf-install.sh` が名前や場所を変えて force-* に置く雛形（`release/` の deploy-target.txt・remove-target.txt と `gitmessage`）。`templates/` に置かない。日常運用で参照してよいのは、`sf-install.sh` の `phase_setup_release_dir`（release の雛形）のみ |
 | `tests/` | モックベースの単体テスト一式と、結合テスト L1（`test_integration*.sh`・`tests/integration/`） |
 | `tests/e2e/` | 実環境での `sf-init` の通し検証（自動実行。作ったものは既定で残し、次回の前掃除で削除）。通常のテストには含めない |
 | `site/` | 利用者向けの文書サイト（HTML。GitHub Pages で公開。`doc/dev-reference.md` 9.8） |

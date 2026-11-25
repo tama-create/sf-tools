@@ -37,8 +37,8 @@
 #      - ./sf-tools/release/ と ./sf-tools/release/.gitkeep を作成する
 #      - main ブランチのときは、ここで終わる（release/<ブランチ>/ と branch_name.txt は、作成・更新しない）
 #      - それ以外のブランチ: release/<ブランチ>/ を作成し、deploy-target.txt・remove-target.txt が無ければ
-#        ~/sf-tools/templates/sf-tools/release/__BRANCH__/ からコピーし、release/branch_name.txt にブランチ名を書き込む
-#   6. （sf-init.sh から呼ばれたときのみ）~/sf-tools/templates/gitmessage を ./.gitmessage にコピーし、
+#        ~/sf-tools/config/install/release/ からコピーし、release/branch_name.txt にブランチ名を書き込む
+#   6. （sf-init.sh から呼ばれたときのみ）~/sf-tools/config/install/gitmessage を ./.gitmessage にコピーし、
 #      git config commit.template .gitmessage を設定する。テンプレートが無い・コピーか設定に失敗したときは、WARNING を表示して
 #      続行する（完了の SUCCESS は表示しない）
 #   7. ./package.json があれば、npm install を実行する。失敗しても WARNING を表示して続行する。次のときは、スキップする:
@@ -62,6 +62,9 @@
 #   - 終了コード: 0。手順 3 で中断したとき・不明なオプションのときは 1。手順 3 以外の失敗は、WARNING を表示して続行する
 #   - GitHub Actions のワークフロー（.github/workflows/）は扱わない。新規作成時は sf-init.sh（Phase 3）が
 #     ~/sf-tools/templates/ からコピーし、作成済みのプロジェクトへの反映は sf-sync-wf.sh（管理者が手動で実行）が行う
+#   - 手順 5・6 のコピー元は、~/sf-tools/templates/ ではなく ~/sf-tools/config/install/ に置く。templates/ は、sf-init（Phase 3）が
+#     丸ごと force-* にコピーするため、そこに置くと、名前や場所を変えて使うコピー元まで force-* に入ってしまう
+#     （以前は templates/sf-tools/release/__BRANCH__/ と templates/gitmessage に置き、force-* に不要な写しが残っていた）
 #   - ログ: ./sf-tools/logs/sf-install.log（実行ごとに作り直す）
 # ==============================================================================
 
@@ -222,10 +225,11 @@ phase_setup_release_dir() {
     fi
     local release_dir="sf-tools/release/${branch_name}"
     run mkdir -p "$release_dir" || return $RET_NG
+    # コピー元は config/install/release/（templates/ には置かない。冒頭コメントの【補足】）
     [[ ! -f "${release_dir}/deploy-target.txt" ]] \
-        && { run cp "$HOME/sf-tools/templates/sf-tools/release/__BRANCH__/deploy-target.txt" "${release_dir}/deploy-target.txt" || return $RET_NG; }
+        && { run cp "$HOME/sf-tools/config/install/release/deploy-target.txt" "${release_dir}/deploy-target.txt" || return $RET_NG; }
     [[ ! -f "${release_dir}/remove-target.txt" ]] \
-        && { run cp "$HOME/sf-tools/templates/sf-tools/release/__BRANCH__/remove-target.txt" "${release_dir}/remove-target.txt" || return $RET_NG; }
+        && { run cp "$HOME/sf-tools/config/install/release/remove-target.txt" "${release_dir}/remove-target.txt" || return $RET_NG; }
     printf '%s\n' "$branch_name" | run tee "sf-tools/release/branch_name.txt" > /dev/null || return $RET_NG
     log "INFO" "ブランチ: ${branch_name} / branch_name.txt を保存しました"
     return $RET_OK
@@ -233,7 +237,7 @@ phase_setup_release_dir() {
 
 # 【GITMESSAGE】コミットメッセージテンプレートの設置
 phase_setup_gitmessage() {
-    local template="$HOME/sf-tools/templates/gitmessage"
+    local template="$HOME/sf-tools/config/install/gitmessage"   # templates/ には置かない（冒頭コメントの【補足】）
     # テンプレートが無いときは、失敗として返す（以前は、WARNING のあと成功を返し、メインフローが「設置が完了しました」も表示していた）
     if [[ ! -f "$template" ]]; then
         log "WARNING" "gitmessage テンプレートが見つかりません: $template"

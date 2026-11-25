@@ -29,6 +29,9 @@
 # 【補足】
 #   - 可視性は、常に Private
 #   - sf-tools/templates/ が、雛形の唯一の正本（force-template リポジトリは廃止済み）
+#   - templates/ には、force-* にそのまま置くもの（同じ名前・同じ場所）だけを入れる。手順 4 は、除外なしで丸ごとコピーするため。
+#     sf-install.sh が名前や場所を変えて使うコピー元（release/<ブランチ名>/ の雛形・.gitmessage の雛形）は、
+#     sf-tools/config/install/ に置く（tests/test_sf-install.sh の test_templates_only_force_files が確かめる）
 #   - core.longpaths=true は、この Phase でクローンしたときだけ付け、クローンの設定に残る（Windows のパスの長さの上限対策。
 #     ほかの OS では無視される）。既存のクローンには、設定しない
 #   - 終了コード: 0 = OK / 1 = die
@@ -113,7 +116,8 @@ fi
 tmpl_src="${SF_TOOLS_DIR}/templates"
 log "INFO" "テンプレートファイルをコピー中: ${tmpl_src} → ${REPO_DIR}"
 run mkdir -p "$REPO_DIR" || die "REPO_DIR を作成できません: $REPO_DIR"
-# cp -r でテンプレート配下の全ファイル・ディレクトリをコピー（上書き）
+# cp -r でテンプレート配下の全ファイル・ディレクトリをコピー（上書き）。除外はしない（templates/ には、force-* に
+#   そのまま置くものだけを入れる決まり。冒頭コメントの【補足】）
 # サブディレクトリ（.github/workflows/, force-app/, .vscode/ 等）も含む
 run cp -r "${tmpl_src}/." "$REPO_DIR/" \
     || die "テンプレートファイルのコピーに失敗しました。"

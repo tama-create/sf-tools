@@ -18,11 +18,11 @@ site/reference/commands-dev.html | bin/sf-hook.sh | 4023496098-3227 | 5b20e70
 site/reference/commands-dev.html | bin/sf-log.sh | 3011004289-22329 | ebc141b
 site/reference/commands-dev.html | bin/sf-unhook.sh | 756720157-1896 | 5b20e70
 
-site/reference/commands-auto.html | bin/sf-install.sh | 1635151198-6746 | 0277207
+site/reference/commands-auto.html | bin/sf-install.sh | 807008251-7188 | 3a4b417
 site/reference/commands-auto.html | bin/sf-upgrade.sh | 1489370091-5002 | 0277207
 site/reference/commands-auto.html | bin/sf-prepush.sh | 2137767055-4495 | 0277207
 site/reference/commands-auto.html | bin/sf-precommit.sh | 2396654912-1585 | 0277207
-site/reference/commands-auto.html | bin/sf-metasync.sh | 2635827350-25190 | 0277207
+site/reference/commands-auto.html | bin/sf-metasync.sh | 1670318031-26335 | 00619c1
 
 site/reference/target-files.html | bin/sf-check.sh | 334649645-7163 | b2034a6
 site/reference/target-files.html | bin/sf-release.sh | 1358071720-8047 | b2034a6
@@ -56,7 +56,7 @@ site/admin/verify.html | bin/sf-typecheck.sh | 2610487361-7160 | b2034a6
 site/admin/verify.html | lib/typecheck.js | 3564138558-5155 | b2034a6
 
 site/guide/install.html | bin/sf-upgrade.sh | 1489370091-5002 | ebc141b
-site/guide/install.html | bin/sf-install.sh | 1635151198-6746 | ebc141b
+site/guide/install.html | bin/sf-install.sh | 807008251-7188 | 3a4b417
 site/guide/install.html | bin/sf-start.sh | 1463713128-7421 | ebc141b
 
 site/admin/troubleshooting.html | bin/sf-job.sh | 3104353950-6410 | fc9cbb5
@@ -72,7 +72,7 @@ site/reference/commands.html | bin/sf-init.sh | 4143046044-23496 | 9640759
 site/reference/commands.html | bin/sf-update-secret.sh | 1262693024-6313 | 9640759
 site/reference/commands.html | bin/sf-sync-wf.sh | 2612271841-6183 | 9640759
 site/reference/commands.html | bin/sf-typecheck.sh | 2610487361-7160 | 9640759
-site/reference/commands.html | bin/sf-metasync.sh | 2635827350-25190 | 9640759
+site/reference/commands.html | bin/sf-metasync.sh | 1670318031-26335 | 00619c1
 site/reference/commands.html | phases/init/verify.sh | 1817113336-12401 | 9640759
 site/reference/commands.html | phases/init/add_tier.sh | 818736844-7560 | 9640759
 site/reference/commands.html | phases/init/remove_tier.sh | 15038481-6773 | 9640759
@@ -83,7 +83,7 @@ site/index.html | bin/sf-init.sh | 4143046044-23496 | 9640759
 site/guide/glossary.html | bin/sf-launcher.sh | 1532413299-4317 | 9640759
 site/guide/glossary.html | bin/sf-job.sh | 3104353950-6410 | 9640759
 site/guide/glossary.html | bin/sf-release.sh | 1358071720-8047 | 9640759
-site/design/cicd.html | bin/sf-metasync.sh | 2635827350-25190 | 0277207
+site/design/cicd.html | bin/sf-metasync.sh | 1670318031-26335 | 00619c1
 site/design/cicd.html | bin/sf-release.sh | 1358071720-8047 | 0277207
 site/design/cicd.html | bin/sf-next.sh | 3773425382-4882 | 0277207
 site/design/cicd.html | bin/sf-prepush.sh | 2137767055-4495 | 0277207
@@ -95,10 +95,10 @@ site/reference/structure.html | bin/sf-typecheck.sh | 2610487361-7160 | fc9cbb5
 site/reference/structure.html | bin/sf-check.sh | 334649645-7163 | fc9cbb5
 site/reference/structure.html | bin/sf-prepush.sh | 2137767055-4495 | fc9cbb5
 site/reference/structure.html | bin/sf-hook.sh | 4023496098-3227 | fc9cbb5
-site/reference/structure.html | bin/sf-install.sh | 1635151198-6746 | fc9cbb5
+site/reference/structure.html | bin/sf-install.sh | 807008251-7188 | 3a4b417
 site/admin/setup.html | phases/init/01_check_env.sh | 1463778109-2311 | fc9cbb5
 site/admin/setup.html | phases/init/02_project_info.sh | 1060219747-2798 | fc9cbb5
-site/admin/setup.html | phases/init/03_repo_create.sh | 3075761310-2366 | fc9cbb5
+site/admin/setup.html | phases/init/03_repo_create.sh | 4045193662-2809 | 3a4b417
 site/admin/setup.html | phases/init/05_setup_branches.sh | 3316235317-1659 | fc9cbb5
 site/admin/setup.html | phases/init/08_initial_commit.sh | 1921436649-2825 | fc9cbb5
 site/admin/setup.html | phases/init/09_repo_rules.sh | 3503851151-3324 | fc9cbb5

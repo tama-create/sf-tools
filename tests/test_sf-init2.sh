@@ -165,6 +165,53 @@ test_admin_branch_push_failure_is_not_fatal() {
 }
 
 # ==============================================================================
+# テスト 6g: Phase 3 のコピーの結果に、sf-install.sh のコピー元（release の雛形・gitmessage）が入らない
+#   templates/ には、force-* にそのまま置くものだけを入れる決まり（コピー元は config/install/）。
+#   以前は、templates/ の sf-tools/release/__BRANCH__/ と gitmessage が、force-* にそのまま残っていた
+# ==============================================================================
+test_repo_has_no_install_sources() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] Phase 3 → force-* に __BRANCH__・gitmessage が入らない（雛形はそのまま入る）${CLR_RST}"
+
+    local mb mock_home base work exit_code repo
+    mb=$(setup_mock_bin)
+    export MOCK_CALL_LOG="$mb/calls.log"
+    mock_home=$(setup_mock_home)
+    base=$(mktemp -d "${TMPDIR:-/tmp}/test-init-XXXX")
+    work="$base/my-work"; mkdir -p "$work"
+
+    create_all_mocks "$mb"
+    create_mock_gh_for_init "$mb"
+    _stub_subscripts "$mock_home"
+
+    _make_input_3branches         | ( cd "$work" && HOME="$mock_home" PATH="$mb:$PATH"               env "${INIT_ECA_ENV[@]}" bash "$mock_home/sf-tools/bin/sf-init.sh" --owner tamashimon --project testproject )           > /dev/null 2>&1
+    exit_code=$?
+    assert_exit_ok "$exit_code" "sf-init が正常終了する"
+
+    # Phase 3 のコピー先（sfdx-project.json がある、クローンのフォルダ）
+    repo=$(find "$work" -name sfdx-project.json -not -path '*/node_modules/*' | head -1)  # VAR=$(cmd) のため run 不使用
+    repo="${repo%/sfdx-project.json}"
+    if [[ -z "$repo" ]]; then
+        fail "Phase 3 のコピー先が見つかる" "sfdx-project.json がない"
+    else
+        assert_file_exists "$repo/sf-tools/config/metadata.txt" "雛形（sf-tools/config/metadata.txt）はそのまま入る"
+        assert_file_exists "$repo/.github/workflows/wf-validate.yml" "雛形（ワークフロー）はそのまま入る"
+        if [[ -e "$repo/gitmessage" ]]; then
+            fail "gitmessage（sf-install.sh のコピー元）が入らない" "$repo/gitmessage がある"
+        else
+            pass "gitmessage（sf-install.sh のコピー元）が入らない"
+        fi
+        if [[ -e "$repo/sf-tools/release/__BRANCH__" ]]; then
+            fail "sf-tools/release/__BRANCH__（sf-install.sh のコピー元）が入らない" "ある"
+        else
+            pass "sf-tools/release/__BRANCH__（sf-install.sh のコピー元）が入らない"
+        fi
+    fi
+
+    teardown "$mb" "$mock_home" "$base"
+}
+
+# ==============================================================================
 # テスト 6f: 最初のメタデータの同期に失敗しても、セットアップは成功のまま（完了画面で知らせる。クローンには取り込まない）
 # ==============================================================================
 test_initial_sync_failure_is_not_fatal() {
@@ -935,6 +982,7 @@ test_repo_create_failure
 test_sf_login_failure
 test_invalid_owner_folder
 test_admin_branch_push_failure_is_not_fatal
+test_repo_has_no_install_sources
 test_initial_sync_failure_is_not_fatal
 test_refuse_foreign_clone
 test_restart_clears_mark

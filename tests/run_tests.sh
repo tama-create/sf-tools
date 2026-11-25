@@ -6,7 +6,7 @@
 #   引数なし → 全テストを実行（既定は並列。--serial で 1 つずつ）
 #   引数あり → 指定したテストのみ実行（例: bash run_tests.sh test_sf-hook.sh）
 #   --changed           : 変更したファイル（git の差分と、まだ git add していない新しいファイル。.gitignore の対象は除く）に対応する
-#                         テストだけを実行する（対応は、下の case 文）
+#                         テストだけを実行する（対応は、下の case 文）。git の差分を読めなければ、終了コード 1（全件に倒れない）
 #   --jobs N / --serial : 同時に動かすテストファイルの数（既定: CPU の数。環境変数 SF_TEST_JOBS でも指定できる。
 #                         --serial は 1 = 1 つずつ）。時間のかかるファイルから先に起動する（全体の時間を短くするため）
 #   --shard I/N         : テストファイルを N 組に分け、I 番目（1 始まり）の組だけを実行する（GitHub Actions で、複数のジョブに分けて、並列に動かすため。
@@ -14,6 +14,8 @@
 #                         順に割り当てる（どの環境でも、同じ分け方になる）。N 組を全部動かすと、全ファイルが、ちょうど 1 回ずつ動く
 #   環境変数 SF_TEST_LIST_ONLY=1 : 実行せずに、対象のテストファイル名を表示して終わる（--shard の分け方の確認用）
 #   環境変数 SF_TEST_TIMES=1 : 各ファイルの所要時間（[TIME] 行）を、最後に、長い順に表示する（_weight の目安を、実測で直すため）
+#   WSL では、~/.cache/sf-tools-test に写して動かす（下）。Git worktree では、写しの .git を、WSL から読めるパスに直す
+#   （tests/wsl-gitfile.sh。直さないと、写しの中で git が使えない）
 # ==============================================================================
 
 # Windows Git Bash の場合は WSL で自動リダイレクト（高速化）
@@ -32,10 +34,23 @@ fi
 # sf-install.sh の git pull を止め、WSL の sf-start が古い版で動いた）
 if [[ "$(uname -s)" == "Linux" ]] && [[ "${BASH_SOURCE[0]}" == /mnt/* ]]; then
     _src="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+    # rsync --delete の送り先・送り元が空・/ にならないことを、先に確かめる（HOME が空なら「/.cache/…」になるため。
+    # 2026-11-25 に、手で打った WSL の命令で、変数が空のまま rsync --delete が / を相手に動いたことがある）
+    if [[ -z "${HOME:-}" || "$HOME" == "/" || -z "$_src" || "$_src" == "/" ]]; then
+        echo "  [run_tests] HOME・写し元が正しくないため、WSL の写しを作りません（HOME=${HOME:-}・写し元=${_src}）。" >&2
+        exit 1
+    fi
     _dst="${HOME}/.cache/sf-tools-test"
     mkdir -p "$_dst"
     echo "  [run_tests] WSL ネイティブ FS に同期中: ${_dst} ..."
     rsync -a --delete "${_src}/" "${_dst}/"
+    # Git worktree では、写しの .git が「gitdir: C:/…」（Windows のパス）を指し、写しの中で git が使えない。
+    # WSL から読める /mnt/c/… に直す（--changed・test_docs.sh の Markdown の一覧などが、git を使うため）
+    bash "${_dst}/tests/wsl-gitfile.sh" "$_src" "$_dst"
+    # 写しの中の git は、本体の .git（/mnt/c 越し）の索引を読む。git diff などが、ついでに索引を書き換えないようにする
+    # （Windows 側の索引に、写しのファイルの情報を書かないため。テストの中で作る一時のリポジトリにも効くが、
+    # 止めるのは、ついでの索引の書き換えだけで、git の結果は変わらない）
+    [[ -f "${_dst}/.git" ]] && export GIT_OPTIONAL_LOCKS=0
     exec bash "${_dst}/tests/run_tests.sh" "$@"
 fi
 
@@ -283,6 +298,12 @@ if [[ "${1:-}" == "--changed" ]]; then
     shift
     _changed_tests=()
     _run_all=0
+    # git が使えなければ、止める（下の git diff は、失敗を隠すため、差分が空になり「対応するテストなし → 全件」に倒れていた。
+    # 手元では全件を回さない決まりのため、黙って全件にしない。2026-11-25 に、worktree の WSL の写しで起きた）
+    if ! git -C "$TESTS_DIR/.." rev-parse --git-dir >/dev/null 2>&1; then  # 確かめるだけのため、直接実行
+        echo -e "${CLR_FAIL}[ERROR] --changed: git の差分を読めません（${TESTS_DIR}/.. が git のリポジトリとして読めません）。${CLR_RST}" >&2
+        exit 1
+    fi
 
     while IFS= read -r _file; do
         # 結合テストのカバレッジ表のガード: コマンド・フック・ワークフロー・計画書が変わったとき
@@ -393,7 +414,7 @@ if [[ "${1:-}" == "--changed" ]]; then
             tests/test_cli_args.sh)
                 _changed_tests+=("test_cli_args.sh")
                 ;;
-            tests/run_tests.sh|tests/test_run-tests.sh)
+            tests/run_tests.sh|tests/test_run-tests.sh|tests/wsl-gitfile.sh)
                 _changed_tests+=("test_run-tests.sh")
                 ;;
             tests/test_helper.sh)

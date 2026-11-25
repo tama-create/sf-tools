@@ -12,7 +12,7 @@ site/reference/commands-dev.html | bin/sf-dryrun.sh | 2320821728-2196 | 5b20e70
 site/reference/commands-dev.html | bin/sf-release.sh | 1358071720-8047 | 5b20e70
 site/reference/commands-dev.html | bin/sf-deploy.sh | 3942495165-4530 | 5b20e70
 site/reference/commands-dev.html | bin/sf-push.sh | 1125921469-4600 | 5b20e70
-site/reference/commands-dev.html | bin/sf-next.sh | 3773425382-4882 | 5b20e70
+site/reference/commands-dev.html | bin/sf-next.sh | 111846415-6609 | b284c70
 site/reference/commands-dev.html | bin/sf-restart.sh | 3849369820-2445 | 5b20e70
 site/reference/commands-dev.html | bin/sf-hook.sh | 4023496098-3227 | 5b20e70
 site/reference/commands-dev.html | bin/sf-log.sh | 3011004289-22329 | ebc141b
@@ -33,7 +33,7 @@ site/guide/basics.html | bin/sf-start.sh | 1463713128-7421 | ebc141b
 site/guide/daily.html | bin/sf-dryrun.sh | 2320821728-2196 | b2034a6
 site/guide/daily.html | bin/sf-deploy.sh | 3942495165-4530 | b2034a6
 site/guide/daily.html | bin/sf-push.sh | 1125921469-4600 | b2034a6
-site/guide/daily.html | bin/sf-next.sh | 3773425382-4882 | b2034a6
+site/guide/daily.html | bin/sf-next.sh | 111846415-6609 | b284c70
 site/guide/daily.html | bin/sf-prepush.sh | 2137767055-4495 | b2034a6
 site/guide/daily.html | bin/sf-precommit.sh | 2396654912-1585 | c52ffe3
 
@@ -85,7 +85,7 @@ site/guide/glossary.html | bin/sf-job.sh | 3104353950-6410 | 9640759
 site/guide/glossary.html | bin/sf-release.sh | 1358071720-8047 | 9640759
 site/design/cicd.html | bin/sf-metasync.sh | 1670318031-26335 | 00619c1
 site/design/cicd.html | bin/sf-release.sh | 1358071720-8047 | 0277207
-site/design/cicd.html | bin/sf-next.sh | 3773425382-4882 | 0277207
+site/design/cicd.html | bin/sf-next.sh | 111846415-6609 | b284c70
 site/design/cicd.html | bin/sf-prepush.sh | 2137767055-4495 | 0277207
 site/design/cicd.html | bin/sf-sync-wf.sh | 2612271841-6183 | 0277207
 site/design/cicd.html | bin/sf-upgrade.sh | 1489370091-5002 | 0277207

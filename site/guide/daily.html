@@ -165,13 +165,15 @@
   <thead><tr><th>記号</th><th>意味</th></tr></thead>
   <tbody>
     <tr><td><code>✓</code> マージ済み</td><td>その段階への PR が、マージ済みです（「ブランチ同期」と付くときは、別のブランチ経由で、変更がすでに入っています。この PR による反映は、行われていません）</td></tr>
+    <tr><td><code>▶</code> マージ済み・その後の変更（N コミット）が未反映 → 次のPR先</td><td>一度マージしたあとに、同じブランチへ変更を足しました。足した変更は、まだその段階に入っていません。もう一度、その段階へ PR を出します</td></tr>
     <tr><td><code>⚠</code> マージ済み（順序外）</td><td>前の段階を飛ばして、マージされています。飛ばした段階には、反映されていません</td></tr>
     <tr><td><code>→</code> PR発行中</td><td>PR を出してあり、マージを待っています</td></tr>
     <tr><td><code>▶</code> 次のPR先</td><td>次に PR を出す先です</td></tr>
   </tbody>
 </table>
 <ul>
-  <li>次の PR 先があるときは、「〜にPRを出しますか？」と聞かれます。<code>Y</code> を押すと、GitHub の <strong>PR の作成画面</strong>がブラウザで開きます。PR そのものは、まだ作られていません。画面で内容を確かめて、作成のボタンを押してください。<code>N</code> は何もせず終了、<code>q</code> は中断です。</li>
+  <li>次の PR 先があるときは、「〜にPRを出しますか？」と聞かれます。<code>Y</code> を押すと、GitHub の <strong>PR の作成画面</strong>がブラウザで開きます。PR そのものは、まだ作られていません。画面で内容を確かめて、作成のボタンを押してください。<code>N</code> は何もせず終了、<code>q</code> は中断です。<code>staging</code>・<code>main</code> へ上げるときは、「develop の組織で、動作を確かめ終えましたか？」のように、1 つ前の段階で確かめたかも、同じ確認の中で聞かれます。</li>
+  <li><strong>同じブランチで、変更とリリースを繰り返せます。</strong>develop へマージしたあとに変更を足して push すると、develop が「その後の変更が未反映 → 次のPR先」になり、もう一度 develop へ PR を出す案内になります。develop の組織で満足するまで確かめてから、<code>staging</code> へ上げます。</li>
   <li><strong>PR は、段階の順番どおり（<code>develop</code> → <code>staging</code> → <code>main</code>）に出します。</strong>順番を飛ばしてマージすると、飛ばした段階には、あとから反映できなくなります（<a href="../reference/commands-dev.html#sf-next">詳しくは、リファレンス</a>）。<code>sf-next.sh</code> の案内に従えば、順番どおりになります。</li>
   <li><code>main</code> などの保護ブランチの上では、使えません（作業用のブランチの上で実行します）。</li>
 </ul>

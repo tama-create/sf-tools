@@ -329,6 +329,7 @@ sf-launcher.sh --fzf     # fzf でインクリメンタル検索</code></pre>
   <thead><tr><th>記号</th><th>表示</th><th>説明</th></tr></thead>
   <tbody>
     <tr><td><code>✓</code></td><td>マージ済み</td><td>現在のブランチ → 対象のブランチの PR が、マージ済み（デプロイのワークフローも実行済み）</td></tr>
+    <tr><td><code>▶</code> / <code>✗</code></td><td>マージ済み・その後の変更（N コミット）が未反映</td><td>PR はマージ済みだが、そのあとに同じブランチへ足したコミットが、まだ対象のブランチに入っていない。最初のものは「→ 次のPR先」が付き、<strong>もう一度、そのブランチへ PR を出す</strong>（同じブランチで、develop へのリリースを繰り返す使い方）。数えられないときは、N なし</td></tr>
     <tr><td><code>✓</code></td><td>マージ済み（ブランチ同期）</td><td>現在のブランチのコミットが、すでに対象のブランチに含まれている（直接の PR はないが、別のブランチ経由で伝わったなど）。<strong>この PR のデプロイのワークフローは、未実行</strong></td></tr>
     <tr><td><code>⚠</code></td><td>マージ済み（順序外）</td><td>マージ済みだが、マージの順で前のブランチに、まだマージ済みでないもの（ブランチ同期・PR 発行中・未着手）がある。<strong>前のブランチのデプロイは、未実行</strong></td></tr>
     <tr><td><code>→</code></td><td>PR発行中</td><td>PR を出してあり、マージを待っている</td></tr>
@@ -340,12 +341,12 @@ sf-launcher.sh --fzf     # fzf でインクリメンタル検索</code></pre>
 <h3>判定の方法</h3>
 <p>マージの順（<code>branches.txt</code> の順序を逆にしたもの。例: <code>develop → staging → main</code>）に、各ブランチを次の順で判定します。判定の前に、<code>git fetch</code>（<code>branches.txt</code> の全ブランチを、1 回のコマンドで）でリモートの最新を取得し、<code>gh pr list</code> で、マージ済み・オープンの PR を、それぞれ最新 50 件取得します。</p>
 <ol>
-  <li>現在のブランチ → 対象ブランチの<strong>直接の PR</strong> が、マージ済みにある → 「マージ済み」</li>
+  <li>現在のブランチ → 対象ブランチの<strong>直接の PR</strong> が、マージ済みにある → いまの HEAD が、マージ済みの内容に含まれれば「マージ済み」。含まれなければ（マージのあとに、コミットを足した）、同じ向きのオープンの PR があれば「PR発行中」、なければ「その後の変更が未反映」（次の PR 先にする）。<br>「含まれる」は、HEAD が、マージ済みの PR の最後のコミットと同じか、その祖先か、<code>origin/&lt;対象ブランチ&gt;</code> の祖先であること。PR の最後のコミットでも比べるので、Squash・Rebase でマージした場合も、正しく判定します</li>
   <li><code>git merge-base --is-ancestor HEAD origin/&lt;対象ブランチ&gt;</code> が真（コミットがすでに含まれている） → 「マージ済み（ブランチ同期）」</li>
   <li>直接の PR が、オープンにある → 「PR発行中」</li>
   <li>どれにも当てはまらなければ → 「次のPR先」または「未着手」</li>
 </ol>
-<p>そのあと、マージ済みのブランチより前（マージの順）に、マージ済みでないブランチがあれば、そのマージ済みを「順序外」にします。</p>
+<p>そのあと、マージ済みのブランチより前（マージの順）に、マージ済みでないブランチ（「その後の変更が未反映」を含む）があれば、そのマージ済みを「順序外」にします。</p>
 
 <h3>順序外のマージの制約</h3>
 <div class="box warn">
@@ -370,7 +371,7 @@ sf-launcher.sh --fzf     # fzf でインクリメンタル検索</code></pre>
 <h3>補足</h3>
 <ul>
   <li>保護ブランチ（<code>sf-tools/config/branches.txt</code> に書かれたブランチ。ファイルがない・空のときは <code>main</code>）の上と、ブランチを取得できないとき（detached HEAD など）は、エラーで終了します。</li>
-  <li>次の PR 先があるときは、「<code>&lt;次の PR 先&gt;</code> にPRを出しますか？」と確認します（Y/N/q）。<code>Y</code> で、<code>&lt;origin の URL&gt;/compare/&lt;次の PR 先&gt;...&lt;現在のブランチ&gt;?expand=1</code>（PR の作成画面）を、ブラウザで開き、URL も表示します（PR そのものは、作りません）。<code>N</code> は何もせず終了、<code>q</code> は中断（終了コード 1）です。</li>
+  <li>次の PR 先があるときは、「<code>&lt;次の PR 先&gt;</code> にPRを出しますか？」と確認します（Y/N/q）。次の PR 先がマージの順の 2 つ目以降（例: <code>staging</code>・<code>main</code>）のときは、前に「<code>&lt;1 つ前のブランチ&gt;</code> の組織で、動作を確かめ終えましたか？」が付きます（「マージ済み」の表示だけを見て、確かめずに上の段階へ上げるのを防ぐため。確認の回数は増えません）。<code>Y</code> で、<code>&lt;origin の URL&gt;/compare/&lt;次の PR 先&gt;...&lt;現在のブランチ&gt;?expand=1</code>（PR の作成画面）を、ブラウザで開き、URL も表示します（PR そのものは、作りません）。<code>N</code> は何もせず終了、<code>q</code> は中断（終了コード 1）です。</li>
   <li>開く URL は、<code>origin</code> の URL から作ります（URL に含まれる認証情報（<code>//&lt;ユーザー&gt;:&lt;Token&gt;@</code>）は除き、SSH の形は <code>https://github.com/</code> に直します）。<code>origin</code> の URL を取得できないときは、エラーで終了します。</li>
   <li>PR の状態の判定には、認証済みの <code>gh</code> が必要です。<code>gh</code> が使えないなど、取得に失敗したときは、警告を出さずに「PR なし」として判定します。</li>
   <li>リモートの最新を取得できなかったときは、警告を出して続行し、手元の <code>origin/*</code> で判定します。</li>

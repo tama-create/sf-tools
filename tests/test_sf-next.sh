@@ -20,13 +20,27 @@ case "$1" in
         fi
         exit 0 ;;
     fetch)          exit 0 ;;
+    rev-parse)
+        # rev-parse HEAD → いまの HEAD のコミット（既定: headoid0。gh モックの、マージ済みの PR の既定の最後のコミットと同じ）
+        echo "${MOCK_GIT_HEAD_OID:-headoid0}"; exit 0 ;;
+    rev-list)
+        # rev-list --count <oid>..HEAD → MOCK_GIT_NEW_COMMITS（未設定なら、手元にないコミットとして失敗）
+        [[ -n "${MOCK_GIT_NEW_COMMITS:-}" ]] || exit 128
+        echo "$MOCK_GIT_NEW_COMMITS"; exit 0 ;;
     merge-base)
-        # merge-base --is-ancestor HEAD origin/<target>
+        # merge-base --is-ancestor HEAD origin/<target>  → MOCK_GIT_MERGED_TARGETS に target があれば真
+        # merge-base --is-ancestor HEAD <コミット>       → MOCK_GIT_ANCESTOR_OIDS に、そのコミットがあれば真
         if [[ "$2" == "--is-ancestor" ]]; then
-            target="${4#origin/}"
-            for mb in ${MOCK_GIT_MERGED_TARGETS:-}; do
-                [[ "$mb" == "$target" ]] && exit 0
-            done
+            if [[ "$4" == origin/* ]]; then
+                target="${4#origin/}"
+                for mb in ${MOCK_GIT_MERGED_TARGETS:-}; do
+                    [[ "$mb" == "$target" ]] && exit 0
+                done
+            else
+                for mb in ${MOCK_GIT_ANCESTOR_OIDS:-}; do
+                    [[ "$mb" == "$4" ]] && exit 0
+                done
+            fi
             exit 1
         fi
         exit 0 ;;
@@ -35,17 +49,23 @@ esac
 EOF
     chmod +x "$bin_dir/git"
 
-    # gh モック（--json headRefName,baseRefName → 環境変数で制御）
-    # MOCK_GH_MERGED_PRS / MOCK_GH_OPEN_PRS: スペース区切りの "head->base" ペア
+    # gh モック（--json headRefName,baseRefName[,headRefOid] → 環境変数で制御）
+    # MOCK_GH_MERGED_PRS / MOCK_GH_OPEN_PRS: スペース区切りの "head->base" ペア。"head->base@oid" で PR の最後のコミットを指定できる
+    #   （省略時は headoid0 = git モックの既定の HEAD。つまり「マージのあと、新しいコミットはない」）
     cat > "$bin_dir/gh" << 'EOF'
 #!/bin/bash
 echo "gh $*" >> "${MOCK_CALL_LOG:-/dev/null}"
-# --jq 付きのときは、gh が適用した後の出力（「ヘッド<TAB>ベース」の行。@tsv）を返す。なければ JSON
+# --jq 付きのときは、gh が適用した後の出力（「ヘッド<TAB>ベース[<TAB>コミット]」の行。@tsv）を返す。なければ JSON
 _build_out() {
-    local result="[" sep="" pr head base
+    local result="[" sep="" pr head base oid
     for pr in $1; do
+        oid="headoid0"
+        [[ "$pr" == *@* ]] && { oid="${pr##*@}"; pr="${pr%@*}"; }
         head="${pr%%->*}"; base="${pr##*->}"
-        if [[ "$_args" == *"--jq"* ]]; then
+        if [[ "$_args" == *"--jq"* && "$_args" == *"headRefOid"* && -z "${MOCK_GH_NO_OID:-}" ]]; then
+            printf '%s	%s	%s
+' "$head" "$base" "$oid"
+        elif [[ "$_args" == *"--jq"* ]]; then
             printf '%s	%s
 ' "$head" "$base"
         else
@@ -421,5 +441,162 @@ test_staging_synced
 test_protected_branch_blocked
 test_single_branch_none_merged
 test_single_branch_merged
+
+# --- マージのあとに同じブランチへコミットを足した: develop は「その後の変更が未反映」→ 次の PR 先は develop（staging ではない）---
+test_merged_stale_next_is_develop() {
+    local td mb mh
+    setup_std_env td mb mh
+    create_mock_git_with_remote "$mb"
+
+    export MOCK_GIT_BRANCH="feature/my-feature"
+    export MOCK_GH_MERGED_PRS="feature/my-feature->develop@oldoid1"   # PR の最後のコミット ≠ いまの HEAD（headoid0）
+    export MOCK_GH_OPEN_PRS=""
+    export MOCK_GIT_NEW_COMMITS="3"
+
+    local out; out=$(cd "$td" && echo "n" | PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-next.sh" 2>&1)
+    local ec=$?
+
+    assert_exit_ok $ec "マージのあとの変更あり → 終了コード 0"
+    assert_output_contains "$out" "▶.*develop.*その後の変更（3 コミット）が未反映 → 次のPR先" "develop が ▶（その後の変更 3 コミットが未反映・次のPR先）"
+    assert_output_contains "$out" "✗.*staging" "staging は ✗（次のPR先ではない）"
+    assert_output_contains "$out" "develop にPRを出しますか" "develop への PR を確認する"
+    assert_output_not_contains "$out" "staging にPRを出しますか" "staging への PR を案内しない（develop で確かめていない変更を上げない）"
+    assert_output_not_contains "$out" "動作を確かめ終えましたか" "develop（最初の段階）への PR では、動作の確認を聞かない"
+
+    unset MOCK_GIT_BRANCH MOCK_GH_MERGED_PRS MOCK_GH_OPEN_PRS MOCK_GIT_NEW_COMMITS
+    teardown "$td" "$mb"
+}
+
+# --- マージのあとの変更の数を数えられない（PR の最後のコミットが手元にない）: 数なしで「未反映」と出す ---
+test_merged_stale_count_unknown() {
+    local td mb mh
+    setup_std_env td mb mh
+    create_mock_git_with_remote "$mb"
+
+    export MOCK_GIT_BRANCH="feature/my-feature"
+    export MOCK_GH_MERGED_PRS="feature/my-feature->develop@oldoid1"
+    export MOCK_GH_OPEN_PRS=""
+    unset MOCK_GIT_NEW_COMMITS
+
+    local out; out=$(cd "$td" && echo "n" | PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-next.sh" 2>&1)
+    assert_output_contains "$out" "▶.*develop.*マージ済み・その後の変更が未反映 → 次のPR先" "数えられないときは、数なしで「未反映」"
+
+    unset MOCK_GIT_BRANCH MOCK_GH_MERGED_PRS MOCK_GH_OPEN_PRS
+    teardown "$td" "$mb"
+}
+
+# --- Squash・Rebase でマージ: HEAD が origin/develop の祖先でなくても、PR の最後のコミットと同じ・その祖先なら、マージ済み ---
+test_merged_squash_is_merged() {
+    local td mb mh out
+    setup_std_env td mb mh
+    create_mock_git_with_remote "$mb"
+
+    export MOCK_GIT_BRANCH="feature/my-feature"
+    export MOCK_GH_OPEN_PRS=""
+    export MOCK_GIT_MERGED_TARGETS=""          # HEAD は origin/develop の祖先ではない（Squash）
+
+    # HEAD = PR の最後のコミット
+    export MOCK_GH_MERGED_PRS="feature/my-feature->develop@headoid0"
+    out=$(cd "$td" && echo "n" | PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-next.sh" 2>&1)
+    assert_output_contains "$out" "✓.*develop.*マージ済み" "HEAD が PR の最後のコミットと同じ → develop は ✓"
+    assert_output_contains "$out" "▶.*staging" "→ 次は staging"
+
+    # HEAD が PR の最後のコミットの祖先（手元が少し古い）
+    export MOCK_GIT_HEAD_OID="oldhead"
+    export MOCK_GH_MERGED_PRS="feature/my-feature->develop@newoid9"
+    export MOCK_GIT_ANCESTOR_OIDS="newoid9"
+    out=$(cd "$td" && echo "n" | PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-next.sh" 2>&1)
+    assert_output_contains "$out" "✓.*develop.*マージ済み" "HEAD が PR の最後のコミットの祖先 → develop は ✓"
+    assert_output_not_contains "$out" "未反映" "未反映とは出さない"
+
+    unset MOCK_GIT_BRANCH MOCK_GH_MERGED_PRS MOCK_GH_OPEN_PRS MOCK_GIT_MERGED_TARGETS MOCK_GIT_HEAD_OID MOCK_GIT_ANCESTOR_OIDS
+    teardown "$td" "$mb"
+}
+
+# --- マージのあとの変更で、もう一度 develop へ PR を発行済み → develop は PR発行中（未反映の ▶ にしない）---
+test_merged_stale_with_open_pr() {
+    local td mb mh
+    setup_std_env td mb mh
+    create_mock_git_with_remote "$mb"
+
+    export MOCK_GIT_BRANCH="feature/my-feature"
+    export MOCK_GH_MERGED_PRS="feature/my-feature->develop@oldoid1"
+    export MOCK_GH_OPEN_PRS="feature/my-feature->develop"
+
+    local out; out=$(cd "$td" && echo "n" | PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-next.sh" 2>&1)
+    assert_output_contains "$out" "→.*develop.*PR発行中" "develop は PR発行中"
+    assert_output_not_contains "$out" "未反映" "PR を発行済みなら、未反映とは出さない"
+
+    unset MOCK_GIT_BRANCH MOCK_GH_MERGED_PRS MOCK_GH_OPEN_PRS
+    teardown "$td" "$mb"
+}
+
+# --- develop・staging ともにマージ済みのあとで、コミットを足した → develop が ▶、staging は ✗（未反映。順序外にしない）---
+test_merged_stale_both() {
+    local td mb mh
+    setup_std_env td mb mh
+    create_mock_git_with_remote "$mb"
+
+    export MOCK_GIT_BRANCH="feature/my-feature"
+    export MOCK_GH_MERGED_PRS="feature/my-feature->develop@oldoid1 feature/my-feature->staging@oldoid1"
+    export MOCK_GH_OPEN_PRS=""
+    export MOCK_GIT_NEW_COMMITS="2"
+
+    local out; out=$(cd "$td" && echo "n" | PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-next.sh" 2>&1)
+    assert_output_contains "$out" "▶.*develop.*その後の変更（2 コミット）が未反映 → 次のPR先" "develop が ▶（次のPR先）"
+    assert_output_contains "$out" "✗.*staging.*その後の変更（2 コミット）が未反映" "staging は ✗（未反映）"
+    assert_output_not_contains "$out" "順序外" "順序外にはしない"
+
+    unset MOCK_GIT_BRANCH MOCK_GH_MERGED_PRS MOCK_GH_OPEN_PRS MOCK_GIT_NEW_COMMITS
+    teardown "$td" "$mb"
+}
+
+# --- 2 つ目以降の段階（staging・main）への PR では、1 つ前のブランチの組織で確かめたかを、同じ確認の中で聞く ---
+test_confirm_asks_previous_org_checked() {
+    local td mb mh out
+    setup_std_env td mb mh
+    create_mock_git_with_remote "$mb"
+
+    export MOCK_GIT_BRANCH="feature/my-feature"
+    export MOCK_GH_OPEN_PRS=""
+
+    export MOCK_GH_MERGED_PRS="feature/my-feature->develop"
+    out=$(cd "$td" && echo "n" | PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-next.sh" 2>&1)
+    assert_output_contains "$out" "develop の組織で、動作を確かめ終えましたか？ staging にPRを出しますか？" "staging へは、develop の組織での確認を聞く"
+
+    export MOCK_GH_MERGED_PRS="feature/my-feature->develop feature/my-feature->staging"
+    out=$(cd "$td" && echo "n" | PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-next.sh" 2>&1)
+    assert_output_contains "$out" "staging の組織で、動作を確かめ終えましたか？ main にPRを出しますか？" "main へは、staging の組織での確認を聞く"
+
+    unset MOCK_GIT_BRANCH MOCK_GH_MERGED_PRS MOCK_GH_OPEN_PRS
+    teardown "$td" "$mb"
+}
+
+# --- gh が PR の最後のコミットを返さない（MOCK_GH_NO_OID）: 判定できないため、以前どおりマージ済みとする ---
+test_merged_without_oid_is_merged() {
+    local td mb mh
+    setup_std_env td mb mh
+    create_mock_git_with_remote "$mb"
+
+    export MOCK_GIT_BRANCH="feature/my-feature"
+    export MOCK_GH_MERGED_PRS="feature/my-feature->develop@oldoid1"
+    export MOCK_GH_OPEN_PRS=""
+    export MOCK_GH_NO_OID=1
+
+    local out; out=$(cd "$td" && echo "n" | PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-next.sh" 2>&1)
+    assert_output_contains "$out" "✓.*develop.*マージ済み" "最後のコミットが取れないときは、develop は ✓"
+    assert_output_not_contains "$out" "未反映" "未反映とは出さない"
+
+    unset MOCK_GIT_BRANCH MOCK_GH_MERGED_PRS MOCK_GH_OPEN_PRS MOCK_GH_NO_OID
+    teardown "$td" "$mb"
+}
+
+test_merged_stale_next_is_develop
+test_merged_stale_count_unknown
+test_merged_without_oid_is_merged
+test_merged_squash_is_merged
+test_merged_stale_with_open_pr
+test_merged_stale_both
+test_confirm_asks_previous_org_checked
 
 print_summary

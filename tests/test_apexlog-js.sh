@@ -6,12 +6,15 @@
 # 設計: doc/sf-log-design.md 6 章（要約）・8.3（一覧）・6.4（日時）・12 章（テスト）
 #
 # 【テストケース】
-#   1. summarize: エラー（FATAL_ERROR の複数行・EXCEPTION_THROWN・FLOW_ELEMENT_ERROR・同じものをまとめる・場所と CODE_UNIT）
+#   1. summarize: エラー（FATAL_ERROR の複数行・EXCEPTION_THROWN・FLOW_ELEMENT_ERROR・入力規則の停止・同じものをまとめる・場所と CODE_UNIT）
 #   2. summarize: ログの一覧（操作・最初の CODE_UNIT・SOQL / DML の使用量・長さ・PC のタイムゾーンでの開始時刻）
-#   3. summarize: System.debug（新しい順・複数行の続き）・入力規則（規則の名前）・制限（50% を超えたもの）
+#   3. summarize: System.debug（新しい順・複数行の続き）・入力規則の停止（1 に、規則の名前つきで入れる）・制限（50% を超えたもの）
 #   3b. summarize: フロー・入力規則（flow.log。実機の形: フローごとの開始・完了・エラーと要素・入力規則ごとの評価・通過・停止・
 #      FLOW_ELEMENT_ERROR を、同じ要素を最後に始めた実行のフローに結ぶ・文言のリンクのタグを外す・System.debug の < > は残す・
-#      一覧の操作に、フロー・入力規則の名前を添える）。実機と違う並びの FLOW_ELEMENT_ERROR（odd.log）は、推測で読まずに並べる
+#      一覧の操作に、フロー・入力規則の名前を添える・VALIDATION_FAIL を 1 に入れる）。実機と違う並びの FLOW_ELEMENT_ERROR（odd.log）は、推測で読まずに並べる
+#   3c. summarize: フローのカスタムエラー（customerror.log。2026-11-25 に実機で見た形: FlowCustomError の要素を実行した行だけで、文言はない。
+#      1 に入れる・同じ要素はまとめる・6 で「エラーの行なし」と書かない・4 で「うちカスタムエラー」と添える）
+#   3d. summarize: 所要の印（Salesforce の所要が、ログの中の経過より 1 時間以上長いときだけ ※ と注意。境目・読めないログ）
 #   4. summarize: 取れていないものを隠さない（--note・読めなかったログ・読み取れなかった行・20MB の切り詰め・タイムゾーン不明・
 #      該当する行なしの区分・対象のログなし）
 #   5. summarize: 一覧の形の誤り（列の数・ID・日時・数値）・--list なし → 終了コード 1
@@ -55,7 +58,8 @@ test_summarize_errors() {
           odd.log 07L000000000004AAA 2026-11-23T02:09:00Z Api 成功 900 10
     _sum
     assert_exit_ok "$_RC" "要約を作れる"
-    _has "$_OUT" "# デバッグログの要約（2026-11-23 11:30:00 作成・4 本・エラー 5）" "見出し: 作成時刻（--local-offset の時差）・本数・エラーの数（まとめる前）"
+    # エラー 7 = fatal.log 2・thrown.log 2・odd.log 3（FLOW_ELEMENT_ERROR・VALIDATION_FAIL・VALIDATION_ERROR）
+    _has "$_OUT" "# デバッグログの要約（2026-11-23 11:30:00 作成・4 本・エラー 7）" "見出し: 作成時刻（--local-offset の時差）・本数・エラーの数（まとめる前。入力規則の停止を含む）"
     # PC のタイムゾーンが UTC でも、--local-offset の時差で表示する（GitHub Actions の Windows と同じ状態を、TZ で作る）
     local o2
     o2=$(TZ=UTC node "$AJS" summarize --list "$_LIST" --base "$SF_TOOLS_DIR" --now 2026-11-23T02:30:00Z --local-offset 540 2>&1)
@@ -90,6 +94,7 @@ test_summarize_list_debug_limits() {
     b=$(printf '%s\n' "$_OUT" | grep -n "ok.log:7\]" | cut -d: -f1)
     [[ -n "$a" && -n "$b" && "$a" -lt "$b" ]] && pass "System.debug: 新しい順" || fail "System.debug: 新しい順"
     _has "$_OUT" "VALIDATION_ERROR 取引先名は必須です（規則: Account_Name_Required）" "入力規則: 直前の VALIDATION_RULE の名前を添える"
+    _has "$_OUT" "[$FX/odd.log:6] VALIDATION_FAIL 入力規則 Account_Name_Required で停止（文言はログに出ません。入力規則の定義を見てください）" "入力規則の停止を、1 のエラーに入れる"
     _has "$_OUT" "Number of SOQL queries: 80 / 100（80%）" "制限: 50% を超えたものを書く"
     _has "$_OUT" "Maximum CPU time: 9000 / 10000（90%）" "制限: CPU 時間"
     _hasnt "$_OUT" "Number of DML statements: 10 / 150" "制限: 50% 以下は書かない"
@@ -107,13 +112,15 @@ test_summarize_flow() {
     _has "$_OUT" "## 4. フロー・入力規則・重複ルール" "4 の見出し"
     _has "$_OUT" "- [$FX/flow.log:16] フロー Account_After_Save: 開始 2・完了 1・エラー 1・要素: Check_Type（FlowDecision）、Set_Description（FlowRecordUpdate）" "フロー: 開始・完了・エラーの数と、実行した要素（最初の開始の場所）"
     _has "$_OUT" "- [$FX/flow.log:5] 入力規則 Account_Check: 評価 2・通過 1・停止 1" "入力規則: 評価・通過・停止の数"
-    _has "$_OUT" "- 入力規則のエラー: 1 件" "入力規則のエラーの数"
-    _has "$_OUT" "  - [$FX/flow.log:41] VALIDATION_FAIL（規則: Account_Check）" "入力規則のエラー: 場所と規則の名前"
+    _has "$_OUT" "- [$FX/flow.log:41] VALIDATION_FAIL 入力規則 Account_Check で停止（文言はログに出ません。入力規則の定義を見てください）" "入力規則の停止: 1 のエラーに、場所と規則の名前"
+    _has "$_OUT" "  - 場所: 直前の CODE_UNIT: Validation:Account:001000000000002" "入力規則の停止: 場所は、そのときの CODE_UNIT"
+    _hasnt "$_OUT" "入力規則のエラー:" "入力規則の停止は、4 に重ねて書かない（1 にだけ書く）"
+    _has "$_OUT" "は、上の 1 に入れています" "4 に、保存を止めたものは 1 にあると書く"
     _has "$_OUT" "[$FX/flow.log:44] FLOW_ELEMENT_ERROR フローで次のレコードの更新が試行されました: 001000000000002。次のエラーが発生しました: FIELD_CUSTOM_VALIDATION_EXCEPTION: 保存できません。詳細は 『開発者ガイド』を参照してください。" "フローのエラー: 文言（リンクのタグは外し、中の文字は残す）"
     _hasnt "$_OUT" "<a href='https://example.com" "フローのエラー: リンクのタグを残さない"
     _has "$_OUT" "場所: フロー Account_After_Save の要素 Set_Description（FlowRecordUpdate）（直前の CODE_UNIT: Flow:Account）" "フローのエラー: 同じ要素を最後に始めた実行のフローに結ぶ"
     _has "$_OUT" "MARK <a href='x'>そのまま</a> List<String>" "System.debug の < > は、そのまま残す"
-    _has "$_OUT" "エラー 1）" "見出しのエラーの数に、フローのエラーを数える"
+    _has "$_OUT" "エラー 2）" "見出しのエラーの数に、フローのエラーと入力規則の停止を数える"
     # 区分は CATEGORIES の順（エラー・入力規則・フロー・重複ルール・…・制限・件数）。「）: 重複ルール・制限・件数」なら、その前の区分は出ている
     _has "$_OUT" "（詳しさが足りずに出なかった可能性もある）: 重複ルール・制限・件数" "フロー・入力規則・エラーの行があれば、出なかった区分に入れない（重複ルール・制限・件数だけ）"
     # フロー・入力規則の行がないログ
@@ -121,9 +128,48 @@ test_summarize_flow() {
     _sum
     _has "$_OUT" "- フロー: なし" "フローがなければ、なしと書く"
     _has "$_OUT" "- 入力規則: なし" "入力規則がなければ、なしと書く"
-    _has "$_OUT" "- 入力規則のエラー: なし" "入力規則のエラーがなければ、なしと書く"
     _has "$_OUT" "- 重複ルール: なし" "重複ルールがなければ、なしと書く"
     _hasnt "$_OUT" "allowSave" "重複ありの保存がなければ、止められる注意を書かない"
+    rm -f "$_LIST"
+}
+
+# フローのカスタムエラー（2026-11-25 に tama-dev で見た形をまねた customerror.log。6.3）
+test_summarize_custom_error() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] summarize: フローのカスタムエラー${CLR_RST}"
+    _list customerror.log 07L000000000008AAA 2026-11-25T08:35:23Z "/services/data/v68.0/sobjects/Loan__c" 成功 5000 100
+    _sum
+    assert_exit_ok "$_RC" "要約を作れる"
+    _has "$_OUT" "作成・1 本・エラー 2）" "見出しのエラーの数に、カスタムエラーを数える（実行ごと）"
+    _has "$_OUT" "- [$FX/customerror.log:21] FlowCustomError フローのカスタムエラーで停止（Loan_Before_Save の Error_Duplicate。文言はログに出ません。フローの定義の、この要素を見てください）（同じものが 2 件）" "カスタムエラー: 1 に、フローと要素の名前で入れ、同じ要素はまとめる"
+    _has "$_OUT" "  - 場所: フロー Loan_Before_Save の要素 Error_Duplicate（FlowCustomError）（直前の CODE_UNIT: Flow:01I000000000001）" "カスタムエラー: 場所は、フローと要素と CODE_UNIT"
+    _hasnt "$_OUT" "- なし（エラーの行は" "カスタムエラーがあれば、1 を「なし」にしない"
+    _has "$_OUT" "フロー Loan_Before_Save: 開始 2・完了 2・エラー 2（うちカスタムエラー 2）・要素: Has_Other_Loan（FlowDecision）、Error_Duplicate（FlowCustomError）" "4: 完了の行が出ても、エラーとカスタムエラーの内訳を書く"
+    _hasnt "$_OUT" "出なかった可能性もある）: エラー" "カスタムエラーだけでも、6 で「エラーの行なし」と書かない"
+    rm -f "$_LIST"
+}
+
+# 所要の印（2026-11-25 に、ログの中が約 10 秒で、Salesforce の所要が約 96 時間のログを実機で見た）。
+# customerror.log のログの中の経過は 41ms（いちばん大きい (<ナノ秒>) の 41200000）
+test_summarize_duration_odd() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] summarize: 所要の印${CLR_RST}"
+    _list customerror.log 07L000000000008AAA 2026-11-25T08:35:23Z Api 成功 5000 346530840
+    _sum
+    _has "$_OUT" "| 346530840ms（ログの中は 41ms ※） |" "所要が、ログの中の経過より 1 時間以上長ければ、ログの中の経過と ※ を添える"
+    _has "$_OUT" "- ※ 所要は、Salesforce が返した値（ApexLog の DurationMilliseconds）です。" "※ があれば、表の下に注意を書く"
+    # 境目: 差がちょうど 1 時間なら ※、1 ミリ秒足りなければ付けない
+    _list customerror.log 07L000000000008AAA 2026-11-25T08:35:23Z Api 成功 5000 3600041
+    _sum
+    _has "$_OUT" "| 3600041ms（ログの中は 41ms ※） |" "差がちょうど 1 時間 → ※"
+    _list customerror.log 07L000000000008AAA 2026-11-25T08:35:23Z Api 成功 5000 3600040
+    _sum
+    _has "$_OUT" "| 3600040ms |" "差が 1 時間に 1 ミリ秒足りない → ※ を付けない"
+    _hasnt "$_OUT" "※" "※ がなければ、注意も書かない"
+    # 読めないログ（ログの中の経過が分からない）は、印を付けない
+    _list none.log 07L000000000005AAA 2026-11-23T02:10:00Z Api 成功 10 346530840
+    _sum
+    _has "$_OUT" "| 346530840ms |" "読めないログは、ログの中の経過と比べない"
     rm -f "$_LIST"
 }
 
@@ -290,6 +336,8 @@ test_time() {
 test_summarize_errors
 test_summarize_list_debug_limits
 test_summarize_flow
+test_summarize_custom_error
+test_summarize_duration_odd
 test_summarize_duplicate
 test_summarize_gaps
 test_summarize_bad_list

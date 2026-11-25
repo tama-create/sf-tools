@@ -370,6 +370,25 @@ test_is_gitbash() {
     done
 }
 
+test_detect_runtime() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] detect_runtime: 環境の名前（gitbash / macos / wsl / linux / unknown）${CLR_RST}"
+    local t out
+    for t in msys mingw64 cygwin; do
+        out=$(_osd_run "$t" 'detect_runtime')
+        [[ "$out" == "gitbash" ]] && pass "OSTYPE=${t} → gitbash" || fail "OSTYPE=${t} → gitbash" "$out"
+    done
+    out=$(_osd_run darwin22 'detect_runtime')
+    [[ "$out" == "macos" ]] && pass "OSTYPE=darwin22 → macos" || fail "OSTYPE=darwin22 → macos" "$out"
+    # /proc/version の読み取りは grep を差し替えて決める（テストを動かす環境によらない）
+    out=$(_osd_run linux-gnu 'grep() { return 0; }; detect_runtime')
+    [[ "$out" == "wsl" ]] && pass "OSTYPE=linux-gnu・/proc/version に microsoft → wsl" || fail "OSTYPE=linux-gnu・/proc/version に microsoft → wsl" "$out"
+    out=$(_osd_run linux-gnu 'grep() { return 1; }; detect_runtime')
+    [[ "$out" == "linux" ]] && pass "OSTYPE=linux-gnu・microsoft なし → linux" || fail "OSTYPE=linux-gnu・microsoft なし → linux" "$out"
+    out=$(_osd_run freebsd13 'detect_runtime')
+    [[ "$out" == "unknown" ]] && pass "OSTYPE=freebsd13 → unknown" || fail "OSTYPE=freebsd13 → unknown" "$out"
+}
+
 test_is_reserved_org_alias() {
     echo ""
     echo -e "${CLR_HEAD}[TEST] is_reserved_org_alias: prod / staging / develop / main は共有環境（予約名）、それ以外は個人用${CLR_RST}"
@@ -1746,6 +1765,7 @@ test_run_fast_paths
 test_startup_fast_paths
 test_env_log
 test_is_gitbash
+test_detect_runtime
 test_is_reserved_org_alias
 test_open_browser_gitbash
 test_open_browser_wsl_quote

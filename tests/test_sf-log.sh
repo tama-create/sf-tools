@@ -24,6 +24,13 @@
 #   8. begin（sf-start の前面）: sf を呼ばない・答えがなければ 10・予約名 10・答えが on → 裏で準備して取得役になる／
 #      登録していない印の leave は何もしない／止めたら期限の表示を消す／
 #      裏の準備の失敗 → 1 回だけやり直す（成功したら WARNING を消す・失敗が続けば error・持ち主が死んでいればやり直さない）
+#   9. 環境の混在（Git Bash と WSL。doc/sf-log-design.md 5.6。SF_LOG_TEST_RUNTIME で環境の代わりをする）:
+#      別の環境の取得役が動いている（合図が 30 分以内・読めない・未来）→ begin・start --auto は 10、start・pull・stop・auto は中断、
+#      leave・collect は 0（何も書かない・sf を呼ばない）、status は「別の環境で動作中」／合図が古い → 止まったもの（別の環境の PID に
+#      何も送らない）／古い形（RUNTIME なし）は 12 時間「環境不明」／不正な名前・unknown は「環境不明」／自分が unknown なら判断しない／
+#      名乗り（.claim）: 別の環境の新しい名乗り → 取らない・status は「起動待ち」／古い名乗り → 名乗り直す／同じ環境の名乗りは印を変えない／
+#      失敗したら、自分の名乗りだけを、同じ環境のほかの持ち主がいないときに消す／ロック: 別の環境のロックは 10 分で消す・新しければ待つ／
+#      取得役: RUNTIME・HEARTBEAT を書き、書き直す・別の環境の印を外す・名乗りの AT を書き直す・後始末で名乗りを消す
 # ==============================================================================
 source "$(dirname "${BASH_SOURCE[0]}")/test_helper.sh"
 echo -e "${CLR_HEAD}=== sf-log.sh ===${CLR_RST}"
@@ -477,19 +484,23 @@ _late_log() {
     _org_set "o.logs=o.logs||[]; o.logs.push({Id:'$1',LogUserId:'$2',StartTime:new Date(Date.now()+($3)*1000).toISOString().replace(/\.\d{3}Z\$/,'Z'),Operation:'/long',Status:'成功',LogLength:100,DurationMilliseconds:9000,visibleAt:Date.now()+($4)*1000})"
 }
 
+# 遅れて現れるログを、今すぐ一覧に出す（時間で待たずに、テストが決めた時点で現れるようにする。引数: ID）
+#   以前は「N 秒後に現れる」で書いていて、1 回目の pull が負荷で N 秒を超えると、通常の取得で取れてしまい、テストが揺れた（2026-11-24）
+_reveal() { _org_set "(o.logs||[]).forEach(l=>{ if (l.Id==='$1') l.visibleAt=Date.now(); })"; }
+
 test_late_recheck() {
     echo ""; echo -e "${CLR_HEAD}[TEST] 拾い直し: 遅れて現れた自分のログを取り、要約に入れる${CLR_RST}"
     _env
     _run start -o dev -y
-    # 長い処理 L（開始 +1 秒・4 秒後に現れる）と、あとから始まった短い処理 S（開始 +2 秒・すぐ見える）。他の人の遅れたログ O も
-    _late_log 07L000000000070AAA "$ME" 1 4
-    _late_log 07L000000000072AAA "$OTHER" 1 4
+    # 長い処理 L（開始 +1 秒・1 回目の pull のあとで現れる）と、あとから始まった短い処理 S（開始 +2 秒・すぐ見える）。他の人の遅れたログ O も
+    _late_log 07L000000000070AAA "$ME" 1 600
+    _late_log 07L000000000072AAA "$OTHER" 1 600
     _log 07L000000000071AAA "$ME" 2
     _run pull -o dev
     assert_exit_ok "$RC" "1 回目の pull が成功する"
     assert_equals "$(wc -l < "$TD/logs/apex/.index" | tr -d ' ')" "1" "1 回目は、見えている短い処理だけを取る"
     _has "$(cat "$TD/logs/apex/latest.md")" "07L000000000071AAA" "1 回目の要約に、短い処理が入る"
-    sleep 5
+    _reveal 07L000000000070AAA; _reveal 07L000000000072AAA
     : > "$MOCK_CALL_LOG"
     _run pull -o dev
     assert_exit_ok "$RC" "2 回目の pull が成功する"
@@ -515,10 +526,10 @@ test_late_recheck_failure() {
     _run pull -o dev
     assert_exit_ok "$RC" "しおりが古くても、pull は成功する"
     assert_equals "$(_org 'o.lateQueries||0')" "0" "しおりが 30 分より古く、LATE_FROM もない → 拾い直しの検索をしない"
-    _late_log 07L000000000080AAA "$ME" 1 3
+    _late_log 07L000000000080AAA "$ME" 1 600
     _log 07L000000000081AAA "$ME" 2
     _run pull -o dev
-    sleep 4
+    _reveal 07L000000000080AAA
     _org_set "o.failOnce={'query:ApexLogLate':'UNKNOWN_EXCEPTION'}"
     _run pull -o dev
     assert_exit_ok "$RC" "拾い直しが失敗しても、pull は成功する"
@@ -586,10 +597,11 @@ test_collect_late() {
     _run auto on -o dev
     _live_mark; local m1="$MARK"
     _run start -o dev --auto --owner "$m1"
-    _late_log 07L000000000075AAA "$ME" 1 5
+    _late_log 07L000000000075AAA "$ME" 1 600
     _log 07L000000000076AAA "$ME" 2
     _collect_bg
     _wait_for 40 'grep -q 07L000000000076AAA "$TD/logs/apex/.index" 2>/dev/null' && pass "取得役が、短い処理のログを取る" || fail "取得役が、短い処理のログを取る"
+    _reveal 07L000000000075AAA   # 短い処理を取ったあとで現れる（通常の取得のしおりは、もう先に進んでいる）
     _wait_for 40 'grep -q 07L000000000075AAA "$TD/logs/apex/.index" 2>/dev/null' && pass "取得役が、遅れて現れた長い処理のログを拾い直す" || fail "取得役が、遅れて現れた長い処理のログを拾い直す" "$(cat "$TD/logs/apex/.index" 2>/dev/null)"
     _done
 }
@@ -816,6 +828,243 @@ test_begin_retry() {
     _done
 }
 
+# ------------------------------------------------------------------------------
+# 環境の混在（Git Bash と WSL。doc/sf-log-design.md 5.6）。SF_LOG_TEST_RUNTIME で、自分の環境の名前を決める
+# ------------------------------------------------------------------------------
+# 死んだ PID を作る。結果: DEAD
+_dead_pid() { bash -c 'exit 0' & DEAD=$!; wait "$DEAD"; }
+# 生きている持ち主の代わりの印（環境の名前つき）。引数: 環境の名前。結果: MARK
+_rt_mark() { sleep 600 & SLEEPERS="${SLEEPERS:-} $!"; MARK="$!:$(date +%s):$1$RANDOM"; }
+# 別の環境の取得役の記録を書く。引数: PID 環境 合図（エポック秒または文字） [起動の時刻]
+_foreign_collector() {
+    mkdir -p "$TD/logs/apex"
+    printf 'PID=%s\nSTARTED=%s\nORG=dev\nRUNTIME=%s\nHEARTBEAT=%s\n' "$1" "${4:-$(date +%s)}" "$2" "$3" > "$TD/logs/apex/.collector"
+}
+
+test_runtime_other_active() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] 環境の混在: 別の環境が扱っているときは、status 以外は何もしない${CLR_RST}"
+    _env
+    export SF_LOG_TEST_RUNTIME=gitbash
+    local now c; now=$(date +%s)
+    _dead_pid
+    mkdir -p "$TD/logs/apex"
+    printf 'AUTO=on\nORG=dev\nORG_ID=\nVERSION=1\n' > "$TD/logs/apex/.consent"
+    printf 'STATE=collecting\nORG=dev\n' > "$TD/logs/apex/.status"
+    cp "$TD/logs/apex/.status" "$TD/status.before"
+    _foreign_collector "$DEAD" wsl "$now"
+    : > "$MOCK_CALL_LOG"
+    _rt_mark gitbash
+    _run begin -o dev --owner "$MARK"
+    assert_equals "$RC" "10" "begin → 10"
+    _has "$OUT" "別の環境（wsl）で、デバッグログを取っています。この環境では取りません" "begin → 別の環境で取っていると表示する"
+    assert_file_not_exists "$TD/logs/apex/.owners" "begin → 持ち主として登録しない"
+    assert_file_not_exists "$TD/logs/apex/.claim" "begin → 名乗らない"
+    _run start -o dev --auto --owner "$MARK"
+    assert_equals "$RC" "10" "start --auto → 10"
+    for c in "pull -o dev" "stop" "start -o dev -y" "auto on -o dev"; do
+        # shellcheck disable=SC2086  # サブコマンドと引数に分けるため
+        _run $c
+        assert_exit_fail "$RC" "${c} → 中断"
+        _has "$OUT" "別の環境（wsl）で、デバッグログを取っています" "${c} → 事実を表示する"
+    done
+    _run leave --owner "$MARK"
+    assert_exit_ok "$RC" "leave → 0（何もしない）"
+    _run collect
+    assert_exit_ok "$RC" "collect → 0（2 つ目の取得役を立てない）"
+    assert_equals "$(_kv .collector PID)" "$DEAD" "collect → 別の環境の印を書き換えない"
+    assert_equals "$(cat "$TD/logs/apex/.status")" "$(cat "$TD/status.before")" ".status を書き換えない"
+    [[ ! -s "$MOCK_CALL_LOG" ]] && pass "sf を呼ばない（組織に触れない）" || fail "sf を呼ばない（組織に触れない）" "$(cat "$MOCK_CALL_LOG")"
+    _run status -o dev
+    assert_exit_ok "$RC" "status は答える"
+    _has "$OUT" "取得役: 別の環境（wsl）で動作中（最後の合図は" "status → 別の環境で動作中と表示する"
+    # 合図が読めない・未来の時刻 → 扱っているとみなす（分からないものは、扱っているかもしれない側に倒す）
+    _foreign_collector "$DEAD" wsl "abc"
+    _run pull -o dev
+    assert_exit_fail "$RC" "合図が読めない → 扱っているとみなす（pull は中断）"
+    _foreign_collector "$DEAD" wsl "$((now + 5000))"
+    _run pull -o dev
+    assert_exit_fail "$RC" "合図が未来の時刻 → 扱っているとみなす（pull は中断）"
+    # 環境の名前が不正・unknown → 環境不明（unknown 同士でも同じとみなさない）
+    _foreign_collector "$DEAD" bogus "$now"
+    _run pull -o dev
+    _has "$OUT" "別の環境（不明）で" "環境の名前が不正 → 環境不明として扱う"
+    _foreign_collector "$DEAD" unknown "$now"
+    _run pull -o dev
+    assert_exit_fail "$RC" "記録の環境が unknown → 環境不明として扱う（pull は中断）"
+    # 自分の環境が unknown → 判断しない（これまでの動き）
+    export SF_LOG_TEST_RUNTIME=unknown
+    _foreign_collector "$DEAD" wsl "$now"
+    _run pull -o dev
+    assert_exit_ok "$RC" "自分の環境が unknown → 判断しない（pull は自分で取る）"
+    unset SF_LOG_TEST_RUNTIME
+    _done
+}
+
+test_runtime_stale_and_legacy() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] 環境の混在: 古い合図・古い形の記録${CLR_RST}"
+    _env
+    export SF_LOG_TEST_RUNTIME=gitbash
+    local now lp; now=$(date +%s)
+    # 合図が 30 分より古い別の環境の記録 → 止まったものとみなす。記録の PID が、たまたま自分の環境で生きていても、何も送らない
+    sleep 600 & lp=$!; SLEEPERS="${SLEEPERS:-} $lp"
+    _foreign_collector "$lp" wsl "$((now - 2000))"
+    _log 07L000000000061AAA "$ME" -5
+    _run pull -o dev
+    assert_exit_ok "$RC" "合図が 30 分より古い → 止まったものとみなし、pull が自分で取る"
+    _has "$(cat "$TD/logs/apex/latest.md")" "取得役: 動いていません" "別の環境の古い記録の PID に、取得を頼まない"
+    _run status -o dev
+    _has "$OUT" "取得役: 動いていません" "status → 動いていない"
+    _run stop
+    assert_exit_ok "$RC" "stop が成功する"
+    _alive "$lp" && pass "別の環境の記録の PID には、止める合図（TERM）を送らない" || fail "別の環境の記録の PID には、止める合図（TERM）を送らない"
+    assert_file_not_exists "$TD/logs/apex/.collector" "stop → 古い記録を消す"
+    # 古い形（RUNTIME なし）・起動から 12 時間以内 → kill -0 によらず「環境不明」
+    _dead_pid
+    printf 'PID=%s\nSTARTED=%s\nORG=dev\n' "$DEAD" "$now" > "$TD/logs/apex/.collector"
+    _run pull -o dev
+    assert_exit_fail "$RC" "古い形の記録（12 時間以内）→ pull は中断"
+    _has "$OUT" "別の環境（不明（古い形の記録））で" "古い形の記録 → 環境不明と表示する"
+    _run status -o dev
+    _has "$OUT" "取得役: 状態不明（環境の記録のない、古い形" "status → 古い形の記録は「状態不明」"
+    # 古い形・12 時間より古い → 止まったもの
+    printf 'PID=%s\nSTARTED=%s\nORG=dev\n' "$DEAD" "$((now - 50000))" > "$TD/logs/apex/.collector"
+    _run pull -o dev
+    assert_exit_ok "$RC" "古い形の記録（12 時間より古い）→ 止まったものとみなす"
+    # 形の正しくない記録 → status は「状態不明」
+    printf 'PID=x\n' > "$TD/logs/apex/.collector"
+    _run status -o dev
+    _has "$OUT" "取得役: 状態不明（" "status → 形の正しくない記録は「状態不明」"
+    rm -f "$TD/logs/apex/.collector"
+    # .status が別の組織の記録 → 状態不明
+    printf 'STATE=collecting\nORG=other-org\n' > "$TD/logs/apex/.status"
+    _run status -o dev
+    _has "$OUT" "表示の状態: 状態不明（別の組織（other-org）の記録です" "status → 別の組織の .status は「状態不明」"
+    unset SF_LOG_TEST_RUNTIME
+    _done
+}
+
+test_runtime_claim() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] 環境の混在: 扱う環境の名乗り（.claim）${CLR_RST}"
+    _env
+    export SF_LOG_TEST_RUNTIME=gitbash
+    local now m1 m2; now=$(date +%s)
+    _run auto on -o dev
+    # 別の環境の新しい名乗り → 取り始めない・登録しない
+    printf 'RUNTIME=wsl\nOWNER=1:1:wsl1\nAT=%s\n' "$now" > "$TD/logs/apex/.claim"
+    _rt_mark gitbash; m1="$MARK"
+    _run start -o dev --auto --owner "$m1"
+    assert_equals "$RC" "10" "別の環境の新しい名乗り → 10"
+    assert_equals "$(_tf_count)" "0" "別の環境の新しい名乗り → TraceFlag を作らない"
+    assert_file_not_contains "$TD/logs/apex/.owners" "$m1" "別の環境の新しい名乗り → 持ち主として登録しない"
+    _run status -o dev
+    _has "$OUT" "取得役: 取得役の起動待ち（環境 wsl・名乗りは" "status → 名乗りだけなら「起動待ち」"
+    # 名乗りの環境が unknown → 環境不明（同じとみなさない）
+    printf 'RUNTIME=unknown\nOWNER=1:1:unknown1\nAT=%s\n' "$now" > "$TD/logs/apex/.claim"
+    _run pull -o dev
+    _has "$OUT" "別の環境（不明）で" "名乗りの環境が unknown → 環境不明として扱う"
+    # 30 分より古い名乗り → 自分の環境で名乗り直して、取り始める
+    printf 'RUNTIME=wsl\nOWNER=1:1:wsl1\nAT=%s\n' "$((now - 2000))" > "$TD/logs/apex/.claim"
+    _run start -o dev --auto --owner "$m1"
+    assert_exit_ok "$RC" "古い名乗り → 取り始める"
+    assert_equals "$(_kv .claim RUNTIME)" "gitbash" "古い名乗り → 自分の環境で名乗り直す"
+    assert_equals "$(_kv .claim OWNER)" "$m1" "名乗りに、自分の印を書く"
+    # 同じ環境の名乗り（印の持ち主が生きている）→ 印は変えず、時刻だけ今にする
+    printf 'RUNTIME=gitbash\nOWNER=%s\nAT=%s\n' "$m1" "$((now - 100))" > "$TD/logs/apex/.claim"
+    _rt_mark gitbash; m2="$MARK"
+    _run start -o dev --auto --owner "$m2"
+    assert_exit_ok "$RC" "同じ環境の名乗り → 取り始める"
+    assert_equals "$(_kv .claim OWNER)" "$m1" "同じ環境の名乗り → 印を書き換えない"
+    [[ "$(_kv .claim AT)" -ge "$now" ]] && pass "同じ環境の名乗り → 時刻を今にする" || fail "同じ環境の名乗り → 時刻を今にする" "$(_kv .claim AT)"
+    _run stop
+    assert_exit_ok "$RC" "stop が成功する"
+    assert_file_not_exists "$TD/logs/apex/.claim" "stop → 名乗りを消す"
+    # 取り始めに失敗（取らない設定）→ 自分の名乗りを消す
+    _run auto off -o dev
+    printf 'RUNTIME=gitbash\nOWNER=%s\nAT=%s\n' "$m1" "$now" > "$TD/logs/apex/.claim"
+    printf '%s\n' "$m1" > "$TD/logs/apex/.owners"
+    _run start -o dev --auto --owner "$m1"
+    assert_equals "$RC" "10" "取らない設定 → 10"
+    assert_file_not_exists "$TD/logs/apex/.claim" "取り始めに失敗 → 自分の名乗りを消す"
+    # 同じ環境のほかの生きている持ち主がいれば、消さない
+    printf 'RUNTIME=gitbash\nOWNER=%s\nAT=%s\n' "$m1" "$now" > "$TD/logs/apex/.claim"
+    printf '%s\n%s\n' "$m1" "$m2" > "$TD/logs/apex/.owners"
+    _run start -o dev --auto --owner "$m1"
+    assert_file_exists "$TD/logs/apex/.claim" "同じ環境のほかの持ち主がいる → 名乗りを消さない"
+    # 自分の印でない名乗りは、消さない
+    printf 'RUNTIME=gitbash\nOWNER=%s\nAT=%s\n' "$m2" "$now" > "$TD/logs/apex/.claim"
+    printf '%s\n' "$m1" > "$TD/logs/apex/.owners"
+    _run start -o dev --auto --owner "$m1"
+    assert_equals "$(_kv .claim OWNER)" "$m2" "自分の印でない名乗り → 消さない"
+    unset SF_LOG_TEST_RUNTIME
+    _done
+}
+
+test_runtime_locks() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] 環境の混在: ロックの古さ（pid ファイルの環境と時刻）${CLR_RST}"
+    _env
+    export SF_LOG_TEST_RUNTIME=gitbash
+    local now; now=$(date +%s)
+    mkdir -p "$TD/logs/apex/.lock"
+    # 別の環境のロック・10 分より古い → 残ったロックとして消す
+    printf '1 wsl %s\n' "$((now - 700))" > "$TD/logs/apex/.lock/pid"
+    _run auto on -o dev
+    assert_exit_ok "$RC" "別の環境の古いロック（10 分より前）→ 消して進む"
+    # 同じ環境・死んだ PID → これまでどおり消す
+    _dead_pid
+    mkdir -p "$TD/logs/apex/.lock"; printf '%s gitbash %s\n' "$DEAD" "$now" > "$TD/logs/apex/.lock/pid"
+    _run auto on -o dev
+    assert_exit_ok "$RC" "同じ環境の死んだ PID のロック → 消して進む"
+    # 別の環境のロック・新しい → 奪わずに待ち、上限で中断する（PID が自分の環境で死んでいても）
+    mkdir -p "$TD/logs/apex/.lock"; printf '%s wsl %s\n' "$DEAD" "$now" > "$TD/logs/apex/.lock/pid"
+    _run auto on -o dev
+    assert_exit_fail "$RC" "別の環境の新しいロック → 奪わずに待ち、取れなければ中断する"
+    assert_file_exists "$TD/logs/apex/.lock/pid" "別の環境の新しいロック → 消さない"
+    rm -rf "$TD/logs/apex/.lock"
+    unset SF_LOG_TEST_RUNTIME
+    _done
+}
+
+test_runtime_collector() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] 環境の混在: 取得役の合図・名乗り・別の環境の印${CLR_RST}"
+    _env
+    export SF_LOG_TEST_RUNTIME=gitbash
+    local m1 mw hb1
+    _run auto on -o dev
+    _rt_mark gitbash; m1="$MARK"
+    _run start -o dev --auto --owner "$m1"
+    assert_exit_ok "$RC" "start --auto --owner が成功する"
+    _rt_mark wsl; mw="$MARK"
+    printf '%s\n' "$mw" >> "$TD/logs/apex/.owners"   # 前に別の環境で使ったときの残り（PID は、たまたま生きている）
+    _collect_bg
+    _wait_for 15 '[[ "$(_kv .collector PID)" == "$CPID" ]]' && pass "取得役が印を書く" || fail "取得役が印を書く"
+    assert_equals "$(_kv .collector RUNTIME)" "gitbash" "取得役の印に、環境の名前（RUNTIME）を書く"
+    hb1=$(_kv .collector HEARTBEAT)
+    [[ "$hb1" =~ ^[0-9]+$ ]] && pass "取得役の印に、合図（HEARTBEAT）を書く" || fail "取得役の印に、合図（HEARTBEAT）を書く" "$hb1"
+    _wait_for 15 '! grep -qF -- "$mw" "$TD/logs/apex/.owners"' && pass "持ち主の見張りが、別の環境の印を外す" || fail "持ち主の見張りが、別の環境の印を外す" "$(cat "$TD/logs/apex/.owners")"
+    assert_file_contains "$TD/logs/apex/.owners" "$m1" "同じ環境の印は残す"
+    _wait_for 15 '[[ "$(_kv .collector HEARTBEAT)" -gt "$hb1" ]]' && pass "取得役が、合図を書き直す" || fail "取得役が、合図を書き直す"
+    [[ "$(_kv .claim AT)" -ge "$hb1" ]] && pass "取得役が、名乗りの時刻を書き直す" || fail "取得役が、名乗りの時刻を書き直す" "$(_kv .claim AT)"
+    # 別の環境（wsl）から見ると、扱っている環境がある
+    export SF_LOG_TEST_RUNTIME=wsl
+    _run pull -o dev
+    assert_exit_fail "$RC" "別の環境からの pull → 中断"
+    _has "$OUT" "別の環境（gitbash）で、デバッグログを取っています" "別の環境からの pull → 扱っている環境を表示する"
+    _rt_mark wsl
+    _run begin -o dev --owner "$MARK"
+    assert_equals "$RC" "10" "別の環境からの begin → 10"
+    assert_file_not_contains "$TD/logs/apex/.owners" "$MARK" "別の環境からの begin → 持ち主として登録しない"
+    _alive "$CPID" && pass "別の環境からの操作で、取得役は止まらない" || fail "別の環境からの操作で、取得役は止まらない"
+    # 扱っている環境での後始末 → 名乗りも消える（別の環境が始められる）
+    export SF_LOG_TEST_RUNTIME=gitbash
+    _run leave --owner "$m1"
+    assert_exit_ok "$RC" "最後の leave が成功する"
+    _wait_for 15 '! _alive "$CPID"' && pass "最後の leave → 取得役が止まる" || fail "最後の leave → 取得役が止まる"
+    assert_file_not_exists "$TD/logs/apex/.claim" "最後の leave → 名乗りを消す"
+    assert_file_not_exists "$TD/logs/apex/.collector" "最後の leave → 取得役の印を消す"
+    unset SF_LOG_TEST_RUNTIME
+    _done
+}
+
 test_start_basic
 test_start_count_today
 test_start_waits_for_upgrade
@@ -837,5 +1086,10 @@ test_collect_extend
 test_register_owner
 test_begin
 test_begin_retry
+test_runtime_other_active
+test_runtime_stale_and_legacy
+test_runtime_claim
+test_runtime_locks
+test_runtime_collector
 
 print_summary

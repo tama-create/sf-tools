@@ -917,6 +917,12 @@ AI の開発サイクル用のデバッグログ取得（開発者向け。管�
 - **後始末（`do_cleanup`）**: `stop`・`leave`・取得役が共有。`stop_collector`（`requests/stop` → `STOP_WAIT` 秒 → TERM → 10 秒）→ `.state` の TraceFlag を消す → `.status` を stopped。戻り値 1 = 取得役が止まらない（TraceFlag を残す）/ 2 = 消せない。`stop`・`leave` は `.owners` に CLOSING を書いてから行い、最後に `.owners` を消す。`leave` は失敗しても 0
 - **持ち主の登録（`register_owner`）**: `begin`（と `start --auto --owner`）が行う（ロックを 1 か所にまとめるため）。生きている CLOSING は `CLOSING_WAIT`（60 秒）まで待ち、死んだ CLOSING は消す。`leave` は、登録されていない印なら何もしない
 - **`begin`（sf-start の前面）**: sf を呼ばない（`start --auto` は実機で約 1 分かかったため）。予約名 → `consent_local`（`.consent` の `AUTO`・`ORG`（エイリアス）・`VERSION`。なければ、端末なら Y/N を聞く）→ `register_owner` → `.status` を starting → `nohup bash sf-log.sh start --auto --collect … & disown` → 0。裏の `start --auto` は `auto_consent`（尋ねない。`ORG_ID` が空なら書き、違えば答えを消して 10）のあと準備し、`--collect` なら `exec … collect`
+- **環境の混在（Git Bash と WSL。2026-11-24。設計は `doc/sf-log-design.md` 5.6）**: 1 つのプロジェクトのログは、同時には 1 つの環境だけが扱う。環境の名前は `detect_runtime`（`lib/platform.sh`）。テストは `SF_LOG_TEST_RUNTIME` で差し替える。自分が `unknown` なら判断しない（これまでの動き）
+  - 判断は `other_runtime_active`（読むのは `.claim`・`.collector` だけ）。入口（`case "$CMD"` の前。`status` 以外）・`register_owner` の短いロックの中（戻り値 2）・`cmd_collect` の印を書くロックの中で呼ぶ。終わり方は `refuse_other_runtime`（`begin`・`start --auto` は 10・`leave`・`collect` は 0・ほかは `die`。何も書かない）
+  - 名乗り `.claim`（`RUNTIME`・`OWNER`・`AT`）: `register_owner` が `claim_write_locked` で書く（同じ環境の名乗りで、その印の持ち主が生きていれば、印を変えずに `AT` だけ今に）。取得役が `heartbeat` → `claim_refresh_locked` で `AT` を書き直す。失敗のとき（`finish_auto_or_die` の自動の道・`wait_sf_upgrade` の途中終了）は `claim_release`（自分の印・同じ環境のほかの生きている持ち主なし・この環境の取得役なし）。後始末が成功したら、`stop`・`leave`・`collector_finish` が、`.owners` を消した**あと**に消す（先に消すと、別の環境が名乗って足した印を、`rm -f .owners` が消す）
+  - 合図: `.collector` の `RUNTIME`・`HEARTBEAT`。`heartbeat` は取得役のとき（`IS_COLLECTOR=1`）だけ、`HB_EVERY`（30 秒。テストは 1）より短い間隔では書かない。呼ぶ場所は、目を覚ますたび・sf を呼ぶ直前（`fetch_round`・`late_recheck`・`collector_extend`）・`save_one` の最後
+  - 別の環境の PID に触れない: 取得役の PID は `collector_pid_local`（別の環境の記録なら空）で読む（`stop_collector`・`pull`・`request_collector`・`status`・`finish_auto_or_die`）。持ち主の印は `mark_alive`（環境の名前が違えば死んでいるとみなす。`owners_prune`・CLOSING の判断）
+  - ロック: pid ファイルは `PID 環境 時刻`（一時ファイルから `mv`）。古さの判断は `lock_is_stale`（同じ環境・古い形は `kill -0`、別の環境は `FOREIGN_LOCK_AGE`（600 秒）より古いとき。形が違えば奪わない）
 - **時間の設定**: `SF_LOG_INTERVAL`（既定 180）・`SF_LOG_MAX_SECONDS`（既定 43200）・`SF_LOG_TEST_FAST=1`（テスト用。間隔の下限 1・`TICK` 1・待ち時間を短く）
 - **`--auto`**: 終了コード 0 / 10（取らない）/ 1（失敗）。`finish_auto_or_die` で、手動は `die`、自動は `.status` に書いて終了コードで返す。確認は、端末でなければ聞かずに「取らない」（`read_key` の EOF の die を避ける。`$( )` の中で呼ぶ）
 

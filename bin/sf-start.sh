@@ -32,15 +32,19 @@
 #           WSL で wslview がないときは、powershell.exe でブラウザを開く wslview を /tmp/sf-wsl-bin に作り、PATH の先頭に加える
 #        ログインに失敗したら、中断する（終了コード 1。設定ファイルの書き込み・VS Code の起動・ランチャーの起動は、行わない）
 #   4. .sf/config.json（{"target-org": エイリアス}）と .sfdx/sfdx-config.json（{"defaultusername": エイリアス}）を
-#      上書きする（書き込めなければ中断）。code コマンドがあれば code . で VS Code を起動する（なければ警告のみ）
+#      上書きする（書き込めなければ中断）。code コマンドがあれば code . で VS Code を起動する（なければ警告のみ）。
+#      続けて、AI 向けの案内（プロジェクトのルートの CLAUDE.md に「@~/sf-tools/doc/ai-dev-loop.md」の行、AGENTS.md に
+#      「~/sf-tools/doc/ai-dev-loop.md」を含む行）があるかを確かめ、なければ WARNING で、足し方を案内する（ファイルは書き換えない。
+#      書き換えると、リポジトリに未コミットの変更ができるため）
 #   5. ~/sf-tools/bin/sf-install.sh があれば、バックグラウンドで実行する（出力は、このスクリプトのログに追記）。
 #      内容: ~/sf-tools の git pull・設定ファイルの確認・Git フック（pre-commit / pre-push）の設置・
 #      sf-tools/release/{ブランチ}/ の準備と sf-tools/release/branch_name.txt の更新（main ブランチでは行わない）・
 #      npm install（package.json があるとき。node_modules/.package-lock.json が package-lock.json 以降に更新済みなら省略）・
 #      開発ツールの更新（sf-upgrade.sh。24 時間に 1 回）。詳細は sf-install.sh の冒頭コメント
 #   6. デバッグログ（~/sf-tools/bin/sf-log.sh があるとき。AI が読むログを、ランチャーの起動中に裏で取る。doc/sf-log-design.md 5 章）:
-#        a. 持ち主の印を決める。環境変数 SF_LOG_OWNER（PID:起動の時刻:乱数）があり、その PID が生きていれば引き継ぐ
+#        a. 持ち主の印を決める。環境変数 SF_LOG_OWNER（PID:起動の時刻:環境の名前と乱数）があり、その PID が生きていれば引き継ぐ
 #           （ランチャーの Start・Restart からの入れ子の sf-start）。それ以外は、自分の印を作って export する
+#           （乱数の頭に、環境の名前（detect_runtime。gitbash / wsl など）を付ける。Git Bash と WSL の混在の見分け。doc/sf-log-design.md 5.6）
 #        b. sf-log.sh begin -o {エイリアス} --owner {印} を実行する（sf を呼ばずにすぐ終わる。予約名・「自動で取らない」答えなら取らない。
 #           このプロジェクト・エイリアスで初めてのときは、AI への送信の注意を表示して Y/N で聞く）。取るときは、持ち主の一覧に登録し、
 #           TraceFlag の準備と取得役を裏で起動する。終了コード 0 = 始めた／10 = 取らない／それ以外 = 警告だけ（どれでも先に進む）
@@ -198,6 +202,18 @@ else
     log "WARNING" "'code' コマンドが見つかりません。VS Code を手動で起動してください。"
 fi
 
+# AI 向けの案内（処理の流れの 4）: force-* の CLAUDE.md・AGENTS.md に、手順書 ~/sf-tools/doc/ai-dev-loop.md を指す行があるか。
+#   なければ知らせるだけ（書き換えない）。雛形は ~/sf-tools/templates/ の CLAUDE.md・AGENTS.md（sf-init が新しい force-* に写す）
+_ai_missing=""
+#   探す文字列の「~」は、ファイルに書かれた文字そのもの（ホームのパスに展開しない。展開したら一致しない）
+grep -qF '@~/sf-tools/doc/ai-dev-loop.md' CLAUDE.md 2>/dev/null || _ai_missing="CLAUDE.md"   # 条件チェックのため run 不使用
+# shellcheck disable=SC2088  # 「~」は文字そのものを探す（上の説明）
+grep -qF '~/sf-tools/doc/ai-dev-loop.md' AGENTS.md 2>/dev/null || _ai_missing="${_ai_missing:+${_ai_missing}・}AGENTS.md"   # 条件チェックのため run 不使用
+if [[ -n "$_ai_missing" ]]; then
+    log "WARNING" "AI 向けの案内（${_ai_missing} の、手順書 ~/sf-tools/doc/ai-dev-loop.md を指す行）がありません。AI が sf-tools の使い方を知らないまま作業します。"
+    log "WARNING" "  ~/sf-tools/templates/ の ${_ai_missing} の行を、プロジェクトのルートの同じ名前のファイルに足して（ファイルがなければコピーして）、コミットしてください。"
+fi
+
 # ------------------------------------------------------------------------------
 # 6. バックグラウンド処理（VS Code 起動後に実行）
 # ------------------------------------------------------------------------------
@@ -226,7 +242,7 @@ if [[ -f "$SF_LOG_SH" ]]; then
     if [[ -n "${SF_LOG_OWNER:-}" ]] && kill -0 "${SF_LOG_OWNER%%:*}" 2>/dev/null; then  # 条件チェックのため run 不使用（外側の生死）
         _sf_log_mine=0
     else
-        export SF_LOG_OWNER="$$:$(date +%s):${RANDOM}${RANDOM}"
+        export SF_LOG_OWNER="$$:$(date +%s):$(detect_runtime)${RANDOM}${RANDOM}"   # 環境の名前を頭に（5.6）
         _sf_log_mine=1
     fi
     _sf_log_rc=0

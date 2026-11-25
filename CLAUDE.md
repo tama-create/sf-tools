@@ -99,6 +99,7 @@ git pull origin main                     # main の最新を取り込む
 | `site/`（HTML の文書サイト） | 人間向けの詳細（使い方ガイド・管理者ガイド・リファレンス） | **わかりやすく詳しく書く**。使い方・挙動・設計意図をユーザーが理解できるよう記述する。ページの足し方・テストは `doc/dev-reference.md` 9.8 |
 | `doc/dev-guide.md` | sf-tools の開発者向けの手順書 | 開発・リリースの流れ（mm・rr）と e2e の使い方 |
 | `doc/doc-style.md` | 文書の 3 階層の決まり | コードの冒頭コメント（正本）→ 技術者向け → 一般向け。情報は上から下へだけ流す。書き方は本書に従う |
+| `doc/ai-dev-loop.md` | force-* で開発を手伝う AI 向けの手順書（デバッグログを読みながら直す） | force-* の `CLAUDE.md`・`AGENTS.md`（`templates/` から入る 1 行）が指す。sf-log の動きを変えたら、合わせて直す |
 
 > CLAUDE.md が重くなると Claude のパフォーマンスと回答精度が低下する。ルールや判断基準は簡潔に、詳細は必ず dev-reference に書くこと。
 

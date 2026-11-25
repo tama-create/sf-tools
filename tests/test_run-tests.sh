@@ -14,7 +14,11 @@
 #   6. 組の数が、ファイルの数より多いとき、空の組は、何もせず、成功で終わる
 #   7. SF_TEST_SKIP_INTEGRATION=1 と組み合わせても、結合テストは、外れたまま
 #   8. --changed は、まだ git add していない新しいファイルに対応するテストも選ぶ。.gitignore の対象は数えない。
-#      配布物のコード（bin/・phases/・lib/・hooks/）の変更では、セキュリティの静的な検査（test_security.sh）も選ぶ
+#      配布物のコード（bin/・phases/・lib/・hooks/）の変更では、セキュリティの静的な検査（test_security.sh）も選ぶ。
+#      git のリポジトリとして読めないときは、全件に倒れず、終了コード 1
+#   9. tests/wsl-gitfile.sh（WSL の写しの .git を、WSL から読めるパスに直す）: ふつうの .git フォルダは触らない・
+#      Windows のドライブ（C:/…・D:\…・大文字）→ /mnt/<小文字>/…・相対のパス → 写し元を基準にした絶対のパス・
+#      / で始まるパスはそのまま・本体の .git がなければ書かない・CR を除く・引数の誤り → 終了コード 2
 # ==============================================================================
 source "$(dirname "${BASH_SOURCE[0]}")/test_helper.sh"
 echo -e "${CLR_HEAD}=== run_tests.sh --shard・--changed ===${CLR_RST}"
@@ -102,12 +106,78 @@ test_changed_untracked() {
     git -C "$repo" -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -q -am ignore
     out=$(SF_TEST_SKIP_INTEGRATION="" SF_TEST_NO_WSL=1 SF_TEST_LIST_ONLY=1 bash "$repo/tests/run_tests.sh" --changed 2>/dev/null)
     assert_output_contains "$out" "変更ファイルに対応するテストなし" ".gitignore の対象のファイルは、追跡していないファイルに数えない"
+
+    # git のリポジトリとして読めない（worktree の写しで、.git が読めないパスを指す）→ 全件に倒れず、止める
+    rm -rf "$repo/.git" && printf 'gitdir: %s\n' "$repo/no-such-dir" > "$repo/.git"
+    out=$(SF_TEST_SKIP_INTEGRATION="" SF_TEST_NO_WSL=1 SF_TEST_LIST_ONLY=1 bash "$repo/tests/run_tests.sh" --changed 2>&1); local rc=$?
+    assert_exit_fail "$rc" "git のリポジトリとして読めない → 終了コード 1"
+    assert_output_contains "$out" "git の差分を読めません" "git が使えないことを書く"
+    assert_output_not_contains "$out" "全テスト実行" "黙って全件に倒れない"
     rm -rf "$repo"
+}
+
+# tests/wsl-gitfile.sh（WSL の写しの .git を直す。run_tests.sh が、写したあとに呼ぶ）
+test_wsl_gitfile() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] wsl-gitfile.sh: 写しの .git を、WSL から読めるパスに直す${CLR_RST}"
+    local b src dst mnt rc GF="$SF_TOOLS_DIR/tests/wsl-gitfile.sh"
+    b=$(mktemp -d "${TMPDIR:-/tmp}/test-wslgit-XXXX")
+    src="$b/src"; dst="$b/dst"; mnt="$b/mnt"
+    mkdir -p "$src" "$dst" "$mnt/c/Users/u/repo/.git/worktrees/w" "$mnt/d/a/.git/worktrees/w" "$b/main/.git/worktrees/w"
+    # 写し元と写し先に、同じ .git を置く（rsync で写した直後と同じ）。引数: .git の中身（printf の書式ではなく、文字どおり）
+    _put() { printf '%s' "$1" > "$src/.git"; printf '%s' "$1" > "$dst/.git"; }
+    _gf() { SF_WSL_MNT_ROOT="$mnt" bash "$GF" "$src" "$dst" 2>/dev/null; }
+
+    # ふつうの .git フォルダは、触らない
+    mkdir -p "$src/.git" "$dst/.git"
+    _gf; rc=$?
+    assert_exit_ok "$rc" ".git がフォルダ → 終了コード 0"
+    [[ -d "$dst/.git" ]] && pass ".git がフォルダなら、写しの .git を触らない" || fail ".git がフォルダなら、写しの .git を触らない"
+    rm -rf "$src/.git" "$dst/.git"
+
+    # Windows のドライブ（C:/…）→ /mnt/c/…
+    _put $'gitdir: C:/Users/u/repo/.git/worktrees/w\n'
+    _gf
+    assert_equals "$(cat "$dst/.git")" "gitdir: $mnt/c/Users/u/repo/.git/worktrees/w" "C:/… → /mnt/c/…"
+    assert_equals "$(cat "$src/.git")" "gitdir: C:/Users/u/repo/.git/worktrees/w" "写し元の .git は、書き換えない"
+
+    # \ の区切り・大文字のドライブ・CRLF → /mnt/d/…（小文字・/）
+    _put 'gitdir: D:\a\.git\worktrees\w'$'\r\n'
+    _gf
+    assert_equals "$(cat "$dst/.git")" "gitdir: $mnt/d/a/.git/worktrees/w" "D:\…（CRLF）→ /mnt/d/…（小文字・/ の区切り・CR を除く）"
+
+    # 相対のパス → 写し元を基準にした絶対のパス
+    _put $'gitdir: ../main/.git/worktrees/w\n'
+    _gf
+    assert_equals "$(cat "$dst/.git")" "gitdir: $(cd "$b/main/.git/worktrees/w" && pwd)" "相対のパス → 写し元を基準にした絶対のパス"
+
+    # / で始まるパス（WSL・Linux で作った worktree）は、そのまま
+    _put "gitdir: $b/main/.git/worktrees/w"$'\n'
+    _gf
+    assert_equals "$(cat "$dst/.git")" "gitdir: $b/main/.git/worktrees/w" "/ で始まるパスは、そのまま"
+
+    # 本体の .git がなければ、書かない（壊れた印を作らない）
+    _put $'gitdir: C:/no/such/.git/worktrees/w\n'
+    _gf; rc=$?
+    assert_exit_ok "$rc" "本体の .git がない → 終了コード 0（テストは続ける）"
+    assert_equals "$(cat "$dst/.git")" "gitdir: C:/no/such/.git/worktrees/w" "本体の .git がなければ、写しの .git を書き換えない"
+
+    # 「gitdir: 」で始まらない .git は、推測で書き換えない
+    _put $'something else\n'
+    _gf
+    assert_equals "$(cat "$dst/.git")" "something else" "知らない形の .git は、書き換えない"
+
+    # 引数の誤り → 終了コード 2
+    bash "$GF" "$src" 2>/dev/null; rc=$?
+    assert_equals "$rc" "2" "写し先がない → 終了コード 2"
+    bash "$GF" "$src" "$b/no-such" 2>/dev/null; rc=$?
+    assert_equals "$rc" "2" "写し先のフォルダがない → 終了コード 2"
+    rm -rf "$b"
 }
 
 test_shard_partition
 test_shard_invalid
 test_shard_empty_and_skip
 test_changed_untracked
+test_wsl_gitfile
 
 print_summary

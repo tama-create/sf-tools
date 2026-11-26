@@ -73,8 +73,8 @@ sf-init.sh --verify --cleanup     # 削除のみ（リリースの途中で止�
       <li><code>wf-metasync</code>（Salesforce → Git の同期）を、手動で 1 回実行し、成功する（JWT ログイン・sf-tools の取得を含む）。<code>main</code> の組織の変更が、<code>main</code> にコミットされることがあります。手前の 2 つが NG のときは、実行しません。<code>--no-metasync</code> で、省略できます。</li>
     </ul>
   </li>
-  <li><p><strong>リリース:</strong> リリース用のブランチ（<code>main</code> の先頭から作り、Hello World のファイルと、ターゲットファイルを置きます）1 本から、段階ごとに PR を出します。順番は、<code>develop</code> → <code>staging</code> → <code>main</code> です（ない段階は飛ばします）。各段階で、<code>wf-validate</code>（検証）→ マージ → <code>wf-release</code> と進みます。<code>main</code> へのマージのあとは、<code>wf-propagate</code> も確認します（失敗しても、続きを進めます）。</p></li>
-  <li><p><strong>削除:</strong> 削除用のブランチ（<code>main</code> の先頭から作ります。<code>remove-target.txt</code> と、リポジトリのクラスのファイルの削除）から、同じ順に、各段階へ PR → <code>wf-validate</code> → マージ → <code>wf-release</code>（<code>main</code> のあとは <code>wf-propagate</code> も）。段階ごとに、リリースと同じ確認をします。組織のクラスと、リポジトリのファイルの両方が、消えます。</p></li>
+  <li><p><strong>リリース:</strong> リリース用のブランチ（<code>main</code> の先頭から作り、Hello World のファイルと、ターゲットファイルを置きます）1 本から、段階ごとに PR を出します。順番は、<code>develop</code> → <code>staging</code> → <code>main</code> です（ない段階は飛ばします）。各段階で、<code>wf-validate</code>（検証）→ マージ → <code>wf-release</code> と進みます（同じコミットのまま上げるので、一方通行の決まりの確認が通ります）。<code>main</code> の変更は、環境のブランチへ伝播しません（<code>wf-propagate</code> は廃止しました）。</p></li>
+  <li><p><strong>削除:</strong> 削除用のブランチ（<code>main</code> の先頭から作ります。<code>remove-target.txt</code> と、リポジトリのクラスのファイルの削除）から、同じ順に、各段階へ PR → <code>wf-validate</code> → マージ → <code>wf-release</code>（リリースと同じく、同じコミットのまま上げます）。段階ごとに、リリースと同じ確認をします。組織のクラスと、リポジトリのファイルの両方が、消えます。</p></li>
   <li><p><strong>後始末と結果:</strong> 今回作った作業用のブランチを削除し、確認の成功・失敗の件数を表示します（やり直しで成功したワークフローがあれば、その件数も）。</p></li>
 </ol>
 <h3 id="checks">段階ごとに確認すること</h3>
@@ -88,7 +88,7 @@ sf-init.sh --verify --cleanup     # 削除のみ（リリースの途中で止�
 <p>確認のために、組織へログインすることはありません（ワークフローの実行結果で確認します）。手元にクローンを作ったり、git を操作したりもしません（ブランチやファイルは、GitHub の上で直接作ります）。</p>
 <h3 id="on-failure">失敗したときの動き</h3>
 <ul>
-  <li><code>wf-validate</code>・<code>wf-release</code>・<code>wf-propagate</code> が失敗したときは、ログの末尾を表示して、<strong>1 回だけ</strong>実行し直します。</li>
+  <li><code>wf-validate</code>・<code>wf-release</code> が失敗したときは、ログの末尾を表示して、<strong>1 回だけ</strong>実行し直します。</li>
   <li>上の「確認すること」が失敗しても、記録して、続けます（削除まで進めて、組織を元に戻すためです）。</li>
   <li>PR の作成・ワークフローの実行・マージなど、流れそのものが失敗したときは、そこで止め、案内を表示して、終了コード 1 で終わります。リリースのあとで止まった場合は、組織に Hello World が残ることがあります。残った段階と、<code>sf-init.sh --verify --cleanup</code>（削除のみ）を、表示します。</li>
   <li>ブランチ保護で、PR のマージが拒否されたとき・<code>wf-validate</code> が失敗したときは、その段階で止まり、PR が残ります。</li>

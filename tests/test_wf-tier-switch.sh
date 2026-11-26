@@ -2,19 +2,17 @@
 # ==============================================================================
 # test_wf-tier-switch.sh - 段階の切り替え（branches.txt）の、workflow の判定のテスト
 # ==============================================================================
-# 対象: templates/.github/workflows/ の wf-propagate.yml・wf-release.yml・wf-validate.yml（doc/tier-scaling-design.md 3 章・9 章）
+# 対象: templates/.github/workflows/ の wf-release.yml・wf-validate.yml（doc/tier-scaling-design.md 3 章・9 章。wf-propagate.yml は 2026-11-26 に廃止）
 # YAML から、step の run のスクリプトを取り出して、実際の git リポジトリ（ローカルのリモートつき）で、GitHub Actions と同じ
 # シェル（bash --noprofile --norc -eo pipefail）で実行する（tests/test_wf-sequence.sh と同じ方式）。
 # 確認すること:
-#   - 3 つの workflow の判定の部分（>>> sf-tools: tier-switch v1 〜 <<<）が同じ中身で、判定の呼び出しの印 sf-tools: tier-check がある
+#   - 2 つの workflow の判定の部分（>>> sf-tools: tier-switch v1 〜 <<<）が同じ中身で、判定の呼び出しの印 sf-tools: tier-check がある
 #     （wf-sequence.yml・wf-metasync.yml には、ない）
-#   - wf-release: PR のマージ・手動の実行の両方で、無効の段階なら skip=true。main は常に今までどおり
+#   - wf-release: PR のマージで、無効の段階なら skip=true。main は常に今までどおり。workflow_dispatch がない・wf-propagate.yml がない
 #   - wf-validate: マージ先ごとに、検証に使う段階の有効・無効で skip が決まる
-#   - wf-propagate: 段階の判定の出力と、無効の段階には、ブランチがあっても伝播しない
-#   - wf-propagate: 全履歴のリポジトリで、判定 → 伝播を同じリポジトリで続けて動かしても、浅くならず、伝播が成功する
 #   - branches.txt がない → 今までの動き（::warning）／ main を取得できない → 失敗（::error）／名前でない行 → ::warning
 source "$(dirname "${BASH_SOURCE[0]}")/test_helper.sh"
-echo -e "${CLR_HEAD}=== 段階の切り替え（wf-propagate・wf-release・wf-validate）===${CLR_RST}"
+echo -e "${CLR_HEAD}=== 段階の切り替え（wf-release・wf-validate）===${CLR_RST}"
 
 WF_DIR="$SF_TOOLS_DIR/templates/.github/workflows"
 _GH_BASH=(bash --noprofile --norc -eo pipefail -c)
@@ -86,24 +84,25 @@ _run() {
 # ------------------------------------------------------------------------------
 test_structure() {
     echo ""
-    echo -e "${CLR_HEAD}[TEST] 判定の部分が 3 つで同じ・印がある${CLR_RST}"
-    local p r v
-    p=$(_block wf-propagate.yml | sed 's/^[[:space:]]*//')
+    echo -e "${CLR_HEAD}[TEST] 判定の部分が 2 つで同じ・印がある・伝播のワークフローがない${CLR_RST}"
+    local r v
     r=$(_block wf-release.yml   | sed 's/^[[:space:]]*//')
     v=$(_block wf-validate.yml  | sed 's/^[[:space:]]*//')
-    [[ -n "$p" ]] && pass "wf-propagate.yml に判定の部分がある" || fail "wf-propagate.yml に判定の部分がある"
-    assert_equals "$r" "$p" "wf-release.yml の判定の部分が、wf-propagate.yml と同じ"
-    assert_equals "$v" "$p" "wf-validate.yml の判定の部分が、wf-propagate.yml と同じ"
+    [[ -n "$r" ]] && pass "wf-release.yml に判定の部分がある" || fail "wf-release.yml に判定の部分がある"
+    assert_equals "$v" "$r" "wf-validate.yml の判定の部分が、wf-release.yml と同じ"
     local f
-    for f in wf-propagate.yml wf-release.yml wf-validate.yml; do
+    for f in wf-release.yml wf-validate.yml; do
         assert_file_contains "$WF_DIR/$f" "# sf-tools: tier-check" "${f} に判定の呼び出しの印がある"
     done
     for f in wf-sequence.yml wf-metasync.yml; do
         assert_file_not_contains "$WF_DIR/$f" "sf-tools: tier-check" "${f} には印がない（本書の変更の対象外）"
         assert_file_not_contains "$WF_DIR/$f" "sf-tools: tier-switch" "${f} には判定の部分がない"
     done
-    # リリース実行の if: は、PR・手動の実行の両方で、check-branch の skip を見る
-    assert_file_contains "$WF_DIR/wf-release.yml" "&& needs.check-branch.outputs.skip != 'true'" "wf-release: リリース実行の if: が、両方の経路で skip を見る"
+    # 下りの伝播はない（一方通行の原則。doc/one-way-promotion-design.md 3.7）
+    assert_file_not_exists "$WF_DIR/wf-propagate.yml" "wf-propagate.yml がない（main → staging・develop の伝播をしない）"
+    # 手動の実行はない（doc/one-way-promotion-design.md 3.5）
+    if grep -q '^  workflow_dispatch:' "$WF_DIR/wf-release.yml"; then fail "wf-release.yml に workflow_dispatch がない"; else pass "wf-release.yml に workflow_dispatch がない"; fi
+    assert_file_contains "$WF_DIR/wf-release.yml" "if: github.event.pull_request.merged == true && needs.check-branch.outputs.skip != 'true'" "wf-release: リリース実行は、PR のマージで、skip を見る"
 }
 
 # ------------------------------------------------------------------------------
@@ -127,24 +126,24 @@ test_release() {
     r=$(_rel 'main\nstaging\n' pull_request develop)
     assert_output_contains "$r" "skip=true" "main/staging・develop への PR のマージ → リリースしない"
     assert_output_contains "$r" "段階として無効" "  → ::notice で理由を出す"
-    r=$(_rel 'main\nstaging\n' workflow_dispatch develop)
-    assert_output_contains "$r" "skip=true" "main/staging・develop の手動の実行 → リリースしない（手動も判定を通る）"
+    r=$(_rel 'main\nstaging\n' pull_request develop)
+    assert_output_contains "$r" "skip=true" "main/staging・develop への PR のマージ → リリースしない"
     r=$(_rel 'main\n' pull_request staging)
     assert_output_contains "$r" "skip=true" "main だけ・staging への PR のマージ → リリースしない"
-    r=$(_rel 'main\n' workflow_dispatch staging)
-    assert_output_contains "$r" "skip=true" "main だけ・staging の手動の実行 → リリースしない"
-    r=$(_rel 'main\ndevelop\n' workflow_dispatch develop)
+    r=$(_rel 'main\n' pull_request staging)
+    assert_output_contains "$r" "skip=true" "main だけ・staging への PR のマージ → リリースしない"
+    r=$(_rel 'main\ndevelop\n' pull_request develop)
     assert_output_contains "$r" "skip=true" "staging のない develop → 無効（リリースしない）"
     r=$(_rel 'main\n' pull_request main)
     assert_output_contains "$r" "skip=false" "main への PR のマージ → どの構成でもリリースする"
-    r=$(_rel 'main\n' workflow_dispatch main)
-    assert_output_contains "$r" "skip=false" "main の手動の実行 → どの構成でもリリースする"
-    r=$(_rel 'main\n' workflow_dispatch main noorigin)
+    r=$(_rel 'main\n' pull_request main)
+    assert_output_contains "$r" "skip=false" "main への PR のマージ（2 回目）→ どの構成でもリリースする"
+    r=$(_rel 'main\n' pull_request main noorigin)
     assert_output_contains "$r" "RC=0" "main は判定しない（main を取得できなくても、止めない）"
-    r=$(_rel 'main\nstaging\ndevelop\n' workflow_dispatch develop noorigin)
+    r=$(_rel 'main\nstaging\ndevelop\n' pull_request develop noorigin)
     assert_output_contains "$r" "RC=1" "main を取得できない・develop → ジョブを失敗にする"
     assert_output_not_contains "$r" "skip=" "  → skip を出さない（リリース実行は needs のため動かない）"
-    r=$(_rel NONE workflow_dispatch develop)
+    r=$(_rel NONE pull_request develop)
     assert_output_contains "$r" "skip=false" "branches.txt がない → 今までの動き（判定しない）"
     assert_output_contains "$r" "::warning" "  → ::warning を出す"
     r=$(_rel 'main\nuat\nstaging\n' pull_request staging)
@@ -188,82 +187,8 @@ test_validate() {
     assert_output_contains "$r" "skip=false" "branches.txt がない → 今までの動き"
 }
 
-# ------------------------------------------------------------------------------
-# wf-propagate（段階の判定・伝播）
-# ------------------------------------------------------------------------------
-test_propagate() {
-    echo ""
-    echo -e "${CLR_HEAD}[TEST] wf-propagate: 段階の判定と伝播${CLR_RST}"
-    local repo s r before after
-    s=$(_extract wf-propagate.yml tiers)
-    repo=$(_make_repo 'main\nstaging\ndevelop\n'); r=$(_run "$repo" "$s"); rm -rf "${repo%/work}"
-    assert_output_contains "$r" "staging=true" "3 段階 → staging は有効"
-    assert_output_contains "$r" "develop=true" "3 段階 → develop は有効"
-    repo=$(_make_repo 'main\nstaging\n'); r=$(_run "$repo" "$s"); rm -rf "${repo%/work}"
-    assert_output_contains "$r" "develop=false" "main/staging → develop は無効"
-    repo=$(_make_repo 'main\ndevelop\n'); r=$(_run "$repo" "$s"); rm -rf "${repo%/work}"
-    assert_output_contains "$r" "develop=false" "staging のない develop → 無効"
-    repo=$(_make_repo 'main\n'); git -C "$repo" remote set-url origin "$repo/../nowhere.git"; r=$(_run "$repo" "$s"); rm -rf "${repo%/work}"
-    assert_output_contains "$r" "RC=1" "main を取得できない → ジョブを失敗にする"
-
-    # 無効の段階には、ブランチがあっても伝播しない（origin/develop の SHA が変わらない）
-    s=$(_extract wf-propagate.yml merge_develop)
-    repo=$(_make_repo 'main\nstaging\n')
-    git -C "$repo" fetch -q origin
-    before=$(git -C "$repo" rev-parse origin/develop)
-    r=$(_run "$repo" "$s" TIER_ENABLED=false GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t)
-    git -C "$repo" fetch -q origin
-    after=$(git -C "$repo" rev-parse origin/develop)
-    assert_output_contains "$r" "result=skipped" "develop が無効 → skipped"
-    assert_equals "$after" "$before" "develop が無効 → origin/develop は変わらない"
-    r=$(_run "$repo" "$s" TIER_ENABLED=true GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t)
-    git -C "$repo" fetch -q origin
-    after=$(git -C "$repo" rev-parse origin/develop)
-    assert_output_contains "$r" "result=success" "develop が有効 → 伝播する"
-    [[ "$after" != "$before" ]] && pass "develop が有効 → origin/develop が進む" || fail "develop が有効 → origin/develop が進む"
-    rm -rf "${repo%/work}"
-}
-
-# ------------------------------------------------------------------------------
-# wf-propagate: 全履歴のリポジトリで、段階の判定 → 伝播を、同じリポジトリで続けて動かす（Actions と同じ順）
-#   判定が main を --depth=1 で取得すると、リポジトリが浅くなり、伝播のマージが「refusing to merge unrelated histories」で
-#   失敗した（2026-11-22 に e2e で確認）。判定と伝播を別のリポジトリで試すと、見つからない
-#   浅いリポジトリ（wf-release・wf-validate の check-branch。checkout の既定）では、浅いまま軽く取得する
-# ------------------------------------------------------------------------------
-test_propagate_full_history() {
-    echo ""
-    echo -e "${CLR_HEAD}[TEST] wf-propagate: 全履歴のリポジトリで、判定 → 伝播を続けて動かす${CLR_RST}"
-    local repo s_tiers s_merge r before after
-    s_tiers=$(_extract wf-propagate.yml tiers)
-    s_merge=$(_extract wf-propagate.yml merge_staging)
-    repo=$(_make_repo 'main\nstaging\n')
-    git -C "$repo" fetch -q origin
-    before=$(git -C "$repo" rev-parse origin/staging)
-    r=$(_run "$repo" "$s_tiers")
-    assert_output_contains "$r" "staging=true" "全履歴: 判定 → staging は有効"
-    assert_equals "$(git -C "$repo" rev-parse --is-shallow-repository)" "false" "全履歴: 判定のあとも、浅いリポジトリにならない"
-    r=$(_run "$repo" "$s_merge" TIER_ENABLED=true GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t)
-    assert_output_contains "$r" "result=success" "全履歴: 判定に続く伝播が成功する（unrelated histories にならない）"
-    assert_output_not_contains "$r" "unrelated histories" "全履歴: 伝播のマージで「unrelated histories」が出ない"
-    git -C "$repo" fetch -q origin
-    after=$(git -C "$repo" rev-parse origin/staging)
-    [[ "$after" != "$before" ]] && pass "全履歴: origin/staging が進む" || fail "全履歴: origin/staging が進む"
-    rm -rf "${repo%/work}"
-
-    # 浅いリポジトリ: 判定できて、浅いまま（全履歴を取りに行かない）
-    repo=$(_make_repo 'main\nstaging\n')
-    git -C "$repo" fetch -q --depth=1 origin
-    assert_equals "$(git -C "$repo" rev-parse --is-shallow-repository)" "true" "浅い: 前提（浅いリポジトリにした）"
-    r=$(_run "$repo" "$s_tiers")
-    assert_output_contains "$r" "staging=true" "浅い: 判定 → staging は有効"
-    assert_equals "$(git -C "$repo" rev-parse --is-shallow-repository)" "true" "浅い: 判定のあとも、浅いまま"
-    rm -rf "${repo%/work}"
-}
-
 test_structure
 test_release
 test_validate
-test_propagate
-test_propagate_full_history
 
 print_summary

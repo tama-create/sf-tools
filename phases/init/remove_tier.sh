@@ -3,7 +3,7 @@
 # remove_tier.sh - 段階を外す（sf-init.sh --remove-tier staging|develop [--purge-secrets]）
 # ==============================================================================
 # 既存のプロジェクト（force-*）から、段階 staging または develop を外す。設計は doc/tier-scaling-design.md の 5 章。
-# 本体は、sf-tools/config/branches.txt からその段階の行を消す PR を作ることだけ。PR をマージすると、伝播・リリース・PR の検証が
+# 本体は、sf-tools/config/branches.txt からその段階の行を消す PR を作ることだけ。PR をマージすると、リリース・PR の検証が
 # 止まる（workflow が、origin/main の branches.txt で段階を判定するため。同 3 章）。ブランチ・Secrets / Variables・Ruleset・
 # Salesforce 組織の中のものは、変えない（戻すときは --add-tier で、接続情報が残っていれば、行を戻すだけで済む）。
 # --purge-secrets は、行を消す PR のマージ後に、その段階の接続情報（Secrets / Variables）を消す、別のモード。
@@ -20,9 +20,10 @@
 #        その段階の行がない → die（すでに外れている）
 #        staging を外すのに、develop の行がある → die（develop を先に外す）
 #   3. origin/main の workflow が、段階の切り替えに対応しているかを確かめる（同 5.2 の 3）:
-#        wf-propagate.yml・wf-release.yml・wf-validate.yml: 判定の部分（# >>> sf-tools: tier-switch v1 〜 # <<<）が、
+#        wf-release.yml・wf-validate.yml: 判定の部分（# >>> sf-tools: tier-switch v1 〜 # <<<）が、
 #          この sf-tools の雛形と同じ（行頭の空白を除いて比べる）で、判定の呼び出しの印（# sf-tools: tier-check）がある
 #        wf-metasync.yml: sf-metasync.sh を呼んでいて、workflow の中に（コメントの行を除いて）git push がない
+#        wf-propagate.yml: ない（廃止。残っていれば、対応していない扱い）
 #      満たさないファイルがあれば、INFO で、そのファイル名と、sf-sync-wf.sh で workflow を main まで入れてから実行すること、を
 #      表示して die
 #   4. 影響を表示する（読み取りのみ。読めないものは WARNING を出して続ける）:
@@ -179,7 +180,7 @@ bad_wf=$(tier_switch_wf_problems)  # VAR=$(cmd) のため run 不使用（init-c
 if [[ -n "$bad_wf" ]]; then
     log "INFO" "origin/main の workflow が、段階の切り替えに対応していません（または、雛形と違います）: ${bad_wf}"
     log "INFO" "  sf-tools を更新し、作業用のブランチで sf-sync-wf.sh を実行して、workflow を main まで入れてから、実行してください。"
-    log "INFO" "  （古い workflow のままでは、branches.txt から行を消しても、伝播・リリース・検証は止まりません）"
+    log "INFO" "  （古い workflow のままでは、branches.txt から行を消しても、リリース・検証は止まりません。廃止した wf-propagate.yml は sf-sync-wf.sh --remove で消します）"
     die "origin/main の workflow が、段階の切り替えに対応していません: ${bad_wf}"
 fi
 log "SUCCESS" "origin/main の workflow は、段階の切り替えに対応しています。"
@@ -225,7 +226,7 @@ fi
 # ------------------------------------------------------------------------------
 # 5. 管理者向けの警告と確認（CLAUDE.md 2.4）。GITHUB_ACTIONS=true のときも、省略しない
 # ------------------------------------------------------------------------------
-print_admin_warning "!!  このコマンドは管理者専用です" "    段階 ${REMOVE_TIER} を外す PR を作ります" "    （マージすると、伝播・リリース・検証が止まります）"
+print_admin_warning "!!  このコマンドは管理者専用です" "    段階 ${REMOVE_TIER} を外す PR を作ります" "    （マージすると、リリース・検証が止まります）"
 log "INFO" "変えるのは、branches.txt の PR だけです。ブランチ・Secrets / Variables・Ruleset・Salesforce 組織は、変えません。"
 check_gh_owner "${REPO_FULL_NAME%%/*}"
 ask_yn "  続行しますか？" || die "中断しました。"
@@ -260,7 +261,7 @@ run git push --no-verify -u origin "$PR_BRANCH" || die "git push に失敗しま
 
 PR_URL=$(run gh pr create --base main --head "$PR_BRANCH" -R "$REPO_FULL_NAME" \
     --title "chore: ${REMOVE_TIER} tier を外す" \
-    --body "branches.txt から ${REMOVE_TIER} を外します（sf-init.sh --remove-tier ${REMOVE_TIER} で作成）。マージすると、${REMOVE_TIER} への伝播・リリース・PR の検証が止まります。ブランチ・接続情報（Secrets / Variables）・Ruleset は残すので、sf-init.sh --add-tier ${REMOVE_TIER} で戻せます。") \
+    --body "branches.txt から ${REMOVE_TIER} を外します（sf-init.sh --remove-tier ${REMOVE_TIER} で作成）。マージすると、${REMOVE_TIER} へのリリース・PR の検証が止まります。ブランチ・接続情報（Secrets / Variables）・Ruleset は残すので、sf-init.sh --add-tier ${REMOVE_TIER} で戻せます。") \
     || die "PR の作成に失敗しました。"  # VAR=$(cmd) のため、PR の URL を取得する
 
 # 8. 実行前のブランチに戻る
@@ -269,7 +270,7 @@ run git checkout "$ORIGINAL_BRANCH" || die "${ORIGINAL_BRANCH} ブランチへ�
 # 9. 次にすること
 log "SUCCESS" "段階を外す PR を作りました: ${PR_URL}"
 log "INFO"    "次のステップ:"
-log "INFO"    "  1. PR をマージすると、${REMOVE_TIER} への伝播・リリース・PR の検証が止まります"
+log "INFO"    "  1. PR をマージすると、${REMOVE_TIER} へのリリース・PR の検証が止まります"
 log "INFO"    "  2. 残したもの: ${REMOVE_TIER} ブランチ・接続情報（Secrets / Variables）・Ruleset・組織の外部クライアントアプリ"
 log "INFO"    "  3. 戻すとき: sf-init.sh --add-tier ${REMOVE_TIER}（接続情報が残っていれば、つなぎ直さずに戻せます）"
 log "INFO"    "  4. 接続情報を消すとき: PR のマージ後に sf-init.sh --remove-tier ${REMOVE_TIER} --purge-secrets"

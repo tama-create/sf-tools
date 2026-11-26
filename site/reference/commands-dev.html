@@ -246,6 +246,7 @@ sf-launcher.sh --fzf     # fzf でインクリメンタル検索</code></pre>
   <li><code>deploy-target.txt</code> / <code>remove-target.txt</code> があるかを確かめ、<code>sf-check.sh</code> で検証する（<code>branch_name.txt</code> か、どちらかのファイルがないとき・エラーのときは、中断する）</li>
   <li>既存の <code>package.xml</code> / <code>destructiveChanges.xml</code> を削除してから、マニフェストを作る。両方のファイルに対象が 1 件もなければ、「デプロイ対象なし。正常終了します。」と表示して、正常（終了コード 0）で終わる</li>
   <li>作った 2 つのマニフェストの両方に、同じもの（種類と名前）があれば、その一覧を表示して中断する（組織には送らない）。削除が反映より先に行われるため、消したものを反映で作り直し、項目なら中のデータだけが消えるのを防ぐ。<code>deploy-target.txt</code> にオブジェクトの本体やフォルダを書くと、配下の項目が全部、反映に入るため起きる（<a href="target-files.html">ターゲットファイル</a>）</li>
+  <li>削除の対象のうち、組織にないもの（すでに消えたもの）を、確かめられたものだけ外す（種類ごとに <code>sf org list metadata</code> を 1 回。外したものは WARNING で表示する。下の補足）。すべて外れたら削除を行わず、反映するものもなければ、何もせずに成功する。<code>remove-target.txt</code> に <code># @ignore-missing</code> があれば、この確認をしない</li>
   <li>テストクラスを検出する（上の囲み）</li>
   <li>（<code>-n</code> がなければ）組織のデプロイ状況の画面（<code>lightning/setup/DeployStatus/home</code>）を、ブラウザで開き、5 秒待つ</li>
   <li><code>sf project deploy start --manifest package.xml</code> を実行する。削除対象があれば、<code>--pre-destructive-changes</code> で渡す（削除は、デプロイより先に行われる）。検証モードなら <code>--dry-run</code> を付ける。失敗すれば中断する</li>
@@ -254,7 +255,15 @@ sf-launcher.sh --fzf     # fzf でインクリメンタル検索</code></pre>
 <ul>
   <li>マニフェストは、<code>[files]</code> の行を <code>--source-dir</code>、<code>[members]</code> の行を <code>--metadata</code> として、別々に <code>sf project generate manifest</code> で作り、1 つの XML にまとめます（両方を同時に渡すと、<code>sf</code> は共通の部分だけを返すため）。まとめたあとにメンバーが 1 つもなければ、エラーで中断します（「変更なし」の成功として、見落とさないため）。</li>
   <li><code>deploy-target.txt</code> が空で、<code>remove-target.txt</code> にだけ対象があるときは、メンバーのない <code>package.xml</code>（version 60.0）を作り、削除だけを行います。</li>
-  <li>組織にない削除対象をエラーにしたくないとき（後始末など）は、<code>remove-target.txt</code> に <code># @ignore-missing</code> で始まるコメント行（行頭・<code>#</code> の後の空白は可）を書きます。<code>sf project deploy start</code> に <code>--ignore-warnings</code> が付き、削除以外の警告も、エラーになりません。通常のリリース・削除では、付けないでください（綴りの誤りを、見落とさないためです）。</li>
+  <li>削除の対象のうち、組織にないもの（すでに消えたもの）は、自動で外します。同じブランチで削除を含む変更を何度も出すと（develop に出したあと続きを出す・自分の組織で Deploy したあと Dryrun する）、2 回目からは消す対象がなく、Salesforce が「No ApexClass named: X found」で全体を失敗にするためです。
+    <ul>
+      <li>種類ごとに <code>sf org list metadata</code> で組織の一覧を取り、名前がないものだけを外します（大文字・小文字は区別しません）。</li>
+      <li>確かめられないものは外しません: 一覧が取れない種類（WARNING が出ます）・フォルダの中の種類（Report・Dashboard・Document・EmailTemplate）・<code>*</code>・英数字と <code>_</code> <code>.</code> <code>-</code> 以外を含む名前。消すはずのものが黙って残らないよう、迷うものは残す側に倒します。</li>
+      <li>外したものは、WARNING で 1 件ずつ表示し、デプロイのあとにもう一度表示します。GitHub Actions では、実行の要約にも書きます。<code>[members]</code> の名前の書き間違いも、ここに出るので、消したいものが混ざっていないか確かめてください。</li>
+      <li>すべて外れたら、削除は行いません。反映するものもなければ、何もせずに成功します。</li>
+    </ul>
+  </li>
+  <li>組織にない削除対象を、Salesforce に任せたいとき（後始末など）は、<code>remove-target.txt</code> に <code># @ignore-missing</code> で始まるコメント行（行頭・<code>#</code> の後の空白は可）を書きます。上の自動で外す確認はせず、<code>sf project deploy start</code> に <code>--ignore-warnings</code> が付き、削除以外の警告も、エラーになりません。通常のリリース・削除では、付けないでください。</li>
   <li><code>sf-check.sh</code> の出力（どの行が、なぜエラーか）は、<code>-v</code> がなくても画面に出ます（<code>sf-release.log</code> には残りません）。</li>
   <li><code>-h</code> / <code>--help</code> は、1 つ目の引数なら、ほかの処理の前に説明を表示します。2 つ目以降なら、手順 1 のあとの引数の解析で、そこに来た時点で表示します（それより前の引数がエラーなら、そのエラーで中断します）。</li>
   <li>終了コードは、成功（対象なしを含む）が <code>0</code>、中断・失敗が <code>1</code> です。ログは <code>./sf-tools/logs/sf-release.log</code> に、毎回上書きされます。</li>
@@ -326,63 +335,64 @@ sf-launcher.sh --fzf     # fzf でインクリメンタル検索</code></pre>
 
 <h2 id="sf-next"><code>sf-next.sh</code></h2>
 <pre><code>sf-next.sh [-v]</code></pre>
-<p>現在の作業用のブランチが、ブランチの階層（<code>sf-tools/config/branches.txt</code>。例: <code>develop</code> / <code>staging</code> / <code>main</code>）のどこまでマージ済みかを確認し、次に出すべき PR 先のブランチを案内します。<code>force-*</code> フォルダの中で実行します。<code>-v</code>（<code>--verbose</code>）・<code>-h</code>（<code>--help</code>。1 つ目の引数のときだけ）以外の引数は、「不明なオプションです」で中断します。</p>
+<p>現在の作業用のブランチの<strong>先端のコミット</strong>が、どの段階（<code>develop</code> → <code>staging</code> → <code>main</code>）まで出たかを確かめ、次に PR を出してよい段階を案内します。<code>force-*</code> フォルダの中で実行します。<code>-v</code>（<code>--verbose</code>）・<code>-h</code>（<code>--help</code>。1 つ目の引数のときだけ）以外の引数は、「不明なオプションです」で中断します。</p>
+<p>開発したものは、<strong>一方通行</strong>で、同じコミットのまま <code>develop</code> → <code>staging</code> → <code>main</code> と上げます（<a href="../admin/workflows.html#one-way">一方通行の決まり</a>）。判定は、自分では計算せず、ワークフローと同じ <a href="#sf-promote-check"><code>sf-promote-check.sh --plan</code></a> に任せます。</p>
 
 <h3>表示されるステータス</h3>
-<p>見出し「<code>&lt;現在のブランチ&gt; のマージ状況</code>」の下に、マージの順で 1 行ずつ表示します（標準エラーに出します）。</p>
+<p>見出し「<code>&lt;現在のブランチ&gt; のリリース状況（先端のコミット）</code>」の下に、段階を下から順に 1 行ずつ表示します（標準エラーに出します。段階は、GitHub の <code>main</code> の <code>branches.txt</code> の構成にあるものだけ）。</p>
 <table>
   <thead><tr><th>記号</th><th>表示</th><th>説明</th></tr></thead>
   <tbody>
-    <tr><td><code>✓</code></td><td>マージ済み</td><td>現在のブランチ → 対象のブランチの PR が、マージ済み（デプロイのワークフローも実行済み）</td></tr>
-    <tr><td><code>▶</code> / <code>✗</code></td><td>マージ済み・その後の変更（N コミット）が未反映</td><td>PR はマージ済みだが、そのあとに同じブランチへ足したコミットが、まだ対象のブランチに入っていない。最初のものは「→ 次のPR先」が付き、<strong>もう一度、そのブランチへ PR を出す</strong>（同じブランチで、develop へのリリースを繰り返す使い方）。数えられないときは、N なし</td></tr>
-    <tr><td><code>✓</code></td><td>マージ済み（ブランチ同期）</td><td>現在のブランチのコミットが、すでに対象のブランチに含まれている（直接の PR はないが、別のブランチ経由で伝わったなど）。<strong>この PR のデプロイのワークフローは、未実行</strong></td></tr>
-    <tr><td><code>⚠</code></td><td>マージ済み（順序外）</td><td>マージ済みだが、マージの順で前のブランチに、まだマージ済みでないもの（ブランチ同期・PR 発行中・未着手）がある。<strong>前のブランチのデプロイは、未実行</strong></td></tr>
-    <tr><td><code>→</code></td><td>PR発行中</td><td>PR を出してあり、マージを待っている</td></tr>
-    <tr><td><code>▶</code></td><td>次のPR先</td><td>まだ PR を出していないブランチのうち、最初のもの。次に PR を出すべきブランチ</td></tr>
-    <tr><td><code>✗</code></td><td>（文言なし）</td><td>まだ PR を出していないブランチの、2 つ目以降</td></tr>
+    <tr><td><code>✓</code></td><td>リリース済み（このコミット）</td><td>先端のコミットに、その段階の「リリースの印」がある（その段階への PR がマージされ、<code>wf-release</code> のリリースが成功した）</td></tr>
+    <tr><td><code>▶</code></td><td>次のPR先</td><td>印のない、いちばん下の段階。次に PR を出す段階</td></tr>
+    <tr><td><code>→</code></td><td>PR発行中（#N）</td><td>次の PR 先へ、PR を出してあり、マージを待っている</td></tr>
+    <tr><td><code>✗</code></td><td>（文言なし）</td><td>次の PR 先より上の段階</td></tr>
   </tbody>
 </table>
+<p>表示の例（<code>develop</code> にリリース済み・<code>staging</code> が次）:</p>
+<pre><code>    ✓ develop   リリース済み（このコミット）
+    ▶ staging   次のPR先
+    ✗ main</code></pre>
 
 <h3>判定の方法</h3>
-<p>マージの順（<code>branches.txt</code> の順序を逆にしたもの。例: <code>develop → staging → main</code>）に、各ブランチを次の順で判定します。判定の前に、<code>git fetch</code>（<code>branches.txt</code> の全ブランチを、1 回のコマンドで）でリモートの最新を取得し、<code>gh pr list</code> で、マージ済み・オープンの PR を、それぞれ最新 50 件取得します。</p>
-<ol>
-  <li>現在のブランチ → 対象ブランチの<strong>直接の PR</strong> が、マージ済みにある → いまの HEAD が、マージ済みの内容に含まれれば「マージ済み」。含まれなければ（マージのあとに、コミットを足した）、同じ向きのオープンの PR があれば「PR発行中」、なければ「その後の変更が未反映」（次の PR 先にする）。<br>「含まれる」は、HEAD が、マージ済みの PR の最後のコミットと同じか、その祖先か、<code>origin/&lt;対象ブランチ&gt;</code> の祖先であること。PR の最後のコミットでも比べるので、Squash・Rebase でマージした場合も、正しく判定します</li>
-  <li><code>git merge-base --is-ancestor HEAD origin/&lt;対象ブランチ&gt;</code> が真（コミットがすでに含まれている） → 「マージ済み（ブランチ同期）」</li>
-  <li>直接の PR が、オープンにある → 「PR発行中」</li>
-  <li>どれにも当てはまらなければ → 「次のPR先」または「未着手」</li>
-</ol>
-<p>そのあと、マージ済みのブランチより前（マージの順）に、マージ済みでないブランチ（「その後の変更が未反映」を含む）があれば、そのマージ済みを「順序外」にします。</p>
-
-<h3>順序外のマージの制約</h3>
-<div class="box warn">
-  <div class="title"><code>develop → staging → main</code> の順番を守らずにマージすると、飛ばしたブランチへのデプロイは、できなくなります</div>
-  <ul>
-    <li>上位のブランチ（例: <code>main</code>）にマージすると、コードが下位のブランチ（例: <code>staging</code>）に伝わります。</li>
-    <li>伝わったあとは「差分なし」になり、feature → staging の直接 PR を作れなくなります。</li>
-    <li>デプロイのワークフローは、直接 PR のマージで起動するため、伝わっただけでは動きません。</li>
-  </ul>
-  <p><strong>飛ばしたブランチにデプロイしたいときは、新しいブランチを切って、順序どおりに PR を出し直します。</strong></p>
-</div>
-<h4>順序外の PR を、レビュアーが見つける仕組み（<code>wf-sequence</code>）</h4>
-<p><code>sf-next.sh</code> を使う限り、PR の先は「次の段階」だけです。ランチャーを使わず、GitHub 上で直接 PR を作って段階を飛び越したときは、<code>main</code> / <code>staging</code> への PR を作った時点で、次のようにレビュアーに知らせます。</p>
-<table>
-  <thead><tr><th>通知先</th><th>内容</th></tr></thead>
-  <tbody>
-    <tr><td>PR の会話欄</td><td>「⚠️ マージ順序の確認が必要です。意図的でなければ、この PR は却下してください」というコメント（同じ PR では、既存のコメントを更新します）</td></tr>
-    <tr><td>Slack</td><td>通知</td></tr>
-  </tbody>
-</table>
-<p>マージは止めません（緊急の Hotfix を妨げないため。Free プランの Private リポジトリでは、GitHub がそもそも止められません）。<strong>気づいたレビュアーが、PR を却下します。</strong></p>
+<ul>
+  <li>リリースの印は、<code>wf-release</code> が、組織へのリリースに成功したときに、PR の先端のコミットに付ける、コミットの状態（commit status <code>sf-tools/released-&lt;段階&gt;</code>）です。人が付けた印・ほかのワークフローの印は、無視します。</li>
+  <li><strong><code>develop</code> に出したあとで変更して push すると、先端のコミットが変わり、新しいコミットには印がないので、次の PR 先は <code>develop</code> に戻ります</strong>（<code>develop</code> で確かめたものだけを、上に上げるためです）。</li>
+  <li>次の PR 先で、積み重ねの決まり（R2）も確かめます。同じブランチから、前にその段階へ出した部品を、ターゲットファイルから外していれば、抜けた部品を表示して、PR を勧めずに止まります（終了コード 1）。</li>
+  <li>上の段階にだけ印があり、下の段階にない（原則に反する状態）・push していない変更がある（手元と <code>origin</code> の先端が違う）・<code>origin</code> や PR の一覧が取れない・<code>branches.txt</code> の構成が正しくない、のときは、理由を表示して止まります（判断できないときは、止めます）。</li>
+</ul>
+<h4>順序を飛ばした PR を止める仕組み（<code>wf-sequence</code>・<code>wf-release</code>）</h4>
+<p><code>sf-next.sh</code> を使う限り、PR の先は「次の段階」だけです。ランチャーを使わず、GitHub 上で直接 PR を作って段階を飛び越したときは、<code>main</code> / <code>staging</code> への PR の時点で、<code>wf-sequence</code> の必須チェック「順序チェック」が<strong>失敗します</strong>（PR の会話欄に「⛔ 一方通行の決まりにより、この PR はマージできません」・Slack の通知）。ブランチ保護が効かない組織などで、マージしてしまっても、<code>wf-release</code> が組織へ出しません（最後の守り）。緊急の修正（Hotfix）も、例外にしません。</p>
 <h3>補足</h3>
 <ul>
   <li>保護ブランチ（<code>sf-tools/config/branches.txt</code> に書かれたブランチ。ファイルがない・空のときは <code>main</code>）の上と、ブランチを取得できないとき（detached HEAD など）は、エラーで終了します。</li>
-  <li>次の PR 先があるときは、「<code>&lt;次の PR 先&gt;</code> にPRを出しますか？」と確認します（Y/N/q）。次の PR 先がマージの順の 2 つ目以降（例: <code>staging</code>・<code>main</code>）のときは、前に「<code>&lt;1 つ前のブランチ&gt;</code> の組織で、動作を確かめ終えましたか？」が付きます（「マージ済み」の表示だけを見て、確かめずに上の段階へ上げるのを防ぐため。確認の回数は増えません）。<code>Y</code> で、<code>&lt;origin の URL&gt;/compare/&lt;次の PR 先&gt;...&lt;現在のブランチ&gt;?expand=1</code>（PR の作成画面）を、ブラウザで開き、URL も表示します（PR そのものは、作りません）。<code>N</code> は何もせず終了、<code>q</code> は中断（終了コード 1）です。</li>
+  <li>ターゲットファイル（<code>deploy-target.txt</code>・<code>remove-target.txt</code>）に対象がないときは、「出すものがありません」と表示して終わります。</li>
+  <li>次の PR 先があるときは、「<code>&lt;次の PR 先&gt;</code> にPRを出しますか？」と確認します（Y/N/q）。次の PR 先がいちばん下の段階でないとき（例: <code>staging</code>・<code>main</code>）は、前に「<code>&lt;1 つ前の段階&gt;</code> の組織で、動作を確かめ終えましたか？」が付きます（印の表示だけを見て、確かめずに上の段階へ上げるのを防ぐため。確認の回数は増えません）。<code>Y</code> で、<code>&lt;origin の URL&gt;/compare/&lt;次の PR 先&gt;...&lt;現在のブランチ&gt;?expand=1</code>（PR の作成画面）を、ブラウザで開き、URL も表示します（PR そのものは、作りません）。<code>N</code> は何もせず終了、<code>q</code> は中断（終了コード 1）です。</li>
   <li>開く URL は、<code>origin</code> の URL から作ります（URL に含まれる認証情報（<code>//&lt;ユーザー&gt;:&lt;Token&gt;@</code>）は除き、SSH の形は <code>https://github.com/</code> に直します）。<code>origin</code> の URL を取得できないときは、エラーで終了します。</li>
-  <li>PR の状態の判定には、認証済みの <code>gh</code> が必要です。<code>gh</code> が使えないなど、取得に失敗したときは、警告を出さずに「PR なし」として判定します。</li>
-  <li>リモートの最新を取得できなかったときは、警告を出して続行し、手元の <code>origin/*</code> で判定します。</li>
-  <li>次の PR 先がないときは、「PR発行中」が残っていれば「マージ完了を待ってください」、なければ「全ブランチへのマージが完了しています！」と表示して終わります。</li>
-  <li>終了コードは、正常終了（<code>N</code> で終了した場合を含む）が <code>0</code>、エラー・<code>q</code> での中断が <code>1</code> です。ログは <code>./sf-tools/logs/sf-next.log</code> です（実行のたびに作り直します）。</li>
+  <li>次の PR 先へ、PR が開いているときは、「発行済みです。検証が緑になってから、マージしてください」と表示して終わります。全段階に印があれば、「全段階にリリース済みです！」と表示して終わります。</li>
+  <li>認証済みの <code>gh</code> が必要です（リリースの印・PR の一覧を読みます）。</li>
+  <li>終了コードは、正常終了（<code>N</code> で終了した場合を含む）が <code>0</code>、エラー・<code>q</code> での中断・決まりを破っているときが <code>1</code>、AI 操作の確認待ちが <code>20</code> です。ログは <code>./sf-tools/logs/sf-next.log</code> です（実行のたびに作り直します）。</li>
   <li>AI 操作（環境変数 <code>SF_TOOLS_AI=1</code>）では、PR を出すかの質問の名前は <code>next.pr</code> です。<code>SF_TOOLS_ANSWERS="next.pr=n"</code> で状況の表示だけ、<code>"next.pr=y"</code> で PR の作成画面を開きます。答えがなければ、ブラウザを開く前に、終了コード 20 で止まります。</li>
+</ul>
+
+<h2 id="sf-promote-check"><code>sf-promote-check.sh</code></h2>
+<pre><code>sf-promote-check.sh --pr &lt;PR 番号&gt; [--only sequence|stack] [--json] [-v]   # ワークフロー用
+sf-promote-check.sh --plan [--json] [-v]                                      # sf-next 用</code></pre>
+<p>一方通行のリリースの決まり（<a href="../admin/workflows.html#one-way">R0〜R3</a>）を確かめる、判定の本体です（ここ 1 か所。<code>wf-sequence</code>・<code>wf-validate</code>・<code>wf-release</code>・<code>sf-next.sh</code> が呼びます）。読み取りのみで、組織・GitHub を変えません。ふだん、手で実行することはありません（<code>sf-next.sh</code> が <code>--plan</code> で呼びます）。<code>force-*</code> のプロジェクトのルートで実行します。</p>
+<table>
+  <thead><tr><th>オプション</th><th>意味</th></tr></thead>
+  <tbody>
+    <tr><td><code>--pr &lt;番号&gt;</code></td><td>その PR を確かめます。PR の先端のコミット・ブランチ・マージ先・フォークかは、引数ではなく、<code>gh pr view</code> で GitHub から読みます（違う値を渡して通せないように）</td></tr>
+    <tr><td><code>--only sequence</code> / <code>--only stack</code></td><td>ワークフローの間の分担です（規則を選ぶ機能ではありません）。<code>sequence</code> = R0・R1・R3（<code>wf-sequence</code>）、<code>stack</code> = R0・R2（<code>wf-validate</code>）。付けなければ R0〜R3 のすべて（<code>wf-release</code>）。ほかの値・2 回の指定・空は、終了コード 2</td></tr>
+    <tr><td><code>--plan</code></td><td>手元のブランチについて、次に出してよい段階を計算します（PR は作りません）。段階を下から順に見て、先端のコミットに印がない最初の段階を「次」にし、その段階で R2 も確かめます</td></tr>
+    <tr><td><code>--json</code></td><td>結果を、標準出力に JSON で 1 行で出します（画面の表示は、標準エラー）</td></tr>
+  </tbody>
+</table>
+<ul>
+  <li>段階の並びは、<code>origin/main</code> の <code>sf-tools/config/branches.txt</code> を厳密に読んで決めます（ファイルがない・<code>main</code> の行がない・<code>develop</code> があって <code>staging</code> がない、のときは、判断できないとして止めます）。</li>
+  <li>積み重ね（R2）の部品は、前のリリースのコミットの作業ツリー（一時的な <code>git worktree</code>）で、そのときのターゲットファイルから、<code>sf-release.sh</code> と同じ方法（<code>lib/manifest.sh</code>）でマニフェストを作って比べます（組織には問い合わせません）。R2 を確かめるときは、Salesforce CLI（<code>sf</code>。npm 版）が要ります。</li>
+  <li>ターゲットファイルが空なら、どの規則も確かめず、スキップします（終了コード 0）。</li>
+  <li>終了コード: <code>0</code> = すべて満たす（またはスキップ）／ <code>1</code> = 破った（理由を <code>[R1]</code> などの印つきで表示）／ <code>2</code> = 判断できない（<code>[R0]</code>）。ログは <code>./sf-tools/logs/sf-promote-check.log</code> です。</li>
 </ul>
 
 <h2 id="sf-restart"><code>sf-restart.sh</code></h2>

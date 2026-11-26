@@ -3,6 +3,7 @@
 > **ステータス: 実装済み（2026-11-22。development へ未反映・rr 待ち）。** 設計の正本は本書、処理の流れの正本は各スクリプトの冒頭コメント（`phases/init/remove_tier.sh`・`add_tier.sh`・`status.sh`・`lib/project.sh` の `get_tier_list`・3 つの workflow）。
 > 目的: `sf-tools/config/branches.txt` を、段階（main / staging / develop）の**唯一のスイッチ**にする。行を足せば段階が動き、消せば止まる。減らすための `sf-init.sh --remove-tier` を作る（足すための `--add-tier` は既存）。
 > きっかけ: TAMAさんが、検証環境（force-test-win・force-test-mac）を 3 段階から 2 段階にして、develop の組織を開発用（AI の開発サイクル。`doc/sf-log-design.md`）に回したい。セットアップのやり直しなしに、増やしたり減らしたりできる設計にしたい。
+> **2026-11-26 追記（一方通行のリリース）:** 下りの伝播（`wf-propagate.yml` と、`sf-metasync.sh` の手順 12。main の変更を staging・develop のブランチへ流す）は**廃止した**。本書の伝播の記述は、当時の設計の記録として残す。今の決まりは `doc/one-way-promotion-design.md`（develop → staging → main に同じコミットのまま上げる・リリースの印・R0〜R3）。
 
 ## 1. 現状の問題
 

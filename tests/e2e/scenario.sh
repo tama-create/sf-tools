@@ -28,8 +28,11 @@
 #   metasync-diff  : 組織側だけに Hello World の Apex を作る → wf-metasync を起動 → main に反映される（B3）。組織・main に書き込む。
 #                    run.sh のあと、main には、Hello World のファイルが残っている（リリースの履歴）。いったん外し（組織側だけの差分にするため）、
 #                    終了時に、組織の Apex を削除し、main を、実行前の状態（Hello World のファイルの有無）に戻す
-#   propagate-fail : main と staging に、同じファイルの、違う内容を入れて、wf-propagate を起動 → コンフリクトで失敗し、Slack に通知され、
-#                    staging は変わらない（X4-5）。main・staging に、コミットする（終了時に、そのファイルを削除する。2 層以上のリポジトリが要る）
+#   one-way        : 一方通行のリリースの決まり（doc/one-way-promotion-design.md 7 章）。P = いちばん下の有効な段階・N = その次の段階で、
+#                    開発のブランチ（e2e-ow-時刻）を P へ出す → リリースの印が付く → 部品を外して P へ PR → wf-validate が失敗（R2）→
+#                    戻して（先端のコミットが変わる）N へ PR → wf-sequence の「順序チェック」が失敗（R1）・⛔ のコメント →
+#                    そのままマージ → wf-release が止める（N の組織へ出さない・印なし・Slack 通知）。2 段階以上のリポジトリと、P・N の組織が要る。
+#                    終了時に、P の組織のクラスを消し、P・N に入れたファイル・ブランチ・PR を片付ける（書き込みあり）
 #   restart-org    : sf-restart.sh で、ジョブのクローンの接続先を、別の組織（staging の組織）に切り替える → 接続先が変わり、sf-dryrun が新しい組織を使う → 元の組織に戻す（A8。
 #                    鍵一式に staging の組織があるときだけ。ログインは、認証 URL への差し替え。終了時に、必ず、元の組織へ戻す）
 #   update-secret  : 管理者用のクローンで、sf-update-secret.sh の「1) 秘密鍵」を、同じ秘密鍵（~/.sf-jwt/force-XXXX/server.key）で実行 → Secret SF_PRIVATE_KEY の
@@ -45,8 +48,9 @@
 #   tier-switch    : 段階の切り替え（doc/tier-scaling-design.md 9.1）。対象は、いちばん下の有効な段階（3 段階なら develop・
 #                    2 段階なら staging。CI の e2e は、1 層で作って --add-tier staging したリポジトリのため、staging）。
 #                    管理者用のクローンで sf-init.sh --remove-tier <対象> → PR をマージ →
-#                    main のマージで動く wf-propagate が対象に伝播しない・対象への PR の wf-validate が「デプロイ検証」を skipped にする・
-#                    そのマージの wf-release と、対象での手動の実行が「リリース実行」を skipped にする（組織に書き込まない）→
+#                    対象のブランチの先頭が変わらない（下りの伝播はしない）・対象への PR の wf-validate が「デプロイ検証」を skipped にする・
+#                    そのマージの wf-release が「リリース実行」を skipped にする（組織に書き込まない）・wf-release は手動で実行できない
+#                    （workflow_dispatch がない。PR を通らずに組織へ出す道はない）→
 #                    sf-init.sh --add-tier <対象>（接続情報が残っているので、つなぎ直さずに戻す）→ PR をマージ → 対象への PR が、また検証される。
 #                    2 段階以上（main の branches.txt に staging がある）のリポジトリが要る。段階を変えるため、最後に実行する。
 #                    終了時に、main の branches.txt を元に戻し、PR を閉じ、作ったブランチと、対象に足したファイルを消す（書き込みあり）
@@ -87,7 +91,7 @@ source "${E2E_SCRIPT_DIR}/lib.sh"
 # ------------------------------------------------------------------------------
 # 1. シナリオの一覧
 # ------------------------------------------------------------------------------
-SCENARIO_NAMES="log-secrets manual-delete update-secret sync-wf cross-os validate-fail dist-main metasync-diff propagate-fail restart-org tier-switch"   # 実行の順番どおり（tier-switch は段階を変えるため、最後）
+SCENARIO_NAMES="log-secrets manual-delete update-secret sync-wf cross-os validate-fail dist-main metasync-diff restart-org one-way tier-switch"   # 実行の順番どおり（tier-switch は段階を変えるため、最後）
 _scn_desc() {
     case "$1" in
         log-secrets)   echo "Actions のログ・PR のコメントに、秘密情報が出ていない（読み取りのみ）" ;;
@@ -95,12 +99,12 @@ _scn_desc() {
         validate-fail) echo "壊れた Apex の PR で wf-validate が失敗し、コメントが付く → 直すと成功する（ブランチと PR を作り、後で閉じる）" ;;
         dist-main)     echo "配布版（SF_TOOLS_BRANCH 未設定）で、sf-tools の main が使われる。rr の直後だけ（Variable を一時的に削除し、戻す）" ;;
         metasync-diff) echo "組織側だけの Apex が、wf-metasync で main に反映される（組織と main に書き込み、必ず戻す）" ;;
-        propagate-fail) echo "main → staging の伝播がコンフリクトで失敗し、通知され、staging は変わらない（main・staging にファイルを置き、削除する）" ;;
+        one-way)       echo "一方通行の決まり: 印が付く・積み重ねの抜けで検証が失敗・前の段階に出していないコミットは順序チェックが失敗・マージしても wf-release が止める（2 段階以上が要る）" ;;
         update-secret) echo "sf-update-secret で秘密鍵を同じ鍵で上書き → 更新日時が進む・ほかは変わらない・誤ったパスは拒否される（同じ値で上書き。あとのシナリオが、JWT ログインを確かめる）" ;;
         cross-os)      echo "リポジトリを clone して、OS 混在の問題を確認する: CRLF がない・フックが同じ内容で実行できる・sf-sync-wf --check が成功する（読み取りのみ）" ;;
         sync-wf)       echo "sf-sync-wf が、改変したワークフローを見つけて、雛形に戻す。--remove は、雛形にあるファイルを拒否し、不要なファイルだけ消す（クローンの中だけ）" ;;
         restart-org)   echo "sf-restart で接続先を staging の組織に切り替え、sf-dryrun が新しい組織を使う → 元に戻す（ジョブのクローンの接続設定を、一時的に変える）" ;;
-        tier-switch)   echo "--remove-tier（いちばん下の段階）→ その段階への伝播・検証・リリース（PR と手動）が止まる → --add-tier（つなぎ直さずに戻す）→ また検証される（2 段階以上のリポジトリが要る）" ;;
+        tier-switch)   echo "--remove-tier（いちばん下の段階）→ その段階への検証・リリースが止まる（手動の実行もできない） → --add-tier（つなぎ直さずに戻す）→ また検証される（2 段階以上のリポジトリが要る）" ;;
         *) echo "" ;;
     esac
 }
@@ -110,11 +114,11 @@ _scn_writes() {
         manual-delete) echo "Secret（SLACK_BOT_TOKEN）と Variable（SLACK_CHANNEL_ID）を、一時的に削除し、すぐに元に戻します" ;;
         validate-fail) echo "テスト用ブランチ（e2e-vf-時刻）と PR を作り、wf-validate を動かします（組織へは dry-run のみ。マージしない）。終了時に、PR を閉じ、ブランチを削除します" ;;
         dist-main)     echo "Variable SF_TOOLS_BRANCH を一時的に削除し、テスト用ブランチ（e2e-dm-時刻）と PR で wf-validate を動かします（dry-run のみ）。終了時に、Variable を戻し、PR を閉じ、ブランチを削除します" ;;
-        propagate-fail) echo "main と staging に、同じファイル（e2e-propagate-conflict.txt）の、違う内容をコミットし、wf-propagate を起動します（コンフリクトで失敗する想定）。終了時に、両方から、そのファイルを削除します" ;;
+        one-way)       echo "開発のブランチ（e2e-ow-時刻）と PR を作り、いちばん下の段階へマージして、その組織に Apex（SfToolsE2eHello・SfToolsE2eHelloTest）をリリースします。次の段階へも、止められた PR をマージします（wf-release が組織へ出さない想定）。終了時に、その組織の Apex を削除し、両方の段階に入れたファイル・ブランチを消します" ;;
         update-secret) echo "Secret SF_PRIVATE_KEY を、同じ秘密鍵（~/.sf-jwt/${REPO_NAME}/server.key）で上書きします（値は変わりません。更新日時だけが進みます）" ;;
         sync-wf)       echo "管理者用のクローンの .github/workflows を、一時的に改変し（wf-validate.yml に 1 行・不要なファイル e2e-obsolete.yml）、sf-sync-wf.sh で直します。GitHub・組織へは書き込みません。終了時に、HEAD の状態へ戻します" ;;
         restart-org)   echo "ジョブのクローンの接続先を、sf-restart.sh で、staging の組織に切り替え（sf のエイリアス sf-tools-e2e-restart-STG を、一時的に作る）、dry-run を行います。終了時に、元の組織へ戻し、エイリアスを元の状態にします" ;;
-        tier-switch)   echo "管理者用のクローンで、いちばん下の有効な段階（3 段階なら develop・2 段階なら staging）に sf-init.sh --remove-tier と --add-tier を実行し、その PR を main にマージします（main の branches.txt から、いったんその段階がなくなります）。その段階へのテスト用の PR（e2e-ts-時刻）をマージし、wf-release をその段階で手動の実行をします（組織へは書き込まない想定）。終了時に、branches.txt を元に戻し、PR を閉じ、ブランチとその段階に足したファイルを消します" ;;
+        tier-switch)   echo "管理者用のクローンで、いちばん下の有効な段階（3 段階なら develop・2 段階なら staging）に sf-init.sh --remove-tier と --add-tier を実行し、その PR を main にマージします（main の branches.txt から、いったんその段階がなくなります）。その段階へのテスト用の PR（e2e-ts-時刻）をマージします（組織へは書き込まない想定。wf-release を手動で実行できないことも確かめます）。終了時に、branches.txt を元に戻し、PR を閉じ、ブランチとその段階に足したファイルを消します" ;;
         metasync-diff) echo "テスト用の組織に Apex（SfToolsE2eHello・SfToolsE2eHelloTest）を直接デプロイし、wf-metasync を起動します。main に、その Apex のファイルが、コミットされます（main にすでにあるものは、いったん外します）。終了時に、組織の Apex を削除し、main を実行前の状態に戻します" ;;
         *) echo "" ;;
     esac
@@ -202,11 +206,12 @@ RESTORE_RESTART_CLONE=""   # 接続先を切り替えたジョブのクローン
 RESTORE_RESTART_ALIAS=""   # 元の接続先のエイリアス
 RESTORE_XOS_DIR=""     # cross-os が clone した一時フォルダ（終了時に、削除する。名前は e2e-xos.XXXXXX の形式だけ）
 RESTORE_SYNCWF_CLONE=""   # ワークフローを改変した管理者用のクローン（終了時に、.github/workflows を HEAD の状態へ戻し、不要なファイルを消す）
-RESTORE_PROP_FILE=0    # 1: main・staging に、propagate-fail のファイルを置いた（終了時に、両方から削除する）
+RESTORE_OW_BRANCH=""   # one-way: 作った開発のブランチ（e2e-ow-時刻。終了時に消す）
+RESTORE_OW_APEX_TIER="" # one-way: Hello World をリリースした段階（終了時に、その組織から Apex を削除する）
+RESTORE_OW_FILES=""    # one-way: 段階のブランチに入れたファイル（「段階:パス」の空白区切り。終了時に消す。実行前から有ったものは含めない）
 RESTORE_MAIN_KEEP=""   # 実行前に main に有った Hello World のファイル（スペース区切り。終了時に、元の本文で戻す）
 SCN_SF_TMP=""          # sf を使うシナリオの一時フォルダ（エイリアスの保存先を含む。終了時に、エイリアスを戻し、削除する）
 SCN_OBSOLETE_WF="e2e-obsolete.yml"   # sync-wf が、クローンに置く、雛形にないワークフロー（終了時に消す）
-SCN_PROP_FILE="e2e-propagate-conflict.txt"   # propagate-fail が、main・staging に置くファイル
 SCN_ALLOW_MAIN_COMMITS=0   # 1: このシナリオは、main にコミットが増えてよい（wf-metasync が反映するため）。main の SHA の比較から外す
 RESTORE_TIER_NAME="develop" # tier-switch: 対象の段階（いちばん下の有効な段階。develop か staging。後始末が使う）
 RESTORE_TIER_ORIG=""       # tier-switch: main の branches.txt の元の中身（空でなければ、終了時に、対象の段階がないとき書き戻す）
@@ -347,16 +352,40 @@ _scn_restore() {
             log "ERROR" "  管理者用のクローンの .github/workflows を、戻せませんでした（${RESTORE_SYNCWF_CLONE}）。git checkout -- .github/workflows を実行し、${SCN_OBSOLETE_WF} を削除してください。"; rc=1
         fi
     fi
-    if [[ "$RESTORE_PROP_FILE" == "1" ]]; then
-        # main・staging に置いたファイルを削除する（このスクリプトが置く、決まった名前のファイルだけ。なければ、何もしない）
-        local _br _pf=0
-        for _br in main staging; do
-            verify_file_delete "$REPO_FULL" "$_br" "$SCN_PROP_FILE" "e2e: propagate-fail の後始末（${_br}）" || _pf=1
-        done
-        if [[ $_pf -eq 0 ]]; then
-            log "INFO" "  元に戻しました: main・staging から ${SCN_PROP_FILE} を削除しました"; RESTORE_PROP_FILE=0
+    if [[ -n "$RESTORE_OW_APEX_TIER" ]]; then
+        # その段階の組織の Hello World の Apex を、削除する（許可された 2 つの名前だけ。e2e_delete_apex が確認する。ないものを消しても失敗しない）
+        if ( E2E_TIER="$RESTORE_OW_APEX_TIER"; e2e_sf_admin_login && e2e_delete_apex "$E2E_APEX_HELLO_TEST" "$E2E_APEX_HELLO" ); then
+            log "INFO" "  元に戻しました: ${RESTORE_OW_APEX_TIER} の組織の Apex（${E2E_APEX_HELLO}・${E2E_APEX_HELLO_TEST}）を削除しました"; RESTORE_OW_APEX_TIER=""
         else
-            log "ERROR" "  ${SCN_PROP_FILE} を、main・staging から削除できませんでした（${REPO_FULL}）。手で削除してください。"; rc=1
+            log "ERROR" "  ${RESTORE_OW_APEX_TIER} の組織の Apex を削除できませんでした。bash tests/e2e/cleanup.sh --yes で、削除してください。"; rc=1
+        fi
+    fi
+    if [[ -n "${RESTORE_OW_FILES// /}" ]]; then
+        # 段階のブランチに入れたファイルだけを消す（一覧は、実行前に無かったものだけ。すでにないものは、飛ばす）
+        local _e _of=0
+        for _e in $RESTORE_OW_FILES; do
+            verify_file_sha "$REPO_FULL" "${_e%%:*}" "${_e#*:}" >/dev/null || continue
+            verify_file_delete "$REPO_FULL" "${_e%%:*}" "${_e#*:}" "e2e: one-way の後始末（${_e##*/}）" || _of=1
+        done
+        if [[ $_of -eq 0 ]]; then
+            log "INFO" "  元に戻しました: one-way で段階のブランチに入れたファイルを消しました"; RESTORE_OW_FILES=""
+        else
+            log "ERROR" "  one-way で段階のブランチに入れたファイルを、消せませんでした（${REPO_FULL}）。手で確認してください。"; rc=1
+        fi
+    fi
+    if [[ -n "$RESTORE_OW_BRANCH" ]]; then
+        # 削除してよいのは、このシナリオが作る名前の形式だけ
+        if [[ ! "$RESTORE_OW_BRANCH" =~ ^e2e-ow-[0-9]{6}$ ]]; then
+            log "ERROR" "  削除対象外のブランチ名です: ${RESTORE_OW_BRANCH}"; rc=1
+        elif ! verify_branch_sha "$REPO_FULL" "$RESTORE_OW_BRANCH" >/dev/null; then
+            RESTORE_OW_BRANCH=""   # すでにない（マージ時の自動削除など）
+        else
+            e2e_cancel_pr_runs "$REPO_FULL" "$RESTORE_OW_BRANCH"   # 走り出した検証を止める（取り消せなくても、続ける）
+            if verify_branch_delete "$REPO_FULL" "$RESTORE_OW_BRANCH"; then
+                log "INFO" "  元に戻しました: ブランチ ${RESTORE_OW_BRANCH} を削除しました"; RESTORE_OW_BRANCH=""
+            else
+                log "ERROR" "  ブランチ ${RESTORE_OW_BRANCH} を削除できませんでした（${REPO_FULL}）。手で削除してください。"; rc=1
+            fi
         fi
     fi
     return $rc
@@ -672,45 +701,132 @@ scn_metasync_diff() {
     _chk "main の Hello World のファイルが、実行前と同じ（$(printf '%s' "$orig" | wc -w | tr -d ' ') 個）" "$([[ "$now" == "$orig" ]] && echo 0 || echo 1)"
 }
 
-# propagate-fail: main → staging の伝播（wf-propagate）が、コンフリクトで失敗する経路（X4-5。成功の経路は、run.sh が確認している）
-#   main と staging に、同じファイルの、違う内容をコミットする（どちらにも、まだないファイルの、追加どうしの衝突）。そのうえで、wf-propagate を手動で起動する。
-#   確認: 実行が失敗する・ログにコンフリクトが出る・Slack への通知が成功する（ok:true）・staging の先頭が、実行の前後で変わらない（壊さない）
-#   終了時に、main・staging から、そのファイルを削除する。前提: staging ブランチがある（2 層以上）・main・staging に、そのファイルがない
-scn_propagate_fail() {
-    local f="$SCN_PROP_FILE" br id concl stg_before stg_after
-    SCN_ALLOW_MAIN_COMMITS=1   # main に、コミットする
-    stg_before=$(verify_branch_sha "$REPO_FULL" staging) || stg_before=""  # VAR=$(cmd) のため run 不使用
-    [[ -n "$stg_before" ]] || { SCN_SKIP="staging ブランチがありません（2 層以上のリポジトリが要ります。run.sh --layout 2 など）"; return; }
-    for br in main staging; do
-        if verify_file_sha "$REPO_FULL" "$br" "$f" >/dev/null; then SCN_SKIP="${br} に、すでに ${f} があります（先に消してください）"; return; fi
-    done
-
-    RESTORE_PROP_FILE=1   # 置く前に登録する（途中で止まっても、終了時に削除する）
-    printf '%s\n' "main の内容（コンフリクトの確認）" | verify_file_put "$REPO_FULL" main "$f" "e2e: propagate-fail（main）"
-    _chk "main に ${f} をコミットした" $? || return
-    printf '%s\n' "staging の内容（コンフリクトの確認）" | verify_file_put "$REPO_FULL" staging "$f" "e2e: propagate-fail（staging）"
-    _chk "staging に、同じファイルの、違う内容をコミットした" $? || return
-    stg_before=$(verify_branch_sha "$REPO_FULL" staging) || stg_before=""  # VAR=$(cmd) のため run 不使用（コミットしたあとの先頭）
-
-    id=$(verify_dispatch_workflow "$REPO_FULL" wf-propagate.yml main) || id=""  # VAR=$(cmd) のため run 不使用
-    _chk "wf-propagate を起動した" "$([[ -n "$id" ]] && echo 0 || echo 1)" || return
-    verify_wait_run "$REPO_FULL" "$id"; _chk "wf-propagate が完了した" $? || return
-    concl=$(e2e_run_conclusion "$REPO_FULL" "$id")  # VAR=$(cmd) のため run 不使用
-    _chk "wf-propagate が失敗した（コンフリクトは、失敗として止める）" "$([[ "$concl" == "failure" ]] && echo 0 || echo 1)"
-    verify_run_log_has "$REPO_FULL" "$id" "コンフリクト"; _chk "ログに、コンフリクトが出ている" $?
-    verify_run_log_has "$REPO_FULL" "$id" '"ok":true'; _chk "コンフリクトが、Slack に通知された（ok:true）" $?
-    stg_after=$(verify_branch_sha "$REPO_FULL" staging) || stg_after=""  # VAR=$(cmd) のため run 不使用
-    _chk "失敗しても、staging の先頭は、変わらない（ブランチを壊さない）" "$([[ -n "$stg_before" && "$stg_after" == "$stg_before" ]] && echo 0 || echo 1)"
-
-    # 後始末（main・staging から、ファイルを削除する）
-    _scn_restore; _chk "main・staging から、${f} を削除した" $?
-    for br in main staging; do
-        verify_file_sha "$REPO_FULL" "$br" "$f" >/dev/null
-        _chk "${br} から、${f} が消えた" "$(( $? == 0 ? 1 : 0 ))"
+# one-way: 一方通行のリリースの決まり（doc/one-way-promotion-design.md 7 章の e2e）。2 段階以上のリポジトリで動かす。
+#   P = いちばん下の有効な段階（2 段階なら staging・3 段階なら develop）、N = その次の段階（2 段階なら main・3 段階なら staging）。
+#   1. 開発のブランチ（e2e-ow-時刻。main から作る）に Hello World を置き、P へ PR → wf-validate が成功 → マージ → wf-release が成功し、
+#      PR の先端のコミットに、リリースの印（sf-tools/released-P。github-actions[bot]）が付く。P の組織にだけ、クラスができる
+#   2. 積み重ね（R2）: deploy-target.txt から、クラスの本体を外して push → P へ PR → wf-validate が失敗する（抜けた部品が、ログに出る）。PR は閉じる
+#   3. 順序（R1）: deploy-target.txt を戻して push（先端のコミットが変わり、P の印がない）→ N へ PR → wf-sequence の「順序チェック」が失敗し、
+#      ⛔ のコメントが付く（N は main か staging なので、wf-sequence が動く）
+#   4. 最後の守り: その PR を、そのままマージする（テスト用の組織は無料プランで、Ruleset がなく、マージできる）→ wf-release が
+#      「一方通行の確認」で止める（組織へ出さない。N の組織にクラスがない・N の印が付かない・Slack に通知される）
+#   後始末（_scn_restore）: P の組織のクラスを削除し、P・N のブランチに入れたファイル（実行前から有ったものは除く）を消し、PR を閉じ、ブランチを消す。
+#   前提: P・N の組織が鍵一式にある・どちらの組織にも Hello World のクラスがない（あれば、実行できない。bash tests/e2e/cleanup.sh --yes で消す）
+_scn_ow_put_target() {   # 引数: ブランチ 内容（full = クラスとテスト / test-only = テストだけ。R2 の抜けを作る）
+    if [[ "$2" == "test-only" ]]; then
+        printf '%s\n' '[files]' "force-app/main/default/classes/${VERIFY_APEX_HELLO_TEST}.cls" '' '[members]' \
+            | verify_file_put "$REPO_FULL" "$1" "sf-tools/release/${1}/deploy-target.txt" "e2e: one-way（クラスの本体を外す）"
+    else
+        verify_hello_deploy_target_text | verify_file_put "$REPO_FULL" "$1" "sf-tools/release/${1}/deploy-target.txt" "e2e: one-way（deploy-target を戻す）"
+    fi
+}
+_scn_ow_count() { ( E2E_TIER="$1"; e2e_sf_admin_login >/dev/null 2>&1 && e2e_apex_count "$E2E_APEX_HELLO" ); }   # 引数: 段階。その組織の Hello World の件数
+_scn_ow_note_files() {   # 引数: 段階 ブランチ。マージで、その段階に入るファイル（実行前から有ったものは除く）を、後始末の一覧に足す
+    local p
+    for p in "sf-tools/release/${2}/deploy-target.txt" "sf-tools/release/${2}/remove-target.txt" $(verify_hello_paths); do
+        verify_file_sha "$REPO_FULL" "$1" "$p" >/dev/null && continue   # 実行前から有るものは、消さない
+        RESTORE_OW_FILES="${RESTORE_OW_FILES} ${1}:${p}"
     done
 }
+_scn_slack_ok() { _e2e_gh run view "$1" -R "$REPO_FULL" --log 2>/dev/null | grep -E "Slack (の応答|response)" | grep -q '"ok":true'; }   # 引数: 実行 ID
+scn_one_way() {
+    local orig p_tier n_tier br sha prn head1 head3 b_seq b_val b_rel sid vid rid cnt t
+    orig=$(_scn_branches_txt) || orig=""  # VAR=$(cmd) のため run 不使用
+    if printf '%s\n' "$orig" | grep -qx staging; then
+        if printf '%s\n' "$orig" | grep -qx develop; then p_tier=develop; n_tier=staging; else p_tier=staging; n_tier=main; fi
+    else
+        SCN_SKIP="2 段階以上（main + staging）のリポジトリではありません（main の branches.txt に staging がありません）"; return
+    fi
+    e2e_tier_available "$p_tier" && e2e_tier_available "$n_tier" \
+        || { SCN_SKIP="${p_tier}・${n_tier} の組織が、鍵一式にありません（bootstrap.sh --add-orgs で追加します）"; return; }
+    _scn_sf_prepare || { SCN_SKIP="sf のエイリアスの保存に失敗しました"; return; }
+    for t in "$p_tier" "$n_tier"; do
+        cnt=$(_scn_ow_count "$t") || cnt=""  # VAR=$(cmd) のため run 不使用
+        [[ "$cnt" == "0" ]] || { SCN_SKIP="${t} の組織に、Hello World のクラスがある、または、件数を取得できません（bash tests/e2e/cleanup.sh --yes で消してください）"; return; }
+    done
+    sha=$(verify_branch_sha "$REPO_FULL" main) || sha=""  # VAR=$(cmd) のため run 不使用
+    [[ -n "$sha" ]] || { SCN_SKIP="main の SHA を取得できません"; return; }
+    log "INFO" "  段階: ${p_tier}（いちばん下）→ ${n_tier}（次）"
+    SCN_ALLOW_MAIN_COMMITS=1   # N が main のとき、main にマージする（後始末で、足したファイルを消す）
+    br="e2e-ow-$(date +%H%M%S)"  # VAR=$(cmd) のため run 不使用
 
-# tier-switch: 段階を外す → 伝播・リリース・検証が止まる → 戻す → また動く（doc/tier-scaling-design.md 9.1）
+    # --- 1. P へ、順序どおりにリリースする → 印が付く ---
+    RESTORE_OW_BRANCH="$br"   # 作る前に登録する（途中で止まっても、終了時に消す）
+    verify_branch_create "$REPO_FULL" "$br" "$sha"; _chk "開発のブランチ（${br}）を main から作った" $? || return
+    _scn_ow_note_files "$p_tier" "$br"; _scn_ow_note_files "$n_tier" "$br"   # ファイルを置く前・マージの前に、実行前の状態で、後始末の一覧を作る
+    _scn_put_hello "$br"; _chk "リリース対象と Hello World の Apex を、ブランチに追加した" $? || return
+    b_seq=$(e2e_latest_run_id "$REPO_FULL" wf-sequence.yml "$br")  # VAR=$(cmd) のため run 不使用
+    b_val=$(e2e_latest_run_id "$REPO_FULL" wf-validate.yml "$br")  # VAR=$(cmd) のため run 不使用
+    prn=$(e2e_gh_pr_create "$REPO_FULL" "$br" "e2e: one-way（${p_tier} へ。順序どおり）" "$p_tier") || prn=""  # VAR=$(cmd) のため run 不使用
+    _chk "${p_tier} への PR を作った" "$([[ -n "$prn" ]] && echo 0 || echo 1)" || return
+    RESTORE_PR="$prn"
+    head1=$(e2e_pr_head_sha "$REPO_FULL" "$prn") || head1=""  # VAR=$(cmd) のため run 不使用
+    if [[ "$p_tier" != "develop" ]]; then   # wf-sequence は、main・staging への PR だけで動く
+        sid=$(e2e_wait_pr_run "$REPO_FULL" wf-sequence.yml "$br" "$b_seq") || sid=""  # VAR=$(cmd) のため run 不使用
+        _chk "wf-sequence が成功した（いちばん下の段階には、前の段階がない）" "$([[ -n "$sid" && "$(e2e_run_conclusion "$REPO_FULL" "$sid")" == "success" ]] && echo 0 || echo 1)"
+    fi
+    vid=$(e2e_wait_pr_run "$REPO_FULL" wf-validate.yml "$br" "$b_val") || vid=""  # VAR=$(cmd) のため run 不使用
+    _chk "wf-validate が成功した（${p_tier} への PR）" "$([[ -n "$vid" && "$(e2e_run_conclusion "$REPO_FULL" "$vid")" == "success" ]] && echo 0 || echo 1)" || return
+    b_rel=$(e2e_latest_run_id "$REPO_FULL" wf-release.yml "$br")  # VAR=$(cmd) のため run 不使用
+    RESTORE_OW_APEX_TIER="$p_tier"   # マージの前に登録する（リリースされたら、終了時に、その組織から消す）
+    e2e_gh_pr_merge "$REPO_FULL" "$prn"; _chk "${p_tier} への PR をマージした" $? || return
+    RESTORE_PR=""
+    rid=$(e2e_wait_pr_run "$REPO_FULL" wf-release.yml "$br" "$b_rel") || rid=""  # VAR=$(cmd) のため run 不使用
+    _chk "wf-release が成功した（${p_tier} の組織へリリース）" "$([[ -n "$rid" && "$(e2e_run_conclusion "$REPO_FULL" "$rid")" == "success" ]] && echo 0 || echo 1)" || return
+    e2e_release_mark_ok "$REPO_FULL" "$head1" "$p_tier"; _chk "PR の先端のコミット（${head1:0:7}）に、リリースの印（sf-tools/released-${p_tier}）が付いた" $?
+    cnt=$(_scn_ow_count "$p_tier") || cnt=""  # VAR=$(cmd) のため run 不使用
+    _chk "${p_tier} の組織に、${E2E_APEX_HELLO} ができた" "$([[ "$cnt" == "1" ]] && echo 0 || echo 1)"
+
+    # --- 2. 積み重ね（R2）: 前に P へ出した部品を外す → P への PR の wf-validate が失敗する ---
+    _scn_ow_put_target "$br" test-only; _chk "deploy-target.txt から、クラスの本体（${VERIFY_APEX_HELLO}.cls）を外して push した" $? || return
+    b_val=$(e2e_latest_run_id "$REPO_FULL" wf-validate.yml "$br")  # VAR=$(cmd) のため run 不使用
+    prn=$(e2e_gh_pr_create "$REPO_FULL" "$br" "e2e: one-way（${p_tier} へ。積み重ねの抜け）" "$p_tier") || prn=""  # VAR=$(cmd) のため run 不使用
+    _chk "${p_tier} への 2 回目の PR を作った" "$([[ -n "$prn" ]] && echo 0 || echo 1)" || return
+    RESTORE_PR="$prn"
+    vid=$(e2e_wait_pr_run "$REPO_FULL" wf-validate.yml "$br" "$b_val") || vid=""  # VAR=$(cmd) のため run 不使用
+    _chk "wf-validate が完了した（積み重ねの抜け）" "$([[ -n "$vid" ]] && echo 0 || echo 1)" || return
+    _chk "wf-validate が失敗した（前のリリースの部品が抜けている。成功してはいけない）" "$([[ "$(e2e_run_conclusion "$REPO_FULL" "$vid")" == "failure" ]] && echo 0 || echo 1)"
+    verify_run_log_has "$REPO_FULL" "$vid" "[R2]"; _chk "ログに、積み重ねの決まり（R2）の違反が出た" $?
+    verify_run_log_has "$REPO_FULL" "$vid" "ApexClass:${VERIFY_APEX_HELLO}"; _chk "ログに、抜けた部品（ApexClass:${VERIFY_APEX_HELLO}）が出た" $?
+    e2e_gh_pr_close "$REPO_FULL" "$prn"; _chk "積み重ねの抜けの PR を、マージせずに閉じた" $? && RESTORE_PR=""
+    e2e_cancel_pr_runs "$REPO_FULL" "$br"
+
+    # --- 3. 順序（R1）: P に出したあとに変えたコミットを、N へ出す → wf-sequence が失敗する ---
+    _scn_ow_put_target "$br" full; _chk "deploy-target.txt を戻して push した（先端のコミットが変わる = ${p_tier} の印がない）" $? || return
+    b_seq=$(e2e_latest_run_id "$REPO_FULL" wf-sequence.yml "$br")  # VAR=$(cmd) のため run 不使用
+    prn=$(e2e_gh_pr_create "$REPO_FULL" "$br" "e2e: one-way（${n_tier} へ。${p_tier} に出していないコミット）" "$n_tier") || prn=""  # VAR=$(cmd) のため run 不使用
+    _chk "${n_tier} への PR を作った" "$([[ -n "$prn" ]] && echo 0 || echo 1)" || return
+    RESTORE_PR="$prn"
+    head3=$(e2e_pr_head_sha "$REPO_FULL" "$prn") || head3=""  # VAR=$(cmd) のため run 不使用
+    _chk "先端のコミットが、${p_tier} に出したものと違う（${head1:0:7} → ${head3:0:7}）" "$([[ -n "$head3" && "$head3" != "$head1" ]] && echo 0 || echo 1)"
+    sid=$(e2e_wait_pr_run "$REPO_FULL" wf-sequence.yml "$br" "$b_seq") || sid=""  # VAR=$(cmd) のため run 不使用
+    _chk "wf-sequence が完了した（${n_tier} への PR）" "$([[ -n "$sid" ]] && echo 0 || echo 1)" || return
+    _chk "wf-sequence の「順序チェック」が失敗した（${p_tier} に出していないコミット。R1）" "$([[ "$(_scn_job_conclusion "$sid" "順序チェック")" == "failure" ]] && echo 0 || echo 1)"
+    verify_run_log_has "$REPO_FULL" "$sid" "[R1]"; _chk "ログに、順序の決まり（R1）の違反が出た" $?
+    e2e_pr_comment_has "$REPO_FULL" "$prn" "一方通行の決まりにより"; _chk "PR の会話欄に、⛔（一方通行の決まりにより、マージできません）のコメントが付いた" $?
+
+    # --- 4. 最後の守り: 止められた PR を、そのままマージする → wf-release が組織へ出さない ---
+    e2e_cancel_pr_runs "$REPO_FULL" "$br"   # 走っている検証（wf-validate）を止めてから、マージする（マージのあとは、wf-release を止めないよう、取り消さない）
+    b_rel=$(e2e_latest_run_id "$REPO_FULL" wf-release.yml "$br")  # VAR=$(cmd) のため run 不使用
+    e2e_gh_pr_merge "$REPO_FULL" "$prn"; _chk "止められた PR を、そのままマージした（Ruleset がない組織での、うっかりのマージ）" $? || return
+    RESTORE_PR=""
+    rid=$(e2e_wait_pr_run "$REPO_FULL" wf-release.yml "$br" "$b_rel") || rid=""  # VAR=$(cmd) のため run 不使用
+    _chk "wf-release が完了した（${n_tier} へのマージ）" "$([[ -n "$rid" ]] && echo 0 || echo 1)" || return
+    _chk "wf-release が失敗した（一方通行の確認で止めた。成功してはいけない）" "$([[ "$(e2e_run_conclusion "$REPO_FULL" "$rid")" == "failure" ]] && echo 0 || echo 1)"
+    verify_run_log_has "$REPO_FULL" "$rid" "[R1]"; _chk "wf-release のログに、順序の決まり（R1）の違反が出た" $?
+    verify_run_log_has "$REPO_FULL" "$rid" "リリースを止めました"; _chk "止めたことが、Slack の通知の文面になった（リリースを止めました）" $?
+    _scn_slack_ok "$rid"; _chk "Slack への通知が成功した（ok:true）" $?
+    cnt=$(_scn_ow_count "$n_tier") || cnt=""  # VAR=$(cmd) のため run 不使用
+    _chk "${n_tier} の組織に、${E2E_APEX_HELLO} がない（組織へ出していない）" "$([[ "$cnt" == "0" ]] && echo 0 || echo 1)"
+    e2e_release_mark_ok "$REPO_FULL" "$head3" "$n_tier"; _chk "先端のコミットに、${n_tier} のリリースの印が付いていない" "$(( $? == 0 ? 1 : 0 ))"
+
+    # 後始末（P の組織のクラス・P と N に入れたファイル・ブランチ）
+    _scn_restore; _chk "後始末をした（${p_tier} の組織のクラス・${p_tier} と ${n_tier} に入れたファイル・ブランチ）" $?
+    cnt=$(_scn_ow_count "$p_tier") || cnt=""  # VAR=$(cmd) のため run 不使用
+    _chk "${p_tier} の組織から、${E2E_APEX_HELLO} が消えた" "$([[ "$cnt" == "0" ]] && echo 0 || echo 1)"
+}
+
+# tier-switch: 段階を外す → 検証・リリースが止まる（下りの伝播はしない・手動の実行もできない）→ 戻す → また動く（doc/tier-scaling-design.md 9.1）
 #   2 段階以上のテスト用リポジトリで、いちばん下の有効な段階（3 段階なら develop・2 段階なら staging。以下「対象の段階」）を、
 #   管理者用のクローンから sf-init.sh --remove-tier・--add-tier で外して戻す（CI の e2e は、1 層で作って --add-tier staging で
 #   2 段階にしたリポジトリで動かすため、staging が対象になる）。
@@ -754,14 +870,13 @@ scn_tier_switch() {
     pr="${line%% *}"; br="${line#* }"
     _chk "段階を外す PR ができた" "$([[ -n "$line" ]] && echo 0 || echo 1)" || return
     RESTORE_TIER_BRANCHES="${RESTORE_TIER_BRANCHES} ${br}"
-    b0=$(e2e_latest_run_id "$REPO_FULL" wf-propagate.yml "$br")  # VAR=$(cmd) のため run 不使用
+    b0=$(e2e_latest_run_id "$REPO_FULL" wf-release.yml "$br")  # VAR=$(cmd) のため run 不使用
     e2e_gh_pr_merge "$REPO_FULL" "$pr"; _chk "段階を外す PR をマージした" $? || return
     _scn_branches_txt | grep -qx "$t"; _chk "main の branches.txt から ${t} が消えた" "$(( $? == 0 ? 1 : 0 ))" || return
 
-    # --- 6（マージで動く伝播）: 対象の段階には伝播しない ---
-    run1=$(e2e_wait_pr_run "$REPO_FULL" wf-propagate.yml "$br" "$b0") || run1=""  # VAR=$(cmd) のため run 不使用
-    _chk "wf-propagate が完了した（段階を外す PR のマージ）" "$([[ -n "$run1" ]] && echo 0 || echo 1)" || return
-    verify_run_log_has "$REPO_FULL" "$run1" "${t} は branches.txt にない"; _chk "wf-propagate のログに「${t} は段階として無効」が出た" $?
+    # --- 6: main へのマージで、対象の段階のブランチは変わらない（下りの伝播はしない）。マージで動く wf-release（対象なし）の完了を待つ ---
+    run1=$(e2e_wait_pr_run "$REPO_FULL" wf-release.yml "$br" "$b0") || run1=""  # VAR=$(cmd) のため run 不使用
+    _chk "wf-release が完了した（段階を外す PR のマージ。リリース対象なし）" "$([[ -n "$run1" ]] && echo 0 || echo 1)" || return
     dev1=$(verify_branch_sha "$REPO_FULL" "$t") || dev1=""  # VAR=$(cmd) のため run 不使用
     _chk "${t} の先頭が変わらない（伝播しない）" "$([[ -n "$dev1" && "$dev1" == "$dev0" ]] && echo 0 || echo 1)"
 
@@ -791,11 +906,9 @@ scn_tier_switch() {
     verify_run_log_has "$REPO_FULL" "$run1" "段階として無効"; _chk "wf-release のログに「段階として無効」が出た" $?
     _chk "wf-release の「リリース実行」が skipped（組織にリリースしない）" "$([[ "$(_scn_job_conclusion "$run1" "リリース実行")" == "skipped" ]] && echo 0 || echo 1)"
 
-    # --- 5: 対象の段階で wf-release を手動の実行 → リリースしない ---
-    run1=$(verify_dispatch_workflow "$REPO_FULL" wf-release.yml "$t") || run1=""  # VAR=$(cmd) のため run 不使用
-    _chk "wf-release を ${t} で手動の実行した" "$([[ -n "$run1" ]] && echo 0 || echo 1)" || return
-    verify_wait_run "$REPO_FULL" "$run1"; _chk "wf-release（手動の実行）が完了した" $? || return
-    _chk "手動の実行でも「リリース実行」が skipped" "$([[ "$(_scn_job_conclusion "$run1" "リリース実行")" == "skipped" ]] && echo 0 || echo 1)"
+    # --- 5: wf-release は、手動で実行できない（workflow_dispatch がない。PR を通らずに組織へ出す道はない。一方通行の決まり）---
+    run1=$(VERIFY_DISPATCH_TRIES=2 verify_dispatch_workflow "$REPO_FULL" wf-release.yml "$t") || run1=""  # VAR=$(cmd) のため run 不使用
+    _chk "wf-release を ${t} で手動の実行できない（workflow_dispatch がない）" "$([[ -z "$run1" ]] && echo 0 || echo 1)"
 
     # --- 7・8: 戻す（接続情報が残っているので、つなぎ直さない）→ PR をマージ ---
     e2e_run_sf_cmd "add-tier" "$clone" "y\ny\n" "$sfinit" --add-tier "$t"; _chk "sf-init.sh --add-tier ${t}（つなぎ直さずに戻す）が成功した" $? || return

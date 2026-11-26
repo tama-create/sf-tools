@@ -7,17 +7,15 @@
 # 【起動の条件】
 #   - pull_request の closed で、マージ先が main / staging / develop のとき（マージせずに閉じた PR でも起動するが、
 #     ジョブ「リリース実行」はスキップされる）
-#   - workflow_dispatch（手動の実行。入力なし）。main / staging / develop で実行したときだけ、リリースする。実行したブランチを、
-#     マージ先・ソースブランチの両方として扱う（【補足】参照）
+#   - 手動の実行（workflow_dispatch）は、ない（PR を通らずに組織へ出せるため。doc/one-way-promotion-design.md 3.5）。
+#     失敗したリリースのやり直しは、その実行の「Re-run jobs」で行う
 #   - 起動しない場合: PR の作成・更新（opened / synchronize など）、上記以外のブランチへのマージ、ブランチへの直接の push
-#     （wf-propagate.yml・sf-metasync.sh による main からの伝播の push を含む。伝播では、組織へのリリースは行われない）。
-#     schedule はない
+#     （sf-metasync.sh による main への push を含む）。schedule はない
 #
 # 【ジョブ】
 #   1. リリース対象確認（check-branch）: デプロイ対象があるかを判定し、出力 skip（true / false）を返す。常に実行する
-#      （workflow_dispatch のときは、判定せずに skip=false）
-#   2. リリース実行（release）: check-branch のあと（needs）。PR がマージされた、または main / staging / develop での
-#      workflow_dispatch で、かつ、skip が true でないときだけ実行する（それ以外は、スキップされる）。
+#   2. リリース実行（release）: check-branch のあと（needs）。PR がマージされ、かつ、skip が true でないときだけ実行する
+#      （それ以外は、スキップされる）。権限: contents: read・pull-requests: read・statuses: write・actions: read（一方通行の確認と、リリースの印）。
 #      同時実行の制御（concurrency）: グループは、マージ先のブランチごと（release-<ブランチ名>）。同じグループの実行は、
 #      1 つずつ動く。実行中のものは取り消さず（cancel-in-progress: false）、待機中のものも、すべて残す（queue: max。最大 100）
 #   ブランチ保護との関係: どちらのジョブも、必須チェックではない（PR を閉じたあとに動くため、マージの可否に関係しない）。
@@ -28,19 +26,18 @@
 # 【処理の流れ】
 #   リリース対象確認:
 #     1. イベントの既定のコミットを取得する
-#     1.5 リリース先（PR のマージ先。手動の実行では、実行したブランチ）が main 以外なら、段階として有効かを確かめる
+#     1.5 リリース先（PR のマージ先）が main 以外なら、段階として有効かを確かめる
 #        （origin/main の sf-tools/config/branches.txt。develop は staging もあるときだけ有効。doc/tier-scaling-design.md 3.3）。
-#        PR のマージ・手動の実行の、どちらの経路も通る。無効なら skip=true（::notice。ジョブ「リリース実行」は動かない）。
+#        無効なら skip=true（::notice。ジョブ「リリース実行」は動かない）。
 #        main を取得できなければ、::error を出して、このジョブを失敗にする（「リリース実行」は needs のため動かない）。
 #        branches.txt がなければ、::warning を出し、今までの動き（判定しない）にする
-#     2. workflow_dispatch なら、skip=false で終わる（main / staging / develop 以外のブランチなら、::warning で、
-#        リリースしない旨を表示する）
-#     3. sf-tools/release/<ソースブランチ名>/ の deploy-target.txt・remove-target.txt に、実質的な行（# の行・空行・
+#     2. sf-tools/release/<ソースブランチ名>/ の deploy-target.txt・remove-target.txt に、実質的な行（# の行・空行・
 #        [files]・[members] 以外）があるかを確認する。どちらにもなければ skip=true（スキップの旨を表示）、あれば skip=false
 #   リリース実行（番号は、本体のコメントの Step の番号と同じ）:
 #     1. リリース先（main → 🚀 main の組織 (prod)、staging → 🧪 staging の組織 (staging)、develop → 🔧 develop の組織 (develop)）を、
 #        ::notice と、Actions の Summary（リリース先・ブランチ・PR 番号とタイトル（PR のときだけ）・実行日時（日本時間））に書く
-#     2. マージ先のブランチの最新（実行の時点）を、全履歴（fetch-depth: 0）で取得する
+#     2. この PR のマージのコミット（pull_request.merge_commit_sha）を、全履歴（fetch-depth: 0）で取得する
+#        （マージ先の最新ではない。続けてマージされたとき、あとの PR の変更を、この PR のリリースに混ぜないため）
 #     3. Node.js 22 を入れる
 #     4. Salesforce CLI を入れる（npm install --global @salesforce/cli）
 #     5. マージ先のブランチに対応する組織だけに、JWT でログインする（sf org login jwt・既定の組織に設定）:
@@ -48,15 +45,24 @@
 #        秘密鍵は、Secret SF_PRIVATE_KEY を base64 -d で /tmp/server.key に戻し（umask 077）、ステップの終了時に必ず消す
 #     6. sf-tools を、公開リポジトリ https://github.com/tama-create/sf-tools.git から、Variable SF_TOOLS_BRANCH のブランチ
 #        （未設定なら main）で、~/sf-tools に clone する（Token は使わない）
+#     6.5 一方通行の確認（doc/one-way-promotion-design.md。最後の守り）: PR の先端のコミット（head.sha）を、全履歴で force-promote-check に
+#        取得し（名前は force- で始める。sf-tools のコマンドは force-* のフォルダでしか動かない）、そこで
+#        sf-promote-check.sh --pr <PR 番号> を実行する（--only なし = R0〜R3 のすべて。GH_TOKEN は自動の GITHUB_TOKEN）。
+#        破っている（1）・判断できない（2）ときは、ジョブを失敗にし、組織へは出さない（Ruleset が使えない組織で、
+#        順序外の PR がマージされても、組織は変わらない）
 #     7. sf-tools/release/branch_name.txt に、ソースブランチ名を書き、
 #        sf-release.sh --release --no-open --target <prod / staging / develop> を実行する
 #        （main → prod、staging → staging、develop → develop。GitHub Actions 上のため、確認は表示されない）
+#     7.5 リリースが成功したら、PR の先端のコミットに、リリースの印（commit status。context sf-tools/released-<マージ先>・
+#        state success・target_url この実行）を付ける。次の段階の PR の一方通行の確認（R1）が、この印を見る。付けられなければ、
+#        5 秒・10 秒あけて 3 回まで試し、だめなら ::error を出してジョブを失敗にする（「Re-run jobs」でやり直す）
 #     8. （常に。if: always()）Slack の chat.postMessage に、結果を送る。ジョブの状態（job.status）が success なら
-#        「:white_check_mark: … リリース成功」、それ以外（失敗・取り消し）は「:x: … リリース失敗」。
+#        「:white_check_mark: … リリース成功」、手順 6.5 で止めたときは「:no_entry: … リリースを止めました（一方通行の決まり…）」、
+#        それ以外（失敗・取り消し）は「:x: … リリース失敗」。
 #        リリース先・ブランチ・PR（PR のときだけ）・実行日時（日本時間）・Actions のログの URL を含む。
 #        送信に失敗した（curl の失敗・応答の ok が true でない）ときは、::warning を出す（このステップは失敗にしない。
 #        応答の JSON は、node で読む）
-#   手順 1〜7 のどれかが失敗すると、以降の手順（8 を除く）は行わず、ジョブは失敗する。リリースの中身（マニフェストの生成・
+#   手順 1〜7.5 のどれかが失敗すると、以降の手順（8 を除く）は行わず、ジョブは失敗する。リリースの中身（マニフェストの生成・
 #   テストクラスの指定・sf project deploy start）と終了コードは、sf-release.sh の冒頭コメントを参照
 #
 # 【必要な Secrets / Variables】
@@ -80,12 +86,6 @@
 #
 # 【補足】
 #   - ジョブ「リリース実行」がスキップされたとき（デプロイ対象がない・マージせずに閉じた）は、Slack に通知しない
-#   - workflow_dispatch: main / staging / develop 以外のブランチで実行すると、ジョブ「リリース実行」は、スキップされる
-#     （ジョブ「リリース対象確認」が ::warning を出す。Slack には通知しない）。3 つのブランチで実行すると、実行したブランチの
-#     名前が、そのまま、マージ先（ログインする組織・--target）とソースブランチ（branch_name.txt）になる。sf-release.sh は
-#     sf-tools/release/<そのブランチ名>/ を対象にするため、そのフォルダに deploy-target.txt・remove-target.txt のどちらかが
-#     ないと、失敗する。両方に対象がない（コメント・空行だけ）と、組織にデプロイせずに成功（0）で終わり、Slack には
-#     「リリース成功」と通知される
 #   - 同時実行の制御: 続けてマージしても、同じマージ先へのリリースは、並行せず、1 つずつ動く（待機中の実行は、取り消されない。
 #     ただし、待機が 100 を超えると、GitHub の仕様で、それ以降の実行は取り消される）。マージ先が違うリリースは、並行して動く
 # ==============================================================================
@@ -97,7 +97,8 @@ on:
       - main
       - staging
       - develop
-  workflow_dispatch:
+  # 手動の実行（workflow_dispatch）は、ない（PR を通らずに組織へ出せるため。doc/one-way-promotion-design.md 3.5）。
+  #   失敗したリリースのやり直しは、その実行の「Re-run jobs」で行う（同じイベント・同じコミットのため、一方通行の確認も同じく通る）
 
 jobs:
   check-branch:
@@ -113,18 +114,17 @@ jobs:
         name: デプロイ対象ファイルを確認
         env:
           # ブランチ名・PR のタイトルなど、利用者が決められる値は、シェルのスクリプトに直接埋め込まず、環境変数で受け取る
-          EVENT_NAME: ${{ github.event_name }}
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
-          # リリース先（PR のマージ先。手動の実行では、実行したブランチ）
-          TARGET_REF: ${{ github.event.pull_request.base.ref || github.ref_name }}
+          # リリース先（PR のマージ先）
+          TARGET_REF: ${{ github.event.pull_request.base.ref }}
         run: |
-          # >>> sf-tools: tier-switch v1（この印の間は、wf-propagate・wf-release・wf-validate で同じ中身にする。--remove-tier・テストが比べる）
+          # >>> sf-tools: tier-switch v1（この印の間は、wf-release・wf-validate で同じ中身にする。--remove-tier・テストが比べる）
           # load_tiers: origin/main の branches.txt から、有効な段階を読む（# の行・空行を除く。CR・行の前後の空白を除く）
           #   main を取得できない → ::error を出して 1 を返す（呼び出し側で、ジョブを失敗にする。段階が分からないまま書き込まない）
           #   branches.txt がない → ::warning を出し、TIERS_KNOWN=0（tier_enabled は、今までの動きのため、常に有効を返す）
           #   main の取得は、浅いリポジトリ（checkout が既定の fetch-depth: 1）なら --depth=1 で軽く、全履歴なら --depth を付けない。
-          #   全履歴のリポジトリを --depth=1 で取得すると、リポジトリが浅くなり、main の先の履歴が切れて、wf-propagate の伝播の
-          #   マージが「refusing to merge unrelated histories」で失敗するため（2026-11-22 に e2e で確認）
+          #   全履歴のリポジトリを --depth=1 で取得すると、リポジトリが浅くなり、main の先の履歴が切れて、あとのマージ・祖先の確認が
+          #   失敗するため（2026-11-22 に e2e で、当時の wf-propagate のマージが「refusing to merge unrelated histories」で失敗した）
           load_tiers() {
             if [ "$(git rev-parse --is-shallow-repository 2>/dev/null)" = "true" ]; then _depth="--depth=1"; else _depth=""; fi
             git fetch origin main $_depth -q || { echo "::error title=段階を判定できません::main を取得できません。段階を判定できないため、止めます。"; return 1; }
@@ -150,7 +150,7 @@ jobs:
             return 0
           }
           # <<< sf-tools: tier-switch v1
-          # 段階の判定（PR のマージ・手動の実行の、どちらの経路も、必ずここを通る。doc/tier-scaling-design.md 3.3）。
+          # 段階の判定（PR のマージは、必ずここを通る。doc/tier-scaling-design.md 3.3）。
           #   main は常に有効なので、判定しない（main を取得する通信の失敗で、main のリリースを止めないため）。
           #   main 以外で、段階として無効なら、skip=true（ジョブ「リリース実行」は動かない）。main を取得できなければ、このジョブを失敗にする
           if [[ "$TARGET_REF" != "main" ]]; then                                                    # sf-tools: tier-check
@@ -160,17 +160,6 @@ jobs:
               echo "::notice title=リリースしません::${TARGET_REF} は branches.txt にない（develop は staging もないときを含む）ため、段階として無効です。リリースしません。"
               exit 0
             fi
-          fi
-          # workflow_dispatch の場合は、デプロイ対象で判定しない（skip=false）。
-          #   main / staging / develop 以外のブランチで実行したときは、ジョブ「リリース実行」の if: でスキップされるため、::warning で知らせる
-          #   （GITHUB_REF_NAME は、ランナーが設定する、実行したブランチ名）
-          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-            case "$GITHUB_REF_NAME" in
-              main|staging|develop) ;;
-              *) echo "::warning title=リリースしません::手動の実行は、main / staging / develop のブランチでだけリリースします。このブランチでは、ジョブ「リリース実行」はスキップされます。" ;;
-            esac
-            exit 0
           fi
           HEAD="$HEAD_REF"
           DEPLOY="sf-tools/release/${HEAD}/deploy-target.txt"
@@ -188,17 +177,22 @@ jobs:
   release:
     name: リリース実行
     needs: check-branch
-    # PR がマージされた、または、main / staging / develop での手動の実行（workflow_dispatch）のときだけ、リリースする。
-    #   手動の実行を 3 つのブランチに限るのは、ほかのブランチでは、対応する組織にログインしないまま、sf-release.sh が動くため
-    if: (github.event.pull_request.merged == true || (github.event_name == 'workflow_dispatch' && contains(fromJSON('["main","staging","develop"]'), github.ref_name))) && needs.check-branch.outputs.skip != 'true'
+    # PR がマージされたときだけ、リリースする
+    if: github.event.pull_request.merged == true && needs.check-branch.outputs.skip != 'true'
     runs-on: ubuntu-latest
+    # 一方通行の確認（PR・コミットの状態・Actions の実行を読む）と、リリースの印（commit status）を付けるための権限
+    permissions:
+      contents: read
+      pull-requests: read
+      statuses: write
+      actions: read
     # 同じ組織（マージ先のブランチ）へのリリースは、1 つずつ動かす（並行させない。待機の順は、原則、先に起動したものから。
     #   GitHub の仕様で、順序は保証されない）。
     #   queue: max で、待機中の実行を置き換えずに、すべて残す（既定の queue: single では、待機中の実行が、より新しい実行に
     #   置き換えられて取り消され、そのマージのリリースが、行われないまま終わるため。各実行は、自分のソースブランチの
     #   リストだけをリリースする）。実行中のものは取り消さない
     concurrency:
-      group: release-${{ github.event.pull_request.base.ref || github.ref_name }}
+      group: release-${{ github.event.pull_request.base.ref }}
       cancel-in-progress: false
       queue: max
 
@@ -208,7 +202,7 @@ jobs:
       # --------------------------------------------------------------------------
       - name: リリース先を確認
         env:
-          BASE_REF: ${{ github.event.pull_request.base.ref || github.ref_name }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
           PR_TITLE_RAW: ${{ github.event.pull_request.title || '' }}
           PR_NUMBER_RAW: ${{ github.event.pull_request.number || '' }}
         run: |
@@ -237,12 +231,14 @@ jobs:
           echo "| 実行日時 | $(TZ='Asia/Tokyo' date '+%Y-%m-%d %H:%M:%S JST') |" >> $GITHUB_STEP_SUMMARY
 
       # --------------------------------------------------------------------------
-      # Step 2: マージ先ブランチ（workflow_dispatch のときは、実行したブランチ）の最新をチェックアウト
+      # Step 2: この PR のマージのコミット（merge_commit_sha）をチェックアウト
+      #   マージ先ブランチの最新（base.ref）ではなく、この PR のマージのコミットに固定する。続けてマージされたとき、
+      #   あとの PR の変更（同じファイルの別の版）を、この PR のリリースに混ぜないため（一方通行: 確かめたものと同じものを出す）
       # --------------------------------------------------------------------------
       - name: ソースコードを取得
         uses: actions/checkout@v7
         with:
-          ref: ${{ github.event.pull_request.base.ref || github.ref_name }}
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
           fetch-depth: 0
 
       # --------------------------------------------------------------------------
@@ -266,7 +262,7 @@ jobs:
       #   ジョブの if: で、マージ先は、この 3 つのどれかに限られる）
       # --------------------------------------------------------------------------
       - name: main の組織にログイン（JWT）
-        if: ${{ (github.event.pull_request.base.ref || github.ref_name) == 'main' }}
+        if: ${{ (github.event.pull_request.base.ref) == 'main' }}
         run: |
           # 秘密鍵は、本人だけが読める権限で作り、ログインの成否にかかわらず（失敗しても）、必ず消す
           umask 077
@@ -281,7 +277,7 @@ jobs:
           rm -f /tmp/server.key
 
       - name: staging の組織にログイン（JWT）
-        if: ${{ (github.event.pull_request.base.ref || github.ref_name) == 'staging' }}
+        if: ${{ (github.event.pull_request.base.ref) == 'staging' }}
         run: |
           # 秘密鍵は、本人だけが読める権限で作り、ログインの成否にかかわらず（失敗しても）、必ず消す
           umask 077
@@ -296,7 +292,7 @@ jobs:
           rm -f /tmp/server.key
 
       - name: develop の組織にログイン（JWT）
-        if: ${{ (github.event.pull_request.base.ref || github.ref_name) == 'develop' }}
+        if: ${{ (github.event.pull_request.base.ref) == 'develop' }}
         run: |
           # 秘密鍵は、本人だけが読める権限で作り、ログインの成否にかかわらず（失敗しても）、必ず消す
           umask 077
@@ -317,13 +313,35 @@ jobs:
         run: git clone -b ${{ vars.SF_TOOLS_BRANCH || 'main' }} https://github.com/tama-create/sf-tools.git ~/sf-tools
 
       # --------------------------------------------------------------------------
+      # Step 6.5: 一方通行の確認（doc/one-way-promotion-design.md。最後の守り）
+      #   PR の先端のコミット（head.sha）を、別のフォルダ（force-promote-check。名前は force- で始める）に取得し、
+      #   sf-promote-check.sh --pr で、R0〜R3 をすべて確かめる（--only は付けない）。破っていれば、ここでジョブを失敗にし、
+      #   組織へは出さない（Ruleset が使えない組織で、順序外の PR がマージされても、組織は変わらない）
+      # --------------------------------------------------------------------------
+      - name: 一方通行の確認用に、PR の先端のコミットを取得
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: force-promote-check
+          fetch-depth: 0
+
+      - name: 一方通行の確認（順序・積み重ね・環境ブランチ）
+        id: promote
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          cd force-promote-check
+          bash ~/sf-tools/bin/sf-promote-check.sh --pr "$PR_NUMBER"
+
+      # --------------------------------------------------------------------------
       # Step 7: Salesforce へのリリース実行（main → prod、staging → staging、develop → develop の組織。
       #   sf-tools/release/branch_name.txt に、ソースブランチ名を書いてから、sf-release.sh --release を実行する。失敗はジョブの失敗）
       # --------------------------------------------------------------------------
       - name: Salesforce にリリースを実行
         env:
-          BASE_REF: ${{ github.event.pull_request.base.ref || github.ref_name }}
-          SOURCE_BRANCH: ${{ github.event.pull_request.head.ref || github.ref_name }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          SOURCE_BRANCH: ${{ github.event.pull_request.head.ref }}
         run: |
           BRANCH="$BASE_REF"
           if [ "$BRANCH" = "main" ]; then
@@ -340,6 +358,35 @@ jobs:
           ~/sf-tools/bin/sf-release.sh --release --no-open --target "$TARGET"
 
       # --------------------------------------------------------------------------
+      # Step 7.5: リリースの印（commit status）を、PR の先端のコミットに付ける（リリースが成功したときだけ。
+      #   次の段階の PR の一方通行の確認（R1）が、この印を見る。doc/one-way-promotion-design.md 3.1）。
+      #   context: sf-tools/released-<段階>。target_url: この実行。付けられなければ 3 回まで試し、だめならジョブを失敗にする
+      #   （組織には出ているが印がない状態。次の段階が R1 で止まる側に倒れる。やり直しは「Re-run jobs」）
+      # --------------------------------------------------------------------------
+      - name: リリースの印を付ける
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          RUN_URL="https://github.com/${REPOSITORY}/actions/runs/${RUN_ID}"
+          DESC="PR #${PR_NUMBER} を ${BASE_REF} の組織にリリースしました（$(TZ='Asia/Tokyo' date '+%Y-%m-%d %H:%M JST')）"
+          for i in 1 2 3; do
+            if gh api -X POST "repos/${REPOSITORY}/statuses/${HEAD_SHA}" \
+                -f state=success -f "context=sf-tools/released-${BASE_REF}" \
+                -f "target_url=${RUN_URL}" -f "description=${DESC}" >/dev/null; then
+              echo "::notice title=リリースの印::${HEAD_SHA:0:7} に sf-tools/released-${BASE_REF} を付けました。"
+              exit 0
+            fi
+            sleep $((i * 5))
+          done
+          echo "::error title=リリースの印を付けられません::組織へのリリースは成功しましたが、${HEAD_SHA:0:7} に sf-tools/released-${BASE_REF} を付けられませんでした。この実行を「Re-run jobs」でやり直してください。"
+          exit 1
+
+      # --------------------------------------------------------------------------
       # Step 8: Slack への結果通知（前のステップが失敗しても実行する。ジョブの状態 job.status で、成功・失敗を書き分ける。
       #   送信の失敗は ::warning にし、このステップは失敗にしない）
       # --------------------------------------------------------------------------
@@ -349,12 +396,13 @@ jobs:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           SLACK_CHANNEL_ID: ${{ vars.SLACK_CHANNEL_ID }}
           # ブランチ名・PR のタイトルは、シェルのスクリプトに直接埋め込まず、環境変数で受け取る
-          BASE_REF: ${{ github.event.pull_request.base.ref || github.ref_name }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
           PR_TITLE_RAW: ${{ github.event.pull_request.title || '' }}
           PR_NUMBER_RAW: ${{ github.event.pull_request.number || '' }}
           REPOSITORY: ${{ github.repository }}
           RUN_ID: ${{ github.run_id }}
           JOB_STATUS: ${{ job.status }}
+          PROMOTE_OUTCOME: ${{ steps.promote.outcome }}
         run: |
           # Slack に送る JSON の文字列として安全にする（" と \ のエスケープ・制御文字の除去・Slack の特殊文字 & < > の置き換え）
           json_escape() { printf '%s' "$1" | tr -d '\000-\037' | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'; }
@@ -376,6 +424,10 @@ jobs:
           if [ "$JOB_STATUS" = "success" ]; then
             ICON=":white_check_mark:"
             STATUS_TEXT="リリース成功"
+          elif [ "$PROMOTE_OUTCOME" = "failure" ]; then
+            # 一方通行の確認で止めた（組織は変わっていない。理由は Actions のログ）
+            ICON=":no_entry:"
+            STATUS_TEXT="リリースを止めました（一方通行の決まり: 前の段階に出していない・積み重ねの抜け・環境ブランチなど。組織は変わっていません）"
           else
             ICON=":x:"
             STATUS_TEXT="リリース失敗"
@@ -387,7 +439,8 @@ jobs:
           fi
 
           MESSAGE="${ICON} *Salesforce Release ${STATUS_TEXT}*\n• リリース先: ${ENV_LABEL}\n• ブランチ: \`${BRANCH}\`${PR_TEXT}\n• 実行日時: ${DATETIME}\n• <${RUN_URL}|Actions ログを見る>"
-          PAYLOAD="{\"channel\": \"${SLACK_CHANNEL_ID}\", \"text\": \"${MESSAGE}\"}"
+          CHANNEL=$(json_escape "$SLACK_CHANNEL_ID")   # Variable の値も、JSON の文字列として安全にする
+          PAYLOAD="{\"channel\": \"${CHANNEL}\", \"text\": \"${MESSAGE}\"}"
 
           # 送信の失敗（curl の失敗・応答の ok が true でない（Token の誤り・Bot がチャンネルにいないなど））は、::warning を出すだけで、
           #   このステップは失敗にしない（リリースの成否を、通知の失敗で変えないため）。応答の JSON は、Node で読む

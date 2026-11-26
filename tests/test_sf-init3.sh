@@ -20,7 +20,6 @@
 #   test_phase11_removed
 #   test_phase10_eca_auto
 #   test_verify_step
-#   test_wf_propagate_skip_missing_branch
 #   test_sf_tools_branch_mismatch
 #   test_restart_after_phase2_update
 #   test_step_header_first_step
@@ -757,46 +756,6 @@ test_verify_step() {
     teardown "$mb" "$mock_home" "$init_base"
 }
 
-test_wf_propagate_skip_missing_branch() {
-    echo ""; echo -e "${CLR_HEAD}[TEST] wf-propagate: staging / develop がなければスキップ、あれば伝播する${CLR_RST}"
-    local base; base=$(mktemp -d "${TMPDIR:-/tmp}/test-wfp-XXXX")
-    local g="git -c user.name=t -c user.email=t@example.com"
-    # origin（main だけ）と、その clone（Actions のチェックアウト相当）
-    git init -q --bare "$base/origin.git" 2>/dev/null
-    git clone -q "$base/origin.git" "$base/seed" 2>/dev/null
-    ( cd "$base/seed" && git checkout -q -b main 2>/dev/null; echo a > a.txt; git add a.txt; $g commit -q -m init; git push -q origin main 2>/dev/null )
-    git clone -q "$base/origin.git" "$base/work" 2>/dev/null
-    local sc out rc
-
-    # --- ブランチがない: 失敗にせず、スキップする ---
-    sc="$base/step.sh"
-    local b
-    for b in staging develop; do
-        _wfp_step_script "merge_${b}" > "$sc"
-        [[ -s "$sc" ]] && pass "${b}: ステップの本文を取り出せた" || fail "${b}: ステップの本文を取り出せた"
-        : > "$base/out.txt"
-        # 段階は有効として渡す（このテストは、ブランチの有無を確かめる。段階の有効・無効は tests/test_wf-tier-switch.sh）
-        out=$( cd "$base/work" && GITHUB_OUTPUT="$base/out.txt" TIER_ENABLED=true bash -e "$sc" 2>&1 ); rc=$?
-        assert_exit_ok "$rc"                                             "${b} がない → 失敗にならない（終了コード 0）"
-        assert_file_contains "$base/out.txt" "result=skipped"            "${b} がない → result=skipped を出力する"
-        assert_output_contains "$out" "${b} ブランチがないため"          "${b} がない → スキップの旨を表示する"
-        if echo "$out" | grep -q "pathspec"; then fail "${b} がない → git checkout のエラーは出ない"; else pass "${b} がない → git checkout のエラーは出ない"; fi
-    done
-
-    # --- ブランチがある: main の変更を伝播する ---
-    ( cd "$base/seed" && git checkout -q -b staging 2>/dev/null; git push -q origin staging 2>/dev/null; git checkout -q main; echo b > b.txt; git add b.txt; $g commit -q -m "main の変更"; git push -q origin main 2>/dev/null )
-    ( cd "$base/work" && git fetch -q origin 2>/dev/null )
-    _wfp_step_script merge_staging > "$sc"
-    : > "$base/out.txt"
-    out=$( cd "$base/work" && GITHUB_OUTPUT="$base/out.txt" TIER_ENABLED=true bash -e -c "git config user.name t; git config user.email t@example.com; source '$sc'" 2>&1 ); rc=$?
-    assert_exit_ok "$rc"                                                 "staging がある → 伝播できる（終了コード 0）"
-    assert_file_contains "$base/out.txt" "result=success"                "staging がある → result=success を出力する"
-    [[ "$(git -C "$base/origin.git" show staging:b.txt 2>/dev/null)" == "b" ]] \
-        && pass "staging がある → main の変更が origin の staging に入った" || fail "staging がある → main の変更が origin の staging に入った"
-    assert_file_contains "$SF_TOOLS_DIR/templates/.github/workflows/wf-propagate.yml" 'steps.merge_staging.outputs.result == '"'conflict'" "コンフリクトの判定（conflict）は、そのまま残っている"
-    teardown "$base"
-}
-
 # ==============================================================================
 # テスト 27: 起動時に確認済みのブランチと、選んだ環境が違う → Phase 2 で、ブランチ違いだけを確認する（二重に更新を確認しない）
 # ==============================================================================
@@ -1019,7 +978,6 @@ test_env_type_selection
 test_phase11_removed
 test_phase10_eca_auto
 test_verify_step
-test_wf_propagate_skip_missing_branch
 test_sf_tools_branch_mismatch
 test_restart_after_phase2_update
 test_step_header_first_step

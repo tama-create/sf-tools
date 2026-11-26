@@ -161,7 +161,7 @@ test_three_tiers() {
     local order
     order=$(grep -o -- '--base [a-z]*' "$MOCK_CALL_LOG" | awk '{print $2}' | tr '\n' ',')
     assert_equals "$order" "develop,staging,main,develop,staging,main," "3 層: develop → staging → main の順に、リリースと削除をする"
-    assert_file_contains "$OUT" "wf-propagate が成功した" "3 層: wf-propagate が確認される"
+    assert_file_not_contains "$OUT" "wf-propagate" "3 層: wf-propagate は確かめない（廃止。main の変更は伝播しない）"
     assert_file_contains "$OUT" "dev@example.com" "3 層: develop の接続ユーザーが確認される"
 }
 

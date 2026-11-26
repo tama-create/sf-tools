@@ -107,7 +107,7 @@ sf-init.sh --add-tier develop    # main + staging → main + staging + develop</
   <li><strong>Y</strong>：ブラウザでのログインと、外部クライアントアプリの作成を省いて、<code>branches.txt</code> に行を戻す PR だけを作ります。</li>
   <li><strong>N</strong>：最初と同じように、ブラウザでログインして、つなぎ直します。</li>
   <li>残っている接続情報が、今も使えるか（組織のアプリが消されていないか・ユーザーが無効になっていないか）は、ここでは確かめられません（Secret の値は読めないため）。PR をマージしたあとの、最初の検証・リリースで分かります。</li>
-  <li>残っていたブランチが <code>main</code> より遅れているときは、遅れている本数を表示します。PR をマージしたあと、次に <code>main</code> へマージしたときの伝播で、<code>main</code> が取り込まれます（すぐ取り込むには、<code>wf-propagate</code> を手動で実行します）。</li>
+  <li>残っていたブランチが <code>main</code> より遅れているときは、遅れている本数を表示します。<code>main</code> の変更は、環境のブランチへ伝播しません（<a href="workflows.html#no-propagate">下りの伝播はしない</a>）。開発のブランチは <code>sf-push.sh</code> で <code>main</code> を取り込むので、その段階へ開発のブランチの PR をマージすると、追いつきます。</li>
 </ul>
 
 <h2 id="remove-tier">段階を外す（<code>--remove-tier</code>）</h2>
@@ -115,11 +115,11 @@ sf-init.sh --add-tier develop    # main + staging → main + staging + develop</
 sf-init.sh --remove-tier develop                    # main + staging + develop → main + staging
 sf-init.sh --remove-tier staging                    # main + staging → main のみ（develop を先に外す）
 sf-init.sh --remove-tier develop --purge-secrets    # 外したあと（PR のマージ後）に、接続情報を消す（任意）</code></pre>
-<p>段階を外すと、その段階への<strong>伝播・リリース・PR の検証が止まります</strong>。組織を別の用途に回したいとき（検証環境の組織を、開発用に使うなど）や、段階を減らして運用を軽くしたいときに使います。最初に作った構成に関係なく、1〜3 段階の間で、いつでも減らしたり戻したりできます（戻すときは <a href="#re-add"><code>--add-tier</code></a>）。</p>
+<p>段階を外すと、その段階への<strong>リリース・PR の検証が止まります</strong>（一方通行の決まりでも、外した段階は、前の段階として数えません）。組織を別の用途に回したいとき（検証環境の組織を、開発用に使うなど）や、段階を減らして運用を軽くしたいときに使います。最初に作った構成に関係なく、1〜3 段階の間で、いつでも減らしたり戻したりできます（戻すときは <a href="#re-add"><code>--add-tier</code></a>）。</p>
 
 <h3 id="remove-tier-how">しくみ</h3>
 <ul>
-  <li>段階の有効・無効は、GitHub の <code>main</code> の <code>sf-tools/config/branches.txt</code> だけで決まります。ワークフロー（<code>wf-propagate</code>・<code>wf-release</code>・<code>wf-validate</code>）は、毎回これを読み、表にない段階には、ブランチや接続情報が残っていても、何もしません。<code>wf-metasync</code> の伝播先も、同じ規則で決まります。</li>
+  <li>段階の有効・無効は、GitHub の <code>main</code> の <code>sf-tools/config/branches.txt</code> だけで決まります。ワークフロー（<code>wf-release</code>・<code>wf-validate</code>・<code>wf-sequence</code>）は、毎回これを読み、表にない段階には、ブランチや接続情報が残っていても、何もしません。</li>
   <li><code>--remove-tier</code> がするのは、<code>branches.txt</code> から、その段階の行を消す PR を作ることだけです。PR をマージした時点で、止まります。</li>
   <li><strong>ブランチ・Secrets / Variables・Ruleset・Salesforce 組織の中のものは、変えません。</strong>PR を閉じれば、何も変わっていない状態に戻ります。残しておけば、戻すときに、つなぎ直さずに済みます。</li>
   <li>develop には staging が必要です。staging を外すときは、先に develop を外してください。<code>main</code> は外せません。</li>
@@ -128,7 +128,7 @@ sf-init.sh --remove-tier develop --purge-secrets    # 外したあと（PR の�
 <h3 id="remove-tier-before">実行する前に</h3>
 <div class="box warn">
   <div class="title">ワークフローを、新しい雛形にしておく</div>
-  <p>古いワークフローは、<code>branches.txt</code> を見ずに動くため、行を消しても止まりません。<code>--remove-tier</code> は、GitHub の <code>main</code> のワークフローが、段階の切り替えに対応しているかを確かめ、対応していなければ止まります。そのときは、sf-tools を更新し、作業用のブランチで <a href="workflows.html#sync"><code>sf-sync-wf.sh</code></a> を実行して、ワークフローを <code>main</code> まで入れてから、もう一度実行してください。</p>
+  <p>古いワークフローは、<code>branches.txt</code> を見ずに動くため、行を消しても止まりません。<code>--remove-tier</code> は、GitHub の <code>main</code> のワークフローが、段階の切り替えに対応しているか（廃止した <code>wf-propagate.yml</code> が残っていないかも）を確かめ、対応していなければ止まります。そのときは、sf-tools を更新し、作業用のブランチで <a href="workflows.html#sync"><code>sf-sync-wf.sh</code></a> を実行して、ワークフローを <code>main</code> まで入れてから、もう一度実行してください。</p>
 </div>
 
 <h3 id="remove-tier-flow">流れ</h3>
@@ -136,7 +136,7 @@ sf-init.sh --remove-tier develop --purge-secrets    # 外したあと（PR の�
   <li><p>影響を表示します（読み取りのみ）：その段階にだけあって <code>main</code> にない変更・その段階をマージ先にする、開いている PR・その段階の接続情報の名前（値は出しません）・その段階を対象にする Ruleset。ブランチは消さないので、<code>main</code> にない変更も失われません（ただし、リリースされなくなります）。</p></li>
   <li><p>管理者向けの警告のあと、続けるかを聞きます。</p></li>
   <li><p>作業用のブランチ（<code>system-remove-tier-段階-日時</code>）で、<code>branches.txt</code> から、その段階の行だけを消し、PR を作ります。</p></li>
-  <li><p>作られた PR を、GitHub でマージしてください。マージした時点で、その段階への伝播・リリース・PR の検証が止まります。</p></li>
+  <li><p>作られた PR を、GitHub でマージしてください。マージした時点で、その段階へのリリース・PR の検証が止まります。</p></li>
 </ol>
 
 <h3 id="purge-secrets">接続情報を消す（<code>--purge-secrets</code>。任意）</h3>
@@ -182,11 +182,11 @@ sf-init.sh --remove-tier develop --purge-secrets    # 外したあと（PR の�
 <table>
   <thead><tr><th>項目</th><th>調べること</th></tr></thead>
   <tbody>
-    <tr><td>リポジトリ</td><td>GitHub にリポジトリがあるか。段階のブランチがあるか（なければ、直し方は <code>--add-tier</code>）。ワークフロー 5 本（<code>wf-metasync</code>・<code>wf-propagate</code>・<code>wf-release</code>・<code>wf-sequence</code>・<code>wf-validate</code>）があるか（なければ、<a href="workflows.html#sync"><code>sf-sync-wf.sh</code></a>）</td></tr>
+    <tr><td>リポジトリ</td><td>GitHub にリポジトリがあるか。段階のブランチがあるか（なければ、直し方は <code>--add-tier</code>）。ワークフロー 4 本（<code>wf-metasync</code>・<code>wf-release</code>・<code>wf-sequence</code>・<code>wf-validate</code>）があるか（なければ、<a href="workflows.html#sync"><code>sf-sync-wf.sh</code></a>）。廃止した <code>wf-propagate.yml</code> が残っていれば「！」（<code>sf-sync-wf.sh --remove wf-propagate.yml</code> で消します。不足には数えません）</td></tr>
     <tr><td>Secrets</td><td><code>PAT_TOKEN</code>・<code>SLACK_BOT_TOKEN</code>・<code>SF_PRIVATE_KEY</code>・段階ごとの <code>SF_CONSUMER_KEY_*</code> があるか（名前だけを調べます。値は、だれにも読めません）</td></tr>
     <tr><td>Variables</td><td><code>SLACK_CHANNEL_ID</code>・段階ごとの <code>SF_USERNAME_*</code>・<code>SF_INSTANCE_URL_*</code> があるか。組織の種類の記録（<code>SF_ORG_ID_*</code>）がないときは「！」（以前のバージョンで作ったプロジェクト。<code>--reconnect</code> で記録できます）。<code>SF_TOOLS_BRANCH</code> は、開発版のときだけ使うものなので、なくても不足にしません</td></tr>
     <tr><td>ブランチ保護</td><td>Ruleset（<code>protect-main</code>・<code>protect-staging</code>）の<strong>必須チェックの名前</strong>が、ワークフローのジョブの名前（<code>対象ファイル確認</code>・<code>デプロイ検証</code>・<code>順序チェック</code>）と、過不足なく合っているか（<a href="troubleshooting.html#required-checks">合っていないと、PR をマージできません</a>）。Ruleset が無い（無料プランの非公開リポジトリなど）・読めないときは、「？」と表示するだけで、不足には数えません</td></tr>
-    <tr><td>直近の実行（参考）</td><td><code>wf-metasync</code>・<code>wf-release</code>・<code>wf-validate</code>・<code>wf-propagate</code> の、直近の 1 回の結果。成功は ✓、成功以外で終わったものは「！」、まだ実行されていない・実行中のものは「？」です（時刻は UTC）</td></tr>
+    <tr><td>直近の実行（参考）</td><td><code>wf-metasync</code>・<code>wf-release</code>・<code>wf-validate</code> の、直近の 1 回の結果。成功は ✓、成功以外で終わったものは「！」、まだ実行されていない・実行中のものは「？」です（時刻は UTC）</td></tr>
   </tbody>
 </table>
 <p>最後に、「不足はありません」か「不足が N 件あります」と表示します。</p>

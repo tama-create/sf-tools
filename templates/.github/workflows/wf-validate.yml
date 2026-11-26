@@ -50,8 +50,13 @@
 #     6. JWT で組織にログインする（sf org login jwt。エイリアス ci-org・既定の組織に設定）。秘密鍵は、Secret SF_PRIVATE_KEY を
 #        base64 -d で /tmp/server.key に戻し（umask 077）、ステップの終了時に必ず消す。ログインの失敗は、ステップの失敗
 #     7. sf-tools/release/branch_name.txt に、ソースブランチ名を書く（sf-release.sh が、対象のフォルダを決めるのに読む）
-#     8. SF_TARGET_ORG=ci-org で、sf-release.sh --no-open を実行する（--release なし = 検証モード）。出力は /tmp/sf_result.txt に
-#        保存してから、ログに表示する。set +e のため、検証が失敗しても、このステップは失敗にせず、終了コードを出力 exit_code に残す
+#     7.5 PR の先端のコミット（pull_request.head.sha）を、全履歴（fetch-depth: 0）で force-promote-check に取得する
+#        （名前は force- で始める。sf-tools のコマンドは force-* のフォルダでしか動かない）
+#     8. 一方通行の確認（積み重ね）: force-promote-check で sf-promote-check.sh --pr <PR 番号> --only stack を実行する
+#        （R0・R2。GH_TOKEN は自動の GITHUB_TOKEN。doc/one-way-promotion-design.md）。0 でなければ、デプロイ検証はせず、
+#        ::error を出して、その終了コードを使う。0 なら、SF_TARGET_ORG=ci-org で、sf-release.sh --no-open を実行する
+#        （--release なし = 検証モード）。両方の出力は /tmp/sf_result.txt に保存してから、ログに表示する。set +e のため、
+#        どちらが失敗しても、このステップは失敗にせず、終了コードを出力 exit_code に残す
 #     9. （常に。if: always()）PR に結果をコメントする（毎回、新しいコメントを追加する。ログは、端末の色の指定を除き、
 #        3000 文字を超えたら「...(前半省略)...」と末尾の 3000 文字）。見出しは exit_code で決める:
 #        0 → 「✅ … 検証成功」、0 以外 → 「❌ … 検証失敗（終了コード N）」、
@@ -74,9 +79,13 @@
 #     SF_INSTANCE_URL_STG  : staging の組織の接続 URL
 #     SF_INSTANCE_URL_DEV  : develop の組織の接続 URL
 #     SF_TOOLS_BRANCH      : clone する sf-tools のブランチ（任意。未設定なら main。Phase 9 は development のときだけ登録する）
-#   このほか、PR へのコメントに、自動の GITHUB_TOKEN を使う（設定不要。permissions: pull-requests: write）
+#   このほか、PR へのコメント・一方通行の確認に、自動の GITHUB_TOKEN を使う（設定不要。permissions: pull-requests: write・
+#   contents: read・statuses: read・actions: read）
 #
 # 【補足】
+#   - 一方通行の確認のうち、順序（R1）と環境ブランチ（R3）は wf-sequence.yml、すべて（R0〜R3）は wf-release.yml が確かめる。
+#     ここは積み重ね（R2: 同じブランチから同じ段階へ前に出した部品が、今回の一覧に含まれる）だけ（sf が要るため）。
+#     マージ先が段階でない PR（feature ブランチ向けなど）は、確かめずに 0
 #   - 検証の中身（マニフェストの生成・テストクラスの指定・sf project deploy start --dry-run）は、sf-release.sh の冒頭コメントを参照
 #   - main / staging 以外への PR（feature ブランチ向けの PR を含む）は、DEV の組織を使う。DEV の組織を登録していない構成
 #     （main のみ・main + staging）では、Secrets / Variables が空のため、手順 6 のログインで失敗する
@@ -109,13 +118,13 @@ jobs:
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
           BASE_REF: ${{ github.event.pull_request.base.ref || github.ref_name }}
         run: |
-          # >>> sf-tools: tier-switch v1（この印の間は、wf-propagate・wf-release・wf-validate で同じ中身にする。--remove-tier・テストが比べる）
+          # >>> sf-tools: tier-switch v1（この印の間は、wf-release・wf-validate で同じ中身にする。--remove-tier・テストが比べる）
           # load_tiers: origin/main の branches.txt から、有効な段階を読む（# の行・空行を除く。CR・行の前後の空白を除く）
           #   main を取得できない → ::error を出して 1 を返す（呼び出し側で、ジョブを失敗にする。段階が分からないまま書き込まない）
           #   branches.txt がない → ::warning を出し、TIERS_KNOWN=0（tier_enabled は、今までの動きのため、常に有効を返す）
           #   main の取得は、浅いリポジトリ（checkout が既定の fetch-depth: 1）なら --depth=1 で軽く、全履歴なら --depth を付けない。
-          #   全履歴のリポジトリを --depth=1 で取得すると、リポジトリが浅くなり、main の先の履歴が切れて、wf-propagate の伝播の
-          #   マージが「refusing to merge unrelated histories」で失敗するため（2026-11-22 に e2e で確認）
+          #   全履歴のリポジトリを --depth=1 で取得すると、リポジトリが浅くなり、main の先の履歴が切れて、あとのマージ・祖先の確認が
+          #   失敗するため（2026-11-22 に e2e で、当時の wf-propagate のマージが「refusing to merge unrelated histories」で失敗した）
           load_tiers() {
             if [ "$(git rev-parse --is-shallow-repository 2>/dev/null)" = "true" ]; then _depth="--depth=1"; else _depth=""; fi
             git fetch origin main $_depth -q || { echo "::error title=段階を判定できません::main を取得できません。段階を判定できないため、止めます。"; return 1; }
@@ -174,10 +183,12 @@ jobs:
     if: needs.check-branch.outputs.skip != 'true'
     runs-on: ubuntu-latest
 
-    # PR へのコメント投稿に必要
+    # PR へのコメント投稿（PR を読むのにも使う）・一方通行の確認（リリースの印と、印を付けた実行を読む）に必要
     permissions:
       pull-requests: write
       contents: read
+      statuses: read
+      actions: read
 
     steps:
       # --------------------------------------------------------------------------
@@ -265,17 +276,37 @@ jobs:
           echo "対象ブランチ: ${SOURCE_BRANCH}"
 
       # --------------------------------------------------------------------------
-      # Step 8: Salesforce へのデプロイ検証（反映なし）
-      #   set +e のため、検証が失敗しても、このステップは失敗にしない。終了コードを出力 exit_code に残し、Step 10 で判定する
+      # Step 7.5: 一方通行の確認用に、PR の先端のコミット（head.sha）を、全履歴で取得する
+      #   （名前は force- で始める。sf-tools のコマンドは force-* のフォルダでしか動かない）
+      # --------------------------------------------------------------------------
+      - name: 一方通行の確認用に、PR の先端のコミットを取得
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: force-promote-check
+          fetch-depth: 0
+
+      # --------------------------------------------------------------------------
+      # Step 8: 一方通行の確認（積み重ね。sf-promote-check.sh --pr <番号> --only stack = R0・R2。doc/one-way-promotion-design.md）と、
+      #   Salesforce へのデプロイ検証（反映なし）。一方通行の確認が 0 でなければ、デプロイ検証はせず、その終了コードを使う。
+      #   set +e のため、どちらが失敗しても、このステップは失敗にしない。終了コードを出力 exit_code に残し、Step 10 で判定する
       # --------------------------------------------------------------------------
       - name: Salesforce にデプロイ検証を実行（反映なし）
         id: sf_validate
         env:
           SF_TARGET_ORG: ci-org
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set +e
-          bash "$HOME/sf-tools/bin/sf-release.sh" --no-open > /tmp/sf_result.txt 2>&1
+          ( cd force-promote-check && bash "$HOME/sf-tools/bin/sf-promote-check.sh" --pr "$PR_NUMBER" --only stack ) > /tmp/sf_result.txt 2>&1
           EXIT_CODE=$?
+          if [ "$EXIT_CODE" -eq 0 ]; then
+            bash "$HOME/sf-tools/bin/sf-release.sh" --no-open >> /tmp/sf_result.txt 2>&1
+            EXIT_CODE=$?
+          else
+            echo "::error title=一方通行の決まり::積み重ねの確認（R2）で止めました。前に出した部品が、今回の一覧にありません（上のログ）。"
+          fi
           cat /tmp/sf_result.txt
           echo "exit_code=$EXIT_CODE" >> "$GITHUB_OUTPUT"
 

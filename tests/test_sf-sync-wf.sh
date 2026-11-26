@@ -286,25 +286,24 @@ test_validate_result_heading() {
 # 雛形の同時実行の制御（concurrency）と、手動の実行のブランチの制限（wf-release.yml）
 test_wf_concurrency() {
     local d="$SF_TOOLS_DIR/templates/.github/workflows"
-    assert_file_contains "$d/wf-propagate.yml" "group: propagate" "wf-propagate.yml: 伝播は 1 つずつ動く（concurrency）"
+    assert_file_not_exists "$d/wf-propagate.yml" "wf-propagate.yml は廃止（main の変更は伝播しない）"
     assert_file_contains "$d/wf-metasync.yml" "group: metasync" "wf-metasync.yml: 同期は 1 つずつ動く（concurrency）"
     assert_file_contains "$d/wf-release.yml" "group: release-" "wf-release.yml: 同じマージ先へのリリースは 1 つずつ動く（concurrency）"
     # 待機中のリリースが、新しい実行に置き換えられて（取り消されて）、行われないまま終わらないこと
     assert_file_contains "$d/wf-release.yml" "queue: max" "wf-release.yml: 待機中のリリースを、取り消さずに残す（queue: max）"
     local f n
-    for f in wf-propagate wf-metasync wf-release; do
+    for f in wf-metasync wf-release; do
         n=$(grep -cE '^ +cancel-in-progress: false$' "$d/${f}.yml")  # 設定の行だけを数える（コメントの行は除く）。VAR=$(cmd) のため run 不使用
         assert_equals "$n" "1" "${f}.yml: 実行中のものは取り消さない（cancel-in-progress: false）"
     done
-    assert_file_contains "$d/wf-release.yml" "contains(fromJSON('[\"main\",\"staging\",\"develop\"]'), github.ref_name)" \
-        "wf-release.yml: 手動の実行は、main / staging / develop でだけリリースする"
+    if grep -q '^  workflow_dispatch:' "$d/wf-release.yml"; then fail "wf-release.yml: 手動の実行（workflow_dispatch）はない"; else pass "wf-release.yml: 手動の実行（workflow_dispatch）はない"; fi
 }
 
-# 雛形の Slack への通知（3 本）: 応答の ok を確かめ、true でなければ ::warning を出す（ステップは失敗にしない）
+# 雛形の Slack への通知（wf-release・wf-sequence の 2 本。wf-propagate は廃止）: 応答の ok を確かめ、true でなければ ::warning を出す（ステップは失敗にしない）
 #   確かめる式を取り出して、実際の node で動かす
 test_wf_slack_response_checked() {
     local d="$SF_TOOLS_DIR/templates/.github/workflows" name line js rc
-    for name in wf-release wf-propagate wf-sequence; do
+    for name in wf-release wf-sequence; do
         assert_file_contains "$d/${name}.yml" "::warning title=Slack 通知の失敗::" "${name}: Slack の応答が ok でなければ、::warning を出す"
         assert_file_contains "$d/${name}.yml" '-d "$PAYLOAD" || true)' "${name}: curl の失敗で、ステップを失敗にしない"
         line=$(grep -F "node -e 'process.exit(JSON.parse(" "$d/${name}.yml" | head -1)  # VAR=$(cmd) のため run 不使用

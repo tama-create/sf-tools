@@ -141,7 +141,7 @@ jobs:
           GH_TOKEN: ${{ secrets.E2E_GH_TOKEN }}
           E2E_ALLOW_ACTIONS: "1"
         run: |
-          bash "$HOME/sf-tools/tests/e2e/scenario.sh" -y log-secrets manual-delete update-secret sync-wf cross-os validate-fail metasync-diff propagate-fail restart-org tier-switch
+          bash "$HOME/sf-tools/tests/e2e/scenario.sh" -y log-secrets manual-delete update-secret sync-wf cross-os validate-fail metasync-diff restart-org one-way tier-switch
 
       # 残ったテスト用リポジトリの名前（名前の形式が合う中で、最新の 1 つ）を、macOS のジョブへ渡す。名前の形式の確認は、macOS 側の scenario.sh もする
       - name: テスト用リポジトリの名前を、macOS のジョブへ渡す

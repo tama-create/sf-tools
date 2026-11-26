@@ -37,7 +37,7 @@
 #  27. シナリオ dist-main（配布版 = SF_TOOLS_BRANCH 未設定で、sf-tools の main が使われる。rr の直後だけ）
 #  28. シナリオ metasync-diff（組織側だけの Apex が、wf-metasync で main に反映される。組織と main を、必ず戻す）
 #  29. 中断→再開（run.sh --interrupt）と、git の shim（main への push を 1 回だけ失敗させる）
-#  30. シナリオ propagate-fail（main → staging の伝播のコンフリクト。失敗し、通知され、staging は変わらない）
+#  30. シナリオ one-way（一方通行の決まり。前提の確認・開始の警告・途中で止まったときの後始末。流れ全体は e2e で確かめる）
 #  31. シナリオ restart-org（sf-restart で接続先を staging の組織に切り替え → dry-run → 元に戻す）
 #  33. シナリオ sync-wf（改変したワークフローを sf-sync-wf が見つけて直す・--remove は雛形にあるファイルを拒否・クローンの中だけ）
 #  34. シナリオ update-secret（sf-update-secret で秘密鍵を同じ鍵で上書き・更新日時が進む・誤ったパスは拒否される）
@@ -889,8 +889,10 @@ assert_file_contains "$E2E_DIR/run.sh" "削除後: Salesforce への管理用ロ
     assert_file_contains "$E2E_DIR/run.sh" "再実行で成功したワークフローが" "run.sh: 再実行で成功したワークフローの数を、結果に警告として表示する"
     assert_file_contains "$E2E_DIR/run.sh" '"${label}: wf-validate"' "run.sh: wf-validate の失敗時にログを表示する"
     assert_file_contains "$E2E_DIR/run.sh" '"${label}: wf-release"'  "run.sh: wf-release の失敗時にログを表示する"
-    assert_file_contains "$E2E_DIR/run.sh" 'wf-propagate.yml "$br"' "run.sh: マージ時の wf-propagate の実行と成功を確認する"
-    assert_file_contains "$E2E_DIR/run.sh" '"${label}: wf-propagate"' "run.sh: wf-propagate の失敗時にログを表示する"
+    assert_file_contains "$E2E_DIR/run.sh" 'e2e_release_mark_ok "$REPO_FULL" "$head" "$base"' "run.sh: リリースのたびに、PR の先端のコミットのリリースの印を確かめる（一方通行の決まり）"
+    assert_file_not_contains "$E2E_DIR/run.sh" 'wf-propagate.yml "$br"' "run.sh: wf-propagate（廃止）の実行を待たない"
+    assert_file_contains "$E2E_DIR/run.sh" '_no_workflow wf-propagate.yml' "run.sh: 廃止した wf-propagate.yml がないことを確かめる"
+    assert_file_contains "$E2E_DIR/run.sh" '_branch_unchanged "${TIERS[j]}" "${env_before[j]:-}"' "run.sh: main へのマージのあと、環境ブランチが変わらない（伝播しない）ことを確かめる"
     # 終了時の掃除: 既定は、削除せずに残す（あとから見返せる）。--cleanup で削除する
     assert_file_contains "$E2E_DIR/run.sh" "KEEP=1   # 既定は、終了時に削除しない" "run.sh: 既定は、終了時に削除しない"
     assert_file_contains "$E2E_DIR/run.sh" "--cleanup)    KEEP=0"         "run.sh: --cleanup で、終了時に削除する"
@@ -915,7 +917,7 @@ assert_file_contains "$E2E_DIR/run.sh" "削除後: Salesforce への管理用ロ
     assert_file_contains "$E2E_DIR/run.sh" "sf-push.sh" "run.sh: リリースは、sf-push.sh で commit・push する"
     assert_file_contains "$E2E_DIR/run.sh" 'release/${job}/remove-target.txt' "run.sh: sf-install が用意した remove-target.txt の雛形を確認する"
     assert_file_contains "$E2E_DIR/run.sh" "_hello_write_remove" "run.sh: 削除も、sf-job.sh のジョブで、remove-target.txt を書いて sf-push.sh する"
-    assert_file_contains "$E2E_DIR/run.sh" "sf-next.sh" "run.sh: sf-next.sh で、マージ済みの表示を確認する"
+    assert_file_contains "$E2E_DIR/run.sh" "sf-next.sh" "run.sh: sf-next.sh で、全段階にリリース済みの表示を確認する"
     assert_file_contains "$E2E_DIR/run.sh" "sf-deploy.sh" "run.sh: sf-deploy.sh が、共有環境（予約名）への強制リリースを拒否することを確認する"
 
     # Hello World の Apex のソース: 共有の部品（lib/verify-common.sh）から、そろっている
@@ -1685,9 +1687,10 @@ test_e2e_sequence_parts() {
 
     # run.sh の流れ（実環境でしか動かせないため、骨組みを確認する）
     assert_file_contains "$E2E_DIR/run.sh" "_sequence_pr_check" "run.sh: wf-sequence の、順序を守らない PR の確認がある"
-    assert_file_contains "$E2E_DIR/run.sh" 'にまだマージされていません' "run.sh: 順序外のコメントの文言を確認する"
+    assert_file_contains "$E2E_DIR/run.sh" 'main "e2e: wf-sequence の順序外の確認（マージしない）" failure "一方通行の決まりにより"' "run.sh: 順序外の PR は、失敗し、⛔（一方通行の決まり）のコメントが付くことを確認する（警告だけにしない）"
     assert_file_contains "$E2E_DIR/run.sh" '環境ブランチからの PR は、許可されていません' "run.sh: 環境ブランチからの PR のコメントの文言を確認する"
-    assert_file_contains "$E2E_DIR/run.sh" 'label" == リリース*' "run.sh: 順序どおりの確認は、リリースの PR だけ（削除の PR は、順序外が正しい動き）"
+    assert_file_not_contains "$E2E_DIR/run.sh" 'label" == リリース*' "run.sh: 削除の PR も、順序どおりの確認をする（削除も、段階の順に出す）"
+    assert_file_not_contains "$E2E_DIR/run.sh" '_delete_apex_tier' "run.sh: 段階の組織の削除は、管理者の削除デプロイではなく、段階ごとの PR で行う"
     assert_file_contains "$E2E_DIR/run.sh" 'SEQ_CHECK=1' "run.sh: wf-sequence の確認は、2 層以上のときだけ"
 
     unset MOCK_CALL_LOG MOCK_GH_ACTIVE_RUNS
@@ -1951,7 +1954,7 @@ CEOF
     done
     assert_file_not_contains "$wf" 'vars.' "e2e.yml: Variables を使わない（公開ログに値が出るため、すべて Secrets）"
     assert_file_contains "$wf" "cron: '0 18 * * 0'"        "e2e.yml: 週 1 回（月曜 03:00 日本時間）、定期実行する"
-    assert_file_contains "$wf" "scenario.sh\" -y log-secrets manual-delete update-secret sync-wf cross-os validate-fail metasync-diff propagate-fail restart-org" "e2e.yml: Windows の最後に、実環境のシナリオを動かす（dist-main は、rr の直後だけなので、除く）"
+    assert_file_contains "$wf" "scenario.sh\" -y log-secrets manual-delete update-secret sync-wf cross-os validate-fail metasync-diff restart-org one-way tier-switch" "e2e.yml: Windows の最後に、実環境のシナリオを動かす（dist-main は、rr の直後だけなので、除く）"
     assert_file_not_contains "$wf" "scenario.sh\" -y .*dist-main" "e2e.yml: dist-main は、動かさない（origin/main と origin/development に差がないときだけ動くため）"
     # OS 混在の確認（C2）: Windows が作ったリポジトリの名前を渡し、macOS が、自分の run.sh（開始時に、残りを全部削除する）より前に、確認する
     assert_file_contains "$wf" 'repo: ${{ steps.repo.outputs.name }}' "e2e.yml: Windows のジョブが、テスト用リポジトリの名前を、macOS のジョブへ渡す"

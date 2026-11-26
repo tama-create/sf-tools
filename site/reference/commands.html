@@ -36,7 +36,8 @@
     <tr><td><a href="commands-dev.html#sf-release"><code>sf-release.sh</code></a></td><td>検証（既定は dry-run）・リリース（共有環境・本番の組織へは、手元からは、検証も実行できません）</td><td>—</td></tr>
     <tr><td><a href="commands-dev.html#sf-deploy"><code>sf-deploy.sh</code></a></td><td>⚠️ 接続中の組織への強制リリース（確認あり。個人用の組織だけ）</td><td>○</td></tr>
     <tr><td><a href="commands-dev.html#sf-push"><code>sf-push.sh</code></a></td><td>カレント配下をコミットしてプッシュする</td><td>○</td></tr>
-    <tr><td><a href="commands-dev.html#sf-next"><code>sf-next.sh</code></a></td><td>次の PR 先を確認する</td><td>○</td></tr>
+    <tr><td><a href="commands-dev.html#sf-next"><code>sf-next.sh</code></a></td><td>次の PR 先を確認する（いまのコミットが、どの段階までリリースされたか）</td><td>○</td></tr>
+    <tr><td><a href="commands-dev.html#sf-promote-check"><code>sf-promote-check.sh</code></a></td><td>一方通行のリリースの決まりを確かめる（読み取りのみ。ふだんは <code>sf-next.sh</code> とワークフローが呼ぶ）</td><td>—</td></tr>
     <tr><td><a href="commands-dev.html#sf-restart"><code>sf-restart.sh</code></a></td><td>接続先の組織を切り替える</td><td>○</td></tr>
     <tr><td><a href="commands-dev.html#sf-log"><code>sf-log.sh</code></a></td><td>デバッグログを手元に取り、AI（Claude Code など）が読む要約を作る（個人用の開発組織だけ）</td><td>—</td></tr>
     <tr><td><a href="commands-dev.html#sf-hook"><code>sf-hook.sh</code> / <code>sf-unhook.sh</code></a></td><td>手元のクローンの検証フックを、有効にする / 削除する</td><td>—</td></tr>

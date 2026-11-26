@@ -313,9 +313,8 @@ sf-init.sh --owner my-org --project acme            # オーナーと XXXX を�
     <p>ブランチが 3 階層なら、<code>develop</code> → <code>staging</code> → <code>main</code> の順に、<code>[5] Next</code> をくり返します。PR を作ると、次の処理が、自動で動きます。</p>
     <ul>
       <li>[validate] デプロイ前の検証 — すべての PR で動く</li>
-      <li>[sequence] マージ順序の確認 — <code>main</code> と <code>staging</code> への PR で動く</li>
+      <li>[sequence] マージ順序の確認（一方通行の決まり）— <code>main</code> と <code>staging</code> への PR で動く</li>
       <li>[release] デプロイ → Slack に通知 — <code>main</code>・<code>staging</code>・<code>develop</code> への PR をマージしたあとで動く</li>
-      <li>[propagate] ブランチの伝播 — <code>main</code> への PR をマージしたあとで、<code>main</code> の内容を <code>staging</code>・<code>develop</code> に反映する</li>
     </ul>
     <p>ターゲットファイルが空なので、検証とリリースの本体は「デプロイ対象なし」で飛ばされます（組織には、何も反映しません）。ここで確かめられるのは、ワークフローが動くことと、PR をマージできることです。組織へのリリースと削除（と、その通知）まで確かめるときは、次の <code>--verify</code> を使います。</p>
   </li>

@@ -1128,7 +1128,7 @@ test_json_get() {
 }
 
 # ------------------------------------------------------------------------------
-# AI 操作（SF_TOOLS_AI=1。doc/ai-operation-design.md 1.4）: 入力の関数の確認待ち・答えの受け取り・run の 20 の伝わり方
+# AI 操作（SF_TOOLS_AI=1。doc/ai-operation-design.md 4 章）: 入力の関数の確認待ち・答えの受け取り・run の 20 の伝わり方
 # ------------------------------------------------------------------------------
 test_ai_mode_input() {
     echo ""; echo -e "${CLR_HEAD}[TEST] AI 操作: 入力の関数の確認待ちと、答えの受け取り${CLR_RST}"
@@ -1192,7 +1192,7 @@ test_ai_mode_input() {
     unset -f _ai
 }
 
-# 入力の関数を $( ) の中で呼ばない（サブシェルの exit 20 が、外に伝わらないため。doc/ai-operation-design.md 1.4.3）。
+# 入力の関数を $( ) の中で呼ばない（サブシェルの exit 20 が、外に伝わらないため。doc/ai-operation-design.md 4.3）。
 # 例外は sf-log.sh の「自動で取りますか？」の 1 か所だけ（端末でないときは、聞かずに返るため、AI のときは届かない）
 test_no_input_in_command_substitution() {
     echo ""; echo -e "${CLR_HEAD}[TEST] 入力の関数を \$( ) の中で呼ばない${CLR_RST}"

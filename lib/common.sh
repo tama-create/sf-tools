@@ -521,7 +521,7 @@ run() {
 
     # AI 操作（SF_TOOLS_AI=1）で、子のコマンドが確認待ち（終了コード 20）で止まったら、自分も 20 で終わる。
     #   下の判定は 0 以外をすべて RET_NG（1）に変えるため、ここで先に抜ける（呼び出し側の || die で、別のエラーに変えない。
-    #   doc/ai-operation-design.md 1.4.6）
+    #   doc/ai-operation-design.md 4.6）
     if [[ "$status" -eq "$RET_NEED_ANSWER" && "${SF_TOOLS_AI:-}" == "1" ]]; then
         log "WARNING" "子のコマンドが、確認待ちで止まりました（終了コード ${RET_NEED_ANSWER}）: ${_run_masked}"
         rm -f "$tmp_out"
@@ -741,5 +741,5 @@ source "${_COMMON_LIB_DIR}/input.sh"
 source "${_COMMON_LIB_DIR}/platform.sh"
 source "${_COMMON_LIB_DIR}/project.sh"
 # AI 操作（SF_TOOLS_AI=1）: 自分の先頭の答えを、SF_TOOLS_ANSWERS から受け取り、残りだけを子に渡す（ほかの処理の前に行う。
-#   doc/ai-operation-design.md 1.4.6）。AI の印がなければ、何もしない
+#   doc/ai-operation-design.md 4.6）。AI の印がなければ、何もしない
 _ai_answers_init

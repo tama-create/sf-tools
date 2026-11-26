@@ -17,7 +17,7 @@
 #
 # 【処理の流れ】
 #   0. AI 操作（環境変数 SF_TOOLS_AI=1）で -m がなければ、「[確認待ち] push.message: …」を出して、終了コード 20 で終わる
-#      （VS Code での入力は、AI からはできないため。取り込み・ステージの前に止める。doc/ai-operation-design.md 1.4.5）
+#      （VS Code での入力は、AI からはできないため。取り込み・ステージの前に止める。doc/ai-operation-design.md 4.5）
 #   1. git と code のコマンド（-m があるときは git だけ）があること・Git リポジトリの中であることを確認し（なければエラーで終了する）、
 #      現在のブランチを確認する。次のときは、何も変更せず、エラーで終了する
 #      （コミットだけが手元に残り、プッシュは通らない状態を、作らないため）
@@ -98,7 +98,7 @@ done
 if [[ -n "$MESSAGE_FILE" ]]; then
     [[ -f "$MESSAGE_FILE" && -r "$MESSAGE_FILE" ]] || die "-m のファイルを読めません: ${MESSAGE_FILE}"
 elif [[ "${SF_TOOLS_AI:-}" == "1" ]]; then
-    # AI 操作: VS Code での入力はできない。取り込み・ステージの前に、確認待ちで止める（doc/ai-operation-design.md 1.4.5）
+    # AI 操作: VS Code での入力はできない。取り込み・ステージの前に、確認待ちで止める（doc/ai-operation-design.md 4.5）
     need_answer push.message "コミットのメッセージがありません（AI 操作では、-m <ファイル> で渡します）"
 fi
 

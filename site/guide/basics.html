@@ -126,7 +126,7 @@ sf-job.sh --project acme --owner my-org   # オーナー（GitHub の組織名�
     <tr><td>GitHub へのログイン（まだのとき）</td><td><code>sf-job.sh</code> が、<code>gh auth login</code> を始めます。画面の案内に沿って、ブラウザでログインします</td></tr>
     <tr><td>オーナーとプロジェクト（自動で決まらないとき）</td><td>オーナーは、候補が複数あれば番号で選びます。プロジェクトの名前（<code>XXXX</code>）は、入力して <code>Y</code> / <code>N</code> で確かめます（<a href="#words">上の説明</a>）</td></tr>
     <tr><td>ジョブ名と、最後の確認</td><td>この作業の名前です（例: <code>JOB-20261024</code>）。ブランチの名前になります（<a href="#job">ジョブ名の決まり</a>）。最後に、内容を確かめて <code>Y</code> を押します</td></tr>
-    <tr><td>組織のエイリアス</td><td>エイリアスは、接続する組織に付ける、短い呼び名です（例: <code>myorg</code>）。ここでは、<strong>自分用の組織</strong>（個人の Sandbox・Developer Edition など）に付けます。<code>prod</code> / <code>staging</code> / <code>develop</code> / <code>main</code> は、共有の環境の名前（予約名）なので、付けないでください（その名前の組織には、手元から、検証もリリースもできません。ランチャーの 4 Dryrun・5 Deploy が止まります）。同じエイリアスで、前にログインしていた組織の接続は、いったん消えて、新しいログインに置き換わります</td></tr>
+    <tr><td>組織のエイリアス</td><td>エイリアスは、接続する組織に付ける、短い呼び名です（例: <code>myorg</code>）。ここでは、<strong>自分用の組織</strong>（個人の Sandbox・Developer Edition など）に付けます。<code>prod</code> / <code>staging</code> / <code>develop</code> / <code>main</code> は、共有の環境の名前（予約名）なので、付けないでください（その名前の組織には、手元から、検証もリリースもできません。ランチャーの 2 Dryrun・5 Deploy が止まります）。同じエイリアスで、前にログインしていた組織の接続は、いったん消えて、新しいログインに置き換わります</td></tr>
     <tr><td>ログイン先</td><td><strong>1</strong> = 本番・Developer Edition（<code>login.salesforce.com</code>）／ <strong>2</strong> = Sandbox（<code>test.salesforce.com</code>。Enter だけで、これになります）／ <strong>3</strong> = 組織の URL を入力（<code>https</code> で、<code>salesforce.com</code> か <code>force.com</code> の URL）。<code>q</code> で中断</td></tr>
     <tr><td>Salesforce へのログイン</td><td>ブラウザが開きます。自分用の組織に、ログインしてください。ログインに失敗すると、そこで止まります（VS Code もランチャーも開きません）。もう一度実行してください</td></tr>
   </tbody>

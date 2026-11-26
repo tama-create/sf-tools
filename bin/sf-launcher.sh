@@ -22,10 +22,12 @@
 # 【処理の流れ】
 #   1. 環境変数 SF_LAUNCHER_ACTIVE=1 を export する（sf-start.sh が、ランチャーを二重に起動しないため）
 #   2. カレントフォルダの名前が force- で始まらなければ、警告を表示して終了する（終了コード 1）
-#   3. メニュー（番号: 表示名 → 実行するスクリプト）:
-#        1: Check → sf-check.sh   2: Push → sf-push.sh       3: Next → sf-next.sh
-#        4: Dryrun → sf-dryrun.sh 5: Deploy → sf-deploy.sh   6: Start → sf-start.sh   7: Restart → sf-restart.sh
-#      VS Code のターミナル（環境変数 TERM_PROGRAM=vscode）では 6・7 を表示しない（番号 6・7 は範囲外になる）
+#   3. メニュー（番号: 表示名 → 実行するスクリプト）。1〜5 は、日々の作業の順（上から順に押せば、確かめる → 試す → 反映 → コミット → PR）:
+#        1: Check → sf-check.sh   2: Dryrun → sf-dryrun.sh   3: Deploy → sf-deploy.sh
+#        4: Push → sf-push.sh     5: Next → sf-next.sh
+#        6: Start → sf-start.sh   7: Restart → sf-restart.sh（1 日の最初・組織の切り替えのときだけ使うため、5 との間に線を引く）
+#      VS Code のターミナル（環境変数 TERM_PROGRAM=vscode）では 6・7 を表示しない（番号 6・7 は範囲外になる。線も引かない）
+#      （2026-11-26 に、1: Check 2: Push 3: Next 4: Dryrun 5: Deploy の並びから、作業の順に並べ替えた）
 #   4. 選んだコマンドは、このスクリプトと同じフォルダの sf-xxx.sh を、引数なしで bash で実行する。
 #      スクリプトがなければ、警告を表示する
 #   5. メニューを表示するたびに、見出しの下に、デバッグログ（sf-log.sh）の状態を 1 行表示する（logs/apex/.status の STATE による:
@@ -69,15 +71,15 @@ DIM='\033[2m'
 RESET='\033[0m'
 
 # ------------------------------------------------------------------------------
-# メニュー定義 (コマンド名 | 説明)
+# メニュー定義 (コマンド名 | 説明)。日々の作業の順に並べる（上から順に押す）。start / restart は最後（線の下）
 # VSCode 内では start / restart を除外（code . の二重起動・表示乱れ防止）
 # ------------------------------------------------------------------------------
 MENU_ITEMS_ALL=(
     "sf-check    | ターゲットファイルの構文チェック"
-    "sf-push     | 変更をコミット & プッシュ"
-    "sf-next     | 次の PR 先ブランチを確認"
     "sf-dryrun   | 現在接続中の組織へリリース検証"
     "sf-deploy   | 現在接続中の組織へリリース"
+    "sf-push     | 変更をコミット & プッシュ"
+    "sf-next     | 次の PR 先ブランチを確認"
     "sf-start    | 開発環境を起動（Salesforce ログイン・VSCode 起動）"
     "sf-restart  | 接続組織を切り替えて Start 実行"
 )
@@ -147,6 +149,8 @@ print_menu() {
         label="${label#sf-}"
         # 先頭を大文字に（${label^} は Bash 4 以降のため使わない。macOS 標準の Bash 3.2 で動かす）
         label="$(printf '%s' "${label:0:1}" | tr '[:lower:]' '[:upper:]')${label:1}"
+        # 日々の作業（1〜5）と、環境の起動・切り替え（Start・Restart）の間に線を引く
+        [[ "$label" == "Start" ]] && echo -e "${DIM}  ──────────${RESET}"
         printf "  ${CYAN}[%d]${RESET} ${BOLD}%-10s${RESET}${DIM}%s${RESET}\n" "$num" "$label" "$desc"
         (( num++ ))
     done

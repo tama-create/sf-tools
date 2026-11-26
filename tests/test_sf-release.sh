@@ -341,6 +341,28 @@ test_mixed_files_and_members() {
     teardown "$td" "$mb"
 }
 
+# 反映と削除の両方に同じものがある → 中断する（削除のあとの反映で作り直し、項目のデータだけが消えるため。
+# 2026-11-26 に force-test-win で、オブジェクトの本体を deploy-target.txt に書き、削除する項目が反映にも入った）
+test_overlap_deploy_and_remove_aborts() {
+    local td mb mh
+    setup_std_env td mb mh
+    create_all_mocks "$mb"
+    setup_release_dir "$td"
+    export MOCK_SF_ORG_JSON='{"result":{"alias":"testorg","id":"00D000000000001AAA"}}'
+    local rd="$td/sf-tools/release/feature/test"
+    printf '[files]\n\n[members]\nCustomField:Equipment__c.LegacyNote__c\nCustomField:Equipment__c.Status__c\n' > "$rd/deploy-target.txt"
+    printf '[files]\n\n[members]\nCustomField:Equipment__c.LegacyNote__c\nApexClass:OldClass\n' > "$rd/remove-target.txt"
+
+    local out; out=$(cd "$td" && PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-release.sh" --no-open 2>&1)
+    assert_exit_fail $? "重なり: 非ゼロで終了する"
+    assert_output_contains "$out" "反映（package.xml）と削除（destructiveChanges.xml）の両方に、同じものがあります" "重なり: 理由が表示される"
+    assert_output_contains "$out" "CustomField:Equipment__c.LegacyNote__c" "重なり: 重なったものの種類と名前が表示される"
+    assert_output_not_contains "$out" "ERROR.*CustomField:Equipment__c.Status__c" "重なり: 重なっていないものは、重なりとして表示しない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "project deploy" "重なり: デプロイまで、進まない（dry-run も行わない）"
+    unset MOCK_SF_ORG_JSON
+    teardown "$td" "$mb"
+}
+
 # [members] のみ・[files] のみ → 従来どおり、package.xml が生成される
 test_members_only_and_files_only() {
     local td mb mh
@@ -480,6 +502,7 @@ test_personal_alias_allowed
 test_renamed_production_org_denied
 test_sf_cli_abort
 test_mixed_files_and_members
+test_overlap_deploy_and_remove_aborts
 test_members_only_and_files_only
 test_empty_manifest_aborts
 test_merge_failure_aborts

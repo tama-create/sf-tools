@@ -81,7 +81,7 @@ GitHub Actions（wf-sequence）が、main / staging への PR で、`branches.tx
 
 ### 3.3 sf-next.sh（次のPR先の自動判定）
 
-`sf-next.sh`（ランチャーの 3 Next）を実行すると、現在のブランチが各ターゲットブランチにどのような状態かを判定し、次にPRを出すべきブランチを表示する。Y 入力でブラウザのPR作成画面を直接開く（PR そのものは作らない）。保護ブランチ（branches.txt のブランチ）・detached HEAD の上では、エラーで終了する。詳細は `doc/dev-reference.md` の 4.5。
+`sf-next.sh`（ランチャーの 5 Next）を実行すると、現在のブランチが各ターゲットブランチにどのような状態かを判定し、次にPRを出すべきブランチを表示する。Y 入力でブラウザのPR作成画面を直接開く（PR そのものは作らない）。保護ブランチ（branches.txt のブランチ）・detached HEAD の上では、エラーで終了する。詳細は `doc/dev-reference.md` の 4.5。
 
 **判定ロジック（優先順）:**
 1. `gh pr list --state merged` で**直接 PR** のマージ済みを確認 → `マージ済み`
@@ -137,8 +137,8 @@ GitHub Actions（wf-sequence）が、main / staging への PR で、`branches.tx
 ### 3.6 ローカルでの検証と、共有環境へのリリースの禁止
 
 - **`sf-check.sh`（ターゲットファイルの検証）**: `[files]` のパス（存在するか・リポジトリの外を指さないか・書けるディレクトリか）、`[members]` の形式（`種別名:メンバー名`）、種類の可否（`config/metadata-capability.txt`。リリース・削除できない種類はエラー）、テストクラスの不足（警告のみ）を確かめる。`sf-push.sh`・pre-commit / pre-push フック・`sf-release.sh`・ランチャーの 1 Check から呼ばれる（詳細は `doc/dev-reference.md` の 4.14）
-- **`sf-dryrun.sh`（ランチャーの 4 Dryrun）**: `sf-release.sh` を検証モード（`sf project deploy start --dry-run`）で実行する。組織には反映しない
-- **`sf-deploy.sh`（ランチャーの 5 Deploy）**: `sf-release.sh --release --force` のラッパー。個人用の Sandbox / Developer Edition / Scratch Org への強制リリース用（確認 Y/N あり）
+- **`sf-dryrun.sh`（ランチャーの 2 Dryrun）**: `sf-release.sh` を検証モード（`sf project deploy start --dry-run`）で実行する。組織には反映しない
+- **`sf-deploy.sh`（ランチャーの 3 Deploy）**: `sf-release.sh --release --force` のラッパー。個人用の Sandbox / Developer Edition / Scratch Org への強制リリース用（確認 Y/N あり）
 - **共有環境の保護**: ローカル（`GITHUB_ACTIONS` が `true` 以外）からは、接続先のエイリアスが予約名（`prod` / `staging` / `develop` / `main`）の組織へは、dry-run を含めて実行できない。名前を付け替えた本番組織も止めるため、予約名でなくても組織の種類を調べ、本番、または種類を確認できない組織は中断する（`org_local_release_check`）。共有環境へのリリースは、GitHub にコミットし、PR のレビューを通して、GitHub Actions（wf-release）で行う（詳細は `doc/dev-reference.md` の 4.2・4.8）
 
 ### 3.7 開発者の日々の流れ（ランチャー）

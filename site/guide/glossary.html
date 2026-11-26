@@ -39,7 +39,7 @@
   <thead><tr><th>言葉</th><th>意味</th></tr></thead>
   <tbody>
     <tr><td><strong>プロジェクト</strong>（<code>force-XXXX</code>）</td><td>1 つの Salesforce 開発の単位です。GitHub 上のリポジトリ 1 つに対応します。名前は <code>force-</code> で始まり、<code>XXXX</code> の部分は管理者が決めます（例: <code>force-acme</code>）。<strong>管理者が、sf-tools の雛形で先に作ります。</strong>開発者は、それができてから使い始めます</td></tr>
-    <tr><td><strong>ランチャー</strong>（<code>sf-launcher.sh</code>）</td><td>sf-tools の毎日のコマンド（Check・Push・Next・Dryrun・Deploy など）を、メニューの番号で選んで実行する画面です。番号を 1 文字押すだけで（Enter は不要）実行し、終わるとメニューに戻ります。<code>sf-start.sh</code> の最後に、自動で開きます（<code>sf-job.sh</code> も、最後に <code>sf-start.sh</code> を動かすので、同じく開きます）。コマンドの名前を覚えなくても使えるので、開発者の方には、ランチャーをおすすめします</td></tr>
+    <tr><td><strong>ランチャー</strong>（<code>sf-launcher.sh</code>）</td><td>sf-tools の毎日のコマンド（Check・Dryrun・Deploy・Push・Next など）を、メニューの番号で選んで実行する画面です。番号を 1 文字押すだけで（Enter は不要）実行し、終わるとメニューに戻ります。<code>sf-start.sh</code> の最後に、自動で開きます（<code>sf-job.sh</code> も、最後に <code>sf-start.sh</code> を動かすので、同じく開きます）。コマンドの名前を覚えなくても使えるので、開発者の方には、ランチャーをおすすめします</td></tr>
     <tr><td><strong>リポジトリ</strong></td><td>ファイルと、その変更の履歴を、しまっておく場所です（GitHub 上にあります）</td></tr>
     <tr><td><strong>クローン</strong>（clone）</td><td>リポジトリを、自分のパソコンにコピーすることです。コピーしたものも、クローンと呼びます</td></tr>
     <tr><td><strong>作業フォルダ</strong></td><td>作業用のフォルダを、まとめて置く場所です。どこでも構いません（おすすめは <code>~/sf</code> のような短い名前）</td></tr>
@@ -85,7 +85,7 @@
   <thead><tr><th>言葉</th><th>意味</th></tr></thead>
   <tbody>
     <tr><td><strong>リリース</strong>（デプロイ）</td><td>変更を、Salesforce の組織に反映することです</td></tr>
-    <tr><td><strong>dry-run</strong>（検証）</td><td>実際には反映せずに、「反映できるか」だけを確かめることです。組織の中身は変わらないので、安心して試せます。sf-tools のリリースは、<strong>まず dry-run</strong> が基本です。手元のパソコンから dry-run できるのは、自分用の組織だけです（ランチャーの 4 Dryrun）。共有の環境と本番の組織への dry-run は、PR を作ったときに、GitHub 上のワークフローが自動で行います</td></tr>
+    <tr><td><strong>dry-run</strong>（検証）</td><td>実際には反映せずに、「反映できるか」だけを確かめることです。組織の中身は変わらないので、安心して試せます。sf-tools のリリースは、<strong>まず dry-run</strong> が基本です。手元のパソコンから dry-run できるのは、自分用の組織だけです（ランチャーの 2 Dryrun）。共有の環境と本番の組織への dry-run は、PR を作ったときに、GitHub 上のワークフローが自動で行います</td></tr>
     <tr><td><strong>メタデータ</strong></td><td>Apex クラス・項目・画面レイアウトなど、Salesforce の設定や部品のことです</td></tr>
     <tr><td><strong>ターゲットファイル</strong></td><td>「何を反映するか」「何を削除するか」を書いておくファイルです（<code>deploy-target.txt</code> と <code>remove-target.txt</code>）。作業用のブランチごとに、プロジェクトの中の <code>sf-tools/release/&lt;ブランチ名&gt;/</code> に置きます。どちらにも何も書いていないときは、「デプロイ対象なし」として、何も反映しません（<a href="daily.html">日々の作業</a>）</td></tr>
     <tr><td><strong>メタデータの同期</strong></td><td>組織の最新の状態を、Git に取り込む処理です。手元の変更とは関係なく、組織で直接加えられた変更も、Git に残せます</td></tr>

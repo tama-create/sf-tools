@@ -56,10 +56,11 @@
   <span class="hl">&gt;&gt; Launcher &lt;&lt;</span>
 <span class="dim">  ──────────────────────────────────────────────────</span>
   [<span class="num">1</span>] Check      ターゲットファイルの構文チェック
-  [<span class="num">2</span>] Push       変更をコミット &amp; プッシュ
-  [<span class="num">3</span>] Next       次の PR 先ブランチを確認
-  [<span class="num">4</span>] Dryrun     現在接続中の組織へリリース検証
-  [<span class="num">5</span>] Deploy     現在接続中の組織へリリース
+  [<span class="num">2</span>] Dryrun     現在接続中の組織へリリース検証
+  [<span class="num">3</span>] Deploy     現在接続中の組織へリリース
+  [<span class="num">4</span>] Push       変更をコミット &amp; プッシュ
+  [<span class="num">5</span>] Next       次の PR 先ブランチを確認
+  ──────────
   [<span class="num">6</span>] Start      開発環境を起動（Salesforce ログイン・VSCode 起動）
   [<span class="num">7</span>] Restart    接続組織を切り替えて Start 実行
 <span class="dim">  ──────────────────────────────────────────────────</span>
@@ -71,10 +72,10 @@
   <thead><tr><th>やりたいこと</th><th>押す番号</th><th>コマンドで打つなら</th></tr></thead>
   <tbody>
     <tr><td>ターゲットファイルの書き方を確かめる</td><td><strong>1</strong> Check</td><td><code>sf-check.sh</code></td></tr>
-    <tr><td>変更を GitHub に送る</td><td><strong>2</strong> Push</td><td><code>sf-push.sh</code></td></tr>
-    <tr><td>次の PR の出し先を知る</td><td><strong>3</strong> Next</td><td><code>sf-next.sh</code></td></tr>
-    <tr><td>自分専用の組織に、反映できるか確かめる（dry-run）</td><td><strong>4</strong> Dryrun</td><td><code>sf-dryrun.sh</code></td></tr>
-    <tr><td>自分専用の組織に、実際に反映する</td><td><strong>5</strong> Deploy</td><td><code>sf-deploy.sh</code></td></tr>
+    <tr><td>自分専用の組織に、反映できるか確かめる（dry-run）</td><td><strong>2</strong> Dryrun</td><td><code>sf-dryrun.sh</code></td></tr>
+    <tr><td>自分専用の組織に、実際に反映する</td><td><strong>3</strong> Deploy</td><td><code>sf-deploy.sh</code></td></tr>
+    <tr><td>変更を GitHub に送る</td><td><strong>4</strong> Push</td><td><code>sf-push.sh</code></td></tr>
+    <tr><td>次の PR の出し先を知る</td><td><strong>5</strong> Next</td><td><code>sf-next.sh</code></td></tr>
     <tr><td>前日の続きなど、作業を再開する</td><td><strong>6</strong> Start</td><td><code>sf-start.sh</code></td></tr>
     <tr><td>接続先の組織を切り替える</td><td><strong>7</strong> Restart</td><td><code>sf-restart.sh</code></td></tr>
   </tbody>
@@ -101,7 +102,7 @@
 <p>書き方は、<a href="../reference/target-files.html">ターゲットファイルの書き方</a>を見てください。</p>
 
 <h2 id="dryrun">反映できるか確かめる（dry-run）</h2>
-<p><span class="badge">🎛️ ランチャーの [4] Dryrun</span> コマンドで打つなら:</p>
+<p><span class="badge">🎛️ ランチャーの [2] Dryrun</span> コマンドで打つなら:</p>
 <pre><code>sf-dryrun.sh</code></pre>
 <p>実際には反映せずに、接続中の<strong>自分用の組織</strong>で「反映できるか」だけを確かめます。組織の中身は変わらないので、安心して試せます。共有の環境の組織と本番の組織では、dry-run も、手元からはできません（<a href="#own-org-only">上の囲み</a>）。共有の環境への検証は、PR を作ったときに、GitHub 上で自動で行われます。</p>
 <ul>
@@ -113,7 +114,7 @@
 <p><code>sf-release.sh</code> を、オプションなしで実行しても、同じ dry-run になります。<code>sf-dryrun.sh -r</code> のように <code>-r</code> を付けると、検証ではなく<strong>実際の反映</strong>になる（確認が出ます）ので、検証だけなら付けないでください。</p>
 
 <h2 id="deploy">自分の組織で、実際に反映する（sf-deploy）</h2>
-<p><span class="badge">🎛️ ランチャーの [5] Deploy</span> コマンドで打つなら:</p>
+<p><span class="badge">🎛️ ランチャーの [3] Deploy</span> コマンドで打つなら:</p>
 <pre><code>sf-deploy.sh</code></pre>
 <p>接続中の、<strong>自分専用の組織</strong>（個人用の Sandbox・Developer Edition・Scratch Org）に、変更を実際に反映します。自分の環境で動きを確かめたいときや、Sandbox を乗り換えたときに、今の開発物をまとめて入れ直すときに使います。</p>
 <ul>
@@ -127,7 +128,7 @@
 </div>
 
 <h2 id="push">変更を送る（sf-push）</h2>
-<p><span class="badge">🎛️ ランチャーの [2] Push</span> コマンドで打つなら:</p>
+<p><span class="badge">🎛️ ランチャーの [4] Push</span> コマンドで打つなら:</p>
 <pre><code>sf-push.sh</code></pre>
 <p>カレントフォルダ（ランチャーから実行したときは、<code>force-*</code> フォルダ全体）の下の変更を、まとめてコミットして、GitHub に送ります。次の順に進みます。</p>
 <ol class="steps">
@@ -154,7 +155,7 @@
 </div>
 
 <h2 id="next">PR の状況を確認する（sf-next）</h2>
-<p><span class="badge">🎛️ ランチャーの [3] Next</span> コマンドで打つなら:</p>
+<p><span class="badge">🎛️ ランチャーの [5] Next</span> コマンドで打つなら:</p>
 <pre><code>sf-next.sh</code></pre>
 <p>いまの作業用のブランチが、<code>develop</code> → <code>staging</code> → <code>main</code> のどこまで取り込まれたかを、一覧で表示します（段階は、プロジェクトの <code>branches.txt</code> の設定によります。<code>main</code> だけのプロジェクトもあります）。次に PR（取り込みの依頼）を出す先も、案内します。</p>
 <pre><code>JOB-20261024 のマージ状況
@@ -165,13 +166,15 @@
   <thead><tr><th>記号</th><th>意味</th></tr></thead>
   <tbody>
     <tr><td><code>✓</code> マージ済み</td><td>その段階への PR が、マージ済みです（「ブランチ同期」と付くときは、別のブランチ経由で、変更がすでに入っています。この PR による反映は、行われていません）</td></tr>
+    <tr><td><code>▶</code> マージ済み・その後の変更（N コミット）が未反映 → 次のPR先</td><td>一度マージしたあとに、同じブランチへ変更を足しました。足した変更は、まだその段階に入っていません。もう一度、その段階へ PR を出します</td></tr>
     <tr><td><code>⚠</code> マージ済み（順序外）</td><td>前の段階を飛ばして、マージされています。飛ばした段階には、反映されていません</td></tr>
     <tr><td><code>→</code> PR発行中</td><td>PR を出してあり、マージを待っています</td></tr>
     <tr><td><code>▶</code> 次のPR先</td><td>次に PR を出す先です</td></tr>
   </tbody>
 </table>
 <ul>
-  <li>次の PR 先があるときは、「〜にPRを出しますか？」と聞かれます。<code>Y</code> を押すと、GitHub の <strong>PR の作成画面</strong>がブラウザで開きます。PR そのものは、まだ作られていません。画面で内容を確かめて、作成のボタンを押してください。<code>N</code> は何もせず終了、<code>q</code> は中断です。</li>
+  <li>次の PR 先があるときは、「〜にPRを出しますか？」と聞かれます。<code>Y</code> を押すと、GitHub の <strong>PR の作成画面</strong>がブラウザで開きます。PR そのものは、まだ作られていません。画面で内容を確かめて、作成のボタンを押してください。<code>N</code> は何もせず終了、<code>q</code> は中断です。<code>staging</code>・<code>main</code> へ上げるときは、「develop の組織で、動作を確かめ終えましたか？」のように、1 つ前の段階で確かめたかも、同じ確認の中で聞かれます。</li>
+  <li><strong>同じブランチで、変更とリリースを繰り返せます。</strong>develop へマージしたあとに変更を足して push すると、develop が「その後の変更が未反映 → 次のPR先」になり、もう一度 develop へ PR を出す案内になります。develop の組織で満足するまで確かめてから、<code>staging</code> へ上げます。</li>
   <li><strong>PR は、段階の順番どおり（<code>develop</code> → <code>staging</code> → <code>main</code>）に出します。</strong>順番を飛ばしてマージすると、飛ばした段階には、あとから反映できなくなります（<a href="../reference/commands-dev.html#sf-next">詳しくは、リファレンス</a>）。<code>sf-next.sh</code> の案内に従えば、順番どおりになります。</li>
   <li><code>main</code> などの保護ブランチの上では、使えません（作業用のブランチの上で実行します）。</li>
 </ul>
@@ -191,7 +194,7 @@
     </td></tr>
   </tbody>
 </table>
-<p>pre-push は、Salesforce の組織への検証（dry-run）は、行いません。組織で反映できるかは、ランチャーの 4 Dryrun（自分用の組織）と、PR を作ったときの自動の検証で確かめます。</p>
+<p>pre-push は、Salesforce の組織への検証（dry-run）は、行いません。組織で反映できるかは、ランチャーの 2 Dryrun（自分用の組織）と、PR を作ったときの自動の検証で確かめます。</p>
 
 <div class="box next">
   <div class="title">困ったときは</div>

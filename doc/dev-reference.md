@@ -374,6 +374,7 @@ check_gh_owner "$GITHUB_OWNER"   # 認証ユーザーの一致確認
 
 - ターゲットファイルをもとに `package.xml`（と、削除用の `destructiveChanges.xml`）を生成
 - `sf project deploy start` で検証（既定。`--dry-run`）またはリリース（`--release`）。`destructiveChanges.xml` は `--pre-destructive-changes` で渡す（削除が先）
+- **反映と削除の重なりで中断**: 2 つのマニフェストを作った直後に、`manifest_overlap`（`lib/project.sh`）で、両方にある「種類:メンバー」を探し、あれば一覧を ERROR で出して中断する（dry-run の前。`*` は比べない）。削除が先に行われるため、重なったものは消したあと反映で作り直され、項目なら中のデータだけが消える（Salesforce はエラーにしない）。`deploy-target.txt` にオブジェクトの本体（`*.object-meta.xml`）や `objects/<オブジェクト>` のフォルダを書くと、`sf project generate manifest` が配下の項目を全部入れるため起きる（2026-11-26・force-test-win の段階 3 で判明。sf-check も dry-run も通っていた）
 - 処理の順: `check_sf_cli --cache` → 接続先の決定（`-t` > `SF_TARGET_ORG` > `sf org display` の alias）→ 共有環境の保護（5.1）→ リリースの確認（5.2）→ `branch_name.txt` の読み込み → 対象リストの確認と `sf-check.sh` → マニフェスト生成と `@isTest` の検出（`phase_generate_manifest`）→ `sf org open`（`-n` がなければ。5 秒待つ）→ `sf project deploy start`
 - 両方のリストに対象が 1 件もなければ、「デプロイ対象なし。正常終了します。」で終了コード 0（CI でリリースの定義だけを先に準備する運用を許すため）。`deploy-target.txt` が空で `remove-target.txt` にだけ対象があれば、メンバーのない `package.xml`（version 60.0）で削除だけ行う
 - 終了コード: 成功（対象なしを含む）は 0、中断・失敗は 1
@@ -468,20 +469,26 @@ check_gh_owner "$GITHUB_OWNER"   # 認証ユーザーの一致確認
 | `✗` | 未着手 | まだ PR を出していない |
 
 判定ロジック（優先順）:
-1. `gh pr list --state merged` で直接 PR のマージ済みを確認 → `merged`
+1. `gh pr list --state merged` で直接 PR のマージ済みを確認 → HEAD がマージ済みの内容に含まれれば `merged`。含まれなければ、同じ向きのオープンの PR があれば `pr_open`、なければ `merged_stale`（NEXT_TARGET に設定）
+   - 「含まれる」= HEAD が、PR の最後のコミット（`headRefOid`）と同じ・その祖先、または `origin/<対象>` の祖先。`origin/<対象>` だけで比べると、Squash・Rebase のマージで誤って未反映になるため、PR の最後のコミットでも比べる
+   - 背景: 同じ JOB ブランチで develop へのリリースを繰り返す使い方（2026-11-25。force-test-win の備品の貸し出しアプリ）。以前は、マージ済みの PR が 1 つでもあると `merged` になり、develop で確かめていない変更を、staging へ上げる案内を出していた
+   - `headRefOid` が取れない（結合テスト L1 の fake の gh など）ときは、判定できないため `merged`（以前の動き）
 2. `git merge-base --is-ancestor HEAD origin/<対象>` で間接伝播（上位ブランチ経由）を確認 → `synced`
 3. `gh pr list --state open` で PR 発行中を確認 → `pr_open`
 4. いずれも該当なし → `none`（NEXT_TARGET に設定）
 
 ステータスと表示:
 - `merged` → `✓ マージ済み`
+- `merged_stale` → `▶ マージ済み・その後の変更（N コミット）が未反映 → 次のPR先`（NEXT_TARGET でなければ `✗`。N は `git rev-list --count <PR の最後のコミット>..HEAD`。数えられなければ N なし）
 - `synced` → `✓ マージ済み（ブランチ同期）`（デプロイ WF 未実行）
-- `out_of_order` → `⚠ マージ済み（順序外）`（前に synced/pr_open/none があった merged）
+- `out_of_order` → `⚠ マージ済み（順序外）`（前に synced/pr_open/none/merged_stale があった merged）
 - `pr_open` → `→ PR発行中`
 - `none` かつ NEXT_TARGET → `▶ 次のPR先`
 - `none` → `✗`
 
 次の PR 先がないときは、`pr_open` が残っていれば「マージ完了を待ってください」、なければ「全ブランチへのマージが完了しています！」と表示して終了する。
+
+確認の文: 次の PR 先がマージの順の 2 つ目以降（staging・main）なら、「<1 つ前のブランチ> の組織で、動作を確かめ終えましたか？ <次の PR 先> にPRを出しますか？」にする（確認の回数は増やさない。注意書きを毎回出すと読まれなくなるため、上げる場面だけで聞く）。
 
 順序外マージの制約:
 `develop → staging → main` の順番を守らずにマージした場合、スキップしたブランチへのデプロイは**永久にできない**。

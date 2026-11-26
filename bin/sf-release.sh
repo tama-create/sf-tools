@@ -34,6 +34,8 @@
 #   6. deploy-target.txt / remove-target.txt の存在を確認し、sf-check.sh で構文を検査する。エラーなら中断する。
 #   7. 既存の package.xml / destructiveChanges.xml を削除してから、マニフェストを生成する（【補足】参照）。
 #      両方のリストに対象が 1 件もなければ、何もせず終了コード 0 で終了する。
+#      package.xml と destructiveChanges.xml の両方にある「種類:メンバー」があれば、それを表示して中断する
+#      （削除のあとの反映で、作り直されるため。【補足】の「反映と削除の重なり」参照）。
 #   8. deploy-target.txt の [files] にある .cls のうち、ファイル中に「@isTest」（大文字小文字を区別しない）を
 #      含むものをテストクラスとして検出し、--test-level RunSpecifiedTests と --tests <クラス名>（クラスごと）を付ける。
 #      検出されなければ、--test-level を付けない。
@@ -60,6 +62,11 @@
 #     正常に終了する（CI で、リリースの定義だけを先に準備する運用を許すため）。
 #   - deploy-target.txt が空で remove-target.txt にだけ対象があるときは、メンバーのない package.xml（version 60.0）を
 #     作成し、削除だけを行う。
+#   - 反映と削除の重なり: --pre-destructive-changes は、削除を反映より先に行う。両方に同じものがあると、消したあとに
+#     作り直し、項目なら、項目は残って中のデータだけが消える（Salesforce はエラーにしない）。deploy-target.txt に
+#     オブジェクトの本体（*.object-meta.xml）やフォルダを書くと、sf project generate manifest が配下の項目などを全部入れるため、
+#     remove-target.txt に書いた項目と重なる（2026-11-26 に force-test-win で判明。sf-check.sh も dry-run も通った）。
+#     マニフェストを作った直後に lib/project.sh の manifest_overlap で確かめ、重なりがあれば中断する（ワイルドカード * は比べない）。
 #   - 存在しない削除対象を許す指示（# @ignore-missing）: remove-target.txt に、`# @ignore-missing` で始まる
 #     コメント行（行頭・# の後の空白は可）があるときだけ、sf project deploy start に --ignore-warnings を付ける。
 #     削除対象が組織に存在しなくても、エラーにしない（「No ApexClass named: X found」を、警告として扱う）。
@@ -359,6 +366,22 @@ phase_generate_manifest() {
     # 削除用の destructiveChanges.xml 生成（対象がある場合のみ）
     if [[ ${#remove_args[@]} -gt 0 ]]; then
         generate_manifest "destructiveChanges.xml" "${remove_args[@]}" || return $RET_NG
+        # 反映と削除の両方に同じものがあれば、止める（先に消して、反映で作り直す。項目なら、データだけが黙って消える。
+        # オブジェクトの本体やフォルダを deploy-target.txt に書くと、配下の全部が反映に入るため、起きる。lib/project.sh の manifest_overlap）
+        local overlap item
+        overlap=$(manifest_overlap "$DEPLOY_XML" "$REMOVE_XML") || {  # VAR=$(cmd) のため run 不使用
+            log "ERROR" "マニフェストの重なりを確かめられません（package.xml / destructiveChanges.xml を読めません）。"
+            return $RET_NG
+        }
+        if [[ -n "$overlap" ]]; then
+            log "ERROR" "反映（package.xml）と削除（destructiveChanges.xml）の両方に、同じものがあります:"
+            while IFS= read -r item; do
+                [[ -n "$item" ]] && log "ERROR" "  ${item}"
+            done <<< "$overlap"
+            log "ERROR" "このまま進めると、削除のあとの反映で、作り直されます（項目なら、中のデータだけが消えます）。"
+            log "ERROR" "deploy-target.txt に書いたオブジェクトの本体（*.object-meta.xml）やフォルダは、配下の項目などを、すべて反映に含めます。"
+            return $RET_NG
+        fi
     fi
 
     return $RET_OK

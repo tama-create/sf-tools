@@ -55,7 +55,7 @@ force-app/main/default/lwc/myComponent
   <li><code>[files]</code> と <code>[members]</code> の 2 つのセクションで構成します。</li>
   <li>行頭の <code>#</code> はコメントです。</li>
   <li>空行は無視されます。</li>
-  <li><code>[files]</code> には、ファイルまたはフォルダのパスを書きます（リポジトリのルートからの相対パス。存在しないパスは、エラーです）。<strong>フォルダは、1 つのコンポーネント・オブジェクトを丸ごと指すものだけ</strong>書けます（<code>lwc/コンポーネント名</code>・<code>aura/コンポーネント名</code>・<code>objects/オブジェクト名</code>）。<code>classes</code> や <code>.</code> のような広いフォルダは、対象が広がりすぎる（<code>remove-target.txt</code> では、組織のメタデータが広範囲に削除される）ため、エラーです。絶対パスや、要素に <code>..</code> を含むパス（リポジトリの外を指すパス）も、存在していてもエラーです。</li>
+  <li><code>[files]</code> には、ファイルまたはフォルダのパスを書きます（リポジトリのルートからの相対パス。存在しないパスは、エラーです）。<strong>フォルダは、1 つのコンポーネント・オブジェクトを丸ごと指すものだけ</strong>書けます（<code>lwc/コンポーネント名</code>・<code>aura/コンポーネント名</code>・<code>objects/オブジェクト名</code>）。<strong>同じオブジェクトの項目を <code>remove-target.txt</code> で消すときは、<code>objects/オブジェクト名</code> のフォルダや、オブジェクトの本体（<code>オブジェクト名.object-meta.xml</code>）を書かず、残す項目を 1 つずつ書きます。</strong>フォルダや本体を書くと、配下の項目が全部、反映に入り、消すはずの項目が作り直されます（中のデータだけが消えます）。<code>sf-release.sh</code> は、反映と削除の両方に同じものがあると、送る前に止めます。<code>classes</code> や <code>.</code> のような広いフォルダは、対象が広がりすぎる（<code>remove-target.txt</code> では、組織のメタデータが広範囲に削除される）ため、エラーです。絶対パスや、要素に <code>..</code> を含むパス（リポジトリの外を指すパス）も、存在していてもエラーです。</li>
   <li><code>[members]</code> には、<code>種別名:メンバー名</code> の形で書きます（<code>:</code> がない・先頭か末尾が <code>:</code> の行は、エラーです）。</li>
   <li>最初の <code>[files]</code> / <code>[members]</code> の行より前に書いた行は、<code>[files]</code> として扱われます。</li>
   <li>リリース・削除できないと確認済みの種類（<code>config/metadata-capability.txt</code> で <code>ng</code>）を書くと、<code>sf-check.sh</code> がエラーにします。条件によってできないことがある種類（<code>limited</code>）は、警告です。<code>deploy-target.txt</code> はリリースの可否、<code>remove-target.txt</code> は削除の可否で判定します。</li>

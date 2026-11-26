@@ -374,6 +374,7 @@ check_gh_owner "$GITHUB_OWNER"   # 認証ユーザーの一致確認
 
 - ターゲットファイルをもとに `package.xml`（と、削除用の `destructiveChanges.xml`）を生成
 - `sf project deploy start` で検証（既定。`--dry-run`）またはリリース（`--release`）。`destructiveChanges.xml` は `--pre-destructive-changes` で渡す（削除が先）
+- **反映と削除の重なりで中断**: 2 つのマニフェストを作った直後に、`manifest_overlap`（`lib/project.sh`）で、両方にある「種類:メンバー」を探し、あれば一覧を ERROR で出して中断する（dry-run の前。`*` は比べない）。削除が先に行われるため、重なったものは消したあと反映で作り直され、項目なら中のデータだけが消える（Salesforce はエラーにしない）。`deploy-target.txt` にオブジェクトの本体（`*.object-meta.xml`）や `objects/<オブジェクト>` のフォルダを書くと、`sf project generate manifest` が配下の項目を全部入れるため起きる（2026-11-26・force-test-win の段階 3 で判明。sf-check も dry-run も通っていた）
 - 処理の順: `check_sf_cli --cache` → 接続先の決定（`-t` > `SF_TARGET_ORG` > `sf org display` の alias）→ 共有環境の保護（5.1）→ リリースの確認（5.2）→ `branch_name.txt` の読み込み → 対象リストの確認と `sf-check.sh` → マニフェスト生成と `@isTest` の検出（`phase_generate_manifest`）→ `sf org open`（`-n` がなければ。5 秒待つ）→ `sf project deploy start`
 - 両方のリストに対象が 1 件もなければ、「デプロイ対象なし。正常終了します。」で終了コード 0（CI でリリースの定義だけを先に準備する運用を許すため）。`deploy-target.txt` が空で `remove-target.txt` にだけ対象があれば、メンバーのない `package.xml`（version 60.0）で削除だけ行う
 - 終了コード: 成功（対象なしを含む）は 0、中断・失敗は 1

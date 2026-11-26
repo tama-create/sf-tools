@@ -245,6 +245,7 @@ sf-launcher.sh --fzf     # fzf でインクリメンタル検索</code></pre>
   <li><code>sf-tools/release/branch_name.txt</code> のブランチ名で、<code>sf-tools/release/&lt;ブランチ名&gt;/</code> を対象にする</li>
   <li><code>deploy-target.txt</code> / <code>remove-target.txt</code> があるかを確かめ、<code>sf-check.sh</code> で検証する（<code>branch_name.txt</code> か、どちらかのファイルがないとき・エラーのときは、中断する）</li>
   <li>既存の <code>package.xml</code> / <code>destructiveChanges.xml</code> を削除してから、マニフェストを作る。両方のファイルに対象が 1 件もなければ、「デプロイ対象なし。正常終了します。」と表示して、正常（終了コード 0）で終わる</li>
+  <li>作った 2 つのマニフェストの両方に、同じもの（種類と名前）があれば、その一覧を表示して中断する（組織には送らない）。削除が反映より先に行われるため、消したものを反映で作り直し、項目なら中のデータだけが消えるのを防ぐ。<code>deploy-target.txt</code> にオブジェクトの本体やフォルダを書くと、配下の項目が全部、反映に入るため起きる（<a href="target-files.html">ターゲットファイル</a>）</li>
   <li>テストクラスを検出する（上の囲み）</li>
   <li>（<code>-n</code> がなければ）組織のデプロイ状況の画面（<code>lightning/setup/DeployStatus/home</code>）を、ブラウザで開き、5 秒待つ</li>
   <li><code>sf project deploy start --manifest package.xml</code> を実行する。削除対象があれば、<code>--pre-destructive-changes</code> で渡す（削除は、デプロイより先に行われる）。検証モードなら <code>--dry-run</code> を付ける。失敗すれば中断する</li>

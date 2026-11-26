@@ -1128,6 +1128,68 @@ test_json_get() {
 }
 
 # ------------------------------------------------------------------------------
+# manifest_overlap のテスト（反映と削除の両方にある「種類:メンバー」を出す。* は比べない。読めなければ 1）
+# ------------------------------------------------------------------------------
+test_manifest_overlap() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] manifest_overlap: 反映と削除の重なり${CLR_RST}"
+    local td out rc
+    td=$(mktemp -d "${TMPDIR:-/tmp}/test-mov-XXXX")
+    # lib/common.sh（lib/project.sh を読み込む）を、サブシェルで読んで呼ぶ（test_merge_package_xml の _mp と同じ）
+    manifest_overlap() { ( export SF_INIT_MODE=1; readonly SCRIPT_NAME=test LOG_FILE=/dev/null LOG_MODE=NEW
+                           source "$SF_TOOLS_DIR/lib/common.sh"; manifest_overlap "$@" ); }
+    printf '<?xml version="1.0" encoding="UTF-8"?>
+<Package xmlns="http://soap.sforce.com/2006/04/metadata">
+    <types>
+        <members>*</members>
+        <name>ApexClass</name>
+    </types>
+    <types>
+        <members>Equipment__c.LegacyNote__c</members>
+        <members>Equipment__c.Status__c</members>
+        <name>CustomField</name>
+    </types>
+    <version>66.0</version>
+</Package>
+' > "$td/package.xml"
+    printf '<?xml version="1.0" encoding="UTF-8"?>
+<Package xmlns="http://soap.sforce.com/2006/04/metadata">
+    <types>
+        <members>*</members>
+        <name>ApexClass</name>
+    </types>
+    <types>
+        <members>Equipment__c.LegacyNote__c</members>
+        <name>CustomField</name>
+    </types>
+    <types>
+        <members>Equipment__c.Status__c</members>
+        <name>ListView</name>
+    </types>
+    <version>66.0</version>
+</Package>
+' > "$td/destructiveChanges.xml"
+    out=$(manifest_overlap "$td/package.xml" "$td/destructiveChanges.xml"); rc=$?
+    assert_exit_ok "$rc" "manifest_overlap: 読めれば 0"
+    assert_equals "$out" "CustomField:Equipment__c.LegacyNote__c" "manifest_overlap: 種類と名前が両方とも同じものだけを出す（* と、名前が同じで種類が違うものは出さない）"
+    printf '<?xml version="1.0" encoding="UTF-8"?>
+<Package xmlns="http://soap.sforce.com/2006/04/metadata">
+    <types>
+        <members>OldClass</members>
+        <name>ApexClass</name>
+    </types>
+    <version>66.0</version>
+</Package>
+' > "$td/destructiveChanges.xml"
+    out=$(manifest_overlap "$td/package.xml" "$td/destructiveChanges.xml"); rc=$?
+    assert_exit_ok "$rc" "manifest_overlap: 重なりがなくても 0"
+    assert_equals "$out" "" "manifest_overlap: 重なりがなければ、何も出さない"
+    manifest_overlap "$td/package.xml" "$td/none.xml" >/dev/null 2>&1; rc=$?
+    assert_equals "$rc" "1" "manifest_overlap: 読めなければ 1"
+    rm -rf "$td"
+    unset -f manifest_overlap
+}
+
+# ------------------------------------------------------------------------------
 # merge_package_xml のテスト（package.xml を、種類ごとに、重複なく統合する）
 # ------------------------------------------------------------------------------
 test_merge_package_xml() {
@@ -1784,6 +1846,7 @@ test_push_admin_branch
 test_json_get
 test_portable_sed
 test_merge_package_xml
+test_manifest_overlap
 test_bash32_compat
 
 print_summary

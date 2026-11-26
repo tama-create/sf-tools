@@ -34,7 +34,8 @@
 #   push_admin_branch DIR     ... admin ブランチを、GitHub にも作る（git push -u origin admin。強制 push はしない）
 #   merge_package_xml OUT IN... ... package.xml 形式のマニフェストを 1 つに統合する（種類ごとに、メンバーを重複なく並べる。
 #                               入力が読めない・書けないときは、OUT を削除して戻り値 1）
-#   （内部用: _pick_from_list。変数: _GH_OWNER_RE = GitHub のオーナー名の形式）
+#   manifest_overlap A B      ... 2 つのマニフェストの両方にある「種類:メンバー」を、1 行に 1 つ出す（反映と削除の重なりの検出）
+#   （内部用: _pick_from_list・_manifest_pairs。変数: _GH_OWNER_RE = GitHub のオーナー名の形式）
 # ==============================================================================
 
 # merge_package_xml - package.xml 形式のマニフェストを、1 つに統合する
@@ -101,6 +102,40 @@ merge_package_xml() {
     }
     return $RET_OK
 }
+
+# manifest_overlap - 2 つのマニフェスト（package.xml 形式）の、両方にある「種類:メンバー」を出す
+# ------------------------------------------------------------------------------
+# 【使い方】 manifest_overlap A B
+# 【理由】   反映（package.xml）と削除（destructiveChanges.xml）の両方に同じものがあると、--pre-destructive-changes で
+#           先に消したあと、反映で作り直す。項目なら、項目は残り、中のデータだけが消える（エラーにならない）。
+#           deploy-target.txt にオブジェクトの本体（*.object-meta.xml）やフォルダを書くと、sf project generate manifest が
+#           配下の項目を全部入れるため、remove-target.txt に書いた項目と重なる（2026-11-26・force-test-win の段階 3 で判明。
+#           dry-run も成功のまま通った）。sf-release.sh が、マニフェストを作った直後に、これで確かめて止める
+# 【動作】   merge_package_xml と同じ読み方（各 <types> の <members> を、次の <name> の種類のものとする）で、両方を
+#           「種類:メンバー」の行にし、両方にある行を出す（LC_ALL=C の sort -u の順）。ワイルドカード（*）は、比べない
+# 【戻り値】 0 = 読めた（重なりがなければ、何も出さない）/ 1 = どちらかが読めない
+# ------------------------------------------------------------------------------
+manifest_overlap() {
+    local a="$1" b="$2" f
+    for f in "$a" "$b"; do
+        [[ -f "$f" && -r "$f" ]] || return $RET_NG
+    done
+    # 出力用のため run 不使用（両方の「種類:メンバー」を並べ、両方にある行だけを出す。プロセス置換は Bash 3.2 でも使える）
+    LC_ALL=C comm -12 <(_manifest_pairs "$a") <(_manifest_pairs "$b")
+    return $RET_OK
+}
+
+# _manifest_pairs - （内部用）マニフェストの <types> を「種類:メンバー」の行にする（重複なし・バイト順。* は出さない）
+_manifest_pairs() {
+    # run 不使用: awk・sort は、パイプの部品（manifest_overlap に渡すだけ）
+    awk '
+        /<members>/ { s = $0; sub(/^[[:space:]]*<members>/, "", s); sub(/<\/members>[[:space:]]*$/, "", s); m[n++] = s }
+        /<name>/    { t = $0; sub(/^[[:space:]]*<name>/, "", t); sub(/<\/name>[[:space:]]*$/, "", t)
+                      for (i = 0; i < n; i++) if (m[i] != "*") printf "%s:%s\n", t, m[i]
+                      n = 0 }
+    ' "$1" | LC_ALL=C sort -u
+}
+
 
 # get_target_org - 接続先組織エイリアスを解決して echo する
 # ------------------------------------------------------------------------------

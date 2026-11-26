@@ -36,6 +36,10 @@
 #      両方のリストに対象が 1 件もなければ、何もせず終了コード 0 で終了する。
 #      package.xml と destructiveChanges.xml の両方にある「種類:メンバー」があれば、それを表示して中断する
 #      （削除のあとの反映で、作り直されるため。【補足】の「反映と削除の重なり」参照）。
+#      続けて、destructiveChanges.xml の対象のうち、組織にないもの（すでに消えたもの）を、確かめられたものだけ外す
+#      （種類ごとに sf org list metadata を 1 回。外したものは WARNING で表示し、最後にもう一度表示する。【補足】の
+#      「組織にない削除の対象」参照）。すべて外れたら --pre-destructive-changes を付けず、反映するものもなければ、
+#      何もせず終了コード 0 で終了する。remove-target.txt に # @ignore-missing があれば、この確認をしない。
 #   8. deploy-target.txt の [files] にある .cls のうち、ファイル中に「@isTest」（大文字小文字を区別しない）を
 #      含むものをテストクラスとして検出し、--test-level RunSpecifiedTests と --tests <クラス名>（クラスごと）を付ける。
 #      検出されなければ、--test-level を付けない。
@@ -67,13 +71,24 @@
 #     オブジェクトの本体（*.object-meta.xml）やフォルダを書くと、sf project generate manifest が配下の項目などを全部入れるため、
 #     remove-target.txt に書いた項目と重なる（2026-11-26 に force-test-win で判明。sf-check.sh も dry-run も通った）。
 #     マニフェストを作った直後に lib/project.sh の manifest_overlap で確かめ、重なりがあれば中断する（ワイルドカード * は比べない）。
+#   - 組織にない削除の対象: 同じブランチで、削除を含む変更を何度も出すと（develop に出したあと、続きの変更をもう一度出す・
+#     個人の組織で Deploy したあと Dryrun するなど）、2 回目からは、消す対象が組織にない。Salesforce は
+#     「No ApexClass named: X found」で、検証・リリースの全体を失敗にする（2026-11-26 に force-test-win で発生）。そのため、
+#     マニフェストを作ったあと、lib/project.sh の manifest_missing_in_org で、組織にない対象を調べ、manifest_drop_pairs で外す。
+#     外すのは、組織の一覧（sf org list metadata）が取れて、名前がそこにないものだけ（大文字・小文字は区別しない）。
+#     一覧が取れない種類（WARNING を表示）・フォルダの中の種類（Report・Dashboard・Document・EmailTemplate）・
+#     ワイルドカード（*）・英数字と「_」「.」「-」以外を含む名前は、確かめずに残す（今までどおり、Salesforce が判断する）。
+#     外しすぎると、消すはずのものが黙って残るため、迷うものは残す側に倒す。[members] の名前の書き間違いも、組織にない
+#     ものとして外れるため、外したものは WARNING で 1 件ずつ表示し、デプロイのあとにもう一度表示する。GitHub Actions 上では、
+#     実行の要約（GITHUB_STEP_SUMMARY）にも書く。
 #   - 存在しない削除対象を許す指示（# @ignore-missing）: remove-target.txt に、`# @ignore-missing` で始まる
 #     コメント行（行頭・# の後の空白は可）があるときだけ、sf project deploy start に --ignore-warnings を付ける。
 #     削除対象が組織に存在しなくても、エラーにしない（「No ApexClass named: X found」を、警告として扱う）。
 #     後始末（sf-init.sh --verify --cleanup）のように、どこまで消えているか分からない削除を、何度でも実行できる
 #     ようにするための指示。--ignore-warnings はデプロイ全体に付くため、削除以外の警告も、エラーにならない。
-#     指示がなければ、存在しない対象は、エラーになる（綴りの誤りなどを、見落とさないため。通常のリリース・削除には、
-#     付けないこと）。
+#     指示があるときは、上の「組織にない削除の対象」の確認をせず、Salesforce に任せる（従来どおり）。指示がなければ、
+#     組織にない対象は、上の確認で外れる（確かめられなかったものは、Salesforce のエラーになる）。通常のリリース・削除には、
+#     付けないこと（--ignore-warnings は、削除以外の警告も、エラーにしなくなるため）。
 #   - 共有環境の保護: 接続先のエイリアスが予約名（prod / staging / develop / main）の組織（共有環境）には、
 #     ローカルからは実行できない（dry-run を含む）。リリースは、GitHub にコミットし、レビューを通して、
 #     GitHub Actions で行う。個人用の Sandbox / Developer Edition / Scratch Org は、ローカルから実行できる。
@@ -387,6 +402,71 @@ phase_generate_manifest() {
     return $RET_OK
 }
 
+# 【PRUNE】削除の対象のうち、組織にないもの（すでに消えたもの）を、destructiveChanges.xml から外す
+#   同じブランチで削除を含む変更を何度も出すと、2 回目からは、消す対象が組織にない。Salesforce は「No ApexClass named: X found」で、
+#   検証・リリースの全体を失敗にするため、先に外す（lib/project.sh の manifest_missing_in_org・manifest_drop_pairs）。
+#   確かめられたものだけを外す（一覧が取れない種類・フォルダの中の種類などは、外さない）。外したものは PRUNED_ITEMS に入れ、
+#   最後にもう一度表示する（[members] の書き間違いも、組織にないとして外れるため、見落とさないように）。
+#   remove-target.txt に「# @ignore-missing」があれば、何もしない（--ignore-warnings で、Salesforce に任せる。従来どおり）
+#   戻り値: RET_OK / RET_NO_CHANGE（削除がすべて外れ、反映するものもない）/ RET_NG（XML を読めない・書き換えられない）
+PRUNED_ITEMS=()
+phase_prune_destructive() {
+    [[ -f "$REMOVE_XML" ]] || return $RET_OK
+    if grep -qE '^[[:space:]]*#[[:space:]]*@ignore-missing' "$REMOVE_LIST"; then  # 条件チェック
+        return $RET_OK
+    fi
+    local missing item list="${RELEASE_DIR}/.missing-in-org.txt"
+    log "INFO" "削除の対象が、組織（${TARGET_ORG}）にあるかを確かめます..."
+    missing=$(manifest_missing_in_org "$REMOVE_XML" "$TARGET_ORG") || {  # VAR=$(cmd) のため run 不使用
+        log "ERROR" "削除の対象を読めません（${REMOVE_XML}）。"
+        return $RET_NG
+    }
+    if [[ -z "$missing" ]]; then
+        log "SUCCESS" "削除の対象は、すべて組織にあります（確かめられなかったものは、上の WARNING）。"
+        return $RET_OK
+    fi
+    printf '%s\n' "$missing" > "$list" || return $RET_NG  # run 不使用: 一時ファイルへの書き込み
+    if ! manifest_drop_pairs "$REMOVE_XML" "$list"; then  # 条件チェック
+        rm -f "$list"  # run 不使用: 一時ファイルの除去
+        log "ERROR" "destructiveChanges.xml から、組織にないものを外せませんでした。"
+        return $RET_NG
+    fi
+    rm -f "$list"  # run 不使用: 一時ファイルの除去
+    while IFS= read -r item; do
+        [[ -n "$item" ]] && PRUNED_ITEMS+=("$item")
+    done <<< "$missing"
+    _report_pruned summary
+    if ! grep -q '<members>' "$REMOVE_XML" 2>/dev/null; then  # 条件チェック
+        run rm -f "$REMOVE_XML"
+        log "INFO" "削除の対象が、すべて組織にないため、削除は行いません（--pre-destructive-changes を付けません）。"
+        if ! grep -q '<members>' "$DEPLOY_XML" 2>/dev/null; then  # 条件チェック（反映するものもない）
+            return $RET_NO_CHANGE
+        fi
+    fi
+    return $RET_OK
+}
+
+# _report_pruned [summary] - 組織にないため削除から外したもの（PRUNED_ITEMS）を、WARNING で表示する。
+#   summary を付けると、GitHub Actions 上では、実行の要約（GITHUB_STEP_SUMMARY）にも書く（ログを開かなくても見えるように。
+#   外した直後の 1 回だけ付ける。最後の再表示では付けない）
+_report_pruned() {
+    local item
+    [[ ${#PRUNED_ITEMS[@]} -gt 0 ]] || return 0
+    log "WARNING" "組織（${TARGET_ORG}）にないため、削除の対象から外しました（すでに消えているもの）: ${#PRUNED_ITEMS[@]} 件"
+    for item in "${PRUNED_ITEMS[@]}"; do
+        log "WARNING" "  ${item}"
+    done
+    log "WARNING" "  remove-target.txt の [members] の名前の書き間違いも、ここに出ます。消したいものが、ここにないかを確かめてください。"
+    if [[ "${1:-}" == "summary" && -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+        # run 不使用: 実行の要約への追記
+        {
+            printf '### 削除の対象から外したもの（組織 %s にないため）\n\n' "$TARGET_ORG"
+            for item in "${PRUNED_ITEMS[@]}"; do printf -- '- `%s`\n' "$item"; done
+            printf '\nremove-target.txt の [members] の名前の書き間違いも、ここに出ます。\n\n'
+        } >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+    fi
+}
+
 # 【RELEASE】Salesforce へのデプロイ/検証の実行
 phase_release() {
     local deploy_cmd=("sf" "project" "deploy" "start" "--target-org" "$TARGET_ORG" "--manifest" "$DEPLOY_XML" "${JSON_FLAG[@]}")
@@ -443,9 +523,19 @@ if [[ $manifest_ret -eq $RET_NO_CHANGE ]]; then
 fi
 log "SUCCESS" "マニフェスト生成完了"
 
+phase_prune_destructive
+prune_ret=$?
+[[ $prune_ret -eq $RET_NG ]] && die "削除の対象の確認に失敗しました。"
+if [[ $prune_ret -eq $RET_NO_CHANGE ]]; then
+    log "SUCCESS" "反映・削除するものがありません（削除の対象は、すべて組織にありません）。正常終了します。"
+    exit 0
+fi
+
 phase_release
 res=$?
 
+# 外したものは、最後にもう一度表示する（デプロイの出力の上に流れて、見落とさないように）
+_report_pruned
 if [[ $res -eq $RET_OK ]]; then
     log "SUCCESS" "デプロイ/検証が完了しました。"
 elif [[ $res -eq $RET_NO_CHANGE ]]; then

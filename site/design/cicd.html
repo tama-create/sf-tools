@@ -115,7 +115,7 @@
   </div>
   <figcaption>1 つの作業用のブランチから、各環境へ、<strong>別々に</strong> PR を出します。環境ブランチどうしは、直接マージしません。</figcaption>
 </figure>
-<p>リリースする対象は、作業用のブランチにコミットした、<code>sf-tools/release/&lt;ブランチ名&gt;/</code> のターゲットファイルに書いたものだけです。<code>deploy-target.txt</code> に追加・更新するもの、<code>remove-target.txt</code> に削除するものを書きます（<a href="../reference/target-files.html">ターゲットファイルの書き方</a>）。同じターゲットファイルが、各環境への PR で使われます。</p>
+<p>リリースする対象は、作業用のブランチにコミットした、<code>sf-tools/release/&lt;ブランチ名&gt;/</code> のターゲットファイルに書いたものだけです。<code>deploy-target.txt</code> に追加・更新するもの、<code>remove-target.txt</code> に削除するものを書きます（<a href="../reference/target-files.html">ターゲットファイルの書き方</a>）。同じターゲットファイルが、各環境への PR で使われます。同じブランチから、同じ環境へ、続きの変更をもう一度出しても構いません（すでに消したものは、検証・リリースのときに、組織にないものとして自動で外れます）。</p>
 <div class="box">
   <div class="title">なぜ、環境ブランチどうしを、直接マージしないのか</div>
   <p>環境ブランチの間でマージすると、意図しない変更が混ざるおそれがあります。必ず作業用のブランチを経由させることで、「各環境に、何がデプロイされたか」を、はっきり追えます。</p>

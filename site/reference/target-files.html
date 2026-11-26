@@ -71,7 +71,8 @@ force-app/main/default/classes/OldClass.cls</code></pre>
 <ul>
   <li>削除は、<code>deploy-target.txt</code> のデプロイより先に行われます（<code>--pre-destructive-changes</code>）。</li>
   <li><code>deploy-target.txt</code> が空で、<code>remove-target.txt</code> にだけ対象があるときは、削除だけを行います。</li>
-  <li>組織にない削除対象を、エラーにしたくない（後始末など）ときは、<code># @ignore-missing</code> で始まるコメント行（行頭・<code>#</code> の後の空白は可）を書きます。<code>--ignore-warnings</code> が付き、削除以外の警告も、エラーになりません。通常のリリース・削除では、書かないでください（綴りの誤りを見落とすため）。</li>
+  <li>組織にない削除対象（すでに消えたもの）は、検証・リリースのときに自動で外し、WARNING で表示します（<a href="commands-dev.html#sf-release"><code>sf-release.sh</code></a> の補足）。そのため、同じブランチで削除を含む変更を何度出しても、消したものが残ったままで構いません。<code>[members]</code> の名前の書き間違いも「組織にない」として外れるので、WARNING に消したいものが混ざっていないか確かめてください。</li>
+  <li>組織にない削除対象を、Salesforce に任せたい（後始末など）ときは、<code># @ignore-missing</code> で始まるコメント行（行頭・<code>#</code> の後の空白は可）を書きます。自動で外す確認はせず、<code>--ignore-warnings</code> が付き、削除以外の警告も、エラーになりません。通常のリリース・削除では、書かないでください。</li>
 </ul>
 
 <div class="box">

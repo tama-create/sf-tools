@@ -317,9 +317,14 @@ test_mixed_files_and_members() {
     printf '[files]\nforce-app/main/default/classes/TestClass.cls\nforce-app/main/default/flows/MyFlow.flow-meta.xml\n\n[members]\nCustomObject:My__c\nLayout:My__c-My Layout\n' \
         > "$rd/deploy-target.txt"
     printf '[files]\n\n[members]\nApexClass:OldClass\nFlow:OldFlow\n' > "$rd/remove-target.txt"
+    # 削除の対象は、組織にある（ないと、組織にない削除の対象として外れる。test_prune_missing_destructive）
+    export MOCK_SF_LIST_DIR="$td/list"; mkdir -p "$MOCK_SF_LIST_DIR"
+    printf '[{"fullName":"OldClass"}]' > "$MOCK_SF_LIST_DIR/ApexClass.json"
+    printf '[{"fullName":"OldFlow"}]' > "$MOCK_SF_LIST_DIR/Flow.json"
 
     local out; out=$(cd "$td" && PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-release.sh" --no-open 2>&1)
     local ec=$?
+    unset MOCK_SF_LIST_DIR
 
     assert_exit_ok $ec "混在: 正常終了する"
     assert_file_contains "$rd/package.xml" "<name>ApexClass</name>"  "混在: package.xml に、[files] の ApexClass が入る"
@@ -508,5 +513,117 @@ test_empty_manifest_aborts
 test_merge_failure_aborts
 test_check_error_message
 test_ignore_missing_directive
+
+# 組織にない削除の対象を外す（同じブランチで、削除を含む変更を何度も出すと、2 回目からは、消す対象が組織にない）
+#   組織にあるものの一覧は、偽の sf の MOCK_SF_LIST_DIR/<種類>.json（なければ空の一覧）。MOCK_SF_LIST_FAIL で一覧を失敗させる
+_prune_env() {   # 引数: td 変数名 mb 変数名（setup_std_env の結果）。一覧のフォルダを作り、MOCK_SF_LIST_DIR に入れる
+    export MOCK_SF_ORG_JSON='{"result":{"alias":"testorg","id":"00D000000000001AAA"}}'
+    export MOCK_SF_LIST_DIR="$1/list"
+    mkdir -p "$MOCK_SF_LIST_DIR"
+}
+test_prune_missing_destructive() {
+    local td mb mh rd out ec
+    setup_std_env td mb mh
+    create_all_mocks "$mb"
+    setup_release_dir "$td"
+    _prune_env "$td"
+    rd="$td/sf-tools/release/feature/test"
+
+    # 一部ない: 組織にあるもの（大文字・小文字の違いは、同じとみなす）は残し、ないものだけ外す
+    printf '[files]\n\n[members]\nApexClass:Gone\nApexClass:Keep\nApexClass:MixedCase\n' > "$rd/remove-target.txt"
+    printf '[{"fullName":"Keep"},{"fullName":"MIXEDCASE"},{"fullName":"Other"}]' > "$MOCK_SF_LIST_DIR/ApexClass.json"
+    out=$(cd "$td" && PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-release.sh" --no-open 2>&1); ec=$?
+    assert_exit_ok $ec "一部ない: 成功する"
+    assert_file_contains "$MOCK_CALL_LOG" "org list metadata --metadata-type ApexClass" "一部ない: 種類ごとに、組織の一覧を問い合わせる"
+    assert_file_contains "$rd/destructiveChanges.xml" "<members>Keep</members>" "一部ない: 組織にあるものは、残す"
+    assert_file_contains "$rd/destructiveChanges.xml" "<members>MixedCase</members>" "一部ない: 大文字・小文字だけ違うものは、ある、とみなして残す"
+    assert_file_not_contains "$rd/destructiveChanges.xml" "<members>Gone</members>" "一部ない: 組織にないものは、外す"
+    assert_output_contains "$out" "組織（testorg）にないため、削除の対象から外しました" "一部ない: 外したことを WARNING で表示する"
+    assert_output_contains "$out" "ApexClass:Gone" "一部ない: 外したものの種類と名前を表示する"
+    [[ "$(echo "$out" | grep -c "ApexClass:Gone")" -ge 2 ]] \
+        && pass "一部ない: 外したものを、デプロイのあとにもう一度表示する" || fail "一部ない: 外したものを、デプロイのあとにもう一度表示する"
+    grep "project deploy" "$MOCK_CALL_LOG" | grep -q -- "--pre-destructive-changes" \
+        && pass "一部ない: 残った削除は、--pre-destructive-changes で渡す" || fail "一部ない: 残った削除は、--pre-destructive-changes で渡す"
+
+    # 全部ない・反映はある: 削除の指定を付けずに、反映（検証）だけ行う
+    : > "$MOCK_CALL_LOG"
+    printf '[files]\n\n[members]\nApexClass:Gone\nCustomField:Equipment__c.Old__c\n' > "$rd/remove-target.txt"
+    out=$(cd "$td" && PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-release.sh" --no-open 2>&1); ec=$?
+    assert_exit_ok $ec "全部ない: 成功する"
+    assert_file_contains "$MOCK_CALL_LOG" "project deploy" "全部ない: 反映（検証）は行う"
+    assert_file_not_contains "$MOCK_CALL_LOG" "--pre-destructive-changes" "全部ない: 削除の指定（--pre-destructive-changes）を付けない"
+    assert_file_not_exists "$rd/destructiveChanges.xml" "全部ない: destructiveChanges.xml を残さない"
+    assert_output_contains "$out" "削除の対象が、すべて組織にないため" "全部ない: 削除しない理由を表示する"
+
+    # 全部ない・反映もない: 何もせずに成功する（develop に削除を出したあと、同じブランチから、もう一度出したとき）
+    : > "$MOCK_CALL_LOG"
+    printf '[files]\n' > "$rd/deploy-target.txt"
+    out=$(cd "$td" && PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-release.sh" --no-open 2>&1); ec=$?
+    assert_exit_ok $ec "削除だけで全部ない: 成功する（終了コード 0）"
+    assert_file_not_contains "$MOCK_CALL_LOG" "project deploy" "削除だけで全部ない: デプロイしない"
+    assert_output_contains "$out" "反映・削除するものがありません" "削除だけで全部ない: 理由を表示する"
+    unset MOCK_SF_ORG_JSON MOCK_SF_LIST_DIR
+    teardown "$td" "$mb"
+}
+
+# 確かめられないものは外さない（外しすぎると、消すはずのものが黙って残るため）
+test_prune_keeps_unverifiable() {
+    local td mb mh rd out ec
+    setup_std_env td mb mh
+    create_all_mocks "$mb"
+    setup_release_dir "$td"
+    _prune_env "$td"
+    rd="$td/sf-tools/release/feature/test"
+
+    # 一覧が取れない種類は、外さない（WARNING）
+    printf '[files]\n\n[members]\nApexClass:Gone\n' > "$rd/remove-target.txt"
+    out=$(cd "$td" && MOCK_SF_LIST_FAIL=ApexClass PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-release.sh" --no-open 2>&1)
+    assert_file_contains "$rd/destructiveChanges.xml" "<members>Gone</members>" "一覧が取れない: 外さない"
+    assert_output_contains "$out" "ApexClass: 組織にあるかを確かめられませんでした" "一覧が取れない: WARNING を表示する"
+    grep "project deploy" "$MOCK_CALL_LOG" | grep -q -- "--pre-destructive-changes" \
+        && pass "一覧が取れない: 削除は、そのまま渡す（Salesforce が判断する）" || fail "一覧が取れない: 削除は、そのまま渡す（Salesforce が判断する）"
+
+    # フォルダの中の種類・* ・書き方が違いうる名前は、確かめずに残す
+    : > "$MOCK_CALL_LOG"
+    printf '[files]\n\n[members]\nReport:MyFolder/OldReport\nApexClass:*\nLayout:Account-Account %%28Old%%29 Layout\n' > "$rd/remove-target.txt"
+    out=$(cd "$td" && PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-release.sh" --no-open 2>&1)
+    assert_file_contains "$rd/destructiveChanges.xml" "<members>MyFolder/OldReport</members>" "フォルダの中の種類（Report）: 外さない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "--metadata-type Report" "フォルダの中の種類（Report）: 一覧を問い合わせない"
+    assert_file_contains "$rd/destructiveChanges.xml" "<members>*</members>" "ワイルドカード（*）: 外さない"
+    assert_file_contains "$rd/destructiveChanges.xml" "Account-Account %28Old%29 Layout" "英数字と _ . - 以外を含む名前: 外さない"
+    assert_output_not_contains "$out" "削除の対象から外しました" "確かめられないものだけのとき: 外したものはない"
+
+    # # @ignore-missing があれば、確かめない（従来どおり、--ignore-warnings で Salesforce に任せる）
+    : > "$MOCK_CALL_LOG"
+    printf '# @ignore-missing\n[files]\n\n[members]\nApexClass:Gone\n' > "$rd/remove-target.txt"
+    (cd "$td" && PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-release.sh" --no-open >/dev/null 2>&1)
+    assert_file_not_contains "$MOCK_CALL_LOG" "org list metadata" "@ignore-missing: 組織の一覧を問い合わせない"
+    assert_file_contains "$rd/destructiveChanges.xml" "<members>Gone</members>" "@ignore-missing: 外さない"
+    unset MOCK_SF_ORG_JSON MOCK_SF_LIST_DIR
+    teardown "$td" "$mb"
+}
+
+# GitHub Actions 上では、外したものを、実行の要約（GITHUB_STEP_SUMMARY）にも書く（1 回だけ）
+test_prune_step_summary() {
+    local td mb mh rd sum
+    setup_std_env td mb mh
+    create_all_mocks "$mb"
+    setup_release_dir "$td"
+    _prune_env "$td"
+    rd="$td/sf-tools/release/feature/test"
+    sum="$td/summary.md"
+    printf '[files]\n\n[members]\nApexClass:Gone\n' > "$rd/remove-target.txt"
+    (cd "$td" && GITHUB_ACTIONS=true GITHUB_STEP_SUMMARY="$sum" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-release.sh" -t testorg --no-open >/dev/null 2>&1)
+    assert_file_contains "$sum" "削除の対象から外したもの" "要約: 見出しを書く"
+    assert_file_contains "$sum" "ApexClass:Gone" "要約: 外したものを書く"
+    [[ "$(grep -c "ApexClass:Gone" "$sum" 2>/dev/null)" -eq 1 ]] \
+        && pass "要約: 1 回だけ書く（最後の再表示では、書かない）" || fail "要約: 1 回だけ書く（最後の再表示では、書かない）"
+    unset MOCK_SF_ORG_JSON MOCK_SF_LIST_DIR
+    teardown "$td" "$mb"
+}
+
+test_prune_missing_destructive
+test_prune_keeps_unverifiable
+test_prune_step_summary
 
 print_summary

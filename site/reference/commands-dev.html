@@ -246,6 +246,7 @@ sf-launcher.sh --fzf     # fzf でインクリメンタル検索</code></pre>
   <li><code>deploy-target.txt</code> / <code>remove-target.txt</code> があるかを確かめ、<code>sf-check.sh</code> で検証する（<code>branch_name.txt</code> か、どちらかのファイルがないとき・エラーのときは、中断する）</li>
   <li>既存の <code>package.xml</code> / <code>destructiveChanges.xml</code> を削除してから、マニフェストを作る。両方のファイルに対象が 1 件もなければ、「デプロイ対象なし。正常終了します。」と表示して、正常（終了コード 0）で終わる</li>
   <li>作った 2 つのマニフェストの両方に、同じもの（種類と名前）があれば、その一覧を表示して中断する（組織には送らない）。削除が反映より先に行われるため、消したものを反映で作り直し、項目なら中のデータだけが消えるのを防ぐ。<code>deploy-target.txt</code> にオブジェクトの本体やフォルダを書くと、配下の項目が全部、反映に入るため起きる（<a href="target-files.html">ターゲットファイル</a>）</li>
+  <li>削除の対象のうち、組織にないもの（すでに消えたもの）を、確かめられたものだけ外す（種類ごとに <code>sf org list metadata</code> を 1 回。外したものは WARNING で表示する。下の補足）。すべて外れたら削除を行わず、反映するものもなければ、何もせずに成功する。<code>remove-target.txt</code> に <code># @ignore-missing</code> があれば、この確認をしない</li>
   <li>テストクラスを検出する（上の囲み）</li>
   <li>（<code>-n</code> がなければ）組織のデプロイ状況の画面（<code>lightning/setup/DeployStatus/home</code>）を、ブラウザで開き、5 秒待つ</li>
   <li><code>sf project deploy start --manifest package.xml</code> を実行する。削除対象があれば、<code>--pre-destructive-changes</code> で渡す（削除は、デプロイより先に行われる）。検証モードなら <code>--dry-run</code> を付ける。失敗すれば中断する</li>
@@ -254,7 +255,15 @@ sf-launcher.sh --fzf     # fzf でインクリメンタル検索</code></pre>
 <ul>
   <li>マニフェストは、<code>[files]</code> の行を <code>--source-dir</code>、<code>[members]</code> の行を <code>--metadata</code> として、別々に <code>sf project generate manifest</code> で作り、1 つの XML にまとめます（両方を同時に渡すと、<code>sf</code> は共通の部分だけを返すため）。まとめたあとにメンバーが 1 つもなければ、エラーで中断します（「変更なし」の成功として、見落とさないため）。</li>
   <li><code>deploy-target.txt</code> が空で、<code>remove-target.txt</code> にだけ対象があるときは、メンバーのない <code>package.xml</code>（version 60.0）を作り、削除だけを行います。</li>
-  <li>組織にない削除対象をエラーにしたくないとき（後始末など）は、<code>remove-target.txt</code> に <code># @ignore-missing</code> で始まるコメント行（行頭・<code>#</code> の後の空白は可）を書きます。<code>sf project deploy start</code> に <code>--ignore-warnings</code> が付き、削除以外の警告も、エラーになりません。通常のリリース・削除では、付けないでください（綴りの誤りを、見落とさないためです）。</li>
+  <li>削除の対象のうち、組織にないもの（すでに消えたもの）は、自動で外します。同じブランチで削除を含む変更を何度も出すと（develop に出したあと続きを出す・自分の組織で Deploy したあと Dryrun する）、2 回目からは消す対象がなく、Salesforce が「No ApexClass named: X found」で全体を失敗にするためです。
+    <ul>
+      <li>種類ごとに <code>sf org list metadata</code> で組織の一覧を取り、名前がないものだけを外します（大文字・小文字は区別しません）。</li>
+      <li>確かめられないものは外しません: 一覧が取れない種類（WARNING が出ます）・フォルダの中の種類（Report・Dashboard・Document・EmailTemplate）・<code>*</code>・英数字と <code>_</code> <code>.</code> <code>-</code> 以外を含む名前。消すはずのものが黙って残らないよう、迷うものは残す側に倒します。</li>
+      <li>外したものは、WARNING で 1 件ずつ表示し、デプロイのあとにもう一度表示します。GitHub Actions では、実行の要約にも書きます。<code>[members]</code> の名前の書き間違いも、ここに出るので、消したいものが混ざっていないか確かめてください。</li>
+      <li>すべて外れたら、削除は行いません。反映するものもなければ、何もせずに成功します。</li>
+    </ul>
+  </li>
+  <li>組織にない削除対象を、Salesforce に任せたいとき（後始末など）は、<code>remove-target.txt</code> に <code># @ignore-missing</code> で始まるコメント行（行頭・<code>#</code> の後の空白は可）を書きます。上の自動で外す確認はせず、<code>sf project deploy start</code> に <code>--ignore-warnings</code> が付き、削除以外の警告も、エラーになりません。通常のリリース・削除では、付けないでください。</li>
   <li><code>sf-check.sh</code> の出力（どの行が、なぜエラーか）は、<code>-v</code> がなくても画面に出ます（<code>sf-release.log</code> には残りません）。</li>
   <li><code>-h</code> / <code>--help</code> は、1 つ目の引数なら、ほかの処理の前に説明を表示します。2 つ目以降なら、手順 1 のあとの引数の解析で、そこに来た時点で表示します（それより前の引数がエラーなら、そのエラーで中断します）。</li>
   <li>終了コードは、成功（対象なしを含む）が <code>0</code>、中断・失敗が <code>1</code> です。ログは <code>./sf-tools/logs/sf-release.log</code> に、毎回上書きされます。</li>

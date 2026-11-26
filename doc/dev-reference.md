@@ -376,7 +376,13 @@ check_gh_owner "$GITHUB_OWNER"   # 認証ユーザーの一致確認
 - ターゲットファイルをもとに `package.xml`（と、削除用の `destructiveChanges.xml`）を生成
 - `sf project deploy start` で検証（既定。`--dry-run`）またはリリース（`--release`）。`destructiveChanges.xml` は `--pre-destructive-changes` で渡す（削除が先）
 - **反映と削除の重なりで中断**: 2 つのマニフェストを作った直後に、`manifest_overlap`（`lib/project.sh`）で、両方にある「種類:メンバー」を探し、あれば一覧を ERROR で出して中断する（dry-run の前。`*` は比べない）。削除が先に行われるため、重なったものは消したあと反映で作り直され、項目なら中のデータだけが消える（Salesforce はエラーにしない）。`deploy-target.txt` にオブジェクトの本体（`*.object-meta.xml`）や `objects/<オブジェクト>` のフォルダを書くと、`sf project generate manifest` が配下の項目を全部入れるため起きる（2026-11-26・force-test-win の段階 3 で判明。sf-check も dry-run も通っていた）
-- 処理の順: `check_sf_cli --cache` → 接続先の決定（`-t` > `SF_TARGET_ORG` > `sf org display` の alias）→ 共有環境の保護（5.1）→ リリースの確認（5.2）→ `branch_name.txt` の読み込み → 対象リストの確認と `sf-check.sh` → マニフェスト生成と `@isTest` の検出（`phase_generate_manifest`）→ `sf org open`（`-n` がなければ。5 秒待つ）→ `sf project deploy start`
+- **組織にない削除の対象を外す**（`phase_prune_destructive`）: 重なりの確認のあと、`manifest_missing_in_org`（`lib/project.sh`）で、`destructiveChanges.xml` の対象のうち組織にないものを調べ、`manifest_drop_pairs` で外す。同じブランチで削除を含む変更を何度も出すと（develop に出したあと続きを出す・個人の組織で Deploy したあと Dryrun する）、2 回目からは消す対象がなく、Salesforce が「No ApexClass named: X found」で全体を失敗にするため（2026-11-26・force-test-win の JOB-EQL-1 で発生）
+  - 種類ごとに `sf org list metadata --metadata-type <種類> --target-org <組織> --json` を 1 回。名前は大文字・小文字を区別せずに比べる
+  - **外すのは確かめられたものだけ**（外しすぎると、消すはずのものが黙って残る）。一覧が取れない種類（WARNING）・フォルダの中の種類（Report・Dashboard・Document・EmailTemplate）・`*`・英数字と `_` `.` `-` 以外を含む名前（Layout の `%28` など）は、確かめずに残す
+  - 外したものは WARNING で 1 件ずつ出し、デプロイのあとにもう一度出す（`_report_pruned`）。GitHub Actions 上では `GITHUB_STEP_SUMMARY` にも 1 回書く。`[members]` の書き間違いも、ここに出る
+  - すべて外れたら `--pre-destructive-changes` を付けない。`package.xml` にもメンバーがなければ、「反映・削除するものがありません」で終了コード 0（デプロイしない）
+  - `# @ignore-missing` があれば、この確認をしない（従来どおり `--ignore-warnings`）
+- 処理の順: `check_sf_cli --cache` → 接続先の決定（`-t` > `SF_TARGET_ORG` > `sf org display` の alias）→ 共有環境の保護（5.1）→ リリースの確認（5.2）→ `branch_name.txt` の読み込み → 対象リストの確認と `sf-check.sh` → マニフェスト生成と `@isTest` の検出（`phase_generate_manifest`）→ 組織にない削除の対象を外す（`phase_prune_destructive`）→ `sf org open`（`-n` がなければ。5 秒待つ）→ `sf project deploy start`
 - 両方のリストに対象が 1 件もなければ、「デプロイ対象なし。正常終了します。」で終了コード 0（CI でリリースの定義だけを先に準備する運用を許すため）。`deploy-target.txt` が空で `remove-target.txt` にだけ対象があれば、メンバーのない `package.xml`（version 60.0）で削除だけ行う
 - 終了コード: 成功（対象なしを含む）は 0、中断・失敗は 1
 
@@ -385,9 +391,9 @@ check_gh_owner "$GITHUB_OWNER"   # 認証ユーザーの一致確認
 空のマニフェストでは、`sf project deploy start` が `NothingToDeploy` を返し、sf-release.sh は「変更がないため処理をスキップしました」と成功扱いにしていたため、
 `[files]` と `[members]` を混在させたリストは、検証もリリースもされないまま、緑になっていた（`sf-init.sh --verify --components` で発見）。
 `deploy-target.txt` に対象があるのに、統合後に `<members>` が 1 つもなければ、エラーで中断する（`NothingToDeploy` の成功扱いにしない）。
-**`remove-target.txt` の指示行 `# @ignore-missing`**（コメント行の形）: あるときだけ、`sf project deploy start --ignore-warnings` を付け、組織に存在しない削除対象を、エラーにしない。後始末（`sf-init.sh --verify --cleanup`）用。通常のリリース・削除には、付けない。
+**`remove-target.txt` の指示行 `# @ignore-missing`**（コメント行の形）: あるときだけ、`sf project deploy start --ignore-warnings` を付け、組織に存在しない削除対象を、エラーにしない。後始末（`sf-init.sh --verify --cleanup`）用。通常のリリース・削除には、付けない（組織にない対象は、指示がなくても `phase_prune_destructive` が外す。指示があると、その確認をしない）。
 `merge_package_xml` は、awk と sort だけ（GNU / BSD 共通）。種類は名前の順・メンバーは重複なし・version は最初のもの。
-テスト: `tests/test_sf-release.sh`（混在・`[members]` のみ・`[files]` のみ・空のマニフェスト）、`tests/test_common.sh` の `test_merge_package_xml`。`tests/test_helper.sh` の sf のモックは、実際の sf と同じく、両方を同時に渡すと空になる。
+テスト: `tests/test_sf-release.sh`（混在・`[members]` のみ・`[files]` のみ・空のマニフェスト・組織にない削除の対象（`test_prune_*`。偽の sf の一覧は `MOCK_SF_LIST_DIR`））、e2e は削除のあとの再 Dryrun（`_hello_redryrun_after_delete`）、`tests/test_common.sh` の `test_merge_package_xml`。`tests/test_helper.sh` の sf のモックは、実際の sf と同じく、両方を同時に渡すと空になる。
 
 主なオプション: `--release`（`-r`）/ `--validate`・`--dry-run`（既定と同じ）/ `--no-open`（`-n`）/ `--force`（`-f`。`--ignore-conflicts` を付ける）/ `--target`（`-t`）/ `--json`（`-j`）/ `--verbose`（`-v`）
 

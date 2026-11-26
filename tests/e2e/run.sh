@@ -19,7 +19,8 @@
 #                    リリース（wf-validate → マージ → wf-release）し、続けて削除する（sf-tools の本来の機能の通し）。
 #                    リリース・削除の作業は、通常の運用と同じく、sf-tools のコマンドで行う: sf-job.sh（ブランチ作成・clone・sf-start.sh）
 #                    → ファイルを書く → sf-dryrun.sh（ローカルの検証）→ sf-push.sh（commit・push・pre-push フック）。PR の作成・マージは gh。
-#                    リリース後は、sf-next.sh（マージ済みの表示）と、sf-deploy.sh（共有環境への強制リリースの拒否）も確認する
+#                    リリース後は、sf-next.sh（マージ済みの表示）と、sf-deploy.sh（共有環境への強制リリースの拒否）も確認する。
+#                    削除後は、同じ削除のジョブで、もう一度 sf-dryrun.sh を動かし、組織にない削除の対象を外して、成功することを確認する
 #                    【管理者用フォルダ（admin）の確認】 admin/force-XXXX ができたこと・状態ファイルがプロジェクト名つきであること・
 #                    古い形のフォルダ（init / init-*）がないこと・クローンが admin ブランチ（ローカルと GitHub の両方）であること・
 #                    完了画面の案内・admin ブランチで sf-sync-wf.sh --check が実行でき、main では断られること。
@@ -477,6 +478,16 @@ _hello_deploy_refused() {
         && ! grep -q "project deploy start" "${E2E_TMP}/sf-deploy-refused.out"
 }
 
+# 削除のあと、同じ削除のジョブのクローンで、もう一度 sf-dryrun.sh を動かす。消す対象（Hello World の 2 つ）は組織にないため、
+#   外したと表示し、反映するものもないので、デプロイせずに成功する。引数: 削除のジョブのクローンのフォルダ
+_hello_redryrun_after_delete() {
+    e2e_run_sf_cmd "sf-dryrun-again" "$1" "" "${SF_TOOLS_ROOT}/bin/sf-dryrun.sh" --no-open || return 1
+    grep -qF "削除の対象から外しました" "${E2E_TMP}/sf-dryrun-again.out" \
+        && grep -qF "ApexClass:${E2E_APEX_HELLO}" "${E2E_TMP}/sf-dryrun-again.out" \
+        && grep -qF "反映・削除するものがありません" "${E2E_TMP}/sf-dryrun-again.out" \
+        && ! grep -qF "project deploy start" "${E2E_TMP}/sf-dryrun-again.out"
+}
+
 # --resume: 前回の残りの Hello World の Apex クラスが、組織にあれば、削除する（名前が完全に一致するものだけ。なければ、何もしない）
 _resume_clean_apex() {
     local list
@@ -610,6 +621,10 @@ _hello_flow() {
     chk "削除後: Salesforce への管理用ログイン（問い合わせ用）をやり直した$(_tag main)" _admin_login_tier main || return 0
     chk "削除後: Salesforce から ${E2E_APEX_HELLO} が消えた$(_tag main)" _apex_is main "$E2E_APEX_HELLO" 0
     chk "削除後: Salesforce から ${E2E_APEX_HELLO_TEST} が消えた$(_tag main)" _apex_is main "$E2E_APEX_HELLO_TEST" 0
+    # 同じ削除を、消えたあとにもう一度検証する（同じブランチで、削除を含む変更を何度も出すとき）。sf-release.sh が、
+    #   組織にない削除の対象を外し、反映するものもないので、何もせずに成功する（以前は「No ApexClass named」で失敗した）
+    chk "再削除: 消えたあとに、同じ削除を sf-dryrun.sh で検証すると、組織にないものを外して成功する$(_tag main)" \
+        _hello_redryrun_after_delete "${WORK}/${JOB_DELETE}/${REPO_NAME}"
     # 2 層・3 層: main の削除は、ほかの段階の組織には及ばない（まだ残っている）。残りは、管理者の削除デプロイで掃除する
     for t in "${TIERS[@]}"; do
         [[ "$t" == "main" ]] && continue

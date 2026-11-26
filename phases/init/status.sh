@@ -194,7 +194,7 @@ if run git fetch origin main; then
     _bad_wf=$(tier_switch_wf_problems)  # VAR=$(cmd) のため run 不使用（init-common.sh）
     if [[ -n "$_bad_wf" ]]; then
         log "WARNING" "  workflow が、段階の切り替えに対応していません（または、雛形と違います）: ${_bad_wf}"
-        log "WARNING" "    branches.txt から行を消しても、伝播・リリース・検証は止まりません。作業用のブランチで sf-sync-wf.sh を実行し、main まで入れてください。"
+        log "WARNING" "    branches.txt から行を消しても、リリース・検証は止まりません。作業用のブランチで sf-sync-wf.sh を実行し、main まで入れてください（廃止した wf-propagate.yml は、sf-sync-wf.sh --remove wf-propagate.yml で消します）。"
     fi
     _stb=$(_var "SF_TOOLS_BRANCH")  # VAR=$(cmd) のため run 不使用
     case "$_stb" in

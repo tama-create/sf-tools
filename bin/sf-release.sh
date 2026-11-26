@@ -125,6 +125,7 @@ if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
 fi
 source "$COMMON_LIB"
 source "${SCRIPT_DIR}/../lib/org.sh"   # org_local_release_check（組織の種類の確認）
+source "${SCRIPT_DIR}/../lib/manifest.sh"   # manifest_build（マニフェストの生成。sf-promote-check.sh と共有）
 
 # ------------------------------------------------------------------------------
 # 3. 初期チェック
@@ -245,109 +246,18 @@ phase_check_target() {
     return $RET_OK
 }
 
-# generate_manifest - マニフェスト（package.xml / destructiveChanges.xml）を生成する
-#   引数: 出力ファイル名 引数...（--source-dir パス / --metadata 種別:名前 の組）。出力先は ${RELEASE_DIR}
-#   sf project generate manifest は、--source-dir と --metadata を同時に渡すと、両方の共通部分だけを返す
-#   （重なりがなければ空になり、しかも、成功として終わる）。そのため、別々に生成して、merge_package_xml で統合する。
-#   統合したものに、メンバーが 1 つもなければ、エラーにする（NothingToDeploy の成功扱いで、検証・リリースを、見落とさないため）
-generate_manifest() {
-    local name="$1" base src=() meta=() parts=() i=0 args=() part
-    shift
-    args=("$@")
-    base="${name%.xml}"
-    while [[ $i -lt ${#args[@]} ]]; do
-        case "${args[$i]}" in
-            --source-dir) src+=("--source-dir" "${args[$((i+1))]}") ;;
-            --metadata)   meta+=("--metadata" "${args[$((i+1))]}") ;;
-        esac
-        i=$((i + 2))
-    done
-    if [[ ${#src[@]} -gt 0 ]]; then
-        part="${RELEASE_DIR}/${base}.files.xml"
-        run sf project generate manifest "${src[@]}" --output-dir "$RELEASE_DIR" --name "${base}.files.xml" "${JSON_FLAG[@]}" || return 1
-        parts+=("$part")
-    fi
-    if [[ ${#meta[@]} -gt 0 ]]; then
-        part="${RELEASE_DIR}/${base}.members.xml"
-        run sf project generate manifest "${meta[@]}" --output-dir "$RELEASE_DIR" --name "${base}.members.xml" "${JSON_FLAG[@]}" || return 1
-        parts+=("$part")
-    fi
-    if [[ ${#parts[@]} -eq 0 ]]; then
-        log "ERROR" "${name}: 生成する対象がありません。"
-        return 1
-    fi
-    if ! merge_package_xml "${RELEASE_DIR}/${name}" "${parts[@]}"; then  # 条件チェック（失敗したら、統合前の一時ファイルを消して、中断する）
-        rm -f "${parts[@]}"  # run 不使用: 統合前の一時ファイルの除去
-        log "ERROR" "マニフェストの統合（merge_package_xml）に失敗しました: ${name}"
-        return 1
-    fi
-    rm -f "${parts[@]}"  # run 不使用: 統合前の一時ファイルの除去
-    if ! grep -q '<members>' "${RELEASE_DIR}/${name}" 2>/dev/null; then  # 条件チェック
-        log "ERROR" "${name} に、メンバーが 1 つも含まれていません（ターゲットファイルの記述が、マニフェストに反映されていません）。"
-        log "ERROR" "  ${DEPLOY_LIST} / ${REMOVE_LIST} の、パス・種別名:メンバー名を確認してください。"
-        return 1
-    fi
-    log "SUCCESS" "${name} を生成しました（ファイル指定 $(( ${#src[@]} / 2 )) 件 / メンバー指定 $(( ${#meta[@]} / 2 )) 件）"
-    return 0
-}
-
 # 【MANIFEST】テキストリストからマニフェストファイル(XML)を自動生成
+#   生成は lib/manifest.sh の manifest_build（sf-promote-check.sh の R2 と共有。決まりは lib/manifest.sh の冒頭）。
+#   ここでは、組織に出すときだけの処理（@isTest のクラスの検出・反映と削除の重なりの確認）を行う
 phase_generate_manifest() {
-    run rm -f "$DEPLOY_XML" "$REMOVE_XML"
-    local deploy_args=()
-    local remove_args=()
+    local i=0 filepath classname build_ret=0
 
-    # 補助関数: リストファイルを走査し、コメント・空行を除外して sf コマンド用引数を組み立てる
-    # セクション:
-    #   [files]   → --source-dir <パス>    ファイルパス指定（デフォルト）
-    #   [members] → --metadata <種別:名前>  メンバー名指定
-    #   結果は、配列 _pl_out に入れる（nameref は Bash 4.3 以降のため使わない。macOS 標準の Bash 3.2 で動かす）
-    local _pl_out=()
-    process_list() {
-        local list=$1
-        local section="files"
-        _pl_out=()
-        while IFS= read -r line || [[ -n "$line" ]]; do
-            local clean_line
-            # サブプロセス不使用: \r 除去 → 前後空白トリム（Windows/Git Bash 高速化）
-            clean_line="${line//$'\r'/}"
-            clean_line="${clean_line#"${clean_line%%[^[:space:]]*}"}"
-            clean_line="${clean_line%"${clean_line##*[^[:space:]]}"}"
-
-            # セクション区切りの検出
-            if [[ "$clean_line" == "[files]" ]]; then
-                section="files"; continue
-            elif [[ "$clean_line" == "[members]" ]]; then
-                section="members"; continue
-            fi
-
-            # コメント・空行をスキップ
-            [[ -z "$clean_line" || "$clean_line" == \#* ]] && continue
-
-            # セクションに応じた引数を追加
-            if [[ "$section" == "files" ]]; then
-                _pl_out+=("--source-dir" "$clean_line")
-            else
-                _pl_out+=("--metadata" "$clean_line")
-            fi
-        done < "$list"
-        # TortoiseGit でのサイレントエラー対策:
-        # while ループ最終行が空行で false になっても関数として成功を返す
-        return 0
-    }
-
-    process_list "$DEPLOY_LIST" || return $RET_NG
-    deploy_args=("${_pl_out[@]}")
-    process_list "$REMOVE_LIST" || return $RET_NG
-    remove_args=("${_pl_out[@]}")
-
-    # @isTest アノテーションを持つ .cls ファイルを検出して RUN_TESTS に登録
-    local i=0
-    while [[ $i -lt ${#deploy_args[@]} ]]; do
-        if [[ "${deploy_args[$i]}" == "--source-dir" ]]; then
-            local filepath="${deploy_args[$((i+1))]}"
+    # @isTest アノテーションを持つ .cls ファイルを検出して RUN_TESTS に登録（生成の前に表示する）
+    manifest_parse_list "$DEPLOY_LIST" || return $RET_NG
+    while [[ $i -lt ${#MANIFEST_ARGS[@]} ]]; do
+        if [[ "${MANIFEST_ARGS[$i]}" == "--source-dir" ]]; then
+            filepath="${MANIFEST_ARGS[$((i+1))]}"
             if [[ "$filepath" == *.cls ]] && grep -qi "@isTest" "$filepath" 2>/dev/null; then
-                local classname
                 classname=$(basename "$filepath" .cls)  # VAR=$(cmd) のため run 不使用
                 RUN_TESTS+=("$classname")
                 log "INFO" "  テストクラス検出: ${classname}"
@@ -359,30 +269,16 @@ phase_generate_manifest() {
         log "INFO" "テストクラス合計: ${#RUN_TESTS[@]}件 → --tests に自動設定します"
     fi
 
-    # デプロイ対象がゼロの場合は sf CLI に渡す前に早期終了
-    if [[ ${#deploy_args[@]} -eq 0 && ${#remove_args[@]} -eq 0 ]]; then
+    manifest_build "$RELEASE_DIR" "$RELEASE_DIR" || build_ret=$?
+    if [[ $build_ret -eq $RET_NO_CHANGE ]]; then
         log "WARNING" "デプロイ対象がありません。${DEPLOY_LIST} または ${REMOVE_LIST} にパスを記入してください。"
         return $RET_NO_CHANGE
     fi
+    [[ $build_ret -eq 0 ]] || return $RET_NG
 
-    # 追加/変更用の package.xml 生成
-    if [[ ${#deploy_args[@]} -gt 0 ]]; then
-        local files_count members_count
-        files_count=$(printf '%s\n' "${deploy_args[@]}" | grep -c "^--source-dir$" || true)
-        members_count=$(printf '%s\n' "${deploy_args[@]}" | grep -c "^--metadata$" || true)
-        log "INFO" "デプロイ対象を検出 (ファイル: ${files_count}件 / メンバー: ${members_count}件)"
-        generate_manifest "package.xml" "${deploy_args[@]}" || return $RET_NG
-    else
-        # 対象ゼロでも CLI エラーを防ぐために最小構成の XML を作成
-        printf '<?xml version="1.0" encoding="UTF-8"?><Package xmlns="http://soap.sforce.com/2006/04/metadata"><version>60.0</version></Package>\n' \
-            | run tee "$DEPLOY_XML"
-    fi
-
-    # 削除用の destructiveChanges.xml 生成（対象がある場合のみ）
-    if [[ ${#remove_args[@]} -gt 0 ]]; then
-        generate_manifest "destructiveChanges.xml" "${remove_args[@]}" || return $RET_NG
-        # 反映と削除の両方に同じものがあれば、止める（先に消して、反映で作り直す。項目なら、データだけが黙って消える。
-        # オブジェクトの本体やフォルダを deploy-target.txt に書くと、配下の全部が反映に入るため、起きる。lib/project.sh の manifest_overlap）
+    # 反映と削除の両方に同じものがあれば、止める（先に消して、反映で作り直す。項目なら、データだけが黙って消える。
+    # オブジェクトの本体やフォルダを deploy-target.txt に書くと、配下の全部が反映に入るため、起きる。lib/project.sh の manifest_overlap）
+    if [[ -f "$REMOVE_XML" ]]; then
         local overlap item
         overlap=$(manifest_overlap "$DEPLOY_XML" "$REMOVE_XML") || {  # VAR=$(cmd) のため run 不使用
             log "ERROR" "マニフェストの重なりを確かめられません（package.xml / destructiveChanges.xml を読めません）。"

@@ -3,6 +3,7 @@
 > **本ドキュメントの範囲:** コマンドを連動させて動かす「結合レベル」のテストの、パターンの洗い出しと、作り方の方針・判断の理由。
 > **実装の状況:** L1（ローカル結合。`tests/test_integration*.sh`・`tests/integration/`）と、L2（実環境のシナリオ方式。`tests/e2e/scenario.sh`・`run.sh --interrupt`）は、実装済み。パターンごとの状況は 8.1。実装の詳細（ハーネス・fake・実行方法・CI での扱い）は、`doc/dev-reference.md` の 2.1.2（L1）・9.6（e2e・L2）。
 > 個々のコマンドの単体テストは、`tests/test_*.sh`（`doc/dev-reference.md` セクション 2）。実環境の通しの確認（e2e）は、`doc/dev-reference.md` の 9.6・9.7。
+> **2026-11-26 追記（一方通行のリリース）:** 下りの伝播（`wf-propagate.yml` と、`sf-metasync.sh` の手順 12。main の変更を staging・develop のブランチへ流す）は**廃止した**。本書の伝播の記述は、当時の設計の記録として残す。今の決まりは `doc/one-way-promotion-design.md`（develop → staging → main に同じコミットのまま上げる・リリースの印・R0〜R3）。
 
 ---
 
@@ -433,7 +434,7 @@ Actions 上の実行は、コマンドによって扱いが違う。「全部拒
 | X4-1 sf-init の同時起動 | ✅ | init2（見つけた競合を直した: 同じプロジェクトの sf-init は、ロックで排他する。2 つ目は拒否・強制終了で残った古いロックは引き継ぐ）。あわせて、作られた Ruleset の必須チェックの名前が、ワークフローのジョブ名だけ（`対象ファイル確認`・`デプロイ検証`・`順序チェック`。`validate / …` の形ではない）であることも確かめる（`doc/dev-reference.md` 9.5） |
 | X4-1a 同時 push | ✅ | git |
 | X4-1b GitHub の競合・X4-1c Salesforce の競合 | ✅ | init3（同名のリポジトリの同時作成: 少なくとも片方が成功し、main の初回コミット・リポジトリの登録が重複しない。タイミングによっては、両方が成功する（CI の Windows で発生）。別のフォルダからの同時作成では、Ruleset が重複することがある現状の限界を記録）・misc（同じ組織への同時のデプロイ: ロックで失敗し、再実行で成功） |
-| X4-5 wf-propagate の失敗の経路 | ✅ L2 | `scenario.sh propagate-fail`（コンフリクトで失敗・Slack に通知・staging は変わらない） |
+| X4-5 wf-propagate の失敗の経路 | 廃止（2026-11-26） | `wf-propagate` をなくした（下りの伝播をしない。`doc/one-way-promotion-design.md` 3.7）ため、シナリオ `propagate-fail` も消した。代わりに、`scenario.sh one-way` が、一方通行の決まり（印・R1・R2・最後の守り）を確かめる |
 | X4-3・X4-4 | — | L2（未） |
 | X5-1 ジョブ名の不正 | ✅ | job |
 | X5-2 パスの空白・日本語 | ✅ | job |
@@ -500,6 +501,7 @@ Actions 上の実行は、コマンドによって扱いが違う。「全部拒
 | `sf-release` | あり | A1・X1-6・X6-4 | — |
 | `sf-push` | あり | A2・X2-3 | — |
 | `sf-next` | あり | A5・A14 | — |
+| `sf-promote-check` | あり | A5（`sf-next` の `--plan` として。印・積み重ね（R2）・原則に反する状態） | `--pr`（ワークフロー用）の経路は、単体（`tests/test_sf-promote-check.sh`。偽の gh・本物の git）と、e2e（`run.sh` の印・`scenario.sh one-way`）で確認する |
 | `sf-restart` | あり | A8 | — |
 | `sf-metasync` | あり | B3・X4-4・X8-4 | — |
 | `sf-sync-wf` | あり | B4・X6-5 | — |
@@ -521,10 +523,9 @@ Actions 上の実行は、コマンドによって扱いが違う。「全部拒
 | 対象 | 結合 | パターン | 結合しない理由 |
 |---|---|---|---|
 | `wf-validate.yml` | あり | A3・C1 | — |
-| `wf-release.yml` | あり | C1・X1-6・X10 | — |
-| `wf-propagate.yml` | あり | C1（成功の経路）・X4-5（失敗の経路） | — |
+| `wf-release.yml` | あり | C1・X1-6・X10。一方通行の最後の守り・リリースの印は、e2e（`scenario.sh one-way`・`run.sh`） | — |
 | `wf-metasync.yml` | あり | B3・X4-4 | — |
-| `wf-sequence.yml` | あり | e2e で、3 つの動き（順序どおり・順序外・環境ブランチからの PR）を確認済み | — |
+| `wf-sequence.yml` | あり | e2e で、3 つの動き（順序どおり・順序外（失敗）・環境ブランチからの PR）を確認済み | — |
 
 > 「結合しない理由」は、開発者の判断で、見直せる。**理由を書き換えた、または、削除したときは、このガードのテストが、結合のパターンの有無を、再び確認する。**
 

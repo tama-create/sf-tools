@@ -2,631 +2,179 @@
 # ==============================================================================
 # test_sf-next.sh - sf-next.sh のテスト
 # ==============================================================================
+# 判定の本体は sf-promote-check.sh --plan（tests/test_sf-promote-check.sh が確かめる）。ここでは、偽の判定
+# （環境変数 SF_PROMOTE_CHECK_CMD。終了コードと JSON を MOCK_PC_RC・MOCK_PC_JSON で決める）を使い、表示・確認・
+# PR の作成画面の URL を確かめる。
 source "$(dirname "${BASH_SOURCE[0]}")/test_helper.sh"
 echo -e "${CLR_HEAD}=== sf-next.sh ===${CLR_RST}"
 
-# git モックに merge-base --is-ancestor / remote get-url を追加
-create_mock_git_with_remote() {
-    local bin_dir="$1"
-    cat > "$bin_dir/git" << 'EOF'
+# git モック（symbolic-ref・remote get-url だけ）
+_make_git() {
+    cat > "$1/git" << 'EOF'
 #!/bin/bash
 echo "git $*" >> "${MOCK_CALL_LOG:-/dev/null}"
 case "$1" in
-    symbolic-ref)   echo "${MOCK_GIT_BRANCH:-feature/test}"; exit 0 ;;
+    symbolic-ref) echo "${MOCK_GIT_BRANCH:-feature/test}"; exit 0 ;;
     remote)
-        if [[ "$2" == "get-url" ]]; then
-            # MOCK_GIT_REMOTE_URL が未設定なら既定の URL。空を設定すると、origin がない（何も出さない）
-            echo "${MOCK_GIT_REMOTE_URL-https://github.com/test-owner/force-tama.git}"
-        fi
+        # MOCK_GIT_REMOTE_URL が未設定なら既定の URL。空を設定すると、origin がない（何も出さない）
+        [[ "$2" == "get-url" ]] && echo "${MOCK_GIT_REMOTE_URL-https://github.com/test-owner/force-tama.git}"
         exit 0 ;;
-    fetch)          exit 0 ;;
-    rev-parse)
-        # rev-parse HEAD → いまの HEAD のコミット（既定: headoid0。gh モックの、マージ済みの PR の既定の最後のコミットと同じ）
-        echo "${MOCK_GIT_HEAD_OID:-headoid0}"; exit 0 ;;
-    rev-list)
-        # rev-list --count <oid>..HEAD → MOCK_GIT_NEW_COMMITS（未設定なら、手元にないコミットとして失敗）
-        [[ -n "${MOCK_GIT_NEW_COMMITS:-}" ]] || exit 128
-        echo "$MOCK_GIT_NEW_COMMITS"; exit 0 ;;
-    merge-base)
-        # merge-base --is-ancestor HEAD origin/<target>  → MOCK_GIT_MERGED_TARGETS に target があれば真
-        # merge-base --is-ancestor HEAD <コミット>       → MOCK_GIT_ANCESTOR_OIDS に、そのコミットがあれば真
-        if [[ "$2" == "--is-ancestor" ]]; then
-            if [[ "$4" == origin/* ]]; then
-                target="${4#origin/}"
-                for mb in ${MOCK_GIT_MERGED_TARGETS:-}; do
-                    [[ "$mb" == "$target" ]] && exit 0
-                done
-            else
-                for mb in ${MOCK_GIT_ANCESTOR_OIDS:-}; do
-                    [[ "$mb" == "$4" ]] && exit 0
-                done
-            fi
-            exit 1
-        fi
-        exit 0 ;;
-    *)              exit 0 ;;
+    *) exit 0 ;;
 esac
 EOF
-    chmod +x "$bin_dir/git"
-
-    # gh モック（--json headRefName,baseRefName[,headRefOid] → 環境変数で制御）
-    # MOCK_GH_MERGED_PRS / MOCK_GH_OPEN_PRS: スペース区切りの "head->base" ペア。"head->base@oid" で PR の最後のコミットを指定できる
-    #   （省略時は headoid0 = git モックの既定の HEAD。つまり「マージのあと、新しいコミットはない」）
-    cat > "$bin_dir/gh" << 'EOF'
+    chmod +x "$1/git"
+}
+# 偽の判定（sf-promote-check.sh --plan --json の代わり）
+_make_pc() {
+    cat > "$1/fake-pc.sh" << 'EOF'
 #!/bin/bash
-echo "gh $*" >> "${MOCK_CALL_LOG:-/dev/null}"
-# --jq 付きのときは、gh が適用した後の出力（「ヘッド<TAB>ベース[<TAB>コミット]」の行。@tsv）を返す。なければ JSON
-_build_out() {
-    local result="[" sep="" pr head base oid
-    for pr in $1; do
-        oid="headoid0"
-        [[ "$pr" == *@* ]] && { oid="${pr##*@}"; pr="${pr%@*}"; }
-        head="${pr%%->*}"; base="${pr##*->}"
-        if [[ "$_args" == *"--jq"* && "$_args" == *"headRefOid"* && -z "${MOCK_GH_NO_OID:-}" ]]; then
-            printf '%s	%s	%s
-' "$head" "$base" "$oid"
-        elif [[ "$_args" == *"--jq"* ]]; then
-            printf '%s	%s
-' "$head" "$base"
-        else
-            result="${result}${sep}{\"headRefName\":\"${head}\",\"baseRefName\":\"${base}\"}"
-            sep=","
-        fi
-    done
-    [[ "$_args" == *"--jq"* ]] || echo "${result}]"
-}
-_args="$*"
-if echo "$_args" | grep -q -- "--state merged" && echo "$_args" | grep -q -- "--json"; then
-    _build_out "${MOCK_GH_MERGED_PRS:-}"
-elif echo "$_args" | grep -q -- "--state open" && echo "$_args" | grep -q -- "--json"; then
-    _build_out "${MOCK_GH_OPEN_PRS:-}"
-else
-    exit 0
-fi
+echo "pc $*" >> "${MOCK_CALL_LOG:-/dev/null}"
+echo "[INFO] 偽の判定" >&2
+printf '%s\n' "$MOCK_PC_JSON"
+exit "${MOCK_PC_RC:-0}"
 EOF
-    chmod +x "$bin_dir/gh"
+    chmod +x "$1/fake-pc.sh"
+}
+# JSON を作る。引数: next_tier [pr_open] [skipped] [tiers（空白区切り。既定 develop staging main）]
+_pc_json() {
+    local t="" x
+    for x in ${4:-develop staging main}; do t="${t}${t:+,}\"${x}\""; done
+    printf '{"mode":"plan","ok":true,"skipped":%s,"branch":"feature/my-feature","head":"h","target":"%s","next_tier":"%s","pr_open":"%s","tiers":[%s],"violations":[],"error":""}' \
+        "${3:-false}" "$1" "$1" "${2:-}" "$t"
+}
+_env() { # 変数名 td mb mh
+    setup_std_env "$1" "$2" "$3"
+    local mbv; mbv="${!2}"
+    _make_git "$mbv"; _make_pc "$mbv"; create_mock_browser "$mbv"
+    export SF_PROMOTE_CHECK_CMD="$mbv/fake-pc.sh" MOCK_GIT_BRANCH="feature/my-feature" MOCK_PC_RC=0
+}
+_unset() { unset SF_PROMOTE_CHECK_CMD MOCK_GIT_BRANCH MOCK_PC_RC MOCK_PC_JSON MOCK_GIT_REMOTE_URL; }
+_next() { # 標準入力の答え [追加の環境変数...] → 出力。終了コードは NX_RC
+    local ans="$1"; shift
+    NX_OUT=$(cd "$TD" && printf '%s\n' "$ans" | env PATH="$MB:$PATH" "$@" bash "$SF_TOOLS_DIR/bin/sf-next.sh" 2>&1); NX_RC=$?
 }
 
-# --- 3ブランチ構成: develop マージ済み → 次は staging ---
-test_next_is_staging() {
-    local td mb mh
-    setup_std_env td mb mh
-    create_mock_git_with_remote "$mb"
-
-    export MOCK_GIT_BRANCH="feature/my-feature"
-    export MOCK_GH_MERGED_PRS="feature/my-feature->develop"
-    export MOCK_GH_OPEN_PRS=""
-
-    local out; out=$(cd "$td" && echo "n" | PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-next.sh" 2>&1)
-    local ec=$?
-
-    assert_exit_ok $ec "develop 済み → 終了コード 0"
-    assert_output_contains "$out" "✓.*develop" "develop が ✓ (マージ済み)"
-    assert_output_contains "$out" "▶.*staging" "staging が ▶ (次のPR先)"
-    assert_output_contains "$out" "✗.*main" "main が ✗ (未着手)"
-
-    unset MOCK_GIT_BRANCH MOCK_GH_MERGED_PRS MOCK_GH_OPEN_PRS
-    teardown "$td" "$mb"
+test_display_and_next() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] 表示と次の PR 先${CLR_RST}"
+    local TD MB MH; _env TD MB MH
+    export MOCK_PC_JSON; MOCK_PC_JSON=$(_pc_json staging)
+    _next n
+    assert_exit_ok "$NX_RC" "staging が次 → 0"
+    assert_output_contains "$NX_OUT" "✓.*develop.*リリース済み" "develop は ✓（このコミットでリリース済み）"
+    assert_output_contains "$NX_OUT" "▶.*staging.*次のPR先" "staging は ▶（次の PR 先）"
+    assert_output_contains "$NX_OUT" "✗.*main" "main は ✗"
+    assert_output_contains "$NX_OUT" "develop の組織で、動作を確かめ終えましたか？ staging にPRを出しますか？" "staging へは、develop の組織での確認を聞く"
+    assert_file_contains "$MOCK_CALL_LOG" "pc --plan --json" "判定は sf-promote-check.sh --plan --json"
+    MOCK_PC_JSON=$(_pc_json develop)
+    _next n
+    assert_output_contains "$NX_OUT" "▶.*develop.*次のPR先" "develop が次（develop に出したあと変えたときも、ここに戻る）"
+    assert_output_contains "$NX_OUT" "develop にPRを出しますか？" "一番下の段階は、前の組織の確認を聞かない"
+    assert_output_not_contains "$NX_OUT" "の組織で、動作を確かめ終えましたか？ develop" "develop へは、前の段階の確認を付けない"
+    MOCK_PC_JSON=$(_pc_json main)
+    _next n
+    assert_output_contains "$NX_OUT" "staging の組織で、動作を確かめ終えましたか？ main にPRを出しますか？" "main へは、staging の組織での確認を聞く"
+    MOCK_PC_JSON=$(_pc_json none)
+    _next n
+    assert_exit_ok "$NX_RC" "全段階にリリース済み → 0"
+    assert_output_contains "$NX_OUT" "全段階にリリース済みです" "全段階にリリース済み → 案内"
+    MOCK_PC_JSON=$(_pc_json staging 12)
+    _next n
+    assert_output_contains "$NX_OUT" "→.*staging.*PR発行中（#12）" "開いている PR → PR 発行中（番号つき）"
+    assert_output_contains "$NX_OUT" "検証が緑になってから、マージしてください" "開いている PR → マージを待つ案内"
+    assert_output_not_contains "$NX_OUT" "PRを出しますか" "開いている PR → 新しく PR を勧めない"
+    MOCK_PC_JSON=$(_pc_json main "" false "staging main")
+    _next n
+    assert_output_contains "$NX_OUT" "staging の組織で、動作を確かめ終えましたか？ main にPRを出しますか？" "2 段階（staging・main）でも、前の段階を聞く"
+    MOCK_PC_JSON=$(_pc_json develop "" true)
+    _next n
+    assert_exit_ok "$NX_RC" "対象が空 → 0"
+    assert_output_contains "$NX_OUT" "出すものがありません" "対象が空 → 案内（PR を勧めない）"
+    _unset; teardown "$TD" "$MB"
 }
 
-# --- 3ブランチ構成: develop+staging マージ済み → 次は main ---
-test_next_is_main() {
-    local td mb mh
-    setup_std_env td mb mh
-    create_mock_git_with_remote "$mb"
-
-    export MOCK_GIT_BRANCH="feature/my-feature"
-    export MOCK_GH_MERGED_PRS="feature/my-feature->develop feature/my-feature->staging"
-    export MOCK_GH_OPEN_PRS=""
-
-    local out; out=$(cd "$td" && echo "n" | PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-next.sh" 2>&1)
-    local ec=$?
-
-    assert_exit_ok $ec "develop+staging 済み → 終了コード 0"
-    assert_output_contains "$out" "✓.*develop" "develop が ✓ (マージ済み)"
-    assert_output_contains "$out" "✓.*staging" "staging が ✓ (マージ済み)"
-    assert_output_contains "$out" "▶.*main" "main が ▶ (次のPR先)"
-
-    unset MOCK_GIT_BRANCH MOCK_GH_MERGED_PRS MOCK_GH_OPEN_PRS
-    teardown "$td" "$mb"
+test_rules_broken_or_unknown() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] 決まりを破っている・判断できない${CLR_RST}"
+    local TD MB MH; _env TD MB MH
+    export MOCK_PC_RC=1 MOCK_PC_JSON='{"mode":"plan","ok":false,"skipped":false,"next_tier":"develop","pr_open":"","tiers":["develop"],"violations":[{"rule":"R2","detail":"前に develop へ出したリリース（PR #3）の部品が、今回にありません: ApexClass:B"}],"error":""}'
+    _next y
+    assert_exit_fail "$NX_RC" "R2 を破っている → エラー終了"
+    assert_output_contains "$NX_OUT" "ApexClass:B" "破った理由を表示する"
+    assert_file_not_contains "$MOCK_CALL_LOG" "compare/" "破っている → ブラウザを開かない"
+    export MOCK_PC_RC=2 MOCK_PC_JSON='{"mode":"plan","ok":false,"next_tier":"","tiers":[],"violations":[],"error":"手元（abc1234）と origin/feature/my-feature（def5678）が違います（push していない変更があるか、取り込んでいない変更があります）。"}'
+    _next y
+    assert_exit_fail "$NX_RC" "判断できない → エラー終了"
+    assert_output_contains "$NX_OUT" "push していない変更" "判断できない理由を表示する"
+    export MOCK_PC_RC=2 MOCK_PC_JSON='これは JSON ではない'
+    _next y
+    assert_exit_fail "$NX_RC" "結果を読めない → エラー終了"
+    _unset; teardown "$TD" "$MB"
 }
 
-# --- 3ブランチ構成: 全ブランチマージ済み → 完了メッセージ ---
-test_all_merged() {
-    local td mb mh
-    setup_std_env td mb mh
-    create_mock_git_with_remote "$mb"
-
-    export MOCK_GIT_BRANCH="feature/my-feature"
-    export MOCK_GH_MERGED_PRS="feature/my-feature->develop feature/my-feature->staging feature/my-feature->main"
-    export MOCK_GH_OPEN_PRS=""
-
-    local out; out=$(cd "$td" && echo "n" | PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-next.sh" 2>&1)
-    local ec=$?
-
-    assert_exit_ok $ec "全ブランチマージ済み → 終了コード 0"
-    assert_output_contains "$out" "全ブランチへのマージが完了" "完了メッセージが表示される"
-
-    unset MOCK_GIT_BRANCH MOCK_GH_MERGED_PRS MOCK_GH_OPEN_PRS
-    teardown "$td" "$mb"
-}
-
-# --- 3ブランチ構成: 未マージ → 次は develop ---
-test_none_merged() {
-    local td mb mh
-    setup_std_env td mb mh
-    create_mock_git_with_remote "$mb"
-
-    export MOCK_GIT_BRANCH="feature/my-feature"
-    export MOCK_GH_MERGED_PRS=""
-    export MOCK_GH_OPEN_PRS=""
-
-    local out; out=$(cd "$td" && echo "n" | PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-next.sh" 2>&1)
-    local ec=$?
-
-    assert_exit_ok $ec "未マージ → 終了コード 0"
-    assert_output_contains "$out" "▶.*develop" "develop が ▶ (次のPR先)"
-    assert_output_contains "$out" "✗.*staging" "staging が ✗ (未着手)"
-    assert_output_contains "$out" "✗.*main" "main が ✗ (未着手)"
-
-    unset MOCK_GIT_BRANCH MOCK_GH_MERGED_PRS MOCK_GH_OPEN_PRS
-    teardown "$td" "$mb"
-}
-
-# --- 2ブランチ構成（main + staging）: 未マージ → 次は staging ---
-test_two_branches_none_merged() {
-    local td mb mh
-    setup_std_env td mb mh
-    # branches.txt を2ブランチに上書き
-    printf 'main\nstaging\n' > "$td/sf-tools/config/branches.txt"
-    create_mock_git_with_remote "$mb"
-
-    export MOCK_GIT_BRANCH="feature/my-feature"
-    export MOCK_GH_MERGED_PRS=""
-    export MOCK_GH_OPEN_PRS=""
-
-    local out; out=$(cd "$td" && echo "n" | PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-next.sh" 2>&1)
-    local ec=$?
-
-    assert_exit_ok $ec "2ブランチ未マージ → 終了コード 0"
-    assert_output_contains "$out" "▶.*staging" "staging が ▶ (次のPR先)"
-    assert_output_contains "$out" "✗.*main" "main が ✗ (未着手)"
-
-    unset MOCK_GIT_BRANCH MOCK_GH_MERGED_PRS MOCK_GH_OPEN_PRS
-    teardown "$td" "$mb"
-}
-
-# --- 保護ブランチから実行 → エラー ---
 test_protected_branch_blocked() {
-    local td mb mh
-    setup_std_env td mb mh
-    create_mock_git_with_remote "$mb"
-
-    export MOCK_GIT_BRANCH="main"
-
-    local out; out=$(cd "$td" && echo "n" | PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-next.sh" 2>&1)
-    local ec=$?
-
-    assert_exit_fail $ec "保護ブランチ → エラー終了"
-    assert_output_contains "$out" "保護ブランチ" "エラーメッセージが表示される"
-
-    unset MOCK_GIT_BRANCH
-    teardown "$td" "$mb"
+    echo ""; echo -e "${CLR_HEAD}[TEST] 保護ブランチの上では、実行しない${CLR_RST}"
+    local TD MB MH; _env TD MB MH
+    printf 'main\nstaging\ndevelop\n' > "$TD/sf-tools/config/branches.txt"
+    export MOCK_GIT_BRANCH="develop"
+    _next n
+    assert_exit_fail "$NX_RC" "保護ブランチ（develop）→ エラー終了"
+    assert_output_contains "$NX_OUT" "保護ブランチ" "保護ブランチ → 理由"
+    assert_file_not_contains "$MOCK_CALL_LOG" "pc --plan" "保護ブランチ → 判定を呼ばない"
+    _unset; teardown "$TD" "$MB"
 }
 
-# --- 1ブランチ構成（main のみ）: 未マージ → main が次のPR先 ---
-test_single_branch_none_merged() {
-    local td mb mh
-    setup_std_env td mb mh
-    # branches.txt を1ブランチに上書き
-    printf 'main\n' > "$td/sf-tools/config/branches.txt"
-    create_mock_git_with_remote "$mb"
-
-    export MOCK_GIT_BRANCH="feature/my-feature"
-    export MOCK_GH_MERGED_PRS=""
-    export MOCK_GH_OPEN_PRS=""
-
-    local out; out=$(cd "$td" && echo "n" | PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-next.sh" 2>&1)
-    local ec=$?
-
-    assert_exit_ok $ec "1ブランチ未マージ → 終了コード 0"
-    assert_output_contains "$out" "▶.*main" "main が ▶ (次のPR先)"
-
-    unset MOCK_GIT_BRANCH MOCK_GH_MERGED_PRS MOCK_GH_OPEN_PRS
-    teardown "$td" "$mb"
-}
-
-# --- 1ブランチ構成（main のみ）: マージ済み → 完了 ---
-test_single_branch_merged() {
-    local td mb mh
-    setup_std_env td mb mh
-    printf 'main\n' > "$td/sf-tools/config/branches.txt"
-    create_mock_git_with_remote "$mb"
-
-    export MOCK_GIT_BRANCH="feature/my-feature"
-    export MOCK_GH_MERGED_PRS="feature/my-feature->main"
-    export MOCK_GH_OPEN_PRS=""
-
-    local out; out=$(cd "$td" && echo "n" | PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-next.sh" 2>&1)
-    local ec=$?
-
-    assert_exit_ok $ec "1ブランチマージ済み → 終了コード 0"
-    assert_output_contains "$out" "✓.*main" "main が ✓ (マージ済み)"
-    assert_output_contains "$out" "全ブランチへのマージが完了" "完了メッセージが表示される"
-
-    unset MOCK_GIT_BRANCH MOCK_GH_MERGED_PRS MOCK_GH_OPEN_PRS
-    teardown "$td" "$mb"
-}
-
-# --- PR発行中: develop ✓ / staging → PR発行中 / main ▶ 次のPR先 ---
-test_pr_open_shown() {
-    local td mb mh
-    setup_std_env td mb mh
-    create_mock_git_with_remote "$mb"
-
-    export MOCK_GIT_BRANCH="feature/my-feature"
-    export MOCK_GH_MERGED_PRS="feature/my-feature->develop"
-    export MOCK_GH_OPEN_PRS="feature/my-feature->staging"
-
-    local out; out=$(cd "$td" && echo "n" | PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-next.sh" 2>&1)
-    local ec=$?
-
-    assert_exit_ok $ec "PR発行中あり → 終了コード 0"
-    assert_output_contains "$out" "✓.*develop" "develop が ✓ (マージ済み)"
-    assert_output_contains "$out" "→.*staging" "staging が → (PR発行中)"
-    assert_output_contains "$out" "▶.*main" "main が ▶ (次のPR先)"
-
-    unset MOCK_GIT_BRANCH MOCK_GH_MERGED_PRS MOCK_GH_OPEN_PRS
-    teardown "$td" "$mb"
-}
-
-# --- 順序外マージ: develop ✓ / staging ▶ / main ⚠（main が先にマージ済み）---
-test_out_of_order_merge() {
-    local td mb mh
-    setup_std_env td mb mh
-    create_mock_git_with_remote "$mb"
-
-    export MOCK_GIT_BRANCH="feature/my-feature"
-    # staging を飛ばして main もマージ済み（順序外）
-    export MOCK_GH_MERGED_PRS="feature/my-feature->develop feature/my-feature->main"
-    export MOCK_GH_OPEN_PRS=""
-
-    local out; out=$(cd "$td" && echo "n" | PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-next.sh" 2>&1)
-    local ec=$?
-
-    assert_exit_ok $ec "順序外マージ → 終了コード 0"
-    assert_output_contains "$out" "✓.*develop" "develop が ✓ (マージ済み)"
-    assert_output_contains "$out" "▶.*staging" "staging が ▶ (次のPR先)"
-    assert_output_contains "$out" "⚠.*main" "main が ⚠ (順序外マージ済み)"
-
-    unset MOCK_GIT_BRANCH MOCK_GH_MERGED_PRS MOCK_GH_OPEN_PRS
-    teardown "$td" "$mb"
-}
-
-# --- ブランチ同期: develop ✓ / staging ✓(同期) / main ⚠（PR なしで伝播、staging デプロイ未実行）---
-test_staging_synced() {
-    local td mb mh
-    setup_std_env td mb mh
-    create_mock_git_with_remote "$mb"
-
-    export MOCK_GIT_BRANCH="feature/my-feature"
-    # develop と main に直接 PR あり、staging は gh PR なし（git merge-base で伝播のみ）
-    export MOCK_GH_MERGED_PRS="feature/my-feature->develop feature/my-feature->main"
-    export MOCK_GH_OPEN_PRS=""
-    # git merge-base では develop/staging/main すべてが到達可能（staging は伝播）
-    export MOCK_GIT_MERGED_TARGETS="develop staging main"
-
-    local out; out=$(cd "$td" && echo "n" | PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-next.sh" 2>&1)
-    local ec=$?
-
-    assert_exit_ok $ec "ブランチ同期あり → 終了コード 0"
-    assert_output_contains "$out" "✓.*develop" "develop が ✓ (マージ済み)"
-    assert_output_contains "$out" "✓.*staging.*ブランチ同期" "staging が ✓ (ブランチ同期)"
-    assert_output_contains "$out" "⚠.*main" "main が ⚠ (順序外マージ済み)"
-
-    unset MOCK_GIT_BRANCH MOCK_GH_MERGED_PRS MOCK_GH_OPEN_PRS MOCK_GIT_MERGED_TARGETS
-    teardown "$td" "$mb"
-}
-
-test_next_is_staging
-test_next_is_main
-# --- PR 作成画面の URL: origin の URL の形（https / scp 形式 / ssh://）によらず、https の URL になる ---
-#   結合テスト A5 で見つかった: ssh://git@github.com/... の origin だと、ssh:// のままの、開けない URL になった
-test_pr_url_from_remote_forms() {
-    local td mb mh u
+test_pr_url() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] PR の作成画面の URL${CLR_RST}"
+    local TD MB MH u; _env TD MB MH
+    export MOCK_PC_JSON; MOCK_PC_JSON=$(_pc_json staging)
     for u in "https://github.com/test-owner/force-tama.git" "git@github.com:test-owner/force-tama.git" "ssh://git@github.com/test-owner/force-tama.git"; do
-        setup_std_env td mb mh
-        create_mock_git_with_remote "$mb"
-        create_mock_browser "$mb"
+        : > "$MOCK_CALL_LOG"
         export MOCK_GIT_REMOTE_URL="$u"
-        export MOCK_GIT_BRANCH="feature/my-feature"
-        export MOCK_GH_MERGED_PRS="feature/my-feature->develop"
-        export MOCK_GH_OPEN_PRS=""
-        local out; out=$(cd "$td" && echo "y" | PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-next.sh" 2>&1)
-        assert_output_contains "$out" "https://github.com/test-owner/force-tama/compare/staging...feature/my-feature" "origin が ${u} → https の PR 作成画面の URL になる"
-        unset MOCK_GIT_REMOTE_URL MOCK_GIT_BRANCH MOCK_GH_MERGED_PRS MOCK_GH_OPEN_PRS
-        teardown "$td" "$mb"
+        _next y
+        assert_output_contains "$NX_OUT" "https://github.com/test-owner/force-tama/compare/staging...feature/my-feature" "origin が ${u} → https の PR 作成画面の URL"
     done
-}
-
-# --- 回帰: origin の URL に認証情報（https://user:TOKEN@）があっても、画面・ブラウザに出さない ---
-#   （以前は、そのまま PR 作成画面の URL にして、画面に表示し、ブラウザで開いていた）
-test_pr_url_strips_credentials() {
-    local td mb mh u
+    assert_file_contains "$MOCK_CALL_LOG" "compare/staging...feature/my-feature" "ブラウザで、PR 作成画面を開く"
     for u in "https://x-access-token:ghp_SECRETTOKEN123@github.com/test-owner/force-tama.git" "http://user@github.com/test-owner/force-tama.git"; do
-        setup_std_env td mb mh
-        create_mock_git_with_remote "$mb"
-        create_mock_browser "$mb"
+        : > "$MOCK_CALL_LOG"
         export MOCK_GIT_REMOTE_URL="$u"
-        export MOCK_GIT_BRANCH="feature/my-feature"
-        export MOCK_GH_MERGED_PRS="feature/my-feature->develop"
-        export MOCK_GH_OPEN_PRS=""
-        local out; out=$(cd "$td" && echo "y" | PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-next.sh" 2>&1)
-        assert_output_contains "$out" "//github.com/test-owner/force-tama/compare/staging...feature/my-feature" "認証情報つきの origin（${u%%@*}@...）→ 認証情報を除いた URL を表示する"
-        echo "$out" | grep -q "SECRETTOKEN\|user@" \
-            && fail "認証情報つきの origin → 画面に認証情報を出さない" "$out" \
-            || pass "認証情報つきの origin → 画面に認証情報を出さない"
-        grep -v "remote get-url" "$MOCK_CALL_LOG" | grep -q "SECRETTOKEN\|user@" \
-            && fail "認証情報つきの origin → ブラウザに認証情報を渡さない" \
-            || pass "認証情報つきの origin → ブラウザに認証情報を渡さない"
-        unset MOCK_GIT_REMOTE_URL MOCK_GIT_BRANCH MOCK_GH_MERGED_PRS MOCK_GH_OPEN_PRS
-        teardown "$td" "$mb"
+        _next y
+        assert_output_contains "$NX_OUT" "//github.com/test-owner/force-tama/compare/staging...feature/my-feature" "認証情報つきの origin（${u%%@*}@...）→ 認証情報を除いた URL"
+        echo "$NX_OUT" | grep -q "SECRETTOKEN\|user@" && fail "認証情報を画面に出さない" || pass "認証情報を画面に出さない"
+        grep -v "remote get-url" "$MOCK_CALL_LOG" | grep -q "SECRETTOKEN\|user@" && fail "認証情報をブラウザに渡さない" || pass "認証情報をブラウザに渡さない"
     done
-}
-
-# --- origin の URL を取得できない → エラー終了（/compare/... だけの、開けない URL を開かない）---
-test_pr_url_no_origin() {
-    local td mb mh
-    setup_std_env td mb mh
-    create_mock_git_with_remote "$mb"
-    create_mock_browser "$mb"
+    : > "$MOCK_CALL_LOG"
     export MOCK_GIT_REMOTE_URL=""
-    export MOCK_GIT_BRANCH="feature/my-feature"
-    export MOCK_GH_MERGED_PRS="feature/my-feature->develop"
-    export MOCK_GH_OPEN_PRS=""
-    local out; out=$(cd "$td" && echo "y" | PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-next.sh" 2>&1)
-    assert_exit_fail $? "origin の URL がない → エラー終了"
-    assert_output_contains "$out" "origin の URL を取得できません" "origin の URL がない → 理由が表示される"
+    _next y
+    assert_exit_fail "$NX_RC" "origin の URL がない → エラー終了"
+    assert_output_contains "$NX_OUT" "origin の URL を取得できません" "origin の URL がない → 理由"
     assert_file_not_contains "$MOCK_CALL_LOG" "compare/" "origin の URL がない → ブラウザを開かない"
-    unset MOCK_GIT_REMOTE_URL MOCK_GIT_BRANCH MOCK_GH_MERGED_PRS MOCK_GH_OPEN_PRS
-    teardown "$td" "$mb"
+    _unset; teardown "$TD" "$MB"
 }
 
-# --- 回帰: git fetch の「> Command:」の行を、標準エラーごと捨てない（以前は 2>/dev/null で、-v の出力も消えていた）---
-test_fetch_command_line_shown() {
-    local td mb mh
-    setup_std_env td mb mh
-    create_mock_git_with_remote "$mb"
-    export MOCK_GIT_BRANCH="feature/my-feature"
-    export MOCK_GH_MERGED_PRS="" MOCK_GH_OPEN_PRS=""
-    local out; out=$(cd "$td" && echo "n" | PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-next.sh" 2>&1)
-    assert_output_contains "$out" "> Command: .*git fetch origin develop staging main" "git fetch の「> Command:」の行が表示される"
-    unset MOCK_GIT_BRANCH MOCK_GH_MERGED_PRS MOCK_GH_OPEN_PRS
-    teardown "$td" "$mb"
-}
-
-# --- PR 作成画面を開く: open_browser で、OS に合ったコマンド（Git Bash: start / WSL: powershell / macOS: open / Linux: xdg-open）を使う ---
-test_pr_open_browser() {
-    local td mb mh
-    setup_std_env td mb mh
-    create_mock_git_with_remote "$mb"
-    create_mock_browser "$mb"
-
-    export MOCK_GIT_BRANCH="feature/my-feature"
-    export MOCK_GH_MERGED_PRS="feature/my-feature->develop"
-    export MOCK_GH_OPEN_PRS=""
-
-    local out; out=$(cd "$td" && echo "y" | PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-next.sh" 2>&1)
-    local ec=$?
-
-    assert_exit_ok $ec "PR を出す → 終了コード 0"
-    assert_file_contains "$MOCK_CALL_LOG" "compare/staging...feature/my-feature" "ブラウザで、PR 作成画面（次の PR 先 staging）を開く"
-    assert_output_contains "$out" "compare/staging...feature/my-feature" "開けなかった場合に備えて、URL も表示する"
-
-    unset MOCK_GIT_BRANCH MOCK_GH_MERGED_PRS MOCK_GH_OPEN_PRS
-    teardown "$td" "$mb"
-}
-
-test_all_merged
-test_none_merged
-test_two_branches_none_merged
-test_pr_open_shown
-test_pr_open_browser
-test_pr_url_from_remote_forms
-test_pr_url_strips_credentials
-test_pr_url_no_origin
-test_fetch_command_line_shown
-test_out_of_order_merge
-test_staging_synced
-test_protected_branch_blocked
-test_single_branch_none_merged
-test_single_branch_merged
-
-# --- マージのあとに同じブランチへコミットを足した: develop は「その後の変更が未反映」→ 次の PR 先は develop（staging ではない）---
-test_merged_stale_next_is_develop() {
-    local td mb mh
-    setup_std_env td mb mh
-    create_mock_git_with_remote "$mb"
-
-    export MOCK_GIT_BRANCH="feature/my-feature"
-    export MOCK_GH_MERGED_PRS="feature/my-feature->develop@oldoid1"   # PR の最後のコミット ≠ いまの HEAD（headoid0）
-    export MOCK_GH_OPEN_PRS=""
-    export MOCK_GIT_NEW_COMMITS="3"
-
-    local out; out=$(cd "$td" && echo "n" | PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-next.sh" 2>&1)
-    local ec=$?
-
-    assert_exit_ok $ec "マージのあとの変更あり → 終了コード 0"
-    assert_output_contains "$out" "▶.*develop.*その後の変更（3 コミット）が未反映 → 次のPR先" "develop が ▶（その後の変更 3 コミットが未反映・次のPR先）"
-    assert_output_contains "$out" "✗.*staging" "staging は ✗（次のPR先ではない）"
-    assert_output_contains "$out" "develop にPRを出しますか" "develop への PR を確認する"
-    assert_output_not_contains "$out" "staging にPRを出しますか" "staging への PR を案内しない（develop で確かめていない変更を上げない）"
-    assert_output_not_contains "$out" "動作を確かめ終えましたか" "develop（最初の段階）への PR では、動作の確認を聞かない"
-
-    unset MOCK_GIT_BRANCH MOCK_GH_MERGED_PRS MOCK_GH_OPEN_PRS MOCK_GIT_NEW_COMMITS
-    teardown "$td" "$mb"
-}
-
-# --- マージのあとの変更の数を数えられない（PR の最後のコミットが手元にない）: 数なしで「未反映」と出す ---
-test_merged_stale_count_unknown() {
-    local td mb mh
-    setup_std_env td mb mh
-    create_mock_git_with_remote "$mb"
-
-    export MOCK_GIT_BRANCH="feature/my-feature"
-    export MOCK_GH_MERGED_PRS="feature/my-feature->develop@oldoid1"
-    export MOCK_GH_OPEN_PRS=""
-    unset MOCK_GIT_NEW_COMMITS
-
-    local out; out=$(cd "$td" && echo "n" | PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-next.sh" 2>&1)
-    assert_output_contains "$out" "▶.*develop.*マージ済み・その後の変更が未反映 → 次のPR先" "数えられないときは、数なしで「未反映」"
-
-    unset MOCK_GIT_BRANCH MOCK_GH_MERGED_PRS MOCK_GH_OPEN_PRS
-    teardown "$td" "$mb"
-}
-
-# --- Squash・Rebase でマージ: HEAD が origin/develop の祖先でなくても、PR の最後のコミットと同じ・その祖先なら、マージ済み ---
-test_merged_squash_is_merged() {
-    local td mb mh out
-    setup_std_env td mb mh
-    create_mock_git_with_remote "$mb"
-
-    export MOCK_GIT_BRANCH="feature/my-feature"
-    export MOCK_GH_OPEN_PRS=""
-    export MOCK_GIT_MERGED_TARGETS=""          # HEAD は origin/develop の祖先ではない（Squash）
-
-    # HEAD = PR の最後のコミット
-    export MOCK_GH_MERGED_PRS="feature/my-feature->develop@headoid0"
-    out=$(cd "$td" && echo "n" | PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-next.sh" 2>&1)
-    assert_output_contains "$out" "✓.*develop.*マージ済み" "HEAD が PR の最後のコミットと同じ → develop は ✓"
-    assert_output_contains "$out" "▶.*staging" "→ 次は staging"
-
-    # HEAD が PR の最後のコミットの祖先（手元が少し古い）
-    export MOCK_GIT_HEAD_OID="oldhead"
-    export MOCK_GH_MERGED_PRS="feature/my-feature->develop@newoid9"
-    export MOCK_GIT_ANCESTOR_OIDS="newoid9"
-    out=$(cd "$td" && echo "n" | PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-next.sh" 2>&1)
-    assert_output_contains "$out" "✓.*develop.*マージ済み" "HEAD が PR の最後のコミットの祖先 → develop は ✓"
-    assert_output_not_contains "$out" "未反映" "未反映とは出さない"
-
-    unset MOCK_GIT_BRANCH MOCK_GH_MERGED_PRS MOCK_GH_OPEN_PRS MOCK_GIT_MERGED_TARGETS MOCK_GIT_HEAD_OID MOCK_GIT_ANCESTOR_OIDS
-    teardown "$td" "$mb"
-}
-
-# --- マージのあとの変更で、もう一度 develop へ PR を発行済み → develop は PR発行中（未反映の ▶ にしない）---
-test_merged_stale_with_open_pr() {
-    local td mb mh
-    setup_std_env td mb mh
-    create_mock_git_with_remote "$mb"
-
-    export MOCK_GIT_BRANCH="feature/my-feature"
-    export MOCK_GH_MERGED_PRS="feature/my-feature->develop@oldoid1"
-    export MOCK_GH_OPEN_PRS="feature/my-feature->develop"
-
-    local out; out=$(cd "$td" && echo "n" | PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-next.sh" 2>&1)
-    assert_output_contains "$out" "→.*develop.*PR発行中" "develop は PR発行中"
-    assert_output_not_contains "$out" "未反映" "PR を発行済みなら、未反映とは出さない"
-
-    unset MOCK_GIT_BRANCH MOCK_GH_MERGED_PRS MOCK_GH_OPEN_PRS
-    teardown "$td" "$mb"
-}
-
-# --- develop・staging ともにマージ済みのあとで、コミットを足した → develop が ▶、staging は ✗（未反映。順序外にしない）---
-test_merged_stale_both() {
-    local td mb mh
-    setup_std_env td mb mh
-    create_mock_git_with_remote "$mb"
-
-    export MOCK_GIT_BRANCH="feature/my-feature"
-    export MOCK_GH_MERGED_PRS="feature/my-feature->develop@oldoid1 feature/my-feature->staging@oldoid1"
-    export MOCK_GH_OPEN_PRS=""
-    export MOCK_GIT_NEW_COMMITS="2"
-
-    local out; out=$(cd "$td" && echo "n" | PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-next.sh" 2>&1)
-    assert_output_contains "$out" "▶.*develop.*その後の変更（2 コミット）が未反映 → 次のPR先" "develop が ▶（次のPR先）"
-    assert_output_contains "$out" "✗.*staging.*その後の変更（2 コミット）が未反映" "staging は ✗（未反映）"
-    assert_output_not_contains "$out" "順序外" "順序外にはしない"
-
-    unset MOCK_GIT_BRANCH MOCK_GH_MERGED_PRS MOCK_GH_OPEN_PRS MOCK_GIT_NEW_COMMITS
-    teardown "$td" "$mb"
-}
-
-# --- 2 つ目以降の段階（staging・main）への PR では、1 つ前のブランチの組織で確かめたかを、同じ確認の中で聞く ---
-test_confirm_asks_previous_org_checked() {
-    local td mb mh out
-    setup_std_env td mb mh
-    create_mock_git_with_remote "$mb"
-
-    export MOCK_GIT_BRANCH="feature/my-feature"
-    export MOCK_GH_OPEN_PRS=""
-
-    export MOCK_GH_MERGED_PRS="feature/my-feature->develop"
-    out=$(cd "$td" && echo "n" | PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-next.sh" 2>&1)
-    assert_output_contains "$out" "develop の組織で、動作を確かめ終えましたか？ staging にPRを出しますか？" "staging へは、develop の組織での確認を聞く"
-
-    export MOCK_GH_MERGED_PRS="feature/my-feature->develop feature/my-feature->staging"
-    out=$(cd "$td" && echo "n" | PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-next.sh" 2>&1)
-    assert_output_contains "$out" "staging の組織で、動作を確かめ終えましたか？ main にPRを出しますか？" "main へは、staging の組織での確認を聞く"
-
-    unset MOCK_GIT_BRANCH MOCK_GH_MERGED_PRS MOCK_GH_OPEN_PRS
-    teardown "$td" "$mb"
-}
-
-# --- gh が PR の最後のコミットを返さない（MOCK_GH_NO_OID）: 判定できないため、以前どおりマージ済みとする ---
-test_merged_without_oid_is_merged() {
-    local td mb mh
-    setup_std_env td mb mh
-    create_mock_git_with_remote "$mb"
-
-    export MOCK_GIT_BRANCH="feature/my-feature"
-    export MOCK_GH_MERGED_PRS="feature/my-feature->develop@oldoid1"
-    export MOCK_GH_OPEN_PRS=""
-    export MOCK_GH_NO_OID=1
-
-    local out; out=$(cd "$td" && echo "n" | PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-next.sh" 2>&1)
-    assert_output_contains "$out" "✓.*develop.*マージ済み" "最後のコミットが取れないときは、develop は ✓"
-    assert_output_not_contains "$out" "未反映" "未反映とは出さない"
-
-    unset MOCK_GIT_BRANCH MOCK_GH_MERGED_PRS MOCK_GH_OPEN_PRS MOCK_GH_NO_OID
-    teardown "$td" "$mb"
-}
-
-# AI 操作（SF_TOOLS_AI=1）: next.pr=n → 表示だけ（ブラウザを開かない）／=y → 開く／答えなし → ブラウザを開く前に 20
+# AI 操作（SF_TOOLS_AI=1）: next.pr=n → 表示だけ／=y → 開く／答えなし → ブラウザを開く前に 20
 test_ai_mode() {
-    local td mb mh out ec
-    setup_std_env td mb mh
-    create_mock_git_with_remote "$mb"
-    create_mock_browser "$mb"
-    export MOCK_GIT_BRANCH="feature/my-feature"
-    export MOCK_GH_MERGED_PRS="feature/my-feature->develop"
-    export MOCK_GH_OPEN_PRS=""
-
-    out=$(cd "$td" && echo "y" | PATH="$mb:$PATH" SF_TOOLS_AI=1 bash "$SF_TOOLS_DIR/bin/sf-next.sh" 2>&1); ec=$?
-    assert_equals "$ec" "20" "AI・答えなし → 20（標準入力の y は読まない）"
-    assert_output_contains "$out" "\[確認待ち\] next.pr: develop の組織で、動作を確かめ終えましたか？ staging にPRを出しますか？" "AI・答えなし → 確認待ちの行"
+    echo ""; echo -e "${CLR_HEAD}[TEST] AI 操作${CLR_RST}"
+    local TD MB MH; _env TD MB MH
+    export MOCK_PC_JSON; MOCK_PC_JSON=$(_pc_json staging)
+    _next y SF_TOOLS_AI=1
+    assert_equals "$NX_RC" "20" "AI・答えなし → 20（標準入力の y は読まない）"
+    assert_output_contains "$NX_OUT" "\[確認待ち\] next.pr: develop の組織で、動作を確かめ終えましたか？ staging にPRを出しますか？" "AI・答えなし → 確認待ちの行"
     assert_file_not_contains "$MOCK_CALL_LOG" "compare/" "AI・答えなし → ブラウザを開かない"
-
     : > "$MOCK_CALL_LOG"
-    out=$(cd "$td" && PATH="$mb:$PATH" SF_TOOLS_AI=1 SF_TOOLS_ANSWERS="next.pr=n" bash "$SF_TOOLS_DIR/bin/sf-next.sh" 2>&1); ec=$?
-    assert_exit_ok "$ec" "AI・next.pr=n → 正常終了"
-    assert_output_contains "$out" "▶.*staging" "AI・next.pr=n → 状況を表示する"
+    _next "" SF_TOOLS_AI=1 SF_TOOLS_ANSWERS="next.pr=n"
+    assert_exit_ok "$NX_RC" "AI・next.pr=n → 正常終了"
+    assert_output_contains "$NX_OUT" "▶.*staging" "AI・next.pr=n → 状況を表示する"
     assert_file_not_contains "$MOCK_CALL_LOG" "compare/" "AI・next.pr=n → ブラウザを開かない"
-
     : > "$MOCK_CALL_LOG"
-    out=$(cd "$td" && PATH="$mb:$PATH" SF_TOOLS_AI=1 SF_TOOLS_ANSWERS="next.pr=y" bash "$SF_TOOLS_DIR/bin/sf-next.sh" 2>&1); ec=$?
-    assert_exit_ok "$ec" "AI・next.pr=y → 正常終了"
+    _next "" SF_TOOLS_AI=1 SF_TOOLS_ANSWERS="next.pr=y"
+    assert_exit_ok "$NX_RC" "AI・next.pr=y → 正常終了"
     assert_file_contains "$MOCK_CALL_LOG" "compare/staging...feature/my-feature" "AI・next.pr=y → PR の作成画面を開く"
-    unset MOCK_GIT_BRANCH MOCK_GH_MERGED_PRS MOCK_GH_OPEN_PRS
-    teardown "$td" "$mb"
+    _unset; teardown "$TD" "$MB"
 }
 
-test_merged_stale_next_is_develop
-test_merged_stale_count_unknown
+test_display_and_next
+test_rules_broken_or_unknown
+test_protected_branch_blocked
+test_pr_url
 test_ai_mode
-test_merged_without_oid_is_merged
-test_merged_squash_is_merged
-test_merged_stale_with_open_pr
-test_merged_stale_both
-test_confirm_asks_previous_org_checked
 
 print_summary

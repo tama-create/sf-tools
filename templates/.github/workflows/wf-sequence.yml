@@ -1,15 +1,16 @@
 # ==============================================================================
 # wf-sequence.yml - Salesforce マージ順序チェック
 # ==============================================================================
-# main / staging への PR で、マージの順序（プロモーション順序）を確かめる。順序の定義は、sf-tools/config/branches.txt の並び
-# （常に main のものを読む。上から main → staging → develop で、下に書いたブランチほど、前の段階）。
-#   - 順序外（PR のソースブランチが、前の段階のブランチに、まだマージされていない）: 警告するだけで、マージは止めない
-#     （緊急の Hotfix を妨げないため。ジョブ「順序チェック」は成功する）
-#   - 環境ブランチ（branches.txt のブランチ）から直接出された PR: エラーで、ジョブ「順序チェック」を失敗させる
-#   どちらも、PR の会話欄にコメントを投稿し（同じ PR では、既存のコメントを更新する）、Slack に通知する。
-# 開発者が sf-next.sh を使う限り、順序は守られる。このチェックは、ランチャーを使わず、GitHub 上で直接 PR を作った場合に、
-# レビュアーが気づけるようにするためのもの。気づいたレビュアーが、PR を却下する。
-# Actions の画面での名前は「[sequence] マージ順序チェック」（最上位の name:）。
+# main / staging への PR で、一方通行のリリース（develop → staging → main に、同じコミットのまま上げる。
+# doc/one-way-promotion-design.md）の順序を確かめる。判定の本体は sf-tools の bin/sf-promote-check.sh（--only sequence =
+# R0・R1・R3）。段階の並びは、常に origin/main の sf-tools/config/branches.txt から読む。
+#   - 順序外（R1: PR の先端のコミットに、前の段階のリリースの印（wf-release が付ける commit status）がない）: ジョブ
+#     「順序チェック」を失敗にする（警告だけにはしない。緊急の Hotfix の例外もない。2026-11-26 の決定）
+#   - 環境ブランチ（branches.txt のブランチ）から直接出された PR（R3）: 失敗
+#   - 判断できない（R0: main・branches.txt が読めない・構成の誤り・フォークからの PR など）: 失敗
+#   順序外・環境ブランチのときは、PR の会話欄にコメントを投稿し（同じ PR では、既存のコメントを更新する）、Slack に通知する。
+# Ruleset がない組織（無料プランの非公開リポジトリ）では、失敗してもマージは止まらない。その場合も、wf-release が同じ確認を
+# して、組織へは出さない（最後の守り）。Actions の画面での名前は「[sequence] マージ順序チェック」（最上位の name:）。
 #
 # 【起動の条件】
 #   - pull_request（types の指定なし = opened / synchronize / reopened）で、マージ先が main または staging のとき
@@ -19,7 +20,8 @@
 #
 # 【ジョブ】
 #   1. 対象ファイル確認（check-branch）: 順序チェックが必要かを判定し、出力 skip（true / false）を返す。常に実行する
-#   2. 順序チェック（check-promotion-order）: check-branch のあと（needs）。skip が true のときは、スキップされる
+#   2. 順序チェック（check-promotion-order）: check-branch のあと（needs）。skip が true のときは、スキップされる。
+#      権限: contents: read・pull-requests: write（コメント・PR を読む）・statuses: read（印）・actions: read（印を付けた実行）
 #   ブランチ保護との関係: ジョブ名「対象ファイル確認」「順序チェック」は、sf-init の Phase 9（phases/init/09_repo_rules.sh）が、
 #   Ruleset protect-main / protect-staging（対象: main / staging）に登録する必須チェック 3 つのうちの 2 つ（もう 1 つは
 #   wf-validate.yml の「デプロイ検証」。名前の正本は lib/project.sh の required_status_check_names）。ジョブ名（name:）を変えると、必須チェックが永久に満たされず、
@@ -27,11 +29,10 @@
 #     - 必須チェックは、ジョブ名だけで照合される。main / staging への PR では、wf-validate.yml と、このワークフローの
 #       「対象ファイル確認」が、同じ名前のチェックとして 2 つ並ぶ。この場合に、GitHub が、どちらの結果で（または両方で）
 #       判定するかは、未確認
-#     - 環境ブランチからの PR: 「順序チェック」が失敗するため、マージできない
-#     - 順序外の PR: 「順序チェック」は成功するため、マージは止まらない（コメントと Slack で知らせるだけ）
-#     - スキップされたジョブは、GitHub の仕様で、必須チェックとしては成功として扱われる
+#     - 順序外・環境ブランチ・判断できない PR: 「順序チェック」が失敗するため、マージできない（Ruleset があるとき）
+#     - スキップされたジョブは、GitHub の仕様で、必須チェックとしては成功として扱われる（対象が空の PR。組織へは何も出ない）
 #     - Ruleset がない場合（作成に失敗した。無料プランの Private リポジトリなど）は、失敗しても、マージは止まらない。
-#       リポジトリの Admin は、Ruleset をバイパスできる（bypass_mode: always）
+#       リポジトリの Admin は、Ruleset をバイパスできる（bypass_mode: always）。どちらの場合も、wf-release が組織へは出さない
 #
 # 【処理の流れ】
 #   対象ファイル確認:
@@ -44,43 +45,35 @@
 #     3. sf-tools/release/<ソースブランチ名>/ の deploy-target.txt・remove-target.txt に、実質的な行（# の行・空行・
 #        [files]・[members] 以外）があるかを確認する。どちらにもなければ skip=true（スキップの旨を表示）、あれば skip=false
 #   順序チェック:
-#     1. 全履歴（fetch-depth: 0）で、PR のマージ結果を取得する
-#     2. マージ順序を検証する（ステップ「マージ順序を検証」。id: sequence_check）
-#        a. origin の main を取得し（git fetch origin main。失敗すると、ジョブが失敗する）、main の
-#           sf-tools/config/branches.txt を読む。ない場合は、::notice を出して、成功で終わる（何も通知しない）
-#        b. ソースブランチが環境ブランチなら、::error を出して、終了コード 1 で失敗する（出力 env_branch=true）
-#        c. マージ先が branches.txt にない場合（branches.txt にブランチの行が 1 つもない場合を含む）は、::notice を出して、
-#           成功で終わる（何も通知しない）
-#        d. branches.txt で、マージ先より下に書かれたブランチ（前の段階）を、すべて調べる。前の段階がなければ、
-#           出力 out_of_order=false で、成功で終わる
-#        e. 前の段階の各ブランチを git fetch し、git merge-base --is-ancestor で、PR のソースの最新のコミット
-#           （pull_request.head.sha。フォークからの PR でも調べられるよう、ブランチ名ではなく、コミットで調べる）が
-#           origin/<前の段階> に含まれるかを確かめる。含まれないブランチは、::warning を出し、一覧（出力 prev）に加える。
-#           1 つでもあれば out_of_order=true、なければ out_of_order=false。どちらも、このステップは成功する
+#     1. PR の先端のコミット（pull_request.head.sha）を、全履歴（fetch-depth: 0）で force-promote-check に取得する
+#        （名前は force- で始める。sf-tools のコマンドは force-* のフォルダでしか動かない）。sf-tools（公開リポジトリ）を、
+#        Variable SF_TOOLS_BRANCH のブランチ（未設定なら main）で ~/sf-tools に clone する
+#     2. マージ順序を検証する（ステップ「マージ順序を検証」。id: sequence_check）: force-promote-check で
+#        sf-promote-check.sh --pr <PR 番号> --only sequence --json を実行する（GH_TOKEN は自動の GITHUB_TOKEN）。
+#        出力: feature（ソースブランチ）・detail（破った理由。判断できないときはその理由）・env_branch=true（R3 のとき）・
+#        out_of_order（終了コード 0 なら false、R1 を破ったら true）。終了コードが 0 でなければ、::error を出して失敗する
 #     3. （順序外・環境ブランチのとき。前のステップが失敗しても実行する）Slack の chat.postMessage に、通知を送る
 #        （Secret SLACK_BOT_TOKEN・Variable SLACK_CHANNEL_ID）。送信に失敗した（curl の失敗・応答の ok が true でない）ときは、
 #        ::warning を出す（このステップは失敗にしない。応答の JSON は、ランナーの node で読む）
 #     4. （out_of_order が出力されたとき・環境ブランチのとき。前のステップが失敗しても実行する）PR の会話欄にコメントする。
 #        目印（<!-- sf-tools:sequence -->）のある既存のコメントがあれば、更新する。なければ、新しく投稿する。
-#        内容は、環境ブランチ → 「⛔ 環境ブランチからの PR は、許可されていません」、順序外 → 「⚠️ マージ順序の確認が必要です」、
-#        順序どおり → 「✅ マージ順序は、問題ありません」（ただし、順序どおりで、既存のコメントがない場合は、何も投稿しない）
+#        内容は、環境ブランチ → 「⛔ 環境ブランチからの PR は、許可されていません」、順序外 → 「⛔ 一方通行の決まりにより、
+#        この PR はマージできません」（理由つき）、順序どおり → 「✅ マージ順序は、問題ありません」（ただし、順序どおりで、
+#        既存のコメントがない場合は、何も投稿しない）
 #
 # 【必要な Secrets / Variables】
 #   Secrets（このリポジトリに設定する。sf-init の Phase 7 が登録する）:
 #     SLACK_BOT_TOKEN  : Slack API の Bot Token（順序外・環境ブランチからの PR の通知に使用）
 #   Variables（このリポジトリに設定する。sf-init の Phase 7 が登録する）:
 #     SLACK_CHANNEL_ID : 通知先 Slack チャンネル ID
-#   このほか、PR へのコメントに、自動の GITHUB_TOKEN を使う（設定不要。permissions: pull-requests: write）
+#     SF_TOOLS_BRANCH  : clone する sf-tools のブランチ（任意。未設定なら main）
+#   このほか、PR へのコメント・一方通行の確認に、自動の GITHUB_TOKEN を使う（設定不要）
 #
 # 【補足】
 #   - branches.txt は、PR のマージ結果ではなく、常に origin の main から読む（PR のマージ結果には、含まれない場合があるため）
-#   - run は bash -e で動く（GitHub Actions の既定。pipefail は付かない）。チェックアウト以外で、ジョブが失敗するのは、次の場合だけ:
-#     順序チェックの手順 2a の git fetch origin main の失敗（環境ブランチかを判定できないまま、素通りさせないため。
-#     対象ファイル確認の手順 2 の同じ失敗は、ジョブを失敗にせず、skip=false で順序チェックに任せる）、順序チェックの手順 2b（環境ブランチからの PR）、手順 2e の git fetch の失敗（branches.txt にある
-#     ブランチが origin にない）、手順 4 のコメントの失敗。branches.txt がない・ブランチの行がない場合は、失敗にしない
-#   - フォークからの PR: 順序の判定（手順 2）は行える。ただし、GitHub の既定の設定では、Secrets が渡されず、GITHUB_TOKEN が
-#     読み取り専用になるため、Slack の通知（手順 3）は ::warning で終わり、PR へのコメント（手順 4）は失敗する
-#   - Salesforce の組織には、接続しない
+#   - run は bash -e で動く（GitHub Actions の既定。pipefail は付かない）
+#   - フォークからの PR: R0 で失敗にする（force-* は組織の非公開リポジトリで、フォークからの PR は想定しない）
+#   - Salesforce の組織には、接続しない（sf も使わない。R2（積み重ね）は wf-validate.yml が確かめる）
 # ==============================================================================
 name: "[sequence] マージ順序チェック"
 on:
@@ -145,102 +138,57 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: write   # 順序外の警告を、PR の会話欄に投稿するため
+      pull-requests: write   # 順序外・環境ブランチの ⛔ のコメントを、PR の会話欄に投稿するため（PR を読むのにも使う）
+      statuses: read         # リリースの印（commit status）を読むため
+      actions: read          # 印を付けた wf-release の実行を確かめるため
 
     steps:
       # --------------------------------------------------------------------------
-      # Step 1: 全履歴付きでリポジトリをチェックアウト
+      # Step 1: PR の先端のコミット（head.sha）を、全履歴で取得する（一方通行の確認は、この作業ツリーで行う。
+      #   フォルダの名前は force- で始める。sf-tools のコマンドは force-* のフォルダでしか動かない）
       # --------------------------------------------------------------------------
       - name: ソースコードを取得
         uses: actions/checkout@v7
         with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: force-promote-check
           fetch-depth: 0
 
+      - name: 自動化ツール（sf-tools）を取得
+        run: git clone -b ${{ vars.SF_TOOLS_BRANCH || 'main' }} https://github.com/tama-create/sf-tools.git ~/sf-tools
+
       # --------------------------------------------------------------------------
-      # Step 2: マージ順序の検証
+      # Step 2: マージ順序の検証（sf-promote-check.sh --pr <番号> --only sequence。R0・R1・R3。doc/one-way-promotion-design.md）
+      #   順序外（R1）・環境ブランチ（R3）・判断できない（R0）は、ジョブを失敗にする（警告だけにしない。Hotfix の例外もない）。
+      #   出力: env_branch（R3）・out_of_order（R1。true / false）・feature・detail（破った理由。コメントと Slack に使う）
       # --------------------------------------------------------------------------
       - name: マージ順序を検証
         id: sequence_check
         env:
-          FEATURE_REF: ${{ github.event.pull_request.head.ref || github.ref_name }}
-          BASE_REF: ${{ github.event.pull_request.base.ref || github.ref_name }}
-          # PR のソースの最新のコミット（順序の判定に使う。ブランチ名ではなく、コミットで調べる理由は、下の判定の箇所を参照）
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          # ブランチ名は、シェルのスクリプトに直接埋め込まず、環境変数で受け取る
+          FEATURE_REF: ${{ github.event.pull_request.head.ref }}
         run: |
-          FEATURE="$FEATURE_REF"
-          BASE="$BASE_REF"
-
-          # branches.txt は常に main ブランチから読み込む（main の取得（git fetch）の失敗は、ジョブの失敗にする）
-          BRANCH_FILE=$(mktemp)
-          trap 'rm -f "$BRANCH_FILE"' EXIT
-          git fetch origin main -q
-          if ! git show origin/main:sf-tools/config/branches.txt > "$BRANCH_FILE" 2>/dev/null; then
-            echo "::notice::branches.txt が見つかりません。チェックをスキップします。"
-            exit 0
-          fi
-
-          # コメントと空行を除外してブランチ一覧を取得（ブランチの行が 1 つもないときは、空。
-          #   run は bash -e で動き、pipefail は付かないため、パイプの途中の grep の失敗（該当なし）では止まらない。
-          #   || true は、-eo pipefail で動かしても止まらないための保険（tests/test_wf-sequence.sh は、-eo pipefail で確かめる）。
-          #   空のときは、下の「マージ先が branches.txt にない」で、成功で終わる）
-          BRANCHES=$(grep -v '^[[:space:]]*#' "$BRANCH_FILE" | grep -v '^[[:space:]]*$' | tr -d '\r' || true)
-
-          # 環境ブランチ（branches.txt のブランチ）からの PR は、エラーで失敗させる（必須チェック「順序チェック」が失敗する）
-          if echo "$BRANCHES" | grep -qxF -- "$FEATURE"; then
-            echo "env_branch=true" >> "$GITHUB_OUTPUT"
-            echo "feature=${FEATURE}" >> "$GITHUB_OUTPUT"
-            echo "::error title=マージ元ブランチ不正::${FEATURE} からのPRは許可されていません。必ずフィーチャーブランチからPRを作成してください。"
-            exit 1
-          fi
-
-          # base_ref が branches.txt に含まれていない場合はスキップ（成功で終わる。出力なしのため、通知・コメントもしない）
-          if ! echo "$BRANCHES" | grep -qxF -- "$BASE"; then
-            echo "::notice::チェック対象外のブランチです: $BASE"
-            exit 0
-          fi
-
-          # base_ref より下位のブランチ（前段ブランチ。branches.txt で base_ref より下に書かれたブランチ）を取得
-          PREV_LIST=""
-          FOUND=false
-          while IFS= read -r line; do
-            line=$(echo "$line" | tr -d '\r')
-            echo "$line" | grep -q '^[[:space:]]*#' && continue
-            [ -z "$(echo "$line" | tr -d '[:space:]')" ] && continue
-            if [ "$FOUND" = true ]; then
-              PREV_LIST="${PREV_LIST:+$PREV_LIST }$line"
-            fi
-            [ "$line" = "$BASE" ] && FOUND=true
-          done < "$BRANCH_FILE"
-
-          # 前段ブランチがない場合（最下位ブランチ or main のみ構成）
-          if [ -z "$PREV_LIST" ]; then
-            echo "::notice title=チェック完了::${BASE} への PR に前段ブランチの確認は不要です"
+          cd force-promote-check
+          echo "feature=${FEATURE_REF}" >> "$GITHUB_OUTPUT"
+          RC=0
+          OUT=$(bash ~/sf-tools/bin/sf-promote-check.sh --pr "$PR_NUMBER" --only sequence --json) || RC=$?
+          JSON=$(printf '%s\n' "$OUT" | tail -n 1)
+          echo "結果: ${JSON}"
+          # 破った規則と理由を読む（ランナーの node。JSON を読めなければ、空）
+          RULES=$(node -e 'const j=JSON.parse(process.argv[1]); console.log(j.violations.map(v=>v.rule).join(" "))' "$JSON" 2>/dev/null || true)
+          DETAIL=$(node -e 'const j=JSON.parse(process.argv[1]); console.log((j.violations.map(v=>v.detail).join(" ") || j.error || "").replace(/[\r\n]/g," "))' "$JSON" 2>/dev/null || true)
+          echo "detail=${DETAIL}" >> "$GITHUB_OUTPUT"
+          case " $RULES " in *" R3 "*) echo "env_branch=true" >> "$GITHUB_OUTPUT" ;; esac
+          if [ "$RC" -eq 0 ]; then
             echo "out_of_order=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=順序 OK::前の段階に出した、同じコミットです（または、確かめるものがありません）。"
             exit 0
           fi
-
-          # PR のソースのコミット（head.sha）が、前の段階のブランチに含まれるかを調べる。
-          #   origin/<ソースブランチ> ではなく、コミットで調べるのは、フォークからの PR では、ソースブランチがフォーク側の
-          #   リポジトリにあり、origin/<ソースブランチ> がないため（コミットは、PR のマージ結果の親として、全履歴の取得に含まれる）。
-          #   前の段階のブランチが origin にないと、git fetch が失敗し、ジョブが失敗する
-          MISSING=""
-          for PREV in $PREV_LIST; do
-            git fetch -q origin "$PREV"
-            if git merge-base --is-ancestor "$HEAD_SHA" "origin/$PREV"; then
-              echo "::notice title=プロモーション順序OK::✓ ${FEATURE} は ${PREV} にマージ済みです"
-            else
-              echo "::warning title=⚠ プロモーション順序未確認::${FEATURE} は ${PREV} にまだマージされていません。意図的な場合はそのまま進めてください。"
-              MISSING="${MISSING:+$MISSING, }${PREV}"
-            fi
-          done
-
-          if [ -z "$MISSING" ]; then
-            echo "out_of_order=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "out_of_order=true"  >> "$GITHUB_OUTPUT"
-            echo "feature=${FEATURE}" >> "$GITHUB_OUTPUT"
-            echo "prev=${MISSING}"    >> "$GITHUB_OUTPUT"
-          fi
+          case " $RULES " in *" R1 "*) echo "out_of_order=true" >> "$GITHUB_OUTPUT" ;; esac
+          echo "::error title=一方通行の決まり::${DETAIL:-判断できませんでした（ログを見てください）}"
+          exit 1
 
       # --------------------------------------------------------------------------
       # Step 3: 順序未確認時・環境ブランチからの PR のときの Slack 通知（前のステップが失敗しても実行する。
@@ -254,16 +202,16 @@ jobs:
           SLACK_CHANNEL_ID: ${{ vars.SLACK_CHANNEL_ID }}
           # ブランチ名・PR のタイトルは、シェルのスクリプトに直接埋め込まず、環境変数で受け取る
           FEATURE_RAW: ${{ steps.sequence_check.outputs.feature }}
-          PREV_RAW: ${{ steps.sequence_check.outputs.prev }}
+          DETAIL_RAW: ${{ steps.sequence_check.outputs.detail }}
           PR_TITLE_RAW: ${{ github.event.pull_request.title || '' }}
           PR_NUMBER_RAW: ${{ github.event.pull_request.number || '' }}
           PR_URL_RAW: ${{ github.event.pull_request.html_url || '' }}
-          BASE_RAW: ${{ github.event.pull_request.base.ref || github.ref_name }}
+          BASE_RAW: ${{ github.event.pull_request.base.ref }}
         run: |
           # Slack に送る JSON の文字列として安全にする（" と \ のエスケープ・制御文字の除去・Slack の特殊文字 & < > の置き換え）
           json_escape() { printf '%s' "$1" | tr -d '\000-\037' | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'; }
           FEATURE=$(json_escape "$FEATURE_RAW")
-          PREV=$(json_escape "$PREV_RAW")
+          DETAIL=$(json_escape "$DETAIL_RAW")
           PR_TITLE=$(json_escape "$PR_TITLE_RAW")
           PR_NUMBER=$(json_escape "$PR_NUMBER_RAW")
           PR_URL=$(json_escape "$PR_URL_RAW")
@@ -273,9 +221,10 @@ jobs:
           if [ "$ENV_BRANCH" = "true" ]; then
             MESSAGE=":no_entry: *環境ブランチからの PR は許可されていません*\n• ブランチ \`${FEATURE}\` は、環境ブランチです\n• PR: <${PR_URL}|#${PR_NUMBER} ${PR_TITLE}>\n• 対象: \`${FEATURE}\` → \`${BASE}\`\n• 実行日時: ${DATETIME}\n• この PR は却下し、feature ブランチから作り直してください"
           else
-            MESSAGE=":warning: *マージ順序の確認が必要です*\n• ブランチ \`${FEATURE}\` は \`${PREV}\` にまだマージされていません\n• PR: <${PR_URL}|#${PR_NUMBER} ${PR_TITLE}>\n• 対象: \`${FEATURE}\` → \`${BASE}\`\n• 実行日時: ${DATETIME}\n• 意図的でなければ、この PR は却下してください"
+            MESSAGE=":no_entry: *一方通行の決まりにより、この PR はマージできません*\n• ${DETAIL}\n• PR: <${PR_URL}|#${PR_NUMBER} ${PR_TITLE}>\n• 対象: \`${FEATURE}\` → \`${BASE}\`\n• 実行日時: ${DATETIME}\n• 前の段階に、同じコミットを出してから、出し直してください"
           fi
-          PAYLOAD="{\"channel\": \"${SLACK_CHANNEL_ID}\", \"text\": \"${MESSAGE}\"}"
+          CHANNEL=$(json_escape "$SLACK_CHANNEL_ID")   # Variable の値も、JSON の文字列として安全にする
+          PAYLOAD="{\"channel\": \"${CHANNEL}\", \"text\": \"${MESSAGE}\"}"
 
           # 送信の失敗（curl の失敗・応答の ok が true でない（Token の誤り・Bot がチャンネルにいないなど））は、::warning を出すだけで、
           #   このステップは失敗にしない。応答の JSON は、Node で読む（ランナーに入っている node を使う）
@@ -289,7 +238,7 @@ jobs:
           fi
 
       # --------------------------------------------------------------------------
-      # Step 4: 順序外・環境ブランチからの PR の警告を、PR の会話欄に投稿する（レビュアーが、気づけるように）
+      # Step 4: 順序外・環境ブランチからの PR の理由（⛔）を、PR の会話欄に投稿する（開発者・レビュアーが、止められた理由を見られるように）
       #   同じ PR では、既存のコメント（目印: sf-tools:sequence）を更新する（順序どおりになったら「✅」に書き換える）。
       #   順序どおりで、以前の警告もない場合は、何も投稿しない
       # --------------------------------------------------------------------------
@@ -301,7 +250,7 @@ jobs:
           ENV_BRANCH: ${{ steps.sequence_check.outputs.env_branch }}
           OUT_OF_ORDER: ${{ steps.sequence_check.outputs.out_of_order }}
           FEATURE: ${{ steps.sequence_check.outputs.feature }}
-          PREV: ${{ steps.sequence_check.outputs.prev }}
+          DETAIL: ${{ steps.sequence_check.outputs.detail }}
           BASE_REF: ${{ github.event.pull_request.base.ref }}
         with:
           script: |
@@ -326,15 +275,15 @@ jobs:
             } else if (順序外) {
               本文 = [
                 目印,
-                '## ⚠️ マージ順序の確認が必要です',
+                '## ⛔ 一方通行の決まりにより、この PR はマージできません',
                 '',
-                `ブランチ \`${process.env.FEATURE}\` は、\`${process.env.PREV}\` にまだマージされていません。`,
-                `このまま \`${process.env.BASE_REF}\` にマージすると、段階を飛び越すことになります。`,
+                process.env.DETAIL,
                 '',
-                '**意図的でなければ、この PR は却下してください。**（通常は、`sf-next.sh` が示す順序で、PR を出します）',
+                `開発物は develop → staging → main の順に、同じコミットのまま上げます（staging で問題が出たら、開発環境で直して develop から出し直します）。`,
+                '**前の段階に、同じコミットを出してから、この PR を出し直してください。**（通常は、`sf-next.sh` が示す順序で、PR を出します）。この PR をマージしても、組織へのリリース（wf-release）は止まります',
               ].join('\n');
             } else {
-              本文 = [目印, '## ✅ マージ順序は、問題ありません', '', '前の段階へのマージを、確認しました。'].join('\n');
+              本文 = [目印, '## ✅ マージ順序は、問題ありません', '', '前の段階に出した、同じコミットであることを確認しました。'].join('\n');
             }
             if (既存) {
               await github.rest.issues.updateComment({ owner, repo, comment_id: 既存.id, body: 本文 });

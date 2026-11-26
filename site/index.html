@@ -32,7 +32,7 @@
 <p>sf-tools には、3 種類の人が関わり、4 つの場所（手元のパソコン・GitHub・Salesforce の組織・Slack）を使います。まず、全体を、1 枚の図で見てください。</p>
 <p><strong>この図の見方:</strong> 上から下へ読みます（人 → 手元のパソコン → GitHub → Salesforce の組織 → Slack → 業務担当）。①②の番号は、作業の順番です。管理者が先に準備し、そのあとで、開発者が始めます。</p>
 <figure class="photo" id="fig-overview-image">
-  <a href="assets/system-overview.png"><img src="assets/system-overview.png" width="1024" height="1536" loading="lazy" alt="システム構成図。上から順に、①管理者（sf-init.sh で土台を作る・保守する）、②開発者（sf-job.sh で始めて、ランチャーで進める。手元のパソコンの中に、sf-tools のスクリプト集と作業用のフォルダ、Git・VS Code・Salesforce CLI・GitHub CLI・Node.js がある）、GitHub（リポジトリ force-XXXX。ブランチ・PR・保護のルール・認証情報と、GitHub Actions の 5 つのワークフロー）、Salesforce の組織（共有の環境 develop・staging・main は Actions が JWT 認証で接続し、手元からは反映できない。自分用の組織は手元から直接試す）、Slack（結果の通知）、業務担当（通知を見る）。GitHub から Salesforce へは、マージするとリリース。Salesforce の本番から GitHub の main へは、平日 3 時間おきに変更を取り込む。"></a>
+  <a href="assets/system-overview.png"><img src="assets/system-overview.png" width="1024" height="1536" loading="lazy" alt="システム構成図。上から順に、①管理者（sf-init.sh で土台を作る・保守する）、②開発者（sf-job.sh で始めて、ランチャーで進める。手元のパソコンの中に、sf-tools のスクリプト集と作業用のフォルダ、Git・VS Code・Salesforce CLI・GitHub CLI・Node.js がある）、GitHub（リポジトリ force-XXXX。ブランチ・PR・保護のルール・認証情報と、GitHub Actions の 4 つのワークフロー）、Salesforce の組織（共有の環境 develop・staging・main は Actions が JWT 認証で接続し、手元からは反映できない。自分用の組織は手元から直接試す）、Slack（結果の通知）、業務担当（通知を見る）。GitHub から Salesforce へは、マージするとリリース。Salesforce の本番から GitHub の main へは、平日 3 時間おきに変更を取り込む。"></a>
   <figcaption>画像をクリックすると、大きく表示します。下の「文字で読む版」は、同じ内容です（色の凡例つき）。</figcaption>
 </figure>
 <details>
@@ -61,7 +61,7 @@
     <div class="tiles">
       <div class="node dev"><span class="who">ブランチ・PR</span><strong>レビューして、マージ</strong><small>main・staging・develop と、作業用のブランチ</small></div>
       <div class="node admin"><span class="who">管理者が用意する</span><strong>保護のルール・認証情報</strong><small>Ruleset・Secrets・Variables</small></div>
-      <div class="node auto"><span class="who">🤖 GitHub Actions</span><strong>検証・リリース・取り込み</strong><small>5 つのワークフロー</small></div>
+      <div class="node auto"><span class="who">🤖 GitHub Actions</span><strong>検証・リリース・取り込み</strong><small>4 つのワークフロー</small></div>
     </div>
   </div>
   <div class="updown">
@@ -116,21 +116,20 @@
     <tr><td>PR</td><td>変更の取り込みの依頼。レビューと、自動の検証の結果を、ここで見ます</td></tr>
     <tr><td>ブランチの保護（Ruleset）</td><td><code>main</code>・<code>staging</code> の削除・強制プッシュを禁止し、必須チェックが通るまで、マージを止めます（GitHub のプランによっては、設定できません）</td></tr>
     <tr><td>Secrets・Variables</td><td>Actions が使う認証情報（Salesforce・Slack・GitHub のトークン）と、接続先の情報</td></tr>
-    <tr><td>GitHub Actions</td><td>検証・リリース・同期を、自動で行います（5 つのワークフロー。下の折りたたみ）</td></tr>
+    <tr><td>GitHub Actions</td><td>検証・リリース・同期を、自動で行います（4 つのワークフロー。下の折りたたみ）</td></tr>
     <tr><td rowspan="2">☁️ Salesforce</td><td>共有の環境の組織</td><td><code>develop</code>・<code>staging</code>・<code>main</code>（本番）の組織。Actions が JWT 認証で接続して、リリースします（本番からは、取り込みも）</td></tr>
     <tr><td>自分用の組織</td><td>個人の Sandbox など。手元から、ブラウザでログインして接続し、試します</td></tr>
     <tr><td>💬 Slack</td><td>Bot Token・チャンネル ID</td><td>リリースの結果などを、チャンネルに通知します</td></tr>
   </tbody>
 </table>
 <details>
-  <summary>GitHub Actions の 5 つのワークフロー</summary>
+  <summary>GitHub Actions の 4 つのワークフロー</summary>
   <table>
     <thead><tr><th>ワークフロー</th><th>動くとき</th><th>すること</th></tr></thead>
     <tbody>
       <tr><td><code>wf-validate</code>（PR の検証）</td><td>PR の作成・更新のたび</td><td>dry-run で検証し、結果を PR にコメントする</td></tr>
-      <tr><td><code>wf-sequence</code>（マージ順序の確認）</td><td><code>main</code>・<code>staging</code> への PR</td><td>マージの順序を確認する</td></tr>
-      <tr><td><code>wf-release</code>（リリース）</td><td>PR のマージ</td><td>対応する組織へリリースし、Slack に通知する</td></tr>
-      <tr><td><code>wf-propagate</code>（下位ブランチへの伝播）</td><td><code>main</code> への PR のマージ</td><td><code>main</code> の変更を、<code>staging</code>・<code>develop</code> へ伝える</td></tr>
+      <tr><td><code>wf-sequence</code>（マージ順序の確認）</td><td><code>main</code>・<code>staging</code> への PR</td><td>一方通行の決まり（<code>develop</code> → <code>staging</code> → <code>main</code> に、同じコミットのまま上げる）を確かめ、破っていればマージを止める</td></tr>
+      <tr><td><code>wf-release</code>（リリース）</td><td>PR のマージ</td><td>一方通行の決まりを確かめてから、対応する組織へリリースし、Slack に通知する（破っていれば、組織へ出さない）</td></tr>
       <tr><td><code>wf-metasync</code>（本番の自動同期）</td><td>平日 3 時間おき</td><td>本番の組織のメタデータを、<code>main</code> へ取り込む</td></tr>
     </tbody>
   </table>

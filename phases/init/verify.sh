@@ -63,7 +63,7 @@
 #                          （JWT ログイン・sf-tools の取得を含む。main の組織の変更が、main にコミットされることがある）
 #   4. リリース      : --cleanup 以外のとき。リリース用のブランチ（main の先頭から作り、検証用のファイルと、リリース対象を置く）
 #                      1 本から、develop → staging → main の順（ない段階は、とばす）に、段階ごとの PR を出して、
-#                      wf-validate（検証）→ マージ → wf-release（リリース）。wf-validate・wf-release・wf-propagate が
+#                      wf-validate（検証）→ マージ → wf-release（リリース）。wf-validate・wf-release が
 #                      失敗したときは、ログの末尾を表示して、1 回だけ再実行する。段階ごとに、次を確認する:
 #                        ・その段階の組織への JWT ログインが成功した
 #                        ・ほかの段階のログインのステップは、実行されていない（別の組織に、ログインしていない。
@@ -71,12 +71,12 @@
 #                        ・接続ユーザー（SF_USERNAME_*）が登録されていて、ログに、そのユーザーが出ている
 #                        ・ログに、Hello World のクラス名が出ている
 #                        ・（参考）Slack への通知の成功。確認できなくても、注意の表示のみで、成否に含めない
-#                      main へのマージのあとは、wf-propagate も確認する（失敗しても、続きを進める）。
+#                      （main の変更は、環境のブランチへ伝播しない。wf-propagate は 2026-11-26 に廃止）。
 #                      上の確認の失敗は、記録して続ける（削除まで行って、組織を元に戻すため）。PR の作成・ワークフローの
 #                      実行・マージなど、流れそのものが失敗したときは、そこで止めて、案内を表示し、終了コード 1 で終わる。
 #                      --validate-only は、wf-validate の成功を確認して、PR をマージせずに閉じる（手順 5 は行わない）
 #   5. 削除          : 削除用のブランチ（main の先頭から作る。remove-target.txt と、リポジトリのクラスのファイルの削除）から、
-#                      同じ順に、各段階へ PR → wf-validate → マージ → wf-release（main のあとは wf-propagate も）。
+#                      同じ順に、各段階へ PR → wf-validate → マージ → wf-release（同じコミットのまま。一方通行の確認が通る）。
 #                      段階ごとに、手順 4 と同じ確認を行う。組織のクラスと、リポジトリのファイルの両方が、消える
 #                      （--components は develop の先頭から作り、--with-objects のときは、2 段階で削除する。段階 2 では、
 #                      ログに、サンプルのオブジェクトの名前が出ていることを確認する）
@@ -452,17 +452,16 @@ _guidance() {
     log "WARNING" "  PR が残っているときは、GitHub の画面で、確認してください（https://github.com/${REPO}/pulls）。"
 }
 
-# PR → wf-validate → マージ → wf-release →（main のときだけ）wf-propagate。
+# PR → wf-validate → マージ → wf-release。
 #   種類が validate のときは、PR → wf-validate → PR を閉じる（マージしない。FLOW_RUN は、変えない）。
 #   wf-release の完了を確認した時点で、その実行 ID を FLOW_RUN に入れる（成否の確認の前）。
-#   戻り値: 0 = 流れが最後まで進んだ（wf-propagate の失敗は、記録だけして 0）/ 1 = 途中で失敗した
+#   戻り値: 0 = 流れが最後まで進んだ / 1 = 途中で失敗した
 #   引数: ラベル ブランチ タイトル 先の段階 種類（release / delete / validate。release のとき、マージした時点で、その段階を LEFT に入れる）
 FLOW_RUN=""
 _pr_flow() {
-    local label="$1" br="$2" title="$3" base="$4" mode="$5" prn runid b_val b_rel b_pro pid
+    local label="$1" br="$2" title="$3" base="$4" mode="$5" prn runid b_val b_rel
     b_val=$(verify_latest_run_id "$REPO" wf-validate.yml "$br")    # VAR=$(cmd) のため run 不使用
     b_rel=$(verify_latest_run_id "$REPO" wf-release.yml "$br")     # VAR=$(cmd) のため run 不使用
-    b_pro=$(verify_latest_run_id "$REPO" wf-propagate.yml "$br")   # VAR=$(cmd) のため run 不使用
     prn=$(verify_pr_create "$REPO" "$br" "$title" "sf-init.sh --verify による検証（${_WHAT}）。" "$base") || prn=""  # VAR=$(cmd) のため run 不使用
     _vchk "${label}: PR を作成した（${base} 向け）" test -n "$prn" || return 1
     runid=$(verify_wait_pr_run "$REPO" wf-validate.yml "$br" "$b_val") || runid=""   # VAR=$(cmd) のため run 不使用
@@ -481,12 +480,6 @@ _pr_flow() {
     _vchk "${label}: wf-release が実行され、完了した" test -n "$runid" || return 1
     FLOW_RUN="$runid"
     _vchk "${label}: wf-release が成功した" _run_ok "$runid" "${label}: wf-release" || return 1
-    if [[ "$base" == "main" ]]; then
-        pid=$(verify_wait_pr_run "$REPO" wf-propagate.yml "$br" "$b_pro") || pid=""   # VAR=$(cmd) のため run 不使用
-        if _vchk "${label}: wf-propagate が実行され、完了した" test -n "$pid"; then
-            _vchk "${label}: wf-propagate が成功した" _run_ok "$pid" "${label}: wf-propagate" || true  # 失敗しても、続きの確認は進める
-        fi
-    fi
     return 0
 }
 

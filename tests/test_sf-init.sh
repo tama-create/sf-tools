@@ -690,9 +690,9 @@ test_wf_no_script_injection() {
         else fail "${name}: 利用者が決められる値を、スクリプトに直接埋め込んでいない" "$(echo "$bad" | head -2)"; fi
     done
 
-    # Slack に送る JSON のエスケープ（json_escape）: 3 つのワークフローで、同じ関数。悪意のある・壊れやすい値で確認する
+    # Slack に送る JSON のエスケープ（json_escape）: 2 つのワークフロー（wf-release・wf-sequence）で、同じ関数。悪意のある・壊れやすい値で確認する
     local je t out
-    for name in wf-release wf-propagate wf-sequence; do
+    for name in wf-release wf-sequence; do
         je=$(grep -h 'json_escape()' "$d/${name}.yml" | sed 's/^ *//')
         [[ -n "$je" ]] && pass "${name}: json_escape を使っている" || { fail "${name}: json_escape を使っている"; continue; }
         t='x"; touch /tmp/pwned_wf_test; echo "a\b <b>&</b>'
@@ -1128,7 +1128,7 @@ test_required_checks_match_workflows() {
     fi
     assert_file_contains "$SF_TOOLS_DIR/phases/init/09_repo_rules.sh" "required_status_check_names" "09_repo_rules.sh は、必須チェックの名前を、required_status_check_names から取る"
     # すべてのワークフローに、最上位の name:（Actions の画面の名前。文書の案内と合わせる）がある
-    for wf in wf-validate wf-sequence wf-release wf-propagate wf-metasync; do
+    for wf in wf-validate wf-sequence wf-release wf-metasync; do
         grep -qE '^name: "\[[a-z]+\] ' "$SF_TOOLS_DIR/templates/.github/workflows/${wf}.yml" \
             && pass "${wf}.yml に、最上位の name:（[種別] 名前）がある" || fail "${wf}.yml に、最上位の name:（[種別] 名前）がある"
     done

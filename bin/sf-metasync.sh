@@ -4,7 +4,7 @@
 # ==============================================================================
 # main の組織（sf-init で 1 番目に登録した組織。本番・Sandbox・Developer Edition のどれでもよい）から、メタデータを取得し、
 # main ブランチの「同期の対象のフォルダ」（【補足】）を、取得した内容と同じにして（追加・変更・削除）、コミットして push する。
-# push したときは、有効な段階（branches.txt の staging / develop。get_tier_list）のブランチへ、main をマージして push する。
+# staging・develop のブランチへは、伝播しない（2026-11-26 にやめた。doc/one-way-promotion-design.md 3.7。開発のブランチが、sf-push.sh で main を取り込む）。
 # Salesforce 組織の内容を正とする。どのブランチから実行しても、main に切り替えて処理し、終了時に元のブランチへ戻る。
 # 設計: doc/sf-metasync-redesign.md
 #
@@ -12,7 +12,7 @@
 #   bash ~/sf-tools/bin/sf-metasync.sh [オプション]     # force-* ディレクトリで実行する（管理者向け）
 #
 # 【オプション】
-#   -n, --dry-run         : 手順 9 の計画の表示までで終了する（作業ツリーの変更・コミット・push・伝播は行わない）。
+#   -n, --dry-run         : 手順 9 の計画の表示までで終了する（作業ツリーの変更・コミット・push は行わない）。
 #                           組織からの取得は行う（読み取りのみ）。終了コードは 0
 #   -y, --yes             : --dry-run のときだけ、手順 3 の続行の確認を省く（--dry-run なしで指定すると、中断する）
 #       --allow-mass-delete : 手順 8 の削除の保留のうち、S3（消えたフォルダ）・S4（削除が多い）を解く。手元で実行したときだけ
@@ -65,7 +65,7 @@
 #      （組織が同じでも、ファイルが増減するため。影の比較で、見逃しに数えない）。
 #      shadow は、取得を省かない（影の比較）。指紋の失敗・不明は、取得を止めない（WARNING を出して、全件取得に進む）。
 #      取得を省くのは、検知・指紋のうち on のものが 1 つ以上あり、on のものが「すべて」変更なしのときだけ（--full・--dry-run でなく、
-#      未プッシュのコミットがないとき）。このときは、手順 6 以降を行わず、終了する（コミット・push・伝播はしない）。
+#      未プッシュのコミットがないとき）。このときは、手順 6 以降を行わず、終了する（コミット・push はしない）。
 #      on のものが 1 つでも、変更あり・不明・行わなかった（表がない）なら、全件取得する（検知と指紋が両方 on で、結果が分かれたときも）。
 #      shadow のものは、判定に使わない。shadow のものが「変更あり」なのに、on のものが「変更なし」で省くときは、食い違いの WARNING を出す
 #      （on のものの見逃しの可能性。毎日の --full で反映される）
@@ -109,17 +109,11 @@
 #      - 差分あり: 「定期更新: Salesforce変更の自動反映 (YYYY-MM-DD)」でコミットし（本文に件数）、git push --no-verify origin main する
 #      - 差分なし・origin/main より先のコミットあり（前回の同期の push の失敗など）: そのコミットの一覧（git log --oneline）を
 #        表示して確認を取り、git push --no-verify origin main だけ行う（GitHub Actions 上では、確認しない）
-#      - 差分なし・先のコミットなし: 「完了: Salesforce 組織側に変更はありませんでした。」と表示して終了する（手順 12 は行わない）
+#      - 差分なし・先のコミットなし: 「完了: Salesforce 組織側に変更はありませんでした。」と表示して終了する
 #      コミット・push の失敗は、中断する
-#   12. （手順 11 で push したときのみ。ただし、状態ファイルの更新だけのコミットのときは、伝播しない）
-#      有効な段階（branches.txt の、main 以外の staging / develop。lib/project.sh の get_tier_list）の各ブランチへ、main を伝播する
-#      （段階の名前でない行は無視する。develop は、staging もあるときだけ。規則は doc/tier-scaling-design.md 3.1）
-#      - リモートに無いブランチは、WARNING を表示してスキップする
-#      - git checkout <ブランチ> → git pull origin <ブランチ> --rebase → git merge main --no-edit →
-#        git push --no-verify origin <ブランチ>。失敗したら、WARNING を表示して、そのブランチをスキップする
-#        （pull の失敗: git rebase --abort → git checkout main。merge の失敗: git merge --abort → git checkout main。
-#         push の失敗: git checkout main。checkout の失敗: そのままスキップ）
-#      - 最後に git checkout main する（失敗したら中断する）
+#   12. （なし。以前は、main の変更を、staging・develop のブランチへ伝播（マージして push）していた。2026-11-26 にやめた。
+#      一方通行の原則（開発物は develop → staging → main の上りだけ。doc/one-way-promotion-design.md 3.7）。main の最新は、
+#      開発者の PC で sf-push.sh が取り込む）。手順 11 で push したら、その旨を INFO で表示する
 #   13. 終了時（手順 2 の HEAD の確認より後に、中断したときも）: 手順 10 のあと、コミットの前に中断したときは、
 #       同期の対象のパッケージのフォルダを HEAD に戻す（git reset -q HEAD -- ・git checkout HEAD -- ・git clean -fdq --）。
 #       元のブランチへ git checkout し、手順 4 で退避していれば git stash pop する。一時フォルダを削除する
@@ -140,7 +134,7 @@
 #     on = shadow と同じことに加え、指紋が「変更なし」のとき、取得を省く（手順 5）。指紋の表（config/metasync-fingerprint.txt）にない種類
 #     （Settings・SharingRules・ConnectedApp・StandardValueSet・AssignmentRules など）だけの変更は、毎日の --full の回まで反映されない
 #     （GitHub Actions では、平日の日本時間 9:00。金曜の夕方の変更は、月曜の朝）。設定変更の履歴で補うなら、SF_METASYNC_DETECT も on にする。
-#     状態は ./sf-tools/metasync/fingerprint.json（変更あり・不明の回にだけ更新する。状態の更新だけのコミットは、下流へ伝播しない）。
+#     状態は ./sf-tools/metasync/fingerprint.json（変更あり・不明の回にだけ更新する）。
 #     接続: sf org display のアクセストークンで、Node から SOAP を直接呼ぶ（現行の sf は、org display のトークンを伏せ字で返すため、
 #     そのときは、最初から sf org auth show-access-token で取る。本物が返る古い sf では、期限切れのときだけ取り直す。
 #     トークンは、ログに出さない。https のインスタンス URL にだけ送り、転送は追わない）。Node 18 以上が必要（fetch を使う）。
@@ -154,7 +148,7 @@
 #     off 以外では、状態を ./sf-tools/metasync/state.json に持つ（最後に全件取得した時刻と、区分 B の記録。変更あり・不明の
 #     全件取得のあとにだけ更新するため、変更のない回は、コミットを作らない。ファイルが変わらず、状態だけが変わるときは、
 #     状態だけのコミットになる）。状態は、速くするための手がかりで、壊れていても全件取得になる。設計: doc/sf-metasync-redesign.md 15 章
-#   - 終了コード: 0（同期した・変更がなかった）／ 1（中断した）／ 3（同期した（追加・変更の push・伝播まで行った）が、
+#   - 終了コード: 0（同期した・変更がなかった）／ 1（中断した）／ 3（同期した（追加・変更の push まで行った）が、
 #     削除の保留（S2・S3・S4）がある。GitHub Actions では、ジョブが失敗として表示される）。S5・S9 の保留だけのときは 0 ／
 #     4（秘密の疑いで止めた。何もコミット・push していない）／ 5（公開リポジトリ、または公開・非公開を確認できず、取得せずに止めた）
 #   - 追加の取得（設計: doc/sf-metasync-redesign.md 16 章の P2）: 環境変数 SF_METASYNC_EXTRA（off / on。既定 off）。対象の種類は、各プロジェクトの metadata.txt ではなく、
@@ -175,12 +169,10 @@
 #   - 追跡していないファイル（.gitignore の対象と、sf-tools/release/ を除く）がある場合、手元で実行したときは、手順 4 で中断する
 #     （同期のコミットに、無関係なファイルが含まれてしまうため）。GitHub Actions 上では、確認しない。
 #     sf-tools/release/（作業ブランチの作業用ファイル）は、確認の対象外で、同期のコミットにも含めない
-#   - main への push（手順 11）と、伝播の push（手順 12）は、--no-verify（pre-push フックを通さない）。pre-push フック
+#   - main への push（手順 11）は、--no-verify（pre-push フックを通さない）。pre-push フック
 #     （sf-prepush.sh）は、branches.txt のブランチ（保護ブランチ）の上からの push・保護ブランチへの push を、必ず拒否するため
-#     （手元で実行したとき、--no-verify がないと、伝播の push は、すべて失敗する）。サーバー側の保護（Ruleset）は、そのまま効く
-#   - branches.txt が無い・ブランチの定義が無いときは、WARNING を表示し、main のみとして扱う（手順 12 の対象なし）
-#   - 手順 12 の完了のメッセージは、実際に伝播できたブランチだけを表示する。スキップしたブランチ（リモートにない・失敗）が
-#     あれば、WARNING で一覧する（終了コードは 0 のまま）
+#     （手元で実行したとき、--no-verify がないと、main への push が失敗する）。サーバー側の保護（Ruleset）は、そのまま効く
+
 #   - ログ: ./sf-tools/logs/sf-metasync.log（実行のたびに作り直す）
 # ==============================================================================
 
@@ -844,63 +836,6 @@ phase_git_sync() {
     run git push --no-verify origin "$BRANCH_NAME" || return $RET_NG
 }
 
-# 【PROPAGATE】main の変更を、有効な段階（get_tier_list）の main 以外の各ブランチへ、マージして push する（例: main → staging、main → develop）
-#   段階の有効・無効は、branches.txt の規則（doc/tier-scaling-design.md 3.1）で決める。名前でない行・staging のない develop には、伝播しない
-#   （以前は get_branch_list（全行）を使っていた。段階を外した（行を消した）ブランチに伝播しないのは、以前と同じ）
-PROPAGATED_OK=""        # 伝播できたブランチ（空白区切り）
-PROPAGATED_SKIPPED=""   # 伝播をスキップしたブランチ（ない・失敗）
-phase_propagate_downstream() {
-    local downstream_branches
-    downstream_branches=$(get_tier_list | grep -v '^main$')  # VAR=$(cmd) のため run 不使用
-    for branch in $downstream_branches; do
-        # リモートにブランチが存在するか確認（出力は不要なため直接呼び出し）
-        if ! git ls-remote --exit-code --heads origin "$branch" > /dev/null 2>&1; then
-            log "WARNING" "${branch} ブランチがリモートに存在しないためスキップします"
-            PROPAGATED_SKIPPED="${PROPAGATED_SKIPPED}${branch} "
-            continue
-        fi
-
-        log "INFO" "main → ${branch} へマージします..."
-
-        if ! run git checkout "$branch"; then
-            log "WARNING" "${branch} のチェックアウトに失敗しました（スキップ）"
-            PROPAGATED_SKIPPED="${PROPAGATED_SKIPPED}${branch} "
-            continue
-        fi
-
-        if ! run git pull origin "$branch" --rebase; then
-            log "WARNING" "${branch} の pull に失敗しました（スキップ）"
-            run git rebase --abort
-            run git checkout main
-            PROPAGATED_SKIPPED="${PROPAGATED_SKIPPED}${branch} "
-            continue
-        fi
-
-        if ! run git merge "main" --no-edit; then
-            log "WARNING" "${branch} へのマージに失敗しました（スキップ）"
-            run git merge --abort
-            run git checkout main
-            PROPAGATED_SKIPPED="${PROPAGATED_SKIPPED}${branch} "
-            continue
-        fi
-
-        # --no-verify: 伝播先は branches.txt のブランチ（保護ブランチ）のため、pre-push フック（sf-prepush.sh）は、必ず拒否する
-        #   （以前は付けておらず、手元で実行すると、伝播の push は、すべて失敗していた）。サーバー側の保護（Ruleset）は、そのまま効く
-        if ! run git push --no-verify origin "$branch"; then
-            log "WARNING" "${branch} の push に失敗しました（スキップ）"
-            run git checkout main
-            PROPAGATED_SKIPPED="${PROPAGATED_SKIPPED}${branch} "
-            continue
-        fi
-
-        log "SUCCESS" "${branch} への伝播が完了しました"
-        PROPAGATED_OK="${PROPAGATED_OK}${branch} "
-    done
-
-    # 作業ブランチを main に戻す
-    run git checkout main || die "main ブランチへの復帰に失敗しました。"
-}
-
 # ------------------------------------------------------------------------------
 # 7. メインフロー
 # ------------------------------------------------------------------------------
@@ -978,7 +913,7 @@ log "SUCCESS" "計画の作成完了（${PLAN_COUNTS}）"
 phase_secret_scan       # on で疑いがあれば、ここで止まる（終了コード 4）
 
 if [[ "$DRY_RUN" -eq 1 ]]; then
-    log "SUCCESS" "完了: --dry-run のため、計画の表示までで終了します（作業ツリー・コミット・push・伝播は行いません）。"
+    log "SUCCESS" "完了: --dry-run のため、計画の表示までで終了します（作業ツリー・コミット・push は行いません）。"
     exit $RET_OK
 fi
 
@@ -994,21 +929,9 @@ RES=$?
 
 if [[ $RES -eq $RET_OK ]]; then
     log "SUCCESS" "完了: リポジトリを最新に更新しました。"
-    if [[ ( "$STATE_WRITTEN" -eq 1 || "$FP_WRITTEN" -eq 1 ) && "$COMMITTED" -eq 1 && "$PLAN_CHANGES" -eq 0 ]]; then
-        # 検知・指紋の状態ファイルの更新だけのコミット（メタデータの変更はない）は、下流のブランチへ伝播しない（main の中だけで使う状態のため）
-        if [[ "$FP_WRITTEN" -eq 1 && "$STATE_WRITTEN" -eq 1 ]]; then
-            log "INFO" "検知・指紋の状態ファイルの更新だけのコミットのため、下流ブランチへの伝播は行いません。"
-        elif [[ "$FP_WRITTEN" -eq 1 ]]; then
-            log "INFO" "指紋の状態ファイルの更新だけのコミットのため、下流ブランチへの伝播は行いません。"
-        else
-            log "INFO" "検知の状態ファイルの更新だけのコミットのため、下流ブランチへの伝播は行いません。"
-        fi
-    else
-        phase_propagate_downstream || die "下流ブランチへの伝播に失敗しました。"
-        # 実際に伝播できたブランチだけを表示する（以前は、branches.txt の内容や、スキップの有無にかかわらず、固定の文言を出していた）
-        log "SUCCESS" "下流ブランチへの伝播完了（伝播したブランチ: ${PROPAGATED_OK% }$([[ -z "$PROPAGATED_OK" ]] && echo なし)）"
-        [[ -z "$PROPAGATED_SKIPPED" ]] || log "WARNING" "伝播できなかったブランチ（スキップ）: ${PROPAGATED_SKIPPED% }"
-    fi
+    # main の変更を、staging・develop のブランチへは流さない（一方通行の原則。doc/one-way-promotion-design.md 3.7）。
+    #   main の最新は、開発者の PC で sf-push.sh が取り込み、開発のブランチ経由で上がる
+    log "INFO" "main の変更は、staging・develop のブランチへは伝播しません（開発のブランチが、sf-push.sh で main を取り込みます）。"
 elif [[ $RES -eq $RET_NO_CHANGE ]]; then
     log "SUCCESS" "完了: Salesforce 組織側に変更はありませんでした。"
 else

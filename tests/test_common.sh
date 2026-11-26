@@ -503,6 +503,44 @@ test_get_tier_list() {
     r=$(_gtl_run '  # develop\nmain\nstaging\n');           assert_equals "${r%%|*}" "main staging" "前に空白のあるコメント行は読み飛ばす"
 }
 
+
+# get_tier_list --strict: 判断の材料がないときに止める（doc/one-way-promotion-design.md 3.2 の表）
+#   引数: 1=branches.txt の中身（NONE ならファイルを作らない） 2=FILE を渡すか（1 なら別の場所に置いて渡す）
+#   出力: 標準出力（段階を空白区切り）|戻り値|標準エラー
+_gtls_run() {
+    local td out err rc f arg=""
+    td=$(mktemp -d "${TMPDIR:-/tmp}/test-gtls-XXXX")
+    mkdir -p "$td/sf-tools/config"
+    f="$td/sf-tools/config/branches.txt"
+    if [[ "${2:-0}" == "1" ]]; then f="$td/other.txt"; arg="$f"; fi
+    [[ "$1" == "NONE" ]] || printf "$1" > "$f"
+    out=$( cd "$td" && bash -c "
+        readonly SCRIPT_NAME=test; readonly LOG_FILE=/dev/null; readonly LOG_MODE=NEW; export SF_INIT_MODE=1
+        source '${SF_TOOLS_DIR}/lib/common.sh'
+        get_tier_list --strict ${arg}; echo \"RC=\$?\"" 2>"$td/err" | tr '\n' ' ' )
+    err=$(cat "$td/err")
+    rm -rf "$td"
+    rc="${out##*RC=}"; rc="${rc%% *}"; out="${out%RC=*}"
+    printf '%s|%s|%s' "${out% }" "$rc" "$err"
+}
+test_get_tier_list_strict() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] get_tier_list --strict: 判断の材料がないときは、戻り値 1${CLR_RST}"
+    local r
+    r=$(_gtls_run 'NONE');                       assert_equals "${r%%|*}|$(echo "$r" | cut -d'|' -f2)" "|1" "ファイルがない → 何も出さず戻り値 1"
+    assert_output_contains "${r##*|}" "見つかりません" "ファイルがない → ERROR"
+    r=$(_gtls_run '# コメントだけ\n\n');         assert_equals "$(echo "$r" | cut -d'|' -f2)" "1" "空・コメントだけ → 戻り値 1"
+    r=$(_gtls_run 'staging\n');                  assert_equals "$(echo "$r" | cut -d'|' -f2)" "1" "main の行がない → 戻り値 1"
+    assert_output_contains "${r##*|}" "main の行がありません" "main の行がない → ERROR"
+    r=$(_gtls_run 'main\ndevelop\n');            assert_equals "$(echo "$r" | cut -d'|' -f2)" "1" "develop はあるが staging がない → 戻り値 1"
+    assert_output_contains "${r##*|}" "staging がありません" "develop だけ → ERROR"
+    r=$(_gtls_run 'main\nuat\nstaging\n');       assert_equals "${r%%|*}|$(echo "$r" | cut -d'|' -f2)" "main staging|0" "名前でない行は無視して 0"
+    assert_output_not_contains "${r##*|}" "「uat」" "名前でない行 → --strict では WARNING を出さない"
+    r=$(_gtls_run 'main\n');                     assert_equals "${r%%|*}|$(echo "$r" | cut -d'|' -f2)" "main|0" "main だけ → 0"
+    r=$(_gtls_run 'main\nstaging\n');            assert_equals "${r%%|*}|$(echo "$r" | cut -d'|' -f2)" "main staging|0" "2 段階 → 0"
+    r=$(_gtls_run 'develop\nstaging\nmain\nmain\n'); assert_equals "${r%%|*}|$(echo "$r" | cut -d'|' -f2)" "main staging develop|0" "3 段階・重複・並び → 0"
+    r=$(_gtls_run 'main\nstaging\n' 1);          assert_equals "${r%%|*}|$(echo "$r" | cut -d'|' -f2)" "main staging|0" "FILE を渡すと、そのファイルを読む"
+}
 # ------------------------------------------------------------------------------
 # check_sf_cli のテスト（sf が成功しても終了コード 1 を返す環境の検知）
 # ------------------------------------------------------------------------------
@@ -1909,6 +1947,7 @@ test_open_browser_gitbash
 test_open_browser_wsl_quote
 test_is_protected_branch
 test_get_tier_list
+test_get_tier_list_strict
 test_check_sf_cli
 test_check_sf_cli_cache
 test_check_java_cli

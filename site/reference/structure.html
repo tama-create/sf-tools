@@ -68,11 +68,10 @@
 ├── .gitignore
 ├── .prettierrc / .prettierignore
 ├── .github/
-│   └── workflows/                       ★ CI/CD（5 種類）
+│   └── workflows/                       ★ CI/CD（4 種類）
 │       ├── wf-release.yml               ★   リリース（PR のマージ後）
 │       ├── wf-validate.yml              ★   デプロイ前検証（PR ごと。dry-run）
-│       ├── wf-sequence.yml              ★   マージ順序の確認
-│       ├── wf-propagate.yml             ★   ブランチの伝播（main → staging・develop）
+│       ├── wf-sequence.yml              ★   マージ順序の確認（一方通行の決まり）
 │       └── wf-metasync.yml              ★   メタデータの自動同期（組織 → main）
 ├── .vscode/                             ★ 推奨設定・拡張機能・デバッグ設定
 ├── AGENTS.md                            ★ AI（Codex など）への 1 行の案内（~/sf-tools/doc/ai-dev-loop.md を読む）
@@ -110,6 +109,7 @@
 │   ├── sf-launcher.sh
 │   ├── sf-push.sh
 │   ├── sf-next.sh
+│   ├── sf-promote-check.sh
 │   ├── sf-release.sh
 │   ├── sf-dryrun.sh
 │   ├── sf-deploy.sh
@@ -137,6 +137,7 @@
 │   ├── org.sh                  ← Salesforce 組織の接続情報の共通部品（ログイン先の選択・種類の判定・本番は main のみのガード・
 │   │                               共有環境へのローカルリリースの拒否）
 │   ├── diag.sh                 ← セットアップの診断（sf-init.sh --status と --verify で使用。読み取りのみ）
+│   ├── manifest.sh             ← ターゲットファイルから package.xml・destructiveChanges.xml を作る（sf-release.sh と sf-promote-check.sh で共有）
 │   ├── verify-common.sh        ← Hello World の本文・PR とワークフローの実行の部品（phases/init/verify.sh と e2e で共有）
 │   ├── verify-samples.sh       ← リリースの仕組みの確認用サンプル（パターン別のコンポーネント。sf-init.sh --verify --components が使う）
 │   ├── metasync.js             ← 組織から取得した内容と main を比べて、追加・変更・削除の計画を作り、反映する（sf-metasync.sh が呼ぶ。Node の標準機能のみ）

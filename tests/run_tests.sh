@@ -227,6 +227,7 @@ TEST_FILES=(
     test_apexlog-js.sh
     test_sf-log.sh
     test_sf-release.sh
+    test_sf-promote-check.sh
     test_sf-deploy.sh
     test_sf-dryrun.sh
     test_sf-job.sh
@@ -244,6 +245,7 @@ TEST_FILES=(
     test_sf-sync-wf.sh
     test_wf-sequence.sh
     test_wf-tier-switch.sh
+    test_wf-one-way.sh
     test_remove-tier.sh
     test_project-identity.sh
     test_integration-coverage.sh
@@ -366,14 +368,18 @@ if [[ "${1:-}" == "--changed" ]]; then
             lib/diag.sh)
                 _changed_tests+=("test_diag.sh")
                 ;;
+            lib/manifest.sh)
+                # マニフェストの生成（sf-release.sh と sf-promote-check.sh の R2 が共有。doc/one-way-promotion-design.md 3.2）
+                _changed_tests+=("test_sf-release.sh" "test_sf-promote-check.sh")
+                ;;
             lib/typecheck.js)
                 _changed_tests+=("test_sf-typecheck.sh")
                 ;;
             templates/.github/workflows/wf-sequence.yml)
-                _changed_tests+=("test_wf-sequence.sh" "test_sf-sync-wf.sh")
+                _changed_tests+=("test_wf-sequence.sh" "test_sf-sync-wf.sh" "test_wf-one-way.sh")
                 ;;
-            templates/.github/workflows/wf-propagate.yml|templates/.github/workflows/wf-release.yml|templates/.github/workflows/wf-validate.yml)
-                _changed_tests+=("test_wf-tier-switch.sh" "test_sf-sync-wf.sh" "test_remove-tier.sh")   # 段階の切り替えの判定（doc/tier-scaling-design.md 3 章）。remove_tier.sh が雛形の判定と比べる
+            templates/.github/workflows/wf-release.yml|templates/.github/workflows/wf-validate.yml)
+                _changed_tests+=("test_wf-tier-switch.sh" "test_sf-sync-wf.sh" "test_remove-tier.sh" "test_wf-one-way.sh")   # 段階の切り替えの判定（doc/tier-scaling-design.md 3 章）。remove_tier.sh が雛形の判定と比べる
                 ;;
             phases/init/remove_tier.sh|tests/test_remove-tier.sh)
                 _changed_tests+=("test_remove-tier.sh")

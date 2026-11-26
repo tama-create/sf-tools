@@ -7,14 +7,14 @@
 # ハーネスと fake は tests/integration/lib.sh。計画: doc/integration-test-plan.md（B3 のローカル部分・X8-4・X8-5）
 #
 # 【シナリオ】
-#   M0  フックのあるクローンから（ローカル実行）→ main への push と、staging への伝播の push は、フックを通さず
+#   M0  フックのあるクローンから（ローカル実行）→ main への push は、フックを通さず（staging へは伝播しない）
 #       （--no-verify）、成功する（リポジトリは main・staging の 2 段。staging は、保護ブランチのため、フックが必ず拒否する）
 #   M1  作業ブランチ（未コミットの変更あり）から実行 → main に同期のコミットが届く。元のブランチに戻り、stash が復元される
 #   M2  組織側に変更なし → コミットを作らない。元のブランチに戻る
 #   M3  組織からの取得の失敗 → 失敗で終わり、main は変わらず、元のブランチ・stash が復元される（X8-4）
 #   M4  main の push が拒否される → 失敗で終わり、元のブランチ・stash が復元される。再実行で、未プッシュのコミットが届く（X8-4）
 #   M5  手元の追跡中のファイルの変更が、同期のあとも失われない（stash の復元。同期は、同期の対象のフォルダにしか書かない）（X8-5）
-#   M6  組織で削除した部品が、main から消え、staging にも伝播する（鏡像。取得結果にあるフォルダの中の削除）
+#   M6  組織で削除した部品が、main から消える（鏡像。取得結果にあるフォルダの中の削除。staging へは伝播しない）
 #   M7  削除が多い（S4）→ 削除を保留し、追加・変更だけが届く。終了コード 3。--allow-mass-delete で解ける
 #   M8  直近にマージされたファイルの削除は保留される（S5。実際の git log の確認）。終了コード 0
 #   M9  --dry-run → 取得して計画を表示するだけ。origin・手元の HEAD・作業ブランチは変わらない
@@ -40,7 +40,7 @@ _wait_next_second() { local s; s=$(date +%s); while [[ "$(date +%s)" == "$s" ]];
 
 test_setup() {
     it_setup || { fail "サンドボックスの作成"; return 1; }
-    it_seed_repo 2 || { fail "リポジトリの生成"; return 1; }   # main・staging（M0 で、伝播の push を確かめる）
+    it_seed_repo 2 || { fail "リポジトリの生成"; return 1; }   # main・staging（M0 で、staging へ伝播しないことを確かめる）
     it_make_clone devA JOB-A || { fail "クローンの作成" "$(it_out)"; return 1; }
     CL="$IT_CL"
     IT_TIMEOUT=300
@@ -57,9 +57,9 @@ test_M0() {
     #   サーバー側の保護（Ruleset）は、そのまま効く。以前は、フックに止められ、ローカルでは、最後の push で失敗した
     assert_exit_ok "$IT_RC" "M0: フックのあるクローンでも、sf-metasync の main への push が通る"
     [[ "$(_remote_ref main)" != "$m0" ]] && pass "M0: origin の main に、同期のコミットが届く" || fail "M0: origin の main に、同期のコミットが届く"
-    # 回帰: 伝播の push も、フックを通さない（以前は、フックが、保護ブランチ（staging）の上からの push として拒否し、伝播できなかった）
-    assert_equals "$(_remote_ref staging)" "$(_remote_ref main)" "M0: origin の staging に、main が伝播する（フックに止められない）"
-    it_out_has "伝播したブランチ: staging" && pass "M0: 伝播したブランチ（staging）が表示される" || fail "M0: 伝播したブランチ（staging）が表示される"
+    # main の変更は、staging へ伝播しない（一方通行の原則。doc/one-way-promotion-design.md 3.7。2026-11-26 に伝播をやめた）
+    [[ "$(_remote_ref staging)" != "$(_remote_ref main)" ]] && pass "M0: origin の staging には、main を伝播しない" || fail "M0: origin の staging には、main を伝播しない"
+    it_out_has "staging・develop のブランチへは伝播しません" && pass "M0: 伝播しない旨が表示される" || fail "M0: 伝播しない旨が表示される"
     assert_equals "$(_cur "$CL")" "JOB-A" "M0: 元のブランチに戻る"
     assert_equals "$(_stashes "$CL")" "0" "M0: stash が復元される"
     grep -q "手元の変更" "$CL/README.md" && pass "M0: 手元の未コミットの変更が、復元される" || fail "M0: 手元の未コミットの変更が、復元される"
@@ -174,7 +174,7 @@ _in_main() { _it_git --git-dir="$IT_ORIGIN" ls-tree -r --name-only main | grep -
 _in_staging() { _it_git --git-dir="$IT_ORIGIN" ls-tree -r --name-only staging | grep -q "$1"; }
 
 test_M6() {
-    echo -e "\n${CLR_HEAD}--- M6: 組織で削除した部品が、main から消え、staging にも伝播する ---${CLR_RST}"
+    echo -e "\n${CLR_HEAD}--- M6: 組織で削除した部品が、main から消える ---${CLR_RST}"
     it_set_retrieve "force-app/main/default/classes/Del6.cls|public class Del6 { }" "force-app/main/default/classes/Keep6.cls|public class Keep6 { }"
     _meta
     assert_exit_ok "$IT_RC" "M6: （前提）1 回目の同期が成功する"
@@ -184,7 +184,7 @@ test_M6() {
     assert_exit_ok "$IT_RC" "M6: 2 回目の同期が成功する"
     _in_main 'classes/Del6.cls' && fail "M6: 組織で削除した部品が、main から消える" "残っている" || pass "M6: 組織で削除した部品が、main から消える"
     _in_main 'classes/Keep6.cls' && pass "M6: 組織にある部品は、main に残る" || fail "M6: 組織にある部品は、main に残る"
-    _in_staging 'classes/Del6.cls' && fail "M6: 削除が staging にも伝播する" "残っている" || pass "M6: 削除が staging にも伝播する"
+    _in_staging 'classes/Del6.cls' && fail "M6: （前提）staging には、もともと Del6.cls がない（伝播しないため）" "ある" || pass "M6: （前提）staging には、もともと Del6.cls がない（伝播しないため）"
     _in_main 'classes/.gitkeep' && pass "M6: .gitkeep は、削除しない" || fail "M6: .gitkeep は、削除しない"
 }
 
@@ -281,14 +281,14 @@ test_M11() {
     it_calls sf | grep -q "project retrieve" && fail "M11-2: 取得しない" || pass "M11-2: 取得しない"
     assert_equals "$(_remote_ref main)" "$m1" "M11-2: origin の main は、変わらない（コミットを作らない）"
     assert_equals "$(_cur "$CL")" "JOB-A" "M11-2: 元のブランチに戻る"
-    # (3) 履歴に記録がある → 変更あり → 取得し、追加・変更を同期する。staging へも伝播する
+    # (3) 履歴に記録がある → 変更あり → 取得し、追加・変更を同期する（staging へは伝播しない）
     echo 3 > "$IT_STATE/sf.audit"; it_calls_clear
     it_set_retrieve "force-app/main/default/classes/Det11.cls|public class Det11 { }" "force-app/main/default/classes/Det11b.cls|public class Det11b { }"
     _meta
     assert_exit_ok "$IT_RC" "M11-3: 履歴あり → 正常終了"
     it_calls sf | grep -q "project retrieve" && pass "M11-3: 全件取得した" || fail "M11-3: 全件取得した"
     [[ "$(_remote_ref main)" != "$m1" ]] && pass "M11-3: origin の main に、追加のコミットが届く" || fail "M11-3: origin の main に、追加のコミットが届く"
-    assert_equals "$(_remote_ref staging)" "$(_remote_ref main)" "M11-3: メタデータの変更は、staging に伝播する"
+    [[ "$(_remote_ref staging)" != "$(_remote_ref main)" ]] && pass "M11-3: メタデータの変更も、staging には伝播しない" || fail "M11-3: メタデータの変更も、staging には伝播しない"
     # (4) 履歴はあるが、ファイルの変更はない → 状態だけのコミット。staging へは伝播しない
     #     状態ファイルで回ごとに変わるのは、時刻（lastFullSyncAt。秒単位）だけ（fake の一覧は、いつも空）。M11-3 と同じ秒に動くと、
     #     状態の中身が同じになり、状態だけのコミットができない（CI で、ときどき失敗した）。秒が変わるのを待ってから動かす

@@ -25,8 +25,7 @@ sf-tools（テンプレートの正本）
     ├── wf-validate.yml   ← セルフコンテインド（ジョブ・ステップを内包。処理の中身は sf-tools のスクリプト）
     ├── wf-release.yml    ← 同上
     ├── wf-metasync.yml   ← 同上
-    ├── wf-propagate.yml  ← 同上
-    └── wf-sequence.yml   ← 同上
+    └── wf-sequence.yml   ← 同上（wf-propagate.yml は 2026-11-26 に廃止）
 
 force-XXXX（各プロジェクト）
 └── .github/workflows/
@@ -44,15 +43,14 @@ force-XXXX（各プロジェクト）
 
 | WF（Actions の画面での名前） | 役割 | ジョブ名 | sf-tools の clone | concurrency |
 |---|---|---|---|---|
-| `wf-validate.yml`（`[validate] デプロイ前検証`） | PR の作成・更新で、`sf-release.sh` を検証モードで実行し、結果を PR にコメント | `対象ファイル確認` / `デプロイ検証` | する | なし |
-| `wf-sequence.yml`（`[sequence] マージ順序チェック`） | main / staging への PR で、マージの順序（`branches.txt` の並び）を確認 | `対象ファイル確認` / `順序チェック` | しない | なし |
-| `wf-release.yml`（`[release] デプロイ`） | PR のマージで、マージ先の組織へ `sf-release.sh --release` でリリース | `リリース対象確認` / `リリース実行` | する | `release-<マージ先>`（`queue: max`） |
-| `wf-propagate.yml`（`[propagate] ブランチ伝播`） | main への PR のマージで、main を staging / develop へ直接マージして push | `下流伝播` | しない | `propagate` |
+| `wf-validate.yml`（`[validate] デプロイ前検証`） | PR の作成・更新で、一方通行の積み重ね（`sf-promote-check.sh --only stack`）を確かめ、`sf-release.sh` を検証モードで実行し、結果を PR にコメント | `対象ファイル確認` / `デプロイ検証` | する | なし |
+| `wf-sequence.yml`（`[sequence] マージ順序チェック`） | main / staging への PR で、一方通行の順序・環境ブランチ（`sf-promote-check.sh --only sequence`）を確認 | `対象ファイル確認` / `順序チェック` | する（`sf-promote-check.sh` を使うため。2026-11-26 から） | なし |
+| `wf-release.yml`（`[release] デプロイ`） | PR のマージで、一方通行の決まり（`sf-promote-check.sh`。最後の守り）を確かめてから、マージ先の組織へ `sf-release.sh --release` でリリースし、リリースの印（commit status）を付ける。手動の実行はない | `リリース対象確認` / `リリース実行` | する | `release-<マージ先>`（`queue: max`） |
 | `wf-metasync.yml`（`[metasync] メタ同期`） | 定期・手動で、main の組織のメタデータを `sf-metasync.sh` で main に同期 | `メタデータ同期` | する | `metasync` |
 
 - concurrency は、どれも `cancel-in-progress: false`（実行中のものは取り消さない）。詳細は各 WF の冒頭コメント
 - sf-tools の clone: 公開リポジトリ `https://github.com/tama-create/sf-tools.git` を、Token なしで、Variable `SF_TOOLS_BRANCH` のブランチ（未設定なら `main`）で `~/sf-tools` に clone する。`SF_TOOLS_TOKEN` は 2026-10-05 に廃止（sf-tools の公開に伴う。以前のバージョンで作った `force-*` の WF は Token 付きで clone しているため、その Token を無効にしないこと）。`SF_TOOLS_BRANCH=development` は検証環境だけが登録する（詳細は `doc/dev-reference.md` の 9.1・9.2）
-- Secret `PAT_TOKEN` は、`wf-metasync` と `wf-propagate` のチェックアウトと push に使う（main・staging の Ruleset のバイパスと、`.github/workflows/` の変更を含むマージの push のため）。sf-tools の clone には使わない
+- Secret `PAT_TOKEN` は、`wf-metasync` のチェックアウトと push に使う（main の Ruleset のバイパスのため）。sf-tools の clone には使わない。一方通行の確認とリリースの印は、自動の `GITHUB_TOKEN`（権限: `statuses`・`actions`・`pull-requests` の読み取り、wf-release は `statuses: write`）を使う
 - 必須チェック: force-* の Ruleset（`protect-main` / `protect-staging`）に登録するのは、ジョブ名だけ（`対象ファイル確認`・`デプロイ検証`・`順序チェック`。正本は `lib/project.sh` の `required_status_check_names`）。`ワークフロー名 / ジョブ名` の形では、永久に満たされない。`wf-release.yml` のジョブ名を `リリース対象確認` にしているのは、必須チェックの `対象ファイル確認` と、わざと名前を分けるため（詳細は `doc/dev-reference.md` の 9.5）
 
 ---
@@ -120,7 +118,8 @@ force-XXXX（各プロジェクト）
 - 管理者向けコマンドとして、冒頭に警告ボックス + 確認を出す。`GITHUB_ACTIONS=true` でも省略しない（Actions 上で実行する想定がないため。CLAUDE.md 2.4 の例外）
 - 自動コミット・プッシュは行わない（ユーザーに委ねる）
 - 削除は `--remove` フラグ明示時のみ（誤操作防止）。雛形にあるファイルは削除できない
-- ワークフローをプッシュするには、`workflow` スコープのある権限が必要（main へのマージのあと、`wf-propagate` が staging / develop へ push するときは、`PAT_TOKEN` の `workflow` の権限を使う）
+- ワークフローをプッシュするには、`workflow` スコープのある権限が必要（開発者が、作業用ブランチを push するとき）
+- 廃止した `wf-propagate.yml` は、`sf-sync-wf.sh --remove wf-propagate.yml` で消す（`sf-init.sh --status` が「！」で知らせる。`--remove-tier` は、残っていると止まる）
 - `sf-sync-wf.sh` が書き換えるのは `.github/workflows/` のファイルだけで、Ruleset は変更しない。雛形で必須チェックのジョブ名（2.1）を変えたときは、既存の `force-*` の Ruleset も直す必要がある（食い違いは `sf-init.sh --status` が検出する。詳細は `doc/dev-reference.md` の 9.5）
 
 ### 4.4 更新の手順（推奨）

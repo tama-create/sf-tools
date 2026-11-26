@@ -857,7 +857,7 @@ GITEOF
     local diag_secrets diag_vars diag_wf
     diag_secrets=$'PAT_TOKEN\nSLACK_BOT_TOKEN\nSF_PRIVATE_KEY\nSF_CONSUMER_KEY_PROD\nSF_CONSUMER_KEY_STG'
     diag_vars=$'SLACK_CHANNEL_ID\nSF_TOOLS_BRANCH\nSF_USERNAME_PROD\nSF_INSTANCE_URL_PROD\nSF_ORG_ID_PROD\nSF_USERNAME_STG\nSF_INSTANCE_URL_STG\nSF_ORG_ID_STG'
-    diag_wf=$'wf-metasync.yml\nwf-propagate.yml\nwf-release.yml\nwf-sequence.yml\nwf-validate.yml'
+    diag_wf=$'wf-metasync.yml\nwf-release.yml\nwf-sequence.yml\nwf-validate.yml'
     ( cd "$force_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
         MOCK_GH_SECRETS="$diag_secrets" MOCK_GH_VARIABLES="$diag_vars" MOCK_GH_BRANCHES=$'main\nstaging' MOCK_GH_WORKFLOWS="$diag_wf" \
         MOCK_GH_VAR_SF_INSTANCE_URL_PROD=https://login.salesforce.com MOCK_GH_VAR_SF_USERNAME_PROD=admin@example.com \

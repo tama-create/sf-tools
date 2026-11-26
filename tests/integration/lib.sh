@@ -286,6 +286,24 @@ X-Oauth-Scopes: %s
             _sha=$(git --git-dir="$IT_ORIGIN" rev-parse --verify -q "refs/heads/$_b") || { echo '{"message":"Branch not found"}' >&2; exit 1; }
             if [[ $_has_jq -eq 1 ]]; then echo "$_sha"; else echo "{\"commit\":{\"sha\":\"$_sha\"}}"; fi
             exit 0 ;;
+        repos/*/commits/*/statuses*)
+            # リリースの印（commit status。sf-promote-check.sh の _has_mark）: state/marks の「SHA|段階|状態|付けた人|実行 ID」の行
+            #   （下ほど新しい）から、--jq の context（sf-tools/released-<段階>）に合うものを、すべて
+            #   「作成日時<TAB>状態<TAB>付けた人<TAB>実行の URL」で返す（作成日時は、行の順に新しくする）。なければ、何も出さない
+            _rp="${_path#repos/}"; _rp="${_rp%%/commits/*}"
+            _sha="${_path#repos/*/commits/}"; _sha="${_sha%%/statuses*}"
+            _t=$(printf '%s' "$*" | sed -n 's/.*sf-tools\/released-\([a-z]*\).*/\1/p')
+            [[ -f "$IT_STATE/marks" ]] && grep "^${_sha}|${_t}|" "$IT_STATE/marks" | while IFS='|' read -r _ _ _st _cr _rid; do
+                printf '2026-11-01T%06d	%s	%s	https://github.com/%s/actions/runs/%s
+' "$_rid" "$_st" "$_cr" "$_rp" "$_rid"
+            done
+            exit 0 ;;
+        repos/*/actions/runs/*)
+            # 印の実行（wf-release の実行）: state/marks の実行 ID の行から、「リポジトリ<TAB>パス<TAB>イベント<TAB>結果<TAB>head_sha」
+            _rp="${_path#repos/}"; _rp="${_rp%%/actions/*}"; _rid="${_path##*/runs/}"
+            _line=""; [[ -f "$IT_STATE/marks" ]] && _line=$(grep "|${_rid}\$" "$IT_STATE/marks" | tail -1)
+            [[ -n "$_line" ]] || { echo "HTTP 404: Not Found" >&2; exit 1; }
+            printf '%s\t.github/workflows/wf-release.yml\tpull_request\tsuccess\t%s\n' "$_rp" "${_line%%|*}"; exit 0 ;;
         repos/*/git/refs)
             _ref=""; _sha=""; _prev=""
             for _a in "$@"; do
@@ -306,8 +324,19 @@ fi
 case "$1 $2" in
     "pr list")
         # PR の一覧: state/prs の「状態|ヘッド|ベース」の行から、指定の状態（--state）のものを、「ヘッド<TAB>ベース」で出す
-        _st=""; _p=""; for _a in "$@"; do [[ "$_p" == "--state" ]] && _st="$_a"; _p="$_a"; done
-        [[ -f "$IT_STATE/prs" ]] && while IFS="|" read -r _s _h _b; do [[ "$_s" == "$_st" ]] && printf "%s	%s
+        _st=""; _p=""; _hd=""; _bs=""; _js=""
+        for _a in "$@"; do case "$_p" in --state) _st="$_a" ;; --head) _hd="$_a" ;; --base) _bs="$_a" ;; --json) _js="$_a" ;; esac; _p="$_a"; done
+        # --json のとき（sf-promote-check.sh）: 行の 4 つ目（PR 番号。既定 7）・5 つ目（先端のコミット）を使い、--head・--base で絞る
+        #   --json number（開いている PR の番号）→ 番号を 1 つ / --json number,headRefOid,…（マージ済みの PR）→「番号<TAB>コミット<TAB>false」
+        if [[ -n "$_js" ]]; then
+            [[ -f "$IT_STATE/prs" ]] && while IFS="|" read -r _s _h _b _n _o; do
+                [[ "$_s" == "$_st" && ( -z "$_hd" || "$_h" == "$_hd" ) && ( -z "$_bs" || "$_b" == "$_bs" ) ]] || continue
+                if [[ "$_js" == "number" ]]; then echo "${_n:-7}"; break; fi
+                printf '%s\t%s\tfalse\n' "${_n:-7}" "$_o"
+            done < "$IT_STATE/prs"
+            exit 0
+        fi
+        [[ -f "$IT_STATE/prs" ]] && while IFS="|" read -r _s _h _b _rest; do [[ "$_s" == "$_st" ]] && printf "%s	%s
 " "$_h" "$_b"; done < "$IT_STATE/prs"
         exit 0 ;;
     "workflow run")
@@ -585,9 +614,16 @@ it_sftools_advance() {
 # 組織からの取得（retrieve）で、カレントに書かれるファイルを決める。引数: 「パス|内容」…（なければ、何も書かない）
 it_set_retrieve() { : > "$IT_STATE/sf.retrieve"; local l; for l in "$@"; do printf '%s\n' "$l" >> "$IT_STATE/sf.retrieve"; done; }
 
-# PR を記録する（fake の gh pr list が返す）。引数: 状態（open / merged） ヘッド ベース
-it_pr_add() { printf '%s|%s|%s\n' "$1" "$2" "$3" >> "$IT_STATE/prs"; }
+# PR を記録する（fake の gh pr list が返す）。引数: 状態（open / merged） ヘッド ベース [PR 番号（既定 7）] [先端のコミット]
+it_pr_add() { printf '%s|%s|%s|%s|%s\n' "$1" "$2" "$3" "${4:-7}" "${5:-}" >> "$IT_STATE/prs"; }
 it_pr_clear() { rm -f "$IT_STATE/prs"; }
+# リリースの印（wf-release が付ける commit status）を記録する（fake の gh api …/statuses・…/actions/runs が返す）。
+#   引数: コミット 段階 [状態（既定 success）] [付けた人（既定 github-actions[bot]）]。実行 ID は、行ごとに 9001 から振る
+it_mark_add() {
+    local n; n=$(( $(wc -l < "$IT_STATE/marks" 2>/dev/null || echo 0) + 9001 ))
+    printf '%s|%s|%s|%s|%s\n' "$1" "$2" "${3:-success}" "${4:-github-actions[bot]}" "$n" >> "$IT_STATE/marks"
+}
+it_mark_clear() { rm -f "$IT_STATE/marks"; }
 
 # origin 上で、ブランチを、別のブランチへ、マージする（PR のマージの再現。フックを通さない）。引数: 元 先
 it_origin_merge() {

@@ -86,7 +86,6 @@ case "$*" in
         case "$*" in
             *wf-validate*)  _k=1 ;;
             *wf-release*)   _k=2 ;;
-            *wf-propagate*) _k=3 ;;
             *)              _k=4 ;;
         esac
         echo $(( 1000 + _c * 10 + _k )); exit 0 ;;
@@ -140,7 +139,7 @@ chmod +x "$MB/git"
 
 ALL_SECRETS=$'PAT_TOKEN\nSLACK_BOT_TOKEN\nSF_PRIVATE_KEY\nSF_CONSUMER_KEY_PROD\nSF_CONSUMER_KEY_STG\nSF_CONSUMER_KEY_DEV'
 ALL_VARS=$'SLACK_CHANNEL_ID\nSF_TOOLS_BRANCH\nSF_USERNAME_PROD\nSF_INSTANCE_URL_PROD\nSF_ORG_ID_PROD\nSF_USERNAME_STG\nSF_INSTANCE_URL_STG\nSF_ORG_ID_STG\nSF_USERNAME_DEV\nSF_INSTANCE_URL_DEV\nSF_ORG_ID_DEV'
-ALL_WF=$'wf-metasync.yml\nwf-propagate.yml\nwf-release.yml\nwf-sequence.yml\nwf-validate.yml'
+ALL_WF=$'wf-metasync.yml\nwf-release.yml\nwf-sequence.yml\nwf-validate.yml'
 
 FORCE=$(mktemp -d "${TMPDIR:-/tmp}/test-verify-XXXX")
 mkdir -p "$FORCE/force-testproject"

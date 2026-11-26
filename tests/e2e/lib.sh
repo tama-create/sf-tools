@@ -543,6 +543,31 @@ e2e_pr_comment_absent() {
     ! printf '%s' "$out" | grep -qF -- "$3"
 }
 
+# PR の先端のコミット（head.sha）を、標準出力に返す。取得できなければ、戻り値 1。引数: リポジトリ PR 番号
+e2e_pr_head_sha() {
+    local sha
+    _e2e_check_repo "$1"
+    sha=$(_e2e_gh pr view "$2" -R "$1" --json headRefOid --jq .headRefOid 2>/dev/null) || return 1  # VAR=$(cmd) のため run 不使用
+    [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || return 1
+    printf '%s' "$sha"
+}
+
+# コミットに、リリースの印（commit status の context sf-tools/released-<段階>。wf-release が、組織へのリリースの成功後に付ける）があるか。
+#   同じ context の一番新しい状態が success で、付けたのが github-actions[bot] のときだけ、あるとみなす（doc/one-way-promotion-design.md 3.1。
+#   実行のパス・イベントの照合は、sf-promote-check.sh がする。ここは、e2e の結果の確認）。
+#   引数: リポジトリ コミットの SHA 段階。戻り値: 0 = ある / 1 = ない・取得に失敗した
+e2e_release_mark_ok() {
+    local out
+    _e2e_check_repo "$1"
+    [[ "$2" =~ ^[0-9a-f]{40}$ ]] || return 1
+    # 全ページを取り（--paginate）、作成日時の並べ替えで一番新しいものを見る（sf-promote-check.sh の _has_mark と同じ選び方）
+    out=$(_e2e_gh api --paginate "repos/${1}/commits/${2}/statuses?per_page=100" \
+        --jq ".[] | select(.context == \"sf-tools/released-${3}\") | \"\(.created_at) \(.state) \(.creator.login)\"" 2>/dev/null) || return 1  # VAR=$(cmd) のため run 不使用
+    out=$(printf '%s\n' "$out" | grep -v '^[[:space:]]*$' | LC_ALL=C sort | tail -1)  # VAR=$(cmd) のため run 不使用
+    out="${out#* }"   # 作成日時を除く
+    [[ "$out" == "success github-actions[bot]" ]]
+}
+
 # PR のイベントで起動して、まだ待っている・実行中のワークフローを、すべて取り消す。マージしない PR を閉じたあとに、
 #   走り出した検証（wf-validate）を止めるために使う。取り消せなくても、失敗にしない（戻り値は、常に 0）。
 #   push のイベントで起動したもの（wf-release など）は、対象にしない。引数: リポジトリ ブランチ名（PR の head ブランチ）

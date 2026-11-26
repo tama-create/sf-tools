@@ -95,63 +95,26 @@ test_non_main_branch_switches() {
     teardown "$td" "$mb"
 }
 
-# 伝播先は、有効な段階（get_tier_list）だけ（doc/tier-scaling-design.md 3.1・9 章）
-#   引数: 1=branches.txt の中身（printf の書式）  2=伝播するはずのブランチ（空白区切り）  3=伝播しないはずのブランチ（空白区切り）  4=説明
-_ms_tier_case() {
-    local td mb mh b
+# main の変更は、staging・develop のブランチへ伝播しない（一方通行の原則。doc/one-way-promotion-design.md 3.7。2026-11-26 に伝播をやめた）
+#   変更あり → commit → main への push のあと、ほかのブランチへの checkout・merge・push をしない
+test_no_propagation() {
+    local td mb mh out
     setup_std_env td mb mh
     create_all_mocks "$mb"
-    printf "$1" > "$td/sf-tools/config/branches.txt"
+    printf 'main\nstaging\ndevelop\n' > "$td/sf-tools/config/branches.txt"
     export MOCK_GIT_BRANCH="main"
     export MOCK_GIT_DIFF_EXIT=0
-    export MOCK_GIT_DIFF_EXIT_2ND=1  # 変更あり → commit → 伝播
+    export MOCK_GIT_DIFF_EXIT_2ND=1  # 変更あり → commit → push
     export MOCK_SF_ORG_JSON='{"result":{"alias":"testorg","id":"00D000000000001AAA"}}'
-    ( printf 'Y\nY\n' | ( cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-metasync.sh" ) ) > /dev/null 2>&1
-    for b in $2; do
-        assert_file_contains "$MOCK_CALL_LOG" "git push --no-verify origin ${b}" "${4}: ${b} へ伝播する"
+    out=$( printf 'Y\nY\n' | ( cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-metasync.sh" ) 2>&1 )
+    assert_file_contains "$MOCK_CALL_LOG" "git push --no-verify origin main" "main へは push する（pre-push フックを通さない）"
+    local b
+    for b in staging develop; do
+        assert_file_not_contains "$MOCK_CALL_LOG" "git push --no-verify origin ${b}" "${b} へは push しない（伝播しない）"
     done
-    for b in $3; do
-        assert_file_not_contains "$MOCK_CALL_LOG" "git push --no-verify origin ${b}" "${4}: ${b} へは伝播しない"
-    done
+    assert_file_not_contains "$MOCK_CALL_LOG" "git merge" "ほかのブランチへ merge しない"
+    assert_output_contains "$out" "staging・develop のブランチへは伝播しません" "伝播しない旨を表示する"
     unset MOCK_GIT_BRANCH MOCK_GIT_DIFF_EXIT MOCK_GIT_DIFF_EXIT_2ND MOCK_SF_ORG_JSON
-    teardown "$td" "$mb"
-}
-test_propagate_tiers_only() {
-    _ms_tier_case 'main\nstaging\ndevelop\n' "staging develop" ""                "3 段階"
-    _ms_tier_case 'main\nstaging\n'          "staging"         "develop"         "develop の行がない（ブランチはリモートにある）"
-    _ms_tier_case 'main\ndevelop\n'          ""                "staging develop" "staging がない（develop は無効）"
-    _ms_tier_case 'main\nuat\nstaging\n'     "staging"         "uat develop"     "段階の名前でない行（uat）"
-    _ms_tier_case '# なし\n'                  ""                "staging develop" "段階の行がない"
-}
-
-# staging チェックアウト失敗 → develop は main からマージする（prev_branch バグ修正確認）
-test_staging_fail_dev_merges_main() {
-    local td mb mh
-    setup_std_env td mb mh
-    create_all_mocks "$mb"
-
-    export MOCK_GIT_BRANCH="main"
-    export MOCK_GIT_CHECKOUT_FAIL_BRANCH="staging"  # staging チェックアウトのみ失敗させる
-    export MOCK_GIT_DIFF_EXIT=0
-    export MOCK_GIT_DIFF_EXIT_2ND=1  # phase_git_sync で変更あり → commit → propagate 実行
-    export MOCK_SF_ORG_JSON='{"result":{"alias":"testorg","id":"00D000000000001AAA"}}'
-
-    local out; out=$( printf 'Y
-Y
-' | ( cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-metasync.sh" ) 2>&1 )
-
-    # 回帰: 完了のメッセージは、実際に伝播できたブランチと、スキップしたブランチを表示する（以前は、固定の文言だった）
-    assert_output_contains "$out" "伝播したブランチ: develop）" "完了メッセージ: 伝播できたブランチ（develop）が表示される"
-    assert_output_contains "$out" "伝播できなかったブランチ（スキップ）: staging" "完了メッセージ: スキップしたブランチ（staging）が表示される"
-
-    # develop のマージ元が "main" であることを確認（staging ではない）
-    assert_file_contains "$MOCK_CALL_LOG" "git-merge-arg: main" "staging 失敗後、develop は main からマージした"
-    # 回帰: 伝播の push も、pre-push フックを通さない（伝播先は保護ブランチのため、フックが必ず拒否する。以前は付けていなかった）
-    assert_file_contains "$MOCK_CALL_LOG" "git push --no-verify origin develop" "伝播の push は、pre-push フックを通さない（--no-verify）"
-    ! grep -q "git-merge-arg: staging" "$MOCK_CALL_LOG" 2>/dev/null \
-        && pass "staging からのマージは実行されない" \
-        || fail "staging からのマージは実行されない"
-    unset MOCK_GIT_BRANCH MOCK_GIT_CHECKOUT_FAIL_BRANCH MOCK_GIT_DIFF_EXIT MOCK_GIT_DIFF_EXIT_2ND MOCK_SF_ORG_JSON
     teardown "$td" "$mb"
 }
 
@@ -255,8 +218,7 @@ test_no_changes
 test_unmapped_types_warning_is_one_line
 test_unpushed_commit_pushed
 test_non_main_branch_switches
-test_staging_fail_dev_merges_main
-test_propagate_tiers_only
+test_no_propagation
 # sf の終了コードが 0 以外（インストーラー版の不具合）→ 案内を表示して中断する
 test_sf_cli_abort() {
     local td mb mh
@@ -670,7 +632,7 @@ test_detect_on_first_run_writes_state() {
     [[ -f "$td/sf-tools/metasync/state.json" ]] && pass "検知 on・状態なし: 状態ファイルを書く" || fail "検知 on・状態なし: 状態ファイルを書く"
     assert_file_contains "$MOCK_CALL_LOG" "git add -A -- force-app sf-tools/metasync/state.json" "状態ファイルも、ステージする"
     assert_file_contains "$MOCK_CALL_LOG" "検知の状態の更新のみ" "メタデータの変更がなければ、コミットの本文に「状態の更新のみ」と書く"
-    assert_output_contains "$_MS_OUT" "下流ブランチへの伝播は行いません" "状態ファイルの更新だけのコミットは、下流へ伝播しない"
+    assert_output_contains "$_MS_OUT" "ブランチへは伝播しません" "状態ファイルの更新だけのコミットも、下流へ伝播しない"
     assert_file_not_contains "$MOCK_CALL_LOG" "git merge" "状態ファイルの更新だけのコミットは、merge しない"
     _ms_unset; _det_unset; teardown "$td" "$mb"
 }
@@ -715,7 +677,7 @@ test_detect_on_changed_and_dry_run() {
     assert_output_contains "$_MS_OUT" "履歴に 2 件" "検知 on・履歴あり: 変更ありの理由が出る"
     assert_file_contains "$MOCK_CALL_LOG" "sf project retrieve start" "検知 on・履歴あり: 取得する"
     assert_file_contains "$MOCK_CALL_LOG" "検知の状態も更新" "メタデータの変更があるときは、本文に「検知の状態も更新」と書く"
-    assert_file_contains "$MOCK_CALL_LOG" "git merge" "メタデータの変更があるときは、下流へ伝播する"
+    assert_file_not_contains "$MOCK_CALL_LOG" "git merge" "メタデータの変更があるときも、下流へ伝播しない（一方通行の原則）"
     _ms_unset; _det_unset; teardown "$td" "$mb"
     # --dry-run
     local td mb mh; _ms_env td mb mh; _det_env 0
@@ -833,7 +795,7 @@ test_fp_shadow_first_run() {
     [[ -f "$td/sf-tools/metasync/fingerprint.json" ]] && pass "指紋 shadow・状態なし: 指紋の状態ファイルを書く" || fail "指紋 shadow・状態なし: 指紋の状態ファイルを書く"
     assert_file_contains "$MOCK_CALL_LOG" "git add -A -- force-app sf-tools/metasync/fingerprint.json" "指紋の状態ファイルも、ステージする（検知の状態ファイルは、別）"
     assert_file_contains "$MOCK_CALL_LOG" "指紋の状態の更新のみ" "メタデータの変更がなければ、コミットの本文に「指紋の状態の更新のみ」と書く"
-    assert_output_contains "$_MS_OUT" "指紋の状態ファイルの更新だけのコミットのため、下流ブランチへの伝播は行いません" "状態ファイルの更新だけのコミットは、下流へ伝播しない"
+    assert_output_contains "$_MS_OUT" "ブランチへは伝播しません" "状態ファイルの更新だけのコミットも、下流へ伝播しない"
     assert_file_not_contains "$MOCK_CALL_LOG" "git merge" "状態ファイルの更新だけのコミットは、merge しない"
     assert_file_not_contains "$MOCK_CALL_LOG" "metasync/state.json" "検知（SF_METASYNC_DETECT）が off なら、検知の状態ファイルは触らない"
     _fpi_stop; _ms_unset; teardown "$td" "$mb"
@@ -855,7 +817,7 @@ test_fp_shadow_miss() {
     [[ -f "$td/force-app/main/default/classes/New.cls" ]] && pass "指紋 shadow: 取得結果は、そのまま反映する" || fail "指紋 shadow: 取得結果は、そのまま反映する"
     cmp -s "$td/sf-tools/metasync/fingerprint.json" "$td/fp.before" && pass "指紋が変更なしなら、状態ファイルは変わらない" || fail "指紋が変更なしなら、状態ファイルは変わらない"
     assert_file_not_contains "$MOCK_CALL_LOG" "fingerprint.json" "指紋が変更なしなら、状態ファイルをステージしない"
-    assert_file_contains "$MOCK_CALL_LOG" "git merge" "メタデータの変更があるときは、下流へ伝播する"
+    assert_file_not_contains "$MOCK_CALL_LOG" "git merge" "メタデータの変更があるときも、下流へ伝播しない（一方通行の原則）"
     _fpi_stop; _ms_unset; teardown "$td" "$mb"
 }
 

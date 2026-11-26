@@ -48,7 +48,7 @@ chmod +x "$MB/gh"
 
 ALL_SECRETS=$'PAT_TOKEN\nSLACK_BOT_TOKEN\nSF_PRIVATE_KEY\nSF_CONSUMER_KEY_PROD\nSF_CONSUMER_KEY_STG\nSF_CONSUMER_KEY_DEV'
 ALL_VARS=$'SLACK_CHANNEL_ID\nSF_TOOLS_BRANCH\nSF_USERNAME_PROD\nSF_INSTANCE_URL_PROD\nSF_ORG_ID_PROD\nSF_USERNAME_STG\nSF_INSTANCE_URL_STG\nSF_ORG_ID_STG\nSF_USERNAME_DEV\nSF_INSTANCE_URL_DEV\nSF_ORG_ID_DEV'
-ALL_WF=$'wf-metasync.yml\nwf-propagate.yml\nwf-release.yml\nwf-sequence.yml\nwf-validate.yml'
+ALL_WF=$'wf-metasync.yml\nwf-release.yml\nwf-sequence.yml\nwf-validate.yml'
 ALL_BRANCHES=$'main\nstaging\ndevelop'
 
 # 診断を、子プロセスで実行する。標準エラー（表示）を $OUT に、DIAG_NG を $NG に入れる
@@ -83,7 +83,7 @@ test_all_ok() {
     assert_file_contains "$OUT" "ブランチ develop があります"                        "各段階のブランチが確認される"
     assert_file_contains "$OUT" "SF_CONSUMER_KEY_STG"                              "段階ごとの Secret が確認される"
     assert_file_contains "$OUT" "SF_INSTANCE_URL_DEV"                              "段階ごとの Variable が確認される"
-    assert_file_contains "$OUT" "wf-sequence.yml があります"                        "ワークフロー 5 本が確認される"
+    assert_file_contains "$OUT" "wf-sequence.yml があります"                        "ワークフロー 4 本が確認される"
     assert_file_not_contains "$MOCK_CALL_LOG" "gh secret set"                      "変更系のコマンド（secret set）を呼ばない"
     assert_file_not_contains "$MOCK_CALL_LOG" "gh variable set"                    "変更系のコマンド（variable set）を呼ばない"
     assert_file_not_contains "$MOCK_CALL_LOG" "gh repo create"                     "変更系のコマンド（repo create）を呼ばない"
@@ -99,7 +99,7 @@ test_missing() {
     export MOCK_GH_SECRETS=$'SLACK_BOT_TOKEN\nSF_PRIVATE_KEY\nSF_CONSUMER_KEY_PROD\nSF_CONSUMER_KEY_DEV'
     export MOCK_GH_VARIABLES=$'SF_TOOLS_BRANCH\nSF_USERNAME_PROD\nSF_INSTANCE_URL_PROD\nSF_ORG_ID_PROD\nSF_USERNAME_STG\nSF_INSTANCE_URL_STG\nSF_ORG_ID_STG\nSF_INSTANCE_URL_DEV\nSF_ORG_ID_DEV'
     export MOCK_GH_BRANCHES=$'main\nstaging'
-    export MOCK_GH_WORKFLOWS=$'wf-metasync.yml\nwf-propagate.yml\nwf-sequence.yml\nwf-validate.yml'
+    export MOCK_GH_WORKFLOWS=$'wf-metasync.yml\nwf-sequence.yml\nwf-validate.yml'
     _d main staging develop
     assert_equals "$NG" "6"                                                        "不足は 6 件"
     assert_file_contains "$OUT" "PAT_TOKEN がありません"                             "Secret の不足が表示される"
@@ -256,13 +256,26 @@ test_rulesets() {
 test_name_fixed_string() {
     echo ""; echo -e "${CLR_HEAD}[TEST] 名前の一致は、固定の文字列（. を正規表現として扱わない）${CLR_RST}"
     _all_ok_env
-    export MOCK_GH_WORKFLOWS=$'wf-metasyncXyml\nwf-propagate.yml\nwf-release.yml\nwf-sequence.yml\nwf-validate.yml'
+    export MOCK_GH_WORKFLOWS=$'wf-metasyncXyml\nwf-release.yml\nwf-sequence.yml\nwf-validate.yml'
     _d main
     assert_file_contains "$OUT" "ワークフロー wf-metasync.yml がありません"            "wf-metasyncXyml を wf-metasync.yml とみなさない"
     _dc
 }
 
+# 廃止した wf-propagate.yml が残っている → ！（注意）。不足には数えない
+test_leftover_propagate() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] 廃止した wf-propagate.yml が残っている → 注意（不足に数えない）${CLR_RST}"
+    _all_ok_env
+    export MOCK_GH_WORKFLOWS="${ALL_WF}"$'\nwf-propagate.yml'
+    _d main staging develop
+    assert_equals "$NG" "0"                                                        "不足には数えない"
+    assert_file_contains "$OUT" "廃止したワークフロー wf-propagate.yml が残っています"   "注意が表示される"
+    assert_file_contains "$OUT" "sf-sync-wf.sh --remove wf-propagate.yml"            "消し方が表示される"
+    _dc
+}
+
 test_all_ok
+test_leftover_propagate
 test_missing
 test_rulesets
 test_unknown

@@ -19,7 +19,9 @@
 #                    リリース（wf-validate → マージ → wf-release）し、続けて削除する（sf-tools の本来の機能の通し）。
 #                    リリース・削除の作業は、通常の運用と同じく、sf-tools のコマンドで行う: sf-job.sh（ブランチ作成・clone・sf-start.sh）
 #                    → ファイルを書く → sf-dryrun.sh（ローカルの検証）→ sf-push.sh（commit・push・pre-push フック）。PR の作成・マージは gh。
-#                    リリース後は、sf-next.sh（マージ済みの表示）と、sf-deploy.sh（共有環境への強制リリースの拒否）も確認する。
+#                    リリースが成功するたびに、PR の先端のコミットに、リリースの印（commit status: sf-tools/released-<段階>。
+#                    付けたのは github-actions[bot]）が付くことを確認する（一方通行の決まり。doc/one-way-promotion-design.md）。
+#                    リリース後は、sf-next.sh（全段階にリリース済みの表示）と、sf-deploy.sh（共有環境への強制リリースの拒否）も確認する。
 #                    削除後は、同じ削除のジョブで、もう一度 sf-dryrun.sh を動かし、組織にない削除の対象を外して、成功することを確認する
 #                    【管理者用フォルダ（admin）の確認】 admin/force-XXXX ができたこと・状態ファイルがプロジェクト名つきであること・
 #                    古い形のフォルダ（init / init-*）がないこと・クローンが admin ブランチ（ローカルと GitHub の両方）であること・
@@ -29,17 +31,18 @@
 #                    sf-init.sh --add-tier staging を実行し、組織への接続・Secret / Variable・ブランチ・PR ができること、
 #                    終わったあとも admin ブランチにいること、main へ直接 push していないことを確認する。そのあと、管理者と同じく、
 #                    その PR をマージし（--no-actions のときは、マージしない）、main の branches.txt に staging が入ること、
-#                    マージで動く wf-release（リリース対象なしでスキップ）・wf-propagate が成功し、staging に main の最新が入ることを確認する
-#                    （段階は、main の branches.txt に入って、はじめて有効になる。このあとのシナリオが、staging を使う）（約 6 分）
-#                    【wf-sequence（順序チェック）の確認】 2 層以上のとき: ①順序どおりの PR（staging・main へ）は、成功し、警告のコメントが付かない
-#                    ②前の段階にマージしないまま main へ出した PR（順序外）は、警告（実行は成功。止めない）: PR の会話欄に ⚠️ のコメントが付き、
+#                    マージで動く wf-release（リリース対象なしでスキップ）が成功し、staging のブランチは変わらない（main からの伝播はしない）ことを確認する
+#                    （段階は、main の branches.txt に入って、はじめて有効になる。このあとのシナリオが、staging を使う）（約 5 分）
+#                    【wf-sequence（順序チェック）の確認】 2 層以上のとき: ①順序どおりの PR（staging・main へ）は、成功し、⛔ のコメントが付かない
+#                    ②前の段階に出していないコミットを main へ出した PR（順序外）は、実行が失敗し（一方通行の決まり R1）、PR の会話欄に ⛔ のコメントが付き、
 #                    Slack に通知される ③環境ブランチから main への直接の PR（develop → main など）は、実行が失敗し、⛔ のコメントが付き、Slack に通知される。
 #                    ②と③の PR は、マージせずに閉じ、走り出した検証（wf-validate）を取り消す
 #                    【層数に応じた確認】 リポジトリの構成（main のみ / main + staging / main + staging + develop）を、自動で判定し、
 #                    段階の数だけ、リリースを繰り返す（同じブランチから、develop → staging → main の順に、段階ごとの PR を出す）:
 #                      ・各段階の PR をマージするたびに、その段階の組織にだけ、クラスができること（まだ先の段階の組織には、入っていないこと）
-#                      ・main へのマージのあと、wf-propagate が成功し、staging・develop のブランチに、main の最新が入ること
-#                      ・削除は、main への PR で行い、ほかの段階の組織には及ばないこと（残りは、管理者の削除デプロイで掃除する）
+#                      ・main へのマージのあと、staging・develop のブランチが変わらないこと（下りの伝播はしない）
+#                      ・削除も、同じく develop → staging → main の順に、段階ごとの PR で行い、その段階の組織からだけ消えること
+#                    順序外の PR のマージ（最後の守り）・積み重ねの抜け（R2）は、シナリオ one-way（scenario.sh）で確認する
 #                    2 層・3 層には、**層の数だけ、別々の Salesforce 組織が必要**（2 層 = 2 つ、3 層 = 3 つ）。鍵一式に、
 #                    staging・develop の組織が必要（bootstrap.sh --add-orgs で追加する）。1 つの組織では、層数を再現できない
 #   4. 終了        : sf のエイリアスを実行前の状態に戻す。テスト用のリポジトリ・外部クライアントアプリなどは、既定では削除せずに残す
@@ -329,6 +332,13 @@ _var_equals()   { [[ "$(_e2e_gh variable get "$1" -R "$REPO_FULL" 2>/dev/null)" 
 _no_variable()  { local _l; _l=$(_e2e_gh variable list -R "$REPO_FULL" 2>/dev/null) || return 1; ! printf '%s\n' "$_l" | awk '{print $1}' | grep -qx "$1"; }  # VAR=$(cmd) のため run 不使用
 _has_branch()   { _e2e_gh api "repos/${REPO_FULL}/branches" --jq '.[].name' 2>/dev/null | grep -qx "$1"; }
 _has_workflow() { _e2e_gh api "repos/${REPO_FULL}/contents/.github/workflows" --jq '.[].name' 2>/dev/null | grep -qx "$1"; }
+# ワークフローがない（一覧を取得できて、その名前がない）。取得できないときは、ないとみなさない
+_no_workflow() {
+    local names
+    names=$(_e2e_gh api "repos/${REPO_FULL}/contents/.github/workflows" --jq '.[].name' 2>/dev/null) || return 1  # VAR=$(cmd) のため run 不使用
+    [[ -n "$names" ]] && ! printf '%s
+' "$names" | grep -qx "$1"
+}
 # ファイルに値が含まれていないこと（トークンの漏れの確認）
 _not_in_file()  { [[ ! -f "$2" ]] || ! grep -qF -- "$1" "$2"; }
 
@@ -419,24 +429,25 @@ _run_ok() {
     return 1
 }
 
-# PR の作成 → wf-validate → マージ → wf-release →（main のときだけ）wf-propagate。成功したら、実行 ID を HELLO_RELEASE_RUN に入れる
+# PR の作成 → wf-validate → マージ → wf-release → リリースの印。成功したら、実行 ID を HELLO_RELEASE_RUN に入れる
 #   引数: ラベル ブランチ名（push 済み） PR のタイトル 先の段階（main / staging / develop。既定 main）
 #   同じブランチから、段階ごとに PR を出すため、PR を作る前の最新の実行 ID を覚え、それより新しい実行だけを、この PR の実行とみなす
+#   main へのマージのあと、wf-propagate（廃止）は動かない。下りの伝播がないことは、_hello_flow が、環境ブランチの先頭で確かめる
 _hello_pr_flow() {
-    local label="$1" br="$2" title="$3" base="${4:-main}" prn runid b_val b_rel b_pro b_seq sid
+    local label="$1" br="$2" title="$3" base="${4:-main}" prn runid b_val b_rel b_seq sid head
     b_seq=$(e2e_latest_run_id "$REPO_FULL" wf-sequence.yml "$br")    # VAR=$(cmd) のため run 不使用
     b_val=$(e2e_latest_run_id "$REPO_FULL" wf-validate.yml "$br")    # VAR=$(cmd) のため run 不使用
     b_rel=$(e2e_latest_run_id "$REPO_FULL" wf-release.yml "$br")     # VAR=$(cmd) のため run 不使用
-    b_pro=$(e2e_latest_run_id "$REPO_FULL" wf-propagate.yml "$br")   # VAR=$(cmd) のため run 不使用
     prn=$(e2e_gh_pr_create "$REPO_FULL" "$br" "$title" "$base") || prn=""   # VAR=$(cmd) のため run 不使用
     chk "${label}: PR を作成した" test -n "$prn" || return 1
-    # wf-sequence（順序チェック。main・staging への PR だけで起動する）: 順序どおりなので、成功し、警告のコメントは付かない。失敗しても、続きの確認は進める
-    #   削除の PR は、対象外（main へ直接出す仕様で、前の段階を経由しないため、順序外の警告が付くのが、正しい動き）
-    if [[ "${SEQ_CHECK:-0}" == "1" && ( "$base" == "main" || "$base" == "staging" ) && "$label" == リリース* ]]; then
+    head=$(e2e_pr_head_sha "$REPO_FULL" "$prn") || head=""   # VAR=$(cmd) のため run 不使用（PR の先端のコミット。リリースの印を確かめる）
+    # wf-sequence（順序チェック。main・staging への PR だけで起動する）: 順序どおり（前の段階に、同じコミットを出した）なので、成功し、
+    #   ⛔ のコメントは付かない。失敗しても、続きの確認は進める。削除の PR も、リリースと同じく、段階の順に出す（一方通行の決まり）
+    if [[ "${SEQ_CHECK:-0}" == "1" && ( "$base" == "main" || "$base" == "staging" ) ]]; then
         sid=$(e2e_wait_pr_run "$REPO_FULL" wf-sequence.yml "$br" "$b_seq") || sid=""   # VAR=$(cmd) のため run 不使用
         if chk "${label}: wf-sequence（順序チェック）が実行され、完了した" test -n "$sid"; then
             chk "${label}: wf-sequence が成功した（順序どおり）" test "$(_run_conclusion "$sid")" == "success"
-            chk "${label}: 順序どおりなので、PR に警告のコメント（sf-tools:sequence）が付かない" e2e_pr_comment_absent "$REPO_FULL" "$prn" "sf-tools:sequence"
+            chk "${label}: 順序どおりなので、PR に ⛔ のコメント（sf-tools:sequence）が付かない" e2e_pr_comment_absent "$REPO_FULL" "$prn" "sf-tools:sequence"
         fi
     fi
     runid=$(e2e_wait_pr_run "$REPO_FULL" wf-validate.yml "$br" "$b_val") || runid=""   # VAR=$(cmd) のため run 不使用
@@ -447,27 +458,19 @@ _hello_pr_flow() {
     chk "${label}: wf-release が実行され、完了した" test -n "$runid" || return 1
     chk "${label}: wf-release が成功した（失敗したら、1 回だけ再実行）" _run_ok "$runid" "${label}: wf-release" || return 1
     HELLO_RELEASE_RUN="$runid"
-    # wf-propagate（main へのマージ時だけ起動する。staging / develop がない構成では、スキップして成功になる）。失敗しても、続きの確認は進める
-    if [[ "$base" == "main" ]]; then
-        local pid
-        pid=$(e2e_wait_pr_run "$REPO_FULL" wf-propagate.yml "$br" "$b_pro") || pid=""   # VAR=$(cmd) のため run 不使用
-        if chk "${label}: wf-propagate が実行され、完了した" test -n "$pid"; then
-            chk "${label}: wf-propagate が成功した（staging / develop がない構成では、スキップ。失敗したら、1 回だけ再実行）" _run_ok "$pid" "${label}: wf-propagate"
-        fi
-    fi
+    # リリースの印（commit status: sf-tools/released-<段階>）が、PR の先端のコミットに付いた（次の段階の PR の、順序の確認が見る）
+    chk "${label}: リリースの印（sf-tools/released-${base}。github-actions[bot]）が、PR の先端のコミット（${head:0:7}）に付いた" \
+        e2e_release_mark_ok "$REPO_FULL" "$head" "$base"
     return 0
 }
 
-# 1 回分: ジョブ → PR → wf-validate → マージ → wf-release → wf-propagate。引数: ラベル ブランチ名 PR のタイトル ファイルを書く関数名 テストを検出するか
-_hello_cycle() {
-    local label="$1" br="$2" title="$3" writefn="$4" expect_tests="$5"
-    _hello_local_job "$label" "$br" "$title" "$writefn" "$expect_tests" || return 1
-    _hello_pr_flow "$label" "$br" "$title"
+# sf-next.sh: リリースしたジョブのクローンで実行し、全段階にリリース済みと表示されること（質問には N で答える）
+#   引数: クローンのフォルダ [段階の数（既定 1）]。段階の数以上の行に、「リリース済み（このコミット）」と表示されること
+_hello_sf_next() {
+    e2e_run_sf_cmd "sf-next" "$1" "N\n" "${SF_TOOLS_ROOT}/bin/sf-next.sh" \
+        && grep -qF "全段階にリリース済みです" "${E2E_TMP}/sf-next.out" \
+        && [[ "$(grep -c "リリース済み（このコミット）" "${E2E_TMP}/sf-next.out")" -ge "${2:-1}" ]]
 }
-
-# sf-next.sh: リリースしたジョブのクローンで実行し、マージ済みのブランチが「マージ済み」と表示されること（質問には N で答える）
-#   引数: クローンのフォルダ [段階の数（既定 1）]。段階の数以上の行に、「マージ済み」と表示されること
-_hello_sf_next() { e2e_run_sf_cmd "sf-next" "$1" "N\n" "${SF_TOOLS_ROOT}/bin/sf-next.sh" && [[ "$(grep -c "マージ済み" "${E2E_TMP}/sf-next.out")" -ge "${2:-1}" ]]; }
 # sf-deploy.sh: 予約名の組織へのローカルからの強制リリースは、確認の前に拒否される（終了コード 0 以外、拒否の文言、デプロイしない）
 #   予約名は main を使う（開発者の本物の組織に付いていることがある prod / staging / develop は、避ける。
 #   万一、拒否が働かなくなっても、main という名前の組織は、まず無いので、本物の組織への強制リリースにならない）
@@ -507,9 +510,9 @@ _tag() { if (( ${#TIERS[@]} > 1 )); then printf '（%s の組織）' "$1"; fi; r
 _admin_login_tier() { ( E2E_TIER="$1"; e2e_sf_admin_login ); }                  # 引数: 段階
 _apex_is()          { [[ "$(E2E_TIER="$1" e2e_apex_count "$2")" == "$3" ]]; }    # 引数: 段階 クラス名 期待する件数
 _resume_clean_tier() { ( E2E_TIER="$1"; _resume_clean_apex ); }                 # 引数: 段階（前回の残りの Hello World を消す）
-_delete_apex_tier() { ( E2E_TIER="$1"; e2e_delete_apex "$E2E_APEX_HELLO_TEST" "$E2E_APEX_HELLO" ); }   # 引数: 段階（管理者の削除デプロイ）
-# 段階のブランチに、main の最新が入っているか（wf-propagate の結果）。compare の ahead_by が 0 なら、入っている
-_branch_has_main() { [[ "$(_e2e_gh api "repos/${REPO_FULL}/compare/${1}...main" --jq .ahead_by 2>/dev/null)" == "0" ]]; }
+# ブランチの先頭の SHA（取得できなければ空）。下りの伝播がないこと（main へのマージで、環境ブランチが変わらない）の確認に使う
+_branch_sha() { _e2e_gh api "repos/${REPO_FULL}/branches/${1}" --jq .commit.sha 2>/dev/null; }
+_branch_unchanged() { [[ -n "$2" && "$(_branch_sha "$1")" == "$2" ]]; }   # 引数: ブランチ 前の SHA
 # リポジトリに保存された組織の ID（SF_ORG_ID_*）が、鍵一式のテスト用組織の ID と一致するか（管理用ログイン済みであること）
 _org_id_matches() {   # 引数: 段階
     local have want
@@ -518,7 +521,7 @@ _org_id_matches() {   # 引数: 段階
     [[ -n "$have" && -n "$want" && "${have:0:15}" == "${want:0:15}" ]]
 }
 # wf-sequence の、順序を守らない PR への動きの確認（2 層以上）。PR は、マージせずに閉じる（段階を飛び越えた変更を、組織に入れないため）
-#   引数: ラベル head ブランチ base タイトル 期待する実行の結果（success: 警告のみで止めない / failure: 環境ブランチからの PR は失敗） コメントの文言
+#   引数: ラベル head ブランチ base タイトル 期待する実行の結果（failure: 順序外・環境ブランチからの PR は、一方通行の決まりで失敗） コメントの文言
 #   確認: wf-sequence が実行され、期待どおりの結果になる / PR の会話欄に、目印（sf-tools:sequence）と文言のコメントが付く / Slack への通知が成功する
 _sequence_pr_check() {
     local label="$1" head="$2" base="$3" title="$4" want="$5" text="$6" b_seq prn sid
@@ -528,7 +531,7 @@ _sequence_pr_check() {
     sid=$(e2e_wait_pr_run "$REPO_FULL" wf-sequence.yml "$head" "$b_seq") || sid=""   # VAR=$(cmd) のため run 不使用
     if chk "${label}: wf-sequence が実行され、完了した" test -n "$sid"; then
         chk "${label}: wf-sequence の結果が ${want} だった" test "$(_run_conclusion "$sid")" == "$want"
-        chk "${label}: PR の会話欄に、警告のコメント（sf-tools:sequence）が付いた" e2e_pr_comment_has "$REPO_FULL" "$prn" "sf-tools:sequence"
+        chk "${label}: PR の会話欄に、⛔ のコメント（sf-tools:sequence）が付いた" e2e_pr_comment_has "$REPO_FULL" "$prn" "sf-tools:sequence"
         chk "${label}: コメントの文言が正しい（${text}）" e2e_pr_comment_has "$REPO_FULL" "$prn" "$text"
         chk "${label}: Slack への通知が成功した（ok:true）" verify_run_log_has "$REPO_FULL" "$sid" '"ok":true'
     fi
@@ -563,17 +566,22 @@ _hello_flow() {
     # ジョブの開始から push まで（1 回。同じブランチから、段階ごとに PR を出す）
     _hello_local_job "リリース" "$JOB_RELEASE" "e2e: Hello World をリリース" _hello_write_release 1 || return 0
 
-    # wf-sequence: 前の段階（staging・develop）に、まだマージしていないのに、main へ PR を出す（順序外）→ 警告（止めない）。マージはしない
+    # wf-sequence: 前の段階（staging・develop）に、まだ出していないコミットを、main へ PR で出す（順序外）→ 失敗する（一方通行の決まり R1）。マージはしない
     if [[ "$SEQ_CHECK" == "1" ]]; then
-        log "HEADER" "wf-sequence: 順序外の PR（前の段階に、マージせずに、main へ）"
-        _sequence_pr_check "wf-sequence（順序外）" "$JOB_RELEASE" main "e2e: wf-sequence の順序外の確認（マージしない）" success "にまだマージされていません"
+        log "HEADER" "wf-sequence: 順序外の PR（前の段階に出さずに、main へ）"
+        _sequence_pr_check "wf-sequence（順序外）" "$JOB_RELEASE" main "e2e: wf-sequence の順序外の確認（マージしない）" failure "一方通行の決まりにより"
         _elapsed "wf-sequence（順序外）の確認の終了"
     fi
 
     # 段階ごとに、PR → wf-validate → マージ → wf-release。上流（develop）から、main の順
+    local -a env_before=()
     for (( i = 0; i < n; i++ )); do
         t="${TIERS[i]}"
         lbl="リリース"; (( n > 1 )) && lbl="リリース（${t}）"
+        # main へのマージの前に、環境ブランチ（staging・develop）の先頭を覚える（マージのあと、変わらないこと = 下りの伝播がないことを確かめる）
+        if [[ "$t" == "main" ]]; then
+            for (( j = 0; j < n; j++ )); do env_before[j]=$(_branch_sha "${TIERS[j]}"); done   # VAR=$(cmd) のため run 不使用
+        fi
         _hello_pr_flow "$lbl" "$JOB_RELEASE" "e2e: Hello World をリリース" "$t" || return 0
         (( n > 1 )) && _elapsed "${lbl}の終了"
         # wf-release の途中のステップ（JWT ログイン・sf-tools の取得・Slack 通知）
@@ -602,43 +610,45 @@ _hello_flow() {
     done
     _elapsed "リリース側（sf-job → PR → wf-release）の終了"
 
-    # main へのマージのあと、wf-propagate が、staging・develop のブランチに、main の最新を入れること
-    for t in "${TIERS[@]}"; do
-        [[ "$t" == "main" ]] && continue
-        chk "wf-propagate: ${t} のブランチに、main の最新が入った" _branch_has_main "$t"
+    # main へのマージのあと、staging・develop のブランチは変わらない（下りの伝播はしない。開発のブランチが、sf-push.sh で main を取り込む）
+    for (( j = 0; j < n; j++ )); do
+        [[ "${TIERS[j]}" == "main" ]] && continue
+        chk "伝播しない: main へのマージのあと、${TIERS[j]} のブランチの先頭が変わらない" \
+            _branch_unchanged "${TIERS[j]}" "${env_before[j]:-}"
     done
 
     # 通常の運用で使う、そのほかの sf-tools のコマンド（リリースしたジョブのクローンで実行する）
     repo="${WORK}/${JOB_RELEASE}/${REPO_NAME}"
-    chk "sf-next.sh: マージ済みのブランチを、マージ済みと表示する" _hello_sf_next "$repo" "$n"
+    chk "sf-next.sh: 全段階にリリース済みと表示する（このコミットに、全段階の印がある）" _hello_sf_next "$repo" "$n"
     chk "sf-deploy.sh: 共有環境（予約名 main）へのローカルからの強制リリースを、拒否する" _hello_deploy_refused "$repo"
 
-    # 削除: main への PR（remove-target.txt）で行う。ほかの段階の組織には、及ばない
-    _hello_cycle "削除" "$JOB_DELETE" "e2e: Hello World を削除" _hello_write_remove 0 || return 0
+    # 削除: リリースと同じく、同じブランチから、develop → staging → main の順に、段階ごとの PR（remove-target.txt）で行う（一方通行の決まり）
+    _hello_local_job "削除" "$JOB_DELETE" "e2e: Hello World を削除" _hello_write_remove 0 || return 0
     # 2 回目の sf-job.sh（sf-start.sh）が、同じ組織の接続を、いったんログアウトして、ログインし直す。
     # 同じユーザーの認証は、エイリアスが違っても、共通の保存先を使うため、問い合わせ用の管理用ログインを、やり直してから確認する
+    for (( i = 0; i < n; i++ )); do
+        t="${TIERS[i]}"
+        lbl="削除"; (( n > 1 )) && lbl="削除（${t}）"
+        _hello_pr_flow "$lbl" "$JOB_DELETE" "e2e: Hello World を削除" "$t" || return 0
+        (( n > 1 )) && _elapsed "${lbl}の終了"
+        chk "削除後: Salesforce への管理用ログイン（問い合わせ用）をやり直した$(_tag "$t")" _admin_login_tier "$t" || return 0
+        chk "削除後: Salesforce から ${E2E_APEX_HELLO} が消えた$(_tag "$t")" _apex_is "$t" "$E2E_APEX_HELLO" 0
+        chk "削除後: Salesforce から ${E2E_APEX_HELLO_TEST} が消えた$(_tag "$t")" _apex_is "$t" "$E2E_APEX_HELLO_TEST" 0
+        for (( j = i + 1; j < n; j++ )); do
+            chk "削除後: まだ、${TIERS[j]} の組織には、${E2E_APEX_HELLO} が残っている（意図した組織にだけ作用する）"                 _apex_is "${TIERS[j]}" "$E2E_APEX_HELLO" 1
+        done
+    done
     _elapsed "削除側（sf-job → PR → wf-release）の終了"
-    chk "削除後: Salesforce への管理用ログイン（問い合わせ用）をやり直した$(_tag main)" _admin_login_tier main || return 0
-    chk "削除後: Salesforce から ${E2E_APEX_HELLO} が消えた$(_tag main)" _apex_is main "$E2E_APEX_HELLO" 0
-    chk "削除後: Salesforce から ${E2E_APEX_HELLO_TEST} が消えた$(_tag main)" _apex_is main "$E2E_APEX_HELLO_TEST" 0
     # 同じ削除を、消えたあとにもう一度検証する（同じブランチで、削除を含む変更を何度も出すとき）。sf-release.sh が、
     #   組織にない削除の対象を外し、反映するものもないので、何もせずに成功する（以前は「No ApexClass named」で失敗した）
-    chk "再削除: 消えたあとに、同じ削除を sf-dryrun.sh で検証すると、組織にないものを外して成功する$(_tag main)" \
-        _hello_redryrun_after_delete "${WORK}/${JOB_DELETE}/${REPO_NAME}"
-    # 2 層・3 層: main の削除は、ほかの段階の組織には及ばない（まだ残っている）。残りは、管理者の削除デプロイで掃除する
-    for t in "${TIERS[@]}"; do
-        [[ "$t" == "main" ]] && continue
-        chk "削除後: main の削除は、${t} の組織には及んでいない（まだ残っている。意図した組織にだけ作用する）" _apex_is "$t" "$E2E_APEX_HELLO" 1
-        chk "後始末: ${t} の組織の Hello World を、管理者の削除デプロイで消した" _delete_apex_tier "$t"
-        chk "後始末後: Salesforce から ${E2E_APEX_HELLO} が消えた$(_tag "$t")" _apex_is "$t" "$E2E_APEX_HELLO" 0
-        chk "後始末後: Salesforce から ${E2E_APEX_HELLO_TEST} が消えた$(_tag "$t")" _apex_is "$t" "$E2E_APEX_HELLO_TEST" 0
-    done
+    chk "再削除: 消えたあとに、同じ削除を sf-dryrun.sh で検証すると、組織にないものを外して成功する"         _hello_redryrun_after_delete "${WORK}/${JOB_DELETE}/${REPO_NAME}"
 }
 
 # --add-tier（管理者用のクローン = admin ブランチから、staging を追加する）の確認
 #   新しく作った 1 層のリポジトリに、staging の段階を足す。確認すること: 実行できる（組織への接続・Secret / Variable・ブランチ・PR）、
 #   終わったあとも admin ブランチにいる（main に居座らない）、main へ直接 push していない。そのあと、管理者と同じく PR をマージし、
-#   staging が段階として有効になる（main の branches.txt に入り、main の最新が伝播する）ことを確かめる（--no-actions のときは、マージしない）。
+#   staging が段階として有効になる（main の branches.txt に入る。staging のブランチは、そのマージで変わらない = 伝播しない）ことを確かめる
+#   （--no-actions のときは、マージしない）。
 #   Hello World の確認のあとに行う（先に行うと、リポジトリが 2 層になり、リリースの確認の対象が変わるため）
 _main_sha()   { _e2e_gh api "repos/${REPO_FULL}/branches/main" --jq .commit.sha 2>/dev/null; }
 _has_open_pr_titled() { _e2e_gh pr list -R "$REPO_FULL" --state open --json title --jq '.[].title' 2>/dev/null | grep -qxF -- "$1"; }
@@ -658,29 +668,24 @@ _add_tier_check() {
     chk "add-tier: branches.txt を更新する PR が作られた" _has_open_pr_titled "chore: ${t} tier を追加"
     chk "add-tier: main へ、直接 push していない（PR を作るだけ）" test "$(_main_sha)" == "$main_before"
     # 管理者と同じく、PR をマージする（段階は、main の branches.txt に入って、はじめて有効になる。doc/tier-scaling-design.md 3.2）。
-    #   マージしないと、staging は無効のまま（伝播・検証・リリースが止まる）で、このあとのシナリオ（propagate-fail・tier-switch）が、
+    #   マージしないと、staging は無効のまま（検証・リリースが止まる）で、このあとのシナリオ（one-way・tier-switch）が、
     #   staging を使えない。--no-actions のときは、ワークフローの完了を待てないため、マージしない
     [[ $SKIP_ACTIONS -eq 0 ]] || { log "INFO" "  add-tier: PR のマージを省略しました（--no-actions）。"; return 0; }
-    local prn br b_pro b_rel pid rid
+    local prn br b_rel rid stg_before
     prn=$(_e2e_gh pr list -R "$REPO_FULL" --state open --json number,title,headRefName \
         --jq ".[] | select(.title == \"chore: ${t} tier を追加\") | \"\(.number) \(.headRefName)\"" 2>/dev/null | head -1)  # VAR=$(cmd) のため run 不使用
     br="${prn#* }"; prn="${prn%% *}"
     chk "add-tier: PR の番号が分かった" test -n "$prn" || return 0
-    b_pro=$(e2e_latest_run_id "$REPO_FULL" wf-propagate.yml "$br")   # VAR=$(cmd) のため run 不使用
     b_rel=$(e2e_latest_run_id "$REPO_FULL" wf-release.yml "$br")     # VAR=$(cmd) のため run 不使用
+    stg_before=$(_branch_sha "$t")  # VAR=$(cmd) のため run 不使用（マージのあと、変わらないこと = 伝播しないことを確かめる）
     chk "add-tier: PR をマージした（管理者の操作と同じ）" e2e_gh_pr_merge "$REPO_FULL" "$prn" || return 0
     chk "add-tier: main の branches.txt に ${t} が入った" _main_branches_has "$t"
-    # マージで動く wf-release（リリース対象のフォルダがないため、スキップして成功）と wf-propagate（main → staging）の完了を待つ。
-    #   このあとのシナリオが staging に書き込むため、伝播と重ならないようにする
+    # マージで動く wf-release（リリース対象のフォルダがないため、スキップして成功）の完了を待つ（このあとのシナリオと重ならないように）
     rid=$(e2e_wait_pr_run "$REPO_FULL" wf-release.yml "$br" "$b_rel") || rid=""   # VAR=$(cmd) のため run 不使用
     if chk "add-tier: マージ後の wf-release が実行され、完了した" test -n "$rid"; then
         chk "add-tier: マージ後の wf-release が成功した（リリース対象なしでスキップ）" _run_ok "$rid" "add-tier: wf-release"
     fi
-    pid=$(e2e_wait_pr_run "$REPO_FULL" wf-propagate.yml "$br" "$b_pro") || pid=""   # VAR=$(cmd) のため run 不使用
-    if chk "add-tier: マージ後の wf-propagate が実行され、完了した" test -n "$pid"; then
-        chk "add-tier: マージ後の wf-propagate が成功した" _run_ok "$pid" "add-tier: wf-propagate"
-    fi
-    chk "add-tier: ${t} が段階として有効になり、main の最新が伝播した" _branch_has_main "$t"
+    chk "add-tier: マージのあとも、${t} のブランチの先頭が変わらない（main からの伝播はしない）" _branch_unchanged "$t" "$stg_before"
 }
 # main の branches.txt に、その段階の行があるか。引数: 段階
 _main_branches_has() {
@@ -752,9 +757,10 @@ if [[ "$INIT_RC" -eq 0 ]]; then
         chk "SF_TOOLS_BRANCH が development" _var_equals SF_TOOLS_BRANCH development
     fi
     chk "SLACK_CHANNEL_ID が入力した共有チャンネルの ID" _var_equals SLACK_CHANNEL_ID "$E2E_SLACK_CHANNEL_ID"
-    for _w in wf-metasync.yml wf-propagate.yml wf-release.yml wf-sequence.yml wf-validate.yml; do
+    for _w in wf-metasync.yml wf-release.yml wf-sequence.yml wf-validate.yml; do
         chk "ワークフロー ${_w} がある" _has_workflow "$_w"
     done
+    chk "廃止したワークフロー wf-propagate.yml がない（下りの伝播はしない）" _no_workflow wf-propagate.yml
 
     # 管理者用フォルダ（admin）と、admin ブランチ（新しく作ったときだけ。--resume の前回分は、古い形のことがある）
     if [[ $RESUME -eq 0 ]]; then

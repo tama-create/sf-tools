@@ -229,16 +229,3 @@ INIT_ECA_ENV=(MOCK_SF_ORG_JSON='{"result":{"username":"admin@example.com","alias
 _make_input_3branches() {
     printf 'Y\nY\n1\n1\nghp_faketoken\n\nxoxb-faketoken\nC01ABCDEFGH\n\n1\n1\n1\n'
 }
-
-# ==============================================================================
-# ワークフローのひな形 wf-propagate.yml: staging / develop がない構成では、失敗にせずスキップする
-#   背景: main のみの構成で、main へのマージのたびに git checkout staging が失敗し、赤い ✗ になっていた（e2e で発覚）
-#   ワークフローの run: の本文を取り出して、本物の git で実行する（ブランチがない / ある）
-# ==============================================================================
-_wfp_step_script() {  # 引数: ステップの id（merge_staging など）。run: | の本文を標準出力へ
-    awk -v id="$1" '
-        $0 ~ "id: " id {f=1}
-        f && /run: \|/ {r=1; next}
-        r { if ($0 ~ /^          /) { sub(/^          /, ""); print } else if ($0 ~ /^[[:space:]]*$/) { print "" } else { exit } }
-    ' "$SF_TOOLS_DIR/templates/.github/workflows/wf-propagate.yml"
-}

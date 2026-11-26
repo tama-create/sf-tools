@@ -37,6 +37,9 @@ case "$*" in
     "api repos/"*"/actions/secrets/SF_PRIVATE_KEY"*)
         [[ "${MOCK_GH_NO_PK:-}" == "1" ]] && exit 1
         echo "2026-10-21T00:00:0$(cat "${MOCK_CALL_LOG%/*}/pk.ver" 2>/dev/null || echo 0)Z"; exit 0 ;;
+    # main の branches.txt（one-way・tier-switch の段階の判定）: MOCK_GH_BRANCHES_TXT の中身（\n 区切り。既定は main だけ）を、base64 で返す
+    #   次の「/branches」の分岐にも当たる名前のため、その前に置く
+    "api repos/"*"/contents/sf-tools/config/branches.txt?ref=main"*) printf '%b\n' "${MOCK_GH_BRANCHES_TXT:-main}" | base64; exit 0 ;;
     "api repos/"*"/branches"*)           printf 'main\nadmin\n'; exit 0 ;;
     # Secret・Variable の状態（manual-delete の再現）: $MB/secrets.txt（名前の行）・$MB/vars.txt（「名前=値」の行）。ファイルがなければ、空
     #   MOCK_GH_SECRET_SET_FAIL_FIRST=1: secret set の 1 回目が失敗する（元に戻す処理の失敗と、終了時の再試行の再現）
@@ -66,7 +69,7 @@ case "$*" in
         _p="${2#repos/*/contents/}"; _p="${_p%%\?*}"
         grep -qxF "$_p" "${MOCK_CALL_LOG%/*}/mainfiles.txt" 2>/dev/null && { echo "sha-$_p"; exit 0; }
         exit 1 ;;
-    # propagate-fail の再現: staging ブランチ（先頭の SHA。MOCK_GH_NO_STAGING=1: なし / MOCK_GH_STAGING_MOVE=1: 3 回目以降は、別の SHA）と、そのファイル（$MB/stagingfiles.txt）
+    # staging ブランチの再現（one-way の後始末など）: staging ブランチ（先頭の SHA。MOCK_GH_NO_STAGING=1: なし / MOCK_GH_STAGING_MOVE=1: 3 回目以降は、別の SHA）と、そのファイル（$MB/stagingfiles.txt）
     "api repos/"*"/git/ref/heads/staging"*)
         [[ "${MOCK_GH_NO_STAGING:-}" == "1" ]] && exit 1
         _d="${MOCK_CALL_LOG%/*}"

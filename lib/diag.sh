@@ -12,8 +12,9 @@
 #   ？ 確認できなかった（通信エラー・権限不足など。不足には数えない）
 #
 # 【確認する項目】（「段階」は、diag_run に渡したブランチ名。PROD / STG / DEV の接尾辞は main / staging / develop だけ）
-#   1. リポジトリ    : GitHub にあるか / 渡した段階のブランチがあるか / ワークフロー 5 本
-#                      （wf-metasync / wf-propagate / wf-release / wf-sequence / wf-validate の .yml）があるか
+#   1. リポジトリ    : GitHub にあるか / 渡した段階のブランチがあるか / ワークフロー 4 本
+#                      （wf-metasync / wf-release / wf-sequence / wf-validate の .yml）があるか。廃止した wf-propagate.yml が
+#                      残っていれば ！（注意。sf-sync-wf.sh --remove wf-propagate.yml で消す。不足には数えない）
 #   2. Secrets       : PAT_TOKEN / SLACK_BOT_TOKEN / SF_PRIVATE_KEY / 段階ごとの SF_CONSUMER_KEY_*
 #   3. Variables     : SLACK_CHANNEL_ID / 段階ごとの SF_USERNAME_* / SF_INSTANCE_URL_*
 #                      （組織の種類の記録 SF_ORG_ID_* がないときは ！（注意）を出す。不足には数えない: 古いバージョンで
@@ -22,7 +23,7 @@
 #                      （対象ファイル確認・デプロイ検証・順序チェック。required_status_check_names）と合っているか。
 #                      合っていないと、条件が満たされず、PR をマージできない（以前の sf-init は、「validate / 対象ファイル確認」の
 #                      形で登録していた）。Ruleset が無い（無料プランの非公開リポジトリなど）・読めないときは、？ にする（不足に数えない）
-#   5. 直近の実行    : wf-metasync / wf-release / wf-validate / wf-propagate の、直近の 1 回の結果（参考。成功以外の
+#   5. 直近の実行    : wf-metasync / wf-release / wf-validate の、直近の 1 回の結果（参考。成功以外の
 #                      完了は ！、未実行・実行中・確認できないときは ？。不足には数えない）
 #   Salesforce 側（外部クライアントアプリ・JWT 接続）は、ログインが必要なため、ここでは確認しない。
 #   直近の wf-metasync / wf-release が成功していれば、JWT 接続は、できている。
@@ -187,13 +188,17 @@ diag_run() {
         _diag_line unknown "ブランチの一覧を、確認できませんでした"
     fi
     if names=$(_diag_names workflows "$repo"); then  # 条件チェック
-        for wf in wf-metasync.yml wf-propagate.yml wf-release.yml wf-sequence.yml wf-validate.yml; do
+        for wf in wf-metasync.yml wf-release.yml wf-sequence.yml wf-validate.yml; do
             if _diag_has "$names" "$wf"; then
                 _diag_line ok "ワークフロー ${wf} があります"
             else
                 _diag_line ng "ワークフロー ${wf} がありません" "force-* の中で sf-sync-wf.sh"
             fi
         done
+        # 廃止した wf-propagate.yml（main の変更を、環境のブランチへ流す。一方通行の原則に反する）が残っていれば、注意
+        if _diag_has "$names" "wf-propagate.yml"; then
+            _diag_line warn "廃止したワークフロー wf-propagate.yml が残っています（force-* の中で sf-sync-wf.sh --remove wf-propagate.yml で消します）"
+        fi
     else
         _diag_line unknown "ワークフローの一覧を、確認できませんでした"
     fi
@@ -235,7 +240,7 @@ diag_run() {
 
     # --- 5. 直近のワークフローの実行（参考。Salesforce 側の接続は、ここで分かる） ---
     echo "  直近のワークフローの実行（成功していれば、Salesforce への JWT 接続も、できています）" >&2
-    for wf in wf-metasync.yml wf-release.yml wf-validate.yml wf-propagate.yml; do
+    for wf in wf-metasync.yml wf-release.yml wf-validate.yml; do
         _diag_last_run "$repo" "$wf"
     done
 

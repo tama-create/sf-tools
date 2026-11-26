@@ -225,11 +225,12 @@ run git checkout main || die "main ブランチへの切り替えに失敗しま
 if git ls-remote --exit-code --heads origin "$ADD_TIER" > /dev/null 2>&1; then
     # 条件チェックのため run 不使用
     log "INFO" "${ADD_TIER} ブランチはリモートに既に存在します（スキップ）。"
-    # --remove-tier で残したブランチは、main より遅れていることがある（段階が無効のあいだ、伝播されないため）
+    # --remove-tier で残したブランチは、main より遅れていることがある（main の変更は、環境のブランチへ伝播しないため。
+    #   doc/one-way-promotion-design.md 3.7）。遅れていても、開発のブランチの PR（main を取り込み済み）で、追いつく
     if run git fetch origin "$ADD_TIER"; then
         _behind=$(git rev-list --count "origin/${ADD_TIER}..origin/main" 2>/dev/null || echo "")  # VAR=$(cmd) のため run 不使用
         if [[ -n "$_behind" && "$_behind" != "0" ]]; then
-            log "WARNING" "${ADD_TIER} ブランチは、main より ${_behind} コミット遅れています。PR をマージしたあと、次に main へマージしたときの伝播で、main が取り込まれます。すぐ取り込むには、wf-propagate を手動で実行してください。"
+            log "WARNING" "${ADD_TIER} ブランチは、main より ${_behind} コミット遅れています。（main の変更は伝播しません。開発のブランチは sf-push.sh で main を取り込むため、その PR をマージすると追いつきます）"
         fi
     fi
 else

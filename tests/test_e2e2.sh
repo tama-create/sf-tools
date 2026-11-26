@@ -11,7 +11,7 @@
 #  27. シナリオ dist-main（配布版 = SF_TOOLS_BRANCH 未設定で、sf-tools の main が使われる。rr の直後だけ）
 #  28. シナリオ metasync-diff（組織側だけの Apex が、wf-metasync で main に反映される。組織と main を、必ず戻す）
 #  29. 中断→再開（run.sh --interrupt）と、git の shim（main への push を 1 回だけ失敗させる）
-#  30. シナリオ propagate-fail（main → staging の伝播のコンフリクト。失敗し、通知され、staging は変わらない）
+#  30. シナリオ one-way（一方通行の決まり。前提の確認・開始の警告・途中で止まったときの後始末。流れ全体は e2e で確かめる）
 #  31. シナリオ restart-org（sf-restart で接続先を staging の組織に切り替え → dry-run → 元に戻す）
 #  33. シナリオ sync-wf（改変したワークフローを sf-sync-wf が見つけて直す・--remove は雛形にあるファイルを拒否）
 #  34. シナリオ update-secret（sf-update-secret で秘密鍵を同じ鍵で上書き・更新日時が進む・誤ったパスは拒否される）
@@ -378,89 +378,68 @@ EOF
 }
 
 # ------------------------------------------------------------------------------
-# 30. シナリオ propagate-fail（main → staging の伝播のコンフリクト。失敗し、通知され、staging は変わらない）
+# 30. シナリオ one-way（一方通行の決まり。前提の確認・開始の警告・途中で止まったときの後始末）
+#   流れ全体（印・R2・R1・最後の守り）は、実際の GitHub Actions の結果を見るため、e2e（e2e.yml）で確かめる。ここは、実行できない条件と、後始末
 # ------------------------------------------------------------------------------
-test_e2e_scenario_propagate_fail() {
-    echo ""; echo -e "${CLR_HEAD}[TEST] scenario.sh propagate-fail（main・staging に衝突を作る → wf-propagate が失敗 → 削除して戻す）${CLR_RST}"
+test_e2e_scenario_one_way() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] scenario.sh one-way（前提の確認・開始の警告・途中で止まったときの後始末）${CLR_RST}"
     _mk_cleanup_env
-    local rc f="e2e-propagate-conflict.txt"
-    local ok_log=$'##[error]コンフリクト: main → staging のマージでコンフリクトが発生しました\nSlack の応答: {"ok":true}'
-    export E2E_CONCLUSION_TRIES=1 VERIFY_DISPATCH_TRIES=2
-    _reset_pf() {
-        rm -f "$MB/disp.cnt" "$MB/concl.cnt" "$MB/stg.cnt"
+    local rc fx_stg="$CB/fx-ow-stg.env" fx_main="$FX"
+    cp "$FX" "$fx_stg"; echo 'E2E_SFDX_AUTH_URL_STG=force://PlatformCLI::stgurl@example.my.salesforce.com' >> "$fx_stg"
+    export E2E_CONCLUSION_TRIES=1 E2E_LIST_RETRY=1
+    _reset_ow() {
+        rm -f "$MB/concl.cnt" "$MB/deleted.txt" "$MB/apex_created.txt"
         : > "$MB/mainfiles.txt"; : > "$MB/stagingfiles.txt"; : > "$MOCK_CALL_LOG"
-        unset MOCK_GH_NO_STAGING MOCK_GH_STAGING_MOVE
+        unset MOCK_SF_APEX MOCK_GH_PR_EXIT MOCK_GH_BRANCHES_TXT
     }
 
-    # --- 成功: 衝突を作る → wf-propagate が失敗・通知 → staging は変わらない → ファイルを削除 ---
-    _reset_pf
-    MOCK_GH_CONCL_LIST="failure" MOCK_GH_RUN_LOG="$ok_log" _run_scenario -y propagate-fail; rc=$?
-    [[ $rc -eq 0 ]] || sed 's/\x1b\[[0-9;]*m//g' "$MB/out.log" | tail -25
-    assert_exit_ok "$rc" "propagate-fail: 成功する"
-    assert_file_contains "$MB/out.log" "成功（" "propagate-fail: 結果が成功と表示される"
-    assert_equals "$(grep -c "api -X PUT .*contents/${f}.*branch=main" "$MOCK_CALL_LOG")" "1" "propagate-fail: main に、ファイルを 1 回コミットする"
-    assert_equals "$(grep -c "api -X PUT .*contents/${f}.*branch=staging" "$MOCK_CALL_LOG")" "1" "propagate-fail: staging に、ファイルを 1 回コミットする"
-    assert_equals "$(grep -c 'workflow run wf-propagate.yml' "$MOCK_CALL_LOG")" "1" "propagate-fail: wf-propagate を 1 回起動する"
-    assert_equals "$(grep -c 'workflow run' "$MOCK_CALL_LOG")" "1" "propagate-fail: ほかのワークフローは、起動しない"
-    assert_equals "$(grep -c 'api -X DELETE repos/.*/contents/' "$MOCK_CALL_LOG")" "2" "propagate-fail: 削除は、main・staging の 2 回だけ"
-    assert_equals "$(wc -c < "$MB/mainfiles.txt" | tr -d ' ')" "0" "propagate-fail: main に、ファイルが残らない"
-    assert_equals "$(wc -c < "$MB/stagingfiles.txt" | tr -d ' ')" "0" "propagate-fail: staging に、ファイルが残らない"
-    assert_file_not_contains "$MOCK_CALL_LOG" "pr merge" "propagate-fail: PR は、扱わない"
+    # --- 1 段階（main の branches.txt に staging がない）→ 実行できない（何も作らない）---
+    _reset_ow
+    FX="$fx_stg" _run_scenario -y one-way; rc=$?
+    assert_exit_fail "$rc" "one-way: 1 段階のリポジトリでは、実行できない"
+    assert_file_contains "$MB/out.log" "2 段階以上" "one-way: 2 段階以上が要ると報告する"
+    assert_file_not_contains "$MOCK_CALL_LOG" "git/refs -f ref=refs/heads/e2e-ow-" "one-way: 実行できないときは、ブランチを作らない"
 
-    # --- 伝播が成功してしまった（衝突を検出できない）→ 失敗（それでも、削除する）---
-    # --- 続けて動かす: main にコミットしてよいシナリオのあとも、次のシナリオが、「main が変わった」と誤判定されない（基準を更新する）---
-    _reset_pf; rm -f "$MB/mainsha.cnt"   # main の SHA の呼び出し回数を、0 に戻す（1 回目は、元の SHA・2 回目以降は、変わった SHA を返すため）
-    MOCK_GH_MAIN_SHA_CHANGE=1 MOCK_GH_RUN_IDS="11" MOCK_GH_CONCL_LIST="failure" MOCK_GH_RUN_LOG="$ok_log" _run_scenario -y propagate-fail log-secrets; rc=$?
-    [[ $rc -eq 0 ]] || sed 's/\x1b\[[0-9;]*m//g' "$MB/out.log" | tail -15
-    assert_exit_ok "$rc" "propagate-fail → log-secrets: 続けて動かしても、成功する（main の基準を更新する）"
-    assert_file_contains "$MB/out.log" "log-secrets: 成功" "propagate-fail → log-secrets: あとのシナリオも、実行される（状態が変わったと誤判定しない）"
-    assert_file_not_contains "$MB/out.log" "状態（main の SHA" "propagate-fail → log-secrets: 状態の変化として、報告されない"
+    # --- staging の組織が、鍵一式にない → 実行できない ---
+    _reset_ow
+    MOCK_GH_BRANCHES_TXT='main\nstaging' FX="$fx_main" _run_scenario -y one-way; rc=$?
+    assert_exit_fail "$rc" "one-way: staging の組織が鍵一式になければ、実行できない"
+    assert_file_contains "$MB/out.log" "鍵一式にありません" "one-way: 組織がないことを報告する"
+    assert_file_not_contains "$MOCK_CALL_LOG" "git/refs -f ref=refs/heads/e2e-ow-" "one-way: 組織がないときは、ブランチを作らない"
 
-    _reset_pf
-    MOCK_GH_CONCL_LIST="success" MOCK_GH_RUN_LOG="$ok_log" _run_scenario -y propagate-fail; rc=$?
-    assert_exit_fail "$rc" "propagate-fail: wf-propagate が成功してしまったら、失敗する"
-    assert_equals "$(wc -c < "$MB/mainfiles.txt" | tr -d ' ')" "0" "propagate-fail: 失敗しても、main のファイルは削除される"
-    assert_equals "$(wc -c < "$MB/stagingfiles.txt" | tr -d ' ')" "0" "propagate-fail: 失敗しても、staging のファイルは削除される"
+    # --- 組織に、すでに Hello World がある → 実行できない（何もデプロイ・作成しない）---
+    _reset_ow
+    MOCK_SF_APEX="SfToolsE2eHello" MOCK_GH_BRANCHES_TXT='main\nstaging' FX="$fx_stg" _run_scenario -y one-way; rc=$?
+    assert_exit_fail "$rc" "one-way: 組織にすでに Hello World があれば、実行できない"
+    assert_file_contains "$MB/out.log" "cleanup.sh --yes" "one-way: 消し方（cleanup.sh）を案内する"
+    assert_file_not_contains "$MOCK_CALL_LOG" "git/refs -f ref=refs/heads/e2e-ow-" "one-way: 実行できないときは、ブランチを作らない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "post-destructive-changes" "one-way: 実行できないときは、組織の Apex を消さない"
 
-    # --- Slack への通知が出ていない → 失敗 ---
-    _reset_pf
-    MOCK_GH_CONCL_LIST="failure" MOCK_GH_RUN_LOG="コンフリクト" _run_scenario -y propagate-fail; rc=$?
-    assert_exit_fail "$rc" "propagate-fail: Slack への通知（ok:true）がなければ、失敗する"
+    # --- PR を作れずに止まる → 後始末で、作ったブランチだけを消す（マージしない・組織に触れない・段階のファイルを消さない）---
+    _reset_ow
+    MOCK_GH_PR_EXIT=1 MOCK_GH_BRANCHES_TXT='main\nstaging' FX="$fx_stg" _run_scenario -y one-way; rc=$?
+    assert_exit_fail "$rc" "one-way: PR を作れなければ、失敗する"
+    assert_file_contains "$MOCK_CALL_LOG" "git/refs -f ref=refs/heads/e2e-ow-" "one-way: 開発のブランチ（e2e-ow-時刻）を作った"
+    assert_equals "$(grep -cE 'api -X DELETE repos/tamashimon-org/force-e2e-20260101-000000/git/refs/heads/e2e-ow-[0-9]{6}$' "$MOCK_CALL_LOG")" "1" "one-way: 後始末で、作ったブランチを 1 回だけ消す"
+    assert_file_not_contains "$MOCK_CALL_LOG" "pr merge" "one-way: 止まったときは、マージしない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "post-destructive-changes" "one-way: リリースしていないので、組織の Apex を消さない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "api -X DELETE repos/tamashimon-org/force-e2e-20260101-000000/contents/" "one-way: 段階のブランチに入れていないので、ファイルを消さない"
 
-    # --- staging が、失敗したのに、動いた（壊した）→ 失敗 ---
-    _reset_pf
-    MOCK_GH_STAGING_MOVE=1 MOCK_GH_CONCL_LIST="failure" MOCK_GH_RUN_LOG="$ok_log" _run_scenario -y propagate-fail; rc=$?
-    assert_exit_fail "$rc" "propagate-fail: 失敗した伝播で、staging の先頭が動いたら、失敗する"
-    assert_file_contains "$MB/out.log" "ブランチを壊さない" "propagate-fail: 確認の項目が、表示される"
-
-    # --- ワークフローが動かない → 失敗（途中で止まっても、削除する）---
-    _reset_pf
-    MOCK_GH_WORKFLOW_EXIT=1 _run_scenario -y propagate-fail; rc=$?
-    assert_exit_fail "$rc" "propagate-fail: wf-propagate を起動できなければ、失敗する"
-    assert_equals "$(wc -c < "$MB/mainfiles.txt" | tr -d ' ')" "0" "propagate-fail: 途中で止まっても、main のファイルは削除される"
-    assert_equals "$(wc -c < "$MB/stagingfiles.txt" | tr -d ' ')" "0" "propagate-fail: 途中で止まっても、staging のファイルは削除される"
-
-    # --- 前提: staging がない → 実行できない（何もコミットしない）---
-    _reset_pf
-    MOCK_GH_NO_STAGING=1 _run_scenario -y propagate-fail; rc=$?
-    assert_exit_fail "$rc" "propagate-fail: staging がなければ、実行できない"
-    assert_file_contains "$MB/out.log" "実行できない" "propagate-fail: 「実行できない」と報告する"
-    assert_file_not_contains "$MOCK_CALL_LOG" "api -X PUT" "propagate-fail: 実行できないときは、何もコミットしない"
-    assert_file_not_contains "$MOCK_CALL_LOG" "api -X DELETE" "propagate-fail: 実行できないときは、何も削除しない"
-
-    # --- 前提: すでにファイルがある → 実行できない（触れない）---
-    _reset_pf; echo "$f" > "$MB/mainfiles.txt"
-    _run_scenario -y propagate-fail; rc=$?
-    assert_exit_fail "$rc" "propagate-fail: main にすでにファイルがあれば、実行できない"
-    assert_file_contains "$MB/mainfiles.txt" "$f" "propagate-fail: 実行できないときは、既存のファイルに触れない"
-
-    # --- 開始の警告 ---
-    _reset_pf
-    _run_scenario propagate-fail < <(printf 'N\n'); rc=$?
-    assert_exit_fail "$rc" "propagate-fail: 開始の確認で N → 中止する"
-    assert_file_contains "$MB/out.log" "書き込み（propagate-fail）" "propagate-fail: 警告に、書き込む内容が表示される"
-    assert_file_not_contains "$MOCK_CALL_LOG" "api -X PUT" "propagate-fail: N のとき、何もコミットしない"
-    unset E2E_CONCLUSION_TRIES VERIFY_DISPATCH_TRIES
+    # --- 開始の警告（N で中止。書き込む内容を表示する）---
+    _reset_ow
+    MOCK_GH_BRANCHES_TXT='main\nstaging' FX="$fx_stg" _run_scenario one-way < <(printf 'N\n'); rc=$?
+    assert_exit_fail "$rc" "one-way: 開始の確認で N → 中止する"
+    assert_file_contains "$MB/out.log" "書き込み（one-way）" "one-way: 警告に、書き込む内容が表示される"
+    assert_file_not_contains "$MOCK_CALL_LOG" "git/refs -f ref=refs/heads/e2e-ow-" "one-way: N のとき、ブランチを作らない"
+    # 流れ（実環境でしか動かせないため、骨組みを確認する）
+    assert_file_contains "$E2E_DIR/scenario.sh" 'e2e_release_mark_ok "$REPO_FULL" "$head1" "$p_tier"' "one-way: P へのリリースのあと、印を確かめる"
+    assert_file_contains "$E2E_DIR/scenario.sh" '"[R2]"' "one-way: 積み重ねの抜けは、wf-validate のログの R2 で確かめる"
+    assert_file_contains "$E2E_DIR/scenario.sh" '"[R1]"' "one-way: 順序外は、ログの R1 で確かめる"
+    assert_file_contains "$E2E_DIR/scenario.sh" '"順序チェック")" == "failure"' "one-way: 順序外の PR で、wf-sequence の「順序チェック」が失敗する"
+    assert_file_contains "$E2E_DIR/scenario.sh" '"リリースを止めました"' "one-way: 最後の守り（マージしても、wf-release が止める）を確かめる"
+    assert_file_contains "$E2E_DIR/scenario.sh" '_chk "先端のコミットに、${n_tier} のリリースの印が付いていない"' "one-way: 止めたリリースには、印が付かない"
+    unset E2E_CONCLUSION_TRIES E2E_LIST_RETRY
+    FX="$fx_main"
     teardown "$CB"
 }
 
@@ -823,7 +802,7 @@ test_e2e_scenario_validate_fail
 test_e2e_scenario_dist_main
 test_e2e_scenario_metasync_diff
 test_e2e_interrupt
-test_e2e_scenario_propagate_fail
+test_e2e_scenario_one_way
 test_e2e_scenario_restart_org
 test_e2e_scenario_sync_wf
 test_e2e_scenario_update_secret

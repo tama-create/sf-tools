@@ -2,6 +2,7 @@
 
 > 本書は sf-tools の設計哲学・競合との差別化・AI 時代における位置づけをまとめた内部ドキュメントです。
 > 実装詳細（ファイルパス・コマンド等）は各スクリプトおよび `sf-cicd-strategy.md` を参照してください。
+> **2026-11-26 追記（一方通行のリリース）:** 下りの伝播（`wf-propagate.yml` と、`sf-metasync.sh` の手順 12。main の変更を staging・develop のブランチへ流す）は**廃止した**。本書の伝播の記述は、当時の設計の記録として残す。今の決まりは `doc/one-way-promotion-design.md`（develop → staging → main に同じコミットのまま上げる・リリースの印・R0〜R3）。
 
 ---
 

@@ -662,7 +662,8 @@ _tier_wf_block() {
 }
 
 # tier_switch_wf_problems: origin/main の workflow が、段階の切り替えに対応しているかを確かめる（doc/tier-scaling-design.md 5.2 の 3）
-#   wf-propagate.yml・wf-release.yml・wf-validate.yml: 判定の部分が、この sf-tools の雛形と同じで、判定の呼び出しの印（# sf-tools: tier-check）がある
+#   wf-release.yml・wf-validate.yml: 判定の部分が、この sf-tools の雛形と同じで、判定の呼び出しの印（# sf-tools: tier-check）がある
+#   wf-propagate.yml: ない（2026-11-26 に廃止。下りの伝播をしない。doc/one-way-promotion-design.md 3.7。残っていれば、対応していない扱い）
 #   wf-metasync.yml: sf-metasync.sh を呼んでいて、workflow の中に（コメントの行を除いて）git push がない（判定は sf-metasync.sh が行う）
 #   出力: 対応していないファイル名（空白区切り。すべて対応していれば空）。origin/main は、呼び出し側が git fetch しておく
 #   git show "origin/main:<パス>" は、MSYS_NO_PATHCONV=1 を付けて呼ぶ。Windows の Git Bash は、「origin/main:.github/…」のような引数を、
@@ -670,7 +671,7 @@ _tier_wf_block() {
 #   macOS・Linux では、この変数は何もしない）
 tier_switch_wf_problems() {
     local tmpl_dir="${SF_TOOLS_DIR}/templates/.github/workflows" bad="" wf remote_wf tmpl_wf rb tb remote_ms
-    for wf in wf-propagate.yml wf-release.yml wf-validate.yml; do
+    for wf in wf-release.yml wf-validate.yml; do
         remote_wf=$(MSYS_NO_PATHCONV=1 git show "origin/main:.github/workflows/${wf}" 2>/dev/null || true)  # VAR=$(cmd) のため run 不使用（ないときは空）
         tmpl_wf=$(cat "${tmpl_dir}/${wf}" 2>/dev/null || true)                                            # VAR=$(cmd) のため run 不使用
         rb=$(_tier_wf_block "$remote_wf"); tb=$(_tier_wf_block "$tmpl_wf")                               # VAR=$(cmd) のため run 不使用
@@ -678,6 +679,10 @@ tier_switch_wf_problems() {
             bad="${bad}${wf} "
         fi
     done
+    # 廃止した wf-propagate.yml が残っていれば、対応していない扱い（main の変更を、環境のブランチへ流し続けるため）
+    if MSYS_NO_PATHCONV=1 git cat-file -e "origin/main:.github/workflows/wf-propagate.yml" 2>/dev/null; then  # 条件チェックのため run 不使用
+        bad="${bad}wf-propagate.yml "
+    fi
     remote_ms=$(MSYS_NO_PATHCONV=1 git show "origin/main:.github/workflows/wf-metasync.yml" 2>/dev/null || true)  # VAR=$(cmd) のため run 不使用
     if ! printf '%s\n' "$remote_ms" | grep -qF 'sf-metasync.sh' \
        || printf '%s\n' "$remote_ms" | grep -v '^[[:space:]]*#' | grep -qF 'git push'; then  # 条件チェックのため run 不使用

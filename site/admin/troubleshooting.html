@@ -32,7 +32,8 @@
   <tbody>
     <tr><td><code>sf-init.sh</code> が途中で止まった・中断したい</td><td><a href="#init">sf-init が止まった・中断したい</a></td></tr>
     <tr><td><code>main</code> / <code>staging</code> への PR が、いつまでもマージできない</td><td><a href="#required-checks">必須チェックの名前の食い違い</a></td></tr>
-    <tr><td><code>wf-metasync</code> / <code>wf-propagate</code> が失敗する</td><td><a href="#pat">PAT_TOKEN</a>・<a href="#propagate-conflict">伝播のコンフリクト</a>・<a href="#metasync-hold">削除の保留</a></td></tr>
+    <tr><td><code>wf-metasync</code> が失敗する</td><td><a href="#pat">PAT_TOKEN</a>・<a href="#metasync-hold">削除の保留</a></td></tr>
+    <tr><td>「⛔ 一方通行の決まりにより、この PR はマージできません」・「リリースを止めました」</td><td><a href="#one-way">一方通行の決まりで止められた</a></td></tr>
     <tr><td><code>wf-validate</code> / <code>wf-sequence</code> が動かない・失敗する</td><td><a href="#wf-missing">検証のワークフロー</a></td></tr>
     <tr><td>手元の <code>sf-metasync.sh</code> が「組織が、ログインされていません」「SF_ORG_ID_PROD を読み取れませんでした」と止まる</td><td><a href="#metasync-org">接続先の組織が決まらない</a></td></tr>
     <tr><td>マージしたのに、組織にリリースされない</td><td><a href="#release-skip">リリースされない</a></td></tr>
@@ -76,25 +77,25 @@
 </ol>
 <p>新しく作るプロジェクトは、最初から、正しい名前で登録されます。<a href="workflows.html#sync"><code>sf-sync-wf.sh</code></a> はワークフローのファイルだけを書き換え、ブランチ保護は変えないので、この直し方は、手で行う必要があります。必須チェックの仕組みは、<a href="workflows.html#required-checks">ワークフローのページ</a>にあります。</p>
 
-<h3 id="pat"><code>wf-metasync</code> / <code>wf-propagate</code> が失敗する（<code>PAT_TOKEN</code>）</h3>
-<p><code>wf-metasync</code>（[metasync] メタ同期）と <code>wf-propagate</code>（[propagate] ブランチ伝播）は、Secret <code>PAT_TOKEN</code>（GitHub の Token）を使って、リポジトリを取得し、<code>main</code> / <code>staging</code> / <code>develop</code> へプッシュします。失敗したステップで、原因を見分けます。</p>
+<h3 id="pat"><code>wf-metasync</code> が失敗する（<code>PAT_TOKEN</code>）</h3>
+<p><code>wf-metasync</code>（[metasync] メタ同期）は、Secret <code>PAT_TOKEN</code>（GitHub の Token）を使って、リポジトリを取得し、<code>main</code> へプッシュします。失敗したステップで、原因を見分けます。</p>
 <table>
   <thead><tr><th>失敗したところ</th><th>主な原因</th></tr></thead>
   <tbody>
     <tr><td>最初のステップ「ソースコードを取得」</td><td><code>PAT_TOKEN</code> が登録されていない・有効期限が切れた・無効にした</td></tr>
     <tr><td>プッシュのところで「push declined due to repository rule violations」</td><td>Token の持ち主が、リポジトリの Admin ではない（ブランチ保護を迂回できない）</td></tr>
-    <tr><td>伝播のプッシュ（ワークフローのファイルの変更を含むとき）</td><td>Token に <code>workflow</code> の権限がない</td></tr>
+    <tr><td>プッシュ（ワークフローのファイルの変更を含むとき）</td><td>Token に <code>workflow</code> の権限がない</td></tr>
   </tbody>
 </table>
 <p>どの場合も、リポジトリのオーナー（組織の場合は、その組織の管理者）のアカウントで、新しい Token（Classic。<code>repo</code>・<code>workflow</code>）を発行し、リポジトリの Secrets の <code>PAT_TOKEN</code> を登録し直してください（手順は<a href="secrets.html#other">そのほかの情報の登録し直し</a>）。<code>sf-init.sh</code> は、登録のときに、Token の有効性・権限・持ち主が Admin であることを確かめますが、そのあとで Token を無効にしたり、期限が切れたり、持ち主の権限が変わったりすると、この状態になります。<code>sf-update-secret.sh</code> では、<code>PAT_TOKEN</code> は更新できません。</p>
 <div class="box warn">
   <div class="title">この失敗は、Slack に通知されません</div>
-  <p><code>wf-metasync</code> は、成功も失敗も通知しません。<code>wf-propagate</code> が通知するのは、コンフリクトのときだけです。Actions の画面か、<a href="maintenance.html#status"><code>sf-init.sh --status</code></a> の「直近の実行」で、ときどき確かめてください。</p>
+  <p><code>wf-metasync</code> は、成功も失敗も通知しません。Actions の画面か、<a href="maintenance.html#status"><code>sf-init.sh --status</code></a> の「直近の実行」で、ときどき確かめてください。</p>
 </div>
 <p>手元で <code>sf-metasync.sh</code> を実行した時刻と重なって、<code>wf-metasync</code> のプッシュが拒まれることもあります。このときは、Actions の画面から、もう一度実行してください。</p>
 
 <h3 id="metasync-hold"><code>wf-metasync</code> が、削除の保留で失敗する</h3>
-<p><code>wf-metasync</code> は、組織で削除されたものを、<code>main</code> からも消します。ただし、次のときは、<strong>削除だけを保留</strong>にして（ファイルは残します）、追加・変更の同期とほかのブランチへの伝播は済ませたうえで、ジョブを失敗（終了コード 3）として表示します。</p>
+<p><code>wf-metasync</code> は、組織で削除されたものを、<code>main</code> からも消します。ただし、次のときは、<strong>削除だけを保留</strong>にして（ファイルは残します）、追加・変更の同期は済ませたうえで、ジョブを失敗（終了コード 3）として表示します。</p>
 <table>
   <thead><tr><th>保留の理由</th><th>意味</th></tr></thead>
   <tbody>
@@ -123,9 +124,19 @@
 </table>
 <p>GitHub Actions の <code>wf-metasync</code> は、この仕組みを使いません（ワークフローが、JWT で、<code>main</code> の組織にログインします）。</p>
 
-<h3 id="propagate-conflict"><code>wf-propagate</code> が、コンフリクトで失敗する</h3>
-<p><code>main</code> へのマージのあと、<code>main</code> を <code>staging</code> / <code>develop</code> へ伝えるときに、同じ場所が別々に変更されていると、コンフリクト（衝突）します。このときは、そのブランチへのマージを取り消して（ブランチは変わりません）、Slack に、コンフリクトしたブランチ・PR・ログの URL を通知し、失敗で終わります。</p>
-<p>コンフリクトしたブランチは、手で解消します（<code>main</code> を、そのブランチにマージします）。解消するまで、そのブランチは <code>main</code> から遅れたままです。</p>
+<h3 id="one-way">一方通行の決まりで止められた</h3>
+<p>リリースは、<code>develop</code> → <code>staging</code> → <code>main</code> の順に、同じコミットのまま上げる決まりです（<a href="workflows.html#one-way">一方通行の決まり</a>）。破った PR は、次のところで止まります。理由は、PR のコメント・Actions のログ・Slack に、<code>[R1]</code> などの印つきで出ます。</p>
+<table>
+  <thead><tr><th>表示</th><th>原因と直し方</th></tr></thead>
+  <tbody>
+    <tr><td><code>順序チェック</code> が失敗・「⛔ 一方通行の決まりにより、この PR はマージできません」（<code>[R1]</code>「… は、まだ develop に出ていません」）</td><td>PR の先端のコミットが、前の段階にまだ出ていません。前の段階に出したあとで、変更を push したときも、こうなります（コミットが変わるため）。<code>sf-next.sh</code> が示す段階（前の段階）から、出し直します。この PR は閉じます</td></tr>
+    <tr><td><code>デプロイ検証</code> が失敗・「<code>[R2]</code> 前に … へ出したリリース（PR #N）の部品が、今回の deploy-target.txt・remove-target.txt にありません」</td><td>同じブランチから、前に同じ段階へ出した部品を、ターゲットファイルから外しています（上の段階へ、前の部品が届かなくなるため）。外した部品を、<code>deploy-target.txt</code> に戻すか、組織から消すなら <code>remove-target.txt</code> に書いて、push し直します</td></tr>
+    <tr><td><code>[R3]</code>「環境ブランチ … から、直接 … へは出せません」</td><td>環境ブランチから PR を出しています。作業用のブランチから出し直します</td></tr>
+    <tr><td><code>[R0]</code>「判断できません」</td><td><code>main</code> の <code>branches.txt</code> がない・読めない・並びが正しくない、フォークからの PR、GitHub に問い合わせられない、などです。理由を見て、直してから、Actions の画面の「Re-run jobs」で、やり直します</td></tr>
+    <tr><td><code>wf-release</code> が失敗・Slack に「:no_entry: … リリースを止めました（一方通行の決まり …）」</td><td>ブランチ保護が効かない組織などで、止められた PR がマージされました。<strong>組織は変わっていません</strong>（最後の守り）。ブランチには入ったので、正しい順序で、開発のブランチから出し直します（前の段階へ PR → リリース → 次の段階へ）</td></tr>
+  </tbody>
+</table>
+<p>リリースの印を付けるのに失敗したとき（<code>wf-release</code> の「リリースの印を付ける」が失敗）は、組織には出ていますが、印がないので、次の段階の PR が <code>[R1]</code> で止まります。その <code>wf-release</code> の実行を「Re-run jobs」でやり直すと、印が付きます（同じものを、もう一度出します。Salesforce のデプロイは、全部成功するか、何もしないかなので、途中まで出ることはありません）。</p>
 
 <h3 id="wf-missing"><code>wf-validate</code> / <code>wf-sequence</code> が動かない・失敗する</h3>
 <p>動かないときは、次を確かめてください。</p>
@@ -140,13 +151,14 @@
   <li><strong><code>wf-validate</code> が「Salesforce 組織にログイン」で失敗する:</strong> <code>main</code> / <code>staging</code> 以外への PR は、<code>develop</code> の組織で検証します。<code>develop</code> の組織を登録していない構成（<code>main</code> のみ・<code>main</code> + <code>staging</code>）では、このステップで失敗します。PR の出し先を確かめてください。</li>
   <li><strong>PR のコメントが「⚠️ 検証が実行されませんでした」:</strong> 検証の前のステップ（ログイン・sf-tools の取得など）で止まったか、取り消し・時間切れです。Actions の画面で、失敗したステップを見ます。</li>
   <li><strong>「❌ 検証失敗」:</strong> dry-run の検証そのものが失敗しています。コメントのログに、原因（どのファイルの、どの問題か）が出ます。開発者が、ターゲットファイルか変更の内容を直して、プッシュし直します。</li>
-  <li><strong><code>順序チェック</code> が失敗する:</strong> 環境ブランチ（<code>main</code> / <code>staging</code> / <code>develop</code> など）から、直接 PR を出しています。作業用のブランチから出し直してください。</li>
+  <li><strong><code>順序チェック</code> が失敗する:</strong> 前の段階に出していないコミットを出しているか、環境ブランチ（<code>main</code> / <code>staging</code> / <code>develop</code> など）から、直接 PR を出しています（<a href="#one-way">一方通行の決まりで止められた</a>）。</li>
 </ul>
 
 <h3 id="release-skip">マージしたのに、組織にリリースされない</h3>
 <ul>
   <li>ターゲットファイル（<code>deploy-target.txt</code>・<code>remove-target.txt</code>）に中身がないと、<code>wf-release</code> の「リリース実行」はスキップされます。Slack にも通知されません。</li>
-  <li><code>wf-propagate</code> や <code>wf-metasync</code> が <code>staging</code> / <code>develop</code> へ伝えた変更は、PR のマージではないので、リリースされません。その段階にリリースするには、その段階への PR を出して、マージします。順序を飛ばしてマージしたときの注意は、<a href="../reference/commands-dev.html#sf-next"><code>sf-next.sh</code> の説明</a>にあります。</li>
+  <li><code>wf-metasync</code> が <code>main</code> へ取り込んだ変更は、PR のマージではないので、リリースされません。その段階にリリースするには、その段階への PR を出して、マージします。</li>
+  <li>一方通行の決まりを破った PR は、マージしても、<code>wf-release</code> が組織へ出しません（Slack に「リリースを止めました」）。<a href="#one-way">一方通行の決まりで止められた</a>を見てください。</li>
   <li><code>main</code> / <code>staging</code> / <code>develop</code> 以外のブランチへのマージでは、リリースは行われません。</li>
 </ul>
 

@@ -71,6 +71,7 @@ fi
 readonly RET_OK=0           # 正常終了
 readonly RET_NG=1           # 異常終了
 readonly RET_NO_CHANGE=2    # 変更なし
+readonly RET_NEED_ANSWER=20 # 確認待ち（AI 操作で、答えのない質問に来た。lib/input.sh の need_answer。doc/ai-operation-design.md）
 
 # ------------------------------------------------------------------------------
 # 3. 必須変数のバリデーションとログ初期化
@@ -518,6 +519,15 @@ run() {
         cat "$tmp_out"
     fi
 
+    # AI 操作（SF_TOOLS_AI=1）で、子のコマンドが確認待ち（終了コード 20）で止まったら、自分も 20 で終わる。
+    #   下の判定は 0 以外をすべて RET_NG（1）に変えるため、ここで先に抜ける（呼び出し側の || die で、別のエラーに変えない。
+    #   doc/ai-operation-design.md 4.6）
+    if [[ "$status" -eq "$RET_NEED_ANSWER" && "${SF_TOOLS_AI:-}" == "1" ]]; then
+        log "WARNING" "子のコマンドが、確認待ちで止まりました（終了コード ${RET_NEED_ANSWER}）: ${_run_masked}"
+        rm -f "$tmp_out"
+        exit "$RET_NEED_ANSWER"
+    fi
+
     local is_success=$RET_NG
     # 出力の全文を、組み込みの read で読む（grep を起動しない。Windows の Git Bash では、1 回 約 65ms かかる）。
     #   read は、区切り（NUL）を見つけたときだけ成功を返す。NUL がなければ、最後まで読んで、失敗を返す（読めた分は、入っている）。
@@ -717,7 +727,8 @@ readonly SF_RESERVED_ORG_ALIASES="prod staging develop main"
 
 # ------------------------------------------------------------------------------
 # 10. 責務ごとのファイル（ここから読み込む。呼び出し側は、common.sh だけを source すればよい）
-#   input.sh     ... 対話入力（read_input / read_key / press_enter / read_or_quit / read_secret / ask_yn）
+#   input.sh     ... 対話入力（read_input / read_key / press_enter / read_or_quit / read_secret / ask_yn）と、
+#                    AI 操作の確認待ち（need_answer。SF_TOOLS_AI=1 のとき。読み込みの最後に、答えの受け取り _ai_answers_init）
 #   platform.sh  ... OS・外部コマンド（is_gitbash / set_var / sed_inplace / base64_oneline / run_with_timeout /
 #                    run_isolated_home / check_sf_cli / check_java_cli / check_vscode_extension / open_browser）
 #   project.sh   ... プロジェクト（force-*・GitHub・組織・ブランチ）。関数の一覧は、project.sh の冒頭
@@ -729,3 +740,6 @@ _COMMON_LIB_DIR="${BASH_SOURCE[0]%/*}"
 source "${_COMMON_LIB_DIR}/input.sh"
 source "${_COMMON_LIB_DIR}/platform.sh"
 source "${_COMMON_LIB_DIR}/project.sh"
+# AI 操作（SF_TOOLS_AI=1）: 自分の先頭の答えを、SF_TOOLS_ANSWERS から受け取り、残りだけを子に渡す（ほかの処理の前に行う。
+#   doc/ai-operation-design.md 4.6）。AI の印がなければ、何もしない
+_ai_answers_init

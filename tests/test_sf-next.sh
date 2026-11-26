@@ -591,8 +591,38 @@ test_merged_without_oid_is_merged() {
     teardown "$td" "$mb"
 }
 
+# AI 操作（SF_TOOLS_AI=1）: next.pr=n → 表示だけ（ブラウザを開かない）／=y → 開く／答えなし → ブラウザを開く前に 20
+test_ai_mode() {
+    local td mb mh out ec
+    setup_std_env td mb mh
+    create_mock_git_with_remote "$mb"
+    create_mock_browser "$mb"
+    export MOCK_GIT_BRANCH="feature/my-feature"
+    export MOCK_GH_MERGED_PRS="feature/my-feature->develop"
+    export MOCK_GH_OPEN_PRS=""
+
+    out=$(cd "$td" && echo "y" | PATH="$mb:$PATH" SF_TOOLS_AI=1 bash "$SF_TOOLS_DIR/bin/sf-next.sh" 2>&1); ec=$?
+    assert_equals "$ec" "20" "AI・答えなし → 20（標準入力の y は読まない）"
+    assert_output_contains "$out" "\[確認待ち\] next.pr: develop の組織で、動作を確かめ終えましたか？ staging にPRを出しますか？" "AI・答えなし → 確認待ちの行"
+    assert_file_not_contains "$MOCK_CALL_LOG" "compare/" "AI・答えなし → ブラウザを開かない"
+
+    : > "$MOCK_CALL_LOG"
+    out=$(cd "$td" && PATH="$mb:$PATH" SF_TOOLS_AI=1 SF_TOOLS_ANSWERS="next.pr=n" bash "$SF_TOOLS_DIR/bin/sf-next.sh" 2>&1); ec=$?
+    assert_exit_ok "$ec" "AI・next.pr=n → 正常終了"
+    assert_output_contains "$out" "▶.*staging" "AI・next.pr=n → 状況を表示する"
+    assert_file_not_contains "$MOCK_CALL_LOG" "compare/" "AI・next.pr=n → ブラウザを開かない"
+
+    : > "$MOCK_CALL_LOG"
+    out=$(cd "$td" && PATH="$mb:$PATH" SF_TOOLS_AI=1 SF_TOOLS_ANSWERS="next.pr=y" bash "$SF_TOOLS_DIR/bin/sf-next.sh" 2>&1); ec=$?
+    assert_exit_ok "$ec" "AI・next.pr=y → 正常終了"
+    assert_file_contains "$MOCK_CALL_LOG" "compare/staging...feature/my-feature" "AI・next.pr=y → PR の作成画面を開く"
+    unset MOCK_GIT_BRANCH MOCK_GH_MERGED_PRS MOCK_GH_OPEN_PRS
+    teardown "$td" "$mb"
+}
+
 test_merged_stale_next_is_develop
 test_merged_stale_count_unknown
+test_ai_mode
 test_merged_without_oid_is_merged
 test_merged_squash_is_merged
 test_merged_stale_with_open_pr

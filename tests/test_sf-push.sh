@@ -246,8 +246,52 @@ test_push_protected_branch() {
     teardown "$td" "$mb"
 }
 
+# -m <ファイル>: VS Code を開かず、同じ整形でコミットする／整形の結果が空 → コミットしない／ファイルがない → 取り込みの前に中断。
+# AI 操作（SF_TOOLS_AI=1）で -m がない → 取り込み（merge）・ステージ（add）の前に、確認待ち（20）で止まる
+test_push_message_option_and_ai() {
+    local td mb mh out ec
+    setup_std_env td mb mh
+    _create_mocks_push "$mb" "$td" "cancel"   # code が呼ばれても、何も書かない（-m の内容だけが使われることを確かめる）
+    printf '\n# コメント\n件名 -m\r\n\n本文\n\n' > "$td/msg.txt"
+
+    out=$(cd "$td" && PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-push.sh" -m msg.txt 2>&1); ec=$?
+    assert_exit_ok "$ec" "-m → 正常終了"
+    assert_file_not_contains "$mb/calls.log" "code " "-m → VS Code を開かない"
+    assert_file_contains "$mb/calls.log" "commit" "-m → git commit が呼ばれた"
+    assert_equals "$(cat "$mb/commit_msg.txt" 2>/dev/null)" "$(printf '件名 -m\n\n本文')" "-m → VS Code の経路と同じ整形（CR・コメント・前後の空行を除き、途中の空行は残す）"
+    assert_file_exists "$td/msg.txt" "-m のファイルは消さない"
+
+    : > "$mb/calls.log"; rm -f "$mb/commit_msg.txt"
+    printf '# コメントだけ\n\n' > "$td/empty.txt"
+    out=$(cd "$td" && PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-push.sh" -m empty.txt 2>&1); ec=$?
+    assert_exit_ok "$ec" "-m・整形の結果が空 → 0（何もしない）"
+    assert_file_not_contains "$mb/calls.log" "commit" "-m・整形の結果が空 → コミットしない"
+
+    : > "$mb/calls.log"
+    out=$(cd "$td" && PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-push.sh" -m nofile.txt 2>&1); ec=$?
+    assert_exit_fail "$ec" "-m のファイルがない → 中断"
+    assert_file_not_contains "$mb/calls.log" "merge" "-m のファイルがない → 取り込まない"
+    assert_file_not_contains "$mb/calls.log" "add" "-m のファイルがない → ステージしない"
+    out=$(cd "$td" && PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-push.sh" -m 2>&1); ec=$?
+    assert_exit_fail "$ec" "-m の値がない → 中断"
+
+    : > "$mb/calls.log"
+    out=$(cd "$td" && PATH="$mb:$PATH" SF_TOOLS_AI=1 bash "$SF_TOOLS_DIR/bin/sf-push.sh" 2>&1); ec=$?
+    assert_equals "$ec" "20" "AI・-m なし → 20"
+    assert_output_contains "$out" "\[確認待ち\] push.message:" "AI・-m なし → 確認待ちの行"
+    assert_file_not_contains "$mb/calls.log" "merge" "AI・-m なし → 取り込まない（副作用の前に止まる）"
+    assert_file_not_contains "$mb/calls.log" "add" "AI・-m なし → ステージしない"
+
+    : > "$mb/calls.log"
+    out=$(cd "$td" && PATH="$mb:$PATH" SF_TOOLS_AI=1 bash "$SF_TOOLS_DIR/bin/sf-push.sh" -m msg.txt 2>&1); ec=$?
+    assert_exit_ok "$ec" "AI・-m あり → 正常終了"
+    assert_file_contains "$mb/calls.log" "push" "AI・-m あり → git push が呼ばれた"
+    teardown "$td" "$mb"
+}
+
 test_push_no_changes
 test_push_unpushed_only
+test_push_message_option_and_ai
 test_push_detached_head
 test_push_protected_branch
 test_push_cancel

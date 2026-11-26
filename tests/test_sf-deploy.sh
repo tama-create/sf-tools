@@ -276,7 +276,53 @@ test_personal_alias_allowed() {
     teardown "$td" "$mb"
 }
 
+# AI 操作（SF_TOOLS_AI=1。doc/ai-operation-design.md）: 答えがなければ、反映の前に確認待ち（20）で止まる／
+# deploy.force=y なら反映する／ほかの名前の答えは使わない／標準入力の答えは読まない／共有環境は、答えがあっても拒否する
+test_ai_mode() {
+    local td mb mh out ec
+    setup_std_env td mb mh
+    create_all_mocks "$mb"
+    setup_release_dir "$td" "feature/deploy-test"
+    export MOCK_GIT_BRANCH="feature/deploy-test"
+    export MOCK_SF_ORG_JSON='{"result":{"alias":"testorg","id":"00D000000000001AAA"}}'
+
+    out=$( echo "Y" | ( cd "$td" && HOME="$mh" PATH="$mb:$PATH" SF_TOOLS_AI=1 bash "$SF_TOOLS_DIR/bin/sf-deploy.sh" --no-open ) 2>&1 ); ec=$?
+    assert_equals "$ec" "20" "AI・答えなし → 終了コード 20（標準入力の Y は読まない）"
+    assert_output_contains "$out" "\[確認待ち\] deploy.force: 強制デプロイ（--force）を実行します。続行しますか？" "AI・答えなし → 確認待ちの行（名前と質問の文）"
+    assert_file_not_contains "$MOCK_CALL_LOG" "project deploy" "AI・答えなし → 反映しない"
+
+    : > "$MOCK_CALL_LOG"
+    out=$( ( cd "$td" && HOME="$mh" PATH="$mb:$PATH" SF_TOOLS_AI=1 SF_TOOLS_ANSWERS="next.pr=y" bash "$SF_TOOLS_DIR/bin/sf-deploy.sh" --no-open ) 2>&1 ); ec=$?
+    assert_equals "$ec" "20" "AI・ほかの名前の答えだけ → 20（流用しない）"
+    assert_file_not_contains "$MOCK_CALL_LOG" "project deploy" "AI・ほかの名前の答えだけ → 反映しない"
+
+    : > "$MOCK_CALL_LOG"
+    out=$( ( cd "$td" && HOME="$mh" PATH="$mb:$PATH" SF_TOOLS_AI=1 SF_TOOLS_ANSWERS="deploy.force=n" bash "$SF_TOOLS_DIR/bin/sf-deploy.sh" --no-open ) 2>&1 ); ec=$?
+    assert_exit_fail "$ec" "AI・deploy.force=n → 中断"
+    assert_file_not_contains "$MOCK_CALL_LOG" "project deploy" "AI・deploy.force=n → 反映しない"
+
+    : > "$MOCK_CALL_LOG"
+    out=$( ( cd "$td" && HOME="$mh" PATH="$mb:$PATH" SF_TOOLS_AI=1 SF_TOOLS_ANSWERS="deploy.force=y" bash "$SF_TOOLS_DIR/bin/sf-deploy.sh" --no-open ) 2>&1 ); ec=$?
+    assert_exit_ok "$ec" "AI・deploy.force=y → 反映する"
+    assert_output_contains "$out" "AI 経由の回答: deploy.force=y" "AI・答えを使ったことを表示する"
+    assert_file_contains "$MOCK_CALL_LOG" "project deploy" "AI・deploy.force=y → sf-release.sh で反映した"
+
+    # 共有環境（予約名）は、AI の答え・SF_DEPLOY_CONFIRMED があっても、拒否する（最後の守り。sf-release.sh を直接でも）
+    : > "$MOCK_CALL_LOG"
+    out=$( ( cd "$td" && HOME="$mh" PATH="$mb:$PATH" SF_TOOLS_AI=1 SF_TOOLS_ANSWERS="deploy.force=y" SF_DEPLOY_CONFIRMED=1 bash "$SF_TOOLS_DIR/bin/sf-deploy.sh" --no-open -t develop ) 2>&1 ); ec=$?
+    assert_exit_fail "$ec" "AI・共有環境(develop)・答えあり → 拒否"
+    assert_output_contains "$out" "共有環境（予約名）のため" "AI・共有環境 → 拒否の旨"
+    assert_file_not_contains "$MOCK_CALL_LOG" "project deploy" "AI・共有環境 → 反映しない"
+    : > "$MOCK_CALL_LOG"
+    out=$( ( cd "$td" && HOME="$mh" PATH="$mb:$PATH" SF_TOOLS_AI=1 SF_TOOLS_ANSWERS="release.x=y" SF_DEPLOY_CONFIRMED=1 bash "$SF_TOOLS_DIR/bin/sf-release.sh" --release --no-open -t staging ) 2>&1 ); ec=$?
+    assert_exit_fail "$ec" "AI・sf-release.sh を直接・共有環境(staging)・SF_DEPLOY_CONFIRMED=1 → 拒否"
+    assert_file_not_contains "$MOCK_CALL_LOG" "project deploy" "AI・sf-release.sh を直接・共有環境 → 反映しない"
+    unset MOCK_GIT_BRANCH MOCK_SF_ORG_JSON
+    teardown "$td" "$mb"
+}
+
 test_feature_branch
+test_ai_mode
 test_reserved_alias_blocked
 test_target_invalid_forms_rejected
 test_branch_unavailable_blocked

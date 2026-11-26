@@ -746,7 +746,7 @@ ensure_sf_tools_latest() {
     if [[ -n "$dirty" || "$ahead" -gt 0 ]]; then
         die "sf-tools に未コミットの変更または未 push のコミットがあるため、自動では更新できません。"
     fi
-    ask_yn "▶ sf-tools を更新しますか？" || die "sf-tools が最新ではないため、続行できません。"
+    ask_yn "▶ sf-tools を更新しますか？" update.sftools || die "sf-tools が最新ではないため、続行できません。"
     run git -C "$dir" pull --ff-only origin "$cur" || die "sf-tools の更新に失敗しました。"
     log "SUCCESS" "sf-tools を更新しました。"
     return 2

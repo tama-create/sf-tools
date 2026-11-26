@@ -33,17 +33,25 @@
   <div class="flow">
     <div class="node dev"><span class="who">① 書く</span><strong>ターゲットファイル</strong><small>何を反映・削除するか</small></div>
     <div class="arrow">→</div>
-    <div class="node dev"><span class="who">② ランチャー [4]</span><strong>Dryrun</strong><small>反映できるか確かめる</small></div>
+    <div class="node dev"><span class="who">② ランチャー [2]</span><strong>Dryrun</strong><small>反映できるか確かめる</small></div>
     <div class="arrow">→</div>
-    <div class="node dev"><span class="who">③ ランチャー [2]</span><strong>Push</strong><small>変更を GitHub に送る</small></div>
+    <div class="node dev"><span class="who">③ ランチャー [4]</span><strong>Push</strong><small>変更を GitHub に送る</small></div>
     <div class="arrow">→</div>
-    <div class="node dev"><span class="who">④ ランチャー [3]</span><strong>Next</strong><small>次の PR の出し先を確認し、PR を作る</small></div>
+    <div class="node dev"><span class="who">④ ランチャー [5]</span><strong>Next</strong><small>次の PR の出し先を確認し、PR を作る</small></div>
     <div class="arrow">→</div>
     <div class="node auto"><span class="who">🤖 自動</span><strong>検証・反映</strong><small>PR を作ると検証、マージすると反映</small></div>
   </div>
   <figcaption>実線の箱は、あなたが行うことです。点線の箱は、自動で行われます。②の Dryrun は、自分用の組織に対して行います。</figcaption>
 </figure>
 
+<h2 id="ai">AI に言葉で頼む（Claude Code・Codex）</h2>
+<p>ランチャーの番号の代わりに、Claude Code や Codex に、言葉で頼むこともできます。「チェックして」「反映できるか試して」「反映して」「コミットして」「PR を出して」のように話しかけると、AI が、裏で同じコマンドを動かします。AI の決まりは、sf-tools の手順書（<code>~/sf-tools/doc/ai-dev-loop.md</code>）にあり、プロジェクトの <code>CLAUDE.md</code>・<code>AGENTS.md</code> から読まれます。</p>
+<ul>
+  <li><strong>確かめるだけの操作</strong>（チェック・dry-run・状況の確認・デバッグログ）は、頼むとすぐ動きます。</li>
+  <li><strong>書き込む操作</strong>（自分の組織への反映・コミットと送信・PR の作成画面を開く）は、AI が、何が起きるか（反映先の組織・変更の一覧・コミットのメッセージの案・PR の先）を示して、「はい」の返事を待ってから動かします。勝手に進めることはありません。</li>
+  <li>コマンドの確認（Y/N）は、AI が勝手に答えません。答えを用意していない確認に来ると、コマンドは止まり、AI が、その質問をそのまま聞き返します。</li>
+  <li>共有の環境の組織と本番の組織には、AI に頼んでも、手元からは反映できません（ランチャーと同じです）。作業の開始（<code>sf-start.sh</code>）・組織の切り替え・新しい作業（<code>sf-job.sh</code>）は、これまでどおり人が行います。</li>
+</ul>
 <h2 id="launcher">ランチャーで進める（おすすめ）</h2>
 <p>毎日の操作は、ランチャーのメニューから、<strong>番号を 1 つ押すだけ</strong>で実行できます。コマンドの名前を覚える必要は、ありません。コマンドを直接打つこともできます（慣れている方は、そちらでも構いません）。便利なので、ランチャーをおすすめしています。</p>
 <div class="box ok">

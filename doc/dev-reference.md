@@ -186,7 +186,7 @@
 
 > 仕様の正本は、各ファイルの冒頭コメント（【提供する関数】）と、関数ごとの説明コメント。ここは要点だけ。
 > **構成**: `lib/common.sh` が窓口で、ログ（`log`）・実行（`run`）・終了（`die`）・`show_help`・`reject_unknown_args`・`print_admin_warning`・`json_get`・`_mask_secrets` / `_strip_ansi` / `_strip_term_codes` と定数を持つ。残りの関数は、責務ごとのファイルに分けてあり、`common.sh` が、最後に `input.sh` → `platform.sh` → `project.sh` の順で `source` する（呼び出し側は、`common.sh` だけを `source` すればよい。この 3 つは、単独では `source` しない）。
-> - `lib/input.sh`（対話入力: `read_input` / `read_key` / `press_enter` / `read_or_quit` / `read_secret` / `ask_yn`）
+> - `lib/input.sh`（対話入力: `read_input` / `read_key` / `press_enter` / `read_or_quit` / `read_secret` / `ask_yn`・AI 操作の確認待ち `need_answer`）
 > - `lib/platform.sh`（OS・外部コマンド: `is_gitbash` / `set_var` / `sed_inplace` / `base64_oneline` / `run_with_timeout` / `run_isolated_home` / `check_sf_cli` / `check_java_cli` / `check_vscode_extension` / `open_browser`）
 > - `lib/project.sh`（プロジェクト: `get_target_org` / `check_force_dir` / `resolve_init_identity` / `resolve_job_identity` / `check_gh_owner` / `get_branch_list` / `get_tier_list` / `is_reserved_org_alias` / `is_protected_branch` / `required_status_check_names` / `ensure_sf_tools_latest` / `merge_package_xml` / 管理者用のクローンの関数など）
 >
@@ -258,7 +258,8 @@ source 時の動作: Bash 3.2 未満なら `exit 1` → `LOG_FILE` の確認 →
 | `read_or_quit` | `read_or_quit VAR PROMPT` | テキスト入力（空 Enter は再入力・q / Q・EOF で中断） |
 | `read_secret` | `read_secret VAR PROMPT` | 秘密情報の入力（1 文字ごとに `*` を表示・BackSpace 対応・制御文字は無視・Enter のあと「N 文字を受け取りました（先頭: ghp_…）」を表示・空 Enter は再入力（端末のときは貼り付け方を案内）・q で中断・末尾の CR を除去・改行なしの EOF は確定）。Token の入力に使う（値は画面・ログに出さない） |
 | `_mask_secrets` | `_mask_secrets TEXT` | GitHub（`ghp_` / `gho_` / `ghu_` / `ghs_` / `ghr_` / `github_pat_`）と Slack（`xoxa-` / `xoxb-` / `xoxp-` / `xoxr-` / `xoxs-`）の Token らしい文字列を伏せ字にする。`run` のコマンドの行（画面とログの CMD の行・error.log の見出し）に自動適用される。コマンドの出力には適用しない（保険。Token はそもそも引数に含めず、環境変数・標準入力・`GIT_ASKPASS` で渡すこと） |
-| `ask_yn` | `ask_yn "質問"` | Y/N/q 確認（1文字即時入力。Y = 0 / N = 1 / q は `die`。それ以外の文字・空 Enter は無視） |
+| `ask_yn` | `ask_yn "質問" [名前]` | Y/N/q 確認（1文字即時入力。Y = 0 / N = 1 / q は `die`。それ以外の文字・空 Enter は無視）。名前は AI 操作の質問の名前（`<コマンド>.<質問>`。例: `deploy.force`）。AI 操作のとき、`SF_TOOLS_ANSWERS` の、その名前の答えを 1 回だけ使う |
+| `need_answer` | `need_answer 名前 "質問"` | AI 操作（`SF_TOOLS_AI=1`）の確認待ち。`[確認待ち] 名前: 質問` を標準エラーに出し、終了コード 20（`RET_NEED_ANSWER`）で終わる（`die` ではない）。AI 操作のとき、`read_key`・`read_input`・`read_secret` は、入力のループの前で、名前なしでこれを呼ぶ（`press_enter`・`read_or_quit`・`wizard_confirm` も止まる）。`run` は、AI 操作のとき、子の 20 をそのまま返して終わる。設計: `doc/ai-operation-design.md` |
 
 ### 3.2 `log` のレベル
 

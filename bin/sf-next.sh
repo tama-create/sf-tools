@@ -53,6 +53,9 @@
 #   - PR の状態の判定には gh（認証済み）が必要。使えないときも止まらず、PR なしとして判定する
 #
 # 【補足】
+#   - AI 操作（環境変数 SF_TOOLS_AI=1。doc/ai-operation-design.md）: PR を出すかの質問の名前は next.pr。
+#     SF_TOOLS_ANSWERS="next.pr=n" で、状況の表示だけ（ブラウザを開かない）。"next.pr=y" で、PR の作成画面を開く
+#     （人の了承を得たときだけ）。答えがなければ、ブラウザを開く前に「[確認待ち] next.pr: …」を出して、終了コード 20 で終わる
 #   - 表示は、標準エラーに出す。見出し「<現在のブランチ> のマージ状況」の下に、マージの順で 1 行ずつ（状態ごと）:
 #       ✓ <ブランチ>   マージ済み                 : merged
 #       ▶ <ブランチ>   マージ済み・その後の変更（N コミット）が未反映 → 次のPR先 : merged_stale のうち、次の PR 先
@@ -67,7 +70,7 @@
 #       ✓ develop   マージ済み
 #       → staging   PR発行中
 #       ▶ main      次のPR先
-#   - 終了コード: 0 = 正常終了（N で終了した場合を含む） / 1 = エラー・q で中断
+#   - 終了コード: 0 = 正常終了（N で終了した場合を含む） / 1 = エラー・q で中断 / 20 = 確認待ち（AI 操作）
 #   - ログ: ./sf-tools/logs/sf-next.log（実行のたびに作り直す）
 # ==============================================================================
 
@@ -327,7 +330,7 @@ for idx in "${!REVERSED[@]}"; do
     fi
 done
 
-if ask_yn "$CONFIRM_MSG"; then
+if ask_yn "$CONFIRM_MSG" next.pr; then   # next.pr: AI 操作の質問の名前（doc/ai-operation-design.md）
     # リモートリポジトリ情報を取得
     #   http(s):// の URL に含まれる認証情報（//<ユーザー>:<Token>@）は除く（Token を、画面・ログ・ブラウザの履歴に出さないため）。
     #   lib/project.sh の git_origin_redacted は *** に置き換える（表示用）ため、ブラウザで開く URL には使えない

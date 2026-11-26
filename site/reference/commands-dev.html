@@ -295,10 +295,11 @@ sf-launcher.sh --fzf     # fzf でインクリメンタル検索</code></pre>
 <ul>
   <li>終了コードは、中断が <code>1</code>、それ以外は <code>sf-release.sh</code> の終了コードです。</li>
   <li>ログは <code>./sf-tools/logs/sf-deploy.log</code>（実行のたびに作り直す）で、<code>sf-release.sh</code> の処理のログは <code>./sf-tools/logs/sf-release.log</code> です。</li>
+  <li>AI 操作（環境変数 <code>SF_TOOLS_AI=1</code>）では、確認の質問の名前は <code>deploy.force</code> です。AI は、人の了承を得たときだけ <code>SF_TOOLS_ANSWERS="deploy.force=y"</code> で答えます。答えがなければ、反映の前に <code>[確認待ち] deploy.force: …</code> を出して、終了コード 20 で止まります。共有環境・本番の拒否は変わりません。</li>
 </ul>
 
 <h2 id="sf-push"><code>sf-push.sh</code></h2>
-<pre><code>sf-push.sh [-v]</code></pre>
+<pre><code>sf-push.sh [-m &lt;ファイル&gt;] [-v]</code></pre>
 <p>カレントフォルダの下の変更を、VS Code で入力したコミットメッセージで、コミットしてプッシュします。<code>force-*</code> フォルダの中で実行します（<code>git</code> と <code>code</code>（VS Code のコマンド）が必要です）。<code>-v</code>（<code>--verbose</code>）・<code>-h</code>（<code>--help</code>。1 つ目の引数のときだけ）以外の引数は、「不明なオプションです」で中断します。</p>
 <h3>主な処理</h3>
 <ol>
@@ -312,6 +313,8 @@ sf-launcher.sh --fzf     # fzf でインクリメンタル検索</code></pre>
 </ol>
 <h3>補足</h3>
 <ul>
+  <li><code>-m &lt;ファイル&gt;</code> を付けると、VS Code を開かず、そのファイルの内容をコミットメッセージにします（整形は同じ。整形して空なら、何もせず終わります）。ファイルがない・読めないときは、取り込み・ステージの前に中断します。AI に頼むときに使います。</li>
+  <li>AI 操作（環境変数 <code>SF_TOOLS_AI=1</code>）で <code>-m</code> がないときは、取り込み・ステージの前に、<code>[確認待ち] push.message</code> を出して、終了コード 20 で止まります（<a href="../guide/daily.html#ai">AI に言葉で頼む</a>）。</li>
   <li>コミットメッセージは、<code>#</code> で始まる行（前の空白は可）と、先頭・末尾の空行を除きます。途中の空行（件名と本文の間など）は残ります。残りが空なら、コミットもプッシュもせずに終了します。このとき、手順 2 の取り込みと、手順 3 のステージは、元に戻らず、そのまま残ります。</li>
   <li>手順 4 の「プッシュだけ」は、コミットは成功してプッシュが失敗したあとの、やり直しのためです。もう一度 <code>sf-push.sh</code> を実行すれば、取り残されません。手順 2 で取り込んだコミットも、未プッシュのコミットに数えます（追跡先のブランチがないときは、未プッシュ 0 件として扱います）。</li>
   <li>ステージするのも、「変更なし」の判定も、カレントフォルダの下だけです。ただし、コミットでは、パスを指定しません。カレントの外で、前からステージ済みだった変更も、一緒にコミットされます。</li>
@@ -379,6 +382,7 @@ sf-launcher.sh --fzf     # fzf でインクリメンタル検索</code></pre>
   <li>リモートの最新を取得できなかったときは、警告を出して続行し、手元の <code>origin/*</code> で判定します。</li>
   <li>次の PR 先がないときは、「PR発行中」が残っていれば「マージ完了を待ってください」、なければ「全ブランチへのマージが完了しています！」と表示して終わります。</li>
   <li>終了コードは、正常終了（<code>N</code> で終了した場合を含む）が <code>0</code>、エラー・<code>q</code> での中断が <code>1</code> です。ログは <code>./sf-tools/logs/sf-next.log</code> です（実行のたびに作り直します）。</li>
+  <li>AI 操作（環境変数 <code>SF_TOOLS_AI=1</code>）では、PR を出すかの質問の名前は <code>next.pr</code> です。<code>SF_TOOLS_ANSWERS="next.pr=n"</code> で状況の表示だけ、<code>"next.pr=y"</code> で PR の作成画面を開きます。答えがなければ、ブラウザを開く前に、終了コード 20 で止まります。</li>
 </ul>
 
 <h2 id="sf-restart"><code>sf-restart.sh</code></h2>

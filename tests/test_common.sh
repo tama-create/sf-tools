@@ -1128,6 +1128,82 @@ test_json_get() {
 }
 
 # ------------------------------------------------------------------------------
+# AI 操作（SF_TOOLS_AI=1。doc/ai-operation-design.md 1.4）: 入力の関数の確認待ち・答えの受け取り・run の 20 の伝わり方
+# ------------------------------------------------------------------------------
+test_ai_mode_input() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] AI 操作: 入力の関数の確認待ちと、答えの受け取り${CLR_RST}"
+    local td out rc
+    td=$(mktemp -d "${TMPDIR:-/tmp}/test-ai-XXXX")
+    # _ai NAME CODE [stdin]: SCRIPT_NAME=NAME で common.sh を読み、CODE を実行する（サブシェル。標準エラーも受け取る）
+    _ai() { printf '%s' "${3:-}" | ( export SF_INIT_MODE=1; SCRIPT_NAME="$1"; readonly SCRIPT_NAME LOG_FILE="$td/t.log" LOG_MODE=NEW
+              source "$SF_TOOLS_DIR/lib/common.sh"; source "$SF_TOOLS_DIR/lib/wizard.sh"; eval "$2" ) 2>&1; }
+
+    # AI の印なし: 今までどおり、標準入力の答えを読む
+    out=$(_ai sf-deploy 'ask_yn "続行しますか？" deploy.force && echo YES' "y"); rc=$?
+    assert_output_contains "$out" "YES" "印なし: 標準入力の y を読む（名前は使わない）"
+
+    # 答えを使う（1 回だけ）・n は 1・ほかの名前は使わない・名前なしは止まる
+    out=$(SF_TOOLS_AI=1 SF_TOOLS_ANSWERS="deploy.force=y" _ai sf-deploy 'ask_yn "続行しますか？" deploy.force && echo YES'); rc=$?
+    assert_output_contains "$out" "YES" "AI: 答え y → 0"
+    assert_output_contains "$out" "AI 経由の回答: deploy.force=y" "AI: 答えを使ったことを表示する"
+    out=$(SF_TOOLS_AI=1 SF_TOOLS_ANSWERS="deploy.force=n" _ai sf-deploy 'ask_yn "続行しますか？" deploy.force || echo NO'); rc=$?
+    assert_output_contains "$out" "NO" "AI: 答え n → 1"
+    out=$(SF_TOOLS_AI=1 SF_TOOLS_ANSWERS="deploy.force=y" _ai sf-deploy 'ask_yn "続行しますか？" deploy.force; ask_yn "続行しますか？" deploy.force; echo NEVER'); rc=$?
+    assert_equals "$rc" "20" "AI: 同じ名前の 2 回目 → 20（2 回目は、人が見ていない）"
+    assert_output_not_contains "$out" "NEVER" "AI: 2 回目で止まり、先へ進まない"
+    out=$(SF_TOOLS_AI=1 SF_TOOLS_ANSWERS="deploy.other=y" _ai sf-deploy 'ask_yn "続行しますか？" deploy.force; echo NEVER' "y"); rc=$?
+    assert_equals "$rc" "20" "AI: ほかの名前の答え・標準入力の y → 使わず 20"
+    assert_output_contains "$out" "\[確認待ち\] deploy.force: 続行しますか？" "AI: 確認待ちの行（名前と質問の文）"
+    out=$(SF_TOOLS_AI=1 _ai sf-deploy 'ask_yn "名前のない質問"; echo NEVER' "y"); rc=$?
+    assert_equals "$rc" "20" "AI: 名前のない ask_yn → 20"
+    assert_output_contains "$out" "\[確認待ち\] (名前なし): 名前のない質問" "AI: 名前のない質問は、(名前なし) で止まる"
+
+    # いちばん下の入力の関数は、すべて止まる（標準入力を読まない）
+    local f
+    for f in 'read_key k "  1 文字: "' 'read_input v "  文字: "' 'press_enter' 'read_or_quit v "  名前: "' 'wizard_confirm "始めますか"'; do
+        out=$(SF_TOOLS_AI=1 _ai sf-deploy "$f; echo NEVER" "y"); rc=$?
+        assert_equals "$rc" "20" "AI: ${f%% *} → 20（入力を読まない）"
+    done
+    out=$(SF_TOOLS_AI=1 SF_TOOLS_ANSWERS="deploy.secret=y" _ai sf-deploy 'read_secret v "  Token: "; echo NEVER' "secret"); rc=$?
+    assert_equals "$rc" "20" "AI: read_secret は、答え・標準入力があっても 20"
+    assert_output_not_contains "$out" "NEVER" "AI: read_secret で止まる"
+
+    # 答えの形・受け取り（自分の先頭と update だけ。残りを子に渡す）
+    out=$(SF_TOOLS_AI=1 SF_TOOLS_ANSWERS="deploy.force=yes" _ai sf-deploy 'echo NEVER'); rc=$?
+    assert_equals "$rc" "1" "AI: 値が y/n でない → 中断（1）"
+    out=$(SF_TOOLS_AI=1 SF_TOOLS_ANSWERS="Deploy.force=y" _ai sf-deploy 'echo NEVER'); rc=$?
+    assert_equals "$rc" "1" "AI: 名前の形が違う → 中断"
+    out=$(SF_TOOLS_AI=1 SF_TOOLS_ANSWERS="deploy.force=y deploy.force=n" _ai sf-deploy 'echo NEVER'); rc=$?
+    assert_equals "$rc" "1" "AI: 同じ名前が 2 つ → 中断"
+    assert_output_contains "$out" "同じ名前が 2 つあります" "AI: 同じ名前が 2 つ → 理由"
+    out=$(SF_TOOLS_AI=1 SF_TOOLS_ANSWERS="deploy.force=y next.pr=n update.sftools=y release.x=n" _ai sf-deploy 'echo "REST=[$SF_TOOLS_ANSWERS]"'); rc=$?
+    assert_output_contains "$out" "REST=\[next.pr=n release.x=n\]" "AI: 自分（deploy）と update の答えを受け取り、残りだけを子に渡す"
+    out=$(SF_TOOLS_AI=1 SF_TOOLS_ANSWERS="deploy.force=y" _ai sf-deploy 'bash -c "echo CHILD=[\$SF_TOOLS_ANSWERS]"'); rc=$?
+    assert_output_contains "$out" "CHILD=\[\]" "AI: 子のプロセスには、親が受け取った答えが渡らない"
+    out=$(SF_TOOLS_ANSWERS="deploy.force=yes" _ai sf-deploy 'echo OK'); rc=$?
+    assert_output_contains "$out" "OK" "印なし: SF_TOOLS_ANSWERS は見ない（形が違っても中断しない）"
+
+    # run: AI のとき、子の 20 をそのまま返す（|| die で 1 に変えない）。印なしは、今までどおり 1
+    out=$(SF_TOOLS_AI=1 _ai sf-deploy 'run bash -c "exit 20" || die "変わった"; echo NEVER'); rc=$?
+    assert_equals "$rc" "20" "AI: run の子が 20 → 自分も 20（|| die で変わらない）"
+    out=$(_ai sf-deploy 'run bash -c "exit 20"; echo "RC=$?"'); rc=$?
+    assert_output_contains "$out" "RC=1" "印なし: run の子が 20 → 今までどおり 1"
+    rm -rf "$td"
+    unset -f _ai
+}
+
+# 入力の関数を $( ) の中で呼ばない（サブシェルの exit 20 が、外に伝わらないため。doc/ai-operation-design.md 1.4.3）。
+# 例外は sf-log.sh の「自動で取りますか？」の 1 か所だけ（端末でないときは、聞かずに返るため、AI のときは届かない）
+test_no_input_in_command_substitution() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] 入力の関数を \$( ) の中で呼ばない${CLR_RST}"
+    local hits
+    hits=$(grep -rnE '\$\((read_key|read_input|read_secret|read_or_quit|press_enter|ask_yn|wizard_confirm|need_answer)\b' \
+        "$SF_TOOLS_DIR/bin" "$SF_TOOLS_DIR/lib" "$SF_TOOLS_DIR/phases" 2>/dev/null \
+        | grep -v 'bin/sf-log.sh:.*自動で取りますか' || true)
+    assert_equals "$hits" "" "bin/・lib/・phases/ に、\$( ) の中の入力の関数がない（sf-log.sh の 1 か所を除く）"
+}
+
+# ------------------------------------------------------------------------------
 # manifest_overlap のテスト（反映と削除の両方にある「種類:メンバー」を出す。* は比べない。読めなければ 1）
 # ------------------------------------------------------------------------------
 test_manifest_overlap() {
@@ -1847,6 +1923,8 @@ test_json_get
 test_portable_sed
 test_merge_package_xml
 test_manifest_overlap
+test_ai_mode_input
+test_no_input_in_command_substitution
 test_bash32_compat
 
 print_summary

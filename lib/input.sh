@@ -14,8 +14,87 @@
 #   press_enter [MSG]              ... Enter 待ち（q / Q・EOF で中断）
 #   read_or_quit VARNAME PROMPT    ... テキスト入力（空 Enter 無視・q / Q・EOF で中断）
 #   read_secret VARNAME PROMPT     ... 秘密情報の入力（* で表示・空 Enter は再入力・q / Q・EOF（入力なし）で中断）
-#   ask_yn QUESTION                ... Y/N/q 確認（1文字即時入力。Y = 0 / N = 1 / q = 中断）
+#   ask_yn QUESTION [NAME]         ... Y/N/q 確認（1文字即時入力。Y = 0 / N = 1 / q = 中断）。NAME は、AI 操作の質問の名前
+#   need_answer NAME QUESTION      ... AI 操作の確認待ち（「[確認待ち] NAME: QUESTION」を出し、終了コード 20 で終わる）
+#
+# 【AI 操作（SF_TOOLS_AI=1 のときだけ。doc/ai-operation-design.md）】
+#   - ask_yn は、名前（NAME）の答えが SF_TOOLS_ANSWERS（「名前=y|n」の空白区切り）にあれば、それを使う（1 回の実行で 1 回だけ）。
+#     なければ need_answer で止まる（入力を待たない・標準入力を読まない）
+#   - read_key・read_input・read_secret は、入力のループの前で need_answer で止まる（名前なし）。press_enter・read_or_quit・
+#     wizard_confirm（lib/wizard.sh）も、これらを通るため止まる。read_secret は、答えがあっても止まる（秘密の値を AI に扱わせない）
+#   - 答えの受け取り（_ai_answers_init。common.sh の読み込みの最後に呼ぶ）: SF_TOOLS_ANSWERS の各項目の形（名前は
+#     <コマンド>.<質問>、値は y / n）を確かめ（違う・同じ名前が 2 つ → 中断）、名前の先頭が自分（SCRIPT_NAME から sf- を除いたもの）か
+#     update のものを受け取り、残りだけを SF_TOOLS_ANSWERS として export し直す（子・孫は、親の答えを使えない）
+#   - 入力の関数は、$( ) の中で呼ばない（サブシェルの exit 20 は外に伝わらないため）
+#   - AI の印がないときは、今までと同じ（標準入力を読む。テスト・GitHub Actions の動きは変わらない）
 # ==============================================================================
+
+# ------------------------------------------------------------------------------
+# AI 操作（SF_TOOLS_AI=1）の確認待ちと、答えの受け取り（doc/ai-operation-design.md 1.4）
+# ------------------------------------------------------------------------------
+_SF_AI_MY_ANSWERS=""   # このプロセスが受け取った答え（「名前=y|n」の空白区切り。形は確かめ済み）
+_SF_AI_USED=""         # このプロセスで使った名前（空白区切り。同じ名前の 2 回目は、答えがないものとして止める）
+_SF_AI_ANS=""          # _ai_take_answer が取り出した値（y / n）
+# 名前の形: <コマンド>.<質問>（英小文字・数字・-。. で区切る）
+_SF_AI_ITEM_RE='^([a-z][a-z0-9-]*(\.[a-z0-9-]+)+)=([yn])$'
+
+# _ai_mode - AI 操作の印（SF_TOOLS_AI=1）があれば 0
+_ai_mode() { [[ "${SF_TOOLS_AI:-}" == "1" ]]; }
+
+# need_answer NAME QUESTION - 確認待ちの 1 行を出して、終了コード 20（RET_NEED_ANSWER）で終わる。入力は待たない
+#   NAME が空なら「(名前なし)」（AI からは答えられない質問。人に頼む合図）。プロセスごと終わる（die ではない）
+need_answer() {
+    local _na_name="${1:-}" _na_q="${2:-}"
+    # 質問の文の前後の空白を除く（AI が、そのまま人に聞けるように）
+    _na_q="${_na_q#"${_na_q%%[![:space:]]*}"}"
+    _na_q="${_na_q%"${_na_q##*[![:space:]]}"}"
+    printf '[確認待ち] %s: %s
+' "${_na_name:-(名前なし)}" "$_na_q" >&2
+    [[ -n "${LOG_FILE:-}" ]] && printf '[確認待ち] %s: %s
+' "${_na_name:-(名前なし)}" "$_na_q" >> "$LOG_FILE" 2>/dev/null
+    exit "$RET_NEED_ANSWER"
+}
+
+# _ai_answers_init - 自分の先頭の答えを受け取り、残りを SF_TOOLS_ANSWERS として export し直す（AI の印がなければ何もしない）
+_ai_answers_init() {
+    _ai_mode || return 0
+    local _prefix="${SCRIPT_NAME:-}" _item _name _head _rest="" _seen=" " _items=()
+    _prefix="${_prefix#sf-}"
+    # 空白で区切って読む（read -a は Bash 3.2 でも使える。パス名の展開を起こさない）
+    read -r -a _items <<< "${SF_TOOLS_ANSWERS:-}"
+    for _item in ${_items[@]+"${_items[@]}"}; do
+        [[ "$_item" =~ $_SF_AI_ITEM_RE ]] || die "SF_TOOLS_ANSWERS の形が正しくありません: ${_item}（名前=y または 名前=n。名前は <コマンド>.<質問>）"
+        _name="${BASH_REMATCH[1]}"
+        case "$_seen" in *" ${_name} "*) die "SF_TOOLS_ANSWERS に、同じ名前が 2 つあります: ${_name}" ;; esac
+        _seen+="${_name} "
+        _head="${_name%%.*}"
+        if [[ "$_head" == "$_prefix" || "$_head" == "update" ]]; then
+            _SF_AI_MY_ANSWERS+="${_item} "
+        else
+            _rest+="${_item} "
+        fi
+    done
+    export SF_TOOLS_ANSWERS="${_rest% }"
+    [[ -n "$_SF_AI_MY_ANSWERS" ]] && printf '  （AI 経由の答えを受け取りました: %s）
+' "${_SF_AI_MY_ANSWERS% }" >&2
+    return 0
+}
+
+# _ai_take_answer NAME - 自分の答えに NAME があり、まだ使っていなければ、_SF_AI_ANS に値を入れて 0（使ったことにする）
+_ai_take_answer() {
+    local _name="$1" _item
+    [[ -z "$_name" ]] && return 1
+    case " ${_SF_AI_USED} " in *" ${_name} "*) return 1 ;; esac
+    # _SF_AI_MY_ANSWERS の各項目は、形を確かめ済み（空白・展開の文字を含まない）
+    for _item in $_SF_AI_MY_ANSWERS; do
+        if [[ "${_item%=*}" == "$_name" ]]; then
+            _SF_AI_ANS="${_item##*=}"
+            _SF_AI_USED+="${_name} "
+            return 0
+        fi
+    done
+    return 1
+}
 
 # read_input - readline 対応インタラクティブ入力（矢印キー・BS 等が正常に動作する）
 # ------------------------------------------------------------------------------
@@ -38,6 +117,7 @@
 # ------------------------------------------------------------------------------
 read_input() {
     local _varname="$1" _prompt="${2:-}"
+    _ai_mode && need_answer "" "$_prompt"   # AI 操作: 入力を読まずに、確認待ちで止まる（名前なし）
     if [[ -n "$_prompt" ]]; then
         # readline にプロンプトを渡し、ANSI カラーコードを \001..\002 で囲む
         # （カーソル位置計算を正しくし、行折り返し時のプロンプト上書きを防止）
@@ -75,6 +155,7 @@ read_input() {
 # ------------------------------------------------------------------------------
 read_key() {
     local _varname="$1" _prompt="${2:-}" _valid="${3:-}"
+    _ai_mode && need_answer "" "$_prompt"   # AI 操作: ループの前で 1 回だけ、確認待ちで止まる（名前なし）
     while true; do
         [[ -n "$_prompt" ]] && printf "%s" "$_prompt" >&2
         # shellcheck disable=SC2229  # 同上（呼び出し側が指定した名前の変数に読み込む）
@@ -169,6 +250,7 @@ read_or_quit() {
 # ------------------------------------------------------------------------------
 read_secret() {
     local _rs_name="$1" _rs_prompt="$2" _rs_ch _rs_buf _rs_prefix
+    _ai_mode && need_answer "" "$_rs_prompt"   # AI 操作: 秘密の値は、AI に扱わせない（答えがあっても止まる）
     # 制御シーケンス（ESC [ ...）の途中の文字（パラメーター 0x30〜0x3F・中間 0x20〜0x2F）。これ以外の文字で、シーケンスが終わる
     local _rs_csi_mid='0123456789:;<=>? !"#$%&'"'"'()*+,-./'
     while true; do
@@ -233,9 +315,22 @@ read_secret() {
 # ask_yn - Y / N / q を明示的に入力させる（1文字即時入力・q で即中断）
 #   プロンプトは「  質問文 [Y/N/q]: 」（read_key。Y / N / q 以外の文字・空 Enter は、無視して待ち続ける）
 #   戻り値: 0 = Y / y、1 = N / n。q / Q は die
-# 使い方: ask_yn "質問文" && echo "Yes" || echo "No"
+#   NAME（省略可）: AI 操作の質問の名前（<コマンド>.<質問>。例: deploy.force）。AI のとき、その答えを 1 回だけ使う。
+#     答えがない・名前がない → need_answer で止まる（AI の印がなければ、NAME は使わない）
+# 使い方: ask_yn "質問文" [NAME] && echo "Yes" || echo "No"
 ask_yn() {
-    local prompt="$1" answer
+    local prompt="$1" name="${2:-}" answer
+    if _ai_mode; then
+        if _ai_take_answer "$name"; then
+            printf '  %s [Y/N/q]: %s（AI 経由の回答: %s=%s）
+' "$prompt" "$_SF_AI_ANS" "$name" "$_SF_AI_ANS" >&2
+            [[ -n "${LOG_FILE:-}" ]] && printf '[AI 経由の回答] %s=%s: %s
+' "$name" "$_SF_AI_ANS" "$prompt" >> "$LOG_FILE" 2>/dev/null
+            [[ "$_SF_AI_ANS" == "y" ]] && return 0
+            return 1
+        fi
+        need_answer "$name" "$prompt"
+    fi
     read_key answer "  ${prompt} [Y/N/q]: " "[YyNnQq]"
     case "$answer" in
         [Yy]) return 0 ;;

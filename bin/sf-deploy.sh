@@ -45,7 +45,10 @@
 #     GitHub にコミットし、レビューを通して、GitHub Actions で行う。名前だけでは、別の名前を付けた本番組織を止められないため、
 #     組織の種類も確認し（org_local_release_check）、本番の組織、または種類を確認できない組織は、名前にかかわらず、実行できない。
 #   - 2 番目以降の -h / --help は、不明なオプションとして、確認の前に中断する（第 1 引数の -h だけが、ヘルプを表示する）。
-#   - 終了コード: 中断は 1。それ以外は sf-release.sh の終了コード。
+#   - AI 操作（環境変数 SF_TOOLS_AI=1。doc/ai-operation-design.md）: 確認の質問の名前は deploy.force。
+#     SF_TOOLS_ANSWERS="deploy.force=y" で答える（人の了承を得たときだけ）。答えがなければ、反映の前に
+#     「[確認待ち] deploy.force: …」を出して、終了コード 20 で終わる。共有環境・本番の拒否は、AI 操作でも変わらない
+#   - 終了コード: 中断は 1。確認待ち（AI 操作）は 20。それ以外は sf-release.sh の終了コード。
 #   - ログ: ./sf-tools/logs/sf-deploy.log（実行のたびに作り直す）。手順 7 以降（sf-release.sh）のログは、
 #     ./sf-tools/logs/sf-release.log
 # ==============================================================================
@@ -134,7 +137,7 @@ fi
 # 4. 強制デプロイ確認
 # ------------------------------------------------------------------------------
 log "WARNING" "--force（--ignore-conflicts）が指定されています。コンフリクトは強制上書きされます。"
-ask_yn "強制デプロイ（--force）を実行します。続行しますか？" || die "中断しました。"
+ask_yn "強制デプロイ（--force）を実行します。続行しますか？" deploy.force || die "中断しました。"  # deploy.force: AI 操作の質問の名前（doc/ai-operation-design.md）
 
 # sf-release.sh 側の二重確認を抑制するため確認済みフラグをエクスポート
 export SF_DEPLOY_CONFIRMED=1

@@ -762,7 +762,9 @@ consent_local() {
         log "INFO" "  確認できない（端末ではない）ため、今回は取りません（答えは保存しません）。"
         return 1
     fi
-    # read_key は EOF で die するため、$( ) の中で呼ぶ（ランチャーを止めない）。q も「取らない」
+    # read_key は EOF で die するため、$( ) の中で呼ぶ（ランチャーを止めない）。q も「取らない」。
+    #   AI 操作（SF_TOOLS_AI=1）では、標準入力が端末でないため、上で「今回は取らない」と返り、ここには来ない
+    #   （入力の関数を $( ) の中で呼ぶのは、この 1 か所だけ。tests/test_common.sh の書き方の検査で、理由つきで除外する）
     ans=$(read_key _k "  自動で取りますか？ [Y/N/q]: " "[YyNnQq]"; printf '%s' "${_k:-}") || ans=""  # VAR=$(cmd) のため run 不使用
     case "$ans" in
         [Yy]) state_set "$CONSENT_F" "AUTO=on" "ORG=${TARGET_ORG}" "ORG_ID=" "VERSION=${CONSENT_VERSION}" "ANSWERED_AT=$(now_z)" || true; return 0 ;;

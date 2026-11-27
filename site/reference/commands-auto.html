@@ -38,9 +38,9 @@
   <li>リリース用のフォルダを準備する
     <ul>
       <li>現在のブランチ名を取得できない（detached HEAD など）ときは、警告を表示して、何もしません</li>
-      <li><code>sf-tools/release/</code> と <code>sf-tools/release/.gitkeep</code> を作ります</li>
+      <li><code>sf-tools/release/</code> を作ります（毎回ここで作るので、目印の <code>.gitkeep</code> は作りません）</li>
       <li><code>main</code> ブランチでは、ここで終わります（<code>release/&lt;ブランチ名&gt;/</code> と <code>branch_name.txt</code> は、作成も更新もしません）</li>
-      <li>それ以外のブランチでは、<code>release/&lt;ブランチ名&gt;/</code> を作り、<code>deploy-target.txt</code>・<code>remove-target.txt</code> がなければ雛形からコピーし、<code>release/branch_name.txt</code> にブランチ名を書き込みます</li>
+      <li>それ以外のブランチでは、<code>release/&lt;ブランチ名&gt;/</code> を作り、<code>deploy-target.txt</code>・<code>remove-target.txt</code>・<code>README.md</code>（このブランチの作業の資料の入口。<a href="structure.html#branch-docs">置き場所の決まり</a>）がなければ雛形からコピーし（あるものは上書きしません）、<code>release/branch_name.txt</code> にブランチ名を書き込みます</li>
     </ul>
   </li>
   <li>（<code>sf-init.sh</code> から呼ばれたときだけ）コミットメッセージの雛形（<code>.gitmessage</code>）を置き、<code>git config commit.template</code> を設定する</li>

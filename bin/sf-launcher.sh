@@ -38,6 +38,20 @@
 #      キー=値 の行を while read で読み、source しない。
 #      準備中（starting）のあいだは、入力を 5 秒ずつ待ち（read -t）、STATE が変わったら、コマンドを動かさずにメニューを描き直す
 #      （裏の準備は数分かかることがあり、つながっても「準備中」のままだと迷うため）。待ち切れと EOF は、待った時間でも見分ける（Bash 3.2）
+#   6. メニューを表示するたびに、見出しの下に、今の状況を表示する（読み取りのみ。通信しない。2026-11-27）:
+#        ブランチ（git symbolic-ref。ブランチの上にいなければ、その旨だけ）・組織（.sf/config.json の target-org を node で読む。
+#        読めなければ出さない）・未コミットの変更の数（git status --porcelain の行数）・push していないコミットの数
+#        （git rev-list --count @{u}..HEAD。追跡先がなければ「追跡先なし」）・次の PR 先（sf-tools/logs/next-status.txt。
+#        sf-next.sh が最後に判定した結果を書く。HEAD= が今の先端のコミットと同じときだけ使い、違う・ない・読めないときは
+#        「5 Next で確かめる」）。キー=値 の行を while read で読み、source しない。
+#        続けて「次の目安」を 1 行出す（上から順に当てはまったもの。番号は、メニューの並びから引く）:
+#          未コミットの変更がある → Check → Dryrun → Deploy で確かめてから、Push / push していないコミットがある・追跡先がない → Push /
+#          次の PR 先: none → 全段階にリリース済み / 発行中の PR → その PR の検証を待つ / 出すものなし → ターゲットファイルに書く /
+#          段階 → Next（その段階へ PR）/ 分からない → Next（出し先を確かめる）
+#        環境ブランチ（sf-tools/config/branches.txt の行。ファイルがない・空なら main だけ）の上では、変更・次の目安の代わりに、
+#        「環境ブランチの上です」と出す
+#   7. コマンドが終わったら、結果を 1 行で出す: 終了コード 0 → 「✓ <名前>: 終わりました（成功）」（太字の緑）/
+#      それ以外 → 「✗ <名前>: 失敗、または中断しました（終了コード N）」（太字の赤。q での中断も 1 になるため、両方を書く）
 #
 # 【前提条件】
 #   - force-* フォルダで実行する（処理の流れ 2）
@@ -134,10 +148,131 @@ apexlog_state() {
 }
 APEXLOG_REFRESH=5   # 準備中のあいだ、状態を見直す間隔（秒）
 
+# ------------------------------------------------------------------------------
+# 今の状況（メニューの上の数行。読み取りのみ。通信しない。冒頭コメントの処理の流れ 6）
+# ------------------------------------------------------------------------------
+NEXT_STATUS_FILE="sf-tools/logs/next-status.txt"   # sf-next.sh が、最後に判定した結果を書く（ここでは読むだけ）
+
+# コマンド名（sf-check など）→ メニューの番号。並びが変わっても、案内の番号が合うように、MENU_ITEMS から引く
+number_of() {
+    local want="$1" num=1 item c
+    for item in "${MENU_ITEMS[@]}"; do
+        c="${item%%|*}"; c="${c// /}"
+        [[ "$c" == "$want" ]] && { printf '%s' "$num"; return 0; }
+        (( num++ ))
+    done
+    return 1
+}
+
+# コマンド名 → 表示名（sf-check → Check）。${x^} は Bash 4 以降のため、tr で先頭を大文字にする
+label_of() {
+    local l="${1#sf-}"
+    printf '%s' "$(printf '%s' "${l:0:1}" | tr '[:lower:]' '[:upper:]')${l:1}"
+}
+
+# 環境ブランチか（sf-tools/config/branches.txt の行。# の行・空行を除き、CR と前後の空白を除く。ファイルがない・空なら main だけ）
+is_env_branch() {
+    local b="$1" line
+    [[ "$b" == "main" ]] && return 0
+    [[ -f "sf-tools/config/branches.txt" ]] || return 1
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        line="${line%$'\r'}"
+        line="${line#"${line%%[![:space:]]*}"}"; line="${line%"${line##*[![:space:]]}"}"
+        [[ -z "$line" || "$line" == \#* ]] && continue
+        [[ "$line" == "$b" ]] && return 0
+    done < "sf-tools/config/branches.txt"
+    return 1
+}
+
+# つないでいる組織（.sf/config.json の target-org。JSON は node で読む（grep・sed で読まない）。読めなければ空。
+#   表示を崩さないよう、制御文字・幅のない文字・文字の向きを変える文字を除き、60 文字を超えたら切って … を付ける）
+target_org() {
+    [[ -f ".sf/config.json" ]] || return 0
+    command -v node >/dev/null 2>&1 || return 0
+    node -e 'try{const j=JSON.parse(require("fs").readFileSync(".sf/config.json","utf8"));const v=j["target-org"];if(typeof v==="string"){const t=v.replace(/[\x00-\x1f\x7f-\x9f​-‏‪-‮⁦-⁩﻿]/g,"");process.stdout.write(t.length>60?t.slice(0,60)+"…":t)}}catch(e){}' 2>/dev/null
+    return 0
+}
+
+print_status() {
+    local branch org head changes ahead="" has_up=0 line k v nhead="" next="" pr="" skipped="" hint
+    local n_check n_dryrun n_deploy n_push n_next
+    branch=$(git symbolic-ref -q --short HEAD 2>/dev/null) || branch=""   # VAR=$(cmd)（common.sh を読まない単独の設計。以下も同じ）
+    org=$(target_org)
+    # 表示は echo -e のため、値の \ を \\ にする（値の中の \033 などを、端末の制御として解釈させない）。
+    #   ブランチ名は、git の参照名の決まりで \ を含まない。次の PR 先・PR の番号は、下で形を確かめる（\ を通さない）
+    org="${org//\\/\\\\}"
+    if [[ -z "$branch" ]]; then
+        echo -e "  ブランチ: ${YELLOW}（ブランチの上にいません）${RESET}${org:+   組織: ${BOLD}${org}${RESET}}"
+        return 0
+    fi
+    echo -e "  ブランチ: ${BOLD}${branch}${RESET}${org:+   組織: ${BOLD}${org}${RESET}}"
+    if is_env_branch "$branch"; then
+        echo -e "${YELLOW}  ⚠ 環境ブランチの上です。作業は、sf-job.sh で作ったブランチで行います${RESET}"
+        return 0
+    fi
+    changes=$(git status --porcelain 2>/dev/null | wc -l | tr -d ' ')
+    [[ "$changes" =~ ^[0-9]+$ ]] || changes=0
+    if git rev-parse -q --verify '@{u}' >/dev/null 2>&1; then
+        has_up=1
+        ahead=$(git rev-list --count '@{u}..HEAD' 2>/dev/null)
+        [[ "$ahead" =~ ^[0-9]+$ ]] || ahead=0
+    fi
+    # 次の PR 先: sf-next.sh が最後に判定した結果（今の先端のコミットと同じときだけ使う。source しない）
+    head=$(git rev-parse -q --verify HEAD 2>/dev/null) || head=""
+    if [[ -f "$NEXT_STATUS_FILE" ]]; then
+        while IFS= read -r line || [[ -n "$line" ]]; do
+            k="${line%%=*}"; v="${line#*=}"
+            case "$k" in HEAD) nhead="$v" ;; NEXT) next="$v" ;; PR) pr="$v" ;; SKIPPED) skipped="$v" ;; esac
+        done < "$NEXT_STATUS_FILE"
+    fi
+    if [[ -z "$head" || "$nhead" != "$head" ]] || ! [[ "$next" =~ ^[A-Za-z0-9._/-]{1,40}$ ]]; then
+        next=""; pr=""; skipped=""
+    fi
+    [[ "$pr" =~ ^[0-9]{1,9}$ ]] || pr=""   # 長さにも上限（表示を崩さないため）
+
+    if [[ $has_up -eq 1 ]]; then
+        echo -e "  未コミットの変更: ${BOLD}${changes}${RESET} 件   push していないコミット: ${BOLD}${ahead}${RESET} 件"
+    else
+        echo -e "  未コミットの変更: ${BOLD}${changes}${RESET} 件   push していないコミット: ${YELLOW}（追跡先なし）${RESET}"
+    fi
+    if [[ "$skipped" == "true" ]]; then
+        echo -e "  次の PR 先: 出すものなし（ターゲットファイルが空）"
+    elif [[ "$next" == "none" ]]; then
+        echo -e "  次の PR 先: ${GREEN}全段階にリリース済み${RESET}"
+    elif [[ -n "$next" && -n "$pr" ]]; then
+        echo -e "  次の PR 先: ${BOLD}${next}${RESET}（PR 発行中 #${pr}）"
+    elif [[ -n "$next" ]]; then
+        echo -e "  次の PR 先: ${BOLD}${next}${RESET}"
+    else
+        echo -e "  次の PR 先: ${DIM}（Next で確かめる）${RESET}"
+    fi
+
+    n_check=$(number_of sf-check); n_dryrun=$(number_of sf-dryrun); n_deploy=$(number_of sf-deploy)
+    n_push=$(number_of sf-push); n_next=$(number_of sf-next)
+    if [[ "$changes" -gt 0 ]]; then
+        hint="${n_check} Check → ${n_dryrun} Dryrun → ${n_deploy} Deploy で確かめてから、${n_push} Push"
+    elif [[ $has_up -eq 0 || "$ahead" -gt 0 ]]; then
+        hint="${n_push} Push（push していないコミットがあります）"
+    elif [[ "$skipped" == "true" ]]; then
+        hint="ターゲットファイル（sf-tools/release/${branch}/）に、出すものを書く"
+    elif [[ "$next" == "none" ]]; then
+        hint="全段階にリリース済みです（このブランチの作業は終わり）"
+    elif [[ -n "$next" && -n "$pr" ]]; then
+        hint="PR #${pr} の検証が緑になったら、マージする"
+    elif [[ -n "$next" ]]; then
+        hint="${n_next} Next（${next} へ PR を出す）"
+    else
+        hint="${n_next} Next（次の出し先を確かめる）"
+    fi
+    echo -e "${BOLD}${CYAN}  ▶ 次の目安: ${hint}${RESET}"
+    return 0
+}
+
 print_menu() {
     echo ""
     echo -e "${DIM}  ──────────────────────────────────────────────────${RESET}"
     echo -e "${BOLD}  >> Launcher <<${RESET}"
+    print_status
     print_apexlog_status
     echo -e "${DIM}  ──────────────────────────────────────────────────${RESET}"
 
@@ -190,7 +325,16 @@ run_command() {
     echo ""
     echo -e "${GREEN}  ▶ ${cmd}${RESET}"
     echo ""
-    bash "$script"
+    local rc=0
+    bash "$script" || rc=$?
+    # 結果を 1 行で出す（出力が流れても、成功か失敗かが、ひと目で分かるように。処理の流れ 7）
+    echo ""
+    if [[ $rc -eq 0 ]]; then
+        echo -e "${BOLD}${GREEN}  ✓ $(label_of "$cmd"): 終わりました（成功）${RESET}"
+    else
+        echo -e "${BOLD}${RED}  ✗ $(label_of "$cmd"): 失敗、または中断しました（終了コード ${rc}）${RESET}"
+    fi
+    return $rc
 }
 
 # ------------------------------------------------------------------------------

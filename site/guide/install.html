@@ -181,7 +181,7 @@ export PATH="$HOME/sf-tools/bin:$PATH"</code></pre>
   <li><code>~/sf-tools</code> を、最新に更新します（<code>git pull</code>）。</li>
   <li>プロジェクトの設定ファイル（<code>sf-tools/config/</code> の <code>metadata.txt</code>・<code>branches.txt</code>）があるかを確かめます。</li>
   <li>Git のフック（<code>pre-commit</code> / <code>pre-push</code>。コミット・プッシュのときに自動で動くチェック）を設置します。</li>
-  <li>作業用のブランチのとき、ターゲットファイルを置くフォルダ（<code>sf-tools/release/&lt;ブランチ名&gt;/</code>）を用意します。</li>
+  <li>作業用のブランチのとき、ターゲットファイルを置くフォルダ（<code>sf-tools/release/&lt;ブランチ名&gt;/</code>）を用意します。このブランチの作業の資料の入口（<code>README.md</code>）の雛形も置きます（<a href="../reference/structure.html#branch-docs">置き場所の決まり</a>）。</li>
   <li>プロジェクトに必要な部品を入れます（<code>npm install</code>。入れ済みなら省きます）。</li>
   <li>前回から 24 時間以上たっていれば、<code>sf-upgrade.sh</code> で、開発ツールを最新にします: <code>npm</code>・Salesforce CLI（<code>sf</code>）と、<strong>Windows の Git Bash では Git for Windows も</strong>（<code>git update-git-for-windows</code>）。Mac・Linux・WSL の Git は、更新しません（それぞれのパッケージ管理の方法で、更新してください）。</li>
 </ul>

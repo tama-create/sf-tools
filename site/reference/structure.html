@@ -81,7 +81,8 @@
 ├── .gitmessage                          ★ コミットメッセージの雛形（sf-init の Phase 4 で、sf-install.sh が config/install/gitmessage から作る。
 │                                            commit.template の設定は、管理者用のクローンだけ）
 ├── eslint.config.js
-├── force-app/                           ← Salesforce のメタデータ本体
+├── force-app/                           ← Salesforce のメタデータ本体（雛形には main/default/.gitkeep の 1 個だけ。
+│                                            空のフォルダは Git に残らず、force-app がないと Salesforce CLI が止まるため）
 ├── jest.config.js
 ├── package.json
 ├── README.md                            ★ プロジェクトの README の雛形
@@ -91,15 +92,21 @@
 │   ├── config/
 │   │   ├── branches.txt                 ★   使うブランチ（段階）の一覧。並びが順序（main → staging → develop）
 │   │   └── metadata.txt                 ★   メタデータの同期（sf-metasync.sh）で取得する種類
-│   ├── release/
-│   │   ├── .gitkeep                     ★
+│   ├── release/                         ★   （sf-install.sh が毎回作る）
 │   │   ├── branch_name.txt              ☆   現在のブランチ名（sf-install.sh が書く。main では作らない）
 │   │   └── &lt;ブランチ&gt;/                   ★   作業用ブランチごと（sf-install.sh が作る。main では作らない）
+│   │       ├── README.md                ★     このブランチの作業の資料の入口（目的・作業の概要・詳細な仕様・確かめ方・結果）
 │   │       ├── deploy-target.txt        ★     リリースの対象
 │   │       └── remove-target.txt        ★     削除の対象
 │   └── logs/                            ☆   各コマンドのログ・error.log
 └── .git/hooks/                          ☆ pre-commit・pre-push（sf-hook.sh が ~/sf-tools/hooks/ からコピー）</code></pre>
 <p><code>sf-tools/release/&lt;ブランチ&gt;/</code> に、リリースのときに作られる <code>package.xml</code>・<code>destructiveChanges.xml</code> も、git の対象外です。書き方は、<a href="target-files.html">ターゲットファイル</a>にあります。</p>
+<h3 id="branch-docs">ブランチの作業の資料の置き場所</h3>
+<ul>
+  <li><strong>そのブランチだけの資料</strong>（このブランチで何をするか・目的・詳細な仕様・確かめ方・テストデータ・手元で動かす台本など、組織に出さないもの）は、<code>sf-tools/release/&lt;ブランチ&gt;/</code> に置きます。入口は <code>README.md</code> です。ブランチを始めるとき（<code>sf-start.sh</code> の中の <code>sf-install.sh</code>）に、見出しだけの雛形が自動で置かれます（すでにあれば、上書きしません）。GitHub でこのフォルダを開くと、<code>README.md</code> が自動で表示されます。</li>
+  <li><strong>どの開発者にも共通のもの</strong>（プロジェクトの説明など）は、プロジェクトの直下（<code>README.md</code> など）に置きます。</li>
+  <li>ほかのブランチのフォルダは、書き換えません。Apex のテストクラスなど、組織に出す部品は、今までどおり <code>force-app/</code> に置きます。</li>
+</ul>
 
 <h2 id="tools">sf-tools リポジトリの構成</h2>
 <pre><code>sf-tools/

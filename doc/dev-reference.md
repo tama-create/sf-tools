@@ -449,7 +449,7 @@ check_gh_owner "$GITHUB_OWNER"   # 認証ユーザーの一致確認
 2. `~/sf-tools` を、現在のブランチ（取得できなければ `main`）で `git pull origin <ブランチ>`（失敗は WARNING で続行）。`sf-init.sh` から実行中（`SF_INIT_RUNNING` あり）はスキップする（実行中の `sf-init.sh` が書き換わると、bash の読み位置がずれるため）
 3. `./sf-tools/config/metadata.txt`・`branches.txt` の確認: `sf-init.sh` から実行中は、ないものだけテンプレートからコピー（失敗は中断）。それ以外は、どちらかがなければ中断する（プロジェクトの破損として扱い、生成しない）
 4. `sf-hook.sh` で Git Hook（pre-commit / pre-push）をインストール（失敗は WARNING で続行）
-5. `release/<branch>/` と `branch_name.txt` を準備（detached HEAD では何もしない。`main` では `release/` と `.gitkeep` だけ作り、`release/<branch>/`・`branch_name.txt` は作成・更新しない）。deploy-target.txt・remove-target.txt がなければ、`config/install/release/` からコピーする（手順 6 の `gitmessage` も同じく `config/install/` に置く。`templates/` は Phase 3 が丸ごと force-* にコピーするため、名前や場所を変えて使うコピー元は置かない）
+5. `release/<branch>/` と `branch_name.txt` を準備（detached HEAD では何もしない。`main` では `release/` だけ作り、`release/<branch>/`・`branch_name.txt` は作成・更新しない。`.gitkeep` は 2026-11-27 から作らない）。deploy-target.txt・remove-target.txt・README.md（ブランチの作業の資料の入口。置き場所の決まりは `doc/ai-dev-loop.md` 3.1）がなければ、`config/install/release/` からコピーする（あるものは上書きしない）（手順 6 の `gitmessage` も同じく `config/install/` に置く。`templates/` は Phase 3 が丸ごと force-* にコピーするため、名前や場所を変えて使うコピー元は置かない）
 6. `sf-init.sh` から実行中のみ、`config/install/gitmessage` を `.gitmessage` にコピーし、`git config commit.template .gitmessage`（失敗は WARNING で続行）
 7. `package.json` がある場合は `npm install`（失敗は WARNING で続行）。`sf-init.sh` から実行中は、初期セットアップ用の一時フォルダなのでスキップする（約 90 秒の短縮）。`node_modules/.package-lock.json` の更新時刻が `package-lock.json` 以上のときもスキップ（`_get_mtime`）
 8. `~/.sf-tools-last-update` がない、または 24 時間以上経過していれば `sf-upgrade.sh` をバックグラウンド起動（引数なし。標準出力は捨て、標準エラーは `sf-install.log` に追記）。スタンプは、起動を確認できた時点で更新する（完了の時点ではない）
@@ -466,6 +466,7 @@ check_gh_owner "$GITHUB_OWNER"   # 認証ユーザーの一致確認
 - `sf-promote-check.sh --plan --json </dev/null` を呼び、最後の行の JSON を `json_get` で読む（`next_tier`・`pr_open`・`skipped`・`tiers`・`violations`・`error`）。呼ぶコマンドは、環境変数 `SF_PROMOTE_CHECK_CMD` で差し替えられる（テスト用。決まりの強制はワークフロー側がするので、差し替えても破れない）
   - 終了コード 2（判断できない）→ `error` を出して die。1（決まりを破った。R2 の抜けなど）→ `violations` の `detail` を ERROR で出して die（PR を勧めない）
 - 終了コード: 0（N を含む）/ 1（エラー・q・決まりを破った）/ 20（AI 操作の確認待ち）
+- 判定の結果を `./sf-tools/logs/next-status.txt`（`HEAD=`・`NEXT=`・`PR=`・`SKIPPED=`）に書く（2026-11-27。ランチャーの「次の PR 先」の表示用。判定の前に消し、判定できたときだけ書く。書けなくても続ける）
 - `--create --title <題名> --body-file <ファイル>`（2026-11-27。`doc/ai-operation-design.md` 11.2）: Y のとき、ブラウザを開かずに `gh pr create --repo <OWNER/REPO> --base <next_tier> --head <ブランチ> --title=<題名> --body-file=<ファイル>` で PR を作る。オプションの検査は判定より前（題名は空でない 1 行。長さは数えない: `${#…}` はロケールが C だとバイトで数えるため）。`<OWNER/REPO>` は、直した origin の URL が `^https://github\.com/<OWNER>/<REPO>$` のときだけ。gh の失敗は、その出力を出して die。題名・ファイル名は `=` の形の独立した引数（`-` で始まる題名も値として渡る）
 
 表示（段階は `tiers` の順 = 下から）:
@@ -516,6 +517,8 @@ check_gh_owner "$GITHUB_OWNER"   # 認証ユーザーの一致確認
 - `sf-launcher.sh <番号>` で、その番号を 1 回だけ実行して終了（終了コードは、実行したコマンドのもの。範囲外・スクリプトがなければ 1）
 - `sf-launcher.sh --fzf` で fzf モードも利用可能（fzf がなければ、警告を表示して終了コード 1）
 - メニューの見出しの下に、`print_apexlog_status` が `logs/apex/.status` の `STATE`・`ORG`・`EXPIRES_AT`・`COUNT_TODAY`・`REASON`・`WARNING` を `while read` で読み、1 行（と WARNING の 1 行）を表示する（source しない。ファイルがない・知らない STATE なら表示しない）
+- その上に、`print_status` が今の状況を出す（2026-11-27。読み取りのみ・通信しない）: ブランチ（`git symbolic-ref`）・組織（`.sf/config.json` の `target-org` を `node -e` で読む。grep / sed で JSON を読まない）・未コミットの変更（`git status --porcelain` の行数）・push していないコミット（`git rev-list --count @{u}..HEAD`）・次の PR 先（`sf-tools/logs/next-status.txt`。`sf-next.sh` が判定のたびに書く `HEAD=`・`NEXT=`・`PR=`・`SKIPPED=`。`HEAD=` が今の先端と同じで、`NEXT=` が段階名の形のときだけ使う。source しない）・「次の目安」の 1 行（番号は `number_of` で `MENU_ITEMS` から引く。並びが変わってもずれない）。環境ブランチ（`branches.txt`）の上では、目安の代わりに注意を出す
+- `run_command` は、終わったら結果を 1 行で出す（0 → `✓ <名前>: 終わりました（成功）`、それ以外 → `✗ <名前>: 失敗、または中断しました（終了コード N）`）。終了コードは、そのまま返す
 
 ### 4.8 sf-deploy.sh
 
@@ -1071,7 +1074,7 @@ git diff HEAD~1                                   # 直前コミットとの差�
     └── force-XXXX/                 ← ブランチ {ジョブ名} のクローン（VS Code で開く単位）
         ├── （templates/ の中身）    ← Phase 3 がコピー: .github/workflows/wf-*.yml・force-app/・.vscode/・sfdx-project.json など
         ├── sf-tools/config/        ← metadata.txt・branches.txt
-        ├── sf-tools/release/       ← .gitkeep・branch_name.txt（git 対象外）・<ブランチ>/deploy-target.txt・remove-target.txt（main では作らない）
+        ├── sf-tools/release/       ← branch_name.txt（git 対象外）・<ブランチ>/README.md・deploy-target.txt・remove-target.txt（main では作らない）
         ├── sf-tools/logs/          ← 各コマンドのログ・error.log（git 対象外）
         ├── .gitmessage             ← コミットメッセージの雛形（sf-init のときだけ設置）
         └── .git/hooks/             ← pre-commit・pre-push（sf-hook.sh が ~/sf-tools/hooks/ からコピー）

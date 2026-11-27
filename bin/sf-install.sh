@@ -34,10 +34,12 @@
 #   5. リリース管理ディレクトリを準備する。失敗しても WARNING を表示して続行する
 #      - 現在のブランチ名を取得できない（git symbolic-ref -q --short HEAD の終了コードが 0 以外。detached HEAD など）ときは、
 #        WARNING を表示して、何もしない
-#      - ./sf-tools/release/ と ./sf-tools/release/.gitkeep を作成する
+#      - ./sf-tools/release/ を作成する（.gitkeep は作らない。フォルダは、毎回ここで作るため。2026-11-27 に、作るのをやめた）
 #      - main ブランチのときは、ここで終わる（release/<ブランチ>/ と branch_name.txt は、作成・更新しない）
-#      - それ以外のブランチ: release/<ブランチ>/ を作成し、deploy-target.txt・remove-target.txt が無ければ
-#        ~/sf-tools/config/install/release/ からコピーし、release/branch_name.txt にブランチ名を書き込む
+#      - それ以外のブランチ: release/<ブランチ>/ を作成し、deploy-target.txt・remove-target.txt・README.md が無ければ
+#        ~/sf-tools/config/install/release/ からコピーし（あるものは上書きしない）、release/branch_name.txt にブランチ名を書き込む。
+#        README.md は、このブランチの作業の資料の入口（目的・作業の概要・詳細な仕様・確かめ方・結果。ブランチだけの資料は、
+#        このフォルダに置く決まり。doc/ai-dev-loop.md）
 #   6. （sf-init.sh から呼ばれたときのみ）~/sf-tools/config/install/gitmessage を ./.gitmessage にコピーし、
 #      git config commit.template .gitmessage を設定する。テンプレートが無い・コピーか設定に失敗したときは、WARNING を表示して
 #      続行する（完了の SUCCESS は表示しない）
@@ -217,8 +219,8 @@ phase_setup_release_dir() {
         log "WARNING" "現在のブランチ名を取得できませんでした（detached HEAD など）。リリース管理ディレクトリの準備をスキップします。"
         return $RET_NO_CHANGE
     fi
+    # .gitkeep は作らない（フォルダは、ここで毎回作るため、Git に残す目印は要らない。2026-11-27 に、作るのをやめた）
     run mkdir -p "sf-tools/release" || return $RET_NG
-    [[ ! -f "sf-tools/release/.gitkeep" ]] && run touch "sf-tools/release/.gitkeep"
     if [[ "$branch_name" == "main" ]]; then
         log "INFO" "main ブランチはリリース対象外のため、release/<branch> ディレクトリの作成をスキップします。"
         return $RET_OK
@@ -230,6 +232,9 @@ phase_setup_release_dir() {
         && { run cp "$HOME/sf-tools/config/install/release/deploy-target.txt" "${release_dir}/deploy-target.txt" || return $RET_NG; }
     [[ ! -f "${release_dir}/remove-target.txt" ]] \
         && { run cp "$HOME/sf-tools/config/install/release/remove-target.txt" "${release_dir}/remove-target.txt" || return $RET_NG; }
+    # README.md: このブランチの作業の資料の入口。書いた内容を消さないため、あれば上書きしない
+    [[ ! -f "${release_dir}/README.md" ]] \
+        && { run cp "$HOME/sf-tools/config/install/release/README.md" "${release_dir}/README.md" || return $RET_NG; }
     printf '%s\n' "$branch_name" | run tee "sf-tools/release/branch_name.txt" > /dev/null || return $RET_NG
     log "INFO" "ブランチ: ${branch_name} / branch_name.txt を保存しました"
     return $RET_OK

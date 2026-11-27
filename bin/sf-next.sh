@@ -32,6 +32,8 @@
 #      - 終了コード 2（判断できない。push していない変更がある・origin や PR の一覧が取れない・段階の構成の誤りなど）→ 理由を
 #        表示して、エラーで終了する
 #      - 終了コード 1（決まりを破っている。積み重ねの抜けなど）→ 理由を表示して、PR を勧めずにエラーで終了する
+#      判定の前に、./sf-tools/logs/next-status.txt（前回の結果）を消す。判定できたら、そこに、先端のコミット（HEAD=）・次の段階
+#      （NEXT=。全段階済みなら none）・発行中の PR（PR=）・対象が空か（SKIPPED=）を書く（ランチャーの表示用。書けなくても続ける）
 #   3. 結果を表示する（下の【補足】の表示）
 #   4. 対象が空（deploy-target.txt・remove-target.txt に実質的な行がない）なら、その旨を表示して終了する（出すものがない）
 #   5. next_tier が none なら「全段階にリリース済みです！」、next_tier へ開いている PR があれば「PR 発行中（#N）。マージを
@@ -144,6 +146,9 @@ fi
 # 4. 一方通行のリリースの確認（sf-promote-check.sh --plan）
 # ------------------------------------------------------------------------------
 log "INFO" "どの段階まで出たかを確かめています（sf-promote-check.sh --plan）..."
+# ランチャーの表示用の、前回の判定の結果は、判定の前に消す（判定できなかったときに、古い結果が残らないように）
+readonly NEXT_STATUS_FILE="./sf-tools/logs/next-status.txt"
+rm -f "$NEXT_STATUS_FILE" 2>/dev/null || true   # 意図的なエラー無視（ないときも続ける）
 PC_CMD="${SF_PROMOTE_CHECK_CMD:-${SCRIPT_DIR}/sf-promote-check.sh}"
 PC_RC=0
 # VAR=$(cmd) のため run 不使用（判定の結果の JSON を読む。表示は、標準エラーに出る）。標準入力は閉じる（確認の質問に読ませない）
@@ -170,6 +175,13 @@ SKIPPED=$(_pc skipped)
 TIERS=()
 while IFS= read -r _t; do [[ -n "$_t" ]] && TIERS+=("$_t"); done <<< "$(_pc 'tiers.*')"
 [[ -n "$NEXT_TARGET" && ${#TIERS[@]} -gt 0 ]] || die "次のPR先を判断できません: sf-promote-check.sh の結果を読めません。"
+
+# ランチャー（sf-launcher.sh）の表示のために、判定の結果を書く（Git の対象外の logs/。ランチャーは、HEAD が今の先端のコミットと
+#   同じときだけ使う。書けなくても、このコマンドは続ける）
+_head=$(git rev-parse -q --verify HEAD 2>/dev/null) || _head=""   # VAR=$(cmd) のため run 不使用
+if [[ -n "$_head" ]]; then
+    printf 'HEAD=%s\nNEXT=%s\nPR=%s\nSKIPPED=%s\n' "$_head" "$NEXT_TARGET" "$PR_OPEN" "$SKIPPED" > "$NEXT_STATUS_FILE" 2>/dev/null || true   # 意図的なエラー無視（表示用のため）
+fi
 
 # ------------------------------------------------------------------------------
 # 5. 結果の表示

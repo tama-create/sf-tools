@@ -19,6 +19,7 @@ case "$1" in
         # MOCK_GIT_REMOTE_URL が未設定なら既定の URL。空を設定すると、origin がない（何も出さない）
         [[ "$2" == "get-url" ]] && echo "${MOCK_GIT_REMOTE_URL-https://github.com/test-owner/force-tama.git}"
         exit 0 ;;
+    rev-parse) echo "${MOCK_GIT_HEAD:-1111111111111111111111111111111111111111}"; exit 0 ;;   # 先端のコミット（next-status.txt の HEAD=）
     *) exit 0 ;;
 esac
 EOF
@@ -297,7 +298,29 @@ test_create_option_errors() {
     _unset; teardown "$TD" "$MB"
 }
 
+# ランチャーの表示用の、判定の結果（sf-tools/logs/next-status.txt）
+test_next_status_file() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] 判定の結果を next-status.txt に書く（ランチャーの表示用）${CLR_RST}"
+    local TD MB MH; _env TD MB MH
+    local f="$TD/sf-tools/logs/next-status.txt"
+    export MOCK_PC_JSON; MOCK_PC_JSON=$(_pc_json staging 12)
+    _next n
+    assert_file_contains "$f" "HEAD=1111111111111111111111111111111111111111" "先端のコミット（HEAD=）を書く"
+    assert_file_contains "$f" "NEXT=staging" "次の段階（NEXT=）を書く"
+    assert_file_contains "$f" "PR=12" "発行中の PR（PR=）を書く"
+    assert_file_contains "$f" "SKIPPED=false" "対象が空か（SKIPPED=）を書く"
+    MOCK_PC_JSON=$(_pc_json none)
+    _next n
+    assert_file_contains "$f" "NEXT=none" "全段階済み → NEXT=none"
+    export MOCK_PC_RC=2 MOCK_PC_JSON='{"mode":"plan","ok":false,"next_tier":"","tiers":[],"violations":[],"error":"判断できない"}'
+    _next n
+    assert_exit_fail "$NX_RC" "判断できない → エラー終了"
+    assert_file_not_exists "$f" "判断できない → 前回の結果を消す（古い結果を残さない）"
+    _unset; teardown "$TD" "$MB"
+}
+
 test_display_and_next
+test_next_status_file
 test_rules_broken_or_unknown
 test_protected_branch_blocked
 test_pr_url

@@ -208,7 +208,10 @@ test_apexlog_status_refresh() {
     [[ "$out" == *"デバッグログ: 取得中（dev・期限 15:30・今日 0 本）"* ]] && pass "取得中に変わったら、メニューを描き直す" || fail "取得中に変わったら、メニューを描き直す" "$out"
     n=$(printf '%s\n' "$out" | grep -c ">> Launcher <<")
     assert_equals "$n" "2" "描き直しは 1 回だけ（取得中になったら、待ち切れで描き直さない）"
-    [[ ! -s "$mb/calls.log" ]] && pass "描き直しでは、コマンドを動かさない" || fail "描き直しでは、コマンドを動かさない" "$(cat "$mb/calls.log")"
+    # 状況の表示（処理の流れ 6）が読む git（読み取りのみ）は除いて、ほかのコマンドを動かしていないことを確かめる
+    local others
+    others=$(grep -vE '^git (symbolic-ref -q --short HEAD|status --porcelain|rev-parse -q --verify (@\{u\}|HEAD)|rev-list --count @\{u\}\.\.HEAD)$' "$mb/calls.log" 2>/dev/null)
+    [[ -z "$others" ]] && pass "描き直しでは、コマンドを動かさない（状況の表示の、読み取りの git だけ）" || fail "描き直しでは、コマンドを動かさない（状況の表示の、読み取りの git だけ）" "$others"
     # 準備中のままの EOF → すぐ終わる（待ち切れと取り違えない）
     printf 'STATE=starting\nORG=dev\n' > "$td/logs/apex/.status"
     t0=$SECONDS
@@ -218,5 +221,118 @@ test_apexlog_status_refresh() {
     teardown "$td" "$mb"
 }
 test_apexlog_status_refresh
+
+# ------------------------------------------------------------------------------
+# 今の状況の表示と、次の目安（処理の流れ 6）・結果の 1 行（処理の流れ 7）
+#   本物の git の一時リポジトリ（origin は bare）で確かめる（偽の git では、変更の数・追跡先の差を作れないため）
+# ------------------------------------------------------------------------------
+_st_repo() { # 作業フォルダ（force-*）を作り、origin（bare）へ push して、追跡先を付ける。パスを出す
+    local td bare
+    td=$(setup_force_dir); bare="${td}.origin.git"
+    git init -q --bare "$bare"
+    (
+        cd "$td" || exit 1
+        git init -q -b feature/x
+        git config user.email t@example.com; git config user.name t; git config core.autocrlf false
+        # 本物の force-* と同じく、.sf/・logs は Git の対象外にし、ほかは最初にコミットしておく（変更 0 件から始める）
+        printf '.sf/\nlogs\n' > .gitignore
+        printf 'a\n' > a.txt; git add -A; git commit -q -m init
+        git remote add origin "$bare"; git push -q -u origin feature/x 2>/dev/null
+    )
+    printf '{"target-org": "my-dev"}\n' > "$td/.sf/config.json"
+    echo "$td"
+}
+_st_menu() { # 作業フォルダ → メニューの出力（色を除く）
+    (cd "$1" && printf 'q' | TERM_PROGRAM= bash "$SF_TOOLS_DIR/bin/sf-launcher.sh" 2>&1) | sed $'s/\033\\[[0-9;]*m//g'
+}
+
+test_status_display() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] 今の状況の表示と、次の目安${CLR_RST}"
+    local td out head
+    td=$(_st_repo); head=$(git -C "$td" rev-parse HEAD)
+
+    out=$(_st_menu "$td")
+    assert_output_contains "$out" "ブランチ: feature/x   組織: my-dev" "ブランチと組織（.sf/config.json の target-org）を出す"
+    assert_output_contains "$out" "未コミットの変更: 0 件   push していないコミット: 0 件" "変更と、push していないコミットの数を出す"
+    assert_output_contains "$out" "次の PR 先: （Next で確かめる）" "next-status.txt がない → Next で確かめる"
+    assert_output_contains "$out" "▶ 次の目安: 5 Next（次の出し先を確かめる）" "変更なし・push 済み → 5 Next"
+
+    printf 'HEAD=%s\nNEXT=staging\nPR=\nSKIPPED=false\n' "$head" > "$td/sf-tools/logs/next-status.txt"
+    out=$(_st_menu "$td")
+    assert_output_contains "$out" "次の PR 先: staging" "next-status.txt の HEAD が今と同じ → 次の PR 先を出す"
+    assert_output_contains "$out" "▶ 次の目安: 5 Next（staging へ PR を出す）" "次の PR 先がある → 5 Next（その段階へ）"
+
+    printf 'HEAD=%s\nNEXT=staging\nPR=12\nSKIPPED=false\n' "$head" > "$td/sf-tools/logs/next-status.txt"
+    out=$(_st_menu "$td")
+    assert_output_contains "$out" "次の PR 先: staging（PR 発行中 #12）" "発行中の PR → 番号を出す"
+    assert_output_contains "$out" "▶ 次の目安: PR #12 の検証が緑になったら、マージする" "発行中の PR → 検証を待つ"
+
+    printf 'HEAD=%s\nNEXT=none\nPR=\nSKIPPED=false\n' "$head" > "$td/sf-tools/logs/next-status.txt"
+    out=$(_st_menu "$td")
+    assert_output_contains "$out" "次の PR 先: 全段階にリリース済み" "NEXT=none → 全段階にリリース済み"
+
+    printf 'HEAD=%s\nNEXT=develop\nPR=\nSKIPPED=true\n' "$head" > "$td/sf-tools/logs/next-status.txt"
+    out=$(_st_menu "$td")
+    assert_output_contains "$out" "次の PR 先: 出すものなし（ターゲットファイルが空）" "SKIPPED=true → 出すものなし"
+
+    printf 'HEAD=0000000000000000000000000000000000000000\nNEXT=main\nPR=\nSKIPPED=false\n' > "$td/sf-tools/logs/next-status.txt"
+    out=$(_st_menu "$td")
+    assert_output_contains "$out" "次の PR 先: （Next で確かめる）" "HEAD が今と違う（古い結果）→ 使わない"
+
+    printf 'HEAD=%s\nNEXT=$(touch injected)\nPR=1;x\n' "$head" > "$td/sf-tools/logs/next-status.txt"
+    out=$(_st_menu "$td")
+    assert_file_not_exists "$td/injected" "next-status.txt を source しない（中身を実行しない）"
+    assert_output_contains "$out" "次の PR 先: （Next で確かめる）" "形の違う NEXT= → 使わない"
+
+    printf 'b\n' > "$td/b.txt"
+    out=$(_st_menu "$td")
+    assert_output_contains "$out" "未コミットの変更: 1 件" "未コミットの変更を数える"
+    assert_output_contains "$out" "▶ 次の目安: 1 Check → 2 Dryrun → 3 Deploy で確かめてから、4 Push" "未コミットの変更 → 確かめてから Push"
+
+    git -C "$td" add b.txt; git -C "$td" commit -q -m b
+    out=$(_st_menu "$td")
+    assert_output_contains "$out" "push していないコミット: 1 件" "push していないコミットを数える"
+    assert_output_contains "$out" "▶ 次の目安: 4 Push（push していないコミットがあります）" "push していないコミット → 4 Push"
+
+    git -C "$td" checkout -q -b develop
+    out=$(_st_menu "$td")
+    assert_output_contains "$out" "⚠ 環境ブランチの上です" "環境ブランチ（branches.txt）→ その旨を出す"
+    assert_output_not_contains "$out" "次の目安" "環境ブランチ → 次の目安を出さない"
+
+    # 組織名: 制御文字（ESC・改行）・文字の向きを変える文字を除き、60 文字を超えたら切る
+    local long; long=$(printf 'o%.0s' $(seq 1 80))
+    printf '{"target-org": "ab\\u001b[31mcd\\nef\\u202egh%s"}\n' "$long" > "$td/.sf/config.json"
+    out=$( (cd "$td" && printf 'q' | TERM_PROGRAM= bash "$SF_TOOLS_DIR/bin/sf-launcher.sh" 2>&1) | grep '組織:')
+    [[ "$out" != *$'\033[31m'* && "$out" != *$'‮'* ]] && pass "組織名の制御文字・向きを変える文字を除く" || fail "組織名の制御文字・向きを変える文字を除く" "$out"
+    [[ "$out" == *"ab[31mcdefgh"*"…"* ]] && pass "組織名は 60 文字で切って … を付ける" || fail "組織名は 60 文字で切って … を付ける" "$out"
+    printf '{"target-org": "x\\\\033[31my"}\n' > "$td/.sf/config.json"
+    out=$( (cd "$td" && printf 'q' | TERM_PROGRAM= bash "$SF_TOOLS_DIR/bin/sf-launcher.sh" 2>&1) | grep '組織:')
+    [[ "$out" != *$'\033[31m'* && "$out" == *'x\033[31my'* ]] && pass "組織名の \\033 の文字の並びは、制御として解釈せず、そのまま出す" || fail "組織名の \\033 の文字の並びは、制御として解釈せず、そのまま出す" "$out"
+    printf 'HEAD=%s\nNEXT=staging\nPR=1234567890\n' "$(git -C "$td" rev-parse HEAD)" > "$td/sf-tools/logs/next-status.txt"
+    out=$(_st_menu "$td")
+    assert_output_not_contains "$out" "PR 発行中" "長すぎる PR=（10 桁以上）は使わない"
+    printf 'HEAD=%s\nNEXT=%s\n' "$(git -C "$td" rev-parse HEAD)" "$long" > "$td/sf-tools/logs/next-status.txt"
+    out=$(_st_menu "$td")
+    assert_output_not_contains "$out" "次の PR 先: o" "長すぎる NEXT=（41 文字以上）は使わない"
+
+    rm -f "$td/.sf/config.json"
+    out=$(_st_menu "$td")
+    assert_output_not_contains "$out" "組織:" ".sf/config.json がない → 組織を出さない"
+    teardown "$td" "${td}.origin.git"
+}
+test_status_display
+
+test_result_line() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] コマンドの結果の 1 行${CLR_RST}"
+    local td out
+    td=$(_st_repo)
+    out=$(cd "$td" && bash "$SF_TOOLS_DIR/bin/sf-launcher.sh" 1 2>&1 | sed $'s/\033\\[[0-9;]*m//g')
+    assert_output_contains "$out" "✓ Check: 終わりました（成功）" "成功 → ✓ の 1 行"
+    git -C "$td" checkout -q -b develop
+    out=$(cd "$td" && bash "$SF_TOOLS_DIR/bin/sf-launcher.sh" 5 2>&1 | sed $'s/\033\\[[0-9;]*m//g'); local ec=$?
+    assert_output_contains "$out" "✗ Next: 失敗、または中断しました（終了コード 1）" "失敗（環境ブランチの上の sf-next）→ ✗ の 1 行と終了コード"
+    teardown "$td" "${td}.origin.git"
+}
+test_result_line
 
 print_summary

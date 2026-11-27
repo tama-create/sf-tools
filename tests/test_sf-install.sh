@@ -131,7 +131,7 @@ test_release_dir_skipped_on_main() {
     cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-install.sh" 2>&1 >/dev/null
 
     assert_dir_exists     "$td/sf-tools/release"           "sf-tools/release/ ベースディレクトリが作成された"
-    assert_file_exists    "$td/sf-tools/release/.gitkeep" ".gitkeep が作成された"
+    assert_file_not_exists "$td/sf-tools/release/.gitkeep" ".gitkeep は作らない（2026-11-27 に、作るのをやめた）"
     assert_dir_not_exists "$td/sf-tools/release/main"     "main の release サブディレクトリが作成されない"
     unset MOCK_GIT_BRANCH
     teardown "$td" "$mb" "$mh"
@@ -186,6 +186,19 @@ test_deploy_remove_target_created() {
     else
         fail "deploy-target.txt の中身は config/install/release/ の雛形と同じ" "中身が違う"
     fi
+    # README.md（このブランチの作業の資料の入口）も、雛形からコピーする
+    if cmp -s "$td/sf-tools/release/feature/test/README.md" "$SF_TOOLS_DIR/config/install/release/README.md"; then
+        pass "README.md が、config/install/release/ の雛形と同じ中身で作成された"
+    else
+        fail "README.md が、config/install/release/ の雛形と同じ中身で作成された" "ない、または中身が違う"
+    fi
+    assert_file_not_exists "$td/sf-tools/release/.gitkeep" "sf-tools/release/.gitkeep は作らない"
+    # すでにある README.md・ターゲットファイルは、上書きしない（書いた内容を消さない）
+    printf '自分で書いた内容\n' > "$td/sf-tools/release/feature/test/README.md"
+    printf '[files]\nforce-app/main/default/classes/A.cls\n' > "$td/sf-tools/release/feature/test/deploy-target.txt"
+    cd "$td" && SF_INIT_RUNNING=1 HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-install.sh" 2>&1 >/dev/null
+    assert_equals "$(cat "$td/sf-tools/release/feature/test/README.md")" "自分で書いた内容" "すでにある README.md は、上書きしない"
+    assert_file_contains "$td/sf-tools/release/feature/test/deploy-target.txt" "classes/A.cls" "すでにある deploy-target.txt は、上書きしない"
     unset MOCK_GIT_BRANCH
     teardown "$td" "$mb" "$mh"
 }
@@ -197,7 +210,7 @@ test_templates_only_force_files() {
     echo ""
     echo -e "${CLR_HEAD}[TEST] templates/ には force-* にそのまま置くものだけ・コピー元は config/install/${CLR_RST}"
     local f
-    for f in config/install/release/deploy-target.txt config/install/release/remove-target.txt config/install/gitmessage; do
+    for f in config/install/release/deploy-target.txt config/install/release/remove-target.txt config/install/release/README.md config/install/gitmessage; do
         assert_file_exists "$SF_TOOLS_DIR/$f" "コピー元がある: $f"
     done
     # templates/ に、コピー元の写し・仮の名前（__BRANCH__ など、__ で始まるフォルダ）を置かない
@@ -213,6 +226,11 @@ test_templates_only_force_files() {
     else
         pass "templates/ に __ で始まる仮の名前のフォルダを置かない"
     fi
+    # templates/ の .gitkeep は、force-app/main/default/.gitkeep の 1 個だけ（新しいプロジェクトは force-app が空で、
+    #   sfdx-project.json のフォルダがないと sf CLI が MissingPackageDirectoryError で止まるため、1 個は要る。種類ごとのフォルダの .gitkeep は配らない）
+    local keeps
+    keeps=$(cd "$SF_TOOLS_DIR/templates" && find . -name .gitkeep | sort | tr '\n' ' ')  # VAR=$(cmd) のため run 不使用
+    assert_equals "$keeps" "./force-app/main/default/.gitkeep " "templates/ の .gitkeep は force-app/main/default/.gitkeep の 1 個だけ"
     # sf-install.sh が templates/ から読むのは、同じ名前・同じ場所に置く sf-tools/config/ だけ
     local refs
     refs=$(grep -v '^[[:space:]]*#' "$SF_TOOLS_DIR/bin/sf-install.sh" | grep -o 'sf-tools/templates/[^"]*' | grep -v '^sf-tools/templates/sf-tools/config/' | head -3)  # VAR=$(cmd) のため run 不使用

@@ -185,7 +185,7 @@ test_M6() {
     _in_main 'classes/Del6.cls' && fail "M6: 組織で削除した部品が、main から消える" "残っている" || pass "M6: 組織で削除した部品が、main から消える"
     _in_main 'classes/Keep6.cls' && pass "M6: 組織にある部品は、main に残る" || fail "M6: 組織にある部品は、main に残る"
     _in_staging 'classes/Del6.cls' && fail "M6: （前提）staging には、もともと Del6.cls がない（伝播しないため）" "ある" || pass "M6: （前提）staging には、もともと Del6.cls がない（伝播しないため）"
-    _in_main 'classes/.gitkeep' && pass "M6: .gitkeep は、削除しない" || fail "M6: .gitkeep は、削除しない"
+    _in_main 'force-app/main/default/.gitkeep' && pass "M6: .gitkeep は、削除しない（雛形の force-app/main/default/.gitkeep）" || fail "M6: .gitkeep は、削除しない（雛形の force-app/main/default/.gitkeep）"
 }
 
 test_M7() {

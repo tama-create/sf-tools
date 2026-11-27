@@ -27,7 +27,7 @@
 
 <h2 id="sf-job"><code>sf-job.sh</code></h2>
 <pre><code>cd 作業フォルダ
-sf-job.sh [--project XXXX] [--owner OWNER]</code></pre>
+sf-job.sh [--project XXXX] [--owner OWNER] [--name ジョブ名]</code></pre>
 <p>新しい作業（ブランチ）を始めるときの、オールインワンのスクリプトです。作業フォルダ（ジョブフォルダを置く場所。おすすめは <code>~/sf</code> のような短い名前のフォルダ）で実行します。</p>
 <h3>オプション</h3>
 <table>
@@ -35,6 +35,7 @@ sf-job.sh [--project XXXX] [--owner OWNER]</code></pre>
   <tbody>
     <tr><td><code>--project XXXX</code></td><td>プロジェクト名（リポジトリ <code>force-XXXX</code> の XXXX）。先頭の <code>force-</code>（大文字・小文字を問わない）は、除いて扱います。使える文字は、英数字・<code>-</code>・<code>_</code>・<code>.</code> です（記号は、英数字の間に 1 つずつ。50 文字まで。末尾の <code>.git</code> は不可）。不正なら中断します</td></tr>
     <tr><td><code>--owner OWNER</code></td><td>GitHub のオーナー（組織名またはユーザー名）。英数字とハイフンだけです（先頭・末尾は英数字。39 文字まで）。不正なら中断します</td></tr>
+    <tr><td><code>--name ジョブ名</code></td><td>ジョブ名を、入力の代わりに渡します。入力と同じ決まりで確かめ、合わなければ、入力し直さずに中断します。同じ名前のブランチが GitHub にあるときの確認で <code>N</code> にしたときも、別の名前を聞かずに中断します。最後の確認（ジョブ名・ブランチ・クローン先）は、省きません</td></tr>
     <tr><td><code>-h</code>, <code>--help</code></td><td>説明を表示して終了する（1 つ目の引数のときだけ）</td></tr>
   </tbody>
 </table>
@@ -63,6 +64,7 @@ sf-job.sh [--project XXXX] [--owner OWNER]</code></pre>
   </li>
   <li>途中で中断・失敗しても、それまでに作ったブランチ・フォルダ・クローンは、削除しません。ブランチを作ったあとに clone が失敗したときは、同じジョブ名でもう一度実行し、既存のブランチを使う（<code>Y</code>）と、続きから進められます。</li>
   <li><code>sf-start.sh</code> が失敗で終わると、<code>sf-job.sh</code> も中断します（クローンは残ります）。<code>sf-job.sh</code> は、ランチャーを終了するまで終わりません。</li>
+  <li><strong>AI に頼むとき</strong>（Claude Code・Codex に「新しい作業を始めて」と言う）: AI は、プロジェクト・ジョブ名・作るブランチ・クローン先を示し、「はい」をもらってから、<code>--project</code>・<code>--owner</code>・<code>--name</code> を付けて動かします。AI が動かすときは、<code>sf-start.sh</code> を動かさず、クローンまでで終わります（VS Code・ランチャーを開くのは、人の操作のため）。終わったら、そのフォルダで <code>sf-start.sh</code> を動かしてください。<code>gh</code> にログインしていないときも、AI はログインの画面を開かずに止まります。</li>
   <li><strong>Ctrl+C は効きません。</strong>中断は、入力のときに <code>q</code> で行います。中断・失敗の終了コードは <code>1</code> です。Ctrl+C を無視する設定は、ここから起動する <code>sf-start.sh</code>・ランチャーと、ランチャーから実行するコマンドにも、引き継がれます。ただし、<code>sf</code>・<code>npm</code> など Node のコマンドは、実行中に Ctrl+C を押すと、そのコマンドだけが止まることがあります。</li>
   <li>ログは <code>~/sf-tools/logs/sf-job.log</code> です（実行のたびに作り直します）。</li>
 </ul>
@@ -334,8 +336,18 @@ sf-launcher.sh --fzf     # fzf でインクリメンタル検索</code></pre>
 </ul>
 
 <h2 id="sf-next"><code>sf-next.sh</code></h2>
-<pre><code>sf-next.sh [-v]</code></pre>
-<p>現在の作業用のブランチの<strong>先端のコミット</strong>が、どの段階（<code>develop</code> → <code>staging</code> → <code>main</code>）まで出たかを確かめ、次に PR を出してよい段階を案内します。<code>force-*</code> フォルダの中で実行します。<code>-v</code>（<code>--verbose</code>）・<code>-h</code>（<code>--help</code>。1 つ目の引数のときだけ）以外の引数は、「不明なオプションです」で中断します。</p>
+<pre><code>sf-next.sh [-v]
+sf-next.sh --create --title 題名 --body-file 本文のファイル</code></pre>
+<p>現在の作業用のブランチの<strong>先端のコミット</strong>が、どの段階（<code>develop</code> → <code>staging</code> → <code>main</code>）まで出たかを確かめ、次に PR を出してよい段階を案内します。<code>force-*</code> フォルダの中で実行します。<code>-v</code>（<code>--verbose</code>）・<code>-h</code>（<code>--help</code>。1 つ目の引数のときだけ）・下の表のオプション以外の引数は、「不明なオプションです」で中断します。</p>
+<table>
+  <thead><tr><th>オプション</th><th>内容</th></tr></thead>
+  <tbody>
+    <tr><td><code>--create</code></td><td>確認で <code>Y</code> のとき、ブラウザを開かずに、<code>gh pr create</code> で PR を作ります（おもに、AI に「PR を出して」と頼むときに使います）。<code>--title</code> と <code>--body-file</code> の両方が要ります</td></tr>
+    <tr><td><code>--title 題名</code></td><td>PR の題名です。空でない 1 行（改行を含まない）にします。長さは GitHub が確かめます</td></tr>
+    <tr><td><code>--body-file ファイル</code></td><td>PR の本文を書いたファイルです（中身は空でもよく、そのまま使います）。ファイルがない・読めないときは、中断します</td></tr>
+  </tbody>
+</table>
+<p>オプションの誤り（<code>--create</code> に <code>--title</code>・<code>--body-file</code> がない、<code>--create</code> なしで <code>--title</code>・<code>--body-file</code> を付けた、など）は、状況を確かめる前に中断します。</p>
 <p>開発したものは、<strong>一方通行</strong>で、同じコミットのまま <code>develop</code> → <code>staging</code> → <code>main</code> と上げます（<a href="../admin/workflows.html#one-way">一方通行の決まり</a>）。判定は、自分では計算せず、ワークフローと同じ <a href="#sf-promote-check"><code>sf-promote-check.sh --plan</code></a> に任せます。</p>
 
 <h3>表示されるステータス</h3>
@@ -368,11 +380,12 @@ sf-launcher.sh --fzf     # fzf でインクリメンタル検索</code></pre>
   <li>保護ブランチ（<code>sf-tools/config/branches.txt</code> に書かれたブランチ。ファイルがない・空のときは <code>main</code>）の上と、ブランチを取得できないとき（detached HEAD など）は、エラーで終了します。</li>
   <li>ターゲットファイル（<code>deploy-target.txt</code>・<code>remove-target.txt</code>）に対象がないときは、「出すものがありません」と表示して終わります。</li>
   <li>次の PR 先があるときは、「<code>&lt;次の PR 先&gt;</code> にPRを出しますか？」と確認します（Y/N/q）。次の PR 先がいちばん下の段階でないとき（例: <code>staging</code>・<code>main</code>）は、前に「<code>&lt;1 つ前の段階&gt;</code> の組織で、動作を確かめ終えましたか？」が付きます（印の表示だけを見て、確かめずに上の段階へ上げるのを防ぐため。確認の回数は増えません）。<code>Y</code> で、<code>&lt;origin の URL&gt;/compare/&lt;次の PR 先&gt;...&lt;現在のブランチ&gt;?expand=1</code>（PR の作成画面）を、ブラウザで開き、URL も表示します（PR そのものは、作りません）。<code>N</code> は何もせず終了、<code>q</code> は中断（終了コード 1）です。</li>
+  <li><code>--create</code> を付けたときは、<code>Y</code> で、ブラウザを開かずに PR を作り、作られた PR の URL を表示します（題名と本文は、そのまま渡します）。<code>origin</code> が <code>https://github.com/&lt;オーナー&gt;/&lt;リポジトリ&gt;</code> の形でないとき・<code>gh pr create</code> が失敗したとき（理由を表示します）は、PR を作らずに中断します。同じ出し先への PR がほかで先に作られていたときも、GitHub が 2 つ目を断るので、失敗になります。</li>
   <li>開く URL は、<code>origin</code> の URL から作ります（URL に含まれる認証情報（<code>//&lt;ユーザー&gt;:&lt;Token&gt;@</code>）は除き、SSH の形は <code>https://github.com/</code> に直します）。<code>origin</code> の URL を取得できないときは、エラーで終了します。</li>
   <li>次の PR 先へ、PR が開いているときは、「発行済みです。検証が緑になってから、マージしてください」と表示して終わります。全段階に印があれば、「全段階にリリース済みです！」と表示して終わります。</li>
   <li>認証済みの <code>gh</code> が必要です（リリースの印・PR の一覧を読みます）。</li>
   <li>終了コードは、正常終了（<code>N</code> で終了した場合を含む）が <code>0</code>、エラー・<code>q</code> での中断・決まりを破っているときが <code>1</code>、AI 操作の確認待ちが <code>20</code> です。ログは <code>./sf-tools/logs/sf-next.log</code> です（実行のたびに作り直します）。</li>
-  <li>AI 操作（環境変数 <code>SF_TOOLS_AI=1</code>）では、PR を出すかの質問の名前は <code>next.pr</code> です。<code>SF_TOOLS_ANSWERS="next.pr=n"</code> で状況の表示だけ、<code>"next.pr=y"</code> で PR の作成画面を開きます。答えがなければ、ブラウザを開く前に、終了コード 20 で止まります。</li>
+  <li>AI 操作（環境変数 <code>SF_TOOLS_AI=1</code>）では、PR を出すかの質問の名前は <code>next.pr</code> です。<code>SF_TOOLS_ANSWERS="next.pr=n"</code> で状況の表示だけ、<code>"next.pr=y"</code> で PR の作成画面を開きます（<code>--create</code> を付ければ、PR を作ります）。答えがなければ、ブラウザを開く前（PR を作る前）に、終了コード 20 で止まります。AI は、出し先・ブランチ・題名・本文を示し、「はい」をもらってから動かします。</li>
 </ul>
 
 <h2 id="sf-promote-check"><code>sf-promote-check.sh</code></h2>

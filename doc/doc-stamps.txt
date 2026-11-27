@@ -4,7 +4,7 @@
 #   コマンド（bin/sf-*.sh）は、どれかの文書の基になっていること（tests/docs-stamp.sh --check が確認する）。
 # 文書を足したら、その文書の基になるコードを、ここに足す（- のままで足し、文書を読み直してから --update する）。
 
-site/reference/commands-dev.html | bin/sf-job.sh | 3104353950-6410 | 5b20e70
+site/reference/commands-dev.html | bin/sf-job.sh | 3576329447-8264 | e0b8023
 site/reference/commands-dev.html | bin/sf-start.sh | 1463713128-7421 | ebc141b
 site/reference/commands-dev.html | bin/sf-launcher.sh | 1108670460-4696 | 3f6a395
 site/reference/commands-dev.html | bin/sf-check.sh | 334649645-7163 | 5b20e70
@@ -12,7 +12,7 @@ site/reference/commands-dev.html | bin/sf-dryrun.sh | 2320821728-2196 | 5b20e70
 site/reference/commands-dev.html | bin/sf-release.sh | 1513622544-11488 | c204c2a
 site/reference/commands-dev.html | bin/sf-deploy.sh | 3742126846-4982 | a1c1372
 site/reference/commands-dev.html | bin/sf-push.sh | 485829100-5735 | d2dd405
-site/reference/commands-dev.html | bin/sf-next.sh | 2963539997-5509 | dbb651b
+site/reference/commands-dev.html | bin/sf-next.sh | 4016559334-7605 | e0b8023
 site/reference/commands-dev.html | bin/sf-promote-check.sh | 1039361967-5981 | dbb651b
 site/reference/commands-dev.html | bin/sf-restart.sh | 3849369820-2445 | 5b20e70
 site/reference/commands-dev.html | bin/sf-hook.sh | 4023496098-3227 | 5b20e70
@@ -28,13 +28,13 @@ site/reference/commands-auto.html | bin/sf-metasync.sh | 2608034047-25141 | dbb6
 site/reference/target-files.html | bin/sf-check.sh | 334649645-7163 | b2034a6
 site/reference/target-files.html | bin/sf-release.sh | 1513622544-11488 | c204c2a
 
-site/guide/basics.html | bin/sf-job.sh | 3104353950-6410 | ebc141b
+site/guide/basics.html | bin/sf-job.sh | 3576329447-8264 | e0b8023
 site/guide/basics.html | bin/sf-start.sh | 1463713128-7421 | ebc141b
 
 site/guide/daily.html | bin/sf-dryrun.sh | 2320821728-2196 | b2034a6
 site/guide/daily.html | bin/sf-deploy.sh | 3742126846-4982 | a1c1372
 site/guide/daily.html | bin/sf-push.sh | 485829100-5735 | d2dd405
-site/guide/daily.html | bin/sf-next.sh | 2963539997-5509 | dbb651b
+site/guide/daily.html | bin/sf-next.sh | 4016559334-7605 | e0b8023
 site/guide/daily.html | bin/sf-prepush.sh | 2137767055-4495 | b2034a6
 site/guide/daily.html | bin/sf-precommit.sh | 2396654912-1585 | c52ffe3
 
@@ -60,7 +60,7 @@ site/guide/install.html | bin/sf-upgrade.sh | 1489370091-5002 | ebc141b
 site/guide/install.html | bin/sf-install.sh | 807008251-7188 | 3a4b417
 site/guide/install.html | bin/sf-start.sh | 1463713128-7421 | ebc141b
 
-site/admin/troubleshooting.html | bin/sf-job.sh | 3104353950-6410 | fc9cbb5
+site/admin/troubleshooting.html | bin/sf-job.sh | 3576329447-8264 | e0b8023
 site/admin/troubleshooting.html | bin/sf-push.sh | 485829100-5735 | d2dd405
 site/admin/troubleshooting.html | bin/sf-prepush.sh | 2137767055-4495 | fc9cbb5
 site/admin/troubleshooting.html | bin/sf-deploy.sh | 3742126846-4982 | a1c1372
@@ -68,7 +68,7 @@ site/admin/troubleshooting.html | bin/sf-sync-wf.sh | 2612271841-6183 | fc9cbb5
 site/admin/troubleshooting.html | bin/sf-init.sh | 4143046044-23496 | 14f6d2f
 
 site/reference/commands.html | bin/sf-launcher.sh | 1108670460-4696 | 3f6a395
-site/reference/commands.html | bin/sf-job.sh | 3104353950-6410 | 9640759
+site/reference/commands.html | bin/sf-job.sh | 3576329447-8264 | e0b8023
 site/reference/commands.html | bin/sf-init.sh | 4143046044-23496 | 9640759
 site/reference/commands.html | bin/sf-update-secret.sh | 1262693024-6313 | 9640759
 site/reference/commands.html | bin/sf-sync-wf.sh | 2612271841-6183 | 9640759
@@ -78,21 +78,21 @@ site/reference/commands.html | phases/init/verify.sh | 4242042816-12412 | dbb651
 site/reference/commands.html | phases/init/add_tier.sh | 818736844-7560 | 9640759
 site/reference/commands.html | phases/init/remove_tier.sh | 1768172340-6842 | dbb651b
 site/reference/commands.html | phases/init/reconnect.sh | 2731751844-4672 | 9640759
-site/index.html | bin/sf-job.sh | 3104353950-6410 | 9640759
+site/index.html | bin/sf-job.sh | 3576329447-8264 | e0b8023
 site/index.html | bin/sf-launcher.sh | 1108670460-4696 | 3f6a395
 site/index.html | bin/sf-init.sh | 4143046044-23496 | 9640759
 site/guide/glossary.html | bin/sf-launcher.sh | 1108670460-4696 | 3f6a395
-site/guide/glossary.html | bin/sf-job.sh | 3104353950-6410 | 9640759
+site/guide/glossary.html | bin/sf-job.sh | 3576329447-8264 | e0b8023
 site/guide/glossary.html | bin/sf-release.sh | 1513622544-11488 | c204c2a
 site/design/cicd.html | bin/sf-metasync.sh | 2608034047-25141 | dbb651b
 site/design/cicd.html | bin/sf-release.sh | 1513622544-11488 | c204c2a
-site/design/cicd.html | bin/sf-next.sh | 2963539997-5509 | dbb651b
+site/design/cicd.html | bin/sf-next.sh | 4016559334-7605 | e0b8023
 site/design/cicd.html | bin/sf-promote-check.sh | 1039361967-5981 | dbb651b
 site/design/cicd.html | bin/sf-prepush.sh | 2137767055-4495 | 0277207
 site/design/cicd.html | bin/sf-sync-wf.sh | 2612271841-6183 | 0277207
 site/design/cicd.html | bin/sf-upgrade.sh | 1489370091-5002 | 0277207
 site/reference/structure.html | bin/sf-init.sh | 4143046044-23496 | 14f6d2f
-site/reference/structure.html | bin/sf-job.sh | 3104353950-6410 | fc9cbb5
+site/reference/structure.html | bin/sf-job.sh | 3576329447-8264 | e0b8023
 site/reference/structure.html | bin/sf-typecheck.sh | 2610487361-7160 | fc9cbb5
 site/reference/structure.html | bin/sf-check.sh | 334649645-7163 | fc9cbb5
 site/reference/structure.html | bin/sf-prepush.sh | 2137767055-4495 | fc9cbb5

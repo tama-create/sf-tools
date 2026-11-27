@@ -143,7 +143,7 @@ JOB-xxx ──→ main      （本番組織へリリース）
 
 1. `sf-job.sh`: ジョブ名を入力 → GitHub 上の `main` から作業用ブランチを作成 → `./{ジョブ名}/force-XXXX` にクローン → `sf-start.sh` を実行
 2. `sf-start.sh`: 組織に接続（個人用の Sandbox など）→ VS Code を起動 → バックグラウンドで `sf-install.sh`（フック・`sf-tools/release/<ブランチ>/`・ツールの更新）→ 前面で `sf-launcher.sh` を起動
-3. `sf-launcher.sh`（メニュー）: 1 Check（`sf-check.sh`）/ 2 Push（`sf-push.sh`）/ 3 Next（`sf-next.sh`）/ 4 Dryrun（`sf-dryrun.sh`）/ 5 Deploy（`sf-deploy.sh`）/ 6 Start / 7 Restart（VS Code のターミナルでは 6・7 は出ない）
+3. `sf-launcher.sh`（メニュー）: 1 Check（`sf-check.sh`）/ 2 Dryrun（`sf-dryrun.sh`）/ 3 Deploy（`sf-deploy.sh`）/ 4 Push（`sf-push.sh`）/ 5 Next（`sf-next.sh`）/ 6 Start / 7 Restart（VS Code のターミナルでは 6・7 は出ない）
 4. `sf-push.sh`: `origin/main` を取り込み → カレント配下だけをコミット（`sf-check.sh` の検証のあと、VS Code でメッセージを入力）→ プッシュ
 5. `sf-next.sh`: 次の PR 先を判定して、PR の作成画面を開く（3.3）。PR のマージで、wf-release が対応する組織へリリースする
 

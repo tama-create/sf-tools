@@ -81,9 +81,9 @@
 | `test_sf-release.sh` | sf-release.sh |
 | `test_sf-deploy.sh` | sf-deploy.sh |
 | `test_sf-dryrun.sh` | sf-dryrun.sh |
-| `test_sf-job.sh` | sf-job.sh（任意の作業フォルダ・`--owner` / `--project`・クローンの git remote・同名ジョブの重複判定を含む） |
+| `test_sf-job.sh` | sf-job.sh（任意の作業フォルダ・`--owner` / `--project`・クローンの git remote・同名ジョブの重複判定・`--name`・AI 操作（`job.existing`・`job.create`・sf-start を呼ばない・gh auth login を呼ばない）を含む） |
 | `test_project-identity.sh` | lib/project.sh のオーナー・XXXX の決め方（`parse_github_remote` / `normalize_project_name` / `discover_clones` / `gh_owner_candidates` / `resolve_init_identity` / `resolve_job_identity`） |
-| `test_sf-next.sh` | sf-next.sh（判定は偽の `sf-promote-check.sh`（`SF_PROMOTE_CHECK_CMD`）で差し替える。表示・終わり方・PR の作成画面・止まる条件） |
+| `test_sf-next.sh` | sf-next.sh（判定は偽の `sf-promote-check.sh`（`SF_PROMOTE_CHECK_CMD`）で差し替える。表示・終わり方・PR の作成画面・止まる条件・`--create`（gh pr create の引数・オプションの誤り・origin の形）） |
 | `test_sf-promote-check.sh` | sf-promote-check.sh（一方通行の確認。本物の git（bare の origin）と偽の gh（PR・commit status・実行）で、R0〜R3・印を信じる条件・`--only`・`--plan`・`--json`。リポジトリのフォルダは `force-t`） |
 | `test_sf-launcher.sh` | sf-launcher.sh（`common.sh` を読み込まない standalone のランチャー） |
 | `test_security.sh` | セキュリティ修正の退行の検出（静的解析: `run` 経由の `sf org display --verbose` の禁止・`run` の一時ファイルの置き場所など。実行時: ログに `sfdxAuthUrl` が残らない・ログのフォルダが 700）。`--changed` は、`bin/`・`phases/`・`lib/`・`hooks/` の変更で選ぶ（約 3 秒） |
@@ -466,6 +466,7 @@ check_gh_owner "$GITHUB_OWNER"   # 認証ユーザーの一致確認
 - `sf-promote-check.sh --plan --json </dev/null` を呼び、最後の行の JSON を `json_get` で読む（`next_tier`・`pr_open`・`skipped`・`tiers`・`violations`・`error`）。呼ぶコマンドは、環境変数 `SF_PROMOTE_CHECK_CMD` で差し替えられる（テスト用。決まりの強制はワークフロー側がするので、差し替えても破れない）
   - 終了コード 2（判断できない）→ `error` を出して die。1（決まりを破った。R2 の抜けなど）→ `violations` の `detail` を ERROR で出して die（PR を勧めない）
 - 終了コード: 0（N を含む）/ 1（エラー・q・決まりを破った）/ 20（AI 操作の確認待ち）
+- `--create --title <題名> --body-file <ファイル>`（2026-11-27。`doc/ai-operation-design.md` 11.2）: Y のとき、ブラウザを開かずに `gh pr create --repo <OWNER/REPO> --base <next_tier> --head <ブランチ> --title=<題名> --body-file=<ファイル>` で PR を作る。オプションの検査は判定より前（題名は空でない 1 行。長さは数えない: `${#…}` はロケールが C だとバイトで数えるため）。`<OWNER/REPO>` は、直した origin の URL が `^https://github\.com/<OWNER>/<REPO>$` のときだけ。gh の失敗は、その出力を出して die。題名・ファイル名は `=` の形の独立した引数（`-` で始まる題名も値として渡る）
 
 表示（段階は `tiers` の順 = 下から）:
 
@@ -507,7 +508,7 @@ check_gh_owner "$GITHUB_OWNER"   # 認証ユーザーの一致確認
 > 仕様の正本は、`bin/sf-launcher.sh` の冒頭コメント（`--help`）。ここは要点だけ。
 
 - `sf-launcher.sh` で起動するメニュー形式ランチャー（`sf-start.sh` の最後に自動で起動する。`sf-job.sh` からは `sf-start.sh` 経由。別名（`sfl` など）は作らない。直接 `sf-launcher.sh` を打つ。2026-10-23 の決定）
-- メニュー: 1 Check / 2 Push / 3 Next / 4 Dryrun / 5 Deploy / 6 Start / 7 Restart（同じフォルダの `sf-xxx.sh` を、引数なしで bash で実行）。番号は 1 文字（Enter 不要）、`q` で終了。範囲外・数字と `q` 以外は無視。実行したコマンドが失敗しても、ランチャーは終了しない
+- メニュー: 1 Check / 2 Dryrun / 3 Deploy / 4 Push / 5 Next / 6 Start / 7 Restart（同じフォルダの `sf-xxx.sh` を、引数なしで bash で実行）。番号は 1 文字（Enter 不要）、`q` で終了。範囲外・数字と `q` 以外は無視。実行したコマンドが失敗しても、ランチャーは終了しない
 - `lib/common.sh` を source しない standalone 設計（ログファイルを作らない・カラー定義を独自に持つ）
 - force-* フォルダの外では、警告を表示して終了する（終了コード 1。`-h` / `--help` だけは外でも動く）
 - VSCode 内では `sf-start` / `sf-restart`（6・7）をメニューから除外（`$TERM_PROGRAM == "vscode"` で判定。番号 6・7 は範囲外になる）
@@ -629,7 +630,7 @@ tr -d '\r' < "$key_file" | base64_oneline | gh secret set "SF_PRIVATE_KEY" -R "$
 
 #### 4.12.1 sf-job.sh・sf-prepush.sh の、結合テストで見つかった変更
 
-- **`sf-job.sh`（X2-2）**: ジョブ名に、環境ブランチ・管理者用のブランチの名前（`main` / `staging` / `develop` / `admin`。完全一致）は使えない。GitHub 上に同名のブランチがすでにあるときは、最後のコミットの作者・日時（`gh api ... --jq`）を表示して、`ask_yn` で確認する。Y なら `USE_EXISTING_BRANCH=1`（`phase_create_branch` は、作成の API を呼ばずに、戻る。ブランチ作成のあとに、clone が失敗した前回のジョブの、続き）。N なら、別のジョブ名を聞く（q は中断）。
+- **`sf-job.sh`（X2-2）**: ジョブ名に、環境ブランチ・管理者用のブランチの名前（`main` / `staging` / `develop` / `admin`。完全一致）は使えない。GitHub 上に同名のブランチがすでにあるときは、最後のコミットの作者・日時（`gh api ... --jq`）を表示して、`ask_yn` で確認する。Y なら `USE_EXISTING_BRANCH=1`（`phase_create_branch` は、作成の API を呼ばずに、戻る。ブランチ作成のあとに、clone が失敗した前回のジョブの、続き）。N なら、別のジョブ名を聞く（q は中断）。2026-11-27: 検査を `_check_job_name`・`_check_branch` にまとめ、`--name`（入力の代わり。合わなければ・N なら、入力し直さずに中断）からも呼ぶ。質問の名前は `job.existing`・`job.create`。AI 操作では、`gh auth login` を動かさず中断し、sf-start を動かさずにクローンまでで 0（`doc/ai-operation-design.md` 11.3）。
 - **`sf-prepush.sh`（X3-2）**: `phase_fetch` は、`branches.txt` のブランチが、origin に（`git ls-remote --exit-code origin <名前>`）まだないとき、取得せず、警告を出して続ける（以前は、`git fetch` が「見つからない」で失敗し、すべての push が止まった）。
 - **`lib/project.sh`（A14）**: `resolve_job_identity` は、`--project` だけの指定で、同じ XXXX のクローンが、複数のオーナーにある（大文字と小文字だけの違いは、同じ）とき、最初のものを黙って使わず、`_pick_from_list` で、選ばせる（`--owner` を指定すれば、選ばせない）。
 - **`sf-next.sh`（A5）**: 開く PR 作成画面の URL は、origin の URL が `ssh://git@github.com/...`・`git@github.com:...`・https のどれでも、https の URL にする（http(s) の URL に含まれる認証情報（`//<ユーザー>:<Token>@`）と末尾の `.git` は除く。origin の URL を取得できなければエラーで終了）。
@@ -965,7 +966,7 @@ AI の開発サイクル用のデバッグログ取得（開発者向け。管�
 
 | 呼び出し元 | 呼び出し先 | 備考 |
 |---|---|---|
-| `sf-job.sh` | `sf-start.sh` | クローンのあと、そのフォルダで引数なしで実行（対話のため `run` なし） |
+| `sf-job.sh` | `sf-start.sh` | クローンのあと、そのフォルダで引数なしで実行（対話のため `run` なし）。AI 操作（`SF_TOOLS_AI=1`）では呼ばない（`doc/ai-operation-design.md` 11.3） |
 | `sf-restart.sh` | `sf-start.sh` | 接続設定を消したあと、`FORCE_RELOGIN=1` を付けて実行 |
 | `sf-start.sh` | `sf-install.sh` | `~/sf-tools/bin/sf-install.sh` をバックグラウンドで起動（完了は待たない） |
 | `sf-start.sh` | `sf-launcher.sh` | install の起動の直後に起動（完了は待たない）。`SF_LAUNCHER_ACTIVE=1` なら起動しない（二重起動防止） |

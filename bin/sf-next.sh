@@ -3,18 +3,25 @@
 # sf-next.sh - 次のPR先ブランチを確認するスクリプト
 # ==============================================================================
 # 現在のブランチ（の先端のコミット）が、どの段階（develop → staging → main）まで出たかを確かめ、次に PR を出してよい段階を
-# 表示する。確認（Y/N/q）のうえ、PR の作成画面をブラウザで開く（PR そのものは作らない）。
+# 表示する。確認（Y/N/q）のうえ、PR の作成画面をブラウザで開く（PR そのものは作らない）。--create を付けたときは、
+# ブラウザを開かずに、gh pr create で PR を作る（会話で AI が動かすとき。doc/ai-operation-design.md 11.2）。
 # 判断は、一方通行のリリースの確認 sf-promote-check.sh --plan（doc/one-way-promotion-design.md 3.6）に任せる（ここでは計算しない）。
 # 開発物は一方通行で、同じコミットのまま develop → staging → main と上げる。develop に出したあとに変えた（push した）ら、
 # 次の出し先は develop に戻る（staging を勧めない）。
 #
 # 【使い方】
 #   bash ~/sf-tools/bin/sf-next.sh [オプション]
+#   bash ~/sf-tools/bin/sf-next.sh --create --title <題名> --body-file <ファイル>
 #
 # 【オプション】
-#   -v, --verbose  : コマンドの応答（出力）をコンソールにも表示する
-#   -h, --help     : このヘルプを表示して終了する（1 つ目の引数のときだけ）
+#   --create               : 確認で Y のとき、ブラウザを開かずに、gh pr create で PR を作る。--title と --body-file の両方が要る
+#   --title <題名>         : PR の題名（空でない 1 行。CR・LF を含まない。長さは GitHub が確かめる）。--create のときだけ指定できる
+#   --body-file <ファイル> : PR の本文のファイル（あって、読めること。中身は空でもよく、整形しない）。--create のときだけ指定できる
+#   -v, --verbose          : コマンドの応答（出力）をコンソールにも表示する
+#   -h, --help             : このヘルプを表示して終了する（1 つ目の引数のときだけ）
 #   上記以外の引数（2 つ目以降の -h / --help を含む）は、「不明なオプションです」と表示して中断する。
+#   オプションの誤り（値がない・--create に --title か --body-file がない・--create なしの --title / --body-file・題名の形・
+#   本文のファイルがない）は、処理の流れの 1 より前に中断する（判定・通信をしない）
 #
 # 【処理の流れ】
 #   1. 現在のブランチを取得する。取得できない（detached HEAD など）とき・保護ブランチ（branches.txt のブランチ。
@@ -36,6 +43,13 @@
 #           （origin の URL は、http(s):// の URL に含まれる認証情報（//<ユーザー>:<Token>@ の部分）を除き、
 #           git@github.com: / ssh://git@github.com/ を https://github.com/ に直し、末尾の .git を除いたもの。
 #           origin の URL を取得できないときは、エラーで終了する）
+#        Y（--create）: ブラウザを開かず、gh pr create --repo <OWNER/REPO> --base <next_tier> --head <現在のブランチ>
+#           --title=<題名> --body-file=<ファイル> で PR を作り、作られた PR の URL を表示する（題名・ファイル名は、それぞれ
+#           独立した 1 つの引数。= の形のため、題名が - で始まっても、別のオプションとして読まれない）。<OWNER/REPO> は、
+#           上の直した origin の URL が https://github.com/<OWNER>/<REPO> の形（OWNER: 英数字で始まる英数字・-。REPO: 英数字・
+#           . _ - で、. と .. は不可。ほかのホスト・余分なパス・? # は不可）のときだけ取る。合わない・gh pr create が失敗した
+#           （理由を表示する）ときは、エラーで終了する。確かめてから作るまでの間に、同じ head・base の PR がほかで作られたときは、
+#           GitHub が 2 つ目を拒むため、失敗として扱う
 #        N: 何もせず終了する / q: 中断する（終了コード 1）
 #
 # 【前提条件】
@@ -83,7 +97,35 @@ if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
     exit 0
 fi
 source "$COMMON_LIB"
-reject_unknown_args "$@"   # -v / --verbose 以外の引数は、不明なオプションとして中断する
+
+# 引数の解析（処理の流れの 1 より前。誤りがあれば、判定・通信をせずに中断する）
+OPT_CREATE=0
+OPT_TITLE=""; OPT_TITLE_SET=0
+OPT_BODY_FILE=""; OPT_BODY_SET=0
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -v|--verbose) shift ;;
+        --create) OPT_CREATE=1; shift ;;
+        --title)
+            [[ $# -ge 2 ]] || die "--title には、PR の題名を指定してください。"
+            OPT_TITLE="$2"; OPT_TITLE_SET=1; shift 2 ;;
+        --body-file)
+            [[ $# -ge 2 && -n "$2" ]] || die "--body-file には、PR の本文のファイルを指定してください。"
+            OPT_BODY_FILE="$2"; OPT_BODY_SET=1; shift 2 ;;
+        *) die "不明なオプションです: $1" ;;
+    esac
+done
+if [[ $OPT_CREATE -eq 1 ]]; then
+    [[ $OPT_TITLE_SET -eq 1 ]] || die "--create には、--title が要ります。"
+    [[ $OPT_BODY_SET -eq 1 ]] || die "--create には、--body-file が要ります。"
+    # 題名: 空でない 1 行（CR・LF を含まない）。長さは数えない（GitHub が確かめ、長すぎれば gh pr create の失敗になる。
+    #   ${#…} は、ロケールが C だとバイトで数え、日本語の題名を誤って弾くため）
+    [[ -n "$OPT_TITLE" ]] || die "PR の題名が空です。"
+    case "$OPT_TITLE" in *$'\n'*|*$'\r'*) die "PR の題名は 1 行にしてください（改行を含みます）。" ;; esac
+    [[ -f "$OPT_BODY_FILE" && -r "$OPT_BODY_FILE" ]] || die "PR の本文のファイルがない、または読めません: ${OPT_BODY_FILE}"
+else
+    [[ $OPT_TITLE_SET -eq 0 && $OPT_BODY_SET -eq 0 ]] || die "--title・--body-file は、--create と一緒に指定してください。"
+fi
 
 # ------------------------------------------------------------------------------
 # 3. 現在のブランチ
@@ -195,6 +237,25 @@ if ask_yn "$CONFIRM_MSG" next.pr; then   # next.pr: AI 操作の質問の名前�
     REPO_URL=$(git remote get-url origin 2>/dev/null \
         | sed 's#^\(https\{0,1\}://\)[^@/]*@#\1#; s|git@github\.com:|https://github.com/|; s|ssh://git@github\.com/|https://github.com/|; s|\.git$||')  # VAR=$(cmd) のため run 不使用
     [[ -n "$REPO_URL" ]] || die "origin の URL を取得できません。"
+    if [[ $OPT_CREATE -eq 1 ]]; then
+        # --create: gh pr create で PR を作る（doc/ai-operation-design.md 11.2）。リポジトリは、github.com の OWNER/REPO の形のときだけ
+        _re='^https://github\.com/([A-Za-z0-9][A-Za-z0-9-]*)/([A-Za-z0-9._-]+)$'
+        if [[ ! "$REPO_URL" =~ $_re ]] || [[ "${BASH_REMATCH[2]}" == "." || "${BASH_REMATCH[2]}" == ".." ]]; then
+            die "origin が GitHub のリポジトリ（https://github.com/<OWNER>/<REPO>）の形ではないため、PR を作れません: ${REPO_URL}"
+        fi
+        REPO_SLUG="${BASH_REMATCH[1]}/${BASH_REMATCH[2]}"
+        log "INFO" "PR を作ります（${REPO_SLUG}・${NEXT_TARGET} ← ${CURRENT_BRANCH}）: ${OPT_TITLE}"
+        # VAR=$(cmd) のため run 不使用（作られた PR の URL・失敗の理由を読む）。題名・ファイル名は、それぞれ独立した 1 つの引数
+        if PR_CREATED=$(gh pr create --repo "$REPO_SLUG" --base "$NEXT_TARGET" --head "$CURRENT_BRANCH" \
+                "--title=${OPT_TITLE}" "--body-file=${OPT_BODY_FILE}" </dev/null 2>&1); then
+            log "SUCCESS" "PR を作りました: $(printf '%s\n' "$PR_CREATED" | tail -n 1)"
+        else
+            log "ERROR" "gh pr create の出力:"
+            while IFS= read -r _l; do [[ -n "$_l" ]] && log "ERROR" "  ${_l}"; done <<< "$PR_CREATED"
+            die "PR を作れませんでした（gh pr create）。"
+        fi
+        exit $RET_OK
+    fi
     PR_URL="${REPO_URL}/compare/${NEXT_TARGET}...${CURRENT_BRANCH}?expand=1"
     log "INFO" "ブラウザでPR作成画面を開きます..."
     # open_browser（lib/platform.sh）が、OS に合ったコマンドで開く（Git Bash: start / WSL: powershell / macOS: open / Linux: xdg-open）

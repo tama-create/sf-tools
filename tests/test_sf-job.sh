@@ -13,6 +13,8 @@
 #   9. ブランチ作成失敗                    - 非ゼロ終了
 #  10. クローン失敗                        - 非ゼロ終了
 #  11. q で中断                            - 非ゼロ終了
+#  12. --name                              - 入力を聞かない・合わない名前は再入力せずに中断（doc/ai-operation-design.md 11.3）
+#  13. AI 操作（SF_TOOLS_AI=1）            - job.existing・job.create・sf-start を動かさない・gh auth login を動かさない
 # ==============================================================================
 
 source "$(dirname "${BASH_SOURCE[0]}")/test_helper.sh"
@@ -576,6 +578,133 @@ test_gh_auth_login_direct() {
     teardown "$mb" "$mock_home" "$(dirname "$(dirname "$(dirname "$cdir")")")"
 }
 
+# ==============================================================================
+# 12/13 の共通: sf-start.sh を、呼ばれたことを記録するスタブにする。sf-job.sh を動かし、出力を JB_OUT・終了コードを JB_RC に
+# ==============================================================================
+_stub_start_logged() {
+    local mock_home="$1"
+    _stub_job_subscripts "$mock_home"
+    printf '#!/bin/bash\necho "sf-start called" >> "${MOCK_CALL_LOG:-/dev/null}"\nexit 0\n' > "$mock_home/sf-tools/bin/sf-start.sh"
+    chmod +x "$mock_home/sf-tools/bin/sf-start.sh"
+}
+_job() { # 標準入力 作業フォルダ [環境変数...] -- [引数...]
+    local input="$1" dir="$2"; shift 2
+    local envs=()
+    while [[ $# -gt 0 && "$1" != "--" ]]; do envs+=("$1"); shift; done
+    [[ "${1:-}" == "--" ]] && shift
+    JB_OUT=$(printf '%s' "$input" \
+        | (export HOME="$JB_HOME" PATH="$JB_MB:$PATH"; cd "$dir" && env "${envs[@]}" bash "$JB_HOME/sf-tools/bin/sf-job.sh" "$@") 2>&1)
+    JB_RC=$?
+}
+
+test_name_option() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] --name: 入力を聞かない・合わない名前は、入力し直さずに中断${CLR_RST}"
+
+    local cdir
+    JB_MB=$(setup_mock_bin); export MOCK_CALL_LOG="$JB_MB/calls.log"
+    JB_HOME=$(setup_mock_home); cdir=$(setup_company_dir)
+    create_mock_git "$JB_MB"; create_mock_gh_for_job "$JB_MB"; _stub_start_logged "$JB_HOME"
+
+    _job $'Y\n' "$cdir" X=1 -- --owner tamashimon-org --project yamada --name JOB-named
+    assert_exit_ok $JB_RC                                                   "--name: 正常終了する"
+    assert_output_not_contains "$JB_OUT" "ジョブ名："                   "--name: ジョブ名を聞かない"
+    assert_file_contains "$MOCK_CALL_LOG" "JOB-named/force-yamada"          "--name: その名前でクローンする"
+    assert_file_contains "$MOCK_CALL_LOG" "sf-start called"                 "--name（人の操作）: sf-start を動かす"
+
+    local bad
+    for bad in "bad name" "-JOB" "develop" "admin"; do
+        : > "$MOCK_CALL_LOG"
+        _job $'Y\n' "$cdir" X=1 -- --owner tamashimon-org --project yamada --name "$bad"
+        assert_exit_fail $JB_RC                                             "--name「${bad}」: 中断する"
+        assert_output_contains "$JB_OUT" "このジョブ名は使えません"          "--name「${bad}」: 理由を表示する"
+        assert_file_not_contains "$MOCK_CALL_LOG" "git/refs"                "--name「${bad}」: ブランチを作らない"
+    done
+
+    : > "$MOCK_CALL_LOG"
+    mkdir -p "$cdir/JOB-dup/force-yamada"
+    _job $'Y\n' "$cdir" X=1 -- --owner tamashimon-org --project yamada --name JOB-dup
+    assert_exit_fail $JB_RC                                                 "--name でフォルダが重複: 中断する"
+    assert_output_contains "$JB_OUT" "同名のフォルダがすでに存在します"      "--name でフォルダが重複: 理由を表示する"
+    assert_output_not_contains "$JB_OUT" "別のジョブ名を入力してください" "--name でフォルダが重複: 入力し直しを促さない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "git/refs"                    "--name でフォルダが重複: ブランチを作らない"
+
+    : > "$MOCK_CALL_LOG"
+    _job $'N\n' "$cdir" MOCK_GH_BRANCH_EXISTS_EXIT=0 -- --owner tamashimon-org --project yamada --name JOB-other
+    assert_exit_fail $JB_RC                                                 "--name で同名のブランチ・N: 中断する"
+    assert_output_not_contains "$JB_OUT" "ジョブ名："                   "--name で同名のブランチ・N: 別の名前を聞かない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "git clone"                   "--name で同名のブランチ・N: クローンしない"
+
+    teardown "$JB_MB" "$JB_HOME" "$(dirname "$(dirname "$(dirname "$cdir")")")"
+}
+
+test_ai_mode_job() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] AI 操作（SF_TOOLS_AI=1）${CLR_RST}"
+
+    local cdir wdir
+    JB_MB=$(setup_mock_bin); export MOCK_CALL_LOG="$JB_MB/calls.log"
+    JB_HOME=$(setup_mock_home); cdir=$(setup_company_dir); wdir=$(_setup_flex_dir)
+    create_mock_git "$JB_MB"; create_mock_gh_for_job "$JB_MB"; _stub_start_logged "$JB_HOME"
+    local A=(--owner tamashimon-org --project yamada --name JOB-ai)
+
+    _job $'Y\n' "$cdir" SF_TOOLS_AI=1 -- "${A[@]}"
+    assert_equals "$JB_RC" "20"                                             "AI・答えなし → 20（標準入力の Y は読まない）"
+    assert_output_contains "$JB_OUT" "\[確認待ち\] job.create: ▶ よろしいですか？" "AI・答えなし → job.create の確認待ち"
+    assert_file_not_contains "$MOCK_CALL_LOG" "git/refs"                    "AI・答えなし → ブランチを作らない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "git clone"                   "AI・答えなし → クローンしない"
+
+    : > "$MOCK_CALL_LOG"
+    _job "" "$cdir" SF_TOOLS_AI=1 SF_TOOLS_ANSWERS="job.create=y" -- "${A[@]}"
+    assert_exit_ok $JB_RC                                                   "AI・job.create=y → 正常終了する"
+    assert_file_contains "$MOCK_CALL_LOG" "git/refs"                        "AI・job.create=y → ブランチを作る"
+    assert_file_contains "$MOCK_CALL_LOG" "JOB-ai/force-yamada"             "AI・job.create=y → クローンする"
+    assert_file_not_contains "$MOCK_CALL_LOG" "sf-start called"             "AI・job.create=y → sf-start を動かさない"
+    assert_output_contains "$JB_OUT" "sf-start.sh は、人がそのフォルダで実行します" "AI・job.create=y → sf-start は人が動かすと表示する"
+
+    : > "$MOCK_CALL_LOG"
+    _job "" "$cdir" SF_TOOLS_AI=1 SF_TOOLS_ANSWERS="job.create=n" -- --owner tamashimon-org --project yamada --name JOB-ai2
+    assert_exit_fail $JB_RC                                                 "AI・job.create=n → 中断する"
+    assert_file_not_contains "$MOCK_CALL_LOG" "git/refs"                    "AI・job.create=n → ブランチを作らない"
+
+    : > "$MOCK_CALL_LOG"
+    _job "" "$cdir" SF_TOOLS_AI=1 SF_TOOLS_ANSWERS="job.create=y" MOCK_GH_AUTH_STATUS_EXIT=1 -- --owner tamashimon-org --project yamada --name JOB-ai3
+    assert_exit_fail $JB_RC                                                 "AI・gh が未認証 → 中断する"
+    assert_equals "$JB_RC" "1"                                              "AI・gh が未認証 → 終了コード 1"
+    assert_output_contains "$JB_OUT" "GitHub CLI が未認証です"              "AI・gh が未認証 → 理由を表示する"
+    assert_file_not_contains "$MOCK_CALL_LOG" "gh auth login"               "AI・gh が未認証 → gh auth login を動かさない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "git/refs"                    "AI・gh が未認証 → ブランチを作らない"
+
+    : > "$MOCK_CALL_LOG"
+    _job "" "$cdir" SF_TOOLS_AI=1 SF_TOOLS_ANSWERS="job.create=y" -- --owner tamashimon-org --project yamada
+    assert_equals "$JB_RC" "20"                                             "AI・--name なし → 20（ジョブ名の入力で止まる）"
+    assert_file_not_contains "$MOCK_CALL_LOG" "git/refs"                    "AI・--name なし → ブランチを作らない"
+
+    : > "$MOCK_CALL_LOG"
+    _job "" "$wdir" SF_TOOLS_AI=1 SF_TOOLS_ANSWERS="job.create=y" -- --name JOB-ai4
+    assert_equals "$JB_RC" "20"                                             "AI・--owner・--project なし（対話になる）→ 20"
+    assert_file_not_contains "$MOCK_CALL_LOG" "git/refs"                    "AI・--owner・--project なし → ブランチを作らない"
+
+    : > "$MOCK_CALL_LOG"
+    _job "" "$cdir" SF_TOOLS_AI=1 SF_TOOLS_ANSWERS="job.create=y" MOCK_GH_BRANCH_EXISTS_EXIT=0 -- --owner tamashimon-org --project yamada --name JOB-ai5
+    assert_equals "$JB_RC" "20"                                             "AI・同名のブランチ・答えなし → 20"
+    assert_output_contains "$JB_OUT" "\[確認待ち\] job.existing: このブランチを使って、続けますか？" "AI・同名のブランチ → job.existing の確認待ち"
+    assert_file_not_contains "$MOCK_CALL_LOG" "git clone"                   "AI・同名のブランチ・答えなし → クローンしない"
+
+    : > "$MOCK_CALL_LOG"
+    _job "" "$cdir" SF_TOOLS_AI=1 SF_TOOLS_ANSWERS="job.existing=n job.create=y" MOCK_GH_BRANCH_EXISTS_EXIT=0 -- --owner tamashimon-org --project yamada --name JOB-ai6
+    assert_exit_fail $JB_RC                                                 "AI・同名のブランチ・job.existing=n → 中断する"
+    assert_file_not_contains "$MOCK_CALL_LOG" "git clone"                   "AI・同名のブランチ・job.existing=n → クローンしない"
+
+    : > "$MOCK_CALL_LOG"
+    _job "" "$cdir" SF_TOOLS_AI=1 SF_TOOLS_ANSWERS="job.existing=y job.create=y" MOCK_GH_BRANCH_EXISTS_EXIT=0 -- --owner tamashimon-org --project yamada --name JOB-ai7
+    assert_exit_ok $JB_RC                                                   "AI・同名のブランチ・job.existing=y → 正常終了する"
+    assert_file_not_contains "$MOCK_CALL_LOG" "git/refs"                    "AI・同名のブランチ・job.existing=y → ブランチを作らない（既存を使う）"
+    assert_file_contains "$MOCK_CALL_LOG" "JOB-ai7/force-yamada"            "AI・同名のブランチ・job.existing=y → クローンする"
+
+    teardown "$JB_MB" "$JB_HOME" "$(dirname "$(dirname "$(dirname "$cdir")")")" "$(dirname "$wdir")"
+}
+
 test_happy_path
 test_gh_auth_login_direct
 test_developer_not_owner_can_run
@@ -593,5 +722,7 @@ test_flex_prompt
 test_flex_from_init_xxxx_dir
 test_flex_job_name_per_project
 test_unknown_option
+test_name_option
+test_ai_mode_job
 
 print_summary

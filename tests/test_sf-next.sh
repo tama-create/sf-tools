@@ -171,10 +171,138 @@ test_ai_mode() {
     _unset; teardown "$TD" "$MB"
 }
 
+# --create（gh pr create で PR を作る。doc/ai-operation-design.md 11.2）
+#   偽の gh は、pr create の引数を、1 つずつ GHARG<…> の行で記録する（独立した引数で渡ったかを確かめるため）
+_make_gh_pr() {
+    cat > "$1/gh" << 'EOF'
+#!/bin/bash
+if [[ "$1 $2" == "pr create" ]]; then
+    for a in "$@"; do printf 'GHARG<%s>\n' "$a" >> "${MOCK_CALL_LOG:-/dev/null}"; done
+    if [[ "${MOCK_GH_PR_RC:-0}" == "0" ]]; then echo "https://github.com/test-owner/force-tama/pull/7"; exit 0; fi
+    echo "a pull request for branch \"feature/my-feature\" into branch \"staging\" already exists" >&2; exit 1
+fi
+echo "gh $*" >> "${MOCK_CALL_LOG:-/dev/null}"
+exit 0
+EOF
+    chmod +x "$1/gh"
+}
+_nextc() { # 標準入力の答え [環境変数...] -- [引数...] → NX_OUT・NX_RC
+    local ans="$1"; shift
+    local envs=()
+    while [[ $# -gt 0 && "$1" != "--" ]]; do envs+=("$1"); shift; done
+    [[ "${1:-}" == "--" ]] && shift
+    NX_OUT=$(cd "$TD" && printf '%s\n' "$ans" | env PATH="$MB:$PATH" "${envs[@]}" bash "$SF_TOOLS_DIR/bin/sf-next.sh" "$@" 2>&1); NX_RC=$?
+}
+
+test_create() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] --create: gh pr create で PR を作る${CLR_RST}"
+    local TD MB MH; _env TD MB MH
+    _make_gh_pr "$MB"
+    export MOCK_PC_JSON; MOCK_PC_JSON=$(_pc_json staging)
+    local body="$TD/本文 の ファイル.md" title='fix: $HOME; `x` "q" -n 題名'
+    printf '本文の 1 行目\n\n- 項目\n' > "$body"
+
+    _nextc "" SF_TOOLS_AI=1 SF_TOOLS_ANSWERS="next.pr=y" -- --create --title "$title" --body-file "$body"
+    assert_exit_ok "$NX_RC" "AI・next.pr=y → 正常終了"
+    assert_file_contains "$MOCK_CALL_LOG" "GHARG<--title=${title}>" "題名は、--title= の形の 1 つの引数で、そのまま渡る（空白・\$・;・\`・\" を含む）"
+    assert_file_contains "$MOCK_CALL_LOG" "GHARG<--body-file=${body}>" "本文のファイルは、--body-file= の形の 1 つの引数で渡る（ファイル名に空白）"
+    assert_equals "$(grep -A1 -xF 'GHARG<--base>' "$MOCK_CALL_LOG" | tail -n 1)" "GHARG<staging>" "出し先（--base）は next_tier"
+    assert_equals "$(grep -A1 -xF 'GHARG<--head>' "$MOCK_CALL_LOG" | tail -n 1)" "GHARG<feature/my-feature>" "--head は現在のブランチ"
+    assert_equals "$(grep -A1 -xF 'GHARG<--repo>' "$MOCK_CALL_LOG" | tail -n 1)" "GHARG<test-owner/force-tama>" "--repo は origin の OWNER/REPO"
+    assert_file_not_contains "$MOCK_CALL_LOG" "compare/" "--create → ブラウザを開かない"
+    assert_output_contains "$NX_OUT" "PR を作りました: https://github.com/test-owner/force-tama/pull/7" "作られた PR の URL を表示する"
+
+    : > "$MOCK_CALL_LOG"
+    _nextc "" SF_TOOLS_AI=1 SF_TOOLS_ANSWERS="next.pr=y" -- --create --title "-x 先頭がハイフン" --body-file "$body"
+    assert_exit_ok "$NX_RC" "題名が - で始まる → 正常終了"
+    assert_file_contains "$MOCK_CALL_LOG" "GHARG<--title=-x 先頭がハイフン>" "題名が - で始まっても、--title= の値として渡る"
+
+    : > "$MOCK_CALL_LOG"
+    _nextc "" SF_TOOLS_AI=1 SF_TOOLS_ANSWERS="next.pr=n" -- --create --title "t" --body-file "$body"
+    assert_exit_ok "$NX_RC" "AI・next.pr=n → 正常終了"
+    assert_file_not_contains "$MOCK_CALL_LOG" "GHARG<" "AI・next.pr=n → PR を作らない"
+
+    : > "$MOCK_CALL_LOG"
+    _nextc "y" SF_TOOLS_AI=1 -- --create --title "t" --body-file "$body"
+    assert_equals "$NX_RC" "20" "AI・答えなし → 20"
+    assert_file_not_contains "$MOCK_CALL_LOG" "GHARG<" "AI・答えなし → PR を作らない"
+
+    : > "$MOCK_CALL_LOG"
+    _nextc "y" -- --create --title "t" --body-file "$body"
+    assert_exit_ok "$NX_RC" "人の操作でも --create を付ければ、Y で PR を作る"
+    assert_file_contains "$MOCK_CALL_LOG" "GHARG<--title=t>" "人の操作の --create → gh pr create を呼ぶ"
+
+    : > "$MOCK_CALL_LOG"
+    _nextc "" SF_TOOLS_AI=1 SF_TOOLS_ANSWERS="next.pr=y" MOCK_GH_PR_RC=1 -- --create --title "t" --body-file "$body"
+    assert_equals "$NX_RC" "1" "gh pr create の失敗 → 1"
+    assert_output_contains "$NX_OUT" "already exists" "gh pr create の失敗 → gh の理由を表示する"
+    assert_output_contains "$NX_OUT" "PR を作れませんでした" "gh pr create の失敗 → 中断の理由"
+
+    local u
+    for u in "https://gitlab.com/test-owner/force-tama.git" "https://github.com/test-owner/force-tama/extra" "https://github.com/test-owner/force-tama?x=1" "https://github.com/test-owner/.."; do
+        : > "$MOCK_CALL_LOG"
+        _nextc "" SF_TOOLS_AI=1 SF_TOOLS_ANSWERS="next.pr=y" MOCK_GIT_REMOTE_URL="$u" -- --create --title "t" --body-file "$body"
+        assert_exit_fail "$NX_RC" "origin が GitHub の形でない（${u}）→ 中断"
+        assert_file_not_contains "$MOCK_CALL_LOG" "GHARG<" "origin が GitHub の形でない（${u}）→ PR を作らない"
+    done
+
+    : > "$MOCK_CALL_LOG"
+    MOCK_PC_JSON=$(_pc_json staging 12)
+    _nextc "" SF_TOOLS_AI=1 SF_TOOLS_ANSWERS="next.pr=y" -- --create --title "t" --body-file "$body"
+    assert_exit_ok "$NX_RC" "発行済みの PR がある → 正常終了"
+    assert_file_not_contains "$MOCK_CALL_LOG" "GHARG<" "発行済みの PR がある → PR を作らない（二重に作らない）"
+    _unset; unset MOCK_GH_PR_RC; teardown "$TD" "$MB"
+}
+
+# オプションの誤りは、判定（sf-promote-check.sh）を呼ぶ前に中断する
+test_create_option_errors() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] --create のオプションの誤り → 判定の前に中断${CLR_RST}"
+    local TD MB MH; _env TD MB MH
+    _make_gh_pr "$MB"
+    export MOCK_PC_JSON; MOCK_PC_JSON=$(_pc_json staging)
+    local body="$TD/body.md"; : > "$body"
+    local nl=$'1 行目\n2 行目' cr=$'題名\r' long
+    local -a cases=(
+        "--create"
+        "--create --title t"
+        "--create --body-file $body"
+        "--title t"
+        "--body-file $body"
+        "--title"
+        "--create --title t --body-file"
+        "--create --title t --body-file $TD/ない.md"
+    )
+    local c
+    for c in "${cases[@]}"; do
+        : > "$MOCK_CALL_LOG"
+        # shellcheck disable=SC2086  # 空白で分けて引数にする（ケースの値に、空白を含むパスはない）
+        _nextc "y" SF_TOOLS_AI=1 SF_TOOLS_ANSWERS="next.pr=y" -- $c
+        assert_exit_fail "$NX_RC" "「${c##*/}」→ 中断"
+        assert_file_not_contains "$MOCK_CALL_LOG" "pc --plan" "「${c##*/}」→ 判定を呼ばない"
+        assert_file_not_contains "$MOCK_CALL_LOG" "GHARG<" "「${c##*/}」→ PR を作らない"
+    done
+    local t i=0
+    for t in "" "$nl" "$cr"; do
+        i=$((i + 1))
+        : > "$MOCK_CALL_LOG"
+        _nextc "y" SF_TOOLS_AI=1 SF_TOOLS_ANSWERS="next.pr=y" -- --create --title "$t" --body-file "$body"
+        assert_exit_fail "$NX_RC" "題名が不正（${i}: 空・LF・CR）→ 中断"
+        assert_file_not_contains "$MOCK_CALL_LOG" "pc --plan" "題名が不正（${i}）→ 判定を呼ばない"
+    done
+    # 長さは数えない（GitHub が確かめる）。${#…} はロケールが C だとバイトで数え、日本語を誤って弾くため
+    : > "$MOCK_CALL_LOG"
+    long=$(printf 'あ%.0s' $(seq 1 120))
+    _nextc "" SF_TOOLS_AI=1 SF_TOOLS_ANSWERS="next.pr=y" LC_ALL=C -- --create --title "$long" --body-file "$body"
+    assert_exit_ok "$NX_RC" "日本語の長い題名（120 文字・C のロケール）→ 受け付ける"
+    _unset; teardown "$TD" "$MB"
+}
+
 test_display_and_next
 test_rules_broken_or_unknown
 test_protected_branch_blocked
 test_pr_url
 test_ai_mode
+test_create
+test_create_option_errors
 
 print_summary

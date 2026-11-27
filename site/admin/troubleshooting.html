@@ -189,7 +189,7 @@
 <p>以前のバージョンの雛形で作ったプロジェクトで、ワークフローの Node.js のバージョン（<code>node-version</code>）が古いときに起こります。いまの雛形は、Node.js 22 を使います。<a href="workflows.html#sync"><code>sf-sync-wf.sh</code></a> で、ワークフローを最新の雛形に合わせてください（雛形の変更は、作成済みのプロジェクトには、自動では届きません）。</p>
 
 <h2 id="dev">開発者の方へ（毎日の作業で困ったとき）</h2>
-<p>毎日の作業は、ランチャー（<code>sf-launcher.sh</code>。<code>sf-job.sh</code> や <code>sf-start.sh</code> のあとに開くメニュー）から行うのがおすすめです。メニューの番号は、1 Check・2 Push・3 Next・4 Dryrun・5 Deploy です（VS Code のターミナル以外では、6 Start・7 Restart も出ます）。</p>
+<p>毎日の作業は、ランチャー（<code>sf-launcher.sh</code>。<code>sf-job.sh</code> や <code>sf-start.sh</code> のあとに開くメニュー）から行うのがおすすめです。メニューの番号は、1 Check・2 Dryrun・3 Deploy・4 Push・5 Next です（VS Code のターミナル以外では、6 Start・7 Restart も出ます）。</p>
 
 <h3 id="dev-job"><code>sf-job.sh</code> が動かない</h3>
 <ul>
@@ -223,7 +223,7 @@
 <p>画面に、エラーの内容が出ています。多くは、ターゲットファイルの書き方や、変更の内容が原因です。直して、もう一度実行してください。書き方は、<a href="../reference/target-files.html">ターゲットファイルの書き方</a>にあります。実行の前に断られるときは、次の見出しを見てください。</p>
 
 <h3 id="dev-refused">Dryrun・Deploy が、実行の前に断られる（手元から実行できない組織）</h3>
-<p><code>sf-dryrun.sh</code>（4 Dryrun）・<code>sf-deploy.sh</code>（5 Deploy）・<code>sf-release.sh</code> は、手元のパソコンからは、<strong>自分専用の組織</strong>（個人用の Sandbox・Developer Edition・Scratch Org）にだけ使えます。次の組織には、検証（dry-run）も含めて、実行できません。</p>
+<p><code>sf-dryrun.sh</code>（2 Dryrun）・<code>sf-deploy.sh</code>（3 Deploy）・<code>sf-release.sh</code> は、手元のパソコンからは、<strong>自分専用の組織</strong>（個人用の Sandbox・Developer Edition・Scratch Org）にだけ使えます。次の組織には、検証（dry-run）も含めて、実行できません。</p>
 <table>
   <thead><tr><th>表示</th><th>理由</th></tr></thead>
   <tbody>

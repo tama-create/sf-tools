@@ -4,13 +4,16 @@
 # ==============================================================================
 # 作業フォルダ（ジョブフォルダを置く場所）をカレントにして実行する。ジョブ名（例: JOB-20260323）を入力すると、
 # GitHub のリポジトリ force-XXXX に、main から作業用ブランチを作成し、./{ジョブ名}/force-XXXX にクローンして、
-# そのフォルダで sf-start.sh を実行する。
+# そのフォルダで sf-start.sh を実行する。--name でジョブ名を渡すと、入力を省く。会話で AI が動かすとき（SF_TOOLS_AI=1）は、
+# sf-start.sh を動かさずに、クローンまでで終わる（doc/ai-operation-design.md 11.3）。
 #
 # 【使い方】
 #   cd {作業フォルダ}
-#   ~/sf-tools/bin/sf-job.sh [--project XXXX] [--owner OWNER]
+#   ~/sf-tools/bin/sf-job.sh [--project XXXX] [--owner OWNER] [--name ジョブ名]
 #
 # 【オプション】
+#   --name ジョブ名 : ジョブ名（手順 5 の入力の代わり）。手順 5 と同じ検査をして、合わなければ、入力し直さずに中断する。
+#                    GitHub に同名のブランチがあるときの確認で N なら、別の名前を聞かずに中断する。最後の確認は、省かない
 #   --project XXXX : プロジェクト名（リポジトリ force-XXXX の XXXX）。先頭の「force-」（大文字小文字を問わない）は除いて扱う。
 #                    使える文字は英数字・- ・_ ・.（区切りは英数字の間に 1 つずつ。50 文字まで。末尾 .git は不可）。不正なら中断する
 #   --owner OWNER  : GitHub のオーナー（組織名またはユーザー名）。英数字とハイフンのみ（先頭・末尾は英数字。39 文字まで）。
@@ -30,14 +33,16 @@
 #   2. オーナー権限の確認は、しない（開発者が毎日使うコマンドのため）。リポジトリを読み書きする権限は、GitHub が確認する
 #      （リポジトリを読めなければ手順 4 で、ブランチを作れなければ手順 6 で中断する）
 #   3. 環境チェック。カレントフォルダの名前が admin、または force-* なら中断する（判定はカレントフォルダの名前のみ）。
-#      gh auth status が失敗したら gh auth login を実行し、それも失敗したら中断する
+#      gh auth status が失敗したら gh auth login を実行し、それも失敗したら中断する。
+#      AI 操作（SF_TOOLS_AI=1）のときは、gh auth login を実行せず、中断する（ブラウザでのログインは、人の操作。ブランチの作成・
+#      クローンの前に終わる）
 #   4. リポジトリ {OWNER}/force-XXXX の存在を確認する。見つからなければ中断する
-#   5. ジョブ名の入力（q で中断）。次のときは、入力し直す:
+#   5. ジョブ名の入力（q で中断。--name があれば、入力せずに、その値を使う）。次のときは、入力し直す（--name のときは、中断する）:
 #        - 英数字で始まり、英数字・- ・_ だけの 1〜50 文字でない
 #        - main / staging / develop / admin のいずれか（完全一致）
 #        - ./{ジョブ名}/force-XXXX がすでにある
 #      GitHub に同名のブランチがあるときは、最後のコミットの作者・日時を表示して確認する
-#      （Y: そのブランチを使って続ける / N: 入力し直す / q: 中断）。
+#      （Y: そのブランチを使って続ける / N: 入力し直す（--name のときは中断） / q: 中断）。
 #      最後に、ジョブ名・ブランチ・クローン先を表示して確認する（N / q で中断）
 #   6. GitHub 上に、main の最新コミットから、ブランチ {ジョブ名} を作成する。main がなければ中断する。
 #      5 で既存のブランチを使うと選んだときは、作成しない
@@ -45,7 +50,9 @@
 #      https://github.com/{OWNER}/force-XXXX.git ./{ジョブ名}/force-XXXX を実行する
 #      （core.longpaths は Windows のパス長の上限対策。クローン先の設定に残る）
 #   8. ./{ジョブ名}/force-XXXX に移動し、sf-start.sh を引数なしで実行する（組織への接続・VS Code の起動・
-#      sf-launcher.sh の起動）。sf-launcher.sh を終了するまで、sf-job.sh も終わらない
+#      sf-launcher.sh の起動）。sf-launcher.sh を終了するまで、sf-job.sh も終わらない。
+#      AI 操作（SF_TOOLS_AI=1）のときは、sf-start.sh を実行せず、移動もしない。クローン先と「sf-start.sh は、人がそのフォルダで
+#      実行する」を表示して、終了コード 0 で終わる（sf-start.sh は、VS Code・ランチャーを開き、閉じるまで終わらないため）
 #
 # 【前提条件】
 #   - 実行場所: 作業フォルダ（場所は任意。admin・force-* の中は不可）。おすすめは ~/sf のような短い名前のフォルダ。
@@ -64,6 +71,10 @@
 #   - 途中で中断・失敗しても、それまでに作成したブランチ・フォルダ・クローンは削除しない。
 #     ブランチ作成のあとに clone が失敗したときは、同じジョブ名で再実行し、既存のブランチを使う（Y）と、続きから進める
 #   - sf-start.sh が 0 以外で終了すると、sf-job.sh も中断する（クローンは残る）
+#   - AI 操作（doc/ai-operation-design.md）の質問の名前: job.existing（GitHub に同名のブランチがあるとき「このブランチを使って、
+#     続けますか？」）・job.create（最後の確認「▶ よろしいですか？」）。答えがないと、終了コード 20（確認待ち）で、ブランチの作成・
+#     クローンの前に止まる。ジョブ名の入力・プロジェクトの特定の対話も、AI 操作では確認待ち（名前なし）で止まる
+#     （AI は、--project・--owner・--name を付けて動かす）
 #   - ログ: ~/sf-tools/logs/sf-job.log（実行のたびに作り直す）
 # ==============================================================================
 
@@ -99,6 +110,7 @@ trap '' INT  # Ctrl+C を無効化（q で中断すること。無視の設定�
 # 引数の解析
 ARG_OWNER=""
 ARG_PROJECT=""
+ARG_NAME=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --owner)
@@ -107,9 +119,12 @@ while [[ $# -gt 0 ]]; do
         --project)
             [[ -n "${2:-}" ]] || die "--project には、プロジェクト名（force-XXXX の XXXX の部分）を指定してください。"
             ARG_PROJECT="$2"; shift 2 ;;
+        --name)
+            [[ -n "${2:-}" ]] || die "--name には、ジョブ名を指定してください。"
+            ARG_NAME="$2"; shift 2 ;;
         *)
             die "不明なオプションです: $1
-使い方: ~/sf-tools/bin/sf-job.sh [--project XXXX] [--owner OWNER]" ;;
+使い方: ~/sf-tools/bin/sf-job.sh [--project XXXX] [--owner OWNER] [--name ジョブ名]" ;;
     esac
 done
 
@@ -157,6 +172,8 @@ phase_check_environment() {
 
     log "INFO" "GitHub CLI の認証状態を確認中..."
     if ! run gh auth status; then
+        # AI 操作では、gh auth login（ブラウザでのログイン。人の操作）を動かさない。ブランチの作成・クローンの前に中断する
+        _ai_mode && die "GitHub CLI が未認証です。"
         log "WARNING" "GitHub CLI が未認証です。ログインします..."
         # 対話のため run 不使用（run は出力を一時ファイルに書き出すため、gh の質問・ブラウザの案内が表示されない）
         gh auth login || die "GitHub 認証に失敗しました。"
@@ -187,71 +204,82 @@ phase_load_project_info() {
     return $RET_OK
 }
 
-# 【JOB】ジョブ名の入力と重複チェック
+# _check_job_name - JOB_NAME を、ジョブ名として使えるか確かめる（使えれば JOB_DIR を決めて 0。使えなければ理由を WARNING で出して 1）
+#   入力のループと --name の両方から呼ぶ（検査を 1 か所にまとめ、2 つの道で差が出ないようにする。doc/ai-operation-design.md 11.3）
+_check_job_name() {
+    if [[ -z "$JOB_NAME" ]]; then
+        log "WARNING" "ジョブ名を入力してください。"
+        return 1
+    fi
+
+    # バリデーション: 英数字・ハイフン・アンダースコアのみ・1〜50文字
+    if [[ ! "$JOB_NAME" =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]{0,49}$ ]]; then
+        log "WARNING" "無効なジョブ名です。英数字・ハイフン・アンダースコアのみ使用可能です（例: JOB-20260323）"
+        return 1
+    fi
+
+    # 環境ブランチ・管理者用のブランチと同じ名前は使えない（同名のブランチが、すでにあり、それを使って続けてしまわないため）
+    case "$JOB_NAME" in
+        main|staging|develop|admin)
+            log "WARNING" "この名前は、環境ブランチ・管理者用のブランチの名前のため、使えません: ${JOB_NAME}"
+            return 1 ;;
+    esac
+
+    # --- ローカルフォルダの重複チェック ---
+    #   同じジョブ名のフォルダに、同じ名前（force-XXXX）のもの（フォルダ・ファイル。オーナーは問わない）があれば、重複。
+    #   別の force-* だけを含むなら、重複ではない（同じジョブ名で、複数のプロジェクトを扱える）
+    JOB_DIR="${PWD}/${JOB_NAME}"
+    if [[ -e "${JOB_DIR}/${REPO_NAME}" ]]; then
+        log "WARNING" "同名のフォルダがすでに存在します: ${JOB_DIR}"
+        [[ -z "$ARG_NAME" ]] && log "WARNING" "別のジョブ名を入力してください。"
+        return 1
+    fi
+    return 0
+}
+
+# _check_branch - GitHub に同名のブランチがあるかを確かめる。なければ 0。あれば確認し（job.existing）、Y なら
+#   USE_EXISTING_BRANCH=1 で 0、N なら 1（q は ask_yn が中断する）
+_check_branch() {
+    log "INFO" "GitHub ブランチの存在を確認中..."
+    local _last=""
+    if ! gh api "repos/${REPO_FULL_NAME}/branches/${JOB_NAME}" &>/dev/null 2>&1; then  # 条件チェックのため run 不使用
+        return 0
+    fi
+    log "WARNING" "GitHub 上に、すでに同名のブランチがあります: ${JOB_NAME}"
+    # 前回、ブランチの作成のあとに、clone が失敗した同じジョブなら、そのブランチを使って、続けられる（このフォルダには、clone がない）。
+    #   ほかの人のジョブのブランチなら、別のジョブ名にする。最後のコミットの作者と日時を表示して、判断の材料にする
+    _last=$(gh api "repos/${REPO_FULL_NAME}/branches/${JOB_NAME}" --jq ".commit.commit.author.name + \" / \" + .commit.commit.author.date" 2>/dev/null || true)  # VAR=$(cmd) のため run 不使用
+    [[ -n "$_last" ]] && log "INFO" "  最後のコミット: ${_last}"
+    log "INFO" "  自分が作った、clone に失敗したジョブなら、このブランチを使って、続けられます。ほかの人のジョブなら、N で、別のジョブ名にしてください。"
+    if ask_yn "このブランチを使って、続けますか？" job.existing; then   # job.existing: AI 操作の質問の名前（doc/ai-operation-design.md）
+        USE_EXISTING_BRANCH=1
+        return 0
+    fi
+    return 1
+}
+
+# 【JOB】ジョブ名の入力（または --name）と重複チェック
 phase_ask_job_name() {
-    log "INFO" "ジョブ名を入力してください。（例: JOB-20260323 / q で中断）"
-    echo ""
+    if [[ -n "$ARG_NAME" ]]; then
+        # --name: 入力の代わりに、この値を 1 回だけ確かめる（合わなければ、入力し直さずに中断する）
+        JOB_NAME="$ARG_NAME"
+        _check_job_name || die "このジョブ名は使えません: ${JOB_NAME}"
+        _check_branch || die "中断しました。"
+    else
+        log "INFO" "ジョブ名を入力してください。（例: JOB-20260323 / q で中断）"
+        echo ""
 
-    while true; do
-        read_or_quit JOB_NAME "  ジョブ名："
-
-        if [[ -z "$JOB_NAME" ]]; then
-            log "WARNING" "ジョブ名を入力してください。"
-            continue
-        fi
-
-        # バリデーション: 英数字・ハイフン・アンダースコアのみ・1〜50文字
-        if [[ ! "$JOB_NAME" =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]{0,49}$ ]]; then
-            log "WARNING" "無効なジョブ名です。英数字・ハイフン・アンダースコアのみ使用可能です（例: JOB-20260323）"
-            JOB_NAME=""
-            continue
-        fi
-
-        # 環境ブランチ・管理者用のブランチと同じ名前は使えない（同名のブランチが、すでにあり、それを使って続けてしまわないため）
-        case "$JOB_NAME" in
-            main|staging|develop|admin)
-                log "WARNING" "この名前は、環境ブランチ・管理者用のブランチの名前のため、使えません: ${JOB_NAME}"
+        while true; do
+            read_or_quit JOB_NAME "  ジョブ名："
+            if ! _check_job_name; then
                 JOB_NAME=""
-                continue ;;
-        esac
-
-        # --- ローカルフォルダの重複チェック ---
-        #   同じジョブ名のフォルダに、同じ名前（force-XXXX）のもの（フォルダ・ファイル。オーナーは問わない）があれば、重複。
-        #   別の force-* だけを含むなら、重複ではない（同じジョブ名で、複数のプロジェクトを扱える）
-        JOB_DIR="${PWD}/${JOB_NAME}"
-        if [[ -e "${JOB_DIR}/${REPO_NAME}" ]]; then
-            log "WARNING" "同名のフォルダがすでに存在します: ${JOB_DIR}"
-            log "WARNING" "別のジョブ名を入力してください。"
-            JOB_NAME=""
-            continue
-        fi
-
-        # --- GitHub ブランチの重複チェック ---
-        log "INFO" "GitHub ブランチの存在を確認中..."
-        local branch_exists=0 _last=""
-        if gh api "repos/${REPO_FULL_NAME}/branches/${JOB_NAME}" &>/dev/null 2>&1; then  # 条件チェックのため run 不使用
-            branch_exists=1
-        fi
-
-        if [[ $branch_exists -eq 1 ]]; then
-            log "WARNING" "GitHub 上に、すでに同名のブランチがあります: ${JOB_NAME}"
-            # 前回、ブランチの作成のあとに、clone が失敗した同じジョブなら、そのブランチを使って、続けられる（このフォルダには、clone がない）。
-            #   ほかの人のジョブのブランチなら、別のジョブ名にする。最後のコミットの作者と日時を表示して、判断の材料にする
-            _last=$(gh api "repos/${REPO_FULL_NAME}/branches/${JOB_NAME}" --jq ".commit.commit.author.name + \" / \" + .commit.commit.author.date" 2>/dev/null || true)  # VAR=$(cmd) のため run 不使用
-            [[ -n "$_last" ]] && log "INFO" "  最後のコミット: ${_last}"
-            log "INFO" "  自分が作った、clone に失敗したジョブなら、このブランチを使って、続けられます。ほかの人のジョブなら、N で、別のジョブ名にしてください。"
-            if ask_yn "このブランチを使って、続けますか？"; then
-                USE_EXISTING_BRANCH=1
-                break
+                continue
             fi
+            _check_branch && break
             log "WARNING" "別のジョブ名を入力してください。"
             JOB_NAME=""
-            continue
-        fi
-
-        # OK
-        break
-    done
+        done
+    fi
 
     REPO_DIR="${JOB_DIR}/${REPO_NAME}"
 
@@ -266,7 +294,7 @@ phase_ask_job_name() {
     echo "  クローン先 : ${REPO_DIR}"
     echo "  --------------------------------------------------"
     echo ""
-    ask_yn "▶ よろしいですか？" || die "中断しました。"
+    ask_yn "▶ よろしいですか？" job.create || die "中断しました。"   # job.create: AI 操作の質問の名前（doc/ai-operation-design.md）
 
     return $RET_OK
 }
@@ -324,6 +352,12 @@ phase_clone_repository() {
 
 # 【START】sf-start.sh を起動（組織への接続・VS Code 起動・sf-launcher.sh 起動）
 phase_sf_start() {
+    # AI 操作では、sf-start.sh（VS Code・ランチャーを開き、閉じるまで終わらない。人の操作）を動かさず、移動もしない
+    if _ai_mode; then
+        log "SUCCESS" "ジョブの準備ができました: ${REPO_DIR}"
+        log "INFO" "sf-start.sh は、人がそのフォルダで実行します（AI 操作では動かしません）。"
+        return $RET_OK
+    fi
     log "INFO" "sf-start.sh を起動します..."
     cd "$REPO_DIR" || die "ディレクトリに移動できません: ${REPO_DIR}"
 

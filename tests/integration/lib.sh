@@ -569,6 +569,8 @@ it_make_clone() {
 
 # Apex クラスを 1 つ作る（クラスと meta）。引数: クローン 名前 [内容]
 it_add_class() {
+    # 雛形の force-app/main/default/classes/ は、2026-11-27 から配らない（.gitkeep を 1 個にまとめた）。書く前にフォルダを作る
+    mkdir -p "$1/force-app/main/default/classes"
     printf '%s\n' "${3:-public class $2 { }}" > "$1/force-app/main/default/classes/$2.cls"
     printf '<?xml version="1.0"?>\n<ApexClass xmlns="http://soap.sforce.com/2006/04/metadata"><apiVersion>60.0</apiVersion><status>Active</status></ApexClass>\n' \
         > "$1/force-app/main/default/classes/$2.cls-meta.xml"

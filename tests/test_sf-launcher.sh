@@ -200,9 +200,10 @@ test_apexlog_status_refresh() {
     create_all_mocks "$mb"
     mkdir -p "$td/logs/apex"
     printf 'STATE=starting\nORG=dev\n' > "$td/logs/apex/.status"
-    # 2 秒後に取得中へ変わる。入力の q は 8 秒後（その間に、5 秒の待ち切れが 1 回ある）
+    # 2 秒後に取得中へ変わる。入力の q は 14 秒後（その間に、5 秒の待ち切れが 1 回ある。メニューの描画は、状況の表示（git・node）の分、
+    #   遅い Windows の CI では数秒かかるため、余裕を持たせる）
     ( sleep 2; printf 'STATE=collecting\nORG=dev\nEXPIRES_AT=15:30\nCOUNT_TODAY=0\n' > "$td/logs/apex/.status" ) &
-    out=$(cd "$td" && { sleep 8; printf 'q'; } | PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-launcher.sh" 2>&1)
+    out=$(cd "$td" && { sleep 14; printf 'q'; } | PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-launcher.sh" 2>&1)
     wait
     [[ "$out" == *"● 準備中"* ]] && pass "最初は、準備中を表示する" || fail "最初は、準備中を表示する" "$out"
     [[ "$out" == *"● 取得中（期限 15:30・今日 0 本）"* ]] && pass "取得中に変わったら、メニューを描き直す" || fail "取得中に変わったら、メニューを描き直す" "$out"

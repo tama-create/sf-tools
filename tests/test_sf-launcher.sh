@@ -3,6 +3,7 @@
 # test_sf-launcher.sh - sf-launcher.sh のテスト
 # ==============================================================================
 source "$(dirname "${BASH_SOURCE[0]}")/test_helper.sh"
+export SF_LAUNCHER_BG_STATUS=0   # 2 行目の裏の判定（sf-next.sh --status）を止める。確かめるテストだけで 1 にする
 echo -e "${CLR_HEAD}=== sf-launcher.sh ===${CLR_RST}"
 
 # ------------------------------------------------------------------------------
@@ -440,5 +441,58 @@ test_reload_when_updated() {
     teardown "$td" "${td}.origin.git" "$bd"
 }
 test_reload_when_updated
+
+test_bg_status() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] 2 行目の結果がないとき、裏で sf-next.sh --status を動かし、終わったら描き直す${CLR_RST}"
+    local td mk out n
+    td=$(_st_repo); mk=$(mktemp -d)
+    mkdir -p "$td/sf-tools/logs"
+    # 判定の本体（sf-promote-check.sh）のモック: 呼ばれた回数を数え、少し待ってから、develop が次の結果を返す
+    cat > "$mk/pc.sh" <<'MOCK'
+#!/bin/bash
+echo x >> "${0%/*}/count"
+sleep 2
+printf '{"mode":"plan","ok":true,"skipped":false,"branch":"feature/x","head":"h","target":"develop","next_tier":"develop","pr_open":"","tiers":["develop","staging","main"],"violations":[],"error":""}\n'
+MOCK
+    out=$( (cd "$td" && { sleep 25; printf 'q'; } | SF_LAUNCHER_BG_STATUS=1 SF_PROMOTE_CHECK_CMD="$mk/pc.sh" TERM_PROGRAM= bash "$SF_TOOLS_DIR/bin/sf-launcher.sh" 2>&1) | sed $'s/\033\\[[0-9;]*m//g')
+    assert_output_contains "$out" "Branch: （確かめています…）" "結果がない → 裏で判定し、そのあいだは「確かめています」"
+    assert_output_contains "$out" "Branch: ▸ develop (次のPR) ⇒ × staging ⇒ × main" "裏の判定が終わる → 描き直して、段階の並びを出す"
+    assert_file_contains "$td/sf-tools/logs/next-status.txt" "TIERS=develop staging main" "裏の判定が、next-status.txt を書く"
+    [[ -f "$td/sf-tools/logs/sf-next-status.log" ]] && pass "裏の判定は、別のログ（sf-next-status.log）に書く" || fail "裏の判定は、別のログ（sf-next-status.log）に書く"
+    n=$(wc -l < "$mk/count" | tr -d ' ')
+    assert_equals "$n" "1" "同じ先端のコミットでは、判定は 1 回だけ"
+
+    # 判定できない（終了コード 2）→ 「5 PullRequest で確かめる」に戻し、同じコミットでは、繰り返さない
+    rm -f "$td/sf-tools/logs/next-status.txt" "$mk/count"
+    cat > "$mk/pc.sh" <<'MOCK'
+#!/bin/bash
+echo x >> "${0%/*}/count"
+printf '{"mode":"plan","ok":false,"next_tier":"","tiers":[],"violations":[],"error":"origin を読めません"}\n'
+exit 2
+MOCK
+    out=$( (cd "$td" && { sleep 20; printf 'q'; } | SF_LAUNCHER_BG_STATUS=1 SF_PROMOTE_CHECK_CMD="$mk/pc.sh" TERM_PROGRAM= bash "$SF_TOOLS_DIR/bin/sf-launcher.sh" 2>&1) | sed $'s/\033\\[[0-9;]*m//g')
+    assert_output_contains "$out" "Branch: （5 PullRequest で確かめる）" "裏の判定が失敗 → 「5 PullRequest で確かめる」"
+    n=$(wc -l < "$mk/count" | tr -d ' ')
+    assert_equals "$n" "1" "失敗しても、同じ先端のコミットでは、繰り返さない"
+
+    # 読み込み直し（exec）のときは、判定したコミットを引き継ぐ（同じコミットで、もう一度判定しない）
+    rm -f "$td/sf-tools/logs/next-status.txt" "$mk/count"
+    cat > "$mk/pc.sh" <<'MOCK'
+#!/bin/bash
+echo x >> "${0%/*}/count"
+sleep 6
+exit 2
+MOCK
+    local bd; bd=$(mktemp -d)   # 書き換えてよい sf-tools の写し（bin/ と lib/。sf-next.sh が ../lib を読むため）
+    mkdir -p "$bd/bin"
+    cp "$SF_TOOLS_DIR/bin/sf-launcher.sh" "$SF_TOOLS_DIR/bin/sf-next.sh" "$bd/bin/"
+    cp -r "$SF_TOOLS_DIR/lib" "$bd/lib"
+    out=$( (cd "$td" && { sleep 3; echo '# 書き換え' >> "$bd/bin/sf-launcher.sh"; sleep 14; printf 'q'; } | SF_LAUNCHER_BG_STATUS=1 SF_PROMOTE_CHECK_CMD="$mk/pc.sh" TERM_PROGRAM= bash "$bd/bin/sf-launcher.sh" 2>&1) | sed $'s/\033\\[[0-9;]*m//g')
+    assert_output_contains "$out" "読み込み直します" "判定中に書き換わる → 読み込み直す"
+    n=$(wc -l < "$mk/count" | tr -d ' ')
+    assert_equals "$n" "1" "読み込み直しても、同じ先端のコミットでは、判定は 1 回だけ（引き継ぐ）"
+    teardown "$td" "${td}.origin.git" "$mk" "$bd"
+}
+test_bg_status
 
 print_summary

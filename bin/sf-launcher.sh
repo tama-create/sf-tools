@@ -59,7 +59,15 @@
 #      元は、sf-tools/logs/next-status.txt（sf-next.sh が判定のたびに書く HEAD=・NEXT=・PR=・SKIPPED=・TIERS=）。
 #      HEAD= が今の先端のコミットと同じで、NEXT= が段階名の形（40 文字まで）、TIERS= が段階名を空白でつないだ形（10 個まで）、
 #      TIERS= に同じ段階が 2 回出てこず、NEXT= が none か TIERS= の中にあり、SKIPPED= が true か false のときだけ使う。PR= は 9 桁まで。キー=値 を while read で読み、source しない。
-#      使えないとき（ファイルがない・古い・形が違う）は「（5 PullRequest で確かめる）」（番号はメニューの並びから引く）
+#      使えないとき（ファイルがない・古い・形が違う）は、裏で sf-next.sh --status を動かし（標準入力・出力は閉じる。判定だけで、
+#      PR は作らない）、終わるまで「（確かめています…）」と出す。終わったら（待ち切れのときに kill -0 で見る）、メニューを描き直す。
+#      裏の判定は、先端のコミットごとに 1 回だけ（失敗しても繰り返さない）。判定できなかったとき（オフライン・gh の認証切れ・
+#      push していない変更など）は「（5 PullRequest で確かめる）」（番号はメニューの並びから引く）。環境変数
+#      SF_LAUNCHER_BG_STATUS=0 で、裏の判定を止められる（テスト用）。2026-11-27
+#      ランチャーを終えても、裏の判定は止めない（終わるまで動いて、結果を書く）。読み込み直す（処理の流れ 8）ときは、
+#      判定したコミットとプロセスの番号を、環境変数（SF_LAUNCHER_BG_HEAD・SF_LAUNCHER_BG_PID）で新しい版へ引き継ぐ
+#      （exec のあとも同じプロセスのため、裏の判定は、そのまま子として残る）。前面の 5 PullRequest と同時に動いても、
+#      sf-next.sh は、一時ファイルに書いてから置き換えるため、書きかけを読まない
 #   7. コマンドが終わったら、結果を 1 行で出す: 終了コード 0 → 「✓ <表示名>: 終わりました（成功）」（太字の緑）/
 #      それ以外 → 「✗ <表示名>: 失敗、または中断しました（終了コード N）」（太字の赤。q での中断も 1 になるため、両方を書く）
 #   8. メニューの入力は、5 秒ずつ待つ（read -t。Bash 3.2 は、待ち切れと EOF の戻り値が同じ 1 のため、待った時間で見分ける。
@@ -254,6 +262,23 @@ unset _item _c
 # 見出しの 2 行目以降の頭（「  >> LAUNCHER <<   」と同じ幅の空白。1 行目のブランチ名の位置にそろえる。ASCII なので、文字数 = 幅）
 HEAD_PAD="                   "
 
+# 2 行目の裏の判定（処理の流れ 6）。print_menu は $( ) の中で呼ばないため、ここの変数は、描き直しのあいだも残る
+BG_HEAD=""   # 裏の判定を始めた先端のコミット（同じコミットでは、もう始めない）
+BG_PID=""    # 裏の判定のプロセス（終わったら空にする）
+# 読み込み直し（exec。処理の流れ 8）の前の値を引き継ぐ（exec のあとも同じプロセスのため、裏の判定は、そのまま子として残る。
+#   引き継がないと、同じコミットで、もう一度判定してしまう）。形が違えば使わない
+[[ "${SF_LAUNCHER_BG_HEAD:-}" =~ ^[0-9a-f]{40,64}$ ]] && BG_HEAD="$SF_LAUNCHER_BG_HEAD"
+[[ "${SF_LAUNCHER_BG_PID:-}" =~ ^[0-9]{1,10}$ ]] && BG_PID="$SF_LAUNCHER_BG_PID"
+unset SF_LAUNCHER_BG_HEAD SF_LAUNCHER_BG_PID   # 子のコマンドには渡さない
+bg_status_start() {
+    [[ -n "$1" && "$1" != "$BG_HEAD" ]] || return 0
+    [[ "${SF_LAUNCHER_BG_STATUS:-1}" == "1" && -f "$SCRIPT_DIR/sf-next.sh" ]] || return 0
+    BG_HEAD="$1"
+    bash "$SCRIPT_DIR/sf-next.sh" --status < /dev/null > /dev/null 2>&1 &   # cmd &（裏で動かす。結果は next-status.txt）
+    BG_PID=$!
+}
+bg_status_running() { [[ -n "$BG_PID" ]] && kill -0 "$BG_PID" 2>/dev/null; }   # kill は組み込み（コマンドを起動しない）
+
 print_status() {
     local branch="" org head="" changes=0 ahead=0 has_up=0 st line k v nhead="" next="" pr="" skipped="" tiers=""
     local parts t i=0 nidx=-1 rel="" seg
@@ -294,6 +319,7 @@ print_status() {
     fi
 
     # 2 行目: Branch: 段階の並び（sf-next.sh が最後に判定した結果。今の先端のコミットと同じときだけ使う。source しない）
+    bg_status_running || BG_PID=""   # 裏の判定が終わっていれば、待つのをやめる（結果は、下でファイルから読む）
     if [[ -f "$NEXT_STATUS_FILE" ]]; then
         while IFS= read -r line || [[ -n "$line" ]]; do
             k="${line%%=*}"; v="${line#*=}"
@@ -337,7 +363,13 @@ print_status() {
             [[ "$next" == "none" ]] && rel="${rel}  ${GREEN}(全段階にリリース済み)${RESET}"
         fi
     else
-        rel="${DIM}（$(number_of sf-next) PullRequest で確かめる）${RESET}"
+        # 使える結果がない → 裏で判定する（先端のコミットごとに 1 回）。動いているあいだは「確かめています」
+        bg_status_start "$head"
+        if bg_status_running; then
+            rel="${DIM}（確かめています…）${RESET}"
+        else
+            rel="${DIM}（$(number_of sf-next) PullRequest で確かめる）${RESET}"
+        fi
     fi
     echo -e "${HEAD_PAD}Branch: ${rel}"
     return 0
@@ -420,7 +452,7 @@ reload_if_updated() {
     [[ -n "$LAUNCHER_STAMP" && "$LAUNCHER_SELF" -nt "$LAUNCHER_STAMP" ]] || return 0
     echo -e "  ${CYAN}↻ sf-tools が更新されたため、ランチャーを読み込み直します${RESET}"
     rm -f "$LAUNCHER_STAMP"; trap - EXIT   # exec では EXIT の trap が動かないため、先に消す
-    exec bash "$LAUNCHER_SELF"
+    SF_LAUNCHER_BG_HEAD="$BG_HEAD" SF_LAUNCHER_BG_PID="$BG_PID" exec bash "$LAUNCHER_SELF"   # 裏の判定の状態を引き継ぐ
 }
 
 # ------------------------------------------------------------------------------
@@ -487,6 +519,7 @@ main() {
                     printf "\r\033[K"
                     reload_if_updated
                     if [[ "$shown" == "starting" && "$(apexlog_state)" != "starting" ]]; then printf "\n"; redraw=1; break; fi
+                    if [[ -n "$BG_PID" ]] && ! bg_status_running; then printf "\n"; redraw=1; break; fi   # 裏の判定が終わった → 2 行目を描き直す
                     continue
                 fi
                 printf "\n"; exit 0   # EOF → 正常終了

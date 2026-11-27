@@ -137,7 +137,7 @@ sf-launcher.sh --fzf     # fzf でインクリメンタル検索</code></pre>
 <p>番号ごとに実行するのは、<code>sf-check.sh</code>・<code>sf-dryrun.sh</code>・<code>sf-deploy.sh</code>・<code>sf-push.sh</code>・<code>sf-next.sh</code>・<code>sf-start.sh</code>・<code>sf-restart.sh</code> です。1〜5 は、日々の作業の順（確かめる → 試す → 反映 → コミット → PR）に並べ、1 日の最初・組織の切り替えのときだけ使う 6・7 との間に線を引いています。VS Code のターミナル（環境変数 <code>TERM_PROGRAM=vscode</code>）では、<code>[6] Start</code> と <code>[7] Restart</code> は表示されません（二重に起動しないため。番号の 6・7 は、範囲外になります）。</p>
 <ul>
   <li>メニューでは、番号を 1 文字入力すると（Enter 不要）実行し、終わるとメニューに戻ります。<code>q</code> で終了します。範囲外の数字や、数字と <code>q</code> 以外の入力は、無視されます。</li>
-  <li>メニューの上の 2 行に、今の状況を出します。1 行目は、ブランチ @ 組織・まだコミットしていない変更の数・デバッグログの状態。2 行目（<code>Branch:</code>）は、段階の並びで、出し終わった段階に <code>✓</code>、次に PR を出す段階に <code>▸</code>（発行中の PR があれば番号）、まだの段階に <code>×</code> を付けます。読み取りだけで、通信はしません。2 行目は、<code>sf-next.sh</code>（5 PullRequest）が最後に判定した結果（<code>sf-tools/logs/next-status.txt</code>）で、そのあとにコミットが変わっていれば、使わず「（5 PullRequest で確かめる）」と出します。環境ブランチの上では、2 行目の代わりに注意を出します。</li>
+  <li>メニューの上の 2 行に、今の状況を出します。1 行目は、ブランチ @ 組織・まだコミットしていない変更の数・デバッグログの状態。2 行目（<code>Branch:</code>）は、段階の並びで、出し終わった段階に <code>✓</code>、次に PR を出す段階に <code>▸</code>（発行中の PR があれば番号）、まだの段階に <code>×</code> を付けます。読み取りだけで、通信はしません。2 行目は、<code>sf-next.sh</code>（5 PullRequest）が最後に判定した結果（<code>sf-tools/logs/next-status.txt</code>）です。結果がない・そのあとにコミットが変わったときは、裏で <code>sf-next.sh --status</code>（判定だけ）を動かし、そのあいだは「（確かめています…）」、終わったら描き直します（判定は、先端のコミットごとに 1 回）。判定できなければ「（5 PullRequest で確かめる）」と出します。環境ブランチの上では、2 行目の代わりに注意を出します。</li>
   <li>動いているあいだに sf-tools が更新されると（<code>sf-start.sh</code> は、裏で sf-tools を最新にしながら、ランチャーを開きます）、数秒のうちに「↻ sf-tools が更新されたため、ランチャーを読み込み直します」と出て、新しい版のメニューに切り替わります。</li>
   <li>コマンドが終わると、結果を 1 行で出します（成功 → <code>✓ &lt;表示名&gt;: 終わりました（成功）</code>、それ以外 → <code>✗ &lt;表示名&gt;: 失敗、または中断しました（終了コード N）</code>）。</li>
   <li>番号を直接指定したとき（<code>sf-launcher.sh 4</code> など）は、そのコマンドを 1 回だけ実行して終わります。番号は、数字だけを受け付け、10 進数として扱います（<code>08</code> は 8）。見るのは 1 つ目の引数だけで、数字以外の引数（<code>-h</code> / <code>--help</code> / <code>--fzf</code> 以外）は、エラー（終了コード 1）です。</li>
@@ -348,6 +348,7 @@ sf-next.sh --create --title 題名 --body-file 本文のファイル</code></pre
     <tr><td><code>--create</code></td><td>確認で <code>Y</code> のとき、ブラウザを開かずに、<code>gh pr create</code> で PR を作ります（おもに、AI に「PR を出して」と頼むときに使います）。<code>--title</code> と <code>--body-file</code> の両方が要ります</td></tr>
     <tr><td><code>--title 題名</code></td><td>PR の題名です。空でない 1 行（改行を含まない）にします。長さは GitHub が確かめます</td></tr>
     <tr><td><code>--body-file ファイル</code></td><td>PR の本文を書いたファイルです（中身は空でもよく、そのまま使います）。ファイルがない・読めないときは、中断します</td></tr>
+    <tr><td><code>--status</code></td><td>判定して、ランチャーの表示用の結果（<code>sf-tools/logs/next-status.txt</code>）を書くだけです（表示・確認・PR の作成をしません）。ランチャーが裏で動かします。ログは <code>sf-next-status.log</code>。<code>--create</code> とは一緒に使えません</td></tr>
   </tbody>
 </table>
 <p>オプションの誤り（<code>--create</code> に <code>--title</code>・<code>--body-file</code> がない、<code>--create</code> なしで <code>--title</code>・<code>--body-file</code> を付けた、など）は、状況を確かめる前に中断します。</p>

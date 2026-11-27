@@ -12,11 +12,16 @@
 # 【使い方】
 #   bash ~/sf-tools/bin/sf-next.sh [オプション]
 #   bash ~/sf-tools/bin/sf-next.sh --create --title <題名> --body-file <ファイル>
+#   bash ~/sf-tools/bin/sf-next.sh --status    # 判定して next-status.txt を書くだけ（ランチャーが裏で動かす）
 #
 # 【オプション】
 #   --create               : 確認で Y のとき、ブラウザを開かずに、gh pr create で PR を作る。--title と --body-file の両方が要る
 #   --title <題名>         : PR の題名（空でない 1 行。CR・LF を含まない。長さは GitHub が確かめる）。--create のときだけ指定できる
 #   --body-file <ファイル> : PR の本文のファイル（あって、読めること。中身は空でもよく、整形しない）。--create のときだけ指定できる
+#   --status               : 判定だけをする。処理の流れの 2 まで（next-status.txt を書く）で終わり、結果の表示・確認・PR の作成を
+#                            しない（ランチャーが、画面を出したあとに裏で動かす。sf-launcher.sh の処理の流れ 6）。ログは
+#                            ./sf-tools/logs/sf-next-status.log（手で動かしたときの sf-next.log を上書きしない）。--create と一緒には使えない。
+#                            判定の結果を書けなかったときは、エラー（終了コード 1）
 #   -v, --verbose          : コマンドの応答（出力）をコンソールにも表示する
 #   -h, --help             : このヘルプを表示して終了する（1 つ目の引数のときだけ）
 #   上記以外の引数（2 つ目以降の -h / --help を含む）は、「不明なオプションです」と表示して中断する。
@@ -33,7 +38,7 @@
 #        表示して、エラーで終了する
 #      - 終了コード 1（決まりを破っている。積み重ねの抜けなど）→ 理由を表示して、PR を勧めずにエラーで終了する
 #      判定の前に、./sf-tools/logs/next-status.txt（前回の結果）を消す。判定できたら、そこに、先端のコミット（HEAD=）・次の段階
-#      （NEXT=。全段階済みなら none）・発行中の PR（PR=）・対象が空か（SKIPPED=）・段階の一覧（TIERS=。下から順に空白区切り）を書く（ランチャーの表示用。書けなくても続ける）
+#      （NEXT=。全段階済みなら none）・発行中の PR（PR=）・対象が空か（SKIPPED=）・段階の一覧（TIERS=。下から順に空白区切り）を書く（ランチャーの表示用。一時ファイルに書いてから mv で置き換える。書けなくても続ける。--status のときだけエラーにする）
 #   3. 結果を表示する（下の【補足】の表示）
 #   4. 対象が空（deploy-target.txt・remove-target.txt に実質的な行がない）なら、その旨を表示して終了する（出すものがない）
 #   5. next_tier が none なら「全段階にリリース済みです！」、next_tier へ開いている PR があれば「PR 発行中（#N）。マージを
@@ -73,14 +78,16 @@
 #   - 判定の本体は sf-promote-check.sh。環境変数 SF_PROMOTE_CHECK_CMD で、呼ぶコマンドを差し替えられる（テスト用。CI の強制は
 #     ワークフロー側の sf-promote-check.sh が行うため、ここを差し替えても、決まりは破れない）
 #   - 終了コード: 0 = 正常終了（N で終了した場合を含む） / 1 = エラー・q で中断・決まりを破っている / 20 = 確認待ち（AI 操作）
-#   - ログ: ./sf-tools/logs/sf-next.log（実行のたびに作り直す）
+#   - ログ: ./sf-tools/logs/sf-next.log（実行のたびに作り直す。--status のときは sf-next-status.log）
 # ==============================================================================
 
 # ------------------------------------------------------------------------------
 # 1. 共通ライブラリの必須設定
 # ------------------------------------------------------------------------------
 SCRIPT_NAME="${0##*/}"; readonly SCRIPT_NAME="${SCRIPT_NAME%.sh}"
-readonly LOG_FILE="./sf-tools/logs/${SCRIPT_NAME}.log"
+_log_name="$SCRIPT_NAME"
+for _a in "$@"; do [[ "$_a" == "--status" ]] && _log_name="${SCRIPT_NAME}-status"; done   # 裏の判定は、別のログに書く
+readonly LOG_FILE="./sf-tools/logs/${_log_name}.log"
 readonly LOG_MODE="NEW"
 
 # ------------------------------------------------------------------------------
@@ -102,12 +109,14 @@ source "$COMMON_LIB"
 
 # 引数の解析（処理の流れの 1 より前。誤りがあれば、判定・通信をせずに中断する）
 OPT_CREATE=0
+OPT_STATUS=0
 OPT_TITLE=""; OPT_TITLE_SET=0
 OPT_BODY_FILE=""; OPT_BODY_SET=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -v|--verbose) shift ;;
         --create) OPT_CREATE=1; shift ;;
+        --status) OPT_STATUS=1; shift ;;
         --title)
             [[ $# -ge 2 ]] || die "--title には、PR の題名を指定してください。"
             OPT_TITLE="$2"; OPT_TITLE_SET=1; shift 2 ;;
@@ -117,6 +126,7 @@ while [[ $# -gt 0 ]]; do
         *) die "不明なオプションです: $1" ;;
     esac
 done
+[[ $OPT_STATUS -eq 1 && $OPT_CREATE -eq 1 ]] && die "--status は、--create と一緒には使えません。"
 if [[ $OPT_CREATE -eq 1 ]]; then
     [[ $OPT_TITLE_SET -eq 1 ]] || die "--create には、--title が要ります。"
     [[ $OPT_BODY_SET -eq 1 ]] || die "--create には、--body-file が要ります。"
@@ -180,7 +190,20 @@ while IFS= read -r _t; do [[ -n "$_t" ]] && TIERS+=("$_t"); done <<< "$(_pc 'tie
 #   同じときだけ使う。書けなくても、このコマンドは続ける）
 _head=$(git rev-parse -q --verify HEAD 2>/dev/null) || _head=""   # VAR=$(cmd) のため run 不使用
 if [[ -n "$_head" ]]; then
-    printf 'HEAD=%s\nNEXT=%s\nPR=%s\nSKIPPED=%s\nTIERS=%s\n' "$_head" "$NEXT_TARGET" "$PR_OPEN" "$SKIPPED" "${TIERS[*]}" > "$NEXT_STATUS_FILE" 2>/dev/null || true   # 意図的なエラー無視（表示用のため）
+    # 一時ファイルに書いてから置き換える（ランチャーの裏の判定と、前面の実行が同時に動いても、書きかけを読ませない）
+    _st_tmp="${NEXT_STATUS_FILE}.$$"
+    _st_ok=0
+    if [[ ! -d "$NEXT_STATUS_FILE" ]] && printf 'HEAD=%s\nNEXT=%s\nPR=%s\nSKIPPED=%s\nTIERS=%s\n' "$_head" "$NEXT_TARGET" "$PR_OPEN" "$SKIPPED" "${TIERS[*]}" > "$_st_tmp" 2>/dev/null \
+        && mv -f "$_st_tmp" "$NEXT_STATUS_FILE" 2>/dev/null; then   # if cmd（表示用のため、失敗しても続ける。--status のときだけ下で失敗にする。
+        #   置き換え先がフォルダだと、mv はその中へ移して成功になるため、先に確かめる）
+        _st_ok=1
+    fi
+    rm -f "$_st_tmp" 2>/dev/null || true   # 意図的なエラー無視（置き換えたあとは、もうない）
+fi
+if [[ $OPT_STATUS -eq 1 ]]; then
+    [[ ${_st_ok:-0} -eq 1 ]] || die "判定の結果を書けませんでした: ${NEXT_STATUS_FILE}"
+    log "SUCCESS" "判定の結果を書きました（${NEXT_STATUS_FILE}。次の段階: ${NEXT_TARGET}）"
+    exit 0   # --status: 判定だけ（表示・確認・PR の作成はしない）
 fi
 
 # ------------------------------------------------------------------------------

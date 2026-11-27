@@ -322,6 +322,28 @@ test_next_status_file() {
 
 test_display_and_next
 test_next_status_file
+
+test_status_only() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] --status: 判定して next-status.txt を書くだけ（表示・確認・PR の作成をしない）${CLR_RST}"
+    local TD MB MH; _env TD MB MH
+    local f="$TD/sf-tools/logs/next-status.txt"
+    export MOCK_PC_JSON; MOCK_PC_JSON=$(_pc_json staging)
+    NX_OUT=$(cd "$TD" && env PATH="$MB:$PATH" bash "$SF_TOOLS_DIR/bin/sf-next.sh" --status < /dev/null 2>&1); NX_RC=$?
+    assert_exit_ok "$NX_RC" "--status → 0（確認を待たない）"
+    assert_file_contains "$f" "NEXT=staging" "--status → next-status.txt を書く"
+    assert_output_not_contains "$NX_OUT" "PRを出しますか" "--status → 確認しない"
+    assert_output_not_contains "$NX_OUT" "リリース状況" "--status → 結果の表示をしない"
+    [[ -f "$TD/sf-tools/logs/sf-next-status.log" ]] && pass "--status → ログは sf-next-status.log" || fail "--status → ログは sf-next-status.log"
+    NX_OUT=$(cd "$TD" && env PATH="$MB:$PATH" bash "$SF_TOOLS_DIR/bin/sf-next.sh" --status --create --title t --body-file /dev/null < /dev/null 2>&1); NX_RC=$?
+    assert_exit_fail "$NX_RC" "--status と --create は一緒に使えない"
+    rm -f "$TD/sf-tools/logs/next-status.txt"; mkdir -p "$TD/sf-tools/logs/next-status.txt"   # 置き換え先がフォルダ → 書けない
+    NX_OUT=$(cd "$TD" && env PATH="$MB:$PATH" bash "$SF_TOOLS_DIR/bin/sf-next.sh" --status < /dev/null 2>&1); NX_RC=$?
+    assert_exit_fail "$NX_RC" "--status で結果を書けない → エラー（ランチャーに、書けたと思わせない）"
+    rmdir "$TD/sf-tools/logs/next-status.txt"
+    ls "$TD"/sf-tools/logs/next-status.txt.* >/dev/null 2>&1 && fail "書けなかった一時ファイルを残さない" || pass "書けなかった一時ファイルを残さない"
+    _unset; teardown "$TD" "$MB"
+}
+test_status_only
 test_rules_broken_or_unknown
 test_protected_branch_blocked
 test_pr_url

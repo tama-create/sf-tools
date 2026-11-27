@@ -62,10 +62,12 @@
 <figure class="diagram">
 <div class="term"><span class="dim">  ──────────────────────────────────────────────────</span>
   <span class="hl">&gt;&gt; Launcher &lt;&lt;</span>
-  ブランチ: JOB-20261127   組織: myorg
-  未コミットの変更: 2 件   push していないコミット: 0 件
-  次の PR 先: （Next で確かめる）
-  <span class="hl">▶ 次の目安: 1 Check → 2 Dryrun → 3 Deploy で確かめてから、4 Push</span>
+<span class="dim">  ──────────────────────────────────────────────────</span>
+  JOB-20261127 ｜ myorg ｜ ログ ● 取得中（期限 15:30・今日 3 本）
+
+   <span class="hl">1 Check</span>  &gt;  2 Dryrun  &gt;  3 Deploy  &gt;  4 Push  &gt;  5 Next
+   <span class="hl">^ ここから（未コミットの変更 2 件）</span>
+
 <span class="dim">  ──────────────────────────────────────────────────</span>
   [<span class="num">1</span>] Check      ターゲットファイルの構文チェック
   [<span class="num">2</span>] Dryrun     現在接続中の組織へリリース検証
@@ -77,14 +79,13 @@
   [<span class="num">7</span>] Restart    接続組織を切り替えて Start 実行
 <span class="dim">  ──────────────────────────────────────────────────</span>
   番号を入力 (1-7 / q で終了):</div>
-  <figcaption>ランチャーの画面です。上に今の状況と次の目安が出て、番号のキーを 1 つ押すと（Enter は不要）、そのコマンドが動きます。</figcaption>
+  <figcaption>ランチャーの画面です。上に今の状況と、作業の流れの中の「今ここ」が出て、番号のキーを 1 つ押すと（Enter は不要）、そのコマンドが動きます。</figcaption>
 </figure>
 <p>メニューの上には、<strong>今の状況</strong>が出ます（読み取りだけで、通信はしません）。</p>
 <ul>
-  <li><strong>ブランチと組織:</strong> いまのブランチと、つないでいる組織（<code>sf-start.sh</code> で選んだもの）です。</li>
-  <li><strong>未コミットの変更・push していないコミット:</strong> まだ送っていない変更の数です。</li>
-  <li><strong>次の PR 先:</strong> 最後に 5 Next を押したときの結果です。そのあとに変更してコミットが変わったときは、「Next で確かめる」になります（古い結果は出しません）。</li>
-  <li><strong>次の目安:</strong> 状況から、次に押す番号を案内します。変更があれば「1 Check → 2 Dryrun → 3 Deploy で確かめてから、4 Push」、送っていないコミットがあれば「4 Push」、送り終わっていれば「5 Next」のように出ます。案内なので、ほかの番号を押しても構いません。</li>
+  <li><strong>1 行目:</strong> いまのブランチ・つないでいる組織（<code>sf-start.sh</code> で選んだもの）・デバッグログの状態（● の色: 取得中 = 緑、準備中 = 水色、取れていない = 赤、取っていない = 黄色）です。</li>
+  <li><strong>作業の流れと「今ここ」:</strong> 1 Check から 5 Next までの流れの中で、今の段階が水色になり、その真下に <code>^</code> の印と説明が出ます。まだコミットしていない変更があれば 1 Check の下（確かめるところから）、push していないコミットがあれば 4 Push の下、送り終わっていれば 5 Next の下（例: 「ここ（staging へ PR を出す）」）に出ます。案内なので、ほかの番号を押しても構いません。</li>
+  <li><strong>次の PR 先:</strong> 最後に 5 Next を押したときの結果を使います。そのあとに変更してコミットが変わったときは、「ここ（次の出し先を確かめる）」になります（古い結果は出しません）。全段階に出し終わっていれば、「✓ 全段階にリリース済みです」と出ます。</li>
   <li><code>main</code> などの環境ブランチの上では、「環境ブランチの上です」と出ます（作業は、<code>sf-job.sh</code> で作ったブランチで行います）。</li>
 </ul>
 <p>コマンドが終わると、「<strong>✓ Check: 終わりました（成功）</strong>」か「<strong>✗ Check: 失敗、または中断しました（終了コード 1）</strong>」が、1 行で出ます。出力が長く流れても、成功したかどうかが、ひと目で分かります（<code>q</code> で中断したときも、終了コードが 1 になるため、✗ で出ます）。</p>

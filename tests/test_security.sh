@@ -211,6 +211,33 @@ test_static_no_sftools_as_tmpdir() {
 }
 
 # ==============================================================================
+# 静的: ソースに、見えない文字（文字の向きを変える文字・幅のない文字・BOM）を、そのまま入れない
+#   （画面に見えるコードと、実際に動くコードが食い違って見える「Trojan Source」の防止。2026-11-27 に、
+#    編集の道具が \uXXXX の書き方を文字そのものに変えて、bin/sf-launcher.sh に入り込んだ）。
+#   正規表現などで要るときは、\uXXXX（node）や $'\xe2\x80\xae'（bash）のように、エスケープで書く
+# ==============================================================================
+test_static_no_invisible_chars() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] 静的: ソースに見えない文字を入れない${CLR_RST}"
+    local pat hits
+    # U+200B〜U+200F・U+202A〜U+202E（e2 80 8b〜8f・aa〜ae）/ U+2066〜U+2069（e2 81 a6〜a9）/ U+FEFF（ef bb bf）
+    pat=$'\xe2\x80[\x8b-\x8f\xaa-\xae]|\xe2\x81[\xa6-\xa9]|\xef\xbb\xbf'
+    # Git に入っている全部のテキスト（git grep -I は、画像などのバイナリを除く）。.github・設定ファイルも対象
+    hits=$(cd "$SF_TOOLS_DIR" && LC_ALL=C git grep -I -l -E "$pat" 2>/dev/null)   # VAR=$(cmd)（テストの読み取り）
+    [[ -z "$hits" ]] && pass "ソースに見えない文字がない" || fail "ソースに見えない文字がない" "$hits"
+    # 検査そのものが、見えない文字を見つけられること（U+200B・U+202E・U+2066・U+FEFF を 1 つずつ入れた一時ファイル）
+    local td c ok=1
+    td=$(mktemp -d "${TMPDIR:-/tmp}/sec-inv-XXXX")
+    for c in $'\xe2\x80\x8b' $'\xe2\x80\xae' $'\xe2\x81\xa6' $'\xef\xbb\xbf'; do
+        printf 'a%sb\n' "$c" > "$td/probe.txt"
+        LC_ALL=C grep -qE "$pat" "$td/probe.txt" || ok=0
+    done
+    printf 'ふつうの日本語の文と ─ の罫線\n' > "$td/probe.txt"
+    LC_ALL=C grep -qE "$pat" "$td/probe.txt" && ok=0
+    rm -rf "$td"
+    [[ $ok -eq 1 ]] && pass "検査は、見えない文字を見つけ、ふつうの日本語・罫線は見逃す" || fail "検査は、見えない文字を見つけ、ふつうの日本語・罫線は見逃す"
+}
+
+# ==============================================================================
 # テスト実行
 # ==============================================================================
 test_static_no_run_sf_org_display
@@ -220,6 +247,7 @@ test_static_chmod600_sf_init_env
 test_static_no_sftools_as_tmpdir
 test_runtime_sfdxauthurl_not_logged
 test_runtime_log_dir_permission
+test_static_no_invisible_chars
 
 echo ""
 echo -e "  結果: ${CLR_PASS}${TESTS_PASSED} PASS${CLR_RST} / ${CLR_FAIL}${TESTS_FAILED} FAIL${CLR_RST}"

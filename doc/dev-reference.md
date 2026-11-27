@@ -516,8 +516,10 @@ check_gh_owner "$GITHUB_OWNER"   # 認証ユーザーの一致確認
 - `SF_LAUNCHER_ACTIVE=1` をエクスポートして `sf-start.sh` からの二重起動を防止
 - `sf-launcher.sh <番号>` で、その番号を 1 回だけ実行して終了（終了コードは、実行したコマンドのもの。範囲外・スクリプトがなければ 1）
 - `sf-launcher.sh --fzf` で fzf モードも利用可能（fzf がなければ、警告を表示して終了コード 1）
-- メニューの見出しの下に、`print_apexlog_status` が `logs/apex/.status` の `STATE`・`ORG`・`EXPIRES_AT`・`COUNT_TODAY`・`REASON`・`WARNING` を `while read` で読み、1 行（と WARNING の 1 行）を表示する（source しない。ファイルがない・知らない STATE なら表示しない）
-- その上に、`print_status` が今の状況を出す（2026-11-27。読み取りのみ・通信しない）: ブランチ（`git symbolic-ref`）・組織（`.sf/config.json` の `target-org` を `node -e` で読む。grep / sed で JSON を読まない）・未コミットの変更（`git status --porcelain` の行数）・push していないコミット（`git rev-list --count @{u}..HEAD`）・次の PR 先（`sf-tools/logs/next-status.txt`。`sf-next.sh` が判定のたびに書く `HEAD=`・`NEXT=`・`PR=`・`SKIPPED=`。`HEAD=` が今の先端と同じで、`NEXT=` が段階名の形のときだけ使う。source しない）・「次の目安」の 1 行（番号は `number_of` で `MENU_ITEMS` から引く。並びが変わってもずれない）。環境ブランチ（`branches.txt`）の上では、目安の代わりに注意を出す
+- メニューの見出し（線・`>> Launcher <<`・線）の下に、`print_status` が今の状況を出す（2026-11-27。読み取りのみ・通信しない）:
+  - 1 行目 `<ブランチ> ｜ <組織> ｜ ログ <状態>`。ブランチは `git symbolic-ref`、組織は `.sf/config.json` の `target-org` を `node -e` で読む（grep / sed で JSON を読まない。表示を崩す文字を除き 60 文字で切る。`echo -e` のため `\` を `\\` にする）。ログは `apexlog_summary` が `logs/apex/.status` を `while read` で読み、`AL_TEXT`・`AL_COLOR`・`AL_WARN` に入れる（source しない。WARNING は 2 行目）
+  - 作業の流れ `1 Check  >  2 Dryrun  >  3 Deploy  >  4 Push  >  5 Next`（番号は `number_of` で `MENU_ITEMS` から引く）と、今の段階の真下の `^ <説明>`。印の位置は流れの文字数で合わせるため、流れと印は ASCII だけで作る（丸数字・罫線は、端末によって 1 文字幅か 2 文字幅かが変わる）。段階は、未コミットの変更（`git status --porcelain`）→ Check / 追跡先なし・push していないコミット（`git rev-list --count @{u}..HEAD`）→ Push / それ以外 → Next（次の PR 先は `sf-tools/logs/next-status.txt`。`sf-next.sh` が書く `HEAD=`・`NEXT=`・`PR=`・`SKIPPED=`。`HEAD=` が今の先端と同じで、`NEXT=` が段階名の形のときだけ使う）。出すものなし・全段階済みは、印の代わりに 1 行
+  - 環境ブランチ（`branches.txt`）の上では、流れの代わりに注意を出す
 - `run_command` は、終わったら結果を 1 行で出す（0 → `✓ <名前>: 終わりました（成功）`、それ以外 → `✗ <名前>: 失敗、または中断しました（終了コード N）`）。終了コードは、そのまま返す
 
 ### 4.8 sf-deploy.sh

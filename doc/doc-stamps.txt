@@ -6,7 +6,7 @@
 
 site/reference/commands-dev.html | bin/sf-job.sh | 3576329447-8264 | e0b8023
 site/reference/commands-dev.html | bin/sf-start.sh | 1463713128-7421 | ebc141b
-site/reference/commands-dev.html | bin/sf-launcher.sh | 691291423-6766 | 894b3a2
+site/reference/commands-dev.html | bin/sf-launcher.sh | 4283870531-7923 | 3b2bacd
 site/reference/commands-dev.html | bin/sf-check.sh | 334649645-7163 | 5b20e70
 site/reference/commands-dev.html | bin/sf-dryrun.sh | 2320821728-2196 | 5b20e70
 site/reference/commands-dev.html | bin/sf-release.sh | 1513622544-11488 | c204c2a
@@ -67,7 +67,7 @@ site/admin/troubleshooting.html | bin/sf-deploy.sh | 3742126846-4982 | a1c1372
 site/admin/troubleshooting.html | bin/sf-sync-wf.sh | 2612271841-6183 | fc9cbb5
 site/admin/troubleshooting.html | bin/sf-init.sh | 4143046044-23496 | 14f6d2f
 
-site/reference/commands.html | bin/sf-launcher.sh | 691291423-6766 | 894b3a2
+site/reference/commands.html | bin/sf-launcher.sh | 4283870531-7923 | 3b2bacd
 site/reference/commands.html | bin/sf-job.sh | 3576329447-8264 | e0b8023
 site/reference/commands.html | bin/sf-init.sh | 4143046044-23496 | 9640759
 site/reference/commands.html | bin/sf-update-secret.sh | 1262693024-6313 | 9640759
@@ -79,9 +79,9 @@ site/reference/commands.html | phases/init/add_tier.sh | 818736844-7560 | 964075
 site/reference/commands.html | phases/init/remove_tier.sh | 1768172340-6842 | dbb651b
 site/reference/commands.html | phases/init/reconnect.sh | 2731751844-4672 | 9640759
 site/index.html | bin/sf-job.sh | 3576329447-8264 | e0b8023
-site/index.html | bin/sf-launcher.sh | 691291423-6766 | 894b3a2
+site/index.html | bin/sf-launcher.sh | 4283870531-7923 | 3b2bacd
 site/index.html | bin/sf-init.sh | 4143046044-23496 | 9640759
-site/guide/glossary.html | bin/sf-launcher.sh | 691291423-6766 | 894b3a2
+site/guide/glossary.html | bin/sf-launcher.sh | 4283870531-7923 | 3b2bacd
 site/guide/glossary.html | bin/sf-job.sh | 3576329447-8264 | e0b8023
 site/guide/glossary.html | bin/sf-release.sh | 1513622544-11488 | c204c2a
 site/design/cicd.html | bin/sf-metasync.sh | 2608034047-25141 | dbb651b

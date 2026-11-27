@@ -30,26 +30,33 @@
 #      （2026-11-26 に、1: Check 2: Push 3: Next 4: Dryrun 5: Deploy の並びから、作業の順に並べ替えた）
 #   4. 選んだコマンドは、このスクリプトと同じフォルダの sf-xxx.sh を、引数なしで bash で実行する。
 #      スクリプトがなければ、警告を表示する
-#   5. メニューを表示するたびに、見出しの下に、デバッグログ（sf-log.sh）の状態を 1 行表示する（logs/apex/.status の STATE による:
-#      collecting = 取得中（組織・期限・今日の本数）/ starting = 準備中 / skipped = 取っていません / error = 取れていません /
-#      stopped = 止まっています。WARNING があれば、もう 1 行）。ファイルがない・STATE がそれ以外なら、何も表示しない。
-#      色は状態で変える（取得中 = 太字の緑 / 準備中 = 太字の水色 / 取れていません = 太字の赤 / 取っていません・止まっています = 黄色。
-#      メニューの中で目立たせ、ひと目で取れているかが分かるようにする）
-#      キー=値 の行を while read で読み、source しない。
-#      準備中（starting）のあいだは、入力を 5 秒ずつ待ち（read -t）、STATE が変わったら、コマンドを動かさずにメニューを描き直す
-#      （裏の準備は数分かかることがあり、つながっても「準備中」のままだと迷うため）。待ち切れと EOF は、待った時間でも見分ける（Bash 3.2）
-#   6. メニューを表示するたびに、見出しの下に、今の状況を表示する（読み取りのみ。通信しない。2026-11-27）:
-#        ブランチ（git symbolic-ref。ブランチの上にいなければ、その旨だけ）・組織（.sf/config.json の target-org を node で読む。
-#        読めなければ出さない）・未コミットの変更の数（git status --porcelain の行数）・push していないコミットの数
-#        （git rev-list --count @{u}..HEAD。追跡先がなければ「追跡先なし」）・次の PR 先（sf-tools/logs/next-status.txt。
-#        sf-next.sh が最後に判定した結果を書く。HEAD= が今の先端のコミットと同じときだけ使い、違う・ない・読めないときは
-#        「5 Next で確かめる」）。キー=値 の行を while read で読み、source しない。
-#        続けて「次の目安」を 1 行出す（上から順に当てはまったもの。番号は、メニューの並びから引く）:
-#          未コミットの変更がある → Check → Dryrun → Deploy で確かめてから、Push / push していないコミットがある・追跡先がない → Push /
-#          次の PR 先: none → 全段階にリリース済み / 発行中の PR → その PR の検証を待つ / 出すものなし → ターゲットファイルに書く /
-#          段階 → Next（その段階へ PR）/ 分からない → Next（出し先を確かめる）
-#        環境ブランチ（sf-tools/config/branches.txt の行。ファイルがない・空なら main だけ）の上では、変更・次の目安の代わりに、
-#        「環境ブランチの上です」と出す
+#   5. メニューを表示するたびに、見出し（線・>> Launcher <<・線）の下に、今の状況を表示する（読み取りのみ。通信しない。2026-11-27）
+#      1 行目: 「<ブランチ> ｜ <組織> ｜ ログ <デバッグログの状態>」（ないものは出さない）
+#        表示する値（ブランチ・組織・デバッグログの期限・本数・理由・WARNING）は、すべて clean_text で掃除する（制御文字・
+#        幅のない文字・文字の向きを変える文字・BOM を除き、echo -e のため \ を 2 つ重ねる。値の中の文字で、画面を崩させない）
+#        ブランチ: git symbolic-ref。ブランチの上にいなければ「（ブランチの上にいません）」だけを出して終わる
+#        組織: .sf/config.json の target-org を node で読む（読めなければ出さない。表示を崩す文字を除き、60 文字で切る）
+#        デバッグログ: logs/apex/.status の STATE による（collecting = ● 取得中（期限・今日の本数）/ starting = ● 準備中 /
+#          skipped = ● 取っていません / error = ● 取れていません / stopped = ● 止まっています。理由（REASON）があれば括弧で添える）。
+#          色は状態で変える（取得中 = 太字の緑 / 準備中 = 太字の水色 / 取れていません = 太字の赤 / 取っていません・止まっています = 黄色）。
+#          WARNING があれば「⚠ デバッグログ: …」をもう 1 行。ファイルがない・STATE がそれ以外なら、ログの部分を出さない。
+#          キー=値 の行を while read で読み、source しない。
+#          準備中（starting）のあいだは、入力を 5 秒ずつ待ち（read -t）、STATE が変わったら、コマンドを動かさずにメニューを描き直す
+#          （裏の準備は数分かかることがあり、つながっても「準備中」のままだと迷うため）。待ち切れと EOF は、待った時間でも見分ける（Bash 3.2）
+#      環境ブランチ（sf-tools/config/branches.txt の行。ファイルがない・空なら main だけ）の上では、続けて
+#      「⚠ 環境ブランチの上です」を出して終わる（流れの絵は出さない）
+#   6. 続けて、作業の流れ「1 Check  >  2 Dryrun  >  3 Deploy  >  4 Push  >  5 Next」（番号はメニューの並びから引く）を出し、
+#      今の段階を太字の水色にして、その真下に「^ <説明>」の印を出す（印の位置は、流れの文字数で合わせる。流れと印は ASCII の
+#      記号だけで作る。丸数字・罫線は、端末によって 1 文字幅か 2 文字幅かが変わり、印がずれるため）。
+#      今の段階は、上から順に当てはまったもの:
+#        未コミットの変更がある（git status --porcelain の行数）→ Check「ここから（未コミットの変更 N 件）」/
+#        追跡先がない → Push「ここ（まだ push していません。追跡先なし）」/
+#        push していないコミットがある（git rev-list --count @{u}..HEAD）→ Push「ここ（push していないコミット N 件）」/
+#        次の PR 先（下）が「出すものなし」→ 印の代わりに「▶ ターゲットファイル（…）に、出すものを書きます」/
+#        none → 印の代わりに「✓ 全段階にリリース済みです」/ 発行中の PR → Next「ここ（PR #N の検証が緑になったら、マージ）」/
+#        段階 → Next「ここ（<段階> へ PR を出す）」/ 分からない → Next「ここ（次の出し先を確かめる）」
+#      次の PR 先は、sf-tools/logs/next-status.txt（sf-next.sh が判定のたびに書く HEAD=・NEXT=・PR=・SKIPPED=）。HEAD= が今の
+#      先端のコミットと同じで、NEXT= が段階名の形（40 文字まで）のときだけ使う。PR= は 9 桁まで。キー=値 を while read で読み、source しない
 #   7. コマンドが終わったら、結果を 1 行で出す: 終了コード 0 → 「✓ <名前>: 終わりました（成功）」（太字の緑）/
 #      それ以外 → 「✗ <名前>: 失敗、または中断しました（終了コード N）」（太字の赤。q での中断も 1 になるため、両方を書く）
 #
@@ -111,29 +118,39 @@ unset _item
 # ------------------------------------------------------------------------------
 # メニュー表示
 # ------------------------------------------------------------------------------
-# デバッグログ（sf-log.sh）の状態を 1 行で表示する（logs/apex/.status。なければ何も表示しない。doc/sf-log-design.md 5.4）
+# 表示する値から、画面を崩す文字を除く（制御文字 \x00-\x1f・\x7f と、C1 制御 U+0080〜U+009F・幅のない文字 U+200B〜U+200F・
+#   文字の向きを変える文字 U+202A〜U+202E・U+2066〜U+2069・BOM U+FEFF の UTF-8 のバイト列）。
+#   さらに、表示は echo -e のため、\ を \\ にする（\033 などの並びを、制御として解釈させない）。結果は標準出力
+clean_text() {
+    printf '%s' "$1" | LC_ALL=C tr -d '\000-\037\177' \
+        | LC_ALL=C sed -e $'s/\xe2\x80[\x8b-\x8f\xaa-\xae]//g' -e $'s/\xe2\x81[\xa6-\xa9]//g' -e $'s/\xef\xbb\xbf//g' -e $'s/\xc2[\x80-\x9f]//g' \
+        | sed -e 's/\\/\\\\/g'
+}
+
+# デバッグログ（sf-log.sh）の状態を、短い表示にする（logs/apex/.status。なければ空。doc/sf-log-design.md 5.4）
+#   結果は AL_TEXT（表示）・AL_COLOR（色）・AL_WARN（WARNING の文。あれば、もう 1 行出す）に入れる（$( ) を使わず、変数で返す）
 #   common.sh を読まないため、キー=値 の行を while read で読み、決まったキーだけを使う（source しない）
-print_apexlog_status() {
-    local f="logs/apex/.status" line k v state="" org="" at="" cnt="" reason="" warn="" text color
+apexlog_summary() {
+    local f="logs/apex/.status" line k v state="" at="" cnt="" reason=""
+    AL_TEXT=""; AL_COLOR=""; AL_WARN=""
     [[ -f "$f" ]] || return 0
     while IFS= read -r line || [[ -n "$line" ]]; do
         k="${line%%=*}"; v="${line#*=}"
         case "$k" in
-            STATE) state="$v" ;; ORG) org="$v" ;; EXPIRES_AT) at="$v" ;; COUNT_TODAY) cnt="$v" ;;
-            REASON) reason="$v" ;; WARNING) warn="$v" ;;
+            STATE) state="$v" ;; EXPIRES_AT) at="$v" ;; COUNT_TODAY) cnt="$v" ;;
+            REASON) reason="$v" ;; WARNING) AL_WARN="$v" ;;
         esac
     done < "$f"
+    at=$(clean_text "$at"); cnt=$(clean_text "$cnt"); reason=$(clean_text "$reason"); AL_WARN=$(clean_text "$AL_WARN")   # VAR=$(cmd)
+    # 色は状態で変える（取得中 = 太字の緑 / 準備中 = 太字の水色 / 取れていません = 太字の赤 / 取っていません・止まっています = 黄色）
     case "$state" in
-        collecting) text="取得中（${org}${at:+・期限 ${at}}${cnt:+・今日 ${cnt} 本}）"; color="${BOLD}${GREEN}" ;;
-        starting)   text="準備中（${org}）"; color="${BOLD}${CYAN}" ;;
-        skipped)    text="取っていません${reason:+（${reason}）}"; color="${YELLOW}" ;;
-        error)      text="取れていません${reason:+（${reason}）}"; color="${BOLD}${RED}" ;;
-        stopped)    text="止まっています${reason:+（${reason}）}"; color="${YELLOW}" ;;
-        *)          return 0 ;;
+        collecting) AL_TEXT="● 取得中（${at:+期限 ${at}・}今日 ${cnt:-0} 本）"; AL_COLOR="${BOLD}${GREEN}" ;;
+        starting)   AL_TEXT="● 準備中"; AL_COLOR="${BOLD}${CYAN}" ;;
+        skipped)    AL_TEXT="● 取っていません${reason:+（${reason}）}"; AL_COLOR="${YELLOW}" ;;
+        error)      AL_TEXT="● 取れていません${reason:+（${reason}）}"; AL_COLOR="${BOLD}${RED}" ;;
+        stopped)    AL_TEXT="● 止まっています${reason:+（${reason}）}"; AL_COLOR="${YELLOW}" ;;
+        *)          AL_WARN="" ;;   # 知らない STATE・ファイルが壊れている → 何も出さない
     esac
-    # 色は状態で変える（以前は薄い灰色で、メニューの中で目立たなかった。2026-11-24）
-    echo -e "${color}  デバッグログ: ${text}${RESET}"
-    [[ -n "$warn" ]] && echo -e "${YELLOW}  ⚠ デバッグログ: ${warn}${RESET}"
     return 0
 }
 
@@ -189,27 +206,33 @@ is_env_branch() {
 target_org() {
     [[ -f ".sf/config.json" ]] || return 0
     command -v node >/dev/null 2>&1 || return 0
-    node -e 'try{const j=JSON.parse(require("fs").readFileSync(".sf/config.json","utf8"));const v=j["target-org"];if(typeof v==="string"){const t=v.replace(/[\x00-\x1f\x7f-\x9f​-‏‪-‮⁦-⁩﻿]/g,"");process.stdout.write(t.length>60?t.slice(0,60)+"…":t)}}catch(e){}' 2>/dev/null
+    node -e 'try{const j=JSON.parse(require("fs").readFileSync(".sf/config.json","utf8"));const v=j["target-org"];if(typeof v==="string"){const t=v.replace(/[\x00-\x1f\x7f-\x9f\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/g,"");process.stdout.write(t.length>60?t.slice(0,60)+"…":t)}}catch(e){}' 2>/dev/null
     return 0
 }
 
 print_status() {
-    local branch org head changes ahead="" has_up=0 line k v nhead="" next="" pr="" skipped="" hint
-    local n_check n_dryrun n_deploy n_push n_next
+    local branch org head changes ahead="" has_up=0 line k v nhead="" next="" pr="" skipped=""
+    local top cur=-1 msg="" endmsg="" i seg pos off=3 plain="" colored="" cmd
+    local stages=(sf-check sf-dryrun sf-deploy sf-push sf-next)
     branch=$(git symbolic-ref -q --short HEAD 2>/dev/null) || branch=""   # VAR=$(cmd)（common.sh を読まない単独の設計。以下も同じ）
     org=$(target_org)
-    # 表示は echo -e のため、値の \ を \\ にする（値の中の \033 などを、端末の制御として解釈させない）。
-    #   ブランチ名は、git の参照名の決まりで \ を含まない。次の PR 先・PR の番号は、下で形を確かめる（\ を通さない）
-    org="${org//\\/\\\\}"
-    if [[ -z "$branch" ]]; then
-        echo -e "  ブランチ: ${YELLOW}（ブランチの上にいません）${RESET}${org:+   組織: ${BOLD}${org}${RESET}}"
-        return 0
-    fi
-    echo -e "  ブランチ: ${BOLD}${branch}${RESET}${org:+   組織: ${BOLD}${org}${RESET}}"
+    # 表示する値は clean_text で掃除する（画面を崩す文字を除き、echo -e のため \ を \\ にする）。
+    #   次の PR 先・PR の番号は、下で形を確かめる（英数字と記号の一部だけを通す）
+    org=$(clean_text "$org"); branch=$(clean_text "$branch")   # VAR=$(cmd)
+    apexlog_summary   # AL_TEXT・AL_WARN は、中で clean_text を通した値から作る
+
+    # 1 行目: ブランチ ｜ 組織 ｜ ログ（ないものは出さない）
+    if [[ -n "$branch" ]]; then top="${BOLD}${branch}${RESET}"; else top="${YELLOW}（ブランチの上にいません）${RESET}"; fi
+    [[ -n "$org" ]] && top="${top} ｜ ${org}"
+    [[ -n "$AL_TEXT" ]] && top="${top} ｜ ログ ${AL_COLOR}${AL_TEXT}${RESET}"
+    echo -e "  ${top}"
+    [[ -n "$AL_WARN" ]] && echo -e "${YELLOW}  ⚠ デバッグログ: ${AL_WARN}${RESET}"
+    [[ -z "$branch" ]] && return 0
     if is_env_branch "$branch"; then
         echo -e "${YELLOW}  ⚠ 環境ブランチの上です。作業は、sf-job.sh で作ったブランチで行います${RESET}"
         return 0
     fi
+
     changes=$(git status --porcelain 2>/dev/null | wc -l | tr -d ' ')
     [[ "$changes" =~ ^[0-9]+$ ]] || changes=0
     if git rev-parse -q --verify '@{u}' >/dev/null 2>&1; then
@@ -230,41 +253,43 @@ print_status() {
     fi
     [[ "$pr" =~ ^[0-9]{1,9}$ ]] || pr=""   # 長さにも上限（表示を崩さないため）
 
-    if [[ $has_up -eq 1 ]]; then
-        echo -e "  未コミットの変更: ${BOLD}${changes}${RESET} 件   push していないコミット: ${BOLD}${ahead}${RESET} 件"
-    else
-        echo -e "  未コミットの変更: ${BOLD}${changes}${RESET} 件   push していないコミット: ${YELLOW}（追跡先なし）${RESET}"
-    fi
-    if [[ "$skipped" == "true" ]]; then
-        echo -e "  次の PR 先: 出すものなし（ターゲットファイルが空）"
+    # 今の段階（cur = stages の位置。-1 = 流れの下に印を出さない）と、印の横の文
+    if [[ "$changes" -gt 0 ]]; then
+        cur=0; msg="ここから（未コミットの変更 ${changes} 件）"
+    elif [[ $has_up -eq 0 ]]; then
+        cur=3; msg="ここ（まだ push していません。追跡先なし）"
+    elif [[ "$ahead" -gt 0 ]]; then
+        cur=3; msg="ここ（push していないコミット ${ahead} 件）"
+    elif [[ "$skipped" == "true" ]]; then
+        endmsg="▶ ターゲットファイル（sf-tools/release/${branch}/）に、出すものを書きます"
     elif [[ "$next" == "none" ]]; then
-        echo -e "  次の PR 先: ${GREEN}全段階にリリース済み${RESET}"
+        endmsg="${GREEN}✓ 全段階にリリース済みです（このブランチの作業は終わり）${RESET}"
     elif [[ -n "$next" && -n "$pr" ]]; then
-        echo -e "  次の PR 先: ${BOLD}${next}${RESET}（PR 発行中 #${pr}）"
+        cur=4; msg="ここ（PR #${pr} の検証が緑になったら、マージ）"
     elif [[ -n "$next" ]]; then
-        echo -e "  次の PR 先: ${BOLD}${next}${RESET}"
+        cur=4; msg="ここ（${next} へ PR を出す）"
     else
-        echo -e "  次の PR 先: ${DIM}（Next で確かめる）${RESET}"
+        cur=4; msg="ここ（次の出し先を確かめる）"
     fi
 
-    n_check=$(number_of sf-check); n_dryrun=$(number_of sf-dryrun); n_deploy=$(number_of sf-deploy)
-    n_push=$(number_of sf-push); n_next=$(number_of sf-next)
-    if [[ "$changes" -gt 0 ]]; then
-        hint="${n_check} Check → ${n_dryrun} Dryrun → ${n_deploy} Deploy で確かめてから、${n_push} Push"
-    elif [[ $has_up -eq 0 || "$ahead" -gt 0 ]]; then
-        hint="${n_push} Push（push していないコミットがあります）"
-    elif [[ "$skipped" == "true" ]]; then
-        hint="ターゲットファイル（sf-tools/release/${branch}/）に、出すものを書く"
-    elif [[ "$next" == "none" ]]; then
-        hint="全段階にリリース済みです（このブランチの作業は終わり）"
-    elif [[ -n "$next" && -n "$pr" ]]; then
-        hint="PR #${pr} の検証が緑になったら、マージする"
-    elif [[ -n "$next" ]]; then
-        hint="${n_next} Next（${next} へ PR を出す）"
-    else
-        hint="${n_next} Next（次の出し先を確かめる）"
+    # 作業の流れ（1 Check  >  2 Dryrun  >  …）。今の段階は太字の水色。幅が必ず 1 文字の ASCII だけで作り、
+    #   下の印（^）の位置を、文字数で合わせる（丸数字・罫線は、端末によって幅が 1 か 2 か変わり、ずれるため）
+    echo ""
+    for i in 0 1 2 3 4; do
+        cmd="${stages[$i]}"
+        seg="$(number_of "$cmd") $(label_of "$cmd")"
+        [[ $i -gt 0 ]] && { plain="${plain}  >  "; colored="${colored}${DIM}  >  ${RESET}"; }
+        [[ $i -eq $cur ]] && off=$(( 3 + ${#plain} ))
+        plain="${plain}${seg}"
+        if [[ $i -eq $cur ]]; then colored="${colored}${BOLD}${CYAN}${seg}${RESET}"; else colored="${colored}${seg}"; fi
+    done
+    echo -e "   ${colored}"
+    if [[ $cur -ge 0 ]]; then
+        pos=$(printf '%*s' "$off" '')
+        echo -e "${pos}${BOLD}${CYAN}^ ${msg}${RESET}"
+    elif [[ -n "$endmsg" ]]; then
+        echo -e "   ${endmsg}"
     fi
-    echo -e "${BOLD}${CYAN}  ▶ 次の目安: ${hint}${RESET}"
     return 0
 }
 
@@ -272,8 +297,9 @@ print_menu() {
     echo ""
     echo -e "${DIM}  ──────────────────────────────────────────────────${RESET}"
     echo -e "${BOLD}  >> Launcher <<${RESET}"
+    echo -e "${DIM}  ──────────────────────────────────────────────────${RESET}"
     print_status
-    print_apexlog_status
+    echo ""
     echo -e "${DIM}  ──────────────────────────────────────────────────${RESET}"
 
     local num=1

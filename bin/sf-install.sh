@@ -50,7 +50,13 @@
 #        （package-lock.json が無いときは、スキップしない）
 #   8. ~/.sf-tools-last-update が無い、またはその更新時刻から 24 時間以上たっていれば、sf-upgrade.sh をバックグラウンドで
 #      起動する（引数なし。標準出力は捨て、標準エラーは ./sf-tools/logs/sf-install.log に追記する）。
-#      起動を確認できたら、~/.sf-tools-last-update の更新時刻を更新する（完了の時点ではなく、起動の時点）
+#      起動を確認できたら、~/.sf-tools-last-update の更新時刻を更新する（完了の時点ではなく、起動の時点。sf-upgrade.sh は裏で動き、
+#      終わりを待てないため。終わりの時点で付けると、毎回失敗する環境では、起動のたびに重い更新を始めてしまう）。
+#      ただし、前回の sf-upgrade.sh が途中で切れていた（sf の更新のロック ~/.sf-tools-upgrade.lock が残っているのに、その PID が
+#      もう動いていない、またはロックが 2 時間以上前のもの（PID が別のプロセスに使い回されたときのため。sf-upgrade.sh と同じ決まり）。
+#      普通に終われば、ロックは消える。環境変数 SF_TOOLS_UPGRADE_LOCK で場所を差し替え可）ときは、24 時間を
+#      待たずに、もう一度起動する（WARNING。途中で切れた更新を「済み」にしない。2026-11-27 に WSL で、sf の入れ替えが途中で切れ、
+#      sf がないまま「4 時間前にアップデート済み」で飛ばされた）。sf-upgrade.sh は、入れ替えの跡を見つけると、更新せずに直し方を出す
 #
 # 【前提条件】
 #   - force-* ディレクトリ（フォルダ名が force- で始まる）で実行すること。それ以外では lib/common.sh が終了する
@@ -114,6 +120,8 @@ check_java_cli --cache || true  # 警告のみのため、戻り値は無視（�
 # ------------------------------------------------------------------------------
 readonly TARGET_DIR="$HOME/sf-tools"
 readonly UPDATE_STAMP_FILE="$HOME/.sf-tools-last-update"
+readonly UPGRADE_LOCK_FILE="${SF_TOOLS_UPGRADE_LOCK:-$HOME/.sf-tools-upgrade.lock}"   # sf-upgrade.sh の更新のロック（同じ場所・形）
+readonly UPGRADE_LOCK_STALE_SEC=7200   # これより古いロックは、PID が生きていても、途中で切れたものとみなす（sf-upgrade.sh と同じ）
 readonly UPDATE_INTERVAL_SEC=86400  # 24時間（秒）
 
 # _get_mtime - ファイルの更新タイムスタンプ（Unix秒）を取得する（macOS / Linux / Git Bash 対応）
@@ -128,8 +136,24 @@ _get_mtime() {
 
 # _is_tool_update_needed - 前回のツールアップデートから一定時間が経過しているか判定
 # 戻り値: 0=実行が必要 / 1=スキップ可
+# 前回の sf-upgrade.sh が、途中で切れたか（ロックが残っているのに、その PID が動いていない、またはロックが古い。
+#   普通に終われば、ロックは消える。PID が別のプロセスに使い回されると、kill -0 だけでは「動いている」と見てしまうため、古さも見る）
+_upgrade_interrupted() {
+    local pid age
+    [[ -f "$UPGRADE_LOCK_FILE" ]] || return 1
+    age=$(( $(date +%s) - $(_get_mtime "$UPGRADE_LOCK_FILE") ))  # VAR=$(cmd) のため run 不使用（現在時刻・更新時刻）
+    [[ $age -ge $UPGRADE_LOCK_STALE_SEC ]] && return 0
+    pid=$(sed -n 's/^PID=//p' "$UPGRADE_LOCK_FILE" 2>/dev/null | head -n 1)   # VAR=$(cmd) のため run 不使用
+    if [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then return 1; fi   # 条件チェックのため run 不使用（動いている）
+    return 0
+}
+
 _is_tool_update_needed() {
     [[ ! -f "$UPDATE_STAMP_FILE" ]] && return 0
+    if _upgrade_interrupted; then
+        log "WARNING" "前回の開発ツールのアップデート（sf-upgrade.sh）が、途中で切れていました。24 時間を待たずに、もう一度動かします。"
+        return 0
+    fi
     local last_update elapsed
     last_update=$(_get_mtime "$UPDATE_STAMP_FILE")
     elapsed=$(( $(date +%s) - last_update ))  # VAR=$(cmd) のため run 不使用（現在時刻の取得）

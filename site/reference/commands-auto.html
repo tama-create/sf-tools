@@ -45,7 +45,7 @@
   </li>
   <li>（<code>sf-init.sh</code> から呼ばれたときだけ）コミットメッセージの雛形（<code>.gitmessage</code>）を置き、<code>git config commit.template</code> を設定する</li>
   <li><code>npm install</code> を実行する（<code>package.json</code> があるとき）。<code>node_modules/.package-lock.json</code> が <code>package-lock.json</code> 以降に更新済みのとき（<code>package-lock.json</code> がないときは、省略しない）と、<code>sf-init.sh</code> から呼ばれたときは、省略します</li>
-  <li><code>~/.sf-tools-last-update</code> がない、またはその更新時刻から 24 時間以上たっていれば、<code>sf-upgrade.sh</code> をバックグラウンドで実行する（画面への表示（標準エラー）は、<code>sf-install.log</code> に追記）。起動を確認できたら、<code>~/.sf-tools-last-update</code> の時刻を更新します（完了の時点ではなく、起動の時点です）</li>
+  <li><code>~/.sf-tools-last-update</code> がない、またはその更新時刻から 24 時間以上たっていれば、<code>sf-upgrade.sh</code> をバックグラウンドで実行する（画面への表示（標準エラー）は、<code>sf-install.log</code> に追記）。起動を確認できたら、<code>~/.sf-tools-last-update</code> の時刻を更新します（完了の時点ではなく、起動の時点です。更新は裏で動くので、終わりを待てないためです）。ただし、前回の <code>sf-upgrade.sh</code> が途中で切れていた（<code>~/.sf-tools-upgrade.lock</code> が残っているのに、そのプロセスがもういない、またはそのロックが 2 時間以上前のもの）ときは、24 時間を待たずに、もう一度動かします（警告を表示します）</li>
 </ol>
 <h3>補足</h3>
 <ul>
@@ -61,12 +61,12 @@
 <p>npm・Salesforce CLI（<code>sf</code>）・Git（Windows の Git Bash だけ）を、最新版に更新します。<code>sf-install.sh</code> から、前回から 24 時間以上たっているときに、バックグラウンドで自動で実行されます（引数なし）。<code>force-*</code> フォルダの中で、手動でも実行できます。<code>-v</code>（<code>--verbose</code>）・<code>-h</code>（<code>--help</code>。1 つ目の引数のときだけ）以外の引数は、「不明なオプションです」で中断します。</p>
 <ol>
   <li>npm を確認する（npm がなければ、警告を表示して飛ばす）。今の版と最新の版が同じなら、何もしません。違うときは、<code>npm install -g npm@latest</code> で更新します。<strong>Node が対応していないときは、npm が何も変えずに止まるので、Node の更新を案内するだけ</strong>です（npm は Node に同梱されていて、最新の npm は、Node が新しくないと入らないことがあります）。Windows の Git Bash では <code>winget upgrade --id OpenJS.NodeJS.LTS</code> を示します（Node は自動では更新しません）。そのほかの理由で失敗したときは、警告に、npm の出力の末尾 5 行（理由）を表示します。なお、事前の確認に <code>--dry-run</code> は使いません（npm 12 は、<code>--dry-run</code> のときだけ、誤って失敗するため）</li>
-  <li><code>sf</code> を更新する（<code>sf</code> がなければ、警告を表示して飛ばす）。npm 版（<code>npm ls -g @salesforce/cli</code> が成功する）なら <code>npm install -g @salesforce/cli@latest</code>、それ以外（公式インストーラー版など）なら <code>sf update</code>。失敗したとき、npm の置き場所（<code>npm config get prefix</code>）に書き込めなければ、その旨を警告します（<code>C:\Program Files\nodejs</code> だと、Windows では管理者権限が要ります。自分のフォルダに <code>npm config set prefix</code> で変えると、権限なしで更新できます）</li>
+  <li><code>sf</code> を更新する（<code>sf</code> がなければ、警告を表示して飛ばす）。先に、npm の置き場所（<code>npm root -g</code>）の <code>@salesforce/</code> の下に、入れ替えが途中で切れた跡（退避の残りの <code>.cli-*</code> のフォルダ、または <code>cli/package.json</code>・<code>cli/bin/run.js</code> の欠けた <code>cli</code>）がないかを見ます。あれば、更新せず、跡の場所と直し方を警告します（自動では直しません）。跡の場所は、ホームフォルダの <code>.sf-tools-sf-broken</code> にも書き、sf-tools のコマンドが <code>sf</code> を確かめるたびに（<code>sf-start.sh</code> の起動の画面など）、警告として表示します。跡がなくなったと確かめたら、消します。npm 版（<code>npm ls -g @salesforce/cli</code> が成功する）なら、入っている版が最新と同じときは何もせず、違えば <code>npm install -g @salesforce/cli@latest</code>、それ以外（公式インストーラー版など）なら <code>sf update</code>。失敗したとき、npm の置き場所（<code>npm config get prefix</code>）に書き込めなければ、その旨を警告します（<code>C:\Program Files\nodejs</code> だと、Windows では管理者権限が要ります。自分のフォルダに <code>npm config set prefix</code> で変えると、権限なしで更新できます）</li>
   <li>Git を更新する（最後に実行）。Windows の Git Bash では <code>git update-git-for-windows --yes</code>。macOS・Linux・WSL では実行せず、パッケージマネージャーで更新するよう案内する</li>
 </ol>
 <ul>
   <li>どの手順が失敗しても、警告を表示して続行します。最後に、更新できなかったもの（npm・Salesforce CLI・Git）があれば、その名前を「更新できなかったものがあります: 〇〇」と並べ、なければ「すべてのアップデートが完了しました」と表示します。終了コードは、失敗があっても 0 です。</li>
-  <li>動いているあいだは、ホームフォルダに <code>.sf-tools-upgrade.lock</code> を置き、終わったら消します。<code>sf-log.sh</code>（デバッグログ）は、これがあるあいだ <code>sf</code> を使わずに待ちます（<code>sf</code> の入れ替えの途中に使うと失敗するため）。ほかの <code>sf-upgrade.sh</code> が動いていれば、何もせずに終わります。</li>
+  <li>動いているあいだは、ホームフォルダに <code>.sf-tools-upgrade.lock</code> を置き、終わったら消します。<code>sf-log.sh</code>（デバッグログ）は、これがあるあいだ <code>sf</code> を使わずに待ちます（<code>sf</code> の入れ替えの途中に使うと失敗するため）。ほかの <code>sf-upgrade.sh</code> が動いていれば、何もせずに終わります（ロックは「ないときだけ作る」ので、2 つが同時に起動しても、入れ替えに進むのは 1 つだけです。PID が生きていても、2 時間以上前のロックは、途中で切れたものとして取り直します）。</li>
   <li>自動で動いたときの表示は、<code>sf-install.log</code> にだけ残ります。Node の更新の案内などを画面で見るには、手動で実行してください。</li>
   <li>ログは <code>./sf-tools/logs/sf-upgrade.log</code> です（実行のたびに作り直します）。</li>
 </ul>

@@ -357,4 +357,138 @@ test_failure_summary_lists_all
 test_prefix_unwritable_hint
 test_prefix_writable_no_hint
 
+# ------------------------------------------------------------------------------
+# sf: 最新なら入れ直さない・入れ替えが途中で切れた跡があれば更新しない（2026-11-27。WSL で同じ版の入れ直しが途中で切れた）
+# ------------------------------------------------------------------------------
+test_sf_skip_when_latest_and_interrupted_traces() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] sf: 最新なら入れ直さない・途中で切れた跡があれば更新しない${CLR_RST}"
+    local td mb mh out root
+    setup_std_env td mb mh
+    create_all_mocks "$mb"
+    root="$td/npm-root"
+    mkdir -p "$root/@salesforce/cli/bin"; : > "$root/@salesforce/cli/package.json"; : > "$root/@salesforce/cli/bin/run.js"
+    local V="MOCK_NPM_VERSION=11.0.0 MOCK_NPM_LATEST=11.0.0 MOCK_NPM_LS_EXIT=0"
+
+    # 入っている版と最新の版が同じ → 入れ直さない
+    : > "$MOCK_CALL_LOG"
+    out=$(cd "$td" && env PATH="$mb:$PATH" $V MOCK_NPM_ROOT="$root" MOCK_NPM_LS_OUT='`-- @salesforce/cli@2.159.7' MOCK_SF_LATEST=2.159.7 bash "$SF_TOOLS_DIR/bin/sf-upgrade.sh" 2>&1)
+    assert_output_contains "$out" "Salesforce CLI は最新です（2.159.7）" "同じ版 → 最新と表示する"
+    assert_file_not_contains "$MOCK_CALL_LOG" "npm install -g @salesforce/cli" "同じ版 → 入れ直さない"
+    assert_output_contains "$out" "すべてのアップデートが完了しました" "同じ版 → 失敗に数えない"
+
+    # WSL の npm の木の形（└──）でも、版を読む
+    : > "$MOCK_CALL_LOG"
+    out=$(cd "$td" && env PATH="$mb:$PATH" $V MOCK_NPM_ROOT="$root" MOCK_NPM_LS_OUT='└── @salesforce/cli@2.159.7' MOCK_SF_LATEST=2.159.7 bash "$SF_TOOLS_DIR/bin/sf-upgrade.sh" 2>&1)
+    assert_file_not_contains "$MOCK_CALL_LOG" "npm install -g @salesforce/cli" "木の形が └── でも、同じ版なら入れ直さない"
+
+    # 版が違う → 更新する
+    : > "$MOCK_CALL_LOG"
+    out=$(cd "$td" && env PATH="$mb:$PATH" $V MOCK_NPM_ROOT="$root" MOCK_NPM_LS_OUT='`-- @salesforce/cli@2.159.6' MOCK_SF_LATEST=2.159.7 bash "$SF_TOOLS_DIR/bin/sf-upgrade.sh" 2>&1)
+    assert_file_contains "$MOCK_CALL_LOG" "npm install -g @salesforce/cli@latest" "版が違う → 更新する"
+
+    # 最新の版が読めない → 今までどおり更新する
+    : > "$MOCK_CALL_LOG"
+    out=$(cd "$td" && env PATH="$mb:$PATH" $V MOCK_NPM_ROOT="$root" MOCK_NPM_LS_OUT='`-- @salesforce/cli@2.159.7' bash "$SF_TOOLS_DIR/bin/sf-upgrade.sh" 2>&1)
+    assert_file_contains "$MOCK_CALL_LOG" "npm install -g @salesforce/cli@latest" "最新の版が読めない → 更新する"
+
+    # 退避の残り（.cli-*）がある → 更新しない（sf update にも進まない）
+    mkdir -p "$root/@salesforce/.cli-BaKP1WRH"
+    : > "$MOCK_CALL_LOG"
+    out=$(cd "$td" && env PATH="$mb:$PATH" $V MOCK_NPM_ROOT="$root" MOCK_NPM_LS_OUT='`-- @salesforce/cli@2.159.6' MOCK_SF_LATEST=2.159.7 bash "$SF_TOOLS_DIR/bin/sf-upgrade.sh" 2>&1)
+    assert_output_contains "$out" "入れ替えが、前回の途中で切れた跡があります" "退避の残り → 跡があると表示する"
+    assert_output_contains "$out" ".cli-BaKP1WRH" "跡の場所を表示する"
+    assert_output_contains "$out" "直し方:" "直し方を表示する"
+    assert_file_not_contains "$MOCK_CALL_LOG" "npm install -g @salesforce/cli" "跡がある → 更新しない"
+    assert_file_not_contains "$MOCK_CALL_LOG" "sf update" "跡がある → sf update にも進まない"
+    assert_output_contains "$out" "更新できなかったものがあります: Salesforce CLI" "跡がある → 失敗に数える"
+    rmdir "$root/@salesforce/.cli-BaKP1WRH"
+
+    # 本体の中身が欠けている（package.json・bin/run.js がない）→ 更新しない
+    rm -f "$root/@salesforce/cli/package.json"
+    : > "$MOCK_CALL_LOG"
+    out=$(cd "$td" && env PATH="$mb:$PATH" $V MOCK_NPM_ROOT="$root" MOCK_NPM_LS_EXIT=1 bash "$SF_TOOLS_DIR/bin/sf-upgrade.sh" 2>&1)
+    assert_output_contains "$out" "$root/@salesforce/cli" "package.json のない cli → 跡として表示する"
+    assert_file_not_contains "$MOCK_CALL_LOG" "sf update" "中身の欠けた cli → sf update に進まない（PATH の後ろの別の sf を更新しない）"
+    : > "$root/@salesforce/cli/package.json"; rm -f "$root/@salesforce/cli/bin/run.js"
+    out=$(cd "$td" && env PATH="$mb:$PATH" $V MOCK_NPM_ROOT="$root" SF_TOOLS_SF_BROKEN_MARK="$td/broken" bash "$SF_TOOLS_DIR/bin/sf-upgrade.sh" 2>&1)
+    assert_output_contains "$out" "入れ替えが、前回の途中で切れた跡があります" "bin/run.js のない cli → 跡として表示する"
+    assert_file_contains "$td/broken" "$root/@salesforce/cli" "跡の場所を、印のファイルに書く（起動の画面に出すため）"
+    : > "$root/@salesforce/cli/bin/run.js"
+    out=$(cd "$td" && env PATH="$mb:$PATH" $V MOCK_NPM_ROOT="$root" SF_TOOLS_SF_BROKEN_MARK="$td/broken" bash "$SF_TOOLS_DIR/bin/sf-upgrade.sh" 2>&1)
+    assert_file_not_exists "$td/broken" "跡がなくなった → 印を消す"
+    printf 'x\n' > "$td/broken"
+    out=$(cd "$td" && env PATH="$mb:$PATH" $V SF_TOOLS_SF_BROKEN_MARK="$td/broken" bash "$SF_TOOLS_DIR/bin/sf-upgrade.sh" 2>&1)
+    assert_file_exists "$td/broken" "npm の置き場所を読めない → 印は、そのまま（直ったか分からない）"
+
+    # .cli-* がフォルダでなく、ファイル → 跡としない
+    : > "$root/@salesforce/.cli-file"
+    : > "$MOCK_CALL_LOG"
+    out=$(cd "$td" && env PATH="$mb:$PATH" $V MOCK_NPM_ROOT="$root" MOCK_NPM_LS_OUT='`-- @salesforce/cli@2.159.6' MOCK_SF_LATEST=2.159.7 bash "$SF_TOOLS_DIR/bin/sf-upgrade.sh" 2>&1)
+    assert_output_not_contains "$out" "途中で切れた跡" ".cli-* がファイル → 跡としない"
+    rm -f "$root/@salesforce/.cli-file"
+
+    # プレリリースの版も、そのまま比べる
+    : > "$MOCK_CALL_LOG"
+    out=$(cd "$td" && env PATH="$mb:$PATH" $V MOCK_NPM_ROOT="$root" MOCK_NPM_LS_OUT='`-- @salesforce/cli@2.160.0-beta.1' MOCK_SF_LATEST=2.160.0-beta.1 bash "$SF_TOOLS_DIR/bin/sf-upgrade.sh" 2>&1)
+    assert_output_contains "$out" "Salesforce CLI は最新です（2.160.0-beta.1）" "プレリリースの版も、同じなら最新とする"
+    teardown "$td" "$mb"
+}
+
+# ロックの PID が生きていても、2 時間以上前のロックは、途中で切れたものとみなす（PID の使い回し）
+test_upgrade_old_lock_is_stale() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] 2 時間以上前のロックは、PID が生きていても、途中で切れたものとみなす${CLR_RST}"
+    local td mb mh
+    setup_std_env td mb mh
+    create_all_mocks "$mb"
+    printf 'PID=%s\n' "$$" > "$SF_TOOLS_UPGRADE_LOCK"   # 生きている PID（このテスト自身）
+    touch -t "$(date -d '3 hours ago' +'%Y%m%d%H%M' 2>/dev/null || date -v -3H +'%Y%m%d%H%M')" "$SF_TOOLS_UPGRADE_LOCK"
+    : > "$MOCK_CALL_LOG"
+    (cd "$td" && PATH="$mb:$PATH" MOCK_NPM_LS_EXIT=0 bash "$SF_TOOLS_DIR/bin/sf-upgrade.sh") > /dev/null 2>&1
+    assert_file_contains "$MOCK_CALL_LOG" "npm install -g @salesforce/cli@latest" "古いロック → 動いているとみなさず、更新する"
+    printf 'PID=%s\n' "$$" > "$SF_TOOLS_UPGRADE_LOCK"   # 新しいロック（生きている PID）
+    : > "$MOCK_CALL_LOG"
+    (cd "$td" && PATH="$mb:$PATH" MOCK_NPM_LS_EXIT=0 bash "$SF_TOOLS_DIR/bin/sf-upgrade.sh") > /dev/null 2>&1
+    assert_file_not_contains "$MOCK_CALL_LOG" "npm install -g @salesforce/cli" "新しいロックで PID が生きている → 何もせずに終わる"
+    rm -f "$SF_TOOLS_UPGRADE_LOCK"
+    teardown "$td" "$mb"
+}
+test_upgrade_old_lock_is_stale
+
+# 2 つが同時に起動しても、sf を入れ替えるのは 1 つだけ（ロックは「ないときだけ作る」）
+test_upgrade_lock_concurrent() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] 2 つが同時に起動しても、sf を入れ替えるのは 1 つだけ${CLR_RST}"
+    local td mb mh
+    setup_std_env td mb mh
+    create_all_mocks "$mb"
+    # 入れ替え（npm install -g @salesforce/cli@latest）に 6 秒かかる npm（遅い CI でも、2 つの起動が重なるように）（ほかは偽の npm と同じ）
+    mv "$mb/npm" "$mb/npm-base"
+    cat > "$mb/npm" <<'MOCK'
+#!/bin/bash
+[[ "$*" == *"@salesforce/cli@latest"* ]] && { echo "npm $*" >> "$MOCK_CALL_LOG"; sleep 6; exit 0; }
+exec "${0%/*}/npm-base" "$@"
+MOCK
+    chmod +x "$mb/npm"
+    rm -f "$SF_TOOLS_UPGRADE_LOCK"; : > "$MOCK_CALL_LOG"
+    (cd "$td" && PATH="$mb:$PATH" MOCK_NPM_LS_EXIT=0 bash "$SF_TOOLS_DIR/bin/sf-upgrade.sh" > "$td/a.out" 2>&1) &
+    local p1=$!
+    (cd "$td" && PATH="$mb:$PATH" MOCK_NPM_LS_EXIT=0 bash "$SF_TOOLS_DIR/bin/sf-upgrade.sh" > "$td/b.out" 2>&1) &
+    local p2=$!
+    wait "$p1" "$p2"
+    local n; n=$(grep -c "@salesforce/cli@latest" "$MOCK_CALL_LOG" | tr -d ' ')
+    assert_equals "$n" "1" "同時の 2 つ → sf の入れ替えは 1 回だけ"
+    cat "$td/a.out" "$td/b.out" | grep -q "何もせずに終わります" && pass "もう片方は、何もせずに終わる" || fail "もう片方は、何もせずに終わる"
+    assert_file_not_exists "$SF_TOOLS_UPGRADE_LOCK" "終わったら、ロックを消す"
+
+    # 消せないロック（ここではフォルダで再現。Windows では読み取り専用を作れないため）→ 「ほかが取った」と取り違えず、ロックなしで続ける
+    mkdir -p "$SF_TOOLS_UPGRADE_LOCK"; : > "$MOCK_CALL_LOG"
+    local out; out=$(cd "$td" && PATH="$mb:$PATH" MOCK_NPM_LS_EXIT=0 bash "$SF_TOOLS_DIR/bin/sf-upgrade.sh" 2>&1)
+    assert_output_contains "$out" "ロックを書けません" "消せないロック → WARNING を出す"
+    assert_output_not_contains "$out" "何もせずに終わります" "消せないロック → ほかが取ったと取り違えない"
+    assert_file_contains "$MOCK_CALL_LOG" "@salesforce/cli@latest" "消せないロック → ロックなしで、更新を続ける"
+    rmdir "$SF_TOOLS_UPGRADE_LOCK"
+    teardown "$td" "$mb"
+}
+test_upgrade_lock_concurrent
+test_sf_skip_when_latest_and_interrupted_traces
+
 print_summary

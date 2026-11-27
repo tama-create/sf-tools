@@ -237,6 +237,7 @@ Salesforce 開発の環境構築と日々の作業を自動化するシェルス
 - 実行場所は各 Salesforce プロジェクト (`force-*`) 側
 - `sf-hook.sh` は `hooks/pre-commit`・`hooks/pre-push` をコピーする設計
 - husky が設定されている場合は `core.hooksPath` を削除する設計
+- **force-* の対象は Windows（Git Bash）と macOS だけ。WSL は対象外で、sf-tools の開発（テストを速く動かす）に使う**（2026-11-27 の決定。テストが WSL で動くため、コードが WSL で動くことは保つ。WSL 向けの処理を消すかは未決定）
 - **動作環境（Windows の Git Bash・macOS・Linux・WSL）の「検証済み」は、実際に動かした環境だけを書く**（README・文書サイト（`site/guide/install.html`）の表と、`doc/dev-reference.md` 9.7 の記録を、実際の確認と一致させる。未検証は「未検証」と書く。目標は、すべての OS で動くこと）。新しい環境は、`bash tests/e2e/doctor.sh` で確認してから `bash tests/e2e/run.sh`
 - Salesforce CLI（`sf`）は **npm 版が前提**（`check_sf_cli`）。Windows の Git Bash で公式インストーラー版を使うと、成功しても終了コード 1 になるため非対応（`run` は終了コードのみで判定する。詳細は `doc/dev-reference.md` 3.3）
 

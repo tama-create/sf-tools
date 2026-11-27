@@ -170,6 +170,40 @@ test_upgrade_not_called_within_24h() {
     teardown "$td" "$mb" "$mh"
 }
 
+# 前回の sf-upgrade.sh が途中で切れていた（ロックが残り、その PID が動いていない）→ 24 時間以内でも、もう一度動かす
+test_upgrade_rerun_when_interrupted() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] 途中で切れた更新を「済み」にしない${CLR_RST}"
+    local td mb mh out
+    setup_std_env td mb mh
+    create_all_mocks "$mb"
+    touch "$mh/.sf-tools-last-update"   # 24 時間以内
+    # 動いていない PID のロック（sleep を起動して終わらせ、その PID を使う）
+    local dead; sleep 0 & dead=$!; wait "$dead" 2>/dev/null
+    printf 'PID=%s\n' "$dead" > "$mh/.sf-tools-upgrade.lock"
+    out=$(cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-install.sh" 2>&1 >/dev/null)
+    sleep 1
+    assert_output_contains "$out" "途中で切れていました" "ロックが残り、PID が動いていない → 途中で切れたと表示する"
+    assert_file_contains "$td/sf-tools/logs/sf-install.log" "開発ツールのアップデートをバックグラウンドで開始します" "24 時間以内でも、もう一度動かす"
+
+    # ロックの PID が動いている（ほかの sf-upgrade.sh が更新中）→ 途中で切れたとは見ない（24 時間以内なら、飛ばす）
+    sleep 30 & local alive=$!
+    printf 'PID=%s\n' "$alive" > "$mh/.sf-tools-upgrade.lock"
+    touch "$mh/.sf-tools-last-update"
+    out=$(cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-install.sh" 2>&1 >/dev/null)
+    kill "$alive" 2>/dev/null; wait "$alive" 2>/dev/null
+    assert_output_not_contains "$out" "途中で切れていました" "ロックの PID が動いている → 途中で切れたと見ない"
+    assert_file_contains "$td/sf-tools/logs/sf-install.log" "アップデート済みのためスキップします" "ロックの PID が動いている → 24 時間以内なら飛ばす"
+
+    # PID が生きていても、ロックが 2 時間以上前 → 途中で切れたとみる（PID の使い回し）
+    printf 'PID=%s\n' "$$" > "$mh/.sf-tools-upgrade.lock"
+    touch -t "$(date -d '3 hours ago' +'%Y%m%d%H%M' 2>/dev/null || date -v -3H +'%Y%m%d%H%M')" "$mh/.sf-tools-upgrade.lock"
+    touch "$mh/.sf-tools-last-update"
+    out=$(cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-install.sh" 2>&1 >/dev/null)
+    sleep 1
+    assert_output_contains "$out" "途中で切れていました" "ロックが 2 時間以上前 → PID が生きていても、途中で切れたとみる"
+    teardown "$td" "$mb" "$mh"
+}
+
 # deploy-target.txt と remove-target.txt が作成される
 test_deploy_remove_target_created() {
     local td mb mh
@@ -453,6 +487,7 @@ test_upgrade_skipped_within_24h
 test_upgrade_triggered_on_first_run
 test_upgrade_called_on_first_run
 test_upgrade_not_called_within_24h
+test_upgrade_rerun_when_interrupted
 test_npm_install_skipped_no_package_json
 test_outside_force_dir
 test_skip_pull_when_sf_init_running

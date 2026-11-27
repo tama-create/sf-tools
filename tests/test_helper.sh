@@ -16,6 +16,8 @@ CLR_RST='\033[0m'
 # check_sf_cli の「24 時間は確認を省略」の記録先。テストでは、無効にする（本物のホームに記録を作らず、
 # 省略のテスト以外で、確認が省略されないようにするため。省略のテストは、独自の記録先を指定する）
 export SF_TOOLS_SF_CHECK_STAMP=/dev/null
+# sf-upgrade.sh が書く「入れ替えの跡」の印も、本物のホーム（~/.sf-tools-sf-broken）に作らない（check_sf_cli が、起動の画面に出すため）
+export SF_TOOLS_SF_BROKEN_MARK="${TMPDIR:-/tmp}/sf-tools-test-broken-$$"
 
 # die が、ログに git・node・sf の版を残すために、それらを呼ばないようにする（テストの偽のコマンドの呼び出しの記録を、変えないため。
 # 版を残す動作は、test_common.sh が、この変数を外して検査する）
@@ -448,10 +450,15 @@ create_mock_npm() {
     cat > "$bin_dir/npm" << 'EOF'
 #!/bin/bash
 echo "npm $*" >> "${MOCK_CALL_LOG:-/dev/null}"
-# npm ls -g @salesforce/cli（sf が npm 版かの判定）: 既定は 1（npm 版ではない）。MOCK_NPM_LS_EXIT=0 で npm 版を再現
-[[ "$1" == "ls" ]] && exit "${MOCK_NPM_LS_EXIT:-1}"
-# npm --version（今の版）・npm view npm version（最新の版）: 既定は何も出力しない。MOCK_NPM_VERSION / MOCK_NPM_LATEST で版を再現
+# npm ls -g @salesforce/cli（sf が npm 版かの判定）: 既定は 1（npm 版ではない）。MOCK_NPM_LS_EXIT=0 で npm 版を再現。
+#   出力は MOCK_NPM_LS_OUT（例: "`-- @salesforce/cli@2.1.0"。既定は何も出力しない → 入っている版は読めない）
+[[ "$1" == "ls" ]] && { [[ -n "${MOCK_NPM_LS_OUT:-}" ]] && echo "$MOCK_NPM_LS_OUT"; exit "${MOCK_NPM_LS_EXIT:-1}"; }
+# npm root -g（npm の置き場所の node_modules）: MOCK_NPM_ROOT で再現（既定は何も出力しない → 途中で切れた跡の確認をしない）
+[[ "$1 $2" == "root -g" ]] && { [[ -n "${MOCK_NPM_ROOT:-}" ]] && echo "$MOCK_NPM_ROOT"; exit 0; }
+# npm --version（今の版）・npm view npm version（最新の版）: 既定は何も出力しない。MOCK_NPM_VERSION / MOCK_NPM_LATEST で版を再現。
+#   npm view @salesforce/cli version（sf の最新の版）は MOCK_SF_LATEST（既定は何も出力しない）
 [[ "$1" == "--version" ]] && { [[ -n "${MOCK_NPM_VERSION:-}" ]] && echo "$MOCK_NPM_VERSION"; exit 0; }
+[[ "$1 $2" == "view @salesforce/cli" ]] && { [[ -n "${MOCK_SF_LATEST:-}" ]] && echo "$MOCK_SF_LATEST"; exit 0; }
 [[ "$1" == "view" ]] && { [[ -n "${MOCK_NPM_LATEST:-}" ]] && echo "$MOCK_NPM_LATEST"; exit 0; }
 # npm config get prefix（npm の置き場所）: MOCK_NPM_PREFIX で再現（既定は何も出力しない）
 [[ "$1 $2 $3" == "config get prefix" ]] && { [[ -n "${MOCK_NPM_PREFIX:-}" ]] && echo "$MOCK_NPM_PREFIX"; exit 0; }

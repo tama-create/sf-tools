@@ -188,6 +188,10 @@ run_isolated_home() {
 #
 # 【動作】
 #   ・GitHub Actions 上（GITHUB_ACTIONS=true）では、何もしない（Linux の npm 版のため）
+#   ・sf-upgrade.sh が、Salesforce CLI の入れ替えが途中で切れた跡を見つけて置いた印（~/.sf-tools-sf-broken。環境変数
+#     SF_TOOLS_SF_BROKEN_MARK で変更可。跡の場所が 1 行ずつ）があれば、跡の場所と直し方を WARNING で表示する（止めない。
+#     sf-upgrade.sh は裏で動き、その表示は sf-upgrade.log にしか残らないため、ここで、毎回の起動の画面に出す。2026-11-27）。
+#     印は、sf-upgrade.sh が、跡がなくなったのを確かめたときに消す。sf が未インストールでも表示する（跡で sf が消えていることがあるため）
 #   ・sf が未インストールなら、何もしない（各スクリプトの環境チェックが扱う）
 #   ・--cache のとき、成功を ~/.sf-tools-sf-check（環境変数 SF_TOOLS_SF_CHECK_STAMP で変更可）に、sf の場所を
 #     記録し、同じ場所の sf なら、24 時間（ファイルの更新から 1440 分）は sf --version（1〜2 秒）の実行を省略する。
@@ -205,6 +209,15 @@ check_sf_cli() {
     done
 
     [[ "${GITHUB_ACTIONS:-}" == "true" ]] && return 0
+    local broken="${SF_TOOLS_SF_BROKEN_MARK:-$HOME/.sf-tools-sf-broken}" bline
+    if [[ -f "$broken" ]]; then
+        log "WARNING" "Salesforce CLI の入れ替えが、途中で切れています（sf-upgrade.sh が見つけました。sf-tools/logs/sf-upgrade.log）:"
+        while IFS= read -r bline || [[ -n "$bline" ]]; do
+            [[ -n "$bline" ]] && log "WARNING" "  $(printf '%s' "$bline" | LC_ALL=C tr -d '\000-\037\177')"   # 表示を崩す文字を除く
+        done < "$broken"
+        log "WARNING" "  直し方: 退避された元の版（.cli-* のフォルダ）を cli に名前を戻す（中身の欠けた cli は、別の場所へよける）か、"
+        log "WARNING" "  npm install -g @salesforce/cli で入れ直してください（この表示は、次の自動の更新で、跡がなくなったと確かめたら消えます）"
+    fi
     command -v sf >/dev/null 2>&1 || return 0  # 存在確認のため run 不使用
 
     sf_path=$(command -v sf)  # VAR=$(cmd) のため run 不使用

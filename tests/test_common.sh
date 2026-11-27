@@ -553,6 +553,25 @@ _csc_run() {
         echo RET=\$?" 2>&1
 }
 
+test_check_sf_cli_broken_mark() {
+    echo ""
+    echo -e "${CLR_HEAD}[TEST] check_sf_cli: 入れ替えの跡の印があれば、跡の場所と直し方を WARNING で出す（止めない）${CLR_RST}"
+    local mb out mk
+    mb=$(setup_mock_bin); create_mock_sf "$mb"
+    mk=$(mktemp -d)/broken
+    printf '/x/node_modules/@salesforce/.cli-AAAA\n/x/node_modules/@salesforce/cli\n' > "$mk"
+    out=$(SF_TOOLS_SF_BROKEN_MARK="$mk" _csc_run "$mb:$PATH" "")
+    assert_output_contains "$out" "入れ替えが、途中で切れています" "印がある → WARNING を出す"
+    assert_output_contains "$out" "/x/node_modules/@salesforce/.cli-AAAA" "印にある跡の場所を出す"
+    assert_output_contains "$out" "直し方:" "直し方を出す"
+    assert_output_contains "$out" "RET=0" "印があっても止めない（sf が動けば 0）"
+    rm -f "$mk"
+    out=$(SF_TOOLS_SF_BROKEN_MARK="$mk" _csc_run "$mb:$PATH" "")
+    assert_output_not_contains "$out" "途中で切れています" "印がない → 何も出さない"
+    teardown "$mb" "${mk%/*}"
+}
+test_check_sf_cli_broken_mark
+
 test_check_sf_cli() {
     echo ""
     echo -e "${CLR_HEAD}[TEST] check_sf_cli: sf の終了コードが 0 以外なら案内して中断する${CLR_RST}"

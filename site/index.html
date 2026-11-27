@@ -47,7 +47,7 @@
   </div>
   <div class="down">↓<small>手元のパソコンで、コマンドを実行する</small></div>
   <div class="phase layer">
-    <p class="ph-title">💻 手元のパソコン<small>Windows（Git Bash）・Mac・WSL</small></p>
+    <p class="ph-title">💻 手元のパソコン<small>Windows（Git Bash）・Mac</small></p>
     <div class="tiles">
       <div class="node dev"><span class="who">sf-tools のスクリプト集</span><strong>~/sf-tools</strong><small>ランチャー（番号で選ぶメニュー）も、ここにある</small></div>
       <div class="node dev"><span class="who">作業用のフォルダ</span><strong>force-XXXX</strong><small>プロジェクトのクローン。ここで作って、自分用の組織で試す</small></div>
@@ -186,7 +186,7 @@
   </a>
   <a class="card" href="#f-os">
     <span class="tag">特長 4</span>
-    <h3>Windows・Mac・WSL のどれでも動く</h3>
+    <h3>Windows・Mac のどちらでも動く</h3>
     <p>追加のインストールなしで、どの環境でも、同じように使えます。</p>
   </a>
 </div>
@@ -241,14 +241,13 @@
 </figure>
 <p>その上で開発するので、古い状態を土台にした作業や、気づかない上書きを、避けやすくなります。重なった変更は、早い段階で（<code>sf-push.sh</code> が <code>main</code> を取り込むときや、PR の時点で）見つかり、止まります。</p>
 
-<h3 id="f-os">Windows・Mac・WSL のどれでも動く</h3>
+<h3 id="f-os">Windows・Mac のどちらでも動く</h3>
 <p>Bash の入れ直しなどの、追加のインストールなしで、どの環境でも、同じように使えます（Windows は Git Bash、Mac は標準のターミナルと標準の Bash のまま）。確かめた内容は、<a href="guide/install.html#env">動作環境</a>にあります。</p>
 <figure class="diagram">
   <p class="lane-label">どの環境でも、同じように</p>
   <div class="tiles">
     <div class="node dev"><span class="who">💻 手元</span><strong>Windows</strong><small>Git Bash</small></div>
     <div class="node dev"><span class="who">💻 手元</span><strong>Mac</strong><small>標準のターミナル・標準の Bash</small></div>
-    <div class="node dev"><span class="who">💻 手元</span><strong>WSL</strong><small>Windows の中で動く Ubuntu</small></div>
   </div>
   <div class="down">↓<small>同じコマンド・同じメニュー</small></div>
   <div class="flow">
@@ -366,8 +365,8 @@ sf-job.sh</code></pre>
   </li>
 </ol>
 <div class="box ok">
-  <div class="title">Windows・Mac・WSL で、動作を確かめています</div>
-  <p>Windows は Git Bash（PowerShell・コマンドプロンプトでは動きません）、Mac は標準のターミナル、WSL は Ubuntu で使えます。実際に動かして確かめた環境の一覧は、<a href="guide/install.html#env">動作環境</a>にあります。</p>
+  <div class="title">Windows・Mac で、動作を確かめています</div>
+  <p>Windows は Git Bash（PowerShell・コマンドプロンプトでは動きません）、Mac は標準のターミナルで使えます（WSL は対象外です）。実際に動かして確かめた環境の一覧は、<a href="guide/install.html#env">動作環境</a>にあります。</p>
 </div>
 
 </main>

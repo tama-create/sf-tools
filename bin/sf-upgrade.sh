@@ -16,9 +16,17 @@
 #   ※ そのほかの引数は、「不明なオプションです」と表示して中断する
 #
 # 【処理の流れ】
-#   0. sf の更新のロック（~/.sf-tools-upgrade.lock。環境変数 SF_TOOLS_UPGRADE_LOCK で差し替え可）を見る:
-#        ほかの sf-upgrade.sh が動いている（ロックの PID が生きている）: 何もせずに終わる（INFO。終了コード 0）
-#        それ以外: 自分の PID を書き、終了時（EXIT）に消す（自分の PID のときだけ）。
+#   0. sf の更新のロック（~/.sf-tools-upgrade.lock。環境変数 SF_TOOLS_UPGRADE_LOCK で差し替え可。中身は PID=<数字> の 1 行）を取る:
+#        ロックは「ないときだけ作る」（set -C。O_EXCL のため、2 つが同時に起動しても、作れるのは 1 つだけ。2026-11-27 までは、
+#        読んで確かめてから書いていたため、同時に起動すると、両方が重い入れ替えに進めた）。作れたら、自分のロック。
+#        作れない（もうある）とき: 持ち主が動いている（PID が生きていて、ロックが 2 時間より新しい）→ 何もせずに終わる（INFO。
+#          終了コード 0）。2 時間以上たったロックは、PID が生きていても、途中で切れたものとみなす（PID が別のプロセスに
+#          使い回されたとき、いつまでも「動いている」と見てしまうため。sf-install.sh の、途中で切れたかの判定と同じ決まり）。
+#          持ち主が動いていない → 途中で切れたロックとして消し、もう一度だけ「ないときだけ作る」。それも作れず、持ち主が動いて
+#          いれば、ほかが先に取ったとして終わる（INFO）。持ち主が動いていなければ（消せない・書けないロック）、下の「書けない」と同じ。途中で切れたロックを、2 つが同時に見つけたときだけは、まれに両方が進むことがある（消して
+#          作り直すあいだの隙間。普段の同時起動は、上の 1 回目で防げる）
+#        ロックを書けない（フォルダに書けないなど）: WARNING を出して、ロックなしで続ける（更新は止めない。sf-log.sh が待たないだけ）
+#        終了時（EXIT）に消す（自分の PID のときだけ）。
 #        sf-log.sh は、このロックがあるあいだ、sf を呼ばずに待つ（sf の入れ替えの途中に sf を呼ぶと失敗するため。2026-11-24）
 #   1. npm を確認する（npm が無ければ、WARNING を表示してスキップ）
 #        現在の版（npm --version）と最新の版（npm view npm version）が同じ: 何もしない（INFO）
@@ -29,7 +37,19 @@
 #          それ以外の失敗           : WARNING に、npm の出力の末尾 5 行（理由）を表示する（失敗に数える）。
 #                                     npm の置き場所に書き込めないときは、その旨も表示する
 #   2. Salesforce CLI（sf）をアップデートする（sf が無ければ、WARNING を表示してスキップ）
-#        npm 版（npm があり、npm ls -g @salesforce/cli --depth=0 が成功）: npm install -g @salesforce/cli@latest
+#        先に、npm の置き場所（npm root -g）の @salesforce/ の下に、入れ替えが途中で切れた跡がないかを見る:
+#          退避の残り（.cli-* のフォルダ）がある、または cli/ があるのに cli/package.json か cli/bin/run.js がない
+#          → 更新しない（失敗に数える）。WARNING で、跡の場所と直し方（退避された元の版を cli/ に戻すか、
+#            npm install -g @salesforce/cli で入れ直す）を表示する。自動では直さない（消す・戻すは取り返しがつかないため）。
+#            跡の場所を、印のファイル（~/.sf-tools-sf-broken。環境変数 SF_TOOLS_SF_BROKEN_MARK で差し替え可）にも書く
+#            （この表示は sf-upgrade.log にしか残らないため。check_sf_cli が、毎回の起動の画面に WARNING で出す）。
+#            npm の置き場所を読めて、跡がないときは、印を消す
+#            この確認を、下の npm 版かの判定より前に置く（跡があると npm ls -g が失敗し、npm 版でないと見て sf update に
+#            進んでしまう。WSL では、PATH の後ろの Windows の sf が、黙って使われていた。2026-11-27）
+#        npm 版（npm があり、npm ls -g @salesforce/cli --depth=0 が成功）:
+#          入っている版（npm ls の @salesforce/cli@<版>）と最新の版（npm view @salesforce/cli version）が同じ → 何もしない（INFO）。
+#          どちらかが読めない・違う → npm install -g @salesforce/cli@latest（同じ版の入れ直しはしない。入れ替えは、
+#          約 3.5 万ファイルを書き直す重い処理で、2026-11-27 に WSL で、同じ版の入れ直しが途中で切れ、sf がないまま残った）
 #        それ以外（公式インストーラー・pkg など）                           : sf update
 #        失敗したとき、npm の置き場所（npm config get prefix）に書き込めなければ、その旨を WARNING で表示する
 #   3. Git をアップデートする（最後に実行）
@@ -84,10 +104,37 @@ reject_unknown_args "$@"   # -v / --verbose 以外の引数は、不明なオプ
 # sf の更新のロック（処理の流れ 0）。sf-log.sh が読む（場所・形は sf-log.sh の UPGRADE_LOCK と同じ。PID=<数字> の 1 行）
 # ------------------------------------------------------------------------------
 UPGRADE_LOCK="${SF_TOOLS_UPGRADE_LOCK:-${HOME}/.sf-tools-upgrade.lock}"
-_lock_pid=$(sed -n 's/^PID=//p' "$UPGRADE_LOCK" 2>/dev/null | head -n 1)  # VAR=$(cmd) のため run 不使用
-if [[ "$_lock_pid" =~ ^[0-9]+$ && "$_lock_pid" != "$$" ]] && kill -0 "$_lock_pid" 2>/dev/null; then  # 条件チェックのため run 不使用
-    log "INFO" "ほかの sf-upgrade.sh（PID ${_lock_pid}）が動いているため、何もせずに終わります。"
-    exit 0
+readonly UPGRADE_LOCK_STALE_MIN=120   # これより古い（分）ロックは、PID が生きていても、途中で切れたものとみなす（PID の使い回し。sf-install.sh と同じ 2 時間）
+# ないときだけ作る（set -C は、> を O_EXCL で開く。Bash 3.2・Git Bash でも同じ）。作れたら 0
+_try_lock() { ( set -C; printf 'PID=%s\n' "$$" > "$UPGRADE_LOCK" ) 2>/dev/null; }  # 条件チェックのため run 不使用
+# 今のロックの持ち主が動いているか（PID が生きていて、ロックが 2 時間より新しい）。持ち主の PID は _lock_pid に入れる
+_lock_holder_alive() {
+    _lock_pid=$(sed -n 's/^PID=//p' "$UPGRADE_LOCK" 2>/dev/null | head -n 1)  # VAR=$(cmd) のため run 不使用
+    [[ "$_lock_pid" =~ ^[0-9]+$ && "$_lock_pid" != "$$" ]] || return 1
+    [[ -n "$(find "$UPGRADE_LOCK" -mmin -"$UPGRADE_LOCK_STALE_MIN" 2>/dev/null)" ]] || return 1  # 条件チェックのため run 不使用（find -mmin は macOS・Linux・Git Bash で同じ）
+    kill -0 "$_lock_pid" 2>/dev/null  # 条件チェックのため run 不使用
+}
+_lock_pid=""
+if ! _try_lock; then
+    if [[ -e "$UPGRADE_LOCK" ]]; then
+        if _lock_holder_alive; then
+            log "INFO" "ほかの sf-upgrade.sh（PID ${_lock_pid}）が動いているため、何もせずに終わります。"
+            exit 0
+        fi
+        # 持ち主が動いていない（途中で切れた）→ 消して、もう一度だけ取る
+        rm -f "$UPGRADE_LOCK" 2>/dev/null || true  # 後始末のため run 不使用（消せなければ、下の取り直しが失敗する）
+        if ! _try_lock; then
+            # ほかが先に取った（持ち主が動いている）なら終わる。そうでなければ、消せない・書けないロック（読み取り専用など）
+            #   → 「ほかが取った」と取り違えて更新を止めないよう、ロックなしで続ける（以前と同じ）
+            if [[ -e "$UPGRADE_LOCK" ]] && _lock_holder_alive; then
+                log "INFO" "ほかの sf-upgrade.sh（PID ${_lock_pid}）が、先にロックを取ったため、何もせずに終わります。"
+                exit 0
+            fi
+            log "WARNING" "sf の更新のロックを書けません（${UPGRADE_LOCK}）。続行します。"   # 書けなくても更新は続ける（sf-log.sh が待たないだけ）
+        fi
+    else
+        log "WARNING" "sf の更新のロックを書けません（${UPGRADE_LOCK}）。続行します。"   # 書けなくても更新は続ける（sf-log.sh が待たないだけ）
+    fi
 fi
 # 自分の PID のときだけ消す（ほかの sf-upgrade.sh が書き直したロックを消さない）
 _release_upgrade_lock() {
@@ -95,7 +142,6 @@ _release_upgrade_lock() {
     return 0
 }
 trap _release_upgrade_lock EXIT
-printf 'PID=%s\n' "$$" > "$UPGRADE_LOCK" 2>/dev/null || log "WARNING" "sf の更新のロックを書けません（${UPGRADE_LOCK}）。続行します。"  # 書けなくても更新は続ける（sf-log.sh が待たないだけ）
 
 # ==============================================================================
 # メイン処理
@@ -170,15 +216,53 @@ fi
 # Salesforce CLI のアップデート
 # ------------------------------------------------------------------------------
 log "INFO" "Salesforce CLI をアップデートします..."
-if command -v sf >/dev/null 2>&1; then  # 存在確認のため run 不使用
+# npm の置き場所の @salesforce/ の下に、入れ替えが途中で切れた跡があれば、その場所を 1 行ずつ出す（なければ何も出さない）
+_sf_interrupted_traces() {
+    local root="$1" d
+    [[ -n "$root" && -d "$root/@salesforce" ]] || return 0
+    for d in "$root/@salesforce"/.cli-*; do
+        [[ -d "$d" ]] && printf '%s\n' "$d"   # 退避の残り（npm は、入れ替えが終われば消す）
+    done
+    if [[ -d "$root/@salesforce/cli" ]] && [[ ! -f "$root/@salesforce/cli/package.json" || ! -f "$root/@salesforce/cli/bin/run.js" ]]; then
+        printf '%s\n' "$root/@salesforce/cli"   # 中身が欠けた本体
+    fi
+    return 0
+}
+
+SF_BROKEN_MARK="${SF_TOOLS_SF_BROKEN_MARK:-${HOME}/.sf-tools-sf-broken}"
+sf_traces=""
+npm_root=""
+if command -v npm >/dev/null 2>&1; then  # 存在確認のため run 不使用
+    npm_root=$(npm root -g 2>/dev/null || true)   # VAR=$(cmd) のため run 不使用
+    sf_traces=$(_sf_interrupted_traces "$npm_root")
+fi
+if [[ -n "$sf_traces" ]]; then
+    printf '%s\n' "$sf_traces" > "$SF_BROKEN_MARK" 2>/dev/null \
+        || log "WARNING" "印のファイルを書けません（${SF_BROKEN_MARK}）。起動の画面には出ません。"   # 書けなくても続ける
+elif [[ -n "$npm_root" ]]; then
+    rm -f "$SF_BROKEN_MARK" 2>/dev/null || true   # 跡がなくなった（直った）→ 印を消す（意図的なエラー無視）
+fi
+if [[ -n "$sf_traces" ]]; then
+    log "WARNING" "Salesforce CLI の入れ替えが、前回の途中で切れた跡があります。更新しません:"
+    while IFS= read -r _t; do log "WARNING" "  ${_t}"; done <<< "$sf_traces"
+    log "WARNING" "  直し方: 退避された元の版（.cli-* のフォルダ）を cli に名前を戻す（中身の欠けた cli は、別の場所へよける）か、"
+    log "WARNING" "  npm install -g @salesforce/cli で入れ直してください。直したら、sf --version で確かめます"
+    _mark_failed "Salesforce CLI"
+elif command -v sf >/dev/null 2>&1; then  # 存在確認のため run 不使用
     sf_via_npm=0
     if command -v npm >/dev/null 2>&1; then  # 存在確認のため run 不使用
-        if npm ls -g @salesforce/cli --depth=0 >/dev/null 2>&1; then sf_via_npm=1; fi  # 判定のみのため run 不使用
+        if sf_ls=$(npm ls -g @salesforce/cli --depth=0 2>/dev/null); then sf_via_npm=1; fi  # 判定と版の読み取りのため run 不使用
     fi
     if [[ $sf_via_npm -eq 1 ]]; then
-        # npm 版（sf-tools が前提とする入れ方）: npm で更新する（sf update は npm 版では使えない）
-        run npm install -g @salesforce/cli@latest \
-            || { log "WARNING" "Salesforce CLI のアップデートに失敗しました（続行します）"; _warn_if_prefix_unwritable; _mark_failed "Salesforce CLI"; }
+        # npm 版（sf-tools が前提とする入れ方）: 最新なら何もしない。違えば npm で更新する（sf update は npm 版では使えない）
+        sf_cur=$(printf '%s\n' "$sf_ls" | sed -n 's/.*@salesforce\/cli@\([0-9][0-9A-Za-z.+-]*\).*/\1/p' | head -n 1)   # VAR=$(cmd) のため run 不使用
+        sf_new=$(npm view @salesforce/cli version 2>/dev/null | head -n 1)   # VAR=$(cmd) のため run 不使用
+        if [[ -n "$sf_cur" && "$sf_cur" == "$sf_new" ]]; then
+            log "INFO" "Salesforce CLI は最新です（${sf_cur}）"
+        else
+            run npm install -g @salesforce/cli@latest \
+                || { log "WARNING" "Salesforce CLI のアップデートに失敗しました（続行します）"; _warn_if_prefix_unwritable; _mark_failed "Salesforce CLI"; }
+        fi
     else
         # npm 版以外（公式インストーラー・pkg など）: sf update で更新する
         run sf update \

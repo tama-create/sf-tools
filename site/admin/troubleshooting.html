@@ -189,7 +189,7 @@
 <p>以前のバージョンの雛形で作ったプロジェクトで、ワークフローの Node.js のバージョン（<code>node-version</code>）が古いときに起こります。いまの雛形は、Node.js 22 を使います。<a href="workflows.html#sync"><code>sf-sync-wf.sh</code></a> で、ワークフローを最新の雛形に合わせてください（雛形の変更は、作成済みのプロジェクトには、自動では届きません）。</p>
 
 <h2 id="dev">開発者の方へ（毎日の作業で困ったとき）</h2>
-<p>毎日の作業は、ランチャー（<code>sf-launcher.sh</code>。<code>sf-job.sh</code> や <code>sf-start.sh</code> のあとに開くメニュー）から行うのがおすすめです。メニューの番号は、1 Check・2 Dryrun・3 Deploy・4 Push・5 Next です（VS Code のターミナル以外では、6 Start・7 Restart も出ます）。</p>
+<p>毎日の作業は、ランチャー（<code>sf-launcher.sh</code>。<code>sf-job.sh</code> や <code>sf-start.sh</code> のあとに開くメニュー）から行うのがおすすめです。メニューの番号は、1 Check・2 Dryrun・3 Deploy・4 Push・5 PullRequest です（VS Code のターミナル以外では、6 Start・7 Restart も出ます）。</p>
 
 <h3 id="dev-job"><code>sf-job.sh</code> が動かない</h3>
 <ul>
@@ -212,7 +212,7 @@
 <h3 id="dev-prepush"><code>git push</code> が止められる</h3>
 <p>プッシュのときに、自動のチェック（pre-push フック）が動きます。次のときは、プッシュを止めます。</p>
 <ul>
-  <li><code>main</code> / <code>staging</code> / <code>develop</code>（保護ブランチ）の上にいるとき、ブランチの上にいないとき、保護ブランチへプッシュしようとしたとき（<code>git push origin feature:main</code> など）。作業用のブランチに移って、PR（取り込みの依頼）を出して、反映してください（<code>sf-next.sh</code>、ランチャーの 5 Next が、出し先を案内します）。</li>
+  <li><code>main</code> / <code>staging</code> / <code>develop</code>（保護ブランチ）の上にいるとき、ブランチの上にいないとき、保護ブランチへプッシュしようとしたとき（<code>git push origin feature:main</code> など）。作業用のブランチに移って、PR（取り込みの依頼）を出して、反映してください（<code>sf-next.sh</code>、ランチャーの 5 PullRequest が、出し先を案内します）。</li>
   <li>ターゲットファイルの書き方にエラーがあるとき（画面に、エラーの行が出ます）。</li>
   <li>GitHub の最新の取得に失敗したとき（「リモート情報の取得に失敗しました」）・取り込みがコンフリクトしたとき（「… の自動取り込み（git merge）に失敗しました」。取り込みは取り消されます）。</li>
 </ul>

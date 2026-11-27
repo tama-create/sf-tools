@@ -33,7 +33,7 @@
 #        表示して、エラーで終了する
 #      - 終了コード 1（決まりを破っている。積み重ねの抜けなど）→ 理由を表示して、PR を勧めずにエラーで終了する
 #      判定の前に、./sf-tools/logs/next-status.txt（前回の結果）を消す。判定できたら、そこに、先端のコミット（HEAD=）・次の段階
-#      （NEXT=。全段階済みなら none）・発行中の PR（PR=）・対象が空か（SKIPPED=）を書く（ランチャーの表示用。書けなくても続ける）
+#      （NEXT=。全段階済みなら none）・発行中の PR（PR=）・対象が空か（SKIPPED=）・段階の一覧（TIERS=。下から順に空白区切り）を書く（ランチャーの表示用。書けなくても続ける）
 #   3. 結果を表示する（下の【補足】の表示）
 #   4. 対象が空（deploy-target.txt・remove-target.txt に実質的な行がない）なら、その旨を表示して終了する（出すものがない）
 #   5. next_tier が none なら「全段階にリリース済みです！」、next_tier へ開いている PR があれば「PR 発行中（#N）。マージを
@@ -180,7 +180,7 @@ while IFS= read -r _t; do [[ -n "$_t" ]] && TIERS+=("$_t"); done <<< "$(_pc 'tie
 #   同じときだけ使う。書けなくても、このコマンドは続ける）
 _head=$(git rev-parse -q --verify HEAD 2>/dev/null) || _head=""   # VAR=$(cmd) のため run 不使用
 if [[ -n "$_head" ]]; then
-    printf 'HEAD=%s\nNEXT=%s\nPR=%s\nSKIPPED=%s\n' "$_head" "$NEXT_TARGET" "$PR_OPEN" "$SKIPPED" > "$NEXT_STATUS_FILE" 2>/dev/null || true   # 意図的なエラー無視（表示用のため）
+    printf 'HEAD=%s\nNEXT=%s\nPR=%s\nSKIPPED=%s\nTIERS=%s\n' "$_head" "$NEXT_TARGET" "$PR_OPEN" "$SKIPPED" "${TIERS[*]}" > "$NEXT_STATUS_FILE" 2>/dev/null || true   # 意図的なエラー無視（表示用のため）
 fi
 
 # ------------------------------------------------------------------------------

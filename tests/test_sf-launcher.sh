@@ -126,10 +126,10 @@ test_menu_order() {
     plain=$(printf '%s\n' "$out" | sed $'s/\033\\[[0-9;]*m//g')
     local order
     order=$(printf '%s\n' "$plain" | grep -oE '\[[0-9]\] [A-Za-z]+' | tr '\n' ' ')
-    assert_equals "$order" "[1] Check [2] Dryrun [3] Deploy [4] Push [5] Next [6] Start [7] Restart " "番号は、作業の順（Check・Dryrun・Deploy・Push・Next）、その下に Start・Restart"
+    assert_equals "$order" "[1] Check [2] Dryrun [3] Deploy [4] Push [5] PullRequest [6] Start [7] Restart " "番号は、作業の順（Check・Dryrun・Deploy・Push・PullRequest）、その下に Start・Restart"
     # Next と Start の間に、短い線がある
-    printf '%s\n' "$plain" | grep -A1 '\[5\] Next' | tail -1 | grep -q '^  ──────────$' \
-        && pass "Next と Start の間に線を引く" || fail "Next と Start の間に線を引く" "$plain"
+    printf '%s\n' "$plain" | grep -A1 '\[5\] PullRequest' | tail -1 | grep -q '^  ──────────$' \
+        && pass "PullRequest と Start の間に線を引く" || fail "PullRequest と Start の間に線を引く" "$plain"
     # 番号の直接指定も、新しい並び（2 = Dryrun）で動く
     out=$(cd "$td" && PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-launcher.sh" 2 2>&1)
     [[ "$out" == *"▶ sf-dryrun"* ]] && pass "番号 2 → sf-dryrun を動かす" || fail "番号 2 → sf-dryrun を動かす" "$(printf '%s' "$out" | head -5)"
@@ -138,7 +138,7 @@ test_menu_order() {
     out=$(cd "$td" && printf "q" | TERM_PROGRAM=vscode PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-launcher.sh" 2>&1)
     plain=$(printf '%s\n' "$out" | sed $'s/\033\\[[0-9;]*m//g')
     order=$(printf '%s\n' "$plain" | grep -oE '\[[0-9]\] [A-Za-z]+' | tr '\n' ' ')
-    assert_equals "$order" "[1] Check [2] Dryrun [3] Deploy [4] Push [5] Next " "VS Code の中: 1〜5 だけ"
+    assert_equals "$order" "[1] Check [2] Dryrun [3] Deploy [4] Push [5] PullRequest " "VS Code の中: 1〜5 だけ"
     printf '%s\n' "$plain" | grep -q '^  ──────────$' \
         && fail "VS Code の中: 線を引かない" "$plain" || pass "VS Code の中: 線を引かない"
     teardown "$td" "$mb"
@@ -165,26 +165,26 @@ test_apexlog_status_line() {
     export MOCK_CALL_LOG="$mb/calls.log"
     create_all_mocks "$mb"
     out=$(cd "$td" && echo "q" | PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-launcher.sh" 2>&1)
-    assert_output_not_contains "$out" "ログ ●" ".status がない → 何も表示しない"
+    assert_output_not_contains "$out" "Log:" ".status がない → 何も表示しない"
     mkdir -p "$td/logs/apex"
     printf 'STATE=collecting\nORG=dev\nEXPIRES=2026-11-23T06:30:00Z\nEXPIRES_AT=15:30\nCOUNT_TODAY=3\nWARNING=\n' > "$td/logs/apex/.status"
     out=$(cd "$td" && echo "q" | PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-launcher.sh" 2>&1)
-    [[ "$out" == *"● 取得中（期限 15:30・今日 3 本）"* ]] && pass "取得中 → 組織・期限・今日の本数を表示する" || fail "取得中 → 組織・期限・今日の本数を表示する" "$out"
-    [[ "$out" == *$'\033[1m\033[0;32m● 取得中'* ]] && pass "取得中 → 太字の緑で表示する（目立たせる）" || fail "取得中 → 太字の緑で表示する（目立たせる）" "$out"
+    [[ "$out" == *"取得中 (15:30/3本)"* ]] && pass "取得中 → 期限・今日の本数を表示する（Log: 取得中 (期限/本数)）" || fail "取得中 → 期限・今日の本数を表示する（Log: 取得中 (期限/本数)）" "$out"
+    [[ "$out" == *$'\033[1m\033[0;32m取得中'* ]] && pass "取得中 → 太字の緑で表示する（目立たせる）" || fail "取得中 → 太字の緑で表示する（目立たせる）" "$out"
     printf 'STATE=skipped\nREASON=このプロジェクトでは、自動で取らない設定のため\n' > "$td/logs/apex/.status"
     out=$(cd "$td" && echo "q" | PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-launcher.sh" 2>&1)
-    [[ "$out" == *"● 取っていません（このプロジェクトでは、自動で取らない設定のため）"* ]] && pass "取らない → 理由を表示する" || fail "取らない → 理由を表示する" "$out"
-    [[ "$out" == *$'\033[0;33m● 取っていません'* ]] && pass "取らない → 黄色で表示する" || fail "取らない → 黄色で表示する" "$out"
+    [[ "$out" == *"取っていません（このプロジェクトでは、自動で取らない設定のため）"* ]] && pass "取らない → 理由を表示する" || fail "取らない → 理由を表示する" "$out"
+    [[ "$out" == *$'\033[0;33m取っていません'* ]] && pass "取らない → 黄色で表示する" || fail "取らない → 黄色で表示する" "$out"
     printf 'STATE=error\nREASON=接続できないため\n' > "$td/logs/apex/.status"
     out=$(cd "$td" && echo "q" | PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-launcher.sh" 2>&1)
-    [[ "$out" == *$'\033[1m\033[0;31m● 取れていません（接続できないため）'* ]] && pass "取れていません → 太字の赤で表示する" || fail "取れていません → 太字の赤で表示する" "$out"
+    [[ "$out" == *$'\033[1m\033[0;31m取れていません（接続できないため）'* ]] && pass "取れていません → 太字の赤で表示する" || fail "取れていません → 太字の赤で表示する" "$out"
     printf 'STATE=collecting\nORG=dev\nWARNING=取得に失敗しました（120 秒後にやり直します）\n' > "$td/logs/apex/.status"
     out=$(cd "$td" && echo "q" | PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-launcher.sh" 2>&1)
-    [[ "$out" == *"⚠ デバッグログ: 取得に失敗しました"* ]] && pass "WARNING → もう 1 行表示する" || fail "WARNING → もう 1 行表示する" "$out"
+    [[ "$out" == *"⚠ Log: 取得に失敗しました"* ]] && pass "WARNING → もう 1 行表示する" || fail "WARNING → もう 1 行表示する" "$out"
     printf 'STATE=$(touch injected)\n' > "$td/logs/apex/.status"
     out=$(cd "$td" && echo "q" | PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-launcher.sh" 2>&1)
     assert_file_not_exists "$td/injected" ".status を source しない（中身を実行しない）"
-    assert_output_not_contains "$out" "ログ ●" "知らない STATE → 何も表示しない"
+    assert_output_not_contains "$out" "Log:" "知らない STATE → 何も表示しない"
     teardown "$td" "$mb"
 }
 test_apexlog_status_line
@@ -200,18 +200,29 @@ test_apexlog_status_refresh() {
     create_all_mocks "$mb"
     mkdir -p "$td/logs/apex"
     printf 'STATE=starting\nORG=dev\n' > "$td/logs/apex/.status"
-    # 2 秒後に取得中へ変わる。入力の q は 14 秒後（その間に、5 秒の待ち切れが 1 回ある。メニューの描画は、状況の表示（git・node）の分、
-    #   遅い Windows の CI では数秒かかるため、余裕を持たせる）
-    ( sleep 2; printf 'STATE=collecting\nORG=dev\nEXPIRES_AT=15:30\nCOUNT_TODAY=0\n' > "$td/logs/apex/.status" ) &
-    out=$(cd "$td" && { sleep 14; printf 'q'; } | PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-launcher.sh" 2>&1)
-    wait
-    [[ "$out" == *"● 準備中"* ]] && pass "最初は、準備中を表示する" || fail "最初は、準備中を表示する" "$out"
-    [[ "$out" == *"● 取得中（期限 15:30・今日 0 本）"* ]] && pass "取得中に変わったら、メニューを描き直す" || fail "取得中に変わったら、メニューを描き直す" "$out"
-    n=$(printf '%s\n' "$out" | grep -c ">> Launcher <<")
+    # メニューの描画が終わるのを見てから進める（決め打ちの秒数で待つと、描画の遅い Windows の CI で、描き直しの前に q が届く）:
+    #   1 回目の描画 → 取得中に変える → 2 回目の描画（待ち切れでの描き直し）→ さらに 6 秒待ち（取得中なら、描き直さない）→ q
+    local outf="$td/launcher.out"
+    _wait_menus() { # ファイル 回数 → その回数だけメニューが描かれるまで待つ（最大 90 秒）
+        local i=0
+        while [[ $(grep -c ">> LAUNCHER <<" "$1" 2>/dev/null || true) -lt $2 && $i -lt 90 ]]; do sleep 1; i=$((i + 1)); done
+    }
+    (
+        cd "$td" && {
+            _wait_menus "$outf" 1
+            printf 'STATE=collecting\nORG=dev\nEXPIRES_AT=15:30\nCOUNT_TODAY=0\n' > "$td/logs/apex/.status"
+            _wait_menus "$outf" 2
+            sleep 6; printf 'q'
+        } | PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-launcher.sh" > "$outf" 2>&1
+    )
+    out=$(cat "$outf")
+    [[ "$out" == *"Log: "*"準備中"* ]] && pass "最初は、準備中を表示する" || fail "最初は、準備中を表示する" "$out"
+    [[ "$out" == *"取得中 (15:30/0本)"* ]] && pass "取得中に変わったら、メニューを描き直す" || fail "取得中に変わったら、メニューを描き直す" "$out"
+    n=$(printf '%s\n' "$out" | grep -c ">> LAUNCHER <<")
     assert_equals "$n" "2" "描き直しは 1 回だけ（取得中になったら、待ち切れで描き直さない）"
     # 状況の表示（処理の流れ 6）が読む git（読み取りのみ）は除いて、ほかのコマンドを動かしていないことを確かめる
     local others
-    others=$(grep -vE '^git (symbolic-ref -q --short HEAD|status --porcelain|rev-parse -q --verify (@\{u\}|HEAD)|rev-list --count @\{u\}\.\.HEAD)$' "$mb/calls.log" 2>/dev/null)
+    others=$(grep -vE '^git status --porcelain=v2 --branch$' "$mb/calls.log" 2>/dev/null)
     [[ -z "$others" ]] && pass "描き直しでは、コマンドを動かさない（状況の表示の、読み取りの git だけ）" || fail "描き直しでは、コマンドを動かさない（状況の表示の、読み取りの git だけ）" "$others"
     # 準備中のままの EOF → すぐ終わる（待ち切れと取り違えない）
     printf 'STATE=starting\nORG=dev\n' > "$td/logs/apex/.status"
@@ -247,59 +258,54 @@ _st_menu() { # 作業フォルダ → メニューの出力（色を除く）
     (cd "$1" && printf 'q' | TERM_PROGRAM= bash "$SF_TOOLS_DIR/bin/sf-launcher.sh" 2>&1) | sed $'s/\033\\[[0-9;]*m//g'
 }
 
-_st_aligned() { # 出力（色なし） 段階（例: "4 Push"） 説明 → 印（^）が、その段階の真下にあるか
-    local flow mark c1 c2
-    flow=$(printf '%s\n' "$1" | grep -F '1 Check  >  2 Dryrun' | head -1)
-    mark=$(printf '%s\n' "$1" | grep -E '^ *\^ ' | head -1)
-    c1=${flow%%"$2"*}; c2=${mark%%^*}
-    [[ -n "$flow" && -n "$mark" && ${#c1} -eq ${#c2} ]] && pass "$3" || fail "$3" "流れ: [$flow] 印: [$mark]"
-}
 test_status_display() {
-    echo ""; echo -e "${CLR_HEAD}[TEST] 今の状況の表示と、次の目安${CLR_RST}"
+    echo ""; echo -e "${CLR_HEAD}[TEST] 見出しの 2 行（状況と、段階の並び）${CLR_RST}"
     local td out head
     td=$(_st_repo); head=$(git -C "$td" rev-parse HEAD)
 
     out=$(_st_menu "$td")
-    assert_output_contains "$out" "feature/x ｜ my-dev" "1 行目に、ブランチと組織（.sf/config.json の target-org）を出す"
-    assert_output_contains "$out" "1 Check  >  2 Dryrun  >  3 Deploy  >  4 Push  >  5 Next" "作業の流れを出す（番号はメニューの並び）"
-    assert_output_contains "$out" "\^ ここ（次の出し先を確かめる）" "変更なし・push 済み・next-status.txt がない → Next で確かめる"
-    _st_aligned "$out" "5 Next" "印（^）は、流れの 5 Next の真下に出る"
+    assert_output_contains "$out" ">> LAUNCHER <<   feature/x @ my-dev ／ 変更 0 件" "1 行目に、ブランチ @ 組織（.sf/config.json の target-org）と変更の数を出す"
+    assert_output_contains "$out" "                   Branch: （5 PullRequest で確かめる）" "next-status.txt がない → 2 行目は「5 PullRequest で確かめる」（1 行目のブランチ名の位置にそろえる）"
 
-    printf 'HEAD=%s\nNEXT=staging\nPR=\nSKIPPED=false\n' "$head" > "$td/sf-tools/logs/next-status.txt"
+    printf 'HEAD=%s\nNEXT=staging\nPR=\nSKIPPED=false\nTIERS=develop staging main\n' "$head" > "$td/sf-tools/logs/next-status.txt"
     out=$(_st_menu "$td")
-    assert_output_contains "$out" "\^ ここ（staging へ PR を出す）" "next-status.txt の HEAD が今と同じ → 次の PR 先を出す"
+    assert_output_contains "$out" "Branch: ✓ develop ⇒ ▸ staging (次のPR) ⇒ × main" "next-status.txt の HEAD が今と同じ → 段階の並び（出し終わり ✓・次 ▸・まだ ×）"
 
-    printf 'HEAD=%s\nNEXT=staging\nPR=12\nSKIPPED=false\n' "$head" > "$td/sf-tools/logs/next-status.txt"
+    printf 'HEAD=%s\nNEXT=staging\nPR=12\nSKIPPED=false\nTIERS=develop staging main\n' "$head" > "$td/sf-tools/logs/next-status.txt"
     out=$(_st_menu "$td")
-    assert_output_contains "$out" "\^ ここ（PR #12 の検証が緑になったら、マージ）" "発行中の PR → 番号と、検証を待つことを出す"
+    assert_output_contains "$out" "▸ staging (PR #12 発行中)" "発行中の PR → 番号を出す"
 
-    printf 'HEAD=%s\nNEXT=none\nPR=\nSKIPPED=false\n' "$head" > "$td/sf-tools/logs/next-status.txt"
+    printf 'HEAD=%s\nNEXT=none\nPR=\nSKIPPED=false\nTIERS=develop staging main\n' "$head" > "$td/sf-tools/logs/next-status.txt"
     out=$(_st_menu "$td")
-    assert_output_contains "$out" "✓ 全段階にリリース済みです" "NEXT=none → 全段階にリリース済み（印は出さない）"
-    assert_output_not_contains "$out" "\^ ここ" "NEXT=none → 印（^）は出さない"
+    assert_output_contains "$out" "Branch: ✓ develop ⇒ ✓ staging ⇒ ✓ main  (全段階にリリース済み)" "NEXT=none → すべて ✓・全段階にリリース済み"
+    assert_output_not_contains "$out" "▸" "NEXT=none → ▸ は出さない"
 
-    printf 'HEAD=%s\nNEXT=develop\nPR=\nSKIPPED=true\n' "$head" > "$td/sf-tools/logs/next-status.txt"
+    printf 'HEAD=%s\nNEXT=develop\nPR=\nSKIPPED=true\nTIERS=develop staging main\n' "$head" > "$td/sf-tools/logs/next-status.txt"
     out=$(_st_menu "$td")
-    assert_output_contains "$out" "ターゲットファイル（sf-tools/release/feature/x/）に、出すものを書きます" "SKIPPED=true → ターゲットファイルに書く"
+    assert_output_contains "$out" "Branch: 出すものなし（ターゲットファイル sf-tools/release/feature/x/ が空）" "SKIPPED=true → 出すものなし"
 
-    printf 'HEAD=0000000000000000000000000000000000000000\nNEXT=main\nPR=\nSKIPPED=false\n' > "$td/sf-tools/logs/next-status.txt"
+    printf 'HEAD=0000000000000000000000000000000000000000\nNEXT=main\nPR=\nSKIPPED=false\nTIERS=develop staging main\n'> "$td/sf-tools/logs/next-status.txt"
     out=$(_st_menu "$td")
-    assert_output_contains "$out" "\^ ここ（次の出し先を確かめる）" "HEAD が今と違う（古い結果）→ 使わない"
+    assert_output_contains "$out" "Branch: （5 PullRequest で確かめる）" "HEAD が今と違う（古い結果）→ 使わない"
 
     printf 'HEAD=%s\nNEXT=$(touch injected)\nPR=1;x\n' "$head" > "$td/sf-tools/logs/next-status.txt"
     out=$(_st_menu "$td")
     assert_file_not_exists "$td/injected" "next-status.txt を source しない（中身を実行しない）"
-    assert_output_contains "$out" "\^ ここ（次の出し先を確かめる）" "形の違う NEXT= → 使わない"
+    assert_output_contains "$out" "Branch: （5 PullRequest で確かめる）" "形の違う NEXT= → 使わない"
+    printf 'HEAD=%s\nNEXT=staging\nTIERS=develop $(x) main\n' "$head" > "$td/sf-tools/logs/next-status.txt"
+    out=$(_st_menu "$td")
+    assert_output_contains "$out" "Branch: （5 PullRequest で確かめる）" "形の違う TIERS= → 使わない"
+    printf 'HEAD=%s\nNEXT=qa\nTIERS=develop staging main\n' "$head" > "$td/sf-tools/logs/next-status.txt"
+    out=$(_st_menu "$td")
+    assert_output_contains "$out" "Branch: （5 PullRequest で確かめる）" "NEXT= が段階の一覧にない → 使わない"
 
     printf 'b\n' > "$td/b.txt"
     out=$(_st_menu "$td")
-    assert_output_contains "$out" "\^ ここから（未コミットの変更 1 件）" "未コミットの変更を数え、Check から始める"
-    _st_aligned "$out" "1 Check" "印（^）は、流れの 1 Check の真下に出る"
+    assert_output_contains "$out" "／ 変更 1 件" "未コミットの変更を数える"
 
     git -C "$td" add b.txt; git -C "$td" commit -q -m b
     out=$(_st_menu "$td")
-    assert_output_contains "$out" "\^ ここ（push していないコミット 1 件）" "push していないコミットを数え、Push を示す"
-    _st_aligned "$out" "4 Push" "印（^）は、流れの 4 Push の真下に出る"
+    assert_output_contains "$out" "／ 変更 0 件" "コミットすると、変更の数は 0 件"
 
     # デバッグログの REASON・WARNING に、制御文字（ESC・改行）・文字の向きを変える文字を入れても、画面を崩さない（clean_text）
     mkdir -p "$td/logs/apex"
@@ -307,40 +313,76 @@ test_status_display() {
     printf '\nREASON=x\033[2Jy\xe2\x80\xaez\nWARNING=w\033[31mv\\033u\n' >> "$td/logs/apex/.status"
     out=$( (cd "$td" && printf 'q' | TERM_PROGRAM= bash "$SF_TOOLS_DIR/bin/sf-launcher.sh" 2>&1) )
     [[ "$out" != *$'\033[2J'* && "$out" != *$'\xe2\x80\xae'* && "$out" != *$'\033[31mv'* ]] && pass "デバッグログの理由・WARNING の制御文字・向きを変える文字を除く" || fail "デバッグログの理由・WARNING の制御文字・向きを変える文字を除く" "$out"
-    [[ "$out" == *"● 取れていません（x[2Jyz）"* && "$out" == *'⚠ デバッグログ: w[31mv\033u'* ]] && pass "デバッグログの理由・WARNING は、文字として残す（\\033 の並びは制御にしない）" || fail "デバッグログの理由・WARNING は、文字として残す（\\033 の並びは制御にしない）" "$out"
+    [[ "$out" == *"取れていません（x[2Jyz）"* && "$out" == *'⚠ Log: w[31mv\033u'* ]] && pass "デバッグログの理由・WARNING は、文字として残す（\\033 の並びは制御にしない）" || fail "デバッグログの理由・WARNING は、文字として残す（\\033 の並びは制御にしない）" "$out"
     rm -f "$td/logs/apex/.status"
 
     # 追跡先がない（push したことがないブランチ）→ Push の下に「追跡先なし」
     git -C "$td" checkout -q -b feature/nopush
     out=$(_st_menu "$td")
-    assert_output_contains "$out" "\\^ ここ（まだ push していません。追跡先なし）" "追跡先がない → Push の下に、追跡先なし"
-    _st_aligned "$out" "4 Push" "追跡先なし: 印（^）は、流れの 4 Push の真下に出る"
+    assert_output_contains "$out" "   feature/nopush @ my-dev ／" "push したことがないブランチ → ブランチ名を出す"
     git -C "$td" checkout -q feature/x
+
+    # git status --porcelain=v2 の境界: behind だけ（ahead 0）→ Push ではなく Next / 名前の変更は 1 件 / 付け離れた HEAD
+    git -C "$td" checkout -q feature/x
+    git -C "$td" commit -q --allow-empty -m e1; git -C "$td" push -q origin feature/x 2>/dev/null
+    git -C "$td" reset -q --hard HEAD~1   # origin が 1 つ先（behind 1・ahead 0）
+    rm -f "$td/sf-tools/logs/next-status.txt"
+    out=$(_st_menu "$td")
+    assert_output_contains "$out" "／ 変更 0 件" "behind だけ（ahead 0）→ 変更は 0 件"
+    git -C "$td" mv a.txt renamed.txt
+    out=$(_st_menu "$td")
+    assert_output_contains "$out" "／ 変更 1 件" "名前の変更（porcelain v2 の rename の行）は 1 件"
+    git -C "$td" reset -q --hard HEAD
+    git -C "$td" checkout -q --detach HEAD
+    out=$(_st_menu "$td")
+    assert_output_contains "$out" "（ブランチの上にいません）" "付け離れた HEAD（(detached)）→ ブランチの上にいない"
+    git -C "$td" checkout -q feature/x
+    # 追跡先のブランチが消えた（branch.upstream はあるが branch.ab がない）→ 追跡先なし
+    git -C "$td" push -q origin --delete feature/x 2>/dev/null; git -C "$td" fetch -q --prune origin 2>/dev/null
+    out=$(_st_menu "$td")
+    assert_output_contains "$out" "   feature/x @ my-dev ／" "追跡先のブランチが消えても、表示は崩れない"
+    git -C "$td" push -q -u origin feature/x 2>/dev/null
 
     git -C "$td" checkout -q -b develop
     out=$(_st_menu "$td")
     assert_output_contains "$out" "⚠ 環境ブランチの上です" "環境ブランチ（branches.txt）→ その旨を出す"
-    assert_output_not_contains "$out" "\^ ここ" "環境ブランチ → 流れの印を出さない"
+    assert_output_not_contains "$out" "Branch:" "環境ブランチ → Branch: の行を出さない"
+    git -C "$td" checkout -q feature/x   # 以下は、作業用のブランチの上で確かめる（環境ブランチの上では Branch: の行を出さないため）
 
     # 組織名: 制御文字（ESC・改行）・文字の向きを変える文字を除き、60 文字を超えたら切る
     local long; long=$(printf 'o%.0s' $(seq 1 80))
     printf '{"target-org": "ab\\u001b[31mcd\\nef\\u202egh%s"}\n' "$long" > "$td/.sf/config.json"
-    out=$( (cd "$td" && printf 'q' | TERM_PROGRAM= bash "$SF_TOOLS_DIR/bin/sf-launcher.sh" 2>&1) | grep ' ｜ ')
+    out=$( (cd "$td" && printf 'q' | TERM_PROGRAM= bash "$SF_TOOLS_DIR/bin/sf-launcher.sh" 2>&1) | grep ' @ ')
     [[ "$out" != *$'\033[31m'* && "$out" != *$'\xe2\x80\xae'* ]] && pass "組織名の制御文字・向きを変える文字を除く" || fail "組織名の制御文字・向きを変える文字を除く" "$out"
     [[ "$out" == *"ab[31mcdefgh"*"…"* ]] && pass "組織名は 60 文字で切って … を付ける" || fail "組織名は 60 文字で切って … を付ける" "$out"
     printf '{"target-org": "x\\\\033[31my"}\n' > "$td/.sf/config.json"
-    out=$( (cd "$td" && printf 'q' | TERM_PROGRAM= bash "$SF_TOOLS_DIR/bin/sf-launcher.sh" 2>&1) | grep ' ｜ ')
+    out=$( (cd "$td" && printf 'q' | TERM_PROGRAM= bash "$SF_TOOLS_DIR/bin/sf-launcher.sh" 2>&1) | grep ' @ ')
     [[ "$out" != *$'\033[31m'* && "$out" == *'x\033[31my'* ]] && pass "組織名の \\033 の文字の並びは、制御として解釈せず、そのまま出す" || fail "組織名の \\033 の文字の並びは、制御として解釈せず、そのまま出す" "$out"
     printf 'HEAD=%s\nNEXT=staging\nPR=1234567890\n' "$(git -C "$td" rev-parse HEAD)" > "$td/sf-tools/logs/next-status.txt"
     out=$(_st_menu "$td")
     assert_output_not_contains "$out" "PR #1234567890" "長すぎる PR=（10 桁以上）は使わない"
     printf 'HEAD=%s\nNEXT=%s\n' "$(git -C "$td" rev-parse HEAD)" "$long" > "$td/sf-tools/logs/next-status.txt"
     out=$(_st_menu "$td")
-    assert_output_not_contains "$out" "ここ（ooo" "長すぎる NEXT=（41 文字以上）は使わない"
+    assert_output_not_contains "$out" "▸ ooo" "長すぎる NEXT=（41 文字以上）は使わない"
+    local h; h=$(git -C "$td" rev-parse HEAD)
+    printf 'HEAD=%s\nNEXT=main\nPR=\nSKIPPED=false\nTIERS=main\n' "$h" > "$td/sf-tools/logs/next-status.txt"
+    out=$(_st_menu "$td")
+    assert_output_contains "$out" "Branch: ▸ main (次のPR)" "段階が main だけ → ▸ main（⇒ は出さない）"
+    assert_output_not_contains "$out" "⇒" "段階が 1 つ → ⇒ は出さない"
+    printf 'HEAD=%s\nNEXT=staging\nPR=\nSKIPPED=false\nTIERS=develop staging staging main\n' "$h" > "$td/sf-tools/logs/next-status.txt"
+    out=$(_st_menu "$td")
+    assert_output_contains "$out" "Branch: （5 PullRequest で確かめる）" "TIERS= に同じ段階が 2 回 → 使わない"
+    printf 'HEAD=%s\nNEXT=staging\nPR=\nSKIPPED=yes\nTIERS=develop staging main\n' "$h" > "$td/sf-tools/logs/next-status.txt"
+    out=$(_st_menu "$td")
+    assert_output_contains "$out" "Branch: （5 PullRequest で確かめる）" "SKIPPED= が true / false 以外 → 使わない"
+    printf 'HEAD=%s\nNEXT=staging\nPR=-3\nSKIPPED=false\nTIERS=develop staging main\n' "$h" > "$td/sf-tools/logs/next-status.txt"
+    out=$(_st_menu "$td")
+    assert_output_contains "$out" "▸ staging (次のPR)" "PR= が数字でない（-3）→ PR の番号だけ使わない"
+    assert_output_not_contains "$out" "PR #" "PR= が数字でない → 番号を出さない"
 
     rm -f "$td/.sf/config.json"
     out=$(_st_menu "$td")
-    assert_output_not_contains "$out" "｜ ab" ".sf/config.json がない → 組織を出さない"
+    assert_output_not_contains "$out" "@ " ".sf/config.json がない → 組織を出さない"
     teardown "$td" "${td}.origin.git"
 }
 test_status_display
@@ -353,9 +395,27 @@ test_result_line() {
     assert_output_contains "$out" "✓ Check: 終わりました（成功）" "成功 → ✓ の 1 行"
     git -C "$td" checkout -q -b develop
     out=$(cd "$td" && bash "$SF_TOOLS_DIR/bin/sf-launcher.sh" 5 2>&1 | sed $'s/\033\\[[0-9;]*m//g'); local ec=$?
-    assert_output_contains "$out" "✗ Next: 失敗、または中断しました（終了コード 1）" "失敗（環境ブランチの上の sf-next）→ ✗ の 1 行と終了コード"
+    assert_output_contains "$out" "✗ PullRequest: 失敗、または中断しました（終了コード 1）" "失敗（環境ブランチの上の sf-next）→ ✗ の 1 行と終了コード"
     teardown "$td" "${td}.origin.git"
 }
 test_result_line
+
+test_fzf_label_to_command() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] fzf: 選んだ表示名から、コマンドを引き直す（PullRequest → sf-next）${CLR_RST}"
+    local td mb out
+    td=$(_st_repo); mb=$(mktemp -d)
+    git -C "$td" checkout -q -b develop   # 環境ブランチの上の sf-next は失敗する → 結果の 1 行で、何が動いたかが分かる
+    # 1 回目は PullRequest の行を選び、2 回目は Esc（空）で終える fzf のモック
+    cat > "$mb/fzf" <<'MOCK'
+#!/bin/bash
+n=0; [[ -f "$0.count" ]] && n=$(cat "$0.count"); echo $((n + 1)) > "$0.count"
+if [[ $n -eq 0 ]]; then grep '^PullRequest ' | head -1; else cat > /dev/null; fi
+MOCK
+    chmod +x "$mb/fzf"
+    out=$(cd "$td" && PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-launcher.sh" --fzf < /dev/null 2>&1 | sed $'s/\033\\[[0-9;]*m//g')
+    assert_output_contains "$out" "✗ PullRequest: 失敗、または中断しました" "fzf で PullRequest を選ぶ → sf-next.sh が動く"
+    teardown "$td" "${td}.origin.git" "$mb"
+}
+test_fzf_label_to_command
 
 print_summary

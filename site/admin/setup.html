@@ -308,9 +308,9 @@ sf-init.sh --owner my-org --project acme            # オーナーと XXXX を�
   </li>
   <li>
     <p><strong>PR のワークフロー:</strong> 作業フォルダで <code>sf-job.sh</code> を実行すると、<code>sf-start.sh</code> が自動で動きます。<code>sf-install.sh</code> が、<code>sf-tools/release/&lt;ブランチ名&gt;/</code> の下に、空のターゲットファイル（説明のコメントだけのもの）を作ります。これがそのまま差分になるので、ほかの変更は要りません。続けて、ランチャーで、次の番号を押します（コマンドで打つなら、かっこの中）。</p>
-    <pre><code>[4] Push   （sf-push.sh）  # 自動で作られたファイルを、コミットして送る
-[5] Next   （sf-next.sh）  # 次の PR 先を確認 → ブラウザで PR の作成画面を開く → PR を作って、マージ</code></pre>
-    <p>ブランチが 3 階層なら、<code>develop</code> → <code>staging</code> → <code>main</code> の順に、<code>[5] Next</code> をくり返します。PR を作ると、次の処理が、自動で動きます。</p>
+    <pre><code>[4] Push         （sf-push.sh）  # 自動で作られたファイルを、コミットして送る
+[5] PullRequest  （sf-next.sh）  # 次の PR 先を確認 → ブラウザで PR の作成画面を開く → PR を作って、マージ</code></pre>
+    <p>ブランチが 3 階層なら、<code>develop</code> → <code>staging</code> → <code>main</code> の順に、<code>[5] PullRequest</code> をくり返します。PR を作ると、次の処理が、自動で動きます。</p>
     <ul>
       <li>[validate] デプロイ前の検証 — すべての PR で動く</li>
       <li>[sequence] マージ順序の確認（一方通行の決まり）— <code>main</code> と <code>staging</code> への PR で動く</li>

@@ -86,7 +86,7 @@ JOB-xxx ──→ main      （本番組織へリリース）
 
 ### 3.3 sf-next.sh（次のPR先の自動判定）
 
-`sf-next.sh`（ランチャーの 5 Next）を実行すると、現在のブランチの**先端のコミット**が、どの段階まで出たかを確かめ、次に PR を出してよい段階を表示する。Y 入力でブラウザのPR作成画面を直接開く（PR そのものは作らない）。保護ブランチ（branches.txt のブランチ）・detached HEAD の上では、エラーで終了する。判定は `sf-promote-check.sh --plan` に任せる（自分では計算しない）。詳細は `doc/dev-reference.md` の 4.5。
+`sf-next.sh`（ランチャーの 5 PullRequest）を実行すると、現在のブランチの**先端のコミット**が、どの段階まで出たかを確かめ、次に PR を出してよい段階を表示する。Y 入力でブラウザのPR作成画面を直接開く（PR そのものは作らない）。保護ブランチ（branches.txt のブランチ）・detached HEAD の上では、エラーで終了する。判定は `sf-promote-check.sh --plan` に任せる（自分では計算しない）。詳細は `doc/dev-reference.md` の 4.5。
 
 **判定:** 段階を下から順に見て、先端のコミットに印がない最初の段階を「次のPR先」にする（全部にあれば完了）。develop に出したあとで変更して push すると、先端のコミットが変わるため、次の PR 先は develop に戻る。次の PR 先で R2 も確かめ、破っていれば PR を勧めない。
 
@@ -143,7 +143,7 @@ JOB-xxx ──→ main      （本番組織へリリース）
 
 1. `sf-job.sh`: ジョブ名を入力 → GitHub 上の `main` から作業用ブランチを作成 → `./{ジョブ名}/force-XXXX` にクローン → `sf-start.sh` を実行
 2. `sf-start.sh`: 組織に接続（個人用の Sandbox など）→ VS Code を起動 → バックグラウンドで `sf-install.sh`（フック・`sf-tools/release/<ブランチ>/`・ツールの更新）→ 前面で `sf-launcher.sh` を起動
-3. `sf-launcher.sh`（メニュー）: 1 Check（`sf-check.sh`）/ 2 Dryrun（`sf-dryrun.sh`）/ 3 Deploy（`sf-deploy.sh`）/ 4 Push（`sf-push.sh`）/ 5 Next（`sf-next.sh`）/ 6 Start / 7 Restart（VS Code のターミナルでは 6・7 は出ない）
+3. `sf-launcher.sh`（メニュー）: 1 Check（`sf-check.sh`）/ 2 Dryrun（`sf-dryrun.sh`）/ 3 Deploy（`sf-deploy.sh`）/ 4 Push（`sf-push.sh`）/ 5 PullRequest（`sf-next.sh`）/ 6 Start / 7 Restart（VS Code のターミナルでは 6・7 は出ない）
 4. `sf-push.sh`: `origin/main` を取り込み → カレント配下だけをコミット（`sf-check.sh` の検証のあと、VS Code でメッセージを入力）→ プッシュ
 5. `sf-next.sh`: 次の PR 先を判定して、PR の作成画面を開く（3.3）。PR のマージで、wf-release が対応する組織へリリースする
 

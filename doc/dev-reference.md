@@ -509,18 +509,20 @@ check_gh_owner "$GITHUB_OWNER"   # 認証ユーザーの一致確認
 > 仕様の正本は、`bin/sf-launcher.sh` の冒頭コメント（`--help`）。ここは要点だけ。
 
 - `sf-launcher.sh` で起動するメニュー形式ランチャー（`sf-start.sh` の最後に自動で起動する。`sf-job.sh` からは `sf-start.sh` 経由。別名（`sfl` など）は作らない。直接 `sf-launcher.sh` を打つ。2026-10-23 の決定）
-- メニュー: 1 Check / 2 Dryrun / 3 Deploy / 4 Push / 5 Next / 6 Start / 7 Restart（同じフォルダの `sf-xxx.sh` を、引数なしで bash で実行）。番号は 1 文字（Enter 不要）、`q` で終了。範囲外・数字と `q` 以外は無視。実行したコマンドが失敗しても、ランチャーは終了しない
+- メニュー: 1 Check / 2 Dryrun / 3 Deploy / 4 Push / 5 PullRequest（`sf-next.sh`。2026-11-27 に Next から改名）/ 6 Start / 7 Restart（同じフォルダの `sf-xxx.sh` を、引数なしで bash で実行）。番号は 1 文字（Enter 不要）、`q` で終了。範囲外・数字と `q` 以外は無視。実行したコマンドが失敗しても、ランチャーは終了しない
 - `lib/common.sh` を source しない standalone 設計（ログファイルを作らない・カラー定義を独自に持つ）
 - force-* フォルダの外では、警告を表示して終了する（終了コード 1。`-h` / `--help` だけは外でも動く）
 - VSCode 内では `sf-start` / `sf-restart`（6・7）をメニューから除外（`$TERM_PROGRAM == "vscode"` で判定。番号 6・7 は範囲外になる）
 - `SF_LAUNCHER_ACTIVE=1` をエクスポートして `sf-start.sh` からの二重起動を防止
 - `sf-launcher.sh <番号>` で、その番号を 1 回だけ実行して終了（終了コードは、実行したコマンドのもの。範囲外・スクリプトがなければ 1）
 - `sf-launcher.sh --fzf` で fzf モードも利用可能（fzf がなければ、警告を表示して終了コード 1）
-- メニューの見出し（線・`>> Launcher <<`・線）の下に、`print_status` が今の状況を出す（2026-11-27。読み取りのみ・通信しない）:
-  - 1 行目 `<ブランチ> ｜ <組織> ｜ ログ <状態>`。ブランチは `git symbolic-ref`、組織は `.sf/config.json` の `target-org` を `node -e` で読む（grep / sed で JSON を読まない。表示を崩す文字を除き 60 文字で切る。`echo -e` のため `\` を `\\` にする）。ログは `apexlog_summary` が `logs/apex/.status` を `while read` で読み、`AL_TEXT`・`AL_COLOR`・`AL_WARN` に入れる（source しない。WARNING は 2 行目）
-  - 作業の流れ `1 Check  >  2 Dryrun  >  3 Deploy  >  4 Push  >  5 Next`（番号は `number_of` で `MENU_ITEMS` から引く）と、今の段階の真下の `^ <説明>`。印の位置は流れの文字数で合わせるため、流れと印は ASCII だけで作る（丸数字・罫線は、端末によって 1 文字幅か 2 文字幅かが変わる）。段階は、未コミットの変更（`git status --porcelain`）→ Check / 追跡先なし・push していないコミット（`git rev-list --count @{u}..HEAD`）→ Push / それ以外 → Next（次の PR 先は `sf-tools/logs/next-status.txt`。`sf-next.sh` が書く `HEAD=`・`NEXT=`・`PR=`・`SKIPPED=`。`HEAD=` が今の先端と同じで、`NEXT=` が段階名の形のときだけ使う）。出すものなし・全段階済みは、印の代わりに 1 行
-  - 環境ブランチ（`branches.txt`）の上では、流れの代わりに注意を出す
-- `run_command` は、終わったら結果を 1 行で出す（0 → `✓ <名前>: 終わりました（成功）`、それ以外 → `✗ <名前>: 失敗、または中断しました（終了コード N）`）。終了コードは、そのまま返す
+- 表示名は、起動のときに 1 回だけ `MENU_LABELS` に作る（`label_of`。sf- を除いて先頭を大文字。`sf-next` だけ `PullRequest`）。名前の欄は 11 文字の幅（`%-11s`）。fzf モードも同じ表示名で出し、選んだ表示名から `MENU_LABELS` で照らしてコマンドを引く
+- 線と線の間に、`print_status` が見出しの 2 行を出す（2026-11-27。読み取りのみ・通信しない）:
+  - 描画のたびのコマンドの起動を減らす（Windows の Git Bash では起動が遅い）: ブランチ・先端・変更の数は 1 回の `git status --porcelain=v2 --branch` から読む。値の掃除 `clean_into` は、英数字と一部の記号だけの値ならコマンドを起動しない。組織は `.sf/config.json` の中身が前回と同じなら node を起動しない（`read_target_org`）
+  - 1 行目 `  >> LAUNCHER <<   <ブランチ> @ <組織> ／ 変更 N 件 ／ Log: <状態>`。2 行目以降は、頭に同じ幅（19 文字）の空白 `HEAD_PAD` を置いて、ブランチ名の位置にそろえる。組織は `.sf/config.json` の `target-org` を `node -e` で読む（grep / sed で JSON を読まない。表示を崩す文字を除き 60 文字で切る。`echo -e` のため `\` を `\\` にする）。ログは `apexlog_summary` が `logs/apex/.status` を `while read` で読み、`AL_TEXT`（例: `取得中 (15:30/3本)`）・`AL_COLOR`・`AL_WARN` に入れる（source しない。WARNING は `⚠ Log: …` の 1 行）
+  - 2 行目 `Branch: ✓ develop ⇒ ▸ staging (次のPR) ⇒ × main`（出し終わり ✓・次 ▸（発行中の PR があれば `(PR #N 発行中)`）・まだ ×）。元は `sf-tools/logs/next-status.txt`（`sf-next.sh` が書く `HEAD=`・`NEXT=`・`PR=`・`SKIPPED=`・`TIERS=`）。`HEAD=` が今の先端と同じで、`NEXT=`・`TIERS=` が段階名の形（`TIERS=` は 10 個まで）、`NEXT=` が `none` か `TIERS=` の中にあるときだけ使う。全段階済み → すべて ✓ と `(全段階にリリース済み)`、出すものなし → `出すものなし（ターゲットファイル … が空）`、使えないとき → `（5 PullRequest で確かめる）`
+  - 環境ブランチ（`branches.txt`）の上では、`Branch:` の行の代わりに注意を出す
+- `run_command` は、終わったら結果を 1 行で出す（0 → `✓ <表示名>: 終わりました（成功）`、それ以外 → `✗ <表示名>: 失敗、または中断しました（終了コード N）`）。終了コードは、そのまま返す
 
 ### 4.8 sf-deploy.sh
 

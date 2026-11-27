@@ -67,7 +67,7 @@
 
 ### 2.4 言葉とコマンドの対応
 
-人は、**ランチャーの名前**（Check・Dryrun・Deploy・Push・Next）を、そのまま言って頼める（「Check して」「Dryrun」「Deploy お願い」「Push して」「Next」）。ふつうの言葉で頼んでもよい。
+人は、**ランチャーの名前**（Check・Dryrun・Deploy・Push・PullRequest）を、そのまま言って頼める（「Check して」「Dryrun」「Deploy お願い」「Push して」「PullRequest」）。PullRequest は、短く「PR」、以前の名前の「Next」と言われても同じに扱う。ふつうの言葉で頼んでもよい。
 
 | ランチャーの名前 | ふつうの言葉（例） | コマンド | 区分 |
 |---|---|---|---|
@@ -75,13 +75,13 @@
 | Dryrun | 「反映できるか試して」「dry-run して」 | `sf-dryrun.sh -n` | A |
 | Deploy | 「反映して」「デプロイして」 | `sf-deploy.sh -n`（自分用の組織） | B |
 | Push | 「コミットして」「プッシュして」 | `sf-push.sh -m <ファイル>` | B |
-| Next | 「次はどこに PR？」「状況を見て」 | `sf-next.sh`（`next.pr=n`。状況の表示だけ） | A |
-| Next（PR を出す） | 「PR を出して」 | `sf-next.sh --create --title … --body-file …`（`next.pr=y`） | B |
+| PullRequest（PR・Next） | 「次はどこに PR？」「状況を見て」 | `sf-next.sh`（`next.pr=n`。状況の表示だけ） | A |
+| PullRequest（PR を出す） | 「PR を出して」 | `sf-next.sh --create --title … --body-file …`（`next.pr=y`） | B |
 | （なし） | 「ログを見て」 | `sf-log.sh pull` → `logs/apex/latest.md` | A |
 | （なし） | 「新しい作業を始めて」「ジョブを作って」 | `sf-job.sh --project XXXX --owner OWNER --name <ジョブ名>`（作業フォルダで。`job.create=y`） | B |
 | Start・Restart | 「作業を始めて（VS Code・ランチャーを開く）」「組織を切り替えて」 | （C: 人に頼む。ランチャーの [6]・[7]） | C |
 
-- 「Next」だけと言われたら、まず状況の表示（`next.pr=n`）を見せ、PR を出すかは、あらためて聞く（PR を作るのは B のため）
+- 「PullRequest」「PR」「Next」だけと言われたら、まず状況の表示（`next.pr=n`）を見せ、PR を出すかは、あらためて聞く（PR を作るのは B のため）
 - 「作業を始めて」が、新しいジョブ（ブランチとクローン）のことか、今のフォルダでの sf-start のことか分からないときは、聞き返す
 - Claude Code のスキル（`/sf` など）は、配っていない。この手順書が正本（2026-11-27 の決定。`~/sf-tools/doc/ai-operation-design.md` 11.1）
 - 番号（「3 番」など）で頼まれたら、ランチャーの名前に直して確かめる（「3 は Deploy です。反映してよいですか？」）。番号の並びは、ランチャーの版で変わることがあるため、番号だけで動かさない

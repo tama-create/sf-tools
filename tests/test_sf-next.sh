@@ -309,6 +309,7 @@ test_next_status_file() {
     assert_file_contains "$f" "NEXT=staging" "次の段階（NEXT=）を書く"
     assert_file_contains "$f" "PR=12" "発行中の PR（PR=）を書く"
     assert_file_contains "$f" "SKIPPED=false" "対象が空か（SKIPPED=）を書く"
+    assert_file_contains "$f" "TIERS=develop staging main" "段階の一覧（TIERS=。下から順に空白区切り）を書く"
     MOCK_PC_JSON=$(_pc_json none)
     _next n
     assert_file_contains "$f" "NEXT=none" "全段階済み → NEXT=none"

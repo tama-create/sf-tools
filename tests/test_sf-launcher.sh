@@ -418,4 +418,27 @@ MOCK
 }
 test_fzf_label_to_command
 
+test_reload_when_updated() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] 起動のあとに自分のファイルが書き換わったら、新しい版で読み込み直す${CLR_RST}"
+    local td bd out
+    td=$(_st_repo); bd=$(mktemp -d)
+    cp "$SF_TOOLS_DIR/bin/sf-launcher.sh" "$bd/sf-launcher.sh"
+    mkdir -p "$td/sf-tools/logs"   # 本物の force-* では、sf-start.sh のログで、すでにある
+    # 起動して 2 秒後に書き換え（git pull の代わり。秒の単位の環境でも新しく見えるよう間を空ける）、待ち切れ（5 秒）のあとに q
+    out=$( (cd "$td" && { sleep 2; echo '# 書き換え' >> "$bd/sf-launcher.sh"; sleep 8; printf 'q'; } | TERM_PROGRAM= bash "$bd/sf-launcher.sh" 2>&1) | sed $'s/\033\\[[0-9;]*m//g')
+    assert_output_contains "$out" "↻ sf-tools が更新されたため、ランチャーを読み込み直します" "書き換わった → 読み込み直すことを出す"
+    [[ $(printf '%s\n' "$out" | grep -c '>> LAUNCHER <<') -ge 2 ]] && pass "読み込み直したあと、メニューを描き直す" || fail "読み込み直したあと、メニューを描き直す" "$out"
+    assert_output_contains "$out" "終了しました" "読み込み直したあとも、入力（q）を受け付ける"
+    ls "$td"/sf-tools/logs/.launcher-* >/dev/null 2>&1 && fail "終了のあと、印のファイルを消す" || pass "終了のあと、印のファイルを消す"
+    out=$( (cd "$td" && { sleep 6; printf 'q'; } | TERM_PROGRAM= bash "$bd/sf-launcher.sh" 2>&1) | sed $'s/\033\\[[0-9;]*m//g')
+    assert_output_not_contains "$out" "読み込み直します" "書き換わっていない → 待ち切れても、読み込み直さない"
+    # 入力がないまま、6 秒後に閉じる（Bash 3.2 では、待ち切れと同じ戻り値の EOF）→ 1 回だけ待ち切れ扱いのあと、終わる
+    local t0 ec; t0=$SECONDS
+    (cd "$td" && sleep 6 | TERM_PROGRAM= bash "$bd/sf-launcher.sh" >/dev/null 2>&1); ec=$?
+    assert_exit_ok $ec "入力が 6 秒後に閉じる → 正常終了"
+    (( SECONDS - t0 < 20 )) && pass "入力が 6 秒後に閉じる → 待ち続けずに終わる" || fail "入力が 6 秒後に閉じる → 待ち続けずに終わる" "$((SECONDS - t0)) 秒"
+    teardown "$td" "${td}.origin.git" "$bd"
+}
+test_reload_when_updated
+
 print_summary

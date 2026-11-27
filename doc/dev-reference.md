@@ -522,6 +522,7 @@ check_gh_owner "$GITHUB_OWNER"   # 認証ユーザーの一致確認
   - 1 行目 `  >> LAUNCHER <<   <ブランチ> @ <組織> ／ 変更 N 件 ／ Log: <状態>`。2 行目以降は、頭に同じ幅（19 文字）の空白 `HEAD_PAD` を置いて、ブランチ名の位置にそろえる。組織は `.sf/config.json` の `target-org` を `node -e` で読む（grep / sed で JSON を読まない。表示を崩す文字を除き 60 文字で切る。`echo -e` のため `\` を `\\` にする）。ログは `apexlog_summary` が `logs/apex/.status` を `while read` で読み、`AL_TEXT`（例: `取得中 (15:30/3本)`）・`AL_COLOR`・`AL_WARN` に入れる（source しない。WARNING は `⚠ Log: …` の 1 行）
   - 2 行目 `Branch: ✓ develop ⇒ ▸ staging (次のPR) ⇒ × main`（出し終わり ✓・次 ▸（発行中の PR があれば `(PR #N 発行中)`）・まだ ×）。元は `sf-tools/logs/next-status.txt`（`sf-next.sh` が書く `HEAD=`・`NEXT=`・`PR=`・`SKIPPED=`・`TIERS=`）。`HEAD=` が今の先端と同じで、`NEXT=`・`TIERS=` が段階名の形（`TIERS=` は 10 個まで）、`NEXT=` が `none` か `TIERS=` の中にあるときだけ使う。全段階済み → すべて ✓ と `(全段階にリリース済み)`、出すものなし → `出すものなし（ターゲットファイル … が空）`、使えないとき → `（5 PullRequest で確かめる）`
   - 環境ブランチ（`branches.txt`）の上では、`Branch:` の行の代わりに注意を出す
+- 自分の書き換わりを見る（2026-11-27）: `sf-start.sh` は、裏の `sf-install.sh` が `git pull` で sf-tools を最新にするのと同時に、前面でランチャーを起動するため、ランチャーが古い版のまま動いていた。メニューのときは、起動時に `sf-tools/logs/.launcher-<PID>` を作り（`: >`）、入力の待ち切れ（5 秒ごと）とメニューの描き直しの前に、自分のファイルがそれより新しいか（`-nt`）を見て、新しければ `exec bash` で読み込み直す（入力は、いつも `read -t` で 5 秒ずつ待つ。Bash 3.2 は待ち切れと EOF の戻り値が同じため、待った時間で見分け、4 秒以上たってからの EOF は 1 回だけ待ち切れ扱いになり、次の読み取りで終わる。コマンドを起動しない。Bash 3.2 は秒の単位のため、起動と同じ秒の書き換えは見分けられない）。印は終了時（`trap EXIT`）と `exec` の前に消す
 - `run_command` は、終わったら結果を 1 行で出す（0 → `✓ <表示名>: 終わりました（成功）`、それ以外 → `✗ <表示名>: 失敗、または中断しました（終了コード N）`）。終了コードは、そのまま返す
 
 ### 4.8 sf-deploy.sh

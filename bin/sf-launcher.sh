@@ -62,6 +62,14 @@
 #      使えないとき（ファイルがない・古い・形が違う）は「（5 PullRequest で確かめる）」（番号はメニューの並びから引く）
 #   7. コマンドが終わったら、結果を 1 行で出す: 終了コード 0 → 「✓ <表示名>: 終わりました（成功）」（太字の緑）/
 #      それ以外 → 「✗ <表示名>: 失敗、または中断しました（終了コード N）」（太字の赤。q での中断も 1 になるため、両方を書く）
+#   8. メニューの入力は、5 秒ずつ待つ（read -t。Bash 3.2 は、待ち切れと EOF の戻り値が同じ 1 のため、待った時間で見分ける。
+#      4 秒以上たってからの EOF は、1 回だけ待ち切れとして扱い、次の読み取り（すぐ EOF で返る）で終わる）。待ち切れたとき・メニューを描き直す前に、
+#      このスクリプト自身のファイルが、起動のあとに書き換わったかを見る（起動のときに sf-tools/logs/.launcher-<PID> を作り、
+#      それより新しいか（-nt）で比べる。コマンドを起動しない）。書き換わっていたら「↻ …読み込み直します」と出して、新しい版を
+#      同じ引数なし（メニュー）で exec し直す（sf-start.sh は、裏の sf-install.sh が git pull で sf-tools を最新にするのと同時に、
+#      前面でランチャーを起動するため、ランチャーは古い版を読み込んだまま動いていた。2026-11-27）。
+#      sf-tools/logs がない・印のファイルを作れないときは、確かめない。秒の単位で比べる環境（Bash 3.2）では、起動と同じ秒の
+#      書き換えは見分けられない。印のファイルは、終了のときに消す（exec の前にも消す）。メニューのとき（引数なし）だけ
 #
 # 【前提条件】
 #   - force-* フォルダで実行する（処理の流れ 2）
@@ -398,6 +406,24 @@ run_command() {
 }
 
 # ------------------------------------------------------------------------------
+# 自分の書き換わりを見る（処理の流れ 8）
+# ------------------------------------------------------------------------------
+LAUNCHER_SELF="$SCRIPT_DIR/${BASH_SOURCE[0]##*/}"
+LAUNCHER_STAMP=""
+start_self_watch() {
+    [[ -d sf-tools/logs ]] || return 0
+    LAUNCHER_STAMP="sf-tools/logs/.launcher-$$"
+    { : > "$LAUNCHER_STAMP"; } 2>/dev/null || { LAUNCHER_STAMP=""; return 0; }   # 起動のときの時刻の印（: > はコマンドを起動しない）
+    trap 'rm -f "$LAUNCHER_STAMP"' EXIT   # 終わったら印を消す（common.sh を読まない単独の設計のため、run は使わない）
+}
+reload_if_updated() {
+    [[ -n "$LAUNCHER_STAMP" && "$LAUNCHER_SELF" -nt "$LAUNCHER_STAMP" ]] || return 0
+    echo -e "  ${CYAN}↻ sf-tools が更新されたため、ランチャーを読み込み直します${RESET}"
+    rm -f "$LAUNCHER_STAMP"; trap - EXIT   # exec では EXIT の trap が動かないため、先に消す
+    exec bash "$LAUNCHER_SELF"
+}
+
+# ------------------------------------------------------------------------------
 # メイン処理
 # ------------------------------------------------------------------------------
 main() {
@@ -438,7 +464,9 @@ main() {
     fi
 
     # インタラクティブメニュー
+    start_self_watch
     while true; do
+        reload_if_updated   # 前のコマンド（Start など）の中で、sf-tools が更新されていたら、新しい版で描く
         print_menu
 
         local count="${#MENU_ITEMS[@]}"
@@ -448,21 +476,20 @@ main() {
         # 入力ループ（1文字即時入力・無効入力は行クリアして待機）
         while true; do
             printf "  番号を入力 (1-%d / q で終了): " "$count"
-            if [[ "$shown" == "starting" ]]; then
-                # 準備中: APEXLOG_REFRESH 秒ずつ待ち、状態が変わったら、メニューを描き直す（裏の準備は数分かかることがある。2026-11-23）
-                t0=$SECONDS; rc=0
-                read -rsn1 -t "$APEXLOG_REFRESH" input || rc=$?
-                if [[ $rc -ne 0 ]]; then
-                    # 待ち切れ（Bash 4 以降は 128 より大きい。Bash 3.2 は 1 のため、待った時間でも見分ける）と EOF を分ける
-                    if (( rc > 128 || SECONDS - t0 >= APEXLOG_REFRESH - 1 )); then
-                        printf "\r\033[K"
-                        [[ "$(apexlog_state)" == "starting" ]] && continue
-                        printf "\n"; redraw=1; break
-                    fi
-                    printf "\n"; exit 0   # EOF → 正常終了
+            # APEXLOG_REFRESH 秒ずつ待つ。待ち切れたら、自分の書き換わり（処理の流れ 8）と、準備中のあいだはデバッグログの
+            #   状態を見て、変わっていたら描き直す（裏の準備は数分かかることがある。2026-11-23）
+            t0=$SECONDS; rc=0
+            read -rsn1 -t "$APEXLOG_REFRESH" input || rc=$?
+            if [[ $rc -ne 0 ]]; then
+                # 待ち切れ（Bash 4 以降は 128 より大きい。Bash 3.2 は 1 のため、待った時間でも見分ける）と EOF を分ける。
+                #   4 秒以上たってからの EOF は、ここで 1 回だけ待ち切れとして扱われるが、次の read がすぐ EOF で返り、下で終わる
+                if (( rc > 128 || SECONDS - t0 >= APEXLOG_REFRESH - 1 )); then
+                    printf "\r\033[K"
+                    reload_if_updated
+                    if [[ "$shown" == "starting" && "$(apexlog_state)" != "starting" ]]; then printf "\n"; redraw=1; break; fi
+                    continue
                 fi
-            else
-                read -rsn1 input || { printf "\n"; exit 0; }  # EOF → 正常終了
+                printf "\n"; exit 0   # EOF → 正常終了
             fi
 
             # 空 Enter / 数字・q 以外 → 行クリアして待機（エコーしない）

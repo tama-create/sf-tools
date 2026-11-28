@@ -4,6 +4,8 @@
 # ==============================================================================
 source "$(dirname "${BASH_SOURCE[0]}")/test_helper.sh"
 export SF_LAUNCHER_BG_STATUS=0   # 2 行目の裏の判定（sf-next.sh --status）を止める。確かめるテストだけで 1 にする
+export SF_LAUNCHER_FROM_START=1  # sf-start.sh から開いた扱いにする（メニューを sf-start.sh に切り替えない）。確かめるテストだけで外す
+unset SF_LAUNCHER_ACTIVE
 echo -e "${CLR_HEAD}=== sf-launcher.sh ===${CLR_RST}"
 
 # ------------------------------------------------------------------------------
@@ -179,6 +181,10 @@ test_apexlog_status_line() {
     printf 'STATE=error\nREASON=接続できないため\n' > "$td/logs/apex/.status"
     out=$(cd "$td" && echo "q" | PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-launcher.sh" 2>&1)
     [[ "$out" == *$'\033[1m\033[0;31m取れていません（接続できないため）'* ]] && pass "取れていません → 太字の赤で表示する" || fail "取れていません → 太字の赤で表示する" "$out"
+    printf 'STATE=stopped\nREASON=すべての sf-start が終了したため\n' > "$td/logs/apex/.status"
+    out=$(cd "$td" && echo "q" | PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-launcher.sh" 2>&1)
+    [[ "$out" == *"止まっています（すべての sf-start が終了したため）。sf-start で取り始めます"* ]] && pass "止まっている → 理由と、sf-start で取り始めることを添える" || fail "止まっている → 理由と、sf-start で取り始めることを添える" "$out"
+    [[ "$out" == *$'\033[0;33m止まっています'* ]] && pass "止まっている → 黄色で表示する" || fail "止まっている → 黄色で表示する" "$out"
     printf 'STATE=collecting\nORG=dev\nWARNING=取得に失敗しました（120 秒後にやり直します）\n' > "$td/logs/apex/.status"
     out=$(cd "$td" && echo "q" | PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-launcher.sh" 2>&1)
     [[ "$out" == *"⚠ Log: 取得に失敗しました"* ]] && pass "WARNING → もう 1 行表示する" || fail "WARNING → もう 1 行表示する" "$out"
@@ -494,5 +500,61 @@ MOCK
     teardown "$td" "${td}.origin.git" "$mk" "$bd"
 }
 test_bg_status
+
+test_handoff_to_sf_start() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] メニューを sf-start.sh を通さずに開く → sf-start.sh に切り替える（入口をそろえる）${CLR_RST}"
+    local td bd out
+    td=$(setup_force_dir); bd=$(mktemp -d)
+    mkdir -p "$bd/bin" "$td/sf-tools/logs"
+    cp "$SF_TOOLS_DIR/bin/sf-launcher.sh" "$bd/bin/"
+    # sf-start.sh のモック: 呼ばれたこと・受け取った SF_LAUNCHER_ACTIVE・引数の数を書く
+    cat > "$bd/bin/sf-start.sh" <<'MOCK'
+#!/bin/bash
+echo "start ACTIVE=${SF_LAUNCHER_ACTIVE:-} ARGS=$#" >> "${0%/*}/start.calls"
+MOCK
+    out=$( (cd "$td" && echo "q" | env -u SF_LAUNCHER_FROM_START -u SF_LAUNCHER_ACTIVE bash "$bd/bin/sf-launcher.sh" 2>&1) | sed $'s/\033\\[[0-9;]*m//g')
+    assert_file_contains "$bd/bin/start.calls" "start ACTIVE= ARGS=0" "印なしのメニュー → sf-start.sh を引数なしで動かす（SF_LAUNCHER_ACTIVE は外す）"
+    assert_output_contains "$out" "sf-start で開きます" "切り替えるとき → 「sf-start で開きます」と出す"
+    assert_output_not_contains "$out" "番号を入力" "切り替えるとき → 自分ではメニューを出さない"
+
+    # sf-start.sh からの起動（SF_LAUNCHER_FROM_START=1）→ 切り替えず、メニューを出す
+    rm -f "$bd/bin/start.calls"
+    out=$( (cd "$td" && echo "q" | env -u SF_LAUNCHER_ACTIVE SF_LAUNCHER_FROM_START=1 bash "$bd/bin/sf-launcher.sh" 2>&1) | sed $'s/\033\\[[0-9;]*m//g')
+    [[ ! -f "$bd/bin/start.calls" ]] && pass "sf-start.sh からの起動 → 切り替えない" || fail "sf-start.sh からの起動 → 切り替えない" "$(cat "$bd/bin/start.calls")"
+    assert_output_contains "$out" "番号を入力" "sf-start.sh からの起動 → メニューを出す"
+
+    # ランチャーの中から開かれた（起動したときに SF_LAUNCHER_ACTIVE=1）→ 切り替えない（行ったり来たりしない）
+    rm -f "$bd/bin/start.calls"
+    (cd "$td" && echo "q" | env -u SF_LAUNCHER_FROM_START SF_LAUNCHER_ACTIVE=1 bash "$bd/bin/sf-launcher.sh" > /dev/null 2>&1)
+    [[ ! -f "$bd/bin/start.calls" ]] && pass "起動したときに SF_LAUNCHER_ACTIVE=1 → 切り替えない" || fail "起動したときに SF_LAUNCHER_ACTIVE=1 → 切り替えない" "$(cat "$bd/bin/start.calls")"
+
+    # 印を付けない古い版の sf-start.sh から（SF_LOG_OWNER の PID が生きている）→ 切り替えない
+    rm -f "$bd/bin/start.calls"
+    (cd "$td" && echo "q" | env -u SF_LAUNCHER_FROM_START -u SF_LAUNCHER_ACTIVE SF_LOG_OWNER="$$:1:gitbash1" bash "$bd/bin/sf-launcher.sh" > /dev/null 2>&1)
+    [[ ! -f "$bd/bin/start.calls" ]] && pass "SF_LOG_OWNER の PID が生きている → 切り替えない（古い版の sf-start.sh から）" || fail "SF_LOG_OWNER の PID が生きている → 切り替えない（古い版の sf-start.sh から）" "$(cat "$bd/bin/start.calls")"
+    # 持ち主の PID が死んでいる（sf-start.sh が終わったあとの残り）→ 切り替える
+    rm -f "$bd/bin/start.calls"
+    local dead; bash -c 'exit 0' & dead=$!; wait "$dead"
+    (cd "$td" && echo "q" | env -u SF_LAUNCHER_FROM_START -u SF_LAUNCHER_ACTIVE SF_LOG_OWNER="${dead}:1:gitbash1" bash "$bd/bin/sf-launcher.sh" > /dev/null 2>&1)
+    assert_file_contains "$bd/bin/start.calls" "start ACTIVE=" "SF_LOG_OWNER の PID が死んでいる → 切り替える"
+
+    # 番号の指定 → 切り替えない
+    rm -f "$bd/bin/start.calls"; : > "$bd/bin/sf-check.sh"
+    (cd "$td" && env -u SF_LAUNCHER_FROM_START -u SF_LAUNCHER_ACTIVE bash "$bd/bin/sf-launcher.sh" 1 > /dev/null 2>&1)
+    [[ ! -f "$bd/bin/start.calls" ]] && pass "番号の指定 → 切り替えない" || fail "番号の指定 → 切り替えない" "$(cat "$bd/bin/start.calls")"
+
+    # 読み込み直し（exec）→ 新しい版も、切り替えない（SF_LAUNCHER_FROM_START が環境に残る）
+    rm -f "$bd/bin/start.calls"
+    out=$( (cd "$td" && { sleep 3; echo '# 書き換え' >> "$bd/bin/sf-launcher.sh"; sleep 8; printf 'q'; } | env -u SF_LAUNCHER_ACTIVE SF_LAUNCHER_FROM_START=1 bash "$bd/bin/sf-launcher.sh" 2>&1) | sed $'s/\033\\[[0-9;]*m//g')
+    assert_output_contains "$out" "読み込み直します" "（前提）書き換え → 読み込み直す"
+    [[ ! -f "$bd/bin/start.calls" ]] && pass "読み込み直し → 切り替えない" || fail "読み込み直し → 切り替えない" "$(cat "$bd/bin/start.calls")"
+
+    # sf-start.sh がない → そのままメニューを出す
+    rm -f "$bd/bin/start.calls" "$bd/bin/sf-start.sh"
+    out=$( (cd "$td" && echo "q" | env -u SF_LAUNCHER_FROM_START -u SF_LAUNCHER_ACTIVE bash "$bd/bin/sf-launcher.sh" 2>&1) | sed $'s/\033\\[[0-9;]*m//g')
+    assert_output_contains "$out" "番号を入力" "sf-start.sh がない → そのままメニューを出す"
+    teardown "$td" "$bd"
+}
+test_handoff_to_sf_start
 
 print_summary

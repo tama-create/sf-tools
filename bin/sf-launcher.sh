@@ -3,11 +3,13 @@
 # sf-launcher.sh - sf-tools コマンドランチャー
 # ==============================================================================
 # sf-tools の日常のコマンドを、メニューから番号（または fzf）で選んで実行するランチャー。
-# sf-start.sh の最後に自動で起動する。手動でも実行できる。
+# sf-start.sh の最後に自動で起動する。メニューを直接開こうとしたとき（sf-launcher.sh を打った）は、sf-start.sh に切り替える
+# （入口を sf-start.sh にそろえる。接続の確認・デバッグログの準備をしてから、メニューを開く。2026-11-28）。
 #
 # 【使い方】
 #   sf-launcher.sh              : メニューを表示する。番号を 1 文字入力すると（Enter 不要）実行し、終わるとメニューに戻る。
-#                                 q で終了。範囲外の数字・数字と q 以外の入力は無視する
+#                                 q で終了。範囲外の数字・数字と q 以外の入力は無視する。
+#                                 sf-start.sh から起動されていなければ、sf-start.sh に切り替える（処理の流れ 2）
 #   sf-launcher.sh <番号>       : その番号のコマンドを 1 回だけ実行して終了する（例: sf-launcher.sh 1）
 #   sf-launcher.sh --fzf        : fzf でインクリメンタル検索して実行する（Enter: 実行 / Esc: 終了）。実行後は選択に戻る
 #
@@ -21,7 +23,15 @@
 #
 # 【処理の流れ】
 #   1. 環境変数 SF_LAUNCHER_ACTIVE=1 を export する（sf-start.sh が、ランチャーを二重に起動しないため）
-#   2. カレントフォルダの名前が force- で始まらなければ、警告を表示して終了する（終了コード 1）
+#   2. カレントフォルダの名前が force- で始まらなければ、警告を表示して終了する（終了コード 1）。
+#      続けて、引数なし（メニュー）で、sf-start.sh から起動されていないとき（環境変数 SF_LAUNCHER_FROM_START が 1 でなく、
+#      起動したときの SF_LAUNCHER_ACTIVE も 1 でなく、環境変数 SF_LOG_OWNER の PID（sf-start.sh の持ち主の印）も生きていない。
+#      最後の条件は、印を付けない古い版の sf-start.sh が、更新されたこのランチャーを開いたときのため）は、「sf-start で開きます」と出して、同じフォルダの sf-start.sh を
+#      引数なしで exec する（SF_LAUNCHER_ACTIVE は外して渡す。sf-start.sh が、接続の確認・デバッグログの準備をしてから、
+#      SF_LAUNCHER_FROM_START=1 を付けて、このランチャーを開く。デバッグログを取り始め、閉じるときに後始末をするのは
+#      sf-start.sh だけのため、入口をそろえて「メニューが開いていれば、ログも取れている」ようにする。2026-11-28）。
+#      sf-start.sh がないときは、そのままメニューを開く。番号の指定・--fzf では、切り替えない。
+#      読み込み直し（処理の流れ 8）の exec では、SF_LAUNCHER_FROM_START が環境に残り、SF_LAUNCHER_ACTIVE も 1 のため、切り替えない
 #   3. メニュー（番号: 表示名 → 実行するスクリプト）。1〜5 は、日々の作業の順（上から順に押せば、確かめる → 試す → 反映 → コミット → PR）:
 #        1: Check → sf-check.sh   2: Dryrun → sf-dryrun.sh   3: Deploy → sf-deploy.sh
 #        4: Push → sf-push.sh     5: PullRequest → sf-next.sh（中身は、次の段階へプルリクエストを出す。出し先を確かめる）
@@ -45,6 +55,9 @@
 #          ファイルの中身が前回と同じなら、node を起動せず、前回の結果を使う）
 #        デバッグログ: logs/apex/.status の STATE による（collecting = 取得中 (<期限>/<今日の本数>本) / starting = 準備中 /
 #          skipped = 取っていません / error = 取れていません / stopped = 止まっています。理由（REASON）があれば括弧で添える）。
+#          止まっているときは「。sf-start で取り始めます」を添える（デバッグログを取り始め、閉じるときに後始末をするのは sf-start.sh
+#          だけ。ランチャー自身は、取り始めない（メニューは処理の流れ 2 で sf-start.sh を通る。番号の指定・--fzf では通らない）。
+#          VS Code のターミナルでも、sf-start を打てば同じように取る。2026-11-28 の決定）。
 #          色は状態で変える（取得中 = 太字の緑 / 準備中 = 太字の水色 / 取れていません = 太字の赤 / 取っていません・止まっています = 黄色）。
 #          WARNING があれば「⚠ Log: …」をもう 1 行。ファイルがない・STATE がそれ以外なら、ログの部分を出さない。
 #          キー=値 の行を while read で読み、source しない。
@@ -175,7 +188,7 @@ apexlog_summary() {
         starting)   AL_TEXT="準備中"; AL_COLOR="${BOLD}${CYAN}" ;;
         skipped)    AL_TEXT="取っていません${reason:+（${reason}）}"; AL_COLOR="${YELLOW}" ;;
         error)      AL_TEXT="取れていません${reason:+（${reason}）}"; AL_COLOR="${BOLD}${RED}" ;;
-        stopped)    AL_TEXT="止まっています${reason:+（${reason}）}"; AL_COLOR="${YELLOW}" ;;
+        stopped)    AL_TEXT="止まっています${reason:+（${reason}）}。sf-start で取り始めます"; AL_COLOR="${YELLOW}" ;;   # ランチャーは取り始めない（入口は sf-start だけ）
         *)          AL_WARN="" ;;   # 知らない STATE・ファイルが壊れている → 何も出さない
     esac
     return 0
@@ -459,6 +472,7 @@ reload_if_updated() {
 # メイン処理
 # ------------------------------------------------------------------------------
 main() {
+    local entry_active="${SF_LAUNCHER_ACTIVE:-}"   # 起動したときの値（ランチャーの中から開かれたか。処理の流れ 2）
     export SF_LAUNCHER_ACTIVE=1  # sf-start.sh からの二重起動を防止
 
     # force-* ディレクトリチェック
@@ -467,6 +481,17 @@ main() {
         echo -e "${DIM}  現在: ${PWD}${RESET}"
         echo ""
         exit 1
+    fi
+
+    # メニューを sf-start.sh を通さずに開こうとした → sf-start.sh に切り替える（入口をそろえる。処理の流れ 2）
+    #   生きている sf-start.sh の持ち主（SF_LOG_OWNER の PID）がいるときも、切り替えない（印を付けない古い版の sf-start.sh が、
+    #   更新されたこのランチャーを開いたとき。切り替えると、sf-start.sh と裏の sf-install.sh が、もう 1 回動く）
+    local owner_alive=0
+    if [[ -n "${SF_LOG_OWNER:-}" ]] && kill -0 "${SF_LOG_OWNER%%:*}" 2>/dev/null; then owner_alive=1; fi   # 条件チェックのため（外側の生死）
+    if [[ -z "$1" && "${SF_LAUNCHER_FROM_START:-}" != "1" && "$entry_active" != "1" && $owner_alive -eq 0 && -f "$SCRIPT_DIR/sf-start.sh" ]]; then
+        echo -e "  ${CYAN}sf-start で開きます（接続の確認・デバッグログの準備のあと、メニューを開きます）${RESET}"
+        unset SF_LAUNCHER_ACTIVE   # sf-start.sh が、ランチャーを開けるように外す
+        exec bash "$SCRIPT_DIR/sf-start.sh"   # run 不使用: common.sh を読み込まない単独の設計（exec で置き換える）
     fi
 
     # fzf モード

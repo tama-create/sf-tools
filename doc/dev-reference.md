@@ -368,7 +368,7 @@ check_gh_owner "$GITHUB_OWNER"   # 認証ユーザーの一致確認
 - `.sf/config.json` / `.sfdx/sfdx-config.json` を上書き（書き込めなければ中断）し、`code` があれば `code .` で VS Code を起動（なければ警告のみ）
 - バックグラウンドで `sf-install.sh` を実行（フック・リリースDir準備・npm install・ツール更新はすべて sf-install.sh が担当。完了は待たない）
 - デバッグログ（`~/sf-tools/bin/sf-log.sh` があるとき。`doc/sf-log-design.md` 5 章）: 持ち主の印 `SF_LOG_OWNER`（`PID:時刻:乱数`）を決め（外側の印の PID が生きていれば引き継ぐ = 入れ子）、`sf-log.sh begin -o <エイリアス> --owner <印>` を呼ぶ（sf を呼ばずにすぐ終わる。準備と取得役は裏）。0 かつ自分の印なら、`EXIT` トラップ（`_on_exit`）で `sf-log.sh leave --owner <印>` を呼ぶ。10 は何もしない・それ以外は WARNING。どれでも先へ進む
-- 続けて、前面で `sf-launcher.sh` を起動（`SF_LAUNCHER_ACTIVE=1` なら起動しない。二重起動の防止）
+- 続けて、前面で `sf-launcher.sh` を起動（`SF_LAUNCHER_ACTIVE=1` なら起動しない。二重起動の防止）。`SF_LAUNCHER_FROM_START=1` を付ける（ランチャーが、これのないメニューの起動を `sf-start.sh` に切り替えるため）
 - Ctrl+C は無効（`trap '' INT`。子の bash にも継承される）。終了コードは、ランチャー・バックグラウンドの sf-install.sh の結果によらず 0（中断・失敗は 1）
 - 前提: force-* フォルダで実行（`SF_INIT_MODE=1`（sf-job.sh 経由）なら確認を省略）。接続済みの組織を切り替えるときは `sf-restart.sh`
 
@@ -516,6 +516,7 @@ check_gh_owner "$GITHUB_OWNER"   # 認証ユーザーの一致確認
 - force-* フォルダの外では、警告を表示して終了する（終了コード 1。`-h` / `--help` だけは外でも動く）
 - VSCode 内では `sf-start` / `sf-restart`（6・7）をメニューから除外（`$TERM_PROGRAM == "vscode"` で判定。番号 6・7 は範囲外になる）
 - `SF_LAUNCHER_ACTIVE=1` をエクスポートして `sf-start.sh` からの二重起動を防止
+- 入口を `sf-start.sh` にそろえる（2026-11-28）: 引数なし（メニュー）で、`SF_LAUNCHER_FROM_START` が 1 でなく、起動したときの `SF_LAUNCHER_ACTIVE` も 1 でなく、`SF_LOG_OWNER` の PID も生きていなければ（印を付けない古い版の `sf-start.sh` が、更新されたランチャーを開いたとき、`sf-start.sh` と裏の `sf-install.sh` がもう 1 回動かないように）、`SF_LAUNCHER_ACTIVE` を外して、同じフォルダの `sf-start.sh` を `exec` する（`sf-start.sh` がなければ、そのままメニュー）。デバッグログの begin / leave は `sf-start.sh` だけが行うため（ランチャー自身で行う案は、入口が 2 つになるため取りやめた）。無限の切り替えにならないのは、`sf-start.sh` が `SF_LAUNCHER_FROM_START=1` を付けて開くため。読み込み直しの `exec` では、環境に残る `SF_LAUNCHER_FROM_START` と `SF_LAUNCHER_ACTIVE=1` で切り替えない。番号の指定・`--fzf` は切り替えない。テストは、ファイルの頭で `SF_LAUNCHER_FROM_START=1` を export する
 - `sf-launcher.sh <番号>` で、その番号を 1 回だけ実行して終了（終了コードは、実行したコマンドのもの。範囲外・スクリプトがなければ 1）
 - `sf-launcher.sh --fzf` で fzf モードも利用可能（fzf がなければ、警告を表示して終了コード 1）
 - 表示名は、起動のときに 1 回だけ `MENU_LABELS` に作る（`label_of`。sf- を除いて先頭を大文字。`sf-next` だけ `PullRequest`）。名前の欄は 11 文字の幅（`%-11s`）。fzf モードも同じ表示名で出し、選んだ表示名から `MENU_LABELS` で照らしてコマンドを引く

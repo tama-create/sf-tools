@@ -100,7 +100,7 @@ sf-job.sh [--project XXXX] [--owner OWNER] [--name ジョブ名]</code></pre>
   <li><code>.sf/config.json</code> と <code>.sfdx/sfdx-config.json</code> を、そのエイリアスで上書きする（書き込めなければ中断）。<code>code .</code> で VS Code を起動する（<code>code</code> コマンドがなければ、警告だけで先へ進む）</li>
   <li><a href="commands-auto.html#sf-install"><code>sf-install.sh</code></a> を、バックグラウンドで実行する（出力は、<code>sf-start.sh</code> のログに追記）。内容は、<code>~/sf-tools</code> の <code>git pull</code>・設定ファイル（<code>metadata.txt</code>・<code>branches.txt</code>）の確認・Git フック（<code>pre-commit</code> / <code>pre-push</code>）の設置・リリース用フォルダの準備と <code>branch_name.txt</code> の更新（<code>main</code> ブランチでは行わない）・<code>npm install</code>（<code>package.json</code> があるとき。更新済みなら省略）・開発ツールの更新（<code>sf-upgrade.sh</code>。24 時間に 1 回）</li>
   <li>デバッグログを、ランチャーの起動中に裏で取る準備をする（<a href="#sf-log"><code>sf-log.sh</code></a> があるとき）。このプロジェクト・この組織のエイリアスで初めてのときだけ、AI への送信の注意を表示して「自動で取るか」を聞きます（Y/N）。取るときは、ログを出させる設定（TraceFlag）の準備と取得を、<strong>裏で</strong>始めます（ランチャーは待たずに開きます）。共有環境の組織・本番の組織・「取らない」と答えたときは、取りません。取れなくても、先へ進みます</li>
-  <li>最後に、ランチャー（<code>sf-launcher.sh</code>）を前面で起動する（ランチャーから呼ばれたときは、二重に起動しない）</li>
+  <li>最後に、ランチャー（<code>sf-launcher.sh</code>）を前面で起動する（ランチャーから呼ばれたときは、二重に起動しない。<code>sf-launcher.sh</code> を直接打ったときも、ここを通って開きます）</li>
   <li>終わるとき（ランチャーを <code>q</code> で閉じたとき）は、ほかに起動中の <code>sf-start.sh</code> がなければ、デバッグログの取得を止め、TraceFlag を消します（数十秒かかることがあります）</li>
 </ol>
 <h3>補足</h3>
@@ -116,10 +116,11 @@ sf-job.sh [--project XXXX] [--owner OWNER] [--name ジョブ名]</code></pre>
 
 <h2 id="sf-launcher"><code>sf-launcher.sh</code>（ランチャー）</h2>
 <p><strong>開発者の毎日の操作は、このランチャーで足ります（おすすめ）。</strong>使い方は、<a href="../guide/daily.html#launcher">日々の開発の流れ</a>にあります。</p>
-<pre><code>sf-launcher.sh           # メニュー形式で選択（ふだんは、これだけ）
+<pre><code>sf-start.sh              # 接続の確認・デバッグログの準備のあと、メニューを開く（ふだんは、これだけ）
+sf-launcher.sh           # 上と同じ（sf-start.sh に切り替わる）
 sf-launcher.sh 4         # 番号を直接指定して、すぐ実行
 sf-launcher.sh --fzf     # fzf でインクリメンタル検索</code></pre>
-<p>sf-tools の日常のコマンドを、メニューから選んで実行できます。<code>sf-start.sh</code> の最後に自動で起動します（手動でも実行できます）。<code>force-*</code> フォルダの中で使います。</p>
+<p>sf-tools の日常のコマンドを、メニューから選んで実行できます。<code>sf-start.sh</code> の最後に自動で起動します。<code>sf-launcher.sh</code> でメニューを開こうとしたときも、「sf-start で開きます」と出して、<code>sf-start.sh</code> に切り替わります（デバッグログを取り始め、閉じるときに後始末をするのは <code>sf-start.sh</code> だけのため、入口をそろえています）。番号の指定と <code>--fzf</code> は、切り替わらず、デバッグログも取り始めません。<code>force-*</code> フォルダの中で使います。</p>
 <pre><code>  ──────────────────────────────────────────────────
   >> LAUNCHER <<   JOB-20261127 @ dev-tama ／ 変更 0 件 ／ Log: 取得中 (15:30/23本)
                    Branch: ✓ develop ⇒ ▸ staging (次のPR) ⇒ × main
@@ -146,7 +147,7 @@ sf-launcher.sh --fzf     # fzf でインクリメンタル検索</code></pre>
   <li>フォルダの名前が <code>force-</code> で始まらなければ、警告を表示して終了します（終了コード 1。<code>-h</code> は、フォルダの外でも動きます）。</li>
   <li>メニューと <code>--fzf</code> の中では、実行したコマンドが失敗しても、ランチャーは終了しません。</li>
   <li>終了コードは、メニューを <code>q</code>・EOF で終了したとき・<code>--fzf</code> を Esc で終了したときが <code>0</code>、番号を指定したときは、実行したコマンドの終了コードです（番号が範囲外・スクリプトがないときは <code>1</code>）。</li>
-  <li>見出しの下の「デバッグログ」の 1 行は、<a href="#sf-log"><code>sf-log.sh</code></a> の状態です（取得中・準備中・取っていません・取れていません・止まっています。注意があれば、もう 1 行）。色で状態が分かります（取得中 = 緑・準備中 = 水色・取れていません = 赤・取っていません／止まっています = 黄色）。<code>logs/apex/.status</code> がなければ、表示しません。メニューを表示するたびに、読み直します。準備中のあいだは、5 秒ごとに読み直し、変わったらメニューを描き直します（コマンドは動きません）。</li>
+  <li>見出しの下の「デバッグログ」の 1 行は、<a href="#sf-log"><code>sf-log.sh</code></a> の状態です（取得中・準備中・取っていません・取れていません・止まっています。注意があれば、もう 1 行）。止まっているときは「。sf-start で取り始めます」と添えます（取り始めるのは <code>sf-start.sh</code> だけです）。色で状態が分かります（取得中 = 緑・準備中 = 水色・取れていません = 赤・取っていません／止まっています = 黄色）。<code>logs/apex/.status</code> がなければ、表示しません。メニューを表示するたびに、読み直します。準備中のあいだは、5 秒ごとに読み直し、変わったらメニューを描き直します（コマンドは動きません）。</li>
   <li>ランチャーは、ログファイルを作りません（共通のライブラリを読み込まない、単独の設計です）。</li>
 </ul>
 

@@ -56,8 +56,9 @@
 <p>毎日の操作は、ランチャーのメニューから、<strong>番号を 1 つ押すだけ</strong>で実行できます。コマンドの名前を覚える必要は、ありません。コマンドを直接打つこともできます（慣れている方は、そちらでも構いません）。便利なので、ランチャーをおすすめしています。</p>
 <div class="box ok">
   <div class="title">ランチャーは、自動で開きます</div>
-  <p><code>sf-job.sh</code> や <code>sf-start.sh</code> を実行すると、最後に、ターミナルでランチャーが自動で開きます。閉じてしまったときや、<strong>VS Code のターミナルで使いたいとき</strong>は、<code>force-*</code> フォルダの中で、次のように打ちます（<a href="install.html#path">PATH を設定</a>していれば、<code>sf-l</code> まで打って Tab キーを押すと、補完されます）。</p>
-  <pre><code>sf-launcher.sh</code></pre>
+  <p><code>sf-job.sh</code> や <code>sf-start.sh</code> を実行すると、最後に、ターミナルでランチャーが自動で開きます。閉じてしまったときや、<strong>VS Code のターミナルで使いたいとき</strong>は、<code>force-*</code> フォルダの中で、次のように打ちます（<a href="install.html#path">PATH を設定</a>していれば、<code>sf-st</code> まで打って Tab キーを押すと、補完されます）。</p>
+  <pre><code>sf-start.sh</code></pre>
+  <p><code>sf-start.sh</code> は、組織への接続を確かめ、デバッグログ（AI が読むログ）の準備をしてから、ランチャーを開きます。<code>sf-launcher.sh</code> と打っても、同じく <code>sf-start.sh</code> に切り替わります（「sf-start で開きます」と出ます）。入口をそろえて、ランチャーが開いていれば、デバッグログも取れているようにするためです。</p>
 </div>
 <figure class="diagram">
 <div class="term"><span class="dim">  ──────────────────────────────────────────────────</span>
@@ -105,7 +106,7 @@
   <li><strong>VS Code のターミナルでは、6 と 7 は表示されません</strong>（VS Code が、二重に開かないようにするためです）。1〜5 を使います。</li>
   <li><code>sf-job.sh</code>（新しい作業を始める）は、メニューにありません。<code>force-*</code> フォルダの外の、<strong>作業フォルダ</strong>で実行するためです（<a href="basics.html#job">基本の使い方</a>）。始めたあとは、ランチャーが自動で開きます。</li>
   <li>ランチャーは、<code>force-*</code> フォルダの中でだけ使えます。</li>
-  <li>番号を指定して、1 回だけ実行することもできます（例: <code>sf-launcher.sh 4</code>）。検索して選びたいときは、<code>sf-launcher.sh --fzf</code>（<code>fzf</code> が必要です）。</li>
+  <li>番号を指定して、1 回だけ実行することもできます（例: <code>sf-launcher.sh 4</code>。このときは、<code>sf-start.sh</code> に切り替わりません）。検索して選びたいときは、<code>sf-launcher.sh --fzf</code>（<code>fzf</code> が必要です）。</li>
 </ul>
 
 <h2 id="target">ターゲットファイルを書く</h2>

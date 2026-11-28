@@ -180,7 +180,7 @@ test_launcher_called() {
     setup_std_env td mb mh
     create_all_mocks "$mb"
     mkdir -p "$mh/sf-tools/bin"
-    printf '#!/bin/bash\necho "sf-launcher called" >> "%s"\n' "$MOCK_CALL_LOG" > "$mh/sf-tools/bin/sf-launcher.sh"
+    printf '#!/bin/bash\necho "sf-launcher called FROM=${SF_LAUNCHER_FROM_START:-}" >> "%s"\n' "$MOCK_CALL_LOG" > "$mh/sf-tools/bin/sf-launcher.sh"
     chmod +x "$mh/sf-tools/bin/sf-launcher.sh"
 
     echo '{"target-org":"testorg"}' > "$td/.sf/config.json"
@@ -189,6 +189,7 @@ test_launcher_called() {
     cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-start.sh" 2>&1 >/dev/null
 
     assert_file_contains "$MOCK_CALL_LOG" "sf-launcher called" "sf-launcher.sh が呼び出された"
+    assert_file_contains "$MOCK_CALL_LOG" "FROM=1" "sf-launcher.sh に SF_LAUNCHER_FROM_START=1 を付ける（ランチャーが sf-start.sh に切り替えない）"
     unset MOCK_SF_ORG_JSON
     teardown "$td" "$mb" "$mh"
 }

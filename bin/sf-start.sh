@@ -49,7 +49,8 @@
 #           このプロジェクト・エイリアスで初めてのときは、AI への送信の注意を表示して Y/N で聞く）。取るときは、持ち主の一覧に登録し、
 #           TraceFlag の準備と取得役を裏で起動する。終了コード 0 = 始めた／10 = 取らない／それ以外 = 警告だけ（どれでも先に進む）
 #   7. ~/sf-tools/bin/sf-launcher.sh があり、環境変数 SF_LAUNCHER_ACTIVE が 1 でなければ、前面で起動する
-#      （sf-launcher.sh から呼ばれたときは、二重に起動しない）
+#      （sf-launcher.sh から呼ばれたときは、二重に起動しない）。環境変数 SF_LAUNCHER_FROM_START=1 を付ける
+#      （ランチャーは、これがないメニューの起動を sf-start.sh に切り替えるため。2026-11-28）
 #   8. 終了時（ランチャーを q で閉じたとき・中断したとき）: 6 で自分の印を登録したときだけ、sf-log.sh leave --owner {印} を実行する
 #      （ほかの sf-start がなければ、取得役を止め、TraceFlag を消す。数十秒かかることがある。失敗は警告だけ）
 #
@@ -259,7 +260,7 @@ fi
 # ------------------------------------------------------------------------------
 # ランチャーから（Start / Restart で）呼ばれた場合は二重起動しない（SF_LAUNCHER_ACTIVE=1 はランチャーが export する）
 if [[ -f "$HOME/sf-tools/bin/sf-launcher.sh" ]] && [[ "${SF_LAUNCHER_ACTIVE:-}" != "1" ]]; then
-    bash "$HOME/sf-tools/bin/sf-launcher.sh"  # 対話のため run 不使用。終了コードは使わない（このスクリプトは 0 で終わる）
+    SF_LAUNCHER_FROM_START=1 bash "$HOME/sf-tools/bin/sf-launcher.sh"  # 対話のため run 不使用。終了コードは使わない（このスクリプトは 0 で終わる）。印を付けて開く（ランチャーが sf-start.sh に切り替えない）
 fi
 
 exit $RET_OK

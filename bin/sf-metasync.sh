@@ -288,6 +288,7 @@ if [[ "${GITHUB_ACTIONS:-false}" == "true" ]]; then
     fi
     log "INFO" "接続先組織: ${TARGET_ORG}"
 else
+    _repo_full=""                    # 下の関数が入れる（set_var。shellcheck は、関数の中の代入を追えないため、先に用意する）
     require_origin_repo _repo_full   # origin から「owner/repo」（lib/project.sh。取れなければ die。URL は伏せて出す）
     REPO_FULL="$_repo_full"
     _main_org_id=$(gh variable get SF_ORG_ID_PROD -R "$_repo_full" 2>/dev/null | tr -d '\r') || _main_org_id=""  # VAR=$(cmd) のため run 不使用

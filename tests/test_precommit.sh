@@ -1,16 +1,16 @@
 #!/bin/bash
 # ==============================================================================
-# test_sf-precommit.sh - sf-precommit.sh のテスト
+# test_precommit.sh - phases/hook/precommit.sh のテスト
 # ==============================================================================
 source "$(dirname "${BASH_SOURCE[0]}")/test_helper.sh"
-echo -e "${CLR_HEAD}=== sf-precommit.sh ===${CLR_RST}"
+echo -e "${CLR_HEAD}=== phases/hook/precommit.sh ===${CLR_RST}"
 
 # ------------------------------------------------------------------------------
-# ヘルパー: sf-precommit.sh を force-* ディレクトリで実行
+# ヘルパー: phases/hook/precommit.sh を force-* ディレクトリで実行
 # ------------------------------------------------------------------------------
 run_precommit() {
     local td="$1" mb="$2"
-    cd "$td" && PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-precommit.sh" 2>&1
+    cd "$td" && PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/phases/hook/precommit.sh" 2>&1
 }
 
 # ------------------------------------------------------------------------------

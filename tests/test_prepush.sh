@@ -1,22 +1,22 @@
 #!/bin/bash
 # ==============================================================================
-# test_sf-prepush.sh - sf-prepush.sh のテスト
+# test_prepush.sh - phases/hook/prepush.sh のテスト
 # ==============================================================================
 source "$(dirname "${BASH_SOURCE[0]}")/test_helper.sh"
-echo -e "${CLR_HEAD}=== sf-prepush.sh ===${CLR_RST}"
+echo -e "${CLR_HEAD}=== phases/hook/prepush.sh ===${CLR_RST}"
 
 # ------------------------------------------------------------------------------
-# ヘルパー: sf-prepush.sh を force-* ディレクトリで実行
+# ヘルパー: phases/hook/prepush.sh を force-* ディレクトリで実行
 # ------------------------------------------------------------------------------
 run_prepush() {
     local td="$1" mb="$2"
-    cd "$td" && PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-prepush.sh" 2>&1
+    cd "$td" && PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/phases/hook/prepush.sh" 2>&1
 }
 
 # 標準入力に、git が pre-push フックに渡す行（「<ローカルの ref> <ローカルの sha> <リモートの ref> <リモートの sha>」）を渡して実行する
 run_prepush_refs() {
     local td="$1" mb="$2" lines="$3"
-    ( cd "$td" && printf '%b' "$lines" | PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-prepush.sh" 2>&1 )
+    ( cd "$td" && printf '%b' "$lines" | PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/phases/hook/prepush.sh" 2>&1 )
 }
 
 # ------------------------------------------------------------------------------

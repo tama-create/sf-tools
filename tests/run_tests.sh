@@ -196,7 +196,7 @@ _weight() {   # 結果は、変数 _W に入れる（$(...) で呼ぶと、Windo
         test_metasync-js.sh) _W=40 ;;   # 手元の Windows で 約 22 秒
         test_sf-log.sh) _W=420 ;;   # 手元の Git Bash で 約 8 分（取得役のテストは、裏のプロセスを待つ。偽の sf が Node を毎回起動する。2026-11-23。Actions で実測して直す）
         test_integration-rerun.sh|test_init-common.sh|test_sf-deploy.sh) _W=62 ;;
-        test_sf-job.sh|test_sf-update-workflows.sh|test_sf-pr.sh|test_sf-prepush.sh|test_sf-start.sh|test_wf-sequence.sh|test_wf-tier-switch.sh|test_remove-tier.sh) _W=50 ;;
+        test_sf-job.sh|test_sf-update-workflows.sh|test_sf-pr.sh|test_prepush.sh|test_sf-start.sh|test_wf-sequence.sh|test_wf-tier-switch.sh|test_remove-tier.sh) _W=50 ;;
         test_integration-secrets.sh|test_sf-hook.sh) _W=40 ;;
         test_sf-test-types.sh|test_sf-push.sh|test_sf-update-cli.sh|test_org.sh|test_diag.sh|test_run-tests.sh) _W=28 ;;
         *) _W=10 ;;
@@ -234,11 +234,11 @@ TEST_FILES=(
     test_sf-pr.sh
     test_sf-check.sh
     test_sf-test-types.sh
-    test_sf-prepush.sh
+    test_prepush.sh
     test_sf-push.sh
     test_sf-update-secret.sh
     test_launcher.sh
-    test_sf-precommit.sh
+    test_precommit.sh
     test_security.sh
     test_e2e.sh
     test_e2e2.sh
@@ -405,11 +405,17 @@ if [[ "${1:-}" == "--changed" ]]; then
             phases/start/*)
                 _changed_tests+=("test_launcher.sh" "test_sf-start.sh")   # sf-start.sh が開くメニュー（ランチャー）
                 ;;
+            phases/log/*)
+                _changed_tests+=("test_sf-log.sh")   # sf-log.sh の部品（2026-11-28 に sf-log.sh から分けた）
+                ;;
             phases/init/*|tests/init-test-lib.sh)
                 _changed_tests+=("test_sf-project.sh" "test_sf-project2.sh" "test_sf-project3.sh")   # sf-project のテストは、3 つのファイルに分けてある（共通の部品: tests/init-test-lib.sh）
                 ;;
-            hooks/pre-push)
-                _changed_tests+=("test_sf-prepush.sh")
+            hooks/pre-push|phases/hook/prepush.sh)
+                _changed_tests+=("test_prepush.sh")   # pre-push フックの本体（2026-11-28 に bin/sf-prepush.sh から移した）
+                ;;
+            hooks/pre-commit|phases/hook/precommit.sh)
+                _changed_tests+=("test_precommit.sh")
                 ;;
             tests/e2e/*|tests/e2e-test-lib.sh|tests/test_e2e.sh|tests/test_e2e2.sh|.github/workflows/e2e.yml)
                 _changed_tests+=("test_e2e.sh" "test_e2e2.sh")   # e2e のテストは、2 つのファイルに分けてある（共通の部品: tests/e2e-test-lib.sh）

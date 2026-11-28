@@ -119,8 +119,8 @@ test_coverage_real() {
     local out nrows
     [[ -f "$PLAN_DOC" ]] && pass "計画書がある（doc/integration-test-plan.md）" || { fail "計画書がある" "$PLAN_DOC"; return; }
     nrows=$(_cov_rows "$PLAN_DOC" | grep -c .)
-    # 解析が失敗して、何も検査せずに通る、ということを防ぐ（今の実体は、コマンド 21 + フック 2 + ワークフロー 5 = 28）
-    [[ "$nrows" -ge 28 ]] && pass "表の行を、読めた（${nrows} 行）" || fail "表の行を、読めた" "${nrows} 行（28 行以上のはず。表の形式が変わって、読めていない可能性）"
+    # 解析が失敗して、何も検査せずに通る、ということを防ぐ（2026-11-28 時点で 26 行。ランチャーとフックの本体 2 本を phases/ へ移して、コマンドの行が減った）
+    [[ "$nrows" -ge 26 ]] && pass "表の行を、読めた（${nrows} 行）" || fail "表の行を、読めた" "${nrows} 行（26 行以上のはず。表の形式が変わって、読めていない可能性）"
     out=$(_cov_check "$PLAN_DOC" "$SF_TOOLS_DIR")
     if [[ -z "$out" ]]; then
         pass "実体が、すべて表に載っている・各行の結合・パターン・理由が、そろっている"

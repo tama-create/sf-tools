@@ -28,14 +28,14 @@
 #   - husky 以外の値の core.hooksPath（ローカル・グローバル）が残っているときは、git が .git/hooks/ を使わず、入れたフックが
 #     動かないため、WARNING を出し、最後の「自動的に検証が実行されます」の案内は出さない（フックのコピーは行う）
 #   - インストールされるフック:
-#       pre-commit : ~/sf-tools/bin/sf-precommit.sh --verbose を呼ぶ。sf-check.sh でターゲットファイルを検査し、
+#       pre-commit : ~/sf-tools/phases/hook/precommit.sh --verbose を呼ぶ。sf-check.sh でターゲットファイルを検査し、
 #                    エラーならコミットを中止する。
-#       pre-push   : ~/sf-tools/bin/sf-prepush.sh --verbose を呼ぶ。branches.txt のブランチへの直接プッシュの禁止、
+#       pre-push   : ~/sf-tools/phases/hook/prepush.sh --verbose を呼ぶ。branches.txt のブランチへの直接プッシュの禁止、
 #                    sf-check.sh によるターゲットファイルの検証、origin の自ブランチと main の取り込み（git merge）を行う。
 #                    取り込んだときは、そのプッシュを中止する（もう一度プッシュすると、通る）。
-#                    Salesforce 組織への検証（dry-run）は行わない。詳細は sf-prepush.sh --help。
-#   - コピーされるフックは、$HOME/sf-tools/bin/ のスクリプトを呼ぶだけのラッパー。bin/ の sf-precommit.sh・
-#     sf-prepush.sh の更新は、全プロジェクトに即時反映される。ラッパー（hooks/ のファイル）自体の変更は、
+#                    Salesforce 組織への検証（dry-run）は行わない。詳細は phases/hook/prepush.sh --help。
+#   - コピーされるフックは、$HOME/sf-tools/bin/ のスクリプトを呼ぶだけのラッパー。bin/ の phases/hook/precommit.sh・
+#     phases/hook/prepush.sh の更新は、全プロジェクトに即時反映される。ラッパー（hooks/ のファイル）自体の変更は、
 #     各プロジェクトで sf-hook.sh を再実行するまで反映されない。
 #   - 削除は sf-unhook.sh（pre-push だけを削除する。pre-commit は残る）。
 #   - 終了コード: 成功は 0。中断は 1。
@@ -55,17 +55,9 @@ readonly LOG_MODE="NEW"
 # ------------------------------------------------------------------------------
 SCRIPT_DIR="${BASH_SOURCE[0]%/*}"
 [[ "$SCRIPT_DIR/" == /* && "$SCRIPT_DIR/" != *//* && "$SCRIPT_DIR/" != */./* && "$SCRIPT_DIR/" != */../* ]] || SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-COMMON_LIB="${SCRIPT_DIR}/../lib/common.sh"
-
-if [[ ! -f "$COMMON_LIB" ]]; then
-    echo "[FATAL ERROR] Library not found: $COMMON_LIB" >&2
-    exit 1
-fi
-if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    awk '/^# ==/{f++; next} f==2{sub(/^# ?/,""); print} f==3{exit}' "${BASH_SOURCE[0]}"
-    exit 0
-fi
-source "$COMMON_LIB"
+# 共通ライブラリ（第 1 引数の -h / --help も、ここで処理する: lib/common.sh の 0 章）
+source "${SCRIPT_DIR}/../lib/common.sh" \
+    || { echo "[FATAL ERROR] Library not found: ${SCRIPT_DIR}/../lib/common.sh" >&2; exit 1; }  # run 不使用: run の定義前
 reject_unknown_args "$@"   # -v / --verbose 以外の引数は、不明なオプションとして中断する
 
 # ------------------------------------------------------------------------------

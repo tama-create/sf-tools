@@ -37,7 +37,7 @@
 
 | 区分 | コマンド |
 |---|---|
-| 実環境で実行（うまくいく筋） | `sf-project`（通し・`--add-tier staging`）、`sf-job`、`sf-start`、`sf-refresh`、`sf-hook`、`sf-dryrun`、`sf-push`、`sf-prepush`、`sf-precommit`、`sf-pr` |
+| 実環境で実行（うまくいく筋） | `sf-project`（通し・`--add-tier staging`）、`sf-job`、`sf-start`、`sf-refresh`、`sf-hook`、`sf-dryrun`、`sf-push`、フック（`phases/hook/prepush.sh`・`precommit.sh`）、`sf-pr` |
 | 間接的に実行 | `sf-release`・`sf-check`・`sf-metasync`（`sf-dryrun` と、Actions の中で） |
 | 一部のみ | `sf-update-workflows`（`--check` のみ）、`sf-deploy`（拒否のみ） |
 | 単体テストのみ | `sf-unhook`、`sf-switch-org`、ランチャー（`phases/start/launcher.sh`）、`sf-log`、`sf-update-secret`、`sf-update-cli`、`sf-project` の `--resume` / `--reconnect` / `--status` / `--only` |
@@ -171,7 +171,7 @@
 | A12 | `sf-deploy` が許可される条件の確認（**実際のリリースは、e2e では行わない**） | L1 | ★ |
 | A13 | `sf-project` が生成したリポジトリ（`branches.txt`・各段階のリリースファイル・状態ファイル・完了の印）を、後続のコマンド（`sf-job` → `sf-start` → `sf-refresh` → `sf-hook` → `sf-dryrun` → `sf-push`）が読んで動く、**代表的な最小の通しの経路（1 本）** | L1 | ★★★ |
 | A14 | `origin` の URL からの、プロジェクト判定（`admin` ブランチ・`force-*` 名・別オーナーの同名）が、複数の clone で正しく働く | L1 | ★★ |
-| A15 | **pre-commit フック**（`sf-precommit`）: `sf-hook` で設置したあと、**実際の `git commit`** が、フックを起動する。危険な変更は止め、問題のない変更は通す。フックは、実際の `git` でしか動かないため、モックの単体テストでは確認できない | L1 | ★★★ |
+| A15 | **pre-commit フック**（`phases/hook/precommit.sh`）: `sf-hook` で設置したあと、**実際の `git commit`** が、フックを起動する。危険な変更は止め、問題のない変更は通す。フックは、実際の `git` でしか動かないため、モックの単体テストでは確認できない | L1 | ★★★ |
 
 ### 5.2 B. 管理者の保守
 
@@ -455,7 +455,7 @@ Actions 上の実行は、コマンドによって扱いが違う。「全部拒
 | X9-2 | — | L2（未） |
 | X10-3・X10-4 | — | L2・e2e（未） |
 
-**この段階で見つかり、直したもの**: `sf-push` の再実行（X2-3）・`sf-check` の外部パス（X6-4）・`sf-project` の進捗の先行（X3-6・X3-7）・`sf-project` の同時起動（X4-1。Windows で、Ruleset が重複した。ロックを入れた）・`sf-prepush` の `branches.txt`（origin にないブランチ名が、すべての push を止めた。X3-2）・`sf-job` の同名ブランチ（clone だけをやり直せなかった。X2-2。同名のブランチがあれば、作者・日時を見せて確認し、Y なら作らずに clone だけをやり直す。環境ブランチ・管理者用のブランチの名前（`main` / `staging` / `develop` / `admin`）も、ジョブ名に使えないようにした）・`sf-metasync`（フックのあるクローンで main への push が止められた・push できなかったコミットが取り残された。M0・M4）・`lib/project.sh`（同じ XXXX が別のオーナーに複数あるとき、最初のものを黙って使った。A14）・`sf-pr`（origin が ssh:// のとき、開く URL が https にならなかった。A5）・`sf-start`（標準入力が閉じたとき、エイリアスの入力を無限に繰り返した。X5-3）・`lib/diag.sh`（`SF_TOOLS_BRANCH` は任意なのに、配布版のプロジェクトで、必ず「不足」と表示した。X3-9）・`sf-push`（detached HEAD・main の上でも、先にコミットして、プッシュで失敗し、コミットだけが残った。X3-10 の R5）。今の動きの要点は、`doc/dev-reference.md` の 2.1.2（「結合テストで見つかり、直したもの」）と 4.12.1。**意図した仕様（確認済み）**: `sf-unhook` は pre-push だけを外す（プッシュの検証だけを止めるのが狙い）。
+**この段階で見つかり、直したもの**: `sf-push` の再実行（X2-3）・`sf-check` の外部パス（X6-4）・`sf-project` の進捗の先行（X3-6・X3-7）・`sf-project` の同時起動（X4-1。Windows で、Ruleset が重複した。ロックを入れた）・pre-push フック（`phases/hook/prepush.sh`）の `branches.txt`（origin にないブランチ名が、すべての push を止めた。X3-2）・`sf-job` の同名ブランチ（clone だけをやり直せなかった。X2-2。同名のブランチがあれば、作者・日時を見せて確認し、Y なら作らずに clone だけをやり直す。環境ブランチ・管理者用のブランチの名前（`main` / `staging` / `develop` / `admin`）も、ジョブ名に使えないようにした）・`sf-metasync`（フックのあるクローンで main への push が止められた・push できなかったコミットが取り残された。M0・M4）・`lib/project.sh`（同じ XXXX が別のオーナーに複数あるとき、最初のものを黙って使った。A14）・`sf-pr`（origin が ssh:// のとき、開く URL が https にならなかった。A5）・`sf-start`（標準入力が閉じたとき、エイリアスの入力を無限に繰り返した。X5-3）・`lib/diag.sh`（`SF_TOOLS_BRANCH` は任意なのに、配布版のプロジェクトで、必ず「不足」と表示した。X3-9）・`sf-push`（detached HEAD・main の上でも、先にコミットして、プッシュで失敗し、コミットだけが残った。X3-10 の R5）。今の動きの要点は、`doc/dev-reference.md` の 2.1.2（「結合テストで見つかり、直したもの」）と 4.12.1。**意図した仕様（確認済み）**: `sf-unhook` は pre-push だけを外す（プッシュの検証だけを止めるのが狙い）。
 
 ---
 
@@ -494,8 +494,6 @@ Actions 上の実行は、コマンドによって扱いが違う。「全部拒
 | `sf-update-cli` | あり | A10（`sf-refresh` の一部として） | 独立した結合パターンは、作らない（`sf-refresh` から呼ばれる部品。24 時間スキップと差分の判定は、単体で確認し、`sf-refresh` との連動は、A10 で確認する） |
 | `sf-hook` | あり | A9・A13 | — |
 | `sf-unhook` | あり | A9（`sf-hook` との往復） | — |
-| `sf-precommit` | あり | A15 | — |
-| `sf-prepush` | あり | A2 | — |
 | `sf-check` | あり | A4 | — |
 | `sf-dryrun` | あり | A1 | — |
 | `sf-release` | あり | A1・X1-6・X6-4 | — |

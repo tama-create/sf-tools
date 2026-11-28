@@ -1250,13 +1250,13 @@ test_ai_mode_input() {
 }
 
 # 入力の関数を $( ) の中で呼ばない（サブシェルの exit 20 が、外に伝わらないため。doc/ai-operation-design.md 4.3）。
-# 例外は sf-log.sh の「自動で取りますか？」の 1 か所だけ（端末でないときは、聞かずに返るため、AI のときは届かない）
+# 例外は sf-log.sh（の部品 phases/log/start.sh。2026-11-28 に分けた）の「自動で取りますか？」の 1 か所だけ（端末でないときは、聞かずに返るため、AI のときは届かない）
 test_no_input_in_command_substitution() {
     echo ""; echo -e "${CLR_HEAD}[TEST] 入力の関数を \$( ) の中で呼ばない${CLR_RST}"
     local hits
     hits=$(grep -rnE '\$\((read_key|read_input|read_secret|read_or_quit|press_enter|ask_yn|wizard_confirm|need_answer)\b' \
         "$SF_TOOLS_DIR/bin" "$SF_TOOLS_DIR/lib" "$SF_TOOLS_DIR/phases" 2>/dev/null \
-        | grep -v 'bin/sf-log.sh:.*自動で取りますか' || true)
+        | grep -v 'phases/log/start.sh:.*自動で取りますか' || true)
     assert_equals "$hits" "" "bin/・lib/・phases/ に、\$( ) の中の入力の関数がない（sf-log.sh の 1 か所を除く）"
 }
 

@@ -83,17 +83,10 @@ mkdir -p "${HOME}/sf-tools/logs" 2>/dev/null || true  # run 不使用: ログフ
 # ------------------------------------------------------------------------------
 SCRIPT_DIR="${BASH_SOURCE[0]%/*}"
 [[ "$SCRIPT_DIR/" == /* && "$SCRIPT_DIR/" != *//* && "$SCRIPT_DIR/" != */./* && "$SCRIPT_DIR/" != */../* ]] || SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-COMMON_LIB="${SCRIPT_DIR}/../lib/common.sh"
-if [[ ! -f "$COMMON_LIB" ]]; then
-    echo "[FATAL ERROR] Library not found: $COMMON_LIB" >&2
-    exit 1
-fi
-if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    awk '/^# ==/{f++; next} f==2{sub(/^# ?/,""); print} f==3{exit}' "${BASH_SOURCE[0]}"
-    exit 0
-fi
 export SF_INIT_MODE=1   # force-* ディレクトリの外でも、実行できる（組織だけを対象にするため）
-source "$COMMON_LIB"
+# 共通ライブラリ（第 1 引数の -h / --help も、ここで処理する: lib/common.sh の 0 章）
+source "${SCRIPT_DIR}/../lib/common.sh" \
+    || { echo "[FATAL ERROR] Library not found: ${SCRIPT_DIR}/../lib/common.sh" >&2; exit 1; }  # run 不使用: run の定義前
 source "${SCRIPT_DIR}/../lib/org.sh"
 
 # ------------------------------------------------------------------------------

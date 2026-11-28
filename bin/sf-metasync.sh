@@ -170,7 +170,7 @@
 #     （同期のコミットに、無関係なファイルが含まれてしまうため）。GitHub Actions 上では、確認しない。
 #     sf-tools/release/（作業ブランチの作業用ファイル）は、確認の対象外で、同期のコミットにも含めない
 #   - main への push（手順 11）は、--no-verify（pre-push フックを通さない）。pre-push フック
-#     （sf-prepush.sh）は、branches.txt のブランチ（保護ブランチ）の上からの push・保護ブランチへの push を、必ず拒否するため
+#     （phases/hook/prepush.sh）は、branches.txt のブランチ（保護ブランチ）の上からの push・保護ブランチへの push を、必ず拒否するため
 #     （手元で実行したとき、--no-verify がないと、main への push が失敗する）。サーバー側の保護（Ruleset）は、そのまま効く
 
 #   - ログ: ./sf-tools/logs/sf-metasync.log（実行のたびに作り直す）
@@ -189,17 +189,9 @@ readonly LOG_MODE="NEW"
 # ------------------------------------------------------------------------------
 SCRIPT_DIR="${BASH_SOURCE[0]%/*}"  # run 不使用: common.sh の読み込み前（run が未定義）
 [[ "$SCRIPT_DIR/" == /* && "$SCRIPT_DIR/" != *//* && "$SCRIPT_DIR/" != */./* && "$SCRIPT_DIR/" != */../* ]] || SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"  # run 不使用: common.sh の読み込み前（run が未定義）
-COMMON_LIB="${SCRIPT_DIR}/../lib/common.sh"
-
-if [[ ! -f "$COMMON_LIB" ]]; then
-    echo "[FATAL ERROR] Library not found: $COMMON_LIB" >&2
-    exit 1
-fi
-if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    awk '/^# ==/{f++; next} f==2{sub(/^# ?/,""); print} f==3{exit}' "${BASH_SOURCE[0]}"  # run 不使用: common.sh の読み込み前（run が未定義）
-    exit 0
-fi
-source "$COMMON_LIB"
+# 共通ライブラリ（第 1 引数の -h / --help も、ここで処理する: lib/common.sh の 0 章）
+source "${SCRIPT_DIR}/../lib/common.sh" \
+    || { echo "[FATAL ERROR] Library not found: ${SCRIPT_DIR}/../lib/common.sh" >&2; exit 1; }  # run 不使用: run の定義前
 source "${SCRIPT_DIR}/../lib/org.sh"   # org_find_username_by_id（組織 ID から、ログイン済みの組織を探す）
 
 # ------------------------------------------------------------------------------

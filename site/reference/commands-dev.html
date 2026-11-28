@@ -148,7 +148,7 @@ sf-job.sh [--project XXXX] [--owner OWNER] [--name ジョブ名]</code></pre>
 
 <h2 id="sf-check"><code>sf-check.sh</code></h2>
 <pre><code>sf-check.sh [deploy-target.txt のパス] [remove-target.txt のパス]</code></pre>
-<p>ターゲットファイル（<code>deploy-target.txt</code> / <code>remove-target.txt</code>）の内容を検証します。<code>sf-release.sh</code>・<code>sf-push.sh</code>・<code>sf-precommit.sh</code>・<code>sf-prepush.sh</code>・ランチャーの <code>[1] Check</code> から呼ばれます（単体でも実行できます）。<code>force-*</code> フォルダ（プロジェクトのルート）で実行します。書き方は、<a href="target-files.html">ターゲットファイル</a>にあります。</p>
+<p>ターゲットファイル（<code>deploy-target.txt</code> / <code>remove-target.txt</code>）の内容を検証します。<code>sf-release.sh</code>・<code>sf-push.sh</code>・<code>phases/hook/precommit.sh</code>・<code>phases/hook/prepush.sh</code>・ランチャーの <code>[1] Check</code> から呼ばれます（単体でも実行できます）。<code>force-*</code> フォルダ（プロジェクトのルート）で実行します。書き方は、<a href="target-files.html">ターゲットファイル</a>にあります。</p>
 <h3>確認する内容</h3>
 <p>ファイルを 1 行ずつ読みます（行末の CR と前後の空白を除き、空行と <code>#</code> で始まる行は、読み飛ばします）。最初のセクションの印より前の行は、<code>[files]</code> として扱います。</p>
 <ul>
@@ -475,8 +475,8 @@ sf-unhook.sh</code></pre>
 </ol>
 <ul>
   <li>husky 以外の値の <code>core.hooksPath</code>（ローカル・グローバル）が残っているときは、Git が <code>.git/hooks/</code> を使わず、入れたフックが動かないため、警告を表示します（フックのコピーは行います）。</li>
-  <li>入るフック: <code>pre-commit</code> は <code>sf-precommit.sh</code> を呼び、ターゲットファイルを検証して、エラーならコミットを中止します。<code>pre-push</code> は <code>sf-prepush.sh</code> を呼び、<code>branches.txt</code> のブランチへの直接のプッシュの禁止・ターゲットファイルの検証・<code>origin</code> の自分のブランチと <code>main</code> の取り込みを行います（取り込んだときは、そのプッシュを中止します。もう一度プッシュすると、通ります）。Salesforce の組織への検証（dry-run）は、行いません。</li>
-  <li>コピーされるフックは、<code>~/sf-tools/bin/</code> のスクリプトを呼ぶだけのラッパーです。<code>sf-precommit.sh</code>・<code>sf-prepush.sh</code> の更新は、全プロジェクトに、すぐに届きます。ラッパー（<code>hooks/</code> のファイル）自体の変更は、各プロジェクトで <code>sf-hook.sh</code> を実行し直すまで、届きません。</li>
+  <li>入るフック: <code>pre-commit</code> は <code>phases/hook/precommit.sh</code> を呼び、ターゲットファイルを検証して、エラーならコミットを中止します。<code>pre-push</code> は <code>phases/hook/prepush.sh</code> を呼び、<code>branches.txt</code> のブランチへの直接のプッシュの禁止・ターゲットファイルの検証・<code>origin</code> の自分のブランチと <code>main</code> の取り込みを行います（取り込んだときは、そのプッシュを中止します。もう一度プッシュすると、通ります）。Salesforce の組織への検証（dry-run）は、行いません。</li>
+  <li>コピーされるフックは、<code>~/sf-tools/bin/</code> のスクリプトを呼ぶだけのラッパーです。<code>phases/hook/precommit.sh</code>・<code>phases/hook/prepush.sh</code> の更新は、全プロジェクトに、すぐに届きます。ラッパー（<code>hooks/</code> のファイル）自体の変更は、各プロジェクトで <code>sf-hook.sh</code> を実行し直すまで、届きません。</li>
   <li>終了コードは、成功が <code>0</code>、中断が <code>1</code> です。ログは <code>./sf-tools/logs/sf-hook.log</code> です。</li>
 </ul>
 <h3><code>sf-unhook.sh</code></h3>
@@ -486,7 +486,7 @@ sf-unhook.sh</code></pre>
   <li>sf-tools が置いたフック（目印の文字列がある）だけを削除します。それ以外のフックなら、警告を表示して、削除せずに終了し、最後に「状態は変わっていません」と表示します（終了コード 0）。</li>
   <li>終了コードは、成功（削除しなかった場合を含む）が <code>0</code>、中断・失敗が <code>1</code> です。ログは <code>./sf-tools/logs/sf-unhook.log</code> です。</li>
 </ul>
-<p>フックの動きは、<a href="commands-auto.html#sf-prepush"><code>sf-prepush.sh</code></a> と <a href="commands-auto.html#sf-precommit"><code>sf-precommit.sh</code></a> にあります。</p>
+<p>フックの動きは、<a href="commands-auto.html#sf-prepush"><code>phases/hook/prepush.sh</code></a> と <a href="commands-auto.html#sf-precommit"><code>phases/hook/precommit.sh</code></a> にあります。</p>
 
 </main>
 <aside id="toc"></aside>

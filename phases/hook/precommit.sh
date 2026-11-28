@@ -1,12 +1,12 @@
 #!/bin/bash
 # ==============================================================================
-# sf-precommit.sh - pre-commit フック処理
+# precommit.sh - pre-commit フックの本体（フックだけが呼ぶ部品。2026-11-28 に bin/sf-precommit.sh から移した）
 # ==============================================================================
 # git commit のときに、pre-commit フック（sf-hook.sh が hooks/pre-commit を .git/hooks/pre-commit にコピーしたもの）から
 # 呼ばれる本体。ターゲットファイルを検証し、エラーがあればコミットを中止する。
 #
 # 【使い方】
-#   sf-precommit.sh [オプション]
+#   phases/hook/precommit.sh [オプション]
 #
 # 【オプション】
 #   -v, --verbose  : コマンドの応答（出力）をコンソールにも表示する（フックは、この指定で呼ぶ）
@@ -26,7 +26,7 @@
 #   - sf-check.sh は、引数なしのとき、sf-tools/release/branch_name.txt に書かれたブランチのターゲットファイルを検証する。
 #     branch_name.txt がないときは、検証せずに成功となり、コミットは続行される
 #   - 検証するのは、作業ツリーのファイル（ステージした内容ではない）
-#   - ログ: ./sf-tools/logs/sf-precommit.log（実行のたびに作り直す）
+#   - ログ: ./sf-tools/logs/precommit.log（実行のたびに作り直す）
 # ==============================================================================
 
 # ------------------------------------------------------------------------------
@@ -41,7 +41,8 @@ readonly LOG_MODE="NEW"
 # ------------------------------------------------------------------------------
 SCRIPT_DIR="${BASH_SOURCE[0]%/*}"
 [[ "$SCRIPT_DIR/" == /* && "$SCRIPT_DIR/" != *//* && "$SCRIPT_DIR/" != */./* && "$SCRIPT_DIR/" != */../* ]] || SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-COMMON_LIB="${SCRIPT_DIR}/../lib/common.sh"
+COMMON_LIB="${SCRIPT_DIR}/../../lib/common.sh"   # このファイルは phases/hook/ にある（2 つ上が sf-tools）
+BIN_DIR="${SCRIPT_DIR%/*}"; BIN_DIR="${BIN_DIR%/*}/bin"   # sf-check.sh などのコマンドの場所
 
 if [[ ! -f "$COMMON_LIB" ]]; then
     echo "[FATAL ERROR] Library not found: $COMMON_LIB" >&2
@@ -63,7 +64,7 @@ log "HEADER" "コミット前チェックを開始します (${SCRIPT_NAME}.sh)"
 # 4. ターゲットファイルの検証（sf-check.sh）
 # ------------------------------------------------------------------------------
 log "INFO" "sf-check.sh でターゲットファイルを検証します。"
-run bash "${SCRIPT_DIR}/sf-check.sh" \
+run bash "${BIN_DIR}/sf-check.sh" \
     || die "ターゲットファイルの検証に失敗しました。コミットを中止します。"
 
 log "SUCCESS" "チェック完了。コミットを続行します。"

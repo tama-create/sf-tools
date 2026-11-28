@@ -73,17 +73,9 @@ readonly LOG_MODE="NEW"
 # ------------------------------------------------------------------------------
 SCRIPT_DIR="${BASH_SOURCE[0]%/*}"
 [[ "$SCRIPT_DIR/" == /* && "$SCRIPT_DIR/" != *//* && "$SCRIPT_DIR/" != */./* && "$SCRIPT_DIR/" != */../* ]] || SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-COMMON_LIB="${SCRIPT_DIR}/../lib/common.sh"
-
-if [[ ! -f "$COMMON_LIB" ]]; then
-    echo "[FATAL ERROR] Library not found: $COMMON_LIB" >&2
-    exit 1
-fi
-if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    awk '/^# ==/{f++; next} f==2{sub(/^# ?/,""); print} f==3{exit}' "${BASH_SOURCE[0]}"
-    exit 0
-fi
-source "$COMMON_LIB"
+# 共通ライブラリ（第 1 引数の -h / --help も、ここで処理する: lib/common.sh の 0 章）
+source "${SCRIPT_DIR}/../lib/common.sh" \
+    || { echo "[FATAL ERROR] Library not found: ${SCRIPT_DIR}/../lib/common.sh" >&2; exit 1; }  # run 不使用: run の定義前
 reject_unknown_args "$@"   # -v / --verbose 以外の引数は、不明なオプションとして中断する
 source "${SCRIPT_DIR}/../lib/org.sh"   # ログイン先の選択（種類ではなく URL）・本番は main のみの確認
 

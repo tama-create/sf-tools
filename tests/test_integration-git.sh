@@ -51,7 +51,7 @@ test_hooks() {
     _commit "$cl" "不備のある変更"
     assert_exit_fail "$IT_RC" "A15: 不備のある変更は、git commit が止まる"
     assert_equals "$(_count "$cl")" "$c0" "A15: 止まったとき、コミットは増えない"
-    it_out_has "sf-precommit" && pass "A15: pre-commit フック（sf-precommit）が動いた" || fail "A15: pre-commit フック（sf-precommit）が動いた" "$(it_out | tail -5)"
+    it_out_has "precommit.sh" && pass "A15: pre-commit フック（phases/hook/precommit.sh）が動いた" || fail "A15: pre-commit フック（phases/hook/precommit.sh）が動いた" "$(it_out | tail -5)"
 
     # 直すと通る
     it_set_deploy_target "$cl" JOB-A "force-app/main/default/classes/ItOk.cls"

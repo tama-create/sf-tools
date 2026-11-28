@@ -39,7 +39,7 @@
     <tr><td>実行した <code>force-*</code> フォルダの中の <code>sf-tools/logs/&lt;コマンド名&gt;.log</code></td><td>上以外の、すべてのコマンド（<code>sf-start.sh</code> が開くランチャーは、ログを作りません）</td></tr>
   </tbody>
 </table>
-<p>ログは、ほとんどのコマンドで、実行のたびに作り直されます（前回の内容は消えます）。<code>sf-project.sh</code>（<code>--add-tier</code>・<code>--reconnect</code>・<code>--status</code> を含む）も、起動のたびに <code>sf-project.log</code> を作り直します。<code>sf-check.sh</code>（ほかのコマンドや git のフックからも呼ばれる）と <code>sf-prepush.sh</code>（pre-push フック）だけは、実行のたびに追記されます。</p>
+<p>ログは、ほとんどのコマンドで、実行のたびに作り直されます（前回の内容は消えます）。<code>sf-project.sh</code>（<code>--add-tier</code>・<code>--reconnect</code>・<code>--status</code> を含む）も、起動のたびに <code>sf-project.log</code> を作り直します。<code>sf-check.sh</code>（ほかのコマンドや git のフックからも呼ばれる）と <code>phases/hook/prepush.sh</code>（pre-push フック）だけは、実行のたびに追記されます。</p>
 <p>コマンドの実行に失敗したときは、同じフォルダの <code>error.log</code> にも、失敗したコマンドと、その出力が追記されます（作り直されません）。<code>force-*</code> の <code>sf-tools/logs/</code> は、git の対象外です。</p>
 
 <h2 id="workspace">作業フォルダの構成</h2>
@@ -129,8 +129,6 @@
 │   ├── sf-update-secret.sh
 │   ├── sf-refresh.sh
 │   ├── sf-update-cli.sh
-│   ├── sf-prepush.sh
-│   ├── sf-precommit.sh
 │   └── sf-metasync.sh
 ├── lib/
 │   ├── common.sh               ← 全スクリプト共通ライブラリの窓口（ログ・実行・終了・管理者向けの警告・JSON の読み取り。
@@ -148,9 +146,20 @@
 │   ├── verify-samples.sh       ← リリースの仕組みの確認用サンプル（パターン別のコンポーネント。sf-project.sh --verify --components が使う）
 │   ├── metasync.js             ← 組織から取得した内容と main を比べて、追加・変更・削除の計画を作り、反映する（sf-metasync.sh が呼ぶ。Node の標準機能のみ）
 │   └── typecheck.js            ← メタデータの種類ごとに、リリース・削除ができるかを確かめる（sf-test-types.sh が呼ぶ。Node の標準機能のみ）
-├── phases/
+├── phases/                     ← コマンドの部品（人が直接打つものではない。bin/ の sf-*.sh は、単独で打つコマンドだけ）
 │   ├── start/                  ← sf-start.sh の部品
 │   │   └── launcher.sh         ← 最後に開くメニュー（ランチャー）
+│   ├── hook/                   ← Git のフックの本体（hooks/ のラッパーが呼ぶ）
+│   │   ├── precommit.sh        ← pre-commit（ターゲットファイルの確認）
+│   │   └── prepush.sh          ← pre-push（ターゲットファイルの確認・main との同期の確認）
+│   ├── log/                    ← sf-log.sh の部品（sf-log.sh が順に読み込む）
+│   │   ├── common.sh           ← 設定ファイル・ロック・環境の判断・持ち主の一覧・後始末
+│   │   ├── start.sh            ← 接続先の確認・start（同意・DebugLevel・TraceFlag）
+│   │   ├── fetch.sh            ← ログの取得（遅れて届くログの見直しを含む）
+│   │   ├── pull.sh             ← pull（取得役への依頼・要約）
+│   │   ├── stop.sh             ← stop・leave
+│   │   ├── collect.sh          ← collect（裏の取得役）
+│   │   └── status.sh           ← status・auto・begin
 │   └── init/                   ← sf-project.sh のフェーズスクリプト
 │       ├── init-common.sh
 │       ├── add_tier.sh          ← --add-tier オプションで呼ばれる tier 追加スクリプト
@@ -169,8 +178,8 @@
 │       ├── 09_repo_rules.sh
 │       └── 10_sf_auth.sh
 ├── hooks/
-│   ├── pre-push                ← sf-hook.sh がプロジェクト側（.git/hooks/）へコピー（bin/sf-prepush.sh を呼ぶだけのラッパー）
-│   └── pre-commit              ← 同じく、sf-hook.sh がコピー（bin/sf-precommit.sh を呼ぶだけのラッパー）
+│   ├── pre-push                ← sf-hook.sh がプロジェクト側（.git/hooks/）へコピー（phases/hook/prepush.sh を呼ぶだけのラッパー）
+│   └── pre-commit              ← 同じく、sf-hook.sh がコピー（phases/hook/precommit.sh を呼ぶだけのラッパー）
 ├── templates/                  ← force-* プロジェクトの雛形（唯一の正本。sf-project.sh の Phase 3 が、すべてコピーする。
 │                                  force-* にそのまま置くものだけを入れる。名前や場所を変えて使うものは config/install/）
 │   ├── .forceignore

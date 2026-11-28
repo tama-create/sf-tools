@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>自動実行コマンド | sf-tools ドキュメント</title>
-<meta name="description" content="sf-refresh・sf-update-cli・sf-prepush・sf-precommit・sf-metasync など、自動で動くコマンドの詳細。">
+<meta name="description" content="sf-refresh・sf-update-cli・pre-push・pre-commit のフック・sf-metasync など、自動で動くコマンドの詳細。">
 <link rel="stylesheet" href="../assets/style.css">
 </head>
 <body data-root="../">
@@ -20,7 +20,7 @@
   <div class="title">このページの要点</div>
   <ul>
     <li>ここにあるコマンドは、<strong>人が打つ必要は、ほとんどありません。</strong>ほかのコマンド・git のフック・GitHub Actions が、自動で動かします。</li>
-    <li>動くきっかけ: <code>sf-refresh.sh</code> は <code>sf-start.sh</code> から、<code>sf-update-cli.sh</code> は <code>sf-refresh.sh</code> から 24 時間おきに、<code>sf-prepush.sh</code> は <code>git push</code> のとき、<code>sf-precommit.sh</code> は <code>git commit</code> のとき、<code>sf-metasync.sh</code> は GitHub Actions からです。</li>
+    <li>動くきっかけ: <code>sf-refresh.sh</code> は <code>sf-start.sh</code> から、<code>sf-update-cli.sh</code> は <code>sf-refresh.sh</code> から 24 時間おきに、<code>phases/hook/prepush.sh</code> は <code>git push</code> のとき、<code>phases/hook/precommit.sh</code> は <code>git commit</code> のとき、<code>sf-metasync.sh</code> は GitHub Actions からです。</li>
     <li>どれも、<code>force-*</code> フォルダ（フォルダの名前が <code>force-</code> で始まる）で動きます。</li>
   </ul>
 </div>
@@ -71,7 +71,7 @@
   <li>ログは <code>./sf-tools/logs/sf-update-cli.log</code> です（実行のたびに作り直します）。</li>
 </ul>
 
-<h2 id="sf-prepush"><code>sf-prepush.sh</code></h2>
+<h2 id="sf-prepush"><code>phases/hook/prepush.sh</code></h2>
 <p><code>git push</code> のときに自動で実行される、チェックのスクリプトです（pre-push フックの本体。フックは <code>-v</code> を付けて呼びます）。<code>-v</code>・<code>-h</code> 以外の引数は、エラーで終了します。</p>
 <h3>主な処理</h3>
 <ol>
@@ -94,10 +94,10 @@
   <li>未取り込みのコミットの確認が失敗したとき（手元に <code>origin/main</code> がないなど）は、取り込みを試みずに中断します。</li>
   <li><strong>取り込みをしたとき（早送り（fast-forward）を含む）は、そのプッシュを中止します。</strong>git は、フックを呼ぶ前に、送るコミットを決めているため、そのままでは、取り込みが含まれないまま、プッシュが成功と表示されるからです。取り込み後に、もう一度プッシュすると、取り込みは済んでいるため、通ります。</li>
   <li>中断したときは、終了コード 1 で終わり、プッシュも中止されます。</li>
-  <li>ログは <code>./sf-tools/logs/sf-prepush.log</code> です（実行のたびに追記します）。</li>
+  <li>ログは <code>./sf-tools/logs/prepush.log</code> です（実行のたびに追記します）。</li>
 </ul>
 
-<h2 id="sf-precommit"><code>sf-precommit.sh</code></h2>
+<h2 id="sf-precommit"><code>phases/hook/precommit.sh</code></h2>
 <p><code>git commit</code> のときに自動で実行される、pre-commit フックの本体です。直接実行することはありません。</p>
 <h3>主な処理</h3>
 <ul>
@@ -108,7 +108,7 @@
 <ul>
   <li>検証するのは、<code>sf-tools/release/branch_name.txt</code> に書かれたブランチのターゲットファイルです。このファイルがないときは、検証せずに成功となり、コミットは続行されます。</li>
   <li>検証するのは、作業フォルダにあるファイルです（ステージした内容ではありません）。</li>
-  <li>ログは <code>./sf-tools/logs/sf-precommit.log</code> です（実行のたびに作り直します）。</li>
+  <li>ログは <code>./sf-tools/logs/precommit.log</code> です（実行のたびに作り直します）。</li>
 </ul>
 
 <h2 id="sf-metasync"><code>sf-metasync.sh</code></h2>

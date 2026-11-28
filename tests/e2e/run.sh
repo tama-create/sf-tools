@@ -406,7 +406,7 @@ _hello_local_job() {
             grep -q "テストクラス合計: 1件" "${E2E_TMP}/sf-dryrun-${job}.out" || return 1
     fi
     chk "${label}: sf-push.sh で、commit と push ができた" _hello_push "$job" "$msg" "$repo" || return 1
-    chk "${label}: pre-push フック（sf-prepush.sh）が動いた" test -s "${repo}/sf-tools/logs/sf-prepush.log"
+    chk "${label}: pre-push フック（phases/hook/prepush.sh）が動いた" test -s "${repo}/sf-tools/logs/prepush.log"
     chk "${label}: push した内容が、GitHub のブランチ ${job} に届いている" _pushed_to_remote "$repo" "$job"
 }
 # ワークフローの実行が成功したか。失敗したら、ログを表示し、1 回だけ再実行する（一時的な失敗への対策）。

@@ -153,7 +153,7 @@ export PATH="$HOME/sf-tools/bin:$PATH"
 | 管理者 | 🔑 `sf-update-secret.sh` | GitHub の認証情報（Secrets / Variables）を登録し直す |
 | 管理者 | 🔑 `sf-update-workflows.sh` | 作成済みのワークフローを、最新の雛形に合わせて更新する |
 | 管理者 | 🔑 `sf-test-types.sh` | 個人用の組織で、メタデータの種類ごとに、リリースと削除ができるかを確かめる |
-| 自動 | `sf-refresh.sh` / `sf-update-cli.sh` / `sf-prepush.sh` / `sf-precommit.sh` / `sf-metasync.sh` | ほかのコマンド・git のフック・GitHub Actions から、自動で動く（`sf-metasync.sh` を手元で実行すると、管理者向けの警告と確認が出ます） |
+| 自動 | `sf-refresh.sh` / `sf-update-cli.sh` / `phases/hook/prepush.sh` / `phases/hook/precommit.sh` / `sf-metasync.sh` | ほかのコマンド・git のフック・GitHub Actions から、自動で動く（`sf-metasync.sh` を手元で実行すると、管理者向けの警告と確認が出ます） |
 
 ---
 

@@ -37,7 +37,7 @@ test_hook_content_matches_source() {
     teardown "$td" "$mb" "$mh"
 }
 
-# コピーされたフックが sf-prepush.sh を参照している
+# コピーされたフックが phases/hook/prepush.sh を参照している
 test_hook_calls_sf_prepush() {
     local td mb mh
     setup_std_env td mb mh
@@ -45,7 +45,7 @@ test_hook_calls_sf_prepush() {
 
     cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-hook.sh" 2>&1 >/dev/null
 
-    assert_file_contains "$td/.git/hooks/pre-push" "sf-prepush.sh" "sf-prepush.sh への参照が含まれる"
+    assert_file_contains "$td/.git/hooks/pre-push" "phases/hook/prepush.sh" "phases/hook/prepush.sh への参照が含まれる"
     teardown "$td" "$mb" "$mh"
 }
 
@@ -62,7 +62,7 @@ test_overwrite_existing_hook() {
     local ec=$?
 
     assert_exit_ok $ec "上書きインストール → 終了コード 0"
-    assert_file_contains "$td/.git/hooks/pre-push" "sf-prepush.sh" "上書き後に sf-prepush.sh への参照が含まれる"
+    assert_file_contains "$td/.git/hooks/pre-push" "phases/hook/prepush.sh" "上書き後に phases/hook/prepush.sh への参照が含まれる"
     teardown "$td" "$mb" "$mh"
 }
 

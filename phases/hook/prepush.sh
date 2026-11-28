@@ -1,6 +1,6 @@
 #!/bin/bash
 # ==============================================================================
-# sf-prepush.sh - プッシュ前チェックスクリプト
+# prepush.sh - pre-push フックの本体（フックだけが呼ぶ部品。2026-11-28 に bin/sf-prepush.sh から移した）
 # ==============================================================================
 # git push のときに、pre-push フック（sf-hook.sh が hooks/pre-push を .git/hooks/pre-push にコピーしたもの）から
 # 呼ばれる本体。保護ブランチの上からのプッシュと、保護ブランチへのプッシュを拒否し、ターゲットファイルを検証したうえで、
@@ -8,7 +8,7 @@
 # （取り込みをしたときは、そのプッシュを中止する。もう一度プッシュすると、通る）。
 #
 # 【使い方】
-#   sf-prepush.sh [オプション]
+#   phases/hook/prepush.sh [オプション]
 #
 # 【オプション】
 #   -v, --verbose  : コマンドの応答（出力）をコンソールにも表示する（フックは、この指定で呼ぶ）
@@ -48,7 +48,7 @@
 #   - 2 の検証は、4・5 の取り込みより前に行う。4・5 で取り込んだ変更は、検証しない
 #   - 5 は、3 で main を取得したかにかかわらず、手元の origin/main を見る
 #   - 中断したときは、終了コード 1 で終わり、プッシュも中止される
-#   - ログ: ./sf-tools/logs/sf-prepush.log（実行のたびに追記する）
+#   - ログ: ./sf-tools/logs/prepush.log（実行のたびに追記する）
 # ==============================================================================
 
 # ------------------------------------------------------------------------------
@@ -64,7 +64,8 @@ readonly LOG_MODE="APPEND"
 # ------------------------------------------------------------------------------
 SCRIPT_DIR="${BASH_SOURCE[0]%/*}"  # run 不使用: common.sh の読み込み前（run が未定義）
 [[ "$SCRIPT_DIR/" == /* && "$SCRIPT_DIR/" != *//* && "$SCRIPT_DIR/" != */./* && "$SCRIPT_DIR/" != */../* ]] || SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"  # run 不使用: common.sh の読み込み前（run が未定義）
-COMMON_LIB="${SCRIPT_DIR}/../lib/common.sh"
+COMMON_LIB="${SCRIPT_DIR}/../../lib/common.sh"   # このファイルは phases/hook/ にある（2 つ上が sf-tools）
+BIN_DIR="${SCRIPT_DIR%/*}"; BIN_DIR="${BIN_DIR%/*}/bin"   # sf-check.sh などのコマンドの場所
 
 if [[ ! -f "$COMMON_LIB" ]]; then
     echo "[FATAL ERROR] Library not found: $COMMON_LIB" >&2
@@ -200,7 +201,7 @@ phase_check_main() {
 
 # 【SYNTAX】ターゲットファイルの検証（sf-check.sh を引数なしで実行する。書式・パス・種類の可否。エラーなら中断）
 phase_check_syntax() {
-    run bash "${SCRIPT_DIR}/sf-check.sh" || die "ターゲットファイルの検証でエラーがありました。プッシュを中断しました。"
+    run bash "${BIN_DIR}/sf-check.sh" || die "ターゲットファイルの検証でエラーがありました。プッシュを中断しました。"
     return $RET_OK
 }
 

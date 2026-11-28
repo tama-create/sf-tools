@@ -1935,7 +1935,7 @@ CEOF
         assert_file_contains "$SF_TOOLS_DIR/doc/dev-reference.md" "$_ex" "dev-reference.md: 除外の 6 ファイルの説明が、needs-e2e.sh と同じ（${_ex}）"
     done
     assert_equals "$(grep -c "^E2E_EXCLUDE_PATHS=" "$_ne")" "1" "needs-e2e.sh: 除外の一覧は、1 か所だけ"
-    assert_equals "$(grep "^E2E_EXCLUDE_PATHS=" "$_ne" | tr ' ' '\n' | grep -c '/')" "6" "needs-e2e.sh: 除外は、6 ファイルだけ（増やしたら、CLAUDE.md・dev-guide.md・dev-reference.md の説明も直す）"
+    assert_equals "$(grep "^E2E_EXCLUDE_PATHS=" "$_ne" | tr ' ' '\n' | grep -c '/')" "7" "needs-e2e.sh: 除外は、6 ファイルと 1 フォルダ（phases/metasync）だけ（増やしたら、CLAUDE.md・dev-guide.md・dev-reference.md の説明も直す）"
     # 誤って除外すると、リリース・削除の確認が抜けるもの（共有部品・リリースの雛形・各フェーズ）は、除外していない
     for _in in lib phases hooks templates config bin tests/e2e .github/workflows/e2e.yml; do
         if grep "^E2E_TARGET_PATHS=" "$_ne" | tr ' ()' '\n\n\n' | grep -qx "$_in"; then  # 対象の一覧の 1 語と、完全一致するか

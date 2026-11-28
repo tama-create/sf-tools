@@ -34,5 +34,6 @@
     "**/.sfdx": true
   },
   "xml.preferences.showSchemaDocumentationType": "none",
-  "xml.server.vmargs": "-Xmx2048M"
+  "xml.server.vmargs": "-Xmx2048M",
+  "xml.downloadExternalResources.enabled": true
 }

@@ -405,6 +405,12 @@ if [[ "${1:-}" == "--changed" ]]; then
             phases/start/*)
                 _changed_tests+=("test_launcher.sh" "test_sf-start.sh")   # sf-start.sh が開くメニュー（ランチャー）
                 ;;
+            phases/metasync/*)
+                _changed_tests+=("test_sf-metasync.sh")   # sf-metasync.sh の部品（2026-11-28 に sf-metasync.sh から分けた）
+                ;;
+            phases/project/*)
+                _changed_tests+=("test_sf-project.sh" "test_sf-project2.sh" "test_sf-project3.sh")   # sf-project.sh の部品（2026-11-28 に分けた）
+                ;;
             phases/log/*)
                 _changed_tests+=("test_sf-log.sh")   # sf-log.sh の部品（2026-11-28 に sf-log.sh から分けた）
                 ;;

@@ -418,6 +418,8 @@ check_gh_owner "$GITHUB_OWNER"   # 認証ユーザーの一致確認
 
 > 仕様の正本は、`bin/sf-metasync.sh` の冒頭コメント（`--help`）。ここは要点だけ。
 
+- **ファイルの分け方（2026-11-28）**: 入口の `bin/sf-metasync.sh`（1〜5 章: 設定・引数・固有の設定と通知 / 7 章: メインフロー）と、6 章のフェーズの定義を入れた `phases/metasync/` の部品 4 つ（`git`: SWITCH・GIT・PREPARE / `retrieve`: DETECT〜RECENT / `plan`: PLAN・SCAN・APPLY / `sync`: SYNC）。6 章の位置で順に source する。`phases/metasync/` も e2e の対象外（`tests/e2e/needs-e2e.sh`）
+
 - `prod` エイリアスの組織（**本番・Sandbox のどちらでもよい**）から、メタデータを取得し、`main` にコミットして `push` する（**PR は作らない**）。staging・develop のブランチへは、**伝播しない**（2026-11-26 にやめた。`doc/one-way-promotion-design.md` 3.7。開発のブランチが、`sf-push.sh` で `main` を取り込む。以前の手順 12）
 - どのブランチから実行しても、`main` に切り替えて処理し、終了時に元のブランチへ戻る（追跡中のファイルに未コミットの変更があれば、`git stash` で退避して、戻すときに `stash pop`）
 - **鏡像方式（2026-11-01。設計: `doc/sf-metasync-redesign.md`）**: `metadata.txt` の全種類を、**一時プロジェクト**（`${TMPDIR:-/tmp}/sf-metasync-XXXXXX`）へ `sf project retrieve start --json` で取得し（一時的なエラー（`MetadataTransferError` など）は 60 秒待って 1 回だけやり直す。環境変数 `SF_METASYNC_RETRY_WAIT` で秒数を変えられる）、`lib/metasync.js plan` で、手元の `main` の「同期の対象のフォルダ」と比べて、追加・変更・**削除**を決め、`apply` で作業ツリーに反映してから、コミット・push する。取得が失敗しても、作業ツリーは変わらない。**以前の `sf sgd source delta`（sfdx-git-delta）は廃止した**（比べるのは Git のコミットどうしで、組織を見ないため、`pull --rebase` の直後は常に空で、効果がなかった。公式サポート外のプラグインでもある）
@@ -651,6 +653,8 @@ tr -d '\r' < "$key_file" | base64_oneline | gh secret set "SF_PRIVATE_KEY" -R "$
 ### 4.13 sf-project.sh
 
 > 仕様の正本は、`bin/sf-project.sh` と `phases/init/*.sh` の冒頭コメント（`--help`）。ここは要点と設計の経緯。
+
+- **ファイルの分け方（2026-11-28）**: 入口の `bin/sf-project.sh`（1〜2 章・7 章の Phase のループ）と、`phases/project/` の部品 4 つ（`args`: 3 章・`start`: 4〜5 章・`env`: 6 章・`finish`: 8 章）。元の章の位置で順に source する（引数 `"$@"` と `shift` は、入口と共有）。部品の中の `BASH_SOURCE[0]` は部品のファイルになるため、自分を動かし直す `exec` は `SF_PROJECT_SELF`（入口の場所）を使う。Phase のスクリプト（`phases/init/`。単独で動かす前提のテストがある）とは、別のフォルダに置く
 
 新規 Salesforce プロジェクトの初期セットアップ。`phases/init/` 配下のフェーズスクリプトを順次実行する。保守用のモード（`--add-tier` / `--verify` / `--status` / `--reconnect`）は、force-* の中で実行し、この順で最初に該当した 1 つだけを実行して終了する（ほかのモードの指定は無視。ロックは取らない）。Ctrl+C は、`--help` の判定のあとから無効（`trap '' INT`）。ログは `~/sf-tools/logs/sf-project.log`（起動のたびに空にする）。
 
@@ -1133,7 +1137,7 @@ sf-tools の `main` への反映は、全ユーザーへの配布と同義であ
 
 **配布物のパス**は、利用者が `git pull` で受け取る実行物の `bin/` `lib/` `phases/` `hooks/` `templates/` `config/`。`tests/` `doc/` `.github/workflows/test.yml` `README.md` などは、実行に使われないため、配布物ではない（同じリポジトリにあるが、利用者の動作には影響しない）。
 
-**e2e の対象のパス**は、配布物のうち、リリース・削除の流れに関係しない 6 ファイル（`bin/sf-metasync.sh`・`bin/sf-update-cli.sh`・`lib/metasync.js`・`config/metasync-detect.txt`・`config/metasync-fingerprint.txt`・`config/metasync-extra.txt`）を除いたもの。**`tests/e2e/needs-e2e.sh` が、その定義の正本**（対象のパスの一覧 `E2E_TARGET_PATHS` と、除外の一覧 `E2E_EXCLUDE_PATHS`。e2e 自体の `tests/e2e/`・`e2e.yml` も、対象に入れている）。e2e.yml に、push の起動はない（2026-11-05 に廃止。mm では動かさない）。6 ファイルは、`wf-release.yml`・`wf-propagate.yml` からは、説明のコメントに書かれているだけで、呼び出されない（`sf-update-cli.sh` は、`sf-refresh.sh` が裏で起動するだけで、失敗しても、リリースに影響しない。`config/metasync-*.txt` の 3 つを読むのは、`sf-metasync.sh`・`lib/metasync.js` だけ）。e2e は、1 回で、テスト用の組織（`tamashimon-org`。非公開）の Actions の無料枠（月 2,000 分）を、**約 40 分ぶん**使う（2026-11 の明細: 重いテスト用リポジトリ 37〜39 分 + macOS 側 2〜3 分）。先月（2026-10）は、e2e が作ったリポジトリ 74 個で 1,309 分（65%）を使い、10/23 に枠が尽きた。そのため、リリース・削除に関係しない変更では、e2e を動かさない（`tests/test_e2e.sh` が、`needs-e2e.sh` の除外と、この文書・`CLAUDE.md`・`doc/dev-guide.md` の除外のファイルの説明が、そろっていることを確かめる）。使量は、`organizations/<組織の ID>/settings/billing/usage?year=Y&month=M`（リポジトリ別・日別の明細）で確かめられる。
+**e2e の対象のパス**は、配布物のうち、リリース・削除の流れに関係しない 6 ファイル（`bin/sf-metasync.sh`・`bin/sf-update-cli.sh`・`lib/metasync.js`・`config/metasync-detect.txt`・`config/metasync-fingerprint.txt`・`config/metasync-extra.txt`）と、sf-metasync.sh の部品のフォルダ `phases/metasync` を除いたもの。**`tests/e2e/needs-e2e.sh` が、その定義の正本**（対象のパスの一覧 `E2E_TARGET_PATHS` と、除外の一覧 `E2E_EXCLUDE_PATHS`。e2e 自体の `tests/e2e/`・`e2e.yml` も、対象に入れている）。e2e.yml に、push の起動はない（2026-11-05 に廃止。mm では動かさない）。6 ファイルは、`wf-release.yml`・`wf-propagate.yml` からは、説明のコメントに書かれているだけで、呼び出されない（`sf-update-cli.sh` は、`sf-refresh.sh` が裏で起動するだけで、失敗しても、リリースに影響しない。`config/metasync-*.txt` の 3 つを読むのは、`sf-metasync.sh`・`lib/metasync.js` だけ）。e2e は、1 回で、テスト用の組織（`tamashimon-org`。非公開）の Actions の無料枠（月 2,000 分）を、**約 40 分ぶん**使う（2026-11 の明細: 重いテスト用リポジトリ 37〜39 分 + macOS 側 2〜3 分）。先月（2026-10）は、e2e が作ったリポジトリ 74 個で 1,309 分（65%）を使い、10/23 に枠が尽きた。そのため、リリース・削除に関係しない変更では、e2e を動かさない（`tests/test_e2e.sh` が、`needs-e2e.sh` の除外と、この文書・`CLAUDE.md`・`doc/dev-guide.md` の除外のファイルの説明が、そろっていることを確かめる）。使量は、`organizations/<組織の ID>/settings/billing/usage?year=Y&month=M`（リポジトリ別・日別の明細）で確かめられる。
 
 `bash tests/e2e/needs-e2e.sh` の戻り値が **1**（e2e の対象のパスの変更がない）なら、下の表のうち「テスト」だけを確認する（e2e・ワークフローの手動実行は不要）。**0**（変更あり。変わったファイルが表示される）なら、変更内容に応じて、表の該当する項目を実施する。e2e は、**mm では動かさず、rr の最初の手順として動かす**（`CLAUDE.md` 1.3.2）。
 

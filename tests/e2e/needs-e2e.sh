@@ -9,9 +9,10 @@
 #
 # 【対象のパス】
 #   配布物 bin/ lib/ phases/ hooks/ templates/ config/ と、e2e 自体 tests/e2e/ .github/workflows/e2e.yml。
-#   ただし、リリース・削除の流れから呼ばれない次の 6 ファイルは除く（変えても、e2e の結果が変わらないため）:
+#   ただし、リリース・削除の流れから呼ばれない次の 6 ファイルと 1 フォルダは除く（変えても、e2e の結果が変わらないため）:
 #     bin/sf-metasync.sh  bin/sf-update-cli.sh  lib/metasync.js  config/metasync-detect.txt
 #     config/metasync-fingerprint.txt  config/metasync-extra.txt（この 2 つも、読むのは sf-metasync.sh・lib/metasync.js だけ）
+#     phases/metasync（sf-metasync.sh の部品。2026-11-28 に sf-metasync.sh から分けた）
 #   文書（doc/ site/ *.md）・単体テスト（tests/ の tests/e2e/ 以外）・.github/workflows/test.yml だけの変更は、対象外
 #
 # 【使い方】
@@ -29,9 +30,9 @@
 #   -h, --help : このヘルプを表示する
 # ==============================================================================
 
-# 対象のパス（正本）と、除外の 6 ファイル。変えたら、tests/test_e2e.sh の確認も、CLAUDE.md などの説明も直す
+# 対象のパス（正本）と、除外の 6 ファイルと 1 フォルダ。変えたら、tests/test_e2e.sh の確認も、CLAUDE.md などの説明も直す
 E2E_TARGET_PATHS=(bin lib phases hooks templates config tests/e2e .github/workflows/e2e.yml)
-E2E_EXCLUDE_PATHS=(bin/sf-metasync.sh bin/sf-update-cli.sh lib/metasync.js config/metasync-detect.txt config/metasync-fingerprint.txt config/metasync-extra.txt)
+E2E_EXCLUDE_PATHS=(bin/sf-metasync.sh bin/sf-update-cli.sh lib/metasync.js config/metasync-detect.txt config/metasync-fingerprint.txt config/metasync-extra.txt phases/metasync)
 
 if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
     awk '/^# ==/{f++; next} f==2{sub(/^# ?/,""); print} f==3{exit}' "${BASH_SOURCE[0]}"  # run 不使用: 設定の読み込み前に、ヘルプを出して終わるため

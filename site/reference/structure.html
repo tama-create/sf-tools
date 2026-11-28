@@ -160,6 +160,16 @@
 │   │   ├── stop.sh             ← stop・leave
 │   │   ├── collect.sh          ← collect（裏の取得役）
 │   │   └── status.sh           ← status・auto・begin
+│   ├── metasync/               ← sf-metasync.sh の部品（フェーズの定義。sf-metasync.sh が順に読み込む）
+│   │   ├── git.sh              ← main への切り替え・リモートの取り込み・取得先の準備
+│   │   ├── retrieve.sh         ← 変更の検知・一覧の指紋・メタデータの取得
+│   │   ├── plan.sh             ← 計画・秘密の検査・作業ツリーへの反映
+│   │   └── sync.sh             ← Git への反映
+│   ├── project/                ← sf-project.sh の部品（sf-project.sh が順に読み込む）
+│   │   ├── args.sh             ← 引数の解析・保守用のモードへの振り分け
+│   │   ├── start.sh            ← オーナーとプロジェクト名の決定・開始画面・管理者用の作業フォルダ
+│   │   ├── env.sh              ← 環境変数・同時実行のロック・状態ファイル
+│   │   └── finish.sh           ← 後処理
 │   └── init/                   ← sf-project.sh のフェーズスクリプト
 │       ├── init-common.sh
 │       ├── add_tier.sh          ← --add-tier オプションで呼ばれる tier 追加スクリプト

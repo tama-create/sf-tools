@@ -85,7 +85,7 @@
 | `test_project-identity.sh` | lib/project.sh のオーナー・XXXX の決め方（`parse_github_remote` / `normalize_project_name` / `discover_clones` / `gh_owner_candidates` / `resolve_init_identity` / `resolve_job_identity`） |
 | `test_sf-next.sh` | sf-next.sh（判定は偽の `sf-promote-check.sh`（`SF_PROMOTE_CHECK_CMD`）で差し替える。表示・終わり方・PR の作成画面・止まる条件・`--create`（gh pr create の引数・オプションの誤り・origin の形）） |
 | `test_sf-promote-check.sh` | sf-promote-check.sh（一方通行の確認。本物の git（bare の origin）と偽の gh（PR・commit status・実行）で、R0〜R3・印を信じる条件・`--only`・`--plan`・`--json`。リポジトリのフォルダは `force-t`） |
-| `test_sf-launcher.sh` | sf-launcher.sh（`common.sh` を読み込まない standalone のランチャー） |
+| `test_launcher.sh` | phases/start/launcher.sh（`sf-start.sh` が開くメニュー。`common.sh` を読み込まない standalone のランチャー） |
 | `test_security.sh` | セキュリティ修正の退行の検出（静的解析: `run` 経由の `sf org display --verbose` の禁止・`run` の一時ファイルの置き場所など。実行時: ログに `sfdxAuthUrl` が残らない・ログのフォルダが 700）。`--changed` は、`bin/`・`phases/`・`lib/`・`hooks/` の変更で選ぶ（約 3 秒） |
 | `test_e2e.sh`・`test_e2e2.sh` | tests/e2e/ の安全ガードと部品（テスト関数を、2 つのファイルに、所要時間でほぼ均等に分けた。並列に動かすため。共通の部品は `tests/e2e-test-lib.sh`。実行を伴うシナリオ（manual-delete 以降）が test_e2e2.sh）（gh / sf はモック。実環境には接続しない。名前の判定・Actions 上のガード・削除関数・鍵一式の読み込み・`cleanup.sh` の既定など） |
 | `test_run-tests.sh` | tests/run_tests.sh の `--shard`（`SF_TEST_LIST_ONLY=1` で分け方だけを確かめる: 漏れ・重複がない・いつも同じ分け方・不正な指定は終了コード 2）と `--changed`（まだ `git add` していない新しいファイルも対象にする・`.gitignore` の対象は数えない・配布物のコードの変更で `test_security.sh` を選ぶ・git のリポジトリとして読めなければ全件に倒れず終了コード 1。一時のリポジトリで確かめる）と、`tests/wsl-gitfile.sh`（WSL の写しの `.git` を直す。`SF_WSL_MNT_ROOT` で `/mnt` を差し替えて確かめる） |
@@ -368,7 +368,7 @@ check_gh_owner "$GITHUB_OWNER"   # 認証ユーザーの一致確認
 - `.sf/config.json` / `.sfdx/sfdx-config.json` を上書き（書き込めなければ中断）し、`code` があれば `code .` で VS Code を起動（なければ警告のみ）
 - バックグラウンドで `sf-install.sh` を実行（フック・リリースDir準備・npm install・ツール更新はすべて sf-install.sh が担当。完了は待たない）
 - デバッグログ（`~/sf-tools/bin/sf-log.sh` があるとき。`doc/sf-log-design.md` 5 章）: 持ち主の印 `SF_LOG_OWNER`（`PID:時刻:乱数`）を決め（外側の印の PID が生きていれば引き継ぐ = 入れ子）、`sf-log.sh begin -o <エイリアス> --owner <印>` を呼ぶ（sf を呼ばずにすぐ終わる。準備と取得役は裏）。0 かつ自分の印なら、`EXIT` トラップ（`_on_exit`）で `sf-log.sh leave --owner <印>` を呼ぶ。10 は何もしない・それ以外は WARNING。どれでも先へ進む
-- 続けて、前面で `sf-launcher.sh` を起動（`SF_LAUNCHER_ACTIVE=1` なら起動しない。二重起動の防止）。`SF_LAUNCHER_FROM_START=1` を付ける（ランチャーが、これのないメニューの起動を `sf-start.sh` に切り替えるため）
+- 続けて、前面でメニュー（`~/sf-tools/phases/start/launcher.sh`。4.7）を起動（`SF_LAUNCHER_ACTIVE=1` なら起動しない。二重起動の防止）。メニューを開く入口は `sf-start.sh` だけ
 - Ctrl+C は無効（`trap '' INT`。子の bash にも継承される）。終了コードは、ランチャー・バックグラウンドの sf-install.sh の結果によらず 0（中断・失敗は 1）
 - 前提: force-* フォルダで実行（`SF_INIT_MODE=1`（sf-job.sh 経由）なら確認を省略）。接続済みの組織を切り替えるときは `sf-restart.sh`
 
@@ -506,20 +506,18 @@ check_gh_owner "$GITHUB_OWNER"   # 認証ユーザーの一致確認
 - 第 1 引数の `-h` / `--help` だけが sf-dryrun.sh のヘルプ。2 番目以降は sf-release.sh へ渡る
 - `--release` を転送した場合は sf-release.sh の安全ガード（セクション 3.4）が働く
 
-### 4.7 sf-launcher.sh
+### 4.7 phases/start/launcher.sh（ランチャー）
 
-> 仕様の正本は、`bin/sf-launcher.sh` の冒頭コメント（`--help`）。ここは要点だけ。
+> 仕様の正本は、`phases/start/launcher.sh` の冒頭コメント。ここは要点だけ。
 
-- `sf-launcher.sh` で起動するメニュー形式ランチャー（`sf-start.sh` の最後に自動で起動する。`sf-job.sh` からは `sf-start.sh` 経由。別名（`sfl` など）は作らない。直接 `sf-launcher.sh` を打つ。2026-10-23 の決定）
-- メニュー: 1 Check / 2 Dryrun / 3 Deploy / 4 Push / 5 PullRequest（`sf-next.sh`。2026-11-27 に Next から改名）/ 6 Start / 7 Restart（同じフォルダの `sf-xxx.sh` を、引数なしで bash で実行）。番号は 1 文字（Enter 不要）、`q` で終了。範囲外・数字と `q` 以外は無視。実行したコマンドが失敗しても、ランチャーは終了しない
+- `sf-start.sh` の最後に、前面で開くメニュー形式のランチャー（`sf-job.sh` からは `sf-start.sh` 経由）。**利用者が打つコマンドではない**ため、`bin/` に置かない（`bin/` の `sf-*.sh` は、単独で起動するコマンドの名前。2026-11-28 に `bin/sf-launcher.sh` から移した）。別名（`sfl` など）は作らない（2026-10-23 の決定）
+- 2026-11-28 に、番号の指定（`sf-launcher.sh <番号>`）と `--fzf` をなくした（単独で起動する意味がない。1 つだけ動かすなら `sf-*.sh` を直接打つ）。同じ日に入れた「`sf-launcher.sh` を打ったら `sf-start.sh` に切り替える」仕組み（`SF_LAUNCHER_FROM_START`）も、入口が 1 つになったため消した。引数を付けたら、エラー（終了コード 1）
+- メニュー: 1 Check / 2 Dryrun / 3 Deploy / 4 Push / 5 PullRequest（`sf-next.sh`。2026-11-27 に Next から改名）/ 6 Start / 7 Restart（sf-tools の `bin/` の `sf-xxx.sh` を、引数なしで bash で実行。場所は `BIN_DIR`（このファイルの 2 つ上の `bin/`））。番号は 1 文字（Enter 不要）、`q` で終了。範囲外・数字と `q` 以外は無視。実行したコマンドが失敗しても、ランチャーは終了しない
 - `lib/common.sh` を source しない standalone 設計（ログファイルを作らない・カラー定義を独自に持つ）
-- force-* フォルダの外では、警告を表示して終了する（終了コード 1。`-h` / `--help` だけは外でも動く）
+- force-* フォルダの外では、警告を表示して終了する（終了コード 1）
 - VSCode 内では `sf-start` / `sf-restart`（6・7）をメニューから除外（`$TERM_PROGRAM == "vscode"` で判定。番号 6・7 は範囲外になる）
 - `SF_LAUNCHER_ACTIVE=1` をエクスポートして `sf-start.sh` からの二重起動を防止
-- 入口を `sf-start.sh` にそろえる（2026-11-28）: 引数なし（メニュー）で、`SF_LAUNCHER_FROM_START` が 1 でなく、起動したときの `SF_LAUNCHER_ACTIVE` も 1 でなく、`SF_LOG_OWNER` の PID も生きていなければ（印を付けない古い版の `sf-start.sh` が、更新されたランチャーを開いたとき、`sf-start.sh` と裏の `sf-install.sh` がもう 1 回動かないように）、`SF_LAUNCHER_ACTIVE` を外して、同じフォルダの `sf-start.sh` を `exec` する（`sf-start.sh` がなければ、そのままメニュー）。デバッグログの begin / leave は `sf-start.sh` だけが行うため（ランチャー自身で行う案は、入口が 2 つになるため取りやめた）。無限の切り替えにならないのは、`sf-start.sh` が `SF_LAUNCHER_FROM_START=1` を付けて開くため。読み込み直しの `exec` では、環境に残る `SF_LAUNCHER_FROM_START` と `SF_LAUNCHER_ACTIVE=1` で切り替えない。番号の指定・`--fzf` は切り替えない。テストは、ファイルの頭で `SF_LAUNCHER_FROM_START=1` を export する
-- `sf-launcher.sh <番号>` で、その番号を 1 回だけ実行して終了（終了コードは、実行したコマンドのもの。範囲外・スクリプトがなければ 1）
-- `sf-launcher.sh --fzf` で fzf モードも利用可能（fzf がなければ、警告を表示して終了コード 1）
-- 表示名は、起動のときに 1 回だけ `MENU_LABELS` に作る（`label_of`。sf- を除いて先頭を大文字。`sf-next` だけ `PullRequest`）。名前の欄は 11 文字の幅（`%-11s`）。fzf モードも同じ表示名で出し、選んだ表示名から `MENU_LABELS` で照らしてコマンドを引く
+- 表示名は、起動のときに 1 回だけ `MENU_LABELS` に作る（`label_of`。sf- を除いて先頭を大文字。`sf-next` だけ `PullRequest`）。名前の欄は 11 文字の幅（`%-11s`）
 - 線と線の間に、`print_status` が見出しの 2 行を出す（2026-11-27。読み取りのみ・通信しない）:
   - 描画のたびのコマンドの起動を減らす（Windows の Git Bash では起動が遅い）: ブランチ・先端・変更の数は 1 回の `git status --porcelain=v2 --branch` から読む。値の掃除 `clean_into` は、英数字と一部の記号だけの値ならコマンドを起動しない。組織は `.sf/config.json` の中身が前回と同じなら node を起動しない（`read_target_org`）
   - 1 行目 `  >> LAUNCHER <<   <ブランチ> @ <組織> ／ 変更 N 件 ／ Log: <状態>`。2 行目以降は、頭に同じ幅（19 文字）の空白 `HEAD_PAD` を置いて、ブランチ名の位置にそろえる。組織は `.sf/config.json` の `target-org` を `node -e` で読む（grep / sed で JSON を読まない。表示を崩す文字を除き 60 文字で切る。`echo -e` のため `\` を `\\` にする）。ログは `apexlog_summary` が `logs/apex/.status` を `while read` で読み、`AL_TEXT`（例: `取得中 (15:30/3本)`）・`AL_COLOR`・`AL_WARN` に入れる（source しない。WARNING は `⚠ Log: …` の 1 行）
@@ -818,7 +816,7 @@ sf-init.sh --add-tier develop    # main+staging → main+staging+develop
 
 > 仕様の正本は、`bin/sf-check.sh` の冒頭コメント（`--help`）。ここは要点と設計の経緯。
 
-ターゲットファイルの構文チェックと、テストクラス不足検出を行う。`sf-release.sh` / `sf-push.sh` / `sf-precommit.sh` / `sf-prepush.sh` / `sf-launcher.sh`（メニューの Check）から呼ばれる。単体でも実行できる。
+ターゲットファイルの構文チェックと、テストクラス不足検出を行う。`sf-release.sh` / `sf-push.sh` / `sf-precommit.sh` / `sf-prepush.sh` / メニュー（`phases/start/launcher.sh` の Check）から呼ばれる。単体でも実行できる。
 
 - 引数: 2 つ以上なら 1 つ目を `deploy-target.txt`、2 つ目を `remove-target.txt`（3 つ目以降は無視）、1 つなら `deploy-target.txt` だけ。引数なしなら、`sf-tools/release/branch_name.txt`（Git の管理外。sf-install.sh が保存）のブランチ名で、`sf-tools/release/<ブランチ名>/` の 2 つを検証する（今の Git のブランチではない。`branch_name.txt` がなければ、WARNING を出して終了コード 0。コミットを止めない）
 - `-v` / `--verbose` は受け付けるだけ（run を使わないため）。ほかの `-` で始まる引数（2 つ目以降の `-h` / `--help` を含む）は「不明なオプションです」で中断
@@ -980,8 +978,8 @@ AI の開発サイクル用のデバッグログ取得（開発者向け。管�
 | `sf-job.sh` | `sf-start.sh` | クローンのあと、そのフォルダで引数なしで実行（対話のため `run` なし）。AI 操作（`SF_TOOLS_AI=1`）では呼ばない（`doc/ai-operation-design.md` 11.3） |
 | `sf-restart.sh` | `sf-start.sh` | 接続設定を消したあと、`FORCE_RELOGIN=1` を付けて実行 |
 | `sf-start.sh` | `sf-install.sh` | `~/sf-tools/bin/sf-install.sh` をバックグラウンドで起動（完了は待たない） |
-| `sf-start.sh` | `sf-launcher.sh` | install の起動の直後に起動（完了は待たない）。`SF_LAUNCHER_ACTIVE=1` なら起動しない（二重起動防止） |
-| `sf-launcher.sh` | `sf-check` / `sf-push` / `sf-next` / `sf-dryrun` / `sf-deploy` / `sf-start` / `sf-restart`（`.sh`） | メニューから実行（VS Code の中では start / restart を出さない）。`SF_LAUNCHER_ACTIVE=1` を export する |
+| `sf-start.sh` | `phases/start/launcher.sh` | install の起動の直後に起動（完了は待たない）。`SF_LAUNCHER_ACTIVE=1` なら起動しない（二重起動防止） |
+| `phases/start/launcher.sh` | `sf-check` / `sf-push` / `sf-next` / `sf-dryrun` / `sf-deploy` / `sf-start` / `sf-restart`（`.sh`） | メニューから実行（VS Code の中では start / restart を出さない）。`SF_LAUNCHER_ACTIVE=1` を export する |
 | `sf-install.sh` | `sf-hook.sh` | フックのインストール（`run`） |
 | `sf-install.sh` | `sf-upgrade.sh` | `~/.sf-tools-last-update` から 24 時間以上でバックグラウンド起動 |
 | `sf-dryrun.sh` | `sf-release.sh` | `exec`。オプションなし（dry-run） |
@@ -1204,7 +1202,7 @@ sf-tools の `main` への反映は、全ユーザーへの配布と同義であ
 
 **Hello World のリリース・削除（`_hello_flow`）:** 実際の PR の流れで、`wf-validate` → マージ → `wf-release` を通す（`wf-release` の途中のステップ（JWT ログイン・公開 `sf-tools` の clone）と Slack 通知（`"ok":true`）、成功の通知）。
 - 部品は `tests/e2e/lib.sh`: `e2e_gh_pr_create` / `e2e_gh_pr_merge` / `e2e_wait_pr_run`（`gh run list --workflow … --branch … --event pull_request` で実行を探し、完了まで `E2E_POLL_SEC` 秒（既定 5）おきに確認。起動待ちは `E2E_RUN_FIND_TRIES` 回（既定 24）、完了待ちは `E2E_WF_TIMEOUT` 秒（既定 1200）。本体は `lib/verify-common.sh` の `verify_wait_pr_run` で、`VERIFY_*` の名前でも指定できる）。これらは `_e2e_check_repo` で、オーナー（`E2E_OWNER`）とテスト用リポジトリの名前の形式が一致しないと動かない
-- リリース（通常の運用と同じ道。`_hello_local_job` に `_hello_write_release` を渡す）: `e2e_run_sf_cmd` で、`sf-job.sh`（ブランチ `e2e-hello-時刻`（`JOB_RELEASE`。`--resume` でもぶつからないよう、毎回別の名前）の作成・clone・`sf-start.sh`。標準入力は `ジョブ名 / Y / エイリアス（E2E_JOB_ALIAS） / ログイン先 2`）→ `e2e_wait_sf_install`（`sf-start.sh` が背景で動かす `sf-install.sh` の完了を、`sf-tools/logs/sf-install.log` の完了メッセージで待つ。`E2E_INSTALL_TIMEOUT` 秒、既定 600。`npm install` も、通常の運用と同じく動く）→ Hello World の 4 ファイル（`lib/verify-common.sh` の `verify_hello_paths` / `verify_hello_content_for`。`verify.sh` と共有）と `deploy-target.txt`（`[files]` と `[members]`）を書く（開発者の手作業にあたる部分。`remove-target.txt` は、`sf-install.sh` が作った雛形のまま）→ `sf-dryrun.sh`（`@isTest` の検出と `--tests` を確認）→ `sf-push.sh`（commit・push。`pre-push` フックが動く）。`e2e_run_sf_cmd` は、テスト用の作業フォルダ（`{E2E_HOME_ROOT}/{E2E_OWNER}/e2e-…`）の中だけで動き、出力を `${E2E_TMP}/{ラベル}.out` に残し、失敗したら末尾を表示する。差し替え（`tests/e2e/shims/`）は、`sf`（`org login web` を認証 URL に）、`code`（`code .` は何もしない。`--wait <ファイル>` は、`E2E_COMMIT_MSG` を書き込む）、ブラウザ。`sf-launcher.sh`（対話のメニュー）は、`SF_LAUNCHER_ACTIVE=1` で起動しない。そのあと、`gh` で PR を作り、`wf-validate` → マージ → `wf-release`
+- リリース（通常の運用と同じ道。`_hello_local_job` に `_hello_write_release` を渡す）: `e2e_run_sf_cmd` で、`sf-job.sh`（ブランチ `e2e-hello-時刻`（`JOB_RELEASE`。`--resume` でもぶつからないよう、毎回別の名前）の作成・clone・`sf-start.sh`。標準入力は `ジョブ名 / Y / エイリアス（E2E_JOB_ALIAS） / ログイン先 2`）→ `e2e_wait_sf_install`（`sf-start.sh` が背景で動かす `sf-install.sh` の完了を、`sf-tools/logs/sf-install.log` の完了メッセージで待つ。`E2E_INSTALL_TIMEOUT` 秒、既定 600。`npm install` も、通常の運用と同じく動く）→ Hello World の 4 ファイル（`lib/verify-common.sh` の `verify_hello_paths` / `verify_hello_content_for`。`verify.sh` と共有）と `deploy-target.txt`（`[files]` と `[members]`）を書く（開発者の手作業にあたる部分。`remove-target.txt` は、`sf-install.sh` が作った雛形のまま）→ `sf-dryrun.sh`（`@isTest` の検出と `--tests` を確認）→ `sf-push.sh`（commit・push。`pre-push` フックが動く）。`e2e_run_sf_cmd` は、テスト用の作業フォルダ（`{E2E_HOME_ROOT}/{E2E_OWNER}/e2e-…`）の中だけで動き、出力を `${E2E_TMP}/{ラベル}.out` に残し、失敗したら末尾を表示する。差し替え（`tests/e2e/shims/`）は、`sf`（`org login web` を認証 URL に）、`code`（`code .` は何もしない。`--wait <ファイル>` は、`E2E_COMMIT_MSG` を書き込む）、ブラウザ。対話のメニュー（`phases/start/launcher.sh`）は、`SF_LAUNCHER_ACTIVE=1` で起動しない。そのあと、`gh` で PR を作り、`wf-validate` → マージ → `wf-release`
 - どちらのジョブも、`deploy-target.txt` と `remove-target.txt` の両方が、クローンにある（`sf-install.sh` が雛形から作る。書き換えるのは、使う側だけ）（`sf-release.sh` は、どちらかが無いと止まる。通常は `sf-install.sh` が雛形から作る）。使わない側は、`sf-install.sh` が作った空の雛形（`[files]` と `[members]` のみ）のまま。`wf-validate` の「対象ファイル確認」は、実質の中身がある側だけを見る（2026-10-05 の初回の実機で、`remove-target.txt` が無く検証が失敗した）
 - 削除（リリースと同じ道。`_hello_cycle` に、`_hello_write_remove` を渡す）: `sf-job.sh`（ブランチ `e2e-hello-delete-時刻`（`JOB_DELETE`）。新しいクローン）→ `sf-tools/release/<そのブランチ>/remove-target.txt`（`ApexClass:SfToolsE2eHelloTest` / `ApexClass:SfToolsE2eHello`）を書く（`deploy-target.txt` は雛形のまま）→ `sf-dryrun.sh` → `sf-push.sh` → PR → マージ。`@isTest` の検出の確認は、リリースだけ
 - そのほかの sf-tools のコマンド: リリース後に、リリースしたジョブのクローンで、`sf-next.sh`（出力に「マージ済み」。質問には N で答える。`_hello_sf_next`）と、`sf-deploy.sh -t main --no-open`（予約名 `main` の組織への、ローカルからの強制リリースの拒否。開発者の本物の `prod` などを避けるため `main` を使う。終了コード 0 以外・「共有環境のため」の文言・`project deploy start` が出ないこと。`e2e_run_sf_cmd_refused`・`_hello_deploy_refused`）を確認する
@@ -1300,7 +1298,7 @@ sf-tools の `main` への反映は、全ユーザーへの配布と同義であ
 
 - **構成**: `site/index.html`（トップ）・`site/guide/`（使い方ガイド・用語集: `install`・`basics`・`daily`・`glossary`）・`site/admin/`（管理者ガイド: `setup`・`maintenance`・`secrets`・`workflows`・`verify`・`troubleshooting`）・`site/reference/`（リファレンス: `commands`・`commands-dev`・`commands-auto`・`target-files`・`structure`）・`site/design/`（設計と背景: `cicd`）。ページの一覧の正本は、`site/assets/site.js` の `NAV`。共通の部分は、`site/assets/style.css`（スタイル。ダークモード・スマホ対応）と `site/assets/site.js`。ビルドの手順は、ない（手書きの静的な HTML）。
 - **ページの足し方**: ① `<head>` と骨組み（`<header id="top">`・`<nav id="side">`・`<main id="doc" class="doc">`・`<aside id="toc">`・`<footer id="foot">`・`site.js` の読み込み）を、既存のページと同じにする。② `<body data-root="...">` は、`site/` からの深さに合わせる（直下は `""`・1 階層下は `"../"`）。③ **`assets/site.js` の `NAV` に 1 行足す**（左の目次・前後のリンクは、ここだけで決まる。`h` がない項目は「準備中」と表示される）。コード中の `<` は、`&lt;` にする。④ **見出しの番号（大項目 `1.`・中項目 `1.1`・小項目 `1.1.1`）は、手で書かない**（`site.js` が h2・h3・h4 に自動で付ける）。階層は飛ばさない（h2 の次は h3、h3 の次は h4）。 ⑤ **囲み**（`<div class="box 種類">` + `<div class="title">題</div>`）は、種類で、アイコンが自動で付く（通常 = 💡、`warn` = ⚠️、`danger` = 🛑、`ok` = ✅、`next` = 👉、`admin` = 🔑 管理者専用）。題は、必ず付ける（`tests/test_site.sh` が確認する）。小さな印は `<span class="badge safe">🔍 読み取りのみ</span>`。言葉は、`site/guide/glossary.html`（用語集）にそろえる（管理者 = プロジェクト管理者・リリース = デプロイ・段階 = 環境）。
-- **図の足し方**: 図は、基本は、HTML と CSS だけで描く（ダークモード・スマホ幅に合う）。**例外として、作者が用意した画像（`site/assets/*.png`。ロゴ入りの全体図 `system-overview.png` など）を、`<figure class="photo">` の中に、`<img>`（代替文字 `alt` 必須）と `<figcaption>` つきで載せてよい**。画像は、ダークモード・スマホ幅・文字のコピーに弱いので、同じ内容の HTML/CSS の版を、折りたたみ（`<details>`）で併記する。画像は、PIL などで 256 色に減らして、500KB ほどに収める。`<figure class="diagram">` の中に、①流れ図 `.flow`（`.node` と `.arrow` を交互に並べる。箱の色は `admin`・`dev`・`auto`・`ok`・`warn`。スマホ幅では縦に並ぶ）、②扇形 `.fan`（1 つの元から複数の行き先）、③区分け `.phases`（`.phase.p1`〜`p3`。人の操作がある手順は `li.you`）、④入れ子の箱 `.nest`（フォルダの構成）、⑤ターミナルの画面の見本 `.term` を置く。**`<figcaption>` で、何の図かを必ず書く**。定義は `site/assets/style.css`。`tests/test_site.sh` が、説明文の有無と、箱の色の種類を確認する。**開発者向けのページは、ランチャー（`sf-launcher.sh`）を中心に書く**（コマンドは、直接打つ場合として併記する）。
+- **図の足し方**: 図は、基本は、HTML と CSS だけで描く（ダークモード・スマホ幅に合う）。**例外として、作者が用意した画像（`site/assets/*.png`。ロゴ入りの全体図 `system-overview.png` など）を、`<figure class="photo">` の中に、`<img>`（代替文字 `alt` 必須）と `<figcaption>` つきで載せてよい**。画像は、ダークモード・スマホ幅・文字のコピーに弱いので、同じ内容の HTML/CSS の版を、折りたたみ（`<details>`）で併記する。画像は、PIL などで 256 色に減らして、500KB ほどに収める。`<figure class="diagram">` の中に、①流れ図 `.flow`（`.node` と `.arrow` を交互に並べる。箱の色は `admin`・`dev`・`auto`・`ok`・`warn`。スマホ幅では縦に並ぶ）、②扇形 `.fan`（1 つの元から複数の行き先）、③区分け `.phases`（`.phase.p1`〜`p3`。人の操作がある手順は `li.you`）、④入れ子の箱 `.nest`（フォルダの構成）、⑤ターミナルの画面の見本 `.term` を置く。**`<figcaption>` で、何の図かを必ず書く**。定義は `site/assets/style.css`。`tests/test_site.sh` が、説明文の有無と、箱の色の種類を確認する。**開発者向けのページは、ランチャー（`sf-start.sh` が開くメニュー）を中心に書く**（コマンドは、直接打つ場合として併記する）。
 - **テスト**: `bash tests/run_tests.sh test_site.sh`（`--changed` は、`site/*`・`pages.yml` の変更で選ぶ）。確認するのは、決まった書き出し（doctype・title・`data-root` と深さの一致など）・リンク切れ・`NAV` への登録漏れ（孤立したページ）・LF・コードの中のエスケープしていない `<`・`pages.yml`・囲みの題・見出し（番号を手で書かない・階層を飛ばさない）。
 - **食い違いの検出（`doc/doc-style.md` の 3 階層。コード → 技術文書 → 一般向け文書の順に正しさを伝える）**: ① `tests/test_docs_facts.sh` が、`site/**/*.html` と `README.md` の中のコマンド名・オプション（コード片では、一緒に書いたコマンドの冒頭コメントにあるか）・パス・環境変数（`SF_…`）が、実在するかを調べる（`doc/` は対象外。仕様どおりに存在しない例の書き方は、`tests/docs-facts-allow.txt`）。② `tests/test_docs_stamps.sh` が、冒頭コメントが変わったのに文書が見直されていないものを検出する（`doc/doc-stamps.txt`。新しい `bin/sf-*.sh` は、どれかの文書の基にしないと失敗する）。CI は検出だけで、文書を自動では書き換えない。
 - **公開**: `.github/workflows/pages.yml` が、`main` に `site/` の変更が入ったとき、`site/` を GitHub Pages に公開する（`development` の途中経過は出ない）。リポジトリの Settings → Pages → Source を「GitHub Actions」にする設定（最初の 1 回だけ）は、済んでいる（`gh api repos/tama-create/sf-tools/pages` の `build_type` が `workflow`。2026-10-23 の rr の公開は成功）。公開先は、`https://tama-create.github.io/sf-tools/`。アップロードと公開の間に、アップロードしたもの（`github-pages`）が API から見えるまで待つ手順がある（2026-11-25 から、完了の直後は一覧に出るまで遅れるようになり、待たないと `deploy-pages` が「No artifacts named "github-pages"」で毎回失敗したため。権限 `actions: read` はこの手順のため）。

@@ -154,7 +154,7 @@ git pull origin main                     # main の最新を取り込む
 | `need_answer 名前 "質問"` | AI 操作（`SF_TOOLS_AI=1`）の確認待ち（終了コード 20）。入力の関数は `$( )` の中で呼ばない |
 | `read_secret VAR PROMPT` | 秘密情報（Token など）の入力（`*` で表示。値は画面・ログに出さない） |
 
-> `sf-launcher.sh` は `common.sh` を source しない standalone 設計のため例外。`read -rsn1` 直書き時は `|| { printf "\n"; exit 0; }` で EOF 対応を必ず付けること。
+> `phases/start/launcher.sh`（`sf-start.sh` が開くメニュー）は `common.sh` を source しない standalone 設計のため例外。`read -rsn1` 直書き時は `|| { printf "\n"; exit 0; }` で EOF 対応を必ず付けること。
 
 ### 2.4 安全ガード（管理者向け警告）
 

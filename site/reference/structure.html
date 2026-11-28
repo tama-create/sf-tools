@@ -36,7 +36,7 @@
   <thead><tr><th>ログの場所</th><th>コマンド</th></tr></thead>
   <tbody>
     <tr><td><code>~/sf-tools/logs/&lt;名前&gt;.log</code>（sf-tools 側。プロジェクトの外）</td><td><code>sf-init.sh</code>（<code>sf-init.log</code>。各 Phase も追記する。<code>--add-tier</code>・<code>--reconnect</code>・<code>--status</code> も同じファイル）・<code>sf-init.sh --verify</code> とセットアップの最後の動作の確認（<code>verify.log</code>）・<code>sf-job.sh</code>（<code>sf-job.log</code>）・<code>sf-typecheck.sh</code>（<code>sf-typecheck.log</code>）</td></tr>
-    <tr><td>実行した <code>force-*</code> フォルダの中の <code>sf-tools/logs/&lt;コマンド名&gt;.log</code></td><td>上以外の、すべてのコマンド（ランチャー <code>sf-launcher.sh</code> は、ログを作りません）</td></tr>
+    <tr><td>実行した <code>force-*</code> フォルダの中の <code>sf-tools/logs/&lt;コマンド名&gt;.log</code></td><td>上以外の、すべてのコマンド（<code>sf-start.sh</code> が開くランチャーは、ログを作りません）</td></tr>
   </tbody>
 </table>
 <p>ログは、ほとんどのコマンドで、実行のたびに作り直されます（前回の内容は消えます）。<code>sf-init.sh</code>（<code>--add-tier</code>・<code>--reconnect</code>・<code>--status</code> を含む）も、起動のたびに <code>sf-init.log</code> を作り直します。<code>sf-check.sh</code>（ほかのコマンドや git のフックからも呼ばれる）と <code>sf-prepush.sh</code>（pre-push フック）だけは、実行のたびに追記されます。</p>
@@ -113,7 +113,6 @@
 ├── bin/                        ← スクリプト本体
 │   ├── sf-job.sh
 │   ├── sf-start.sh
-│   ├── sf-launcher.sh
 │   ├── sf-push.sh
 │   ├── sf-next.sh
 │   ├── sf-promote-check.sh
@@ -150,6 +149,8 @@
 │   ├── metasync.js             ← 組織から取得した内容と main を比べて、追加・変更・削除の計画を作り、反映する（sf-metasync.sh が呼ぶ。Node の標準機能のみ）
 │   └── typecheck.js            ← メタデータの種類ごとに、リリース・削除ができるかを確かめる（sf-typecheck.sh が呼ぶ。Node の標準機能のみ）
 ├── phases/
+│   ├── start/                  ← sf-start.sh の部品
+│   │   └── launcher.sh         ← 最後に開くメニュー（ランチャー）
 │   └── init/                   ← sf-init.sh のフェーズスクリプト
 │       ├── init-common.sh
 │       ├── add_tier.sh          ← --add-tier オプションで呼ばれる tier 追加スクリプト

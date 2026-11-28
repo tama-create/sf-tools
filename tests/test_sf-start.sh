@@ -10,9 +10,9 @@ test_connected_org() {
     local td mb mh
     setup_std_env td mb mh
     create_all_mocks "$mb"
-    mkdir -p "$mh/sf-tools/bin"
-    printf '#!/bin/bash\necho "sf-launcher called" >> "%s"\n' "$MOCK_CALL_LOG" > "$mh/sf-tools/bin/sf-launcher.sh"
-    chmod +x "$mh/sf-tools/bin/sf-launcher.sh"
+    mkdir -p "$mh/sf-tools/bin" "$mh/sf-tools/phases/start"
+    printf '#!/bin/bash\necho "launcher called" >> "%s"\n' "$MOCK_CALL_LOG" > "$mh/sf-tools/phases/start/launcher.sh"
+    chmod +x "$mh/sf-tools/phases/start/launcher.sh"
 
     # 接続済みを示す設定ファイルを用意
     echo '{"target-org":"testorg"}' > "$td/.sf/config.json"
@@ -34,9 +34,9 @@ test_alias_prompt_eof_aborts() {
     local td mb mh
     setup_std_env td mb mh
     create_all_mocks "$mb"
-    mkdir -p "$mh/sf-tools/bin"
-    printf '#!/bin/bash\nexit 0\n' > "$mh/sf-tools/bin/sf-launcher.sh"
-    chmod +x "$mh/sf-tools/bin/sf-launcher.sh"
+    mkdir -p "$mh/sf-tools/bin" "$mh/sf-tools/phases/start"
+    printf '#!/bin/bash\nexit 0\n' > "$mh/sf-tools/phases/start/launcher.sh"
+    chmod +x "$mh/sf-tools/phases/start/launcher.sh"
     rm -f "$td/.sf/config.json"    # 初回起動（未接続）→ エイリアスの入力になる
     source "$SF_TOOLS_DIR/lib/platform.sh"   # run_with_timeout（時間の上限つき実行）
 
@@ -54,9 +54,9 @@ test_config_files_written() {
     local td mb mh
     setup_std_env td mb mh
     create_all_mocks "$mb"
-    mkdir -p "$mh/sf-tools/bin"
-    printf '#!/bin/bash\nexit 0\n' > "$mh/sf-tools/bin/sf-launcher.sh"
-    chmod +x "$mh/sf-tools/bin/sf-launcher.sh"
+    mkdir -p "$mh/sf-tools/bin" "$mh/sf-tools/phases/start"
+    printf '#!/bin/bash\nexit 0\n' > "$mh/sf-tools/phases/start/launcher.sh"
+    chmod +x "$mh/sf-tools/phases/start/launcher.sh"
 
     echo '{"target-org":"testorg"}' > "$td/.sf/config.json"
     export MOCK_SF_ORG_JSON='{"result":{"alias":"testorg","id":"00D000000000001AAA"}}'
@@ -75,9 +75,9 @@ test_force_relogin() {
     local td mb mh
     setup_std_env td mb mh
     create_all_mocks "$mb"
-    mkdir -p "$mh/sf-tools/bin"
-    printf '#!/bin/bash\nexit 0\n' > "$mh/sf-tools/bin/sf-launcher.sh"
-    chmod +x "$mh/sf-tools/bin/sf-launcher.sh"
+    mkdir -p "$mh/sf-tools/bin" "$mh/sf-tools/phases/start"
+    printf '#!/bin/bash\nexit 0\n' > "$mh/sf-tools/phases/start/launcher.sh"
+    chmod +x "$mh/sf-tools/phases/start/launcher.sh"
 
     echo '{"target-org":"testorg"}' > "$td/.sf/config.json"
     export MOCK_SF_ORG_JSON='{"result":{"alias":"testorg","id":"00D000000000001AAA"}}'
@@ -99,12 +99,12 @@ test_login_failure_aborts() {
     local td mb mh out ec
     setup_std_env td mb mh
     create_all_mocks "$mb"
-    mkdir -p "$mh/sf-tools/bin"
+    mkdir -p "$mh/sf-tools/bin" "$mh/sf-tools/phases/start"
     printf '#!/bin/bash
 echo LAUNCHER-RAN >> "%s/launcher.log"
 exit 0
-' "$mb" > "$mh/sf-tools/bin/sf-launcher.sh"
-    chmod +x "$mh/sf-tools/bin/sf-launcher.sh"
+' "$mb" > "$mh/sf-tools/phases/start/launcher.sh"
+    chmod +x "$mh/sf-tools/phases/start/launcher.sh"
     rm -f "$td/.sf/config.json" "$td/.sfdx/sfdx-config.json"
 
     out=$(cd "$td" && HOME="$mh" PATH="$mb:$PATH" MOCK_SF_LOGIN_WEB_FAIL=1         bash "$SF_TOOLS_DIR/bin/sf-start.sh" <<< $'failorg
@@ -125,9 +125,9 @@ test_login_url_not_by_alias() {
     local td mb mh
     setup_std_env td mb mh
     create_all_mocks "$mb"
-    mkdir -p "$mh/sf-tools/bin"
-    printf '#!/bin/bash\nexit 0\n' > "$mh/sf-tools/bin/sf-launcher.sh"
-    chmod +x "$mh/sf-tools/bin/sf-launcher.sh"
+    mkdir -p "$mh/sf-tools/bin" "$mh/sf-tools/phases/start"
+    printf '#!/bin/bash\nexit 0\n' > "$mh/sf-tools/phases/start/launcher.sh"
+    chmod +x "$mh/sf-tools/phases/start/launcher.sh"
     echo '{"target-org":"x"}' > "$td/.sf/config.json"
     export MOCK_SF_ORG_JSON='{"result":{"alias":"x","id":"00D000000000001AAA"}}'
 
@@ -147,14 +147,14 @@ test_login_url_not_by_alias() {
     teardown "$td" "$mb" "$mh"
 }
 
-# sf-start.sh → sf-launcher.sh が呼ばれる
+# sf-start.sh → メニュー（phases/start/launcher.sh）が呼ばれる
 # AI 向けの案内（CLAUDE.md・AGENTS.md の、手順書を指す行）がなければ、WARNING で知らせる（書き換えない）
 test_ai_guide_check() {
     local td mb mh out
     setup_std_env td mb mh
     create_all_mocks "$mb"
-    mkdir -p "$mh/sf-tools/bin"
-    printf '#!/bin/bash\nexit 0\n' > "$mh/sf-tools/bin/sf-launcher.sh"; chmod +x "$mh/sf-tools/bin/sf-launcher.sh"
+    mkdir -p "$mh/sf-tools/bin" "$mh/sf-tools/phases/start"
+    printf '#!/bin/bash\nexit 0\n' > "$mh/sf-tools/phases/start/launcher.sh"; chmod +x "$mh/sf-tools/phases/start/launcher.sh"
     rm -f "$mh/sf-tools/bin/sf-log.sh"
     echo '{"target-org":"testorg"}' > "$td/.sf/config.json"
     export MOCK_SF_ORG_JSON='{"result":{"alias":"testorg","id":"00D000000000001AAA"}}'
@@ -179,17 +179,16 @@ test_launcher_called() {
     local td mb mh
     setup_std_env td mb mh
     create_all_mocks "$mb"
-    mkdir -p "$mh/sf-tools/bin"
-    printf '#!/bin/bash\necho "sf-launcher called FROM=${SF_LAUNCHER_FROM_START:-}" >> "%s"\n' "$MOCK_CALL_LOG" > "$mh/sf-tools/bin/sf-launcher.sh"
-    chmod +x "$mh/sf-tools/bin/sf-launcher.sh"
+    mkdir -p "$mh/sf-tools/bin" "$mh/sf-tools/phases/start"
+    printf '#!/bin/bash\necho "launcher called ARGS=$#" >> "%s"\n' "$MOCK_CALL_LOG" > "$mh/sf-tools/phases/start/launcher.sh"
+    chmod +x "$mh/sf-tools/phases/start/launcher.sh"
 
     echo '{"target-org":"testorg"}' > "$td/.sf/config.json"
     export MOCK_SF_ORG_JSON='{"result":{"alias":"testorg","id":"00D000000000001AAA"}}'
 
     cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-start.sh" 2>&1 >/dev/null
 
-    assert_file_contains "$MOCK_CALL_LOG" "sf-launcher called" "sf-launcher.sh が呼び出された"
-    assert_file_contains "$MOCK_CALL_LOG" "FROM=1" "sf-launcher.sh に SF_LAUNCHER_FROM_START=1 を付ける（ランチャーが sf-start.sh に切り替えない）"
+    assert_file_contains "$MOCK_CALL_LOG" "launcher called ARGS=0" "メニュー（phases/start/launcher.sh）を、引数なしで開く"
     unset MOCK_SF_ORG_JSON
     teardown "$td" "$mb" "$mh"
 }
@@ -199,9 +198,9 @@ test_outside_force_dir() {
     local rd mb mh
     rd=$(setup_regular_dir); mb=$(setup_mock_bin); export MOCK_CALL_LOG="$mb/calls.log"; mh=$(setup_mock_home)
     create_all_mocks "$mb"
-    mkdir -p "$mh/sf-tools/bin"
-    printf '#!/bin/bash\nexit 0\n' > "$mh/sf-tools/bin/sf-launcher.sh"
-    chmod +x "$mh/sf-tools/bin/sf-launcher.sh"
+    mkdir -p "$mh/sf-tools/bin" "$mh/sf-tools/phases/start"
+    printf '#!/bin/bash\nexit 0\n' > "$mh/sf-tools/phases/start/launcher.sh"
+    chmod +x "$mh/sf-tools/phases/start/launcher.sh"
 
     local out; out=$(cd "$rd" && HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-start.sh" 2>&1)
     local ec=$?
@@ -221,9 +220,9 @@ test_sf_cli_abort() {
     local td mb mh
     setup_std_env td mb mh
     create_all_mocks "$mb"
-    mkdir -p "$mh/sf-tools/bin"
-    printf '#!/bin/bash\nexit 0\n' > "$mh/sf-tools/bin/sf-launcher.sh"
-    chmod +x "$mh/sf-tools/bin/sf-launcher.sh"
+    mkdir -p "$mh/sf-tools/bin" "$mh/sf-tools/phases/start"
+    printf '#!/bin/bash\nexit 0\n' > "$mh/sf-tools/phases/start/launcher.sh"
+    chmod +x "$mh/sf-tools/phases/start/launcher.sh"
     echo '{"target-org":"testorg"}' > "$td/.sf/config.json"
     export MOCK_SF_ORG_JSON='{"result":{"alias":"testorg","id":"00D000000000001AAA"}}'
 
@@ -244,8 +243,8 @@ test_sf_log_begin_and_leave() {
     local td mb mh out owner
     setup_std_env td mb mh
     create_all_mocks "$mb"
-    mkdir -p "$mh/sf-tools/bin"
-    printf '#!/bin/bash\nexit 0\n' > "$mh/sf-tools/bin/sf-launcher.sh"
+    mkdir -p "$mh/sf-tools/bin" "$mh/sf-tools/phases/start"
+    printf '#!/bin/bash\nexit 0\n' > "$mh/sf-tools/phases/start/launcher.sh"
     printf '#!/bin/bash\necho "sflog $*" >> "%s"\nexit "${SFLOG_RC:-0}"\n' "$MOCK_CALL_LOG" > "$mh/sf-tools/bin/sf-log.sh"
     echo '{"target-org":"testorg"}' > "$td/.sf/config.json"
     export MOCK_SF_ORG_JSON='{"result":{"alias":"testorg","id":"00D000000000001AAA"}}'

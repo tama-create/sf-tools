@@ -14,23 +14,22 @@
 <main id="doc" class="doc">
 
 <h1>📋 コマンド一覧</h1>
-<p class="lead">sf-tools のコマンドの一覧です。コマンドは、すべて <code>~/sf-tools/bin/</code> にあります。どのコマンドも、<code>--help</code>（または <code>-h</code>。多くのコマンドは、1 つ目の引数のときだけ）を付けると、概要・オプション・処理の流れを表示します。文書にないオプションを付けると、「不明なオプションです」と表示して止まります（綴りの誤りに、気づけるようにするためです。ランチャーは、番号以外の引数を「引数には番号を指定してください」で止めます）。</p>
+<p class="lead">sf-tools のコマンドの一覧です。コマンドは、すべて <code>~/sf-tools/bin/</code> にあります。どのコマンドも、<code>--help</code>（または <code>-h</code>。多くのコマンドは、1 つ目の引数のときだけ）を付けると、概要・オプション・処理の流れを表示します。文書にないオプションを付けると、「不明なオプションです」と表示して止まります（綴りの誤りに、気づけるようにするためです）。</p>
 
 <div class="box">
   <div class="title">ふだんは、ランチャーで足ります</div>
-  <p>開発者の毎日の操作は、<code>sf-launcher.sh</code>（ランチャー）のメニューから、番号を押すだけで進められます。<code>sf-start.sh</code> の最後に、自動で開きます（<code>sf-job.sh</code> も、最後に <code>sf-start.sh</code> を起動するため、そのまま開きます）。このページは、コマンドを直接打つときの、一覧です（<a href="../guide/daily.html#launcher">ランチャーの使い方</a>）。</p>
+  <p>開発者の毎日の操作は、ランチャー（<code>sf-start.sh</code> が開くメニュー）から、番号を押すだけで進められます。<code>sf-start.sh</code> の最後に、自動で開きます（<code>sf-job.sh</code> も、最後に <code>sf-start.sh</code> を起動するため、そのまま開きます）。このページは、コマンドを直接打つときの、一覧です（<a href="../guide/daily.html#launcher">ランチャーの使い方</a>）。</p>
 </div>
 
 <h2 id="list">一覧</h2>
-<p>「ランチャーのメニュー」の ○ は、<code>sf-launcher.sh</code> のメニューから選べるコマンドです（<a href="commands-dev.html#sf-launcher">ランチャー</a>）。VS Code のターミナルでは、<code>sf-start.sh</code>（<code>[6] Start</code>）と <code>sf-restart.sh</code>（<code>[7] Restart</code>）は、メニューに表示されません。🔑 は<strong>管理者専用</strong>（警告と確認が出る）、⚠️ は<strong>使うときに注意が必要</strong>なコマンドです（<a href="#admin">次の節</a>）。</p>
+<p>「ランチャーのメニュー」の ○ は、ランチャーのメニューから選べるコマンドです（<a href="commands-dev.html#launcher">ランチャー</a>）。VS Code のターミナルでは、<code>sf-start.sh</code>（<code>[6] Start</code>）と <code>sf-restart.sh</code>（<code>[7] Restart</code>）は、メニューに表示されません。🔑 は<strong>管理者専用</strong>（警告と確認が出る）、⚠️ は<strong>使うときに注意が必要</strong>なコマンドです（<a href="#admin">次の節</a>）。</p>
 
 <h3>開発者が使うコマンド</h3>
 <table>
   <thead><tr><th>コマンド</th><th>用途</th><th>ランチャーのメニュー</th></tr></thead>
   <tbody>
     <tr><td><a href="commands-dev.html#sf-job"><code>sf-job.sh</code></a></td><td>新しい作業を始める（作業用ブランチの作成・クローン → <code>sf-start.sh</code> で、組織への接続・VS Code とランチャーの起動）。管理者が <code>sf-init.sh</code> でリポジトリを作ったあとに使います（リポジトリがなければ中断します）</td><td>—</td></tr>
-    <tr><td><a href="commands-dev.html#sf-start"><code>sf-start.sh</code></a></td><td>開発環境を起動する（作業の再開）</td><td>○</td></tr>
-    <tr><td><a href="commands-dev.html#sf-launcher"><code>sf-launcher.sh</code></a></td><td>ランチャー本体（メニューから選んで実行。<strong>ふだんは、これだけで足ります</strong>）</td><td>—</td></tr>
+    <tr><td><a href="commands-dev.html#sf-start"><code>sf-start.sh</code></a></td><td>開発環境を起動する（作業の再開）。最後に、ランチャー（<a href="commands-dev.html#launcher">メニュー</a>）を開きます。<strong>ふだんは、これだけで足ります</strong></td><td>○</td></tr>
     <tr><td><a href="commands-dev.html#sf-check"><code>sf-check.sh</code></a></td><td>ターゲットファイルの構文を確認する</td><td>○</td></tr>
     <tr><td><a href="commands-dev.html#sf-dryrun"><code>sf-dryrun.sh</code></a></td><td>dry-run で検証する</td><td>○</td></tr>
     <tr><td><a href="commands-dev.html#sf-release"><code>sf-release.sh</code></a></td><td>検証（既定は dry-run）・リリース（共有環境・本番の組織へは、手元からは、検証も実行できません）</td><td>—</td></tr>

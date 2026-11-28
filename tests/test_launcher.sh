@@ -1,12 +1,12 @@
 #!/bin/bash
 # ==============================================================================
-# test_sf-launcher.sh - sf-launcher.sh のテスト
+# test_launcher.sh - phases/start/launcher.sh（sf-start.sh が開くメニュー）のテスト
 # ==============================================================================
 source "$(dirname "${BASH_SOURCE[0]}")/test_helper.sh"
 export SF_LAUNCHER_BG_STATUS=0   # 2 行目の裏の判定（sf-next.sh --status）を止める。確かめるテストだけで 1 にする
-export SF_LAUNCHER_FROM_START=1  # sf-start.sh から開いた扱いにする（メニューを sf-start.sh に切り替えない）。確かめるテストだけで外す
 unset SF_LAUNCHER_ACTIVE
-echo -e "${CLR_HEAD}=== sf-launcher.sh ===${CLR_RST}"
+LAUNCHER="$SF_TOOLS_DIR/phases/start/launcher.sh"
+echo -e "${CLR_HEAD}=== phases/start/launcher.sh ===${CLR_RST}"
 
 # ------------------------------------------------------------------------------
 # force-* 以外のディレクトリ → exit 1
@@ -17,7 +17,7 @@ test_not_in_force_dir() {
     export MOCK_CALL_LOG="$mb/calls.log"
     create_all_mocks "$mb"
 
-    local out; out=$(cd "$td" && PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-launcher.sh" 2>&1)
+    local out; out=$(cd "$td" && PATH="$mb:$PATH" bash "$LAUNCHER" 2>&1)
     local ec=$?
 
     assert_exit_fail $ec "force-* 以外のディレクトリ → exit 1"
@@ -26,75 +26,34 @@ test_not_in_force_dir() {
 }
 
 # ------------------------------------------------------------------------------
-# 有効な番号を引数で直接指定 → sf-check.sh が呼ばれる
-# （branch_name.txt なし → チェックスキップ → exit 0）
+# 引数は受け付けない（番号の指定・--fzf は、2026-11-28 になくした）→ exit 1。コマンドは動かさない
 # ------------------------------------------------------------------------------
-test_direct_number_arg() {
-    local td mb
-    td=$(setup_force_dir); mb=$(setup_mock_bin)
-    export MOCK_CALL_LOG="$mb/calls.log"
-    create_all_mocks "$mb"
-
-    # 番号 1 = sf-check（branch_name.txt なし → スキップして exit 0）
-    local out; out=$(cd "$td" && PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-launcher.sh" 1 2>&1)
-    local ec=$?
-
-    assert_exit_ok $ec "有効な番号引数 (1) → exit 0"
-    teardown "$td" "$mb"
-}
-
-# ------------------------------------------------------------------------------
-# 範囲外の番号 → exit 1
-# ------------------------------------------------------------------------------
-test_out_of_range_number() {
-    local td mb
-    td=$(setup_force_dir); mb=$(setup_mock_bin)
-    export MOCK_CALL_LOG="$mb/calls.log"
-    create_all_mocks "$mb"
-
-    local out; out=$(cd "$td" && PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-launcher.sh" 99 2>&1)
-    local ec=$?
-
-    assert_exit_fail $ec "範囲外の番号 (99) → exit 1"
-    assert_output_contains "$out" "範囲外" "範囲外メッセージが表示された"
-    teardown "$td" "$mb"
-}
-
-# ------------------------------------------------------------------------------
-# 回帰: 先頭が 0 の番号は 10 進数として扱う（以前は 08・09 が 8 進数として扱われ、[[ -eq ]] がエラーになった）
-# ------------------------------------------------------------------------------
-test_leading_zero_number() {
+test_args_rejected() {
     local td mb out ec a
     td=$(setup_force_dir); mb=$(setup_mock_bin)
     export MOCK_CALL_LOG="$mb/calls.log"
     create_all_mocks "$mb"
-
-    out=$(cd "$td" && PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-launcher.sh" 01 2>&1); ec=$?
-    assert_exit_ok $ec "01 → 1 として実行する（exit 0）"
-    for a in 08 09 0000000099999999999; do
-        out=$(cd "$td" && PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-launcher.sh" "$a" 2>&1); ec=$?
-        assert_exit_fail $ec "${a} → 範囲外で exit 1"
-        assert_output_contains "$out" "範囲外" "${a} → 範囲外メッセージが表示された"
-        printf '%s\n' "$out" | grep -qiE "value too great|syntax error|invalid" \
-            && fail "${a} → 算術のエラーが出ない" "$(printf '%s' "$out" | head -3)" \
-            || pass "${a} → 算術のエラーが出ない"
+    for a in 1 2 --fzf -h abc; do
+        out=$(cd "$td" && PATH="$mb:$PATH" bash "$LAUNCHER" "$a" < /dev/null 2>&1); ec=$?
+        assert_exit_fail $ec "引数 ${a} → exit 1"
+        assert_output_contains "$out" "引数は付けません" "引数 ${a} → 「引数は付けません」と出す"
+        assert_output_not_contains "$out" "▶ sf-" "引数 ${a} → コマンドを動かさない"
     done
     teardown "$td" "$mb"
 }
 
 # ------------------------------------------------------------------------------
-# 数字以外の引数 → exit 1
+# 番号を入力 → そのコマンドを動かし、入力が終わったら（EOF）exit 0
 # ------------------------------------------------------------------------------
-test_nonnumber_arg() {
-    local td mb
+test_run_by_input() {
+    local td mb out ec
     td=$(setup_force_dir); mb=$(setup_mock_bin)
     export MOCK_CALL_LOG="$mb/calls.log"
     create_all_mocks "$mb"
-
-    local out; out=$(cd "$td" && PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-launcher.sh" abc 2>&1)
-    local ec=$?
-
-    assert_exit_fail $ec "数字以外の引数 (abc) → exit 1"
+    # 番号 1 = sf-check（branch_name.txt なし → スキップして exit 0）
+    out=$(cd "$td" && printf '1' | PATH="$mb:$PATH" bash "$LAUNCHER" 2>&1); ec=$?
+    assert_exit_ok $ec "1 を入力 → sf-check を動かして、exit 0"
+    assert_output_contains "$out" "▶ sf-check" "1 を入力 → sf-check を動かす"
     teardown "$td" "$mb"
 }
 
@@ -108,7 +67,7 @@ test_quit_interactive() {
     create_all_mocks "$mb"
 
     # printf "q" で stdin に 1 文字送る → read -rsn1 が受け取って exit 0
-    local out; out=$(cd "$td" && printf "q" | PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-launcher.sh" 2>&1)
+    local out; out=$(cd "$td" && printf "q" | PATH="$mb:$PATH" bash "$LAUNCHER" 2>&1)
     local ec=$?
 
     assert_exit_ok $ec "q で終了 → exit 0"
@@ -125,7 +84,7 @@ test_menu_order() {
     export MOCK_CALL_LOG="$mb/calls.log"
     create_all_mocks "$mb"
 
-    out=$(cd "$td" && printf "q" | TERM_PROGRAM= PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-launcher.sh" 2>&1)
+    out=$(cd "$td" && printf "q" | TERM_PROGRAM= PATH="$mb:$PATH" bash "$LAUNCHER" 2>&1)
     plain=$(printf '%s\n' "$out" | sed $'s/\033\\[[0-9;]*m//g')
     local order
     order=$(printf '%s\n' "$plain" | grep -oE '\[[0-9]\] [A-Za-z]+' | tr '\n' ' ')
@@ -133,12 +92,12 @@ test_menu_order() {
     # Next と Start の間に、短い線がある
     printf '%s\n' "$plain" | grep -A1 '\[5\] PullRequest' | tail -1 | grep -q '^  ──────────$' \
         && pass "PullRequest と Start の間に線を引く" || fail "PullRequest と Start の間に線を引く" "$plain"
-    # 番号の直接指定も、新しい並び（2 = Dryrun）で動く
-    out=$(cd "$td" && PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-launcher.sh" 2 2>&1)
+    # 番号の入力も、新しい並び（2 = Dryrun）で動く
+    out=$(cd "$td" && printf '2' | PATH="$mb:$PATH" bash "$LAUNCHER" 2>&1)
     [[ "$out" == *"▶ sf-dryrun"* ]] && pass "番号 2 → sf-dryrun を動かす" || fail "番号 2 → sf-dryrun を動かす" "$(printf '%s' "$out" | head -5)"
 
     # VS Code の中: Start・Restart と、線を出さない
-    out=$(cd "$td" && printf "q" | TERM_PROGRAM=vscode PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-launcher.sh" 2>&1)
+    out=$(cd "$td" && printf "q" | TERM_PROGRAM=vscode PATH="$mb:$PATH" bash "$LAUNCHER" 2>&1)
     plain=$(printf '%s\n' "$out" | sed $'s/\033\\[[0-9;]*m//g')
     order=$(printf '%s\n' "$plain" | grep -oE '\[[0-9]\] [A-Za-z]+' | tr '\n' ' ')
     assert_equals "$order" "[1] Check [2] Dryrun [3] Deploy [4] Push [5] PullRequest " "VS Code の中: 1〜5 だけ"
@@ -151,10 +110,8 @@ test_menu_order() {
 # 実行
 # ------------------------------------------------------------------------------
 test_not_in_force_dir
-test_direct_number_arg
-test_out_of_range_number
-test_leading_zero_number
-test_nonnumber_arg
+test_args_rejected
+test_run_by_input
 test_quit_interactive
 test_menu_order
 
@@ -167,29 +124,29 @@ test_apexlog_status_line() {
     td=$(setup_force_dir); mb=$(setup_mock_bin)
     export MOCK_CALL_LOG="$mb/calls.log"
     create_all_mocks "$mb"
-    out=$(cd "$td" && echo "q" | PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-launcher.sh" 2>&1)
+    out=$(cd "$td" && echo "q" | PATH="$mb:$PATH" bash "$LAUNCHER" 2>&1)
     assert_output_not_contains "$out" "Log:" ".status がない → 何も表示しない"
     mkdir -p "$td/logs/apex"
     printf 'STATE=collecting\nORG=dev\nEXPIRES=2026-11-23T06:30:00Z\nEXPIRES_AT=15:30\nCOUNT_TODAY=3\nWARNING=\n' > "$td/logs/apex/.status"
-    out=$(cd "$td" && echo "q" | PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-launcher.sh" 2>&1)
+    out=$(cd "$td" && echo "q" | PATH="$mb:$PATH" bash "$LAUNCHER" 2>&1)
     [[ "$out" == *"取得中 (15:30/3本)"* ]] && pass "取得中 → 期限・今日の本数を表示する（Log: 取得中 (期限/本数)）" || fail "取得中 → 期限・今日の本数を表示する（Log: 取得中 (期限/本数)）" "$out"
     [[ "$out" == *$'\033[1m\033[0;32m取得中'* ]] && pass "取得中 → 太字の緑で表示する（目立たせる）" || fail "取得中 → 太字の緑で表示する（目立たせる）" "$out"
     printf 'STATE=skipped\nREASON=このプロジェクトでは、自動で取らない設定のため\n' > "$td/logs/apex/.status"
-    out=$(cd "$td" && echo "q" | PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-launcher.sh" 2>&1)
+    out=$(cd "$td" && echo "q" | PATH="$mb:$PATH" bash "$LAUNCHER" 2>&1)
     [[ "$out" == *"取っていません（このプロジェクトでは、自動で取らない設定のため）"* ]] && pass "取らない → 理由を表示する" || fail "取らない → 理由を表示する" "$out"
     [[ "$out" == *$'\033[0;33m取っていません'* ]] && pass "取らない → 黄色で表示する" || fail "取らない → 黄色で表示する" "$out"
     printf 'STATE=error\nREASON=接続できないため\n' > "$td/logs/apex/.status"
-    out=$(cd "$td" && echo "q" | PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-launcher.sh" 2>&1)
+    out=$(cd "$td" && echo "q" | PATH="$mb:$PATH" bash "$LAUNCHER" 2>&1)
     [[ "$out" == *$'\033[1m\033[0;31m取れていません（接続できないため）'* ]] && pass "取れていません → 太字の赤で表示する" || fail "取れていません → 太字の赤で表示する" "$out"
     printf 'STATE=stopped\nREASON=すべての sf-start が終了したため\n' > "$td/logs/apex/.status"
-    out=$(cd "$td" && echo "q" | PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-launcher.sh" 2>&1)
+    out=$(cd "$td" && echo "q" | PATH="$mb:$PATH" bash "$LAUNCHER" 2>&1)
     [[ "$out" == *"止まっています（すべての sf-start が終了したため）。sf-start で取り始めます"* ]] && pass "止まっている → 理由と、sf-start で取り始めることを添える" || fail "止まっている → 理由と、sf-start で取り始めることを添える" "$out"
     [[ "$out" == *$'\033[0;33m止まっています'* ]] && pass "止まっている → 黄色で表示する" || fail "止まっている → 黄色で表示する" "$out"
     printf 'STATE=collecting\nORG=dev\nWARNING=取得に失敗しました（120 秒後にやり直します）\n' > "$td/logs/apex/.status"
-    out=$(cd "$td" && echo "q" | PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-launcher.sh" 2>&1)
+    out=$(cd "$td" && echo "q" | PATH="$mb:$PATH" bash "$LAUNCHER" 2>&1)
     [[ "$out" == *"⚠ Log: 取得に失敗しました"* ]] && pass "WARNING → もう 1 行表示する" || fail "WARNING → もう 1 行表示する" "$out"
     printf 'STATE=$(touch injected)\n' > "$td/logs/apex/.status"
-    out=$(cd "$td" && echo "q" | PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-launcher.sh" 2>&1)
+    out=$(cd "$td" && echo "q" | PATH="$mb:$PATH" bash "$LAUNCHER" 2>&1)
     assert_file_not_exists "$td/injected" ".status を source しない（中身を実行しない）"
     assert_output_not_contains "$out" "Log:" "知らない STATE → 何も表示しない"
     teardown "$td" "$mb"
@@ -220,7 +177,7 @@ test_apexlog_status_refresh() {
             printf 'STATE=collecting\nORG=dev\nEXPIRES_AT=15:30\nCOUNT_TODAY=0\n' > "$td/logs/apex/.status"
             _wait_menus "$outf" 2
             sleep 6; printf 'q'
-        } | PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-launcher.sh" > "$outf" 2>&1
+        } | PATH="$mb:$PATH" bash "$LAUNCHER" > "$outf" 2>&1
     )
     out=$(cat "$outf")
     [[ "$out" == *"Log: "*"準備中"* ]] && pass "最初は、準備中を表示する" || fail "最初は、準備中を表示する" "$out"
@@ -234,7 +191,7 @@ test_apexlog_status_refresh() {
     # 準備中のままの EOF → すぐ終わる（待ち切れと取り違えない）
     printf 'STATE=starting\nORG=dev\n' > "$td/logs/apex/.status"
     t0=$SECONDS
-    out=$(cd "$td" && PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-launcher.sh" < /dev/null 2>&1); local ec=$?
+    out=$(cd "$td" && PATH="$mb:$PATH" bash "$LAUNCHER" < /dev/null 2>&1); local ec=$?
     assert_exit_ok $ec "準備中の EOF → 正常終了"
     (( SECONDS - t0 < 4 )) && pass "準備中の EOF → 待たずに終わる" || fail "準備中の EOF → 待たずに終わる" "$((SECONDS - t0)) 秒"
     teardown "$td" "$mb"
@@ -262,7 +219,7 @@ _st_repo() { # 作業フォルダ（force-*）を作り、origin（bare）へ pu
     echo "$td"
 }
 _st_menu() { # 作業フォルダ → メニューの出力（色を除く）
-    (cd "$1" && printf 'q' | TERM_PROGRAM= bash "$SF_TOOLS_DIR/bin/sf-launcher.sh" 2>&1) | sed $'s/\033\\[[0-9;]*m//g'
+    (cd "$1" && printf 'q' | TERM_PROGRAM= bash "$LAUNCHER" 2>&1) | sed $'s/\033\\[[0-9;]*m//g'
 }
 
 test_status_display() {
@@ -318,7 +275,7 @@ test_status_display() {
     mkdir -p "$td/logs/apex"
     printf 'STATE=error' > "$td/logs/apex/.status"
     printf '\nREASON=x\033[2Jy\xe2\x80\xaez\nWARNING=w\033[31mv\\033u\n' >> "$td/logs/apex/.status"
-    out=$( (cd "$td" && printf 'q' | TERM_PROGRAM= bash "$SF_TOOLS_DIR/bin/sf-launcher.sh" 2>&1) )
+    out=$( (cd "$td" && printf 'q' | TERM_PROGRAM= bash "$LAUNCHER" 2>&1) )
     [[ "$out" != *$'\033[2J'* && "$out" != *$'\xe2\x80\xae'* && "$out" != *$'\033[31mv'* ]] && pass "デバッグログの理由・WARNING の制御文字・向きを変える文字を除く" || fail "デバッグログの理由・WARNING の制御文字・向きを変える文字を除く" "$out"
     [[ "$out" == *"取れていません（x[2Jyz）"* && "$out" == *'⚠ Log: w[31mv\033u'* ]] && pass "デバッグログの理由・WARNING は、文字として残す（\\033 の並びは制御にしない）" || fail "デバッグログの理由・WARNING は、文字として残す（\\033 の並びは制御にしない）" "$out"
     rm -f "$td/logs/apex/.status"
@@ -359,11 +316,11 @@ test_status_display() {
     # 組織名: 制御文字（ESC・改行）・文字の向きを変える文字を除き、60 文字を超えたら切る
     local long; long=$(printf 'o%.0s' $(seq 1 80))
     printf '{"target-org": "ab\\u001b[31mcd\\nef\\u202egh%s"}\n' "$long" > "$td/.sf/config.json"
-    out=$( (cd "$td" && printf 'q' | TERM_PROGRAM= bash "$SF_TOOLS_DIR/bin/sf-launcher.sh" 2>&1) | grep ' @ ')
+    out=$( (cd "$td" && printf 'q' | TERM_PROGRAM= bash "$LAUNCHER" 2>&1) | grep ' @ ')
     [[ "$out" != *$'\033[31m'* && "$out" != *$'\xe2\x80\xae'* ]] && pass "組織名の制御文字・向きを変える文字を除く" || fail "組織名の制御文字・向きを変える文字を除く" "$out"
     [[ "$out" == *"ab[31mcdefgh"*"…"* ]] && pass "組織名は 60 文字で切って … を付ける" || fail "組織名は 60 文字で切って … を付ける" "$out"
     printf '{"target-org": "x\\\\033[31my"}\n' > "$td/.sf/config.json"
-    out=$( (cd "$td" && printf 'q' | TERM_PROGRAM= bash "$SF_TOOLS_DIR/bin/sf-launcher.sh" 2>&1) | grep ' @ ')
+    out=$( (cd "$td" && printf 'q' | TERM_PROGRAM= bash "$LAUNCHER" 2>&1) | grep ' @ ')
     [[ "$out" != *$'\033[31m'* && "$out" == *'x\033[31my'* ]] && pass "組織名の \\033 の文字の並びは、制御として解釈せず、そのまま出す" || fail "組織名の \\033 の文字の並びは、制御として解釈せず、そのまま出す" "$out"
     printf 'HEAD=%s\nNEXT=staging\nPR=1234567890\n' "$(git -C "$td" rev-parse HEAD)" > "$td/sf-tools/logs/next-status.txt"
     out=$(_st_menu "$td")
@@ -398,50 +355,32 @@ test_result_line() {
     echo ""; echo -e "${CLR_HEAD}[TEST] コマンドの結果の 1 行${CLR_RST}"
     local td out
     td=$(_st_repo)
-    out=$(cd "$td" && bash "$SF_TOOLS_DIR/bin/sf-launcher.sh" 1 2>&1 | sed $'s/\033\\[[0-9;]*m//g')
+    out=$(cd "$td" && printf '1' | bash "$LAUNCHER" 2>&1 | sed $'s/\033\\[[0-9;]*m//g')
     assert_output_contains "$out" "✓ Check: 終わりました（成功）" "成功 → ✓ の 1 行"
     git -C "$td" checkout -q -b develop
-    out=$(cd "$td" && bash "$SF_TOOLS_DIR/bin/sf-launcher.sh" 5 2>&1 | sed $'s/\033\\[[0-9;]*m//g'); local ec=$?
+    out=$(cd "$td" && printf '5' | bash "$LAUNCHER" 2>&1 | sed $'s/\033\\[[0-9;]*m//g')
     assert_output_contains "$out" "✗ PullRequest: 失敗、または中断しました（終了コード 1）" "失敗（環境ブランチの上の sf-next）→ ✗ の 1 行と終了コード"
     teardown "$td" "${td}.origin.git"
 }
 test_result_line
 
-test_fzf_label_to_command() {
-    echo ""; echo -e "${CLR_HEAD}[TEST] fzf: 選んだ表示名から、コマンドを引き直す（PullRequest → sf-next）${CLR_RST}"
-    local td mb out
-    td=$(_st_repo); mb=$(mktemp -d)
-    git -C "$td" checkout -q -b develop   # 環境ブランチの上の sf-next は失敗する → 結果の 1 行で、何が動いたかが分かる
-    # 1 回目は PullRequest の行を選び、2 回目は Esc（空）で終える fzf のモック
-    cat > "$mb/fzf" <<'MOCK'
-#!/bin/bash
-n=0; [[ -f "$0.count" ]] && n=$(cat "$0.count"); echo $((n + 1)) > "$0.count"
-if [[ $n -eq 0 ]]; then grep '^PullRequest ' | head -1; else cat > /dev/null; fi
-MOCK
-    chmod +x "$mb/fzf"
-    out=$(cd "$td" && PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-launcher.sh" --fzf < /dev/null 2>&1 | sed $'s/\033\\[[0-9;]*m//g')
-    assert_output_contains "$out" "✗ PullRequest: 失敗、または中断しました" "fzf で PullRequest を選ぶ → sf-next.sh が動く"
-    teardown "$td" "${td}.origin.git" "$mb"
-}
-test_fzf_label_to_command
-
 test_reload_when_updated() {
     echo ""; echo -e "${CLR_HEAD}[TEST] 起動のあとに自分のファイルが書き換わったら、新しい版で読み込み直す${CLR_RST}"
     local td bd out
     td=$(_st_repo); bd=$(mktemp -d)
-    cp "$SF_TOOLS_DIR/bin/sf-launcher.sh" "$bd/sf-launcher.sh"
+    cp "$LAUNCHER" "$bd/launcher.sh"
     mkdir -p "$td/sf-tools/logs"   # 本物の force-* では、sf-start.sh のログで、すでにある
     # 起動して 2 秒後に書き換え（git pull の代わり。秒の単位の環境でも新しく見えるよう間を空ける）、待ち切れ（5 秒）のあとに q
-    out=$( (cd "$td" && { sleep 2; echo '# 書き換え' >> "$bd/sf-launcher.sh"; sleep 8; printf 'q'; } | TERM_PROGRAM= bash "$bd/sf-launcher.sh" 2>&1) | sed $'s/\033\\[[0-9;]*m//g')
+    out=$( (cd "$td" && { sleep 2; echo '# 書き換え' >> "$bd/launcher.sh"; sleep 8; printf 'q'; } | TERM_PROGRAM= bash "$bd/launcher.sh" 2>&1) | sed $'s/\033\\[[0-9;]*m//g')
     assert_output_contains "$out" "↻ sf-tools が更新されたため、ランチャーを読み込み直します" "書き換わった → 読み込み直すことを出す"
     [[ $(printf '%s\n' "$out" | grep -c '>> LAUNCHER <<') -ge 2 ]] && pass "読み込み直したあと、メニューを描き直す" || fail "読み込み直したあと、メニューを描き直す" "$out"
     assert_output_contains "$out" "終了しました" "読み込み直したあとも、入力（q）を受け付ける"
     ls "$td"/sf-tools/logs/.launcher-* >/dev/null 2>&1 && fail "終了のあと、印のファイルを消す" || pass "終了のあと、印のファイルを消す"
-    out=$( (cd "$td" && { sleep 6; printf 'q'; } | TERM_PROGRAM= bash "$bd/sf-launcher.sh" 2>&1) | sed $'s/\033\\[[0-9;]*m//g')
+    out=$( (cd "$td" && { sleep 6; printf 'q'; } | TERM_PROGRAM= bash "$bd/launcher.sh" 2>&1) | sed $'s/\033\\[[0-9;]*m//g')
     assert_output_not_contains "$out" "読み込み直します" "書き換わっていない → 待ち切れても、読み込み直さない"
     # 入力がないまま、6 秒後に閉じる（Bash 3.2 では、待ち切れと同じ戻り値の EOF）→ 1 回だけ待ち切れ扱いのあと、終わる
     local t0 ec; t0=$SECONDS
-    (cd "$td" && sleep 6 | TERM_PROGRAM= bash "$bd/sf-launcher.sh" >/dev/null 2>&1); ec=$?
+    (cd "$td" && sleep 6 | TERM_PROGRAM= bash "$bd/launcher.sh" >/dev/null 2>&1); ec=$?
     assert_exit_ok $ec "入力が 6 秒後に閉じる → 正常終了"
     (( SECONDS - t0 < 20 )) && pass "入力が 6 秒後に閉じる → 待ち続けずに終わる" || fail "入力が 6 秒後に閉じる → 待ち続けずに終わる" "$((SECONDS - t0)) 秒"
     teardown "$td" "${td}.origin.git" "$bd"
@@ -460,7 +399,7 @@ echo x >> "${0%/*}/count"
 sleep 2
 printf '{"mode":"plan","ok":true,"skipped":false,"branch":"feature/x","head":"h","target":"develop","next_tier":"develop","pr_open":"","tiers":["develop","staging","main"],"violations":[],"error":""}\n'
 MOCK
-    out=$( (cd "$td" && { sleep 25; printf 'q'; } | SF_LAUNCHER_BG_STATUS=1 SF_PROMOTE_CHECK_CMD="$mk/pc.sh" TERM_PROGRAM= bash "$SF_TOOLS_DIR/bin/sf-launcher.sh" 2>&1) | sed $'s/\033\\[[0-9;]*m//g')
+    out=$( (cd "$td" && { sleep 25; printf 'q'; } | SF_LAUNCHER_BG_STATUS=1 SF_PROMOTE_CHECK_CMD="$mk/pc.sh" TERM_PROGRAM= bash "$LAUNCHER" 2>&1) | sed $'s/\033\\[[0-9;]*m//g')
     assert_output_contains "$out" "Branch: （確かめています…）" "結果がない → 裏で判定し、そのあいだは「確かめています」"
     assert_output_contains "$out" "Branch: ▸ develop (次のPR) ⇒ × staging ⇒ × main" "裏の判定が終わる → 描き直して、段階の並びを出す"
     assert_file_contains "$td/sf-tools/logs/next-status.txt" "TIERS=develop staging main" "裏の判定が、next-status.txt を書く"
@@ -476,7 +415,7 @@ echo x >> "${0%/*}/count"
 printf '{"mode":"plan","ok":false,"next_tier":"","tiers":[],"violations":[],"error":"origin を読めません"}\n'
 exit 2
 MOCK
-    out=$( (cd "$td" && { sleep 20; printf 'q'; } | SF_LAUNCHER_BG_STATUS=1 SF_PROMOTE_CHECK_CMD="$mk/pc.sh" TERM_PROGRAM= bash "$SF_TOOLS_DIR/bin/sf-launcher.sh" 2>&1) | sed $'s/\033\\[[0-9;]*m//g')
+    out=$( (cd "$td" && { sleep 20; printf 'q'; } | SF_LAUNCHER_BG_STATUS=1 SF_PROMOTE_CHECK_CMD="$mk/pc.sh" TERM_PROGRAM= bash "$LAUNCHER" 2>&1) | sed $'s/\033\\[[0-9;]*m//g')
     assert_output_contains "$out" "Branch: （5 PullRequest で確かめる）" "裏の判定が失敗 → 「5 PullRequest で確かめる」"
     n=$(wc -l < "$mk/count" | tr -d ' ')
     assert_equals "$n" "1" "失敗しても、同じ先端のコミットでは、繰り返さない"
@@ -489,11 +428,12 @@ echo x >> "${0%/*}/count"
 sleep 6
 exit 2
 MOCK
-    local bd; bd=$(mktemp -d)   # 書き換えてよい sf-tools の写し（bin/ と lib/。sf-next.sh が ../lib を読むため）
-    mkdir -p "$bd/bin"
-    cp "$SF_TOOLS_DIR/bin/sf-launcher.sh" "$SF_TOOLS_DIR/bin/sf-next.sh" "$bd/bin/"
+    local bd; bd=$(mktemp -d)   # 書き換えてよい sf-tools の写し（phases/start/・bin/・lib/。sf-next.sh が ../lib を読むため）
+    mkdir -p "$bd/bin" "$bd/phases/start"
+    cp "$LAUNCHER" "$bd/phases/start/"
+    cp "$SF_TOOLS_DIR/bin/sf-next.sh" "$bd/bin/"
     cp -r "$SF_TOOLS_DIR/lib" "$bd/lib"
-    out=$( (cd "$td" && { sleep 3; echo '# 書き換え' >> "$bd/bin/sf-launcher.sh"; sleep 14; printf 'q'; } | SF_LAUNCHER_BG_STATUS=1 SF_PROMOTE_CHECK_CMD="$mk/pc.sh" TERM_PROGRAM= bash "$bd/bin/sf-launcher.sh" 2>&1) | sed $'s/\033\\[[0-9;]*m//g')
+    out=$( (cd "$td" && { sleep 3; echo '# 書き換え' >> "$bd/phases/start/launcher.sh"; sleep 14; printf 'q'; } | SF_LAUNCHER_BG_STATUS=1 SF_PROMOTE_CHECK_CMD="$mk/pc.sh" TERM_PROGRAM= bash "$bd/phases/start/launcher.sh" 2>&1) | sed $'s/\033\\[[0-9;]*m//g')
     assert_output_contains "$out" "読み込み直します" "判定中に書き換わる → 読み込み直す"
     n=$(wc -l < "$mk/count" | tr -d ' ')
     assert_equals "$n" "1" "読み込み直しても、同じ先端のコミットでは、判定は 1 回だけ（引き継ぐ）"
@@ -501,60 +441,19 @@ MOCK
 }
 test_bg_status
 
-test_handoff_to_sf_start() {
-    echo ""; echo -e "${CLR_HEAD}[TEST] メニューを sf-start.sh を通さずに開く → sf-start.sh に切り替える（入口をそろえる）${CLR_RST}"
-    local td bd out
+test_location() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] 置き場所: phases/start/ に置き、コマンドは 2 つ上の bin/ から動かす（bin/sf-launcher.sh はない）${CLR_RST}"
+    local td bd
+    [[ ! -e "$SF_TOOLS_DIR/bin/sf-launcher.sh" ]] && pass "bin/sf-launcher.sh はない（利用者が打つコマンドではない）" || fail "bin/sf-launcher.sh はない" "残っている"
     td=$(setup_force_dir); bd=$(mktemp -d)
-    mkdir -p "$bd/bin" "$td/sf-tools/logs"
-    cp "$SF_TOOLS_DIR/bin/sf-launcher.sh" "$bd/bin/"
-    # sf-start.sh のモック: 呼ばれたこと・受け取った SF_LAUNCHER_ACTIVE・引数の数を書く
-    cat > "$bd/bin/sf-start.sh" <<'MOCK'
-#!/bin/bash
-echo "start ACTIVE=${SF_LAUNCHER_ACTIVE:-} ARGS=$#" >> "${0%/*}/start.calls"
-MOCK
-    out=$( (cd "$td" && echo "q" | env -u SF_LAUNCHER_FROM_START -u SF_LAUNCHER_ACTIVE bash "$bd/bin/sf-launcher.sh" 2>&1) | sed $'s/\033\\[[0-9;]*m//g')
-    assert_file_contains "$bd/bin/start.calls" "start ACTIVE= ARGS=0" "印なしのメニュー → sf-start.sh を引数なしで動かす（SF_LAUNCHER_ACTIVE は外す）"
-    assert_output_contains "$out" "sf-start で開きます" "切り替えるとき → 「sf-start で開きます」と出す"
-    assert_output_not_contains "$out" "番号を入力" "切り替えるとき → 自分ではメニューを出さない"
-
-    # sf-start.sh からの起動（SF_LAUNCHER_FROM_START=1）→ 切り替えず、メニューを出す
-    rm -f "$bd/bin/start.calls"
-    out=$( (cd "$td" && echo "q" | env -u SF_LAUNCHER_ACTIVE SF_LAUNCHER_FROM_START=1 bash "$bd/bin/sf-launcher.sh" 2>&1) | sed $'s/\033\\[[0-9;]*m//g')
-    [[ ! -f "$bd/bin/start.calls" ]] && pass "sf-start.sh からの起動 → 切り替えない" || fail "sf-start.sh からの起動 → 切り替えない" "$(cat "$bd/bin/start.calls")"
-    assert_output_contains "$out" "番号を入力" "sf-start.sh からの起動 → メニューを出す"
-
-    # ランチャーの中から開かれた（起動したときに SF_LAUNCHER_ACTIVE=1）→ 切り替えない（行ったり来たりしない）
-    rm -f "$bd/bin/start.calls"
-    (cd "$td" && echo "q" | env -u SF_LAUNCHER_FROM_START SF_LAUNCHER_ACTIVE=1 bash "$bd/bin/sf-launcher.sh" > /dev/null 2>&1)
-    [[ ! -f "$bd/bin/start.calls" ]] && pass "起動したときに SF_LAUNCHER_ACTIVE=1 → 切り替えない" || fail "起動したときに SF_LAUNCHER_ACTIVE=1 → 切り替えない" "$(cat "$bd/bin/start.calls")"
-
-    # 印を付けない古い版の sf-start.sh から（SF_LOG_OWNER の PID が生きている）→ 切り替えない
-    rm -f "$bd/bin/start.calls"
-    (cd "$td" && echo "q" | env -u SF_LAUNCHER_FROM_START -u SF_LAUNCHER_ACTIVE SF_LOG_OWNER="$$:1:gitbash1" bash "$bd/bin/sf-launcher.sh" > /dev/null 2>&1)
-    [[ ! -f "$bd/bin/start.calls" ]] && pass "SF_LOG_OWNER の PID が生きている → 切り替えない（古い版の sf-start.sh から）" || fail "SF_LOG_OWNER の PID が生きている → 切り替えない（古い版の sf-start.sh から）" "$(cat "$bd/bin/start.calls")"
-    # 持ち主の PID が死んでいる（sf-start.sh が終わったあとの残り）→ 切り替える
-    rm -f "$bd/bin/start.calls"
-    local dead; bash -c 'exit 0' & dead=$!; wait "$dead"
-    (cd "$td" && echo "q" | env -u SF_LAUNCHER_FROM_START -u SF_LAUNCHER_ACTIVE SF_LOG_OWNER="${dead}:1:gitbash1" bash "$bd/bin/sf-launcher.sh" > /dev/null 2>&1)
-    assert_file_contains "$bd/bin/start.calls" "start ACTIVE=" "SF_LOG_OWNER の PID が死んでいる → 切り替える"
-
-    # 番号の指定 → 切り替えない
-    rm -f "$bd/bin/start.calls"; : > "$bd/bin/sf-check.sh"
-    (cd "$td" && env -u SF_LAUNCHER_FROM_START -u SF_LAUNCHER_ACTIVE bash "$bd/bin/sf-launcher.sh" 1 > /dev/null 2>&1)
-    [[ ! -f "$bd/bin/start.calls" ]] && pass "番号の指定 → 切り替えない" || fail "番号の指定 → 切り替えない" "$(cat "$bd/bin/start.calls")"
-
-    # 読み込み直し（exec）→ 新しい版も、切り替えない（SF_LAUNCHER_FROM_START が環境に残る）
-    rm -f "$bd/bin/start.calls"
-    out=$( (cd "$td" && { sleep 3; echo '# 書き換え' >> "$bd/bin/sf-launcher.sh"; sleep 8; printf 'q'; } | env -u SF_LAUNCHER_ACTIVE SF_LAUNCHER_FROM_START=1 bash "$bd/bin/sf-launcher.sh" 2>&1) | sed $'s/\033\\[[0-9;]*m//g')
-    assert_output_contains "$out" "読み込み直します" "（前提）書き換え → 読み込み直す"
-    [[ ! -f "$bd/bin/start.calls" ]] && pass "読み込み直し → 切り替えない" || fail "読み込み直し → 切り替えない" "$(cat "$bd/bin/start.calls")"
-
-    # sf-start.sh がない → そのままメニューを出す
-    rm -f "$bd/bin/start.calls" "$bd/bin/sf-start.sh"
-    out=$( (cd "$td" && echo "q" | env -u SF_LAUNCHER_FROM_START -u SF_LAUNCHER_ACTIVE bash "$bd/bin/sf-launcher.sh" 2>&1) | sed $'s/\033\\[[0-9;]*m//g')
-    assert_output_contains "$out" "番号を入力" "sf-start.sh がない → そのままメニューを出す"
+    mkdir -p "$bd/bin" "$bd/phases/start"
+    cp "$LAUNCHER" "$bd/phases/start/"
+    # sf-check.sh のモック: 呼ばれたことを書く
+    printf '#!/bin/bash\necho called >> "${0%%/*}/check.calls"\n' > "$bd/bin/sf-check.sh"
+    (cd "$td" && printf '1' | bash "$bd/phases/start/launcher.sh" > /dev/null 2>&1)
+    assert_file_contains "$bd/bin/check.calls" "called" "1 を入力 → 2 つ上の bin/ の sf-check.sh を動かす"
     teardown "$td" "$bd"
 }
-test_handoff_to_sf_start
+test_location
 
 print_summary

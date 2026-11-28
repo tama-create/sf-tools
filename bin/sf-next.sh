@@ -19,7 +19,7 @@
 #   --title <題名>         : PR の題名（空でない 1 行。CR・LF を含まない。長さは GitHub が確かめる）。--create のときだけ指定できる
 #   --body-file <ファイル> : PR の本文のファイル（あって、読めること。中身は空でもよく、整形しない）。--create のときだけ指定できる
 #   --status               : 判定だけをする。処理の流れの 2 まで（next-status.txt を書く）で終わり、結果の表示・確認・PR の作成を
-#                            しない（ランチャーが、画面を出したあとに裏で動かす。sf-launcher.sh の処理の流れ 6）。ログは
+#                            しない（ランチャーが、画面を出したあとに裏で動かす。phases/start/launcher.sh の処理の流れ 6）。ログは
 #                            ./sf-tools/logs/sf-next-status.log（手で動かしたときの sf-next.log を上書きしない）。--create と一緒には使えない。
 #                            判定の結果を書けなかったときは、エラー（終了コード 1）
 #   -v, --verbose          : コマンドの応答（出力）をコンソールにも表示する
@@ -186,7 +186,7 @@ TIERS=()
 while IFS= read -r _t; do [[ -n "$_t" ]] && TIERS+=("$_t"); done <<< "$(_pc 'tiers.*')"
 [[ -n "$NEXT_TARGET" && ${#TIERS[@]} -gt 0 ]] || die "次のPR先を判断できません: sf-promote-check.sh の結果を読めません。"
 
-# ランチャー（sf-launcher.sh）の表示のために、判定の結果を書く（Git の対象外の logs/。ランチャーは、HEAD が今の先端のコミットと
+# ランチャー（phases/start/launcher.sh）の表示のために、判定の結果を書く（Git の対象外の logs/。ランチャーは、HEAD が今の先端のコミットと
 #   同じときだけ使う。書けなくても、このコマンドは続ける）
 _head=$(git rev-parse -q --verify HEAD 2>/dev/null) || _head=""   # VAR=$(cmd) のため run 不使用
 if [[ -n "$_head" ]]; then

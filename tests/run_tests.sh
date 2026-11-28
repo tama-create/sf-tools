@@ -237,7 +237,7 @@ TEST_FILES=(
     test_sf-prepush.sh
     test_sf-push.sh
     test_sf-update-secret.sh
-    test_sf-launcher.sh
+    test_launcher.sh
     test_sf-precommit.sh
     test_security.sh
     test_e2e.sh
@@ -401,6 +401,9 @@ if [[ "${1:-}" == "--changed" ]]; then
                 ;;
             lib/verify-common.sh|lib/verify-samples.sh|phases/init/verify.sh|tests/verify-test-lib.sh)
                 _changed_tests+=("test_verify.sh" "test_verify2.sh" "test_verify3.sh")   # verify のテストは、3 つのファイルに分けてある（共通の部品: tests/verify-test-lib.sh）
+                ;;
+            phases/start/*)
+                _changed_tests+=("test_launcher.sh" "test_sf-start.sh")   # sf-start.sh が開くメニュー（ランチャー）
                 ;;
             phases/init/*|tests/init-test-lib.sh)
                 _changed_tests+=("test_sf-init.sh" "test_sf-init2.sh" "test_sf-init3.sh")   # sf-init のテストは、3 つのファイルに分けてある（共通の部品: tests/init-test-lib.sh）

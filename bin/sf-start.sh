@@ -3,7 +3,7 @@
 # sf-start.sh - 開発環境スタートアップスクリプト
 # ==============================================================================
 # 開発環境を起動する。Salesforce 組織に接続（未接続ならログイン）し、VS Code を起動したあと、
-# sf-install.sh をバックグラウンドで実行し、sf-launcher.sh を前面で起動する。
+# sf-install.sh をバックグラウンドで実行し、メニュー（ランチャー。phases/start/launcher.sh）を前面で起動する。
 #
 # 【使い方】
 #   cd {ジョブフォルダ}/force-XXXX
@@ -48,9 +48,9 @@
 #        b. sf-log.sh begin -o {エイリアス} --owner {印} を実行する（sf を呼ばずにすぐ終わる。予約名・「自動で取らない」答えなら取らない。
 #           このプロジェクト・エイリアスで初めてのときは、AI への送信の注意を表示して Y/N で聞く）。取るときは、持ち主の一覧に登録し、
 #           TraceFlag の準備と取得役を裏で起動する。終了コード 0 = 始めた／10 = 取らない／それ以外 = 警告だけ（どれでも先に進む）
-#   7. ~/sf-tools/bin/sf-launcher.sh があり、環境変数 SF_LAUNCHER_ACTIVE が 1 でなければ、前面で起動する
-#      （sf-launcher.sh から呼ばれたときは、二重に起動しない）。環境変数 SF_LAUNCHER_FROM_START=1 を付ける
-#      （ランチャーは、これがないメニューの起動を sf-start.sh に切り替えるため。2026-11-28）
+#   7. ~/sf-tools/phases/start/launcher.sh（メニュー）があり、環境変数 SF_LAUNCHER_ACTIVE が 1 でなければ、前面で起動する
+#      （メニューの Start・Restart から呼ばれたときは、二重に起動しない）。メニューを開く入口は、このスクリプトだけ
+#      （2026-11-28 に bin/sf-launcher.sh を phases/start/ へ移した。利用者が打つコマンドは sf-start.sh）
 #   8. 終了時（ランチャーを q で閉じたとき・中断したとき）: 6 で自分の印を登録したときだけ、sf-log.sh leave --owner {印} を実行する
 #      （ほかの sf-start がなければ、取得役を止め、TraceFlag を消す。数十秒かかることがある。失敗は警告だけ）
 #
@@ -61,10 +61,10 @@
 #
 # 【補足】
 #   - Ctrl+C は無効（1 の確認のあとから。trap '' INT）。入力時に q で中断する。中断・失敗時の終了コードは 1。
-#     シグナルの無視は、子の bash（前面で起動する sf-launcher.sh と、そこから実行する bash のコマンド）に継承されるため、
+#     シグナルの無視は、子の bash（前面で起動するメニューと、そこから実行する bash のコマンド）に継承されるため、
 #     それらも Ctrl+C を無視する。ただし、sf・npm など Node のコマンドは、起動時にシグナルの扱いを既定に戻すため、実行中に
 #     Ctrl+C を押すと、そのコマンドだけが止まることがある（sf-job.sh から呼ばれたときは、sf-job.sh の設定も、同じく引き継がれる）
-#   - 終了コードは、sf-launcher.sh の終了コードによらず 0。バックグラウンドの sf-install.sh の失敗も、終了コードに影響しない
+#   - 終了コードは、メニューの終了コードによらず 0。バックグラウンドの sf-install.sh の失敗も、終了コードに影響しない
 #   - 接続済みの組織を切り替えるときは sf-restart.sh を使う
 #   - ログ: ./sf-tools/logs/sf-start.log（実行のたびに作り直す）。終了時に /tmp/sf-wsl-bin を削除する
 # ==============================================================================
@@ -259,8 +259,8 @@ fi
 # 7. ランチャ起動
 # ------------------------------------------------------------------------------
 # ランチャーから（Start / Restart で）呼ばれた場合は二重起動しない（SF_LAUNCHER_ACTIVE=1 はランチャーが export する）
-if [[ -f "$HOME/sf-tools/bin/sf-launcher.sh" ]] && [[ "${SF_LAUNCHER_ACTIVE:-}" != "1" ]]; then
-    SF_LAUNCHER_FROM_START=1 bash "$HOME/sf-tools/bin/sf-launcher.sh"  # 対話のため run 不使用。終了コードは使わない（このスクリプトは 0 で終わる）。印を付けて開く（ランチャーが sf-start.sh に切り替えない）
+if [[ -f "$HOME/sf-tools/phases/start/launcher.sh" ]] && [[ "${SF_LAUNCHER_ACTIVE:-}" != "1" ]]; then
+    bash "$HOME/sf-tools/phases/start/launcher.sh"  # 対話のため run 不使用。終了コードは使わない（このスクリプトは 0 で終わる）
 fi
 
 exit $RET_OK

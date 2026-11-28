@@ -883,7 +883,7 @@ e2e_show_file_tail() {
 #   失敗（終了コード 0 以外）なら、出力の末尾を表示して、戻り値 1
 #   引数: ラベル フォルダ 標準入力（printf の %b 形式。例: 'e2e-hello\nY\nalias\n'。なければ空） スクリプト [引数...]
 #   フォルダは、テスト用の作業フォルダ（{E2E_HOME_ROOT}/{E2E_OWNER}/e2e-…）の中だけ
-#   SF_LAUNCHER_ACTIVE=1: sf-start.sh が、対話のメニュー（sf-launcher.sh）を起動しないようにする
+#   SF_LAUNCHER_ACTIVE=1: sf-start.sh が、対話のメニュー（phases/start/launcher.sh）を起動しないようにする
 # 実行して、スクリプトの終了コードを返す（失敗の表示はしない）。引数は e2e_run_sf_cmd と同じ
 #   長い処理（sf-job の clone と npm install、sf-dryrun など）が、止まったのか、動いているのか分かるように、
 #   E2E_HEARTBEAT_SEC 秒（既定 30）おきに、経過時間を表示する。

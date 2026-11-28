@@ -56,15 +56,15 @@ EOF
 }
 
 # ==============================================================================
-# ヘルパー：sf-start.sh / sf-launcher.sh をスタブ化
+# ヘルパー：sf-start.sh / メニュー（phases/start/launcher.sh）をスタブ化
 # ==============================================================================
 _stub_job_subscripts() {
     local mock_home="$1"
-    mkdir -p "$mock_home/sf-tools/bin"
+    mkdir -p "$mock_home/sf-tools/bin" "$mock_home/sf-tools/phases/start"
     printf '#!/bin/bash\nexit 0\n' > "$mock_home/sf-tools/bin/sf-start.sh"
     chmod +x "$mock_home/sf-tools/bin/sf-start.sh"
-    printf '#!/bin/bash\nexit 0\n' > "$mock_home/sf-tools/bin/sf-launcher.sh"
-    chmod +x "$mock_home/sf-tools/bin/sf-launcher.sh"
+    printf '#!/bin/bash\nexit 0\n' > "$mock_home/sf-tools/phases/start/launcher.sh"
+    chmod +x "$mock_home/sf-tools/phases/start/launcher.sh"
 }
 
 # ==============================================================================

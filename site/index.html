@@ -95,7 +95,7 @@
   <thead><tr><th>役割</th><th>やること</th><th>使うもの</th></tr></thead>
   <tbody>
     <tr><td>🔑 プロジェクト管理者（先に）</td><td>最初に 1 回、土台を作ります（GitHub のリポジトリ・ブランチと保護のルール・Salesforce への接続・Slack・認証情報・ワークフロー）。あとから、認証情報の更新・ワークフローの更新・構成の変更と診断（段階の追加・取り外し・接続先の付け替え・状態の確認）・動作の確認を行います。</td><td><code>sf-init.sh</code>（<code>--add-tier</code>・<code>--reconnect</code>・<code>--status</code>・<code>--verify</code>）・<code>sf-update-secret.sh</code>・<code>sf-sync-wf.sh</code></td></tr>
-    <tr><td>💻 開発者（管理者の準備のあと）</td><td>作業を始めて、手元で作り、自分用の組織で試して、push と PR で送ります。</td><td><code>sf-job.sh</code>・ランチャー（<code>sf-launcher.sh</code>。Check・Dryrun・Push・PullRequest など）</td></tr>
+    <tr><td>💻 開発者（管理者の準備のあと）</td><td>作業を始めて、手元で作り、自分用の組織で試して、push と PR で送ります。</td><td><code>sf-job.sh</code>・<code>sf-start.sh</code> が開くランチャー（Check・Dryrun・Push・PullRequest など）</td></tr>
     <tr><td>👀 業務担当</td><td>Slack に届く、結果の通知を見ます。</td><td>Slack（コマンドを使う必要は、ほとんどありません）</td></tr>
   </tbody>
 </table>
@@ -105,7 +105,7 @@
   <thead><tr><th>場所</th><th>もの</th><th>何のために</th></tr></thead>
   <tbody>
     <tr><td rowspan="8">💻 手元のパソコン</td><td><code>~/sf-tools</code></td><td>sf-tools のスクリプト集。各プロジェクトのフォルダから呼び出します</td></tr>
-    <tr><td>ランチャー（<code>sf-launcher.sh</code>）</td><td>コマンドを、番号で選んで実行するメニュー</td></tr>
+    <tr><td>ランチャー（<code>sf-start.sh</code> が開く）</td><td>コマンドを、番号で選んで実行するメニュー</td></tr>
     <tr><td>作業用のフォルダ（<code>force-XXXX</code> のクローン）</td><td>ここで作ります。設定は <code>sf-tools/config/</code>、リリースの対象は <code>sf-tools/release/&lt;ブランチ名&gt;/</code> のターゲットファイルに書きます（ブランチ名は、ジョブ名と同じ）</td></tr>
     <tr><td>Git（Windows は Git Bash）</td><td>変更の履歴の管理。commit・push の前に、フック（pre-commit・pre-push）が、ターゲットファイルなどを確かめます</td></tr>
     <tr><td>VS Code（Salesforce の拡張機能）</td><td>エディタの起動・コミットメッセージの入力。拡張機能は、入れておくのがおすすめです</td></tr>
@@ -251,7 +251,7 @@
   </div>
   <div class="down">↓<small>同じコマンド・同じメニュー</small></div>
   <div class="flow">
-    <div class="node ok"><span class="who">🔢 ランチャー</span><strong>sf-launcher.sh</strong><small>番号を選ぶだけのメニュー</small></div>
+    <div class="node ok"><span class="who">🔢 ランチャー</span><strong>sf-start.sh</strong><small>番号を選ぶだけのメニューを開く</small></div>
   </div>
   <div class="down">↓<small>push・PR・マージ</small></div>
   <div class="flow">
@@ -361,7 +361,7 @@ sf-job.sh</code></pre>
   [6] Start        開発環境を起動（VS Code のターミナルでは出ません）
   [7] Restart      接続組織を切り替えて Start 実行（同上）</code></pre>
     <p>ふだんの順番は、<code>[1]</code> Check → <code>[2]</code> Dryrun（自分の組織で試す）→ <code>[4]</code> Push（送る）→ <code>[5]</code> PullRequest（次の段階へ PR を出す）です。番号は、使う順に並んでいます（<code>[3]</code> Deploy は、自分の組織に実際に反映したいときに使います）。</p>
-    <p>コマンドに慣れている方は、<code>sf-push.sh</code> のように、直接打つこともできます。メニューを出し直したいときは、<code>sf-start.sh</code> と打ちます（<code>sf-launcher.sh</code> と打っても、<code>sf-start.sh</code> に切り替わります。くわしくは<a href="guide/daily.html#launcher">日々の開発の流れ</a>）。</p>
+    <p>コマンドに慣れている方は、<code>sf-push.sh</code> のように、直接打つこともできます。メニューを出し直したいときは、<code>sf-start.sh</code> と打ちます（くわしくは<a href="guide/daily.html#launcher">日々の開発の流れ</a>）。</p>
   </li>
 </ol>
 <div class="box ok">

@@ -1,48 +1,36 @@
 #!/bin/bash
 # ==============================================================================
-# sf-launcher.sh - sf-tools コマンドランチャー
+# launcher.sh - sf-start.sh が開くメニュー（ランチャー）
 # ==============================================================================
-# sf-tools の日常のコマンドを、メニューから番号（または fzf）で選んで実行するランチャー。
-# sf-start.sh の最後に自動で起動する。メニューを直接開こうとしたとき（sf-launcher.sh を打った）は、sf-start.sh に切り替える
-# （入口を sf-start.sh にそろえる。接続の確認・デバッグログの準備をしてから、メニューを開く。2026-11-28）。
+# sf-tools の日常のコマンドを、メニューから番号で選んで実行する。sf-start.sh（bin/）の最後に、前面で起動される部品。
+# 利用者が直接打つコマンドではないため、bin/ に置かない（bin/ の sf-*.sh は、単独で起動するコマンドの名前のため。
+# 2026-11-28 に bin/sf-launcher.sh から移した。単独で起動する意味がなかった、番号の指定（sf-launcher.sh <番号>）と
+# fzf のモード（--fzf）も、なくした。入口は sf-start.sh だけ）。
 #
 # 【使い方】
-#   sf-launcher.sh              : メニューを表示する。番号を 1 文字入力すると（Enter 不要）実行し、終わるとメニューに戻る。
-#                                 q で終了。範囲外の数字・数字と q 以外の入力は無視する。
-#                                 sf-start.sh から起動されていなければ、sf-start.sh に切り替える（処理の流れ 2）
-#   sf-launcher.sh <番号>       : その番号のコマンドを 1 回だけ実行して終了する（例: sf-launcher.sh 1）
-#   sf-launcher.sh --fzf        : fzf でインクリメンタル検索して実行する（Enter: 実行 / Esc: 終了）。実行後は選択に戻る
+#   bash ~/sf-tools/phases/start/launcher.sh
+#                               : sf-start.sh が呼ぶ。メニューを表示し、番号を 1 文字入力すると（Enter 不要）実行し、
+#                                 終わるとメニューに戻る。q で終了。範囲外の数字・数字と q 以外の入力は無視する
 #
 # 【オプション】
-#   <番号>     : 実行するコマンドの番号（下のメニューの番号）。数字だけを受け付け、10 進数として扱う（08 は 8。
-#                先頭の 0 は無視する）。先頭の 0 を除いて 10 桁以上は範囲外
-#   --fzf      : fzf モードで起動する
-#   -h, --help : この説明を表示して終了する（第 1 引数のときのみ。force-* フォルダの外でも動く）
-#   それ以外の引数（数字以外）は、エラーで終了する（終了コード 1）。見るのは第 1 引数だけ（2 つ目以降は無視する）。
-#   引数の確認は、処理の流れ 2（force-* フォルダの確認）のあとに行う
+#   なし。引数を付けると、エラーで終了する（終了コード 1）
 #
 # 【処理の流れ】
-#   1. 環境変数 SF_LAUNCHER_ACTIVE=1 を export する（sf-start.sh が、ランチャーを二重に起動しないため）
-#   2. カレントフォルダの名前が force- で始まらなければ、警告を表示して終了する（終了コード 1）。
-#      続けて、引数なし（メニュー）で、sf-start.sh から起動されていないとき（環境変数 SF_LAUNCHER_FROM_START が 1 でなく、
-#      起動したときの SF_LAUNCHER_ACTIVE も 1 でなく、環境変数 SF_LOG_OWNER の PID（sf-start.sh の持ち主の印）も生きていない。
-#      最後の条件は、印を付けない古い版の sf-start.sh が、更新されたこのランチャーを開いたときのため）は、「sf-start で開きます」と出して、同じフォルダの sf-start.sh を
-#      引数なしで exec する（SF_LAUNCHER_ACTIVE は外して渡す。sf-start.sh が、接続の確認・デバッグログの準備をしてから、
-#      SF_LAUNCHER_FROM_START=1 を付けて、このランチャーを開く。デバッグログを取り始め、閉じるときに後始末をするのは
-#      sf-start.sh だけのため、入口をそろえて「メニューが開いていれば、ログも取れている」ようにする。2026-11-28）。
-#      sf-start.sh がないときは、そのままメニューを開く。番号の指定・--fzf では、切り替えない。
-#      読み込み直し（処理の流れ 8）の exec では、SF_LAUNCHER_FROM_START が環境に残り、SF_LAUNCHER_ACTIVE も 1 のため、切り替えない
+#   1. 環境変数 SF_LAUNCHER_ACTIVE=1 を export する（sf-start.sh が、ランチャーを二重に起動しないため。
+#      メニューの Start・Restart から動いた sf-start.sh は、メニューを開かずに戻る）
+#   2. 引数があれば、エラーで終了する（終了コード 1）。カレントフォルダの名前が force- で始まらなければ、
+#      警告を表示して終了する（終了コード 1）
 #   3. メニュー（番号: 表示名 → 実行するスクリプト）。1〜5 は、日々の作業の順（上から順に押せば、確かめる → 試す → 反映 → コミット → PR）:
 #        1: Check → sf-check.sh   2: Dryrun → sf-dryrun.sh   3: Deploy → sf-deploy.sh
 #        4: Push → sf-push.sh     5: PullRequest → sf-next.sh（中身は、次の段階へプルリクエストを出す。出し先を確かめる）
 #        6: Start → sf-start.sh   7: Restart → sf-restart.sh（1 日の最初・組織の切り替えのときだけ使うため、5 との間に線を引く）
 #      表示名は、sf- を除いて先頭を大文字にした名前（sf-next だけは PullRequest）。名前の欄は 11 文字の幅でそろえる。
-#      起動のときに 1 回だけ作る（MENU_LABELS）。fzf モードも同じ表示名で出し、選んだ表示名から、実行するスクリプトを引く
+#      起動のときに 1 回だけ作る（MENU_LABELS）
 #      VS Code のターミナル（環境変数 TERM_PROGRAM=vscode）では 6・7 を表示しない（番号 6・7 は範囲外になる。線も引かない）
 #      （2026-11-26 に、1: Check 2: Push 3: Next 4: Dryrun 5: Deploy の並びから、作業の順に並べ替えた。2026-11-27 に、
 #       5 の表示名を Next から PullRequest にした）
-#   4. 選んだコマンドは、このスクリプトと同じフォルダの sf-xxx.sh を、引数なしで bash で実行する。
-#      スクリプトがなければ、警告を表示する
+#   4. 選んだコマンドは、sf-tools の bin/ の sf-xxx.sh（このファイルの 2 つ上のフォルダの bin/）を、引数なしで bash で
+#      実行する。スクリプトがなければ、警告を表示する
 #   5. メニューを表示するたびに、線と線の間に、見出しの 2 行を表示する（読み取りのみ。通信しない。2026-11-27）
 #      1 行目: 「  >> LAUNCHER <<   <ブランチ> @ <組織> ／ 変更 N 件 ／ Log: <デバッグログの状態>」（ないものは出さない）
 #        2 行目以降は、頭に「  >> LAUNCHER <<   」と同じ幅（19 文字）の空白を置き、1 行目のブランチ名の位置にそろえる
@@ -56,8 +44,7 @@
 #        デバッグログ: logs/apex/.status の STATE による（collecting = 取得中 (<期限>/<今日の本数>本) / starting = 準備中 /
 #          skipped = 取っていません / error = 取れていません / stopped = 止まっています。理由（REASON）があれば括弧で添える）。
 #          止まっているときは「。sf-start で取り始めます」を添える（デバッグログを取り始め、閉じるときに後始末をするのは sf-start.sh
-#          だけ。ランチャー自身は、取り始めない（メニューは処理の流れ 2 で sf-start.sh を通る。番号の指定・--fzf では通らない）。
-#          VS Code のターミナルでも、sf-start を打てば同じように取る。2026-11-28 の決定）。
+#          だけ。ランチャー自身は、取り始めない。VS Code のターミナルでも、sf-start を打てば同じように取る。2026-11-28 の決定）。
 #          色は状態で変える（取得中 = 太字の緑 / 準備中 = 太字の水色 / 取れていません = 太字の赤 / 取っていません・止まっています = 黄色）。
 #          WARNING があれば「⚠ Log: …」をもう 1 行。ファイルがない・STATE がそれ以外なら、ログの部分を出さない。
 #          キー=値 の行を while read で読み、source しない。
@@ -87,30 +74,24 @@
 #      4 秒以上たってからの EOF は、1 回だけ待ち切れとして扱い、次の読み取り（すぐ EOF で返る）で終わる）。待ち切れたとき・メニューを描き直す前に、
 #      このスクリプト自身のファイルが、起動のあとに書き換わったかを見る（起動のときに sf-tools/logs/.launcher-<PID> を作り、
 #      それより新しいか（-nt）で比べる。コマンドを起動しない）。書き換わっていたら「↻ …読み込み直します」と出して、新しい版を
-#      同じ引数なし（メニュー）で exec し直す（sf-start.sh は、裏の sf-install.sh が git pull で sf-tools を最新にするのと同時に、
+#      exec し直す（sf-start.sh は、裏の sf-install.sh が git pull で sf-tools を最新にするのと同時に、
 #      前面でランチャーを起動するため、ランチャーは古い版を読み込んだまま動いていた。2026-11-27）。
 #      sf-tools/logs がない・印のファイルを作れないときは、確かめない。秒の単位で比べる環境（Bash 3.2）では、起動と同じ秒の
-#      書き換えは見分けられない。印のファイルは、終了のときに消す（exec の前にも消す）。メニューのとき（引数なし）だけ
+#      書き換えは見分けられない。印のファイルは、終了のときに消す（exec の前にも消す）
 #
 # 【前提条件】
-#   - force-* フォルダで実行する（処理の流れ 2）
-#   - --fzf を使うときは fzf が必要。なければ、警告を表示して終了する（終了コード 1）
+#   - force-* フォルダで、sf-start.sh から起動する（処理の流れ 2。直接起動すると、デバッグログの準備なしで、メニューが開く）
 #   - lib/common.sh を読み込まない単独の設計（ログファイルは作らない）
 #
 # 【補足】
-#   - 終了コード: メニューを q・EOF で終了 → 0 / --fzf を Esc で終了 → 0 / <番号> → 実行したコマンドの終了コード
-#     （番号が範囲外・スクリプトがない → 1）
-#   - メニュー・fzf モードでは、実行したコマンドが失敗しても、ランチャーは終了しない
+#   - 終了コード: q・EOF で終了 → 0 / 引数がある・force-* フォルダの外 → 1
+#   - 実行したコマンドが失敗しても、ランチャーは終了しない
 # ==============================================================================
 
 SCRIPT_DIR="${BASH_SOURCE[0]%/*}"
 [[ "$SCRIPT_DIR/" == /* && "$SCRIPT_DIR/" != *//* && "$SCRIPT_DIR/" != */./* && "$SCRIPT_DIR/" != */../* ]] || SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-# --help / -h: 冒頭コメントを表示して終了
-if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    awk '/^# ==/{f++; next} f==2{sub(/^# ?/,""); print} f==3{exit}' "${BASH_SOURCE[0]}"  # run 不使用: common.sh を読み込まない単独の設計（run が未定義）
-    exit 0
-fi
+# 実行するコマンド（sf-*.sh）の場所: このファイル（phases/start/）の 2 つ上の bin/（処理の流れ 4）
+BIN_DIR="${SCRIPT_DIR%/*}"; BIN_DIR="${BIN_DIR%/*}/bin"
 
 # ------------------------------------------------------------------------------
 # カラー定義
@@ -285,9 +266,9 @@ BG_PID=""    # 裏の判定のプロセス（終わったら空にする）
 unset SF_LAUNCHER_BG_HEAD SF_LAUNCHER_BG_PID   # 子のコマンドには渡さない
 bg_status_start() {
     [[ -n "$1" && "$1" != "$BG_HEAD" ]] || return 0
-    [[ "${SF_LAUNCHER_BG_STATUS:-1}" == "1" && -f "$SCRIPT_DIR/sf-next.sh" ]] || return 0
+    [[ "${SF_LAUNCHER_BG_STATUS:-1}" == "1" && -f "$BIN_DIR/sf-next.sh" ]] || return 0
     BG_HEAD="$1"
-    bash "$SCRIPT_DIR/sf-next.sh" --status < /dev/null > /dev/null 2>&1 &   # cmd &（裏で動かす。結果は next-status.txt）
+    bash "$BIN_DIR/sf-next.sh" --status < /dev/null > /dev/null 2>&1 &   # cmd &（裏で動かす。結果は next-status.txt）
     BG_PID=$!
 }
 bg_status_running() { [[ -n "$BG_PID" ]] && kill -0 "$BG_PID" 2>/dev/null; }   # kill は組み込み（コマンドを起動しない）
@@ -428,7 +409,7 @@ get_command_by_number() {
 # ------------------------------------------------------------------------------
 run_command() {
     local cmd="$1"
-    local script="${SCRIPT_DIR}/${cmd}.sh"
+    local script="${BIN_DIR}/${cmd}.sh"
 
     if [[ ! -f "$script" ]]; then
         echo -e "${YELLOW}  ⚠ ${cmd}.sh が見つかりません${RESET}"
@@ -472,8 +453,13 @@ reload_if_updated() {
 # メイン処理
 # ------------------------------------------------------------------------------
 main() {
-    local entry_active="${SF_LAUNCHER_ACTIVE:-}"   # 起動したときの値（ランチャーの中から開かれたか。処理の流れ 2）
-    export SF_LAUNCHER_ACTIVE=1  # sf-start.sh からの二重起動を防止
+    export SF_LAUNCHER_ACTIVE=1  # sf-start.sh からの二重起動を防止（処理の流れ 1）
+
+    # 引数は取らない（番号の指定・--fzf は、2026-11-28 になくした。処理の流れ 2）
+    if [[ $# -gt 0 ]]; then
+        echo -e "${YELLOW}  ⚠ 引数は付けません（メニューは sf-start.sh で開きます）${RESET}"
+        exit 1
+    fi
 
     # force-* ディレクトリチェック
     if [[ ! "$(basename "$PWD")" =~ ^force- ]]; then
@@ -481,43 +467,6 @@ main() {
         echo -e "${DIM}  現在: ${PWD}${RESET}"
         echo ""
         exit 1
-    fi
-
-    # メニューを sf-start.sh を通さずに開こうとした → sf-start.sh に切り替える（入口をそろえる。処理の流れ 2）
-    #   生きている sf-start.sh の持ち主（SF_LOG_OWNER の PID）がいるときも、切り替えない（印を付けない古い版の sf-start.sh が、
-    #   更新されたこのランチャーを開いたとき。切り替えると、sf-start.sh と裏の sf-install.sh が、もう 1 回動く）
-    local owner_alive=0
-    if [[ -n "${SF_LOG_OWNER:-}" ]] && kill -0 "${SF_LOG_OWNER%%:*}" 2>/dev/null; then owner_alive=1; fi   # 条件チェックのため（外側の生死）
-    if [[ -z "$1" && "${SF_LAUNCHER_FROM_START:-}" != "1" && "$entry_active" != "1" && $owner_alive -eq 0 && -f "$SCRIPT_DIR/sf-start.sh" ]]; then
-        echo -e "  ${CYAN}sf-start で開きます（接続の確認・デバッグログの準備のあと、メニューを開きます）${RESET}"
-        unset SF_LAUNCHER_ACTIVE   # sf-start.sh が、ランチャーを開けるように外す
-        exec bash "$SCRIPT_DIR/sf-start.sh"   # run 不使用: common.sh を読み込まない単独の設計（exec で置き換える）
-    fi
-
-    # fzf モード
-    if [[ "$1" == "--fzf" ]]; then
-        fzf_mode
-        exit 0
-    fi
-
-    # 番号を引数で直接指定した場合
-    if [[ -n "$1" ]]; then
-        if [[ "$1" =~ ^[0-9]+$ ]]; then
-            local cmd n
-            # 10 進数として扱う（08・09 を 8 進数と解釈させない）。先頭の 0 を除いて 10 桁以上なら、算術の桁あふれで
-            #   小さな数に化けないよう、範囲外（0）とする
-            n="${1#"${1%%[!0]*}"}"   # 先頭の 0 を除く（すべて 0 なら空）
-            if [[ -z "$n" ]]; then n=0; elif [[ ${#n} -le 9 ]]; then n=$((10#$n)); else n=0; fi
-            cmd=$(get_command_by_number "$n") || {
-                echo -e "${YELLOW}  ⚠ 番号 $1 は範囲外です${RESET}"
-                exit 1
-            }
-            run_command "$cmd"
-            exit $?
-        else
-            echo -e "${YELLOW}  ⚠ 引数には番号を指定してください（例: sf-launcher.sh 1）${RESET}"
-            exit 1
-        fi
     fi
 
     # インタラクティブメニュー
@@ -574,49 +523,6 @@ main() {
 
         [[ $redraw -eq 1 ]] && continue   # デバッグログの状態が変わった → コマンドは動かさず、メニューを描き直す
         run_command "$cmd"
-    done
-}
-
-# ------------------------------------------------------------------------------
-# fzf モード（sf-launcher.sh --fzf）
-# ------------------------------------------------------------------------------
-fzf_mode() {
-    if ! command -v fzf &>/dev/null; then
-        echo -e "${YELLOW}  ⚠ fzf がインストールされていません${RESET}"
-        exit 1
-    fi
-
-    while true; do
-        # fzf 用リスト生成（コマンド名 + 説明）
-        local lines=()
-        local idx=0
-        for item in "${MENU_ITEMS[@]}"; do
-            lines+=("$(printf "%-11s %s" "${MENU_LABELS[$idx]}" "${item#*|}")")
-            idx=$((idx + 1))
-        done
-
-        local selected
-        selected=$(printf '%s\n' "${lines[@]}" | fzf \
-            --prompt="  sf-tools > " \
-            --height=50% \
-            --border=rounded \
-            --layout=reverse \
-            --info=inline \
-            --header="  Enter: 実行 / Esc: 終了" \
-            --color="prompt:cyan,header:dim,pointer:green")
-
-        # Esc またはキャンセル
-        [[ -z "$selected" ]] && break
-
-        # 選んだ行の表示名から、コマンドを引く（表示名とコマンドの名前が違うもの（PullRequest → sf-next）があるため、MENU_LABELS で照らす）
-        local label cmd=""
-        label="${selected%% *}"
-        idx=0
-        for item in "${MENU_ITEMS[@]}"; do
-            if [[ "${MENU_LABELS[$idx]}" == "$label" ]]; then cmd="${item%%|*}"; cmd="${cmd// /}"; break; fi
-            idx=$((idx + 1))
-        done
-        [[ -n "$cmd" ]] && run_command "$cmd"
     done
 }
 

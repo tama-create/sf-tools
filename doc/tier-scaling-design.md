@@ -370,4 +370,4 @@ cd {作業フォルダ}/admin/force-XXXX
 
 - [x] e2e の develop 用の組織は TAMA_DEVELOP と同じだった（8 章）→ 2026-11-22 に決定: TAMA_DEVELOP は CI と e2e に残し、開発用に新しい Developer Edition を用意する（案 1）
 - [x] e2e に、段階を外したときのシナリオを足すか → 足す（9.1 の tier-switch）。時間と無料枠は、実装のあとに測って確かめる
-- [ ] `sf-launcher.sh` / `sf-next.sh` などで、無効の段階のブランチを、利用者が誤って使わないようにするか（今は `branches.txt` を読むので、案内には出ない。直接 `git checkout develop` するのは止めない）
+- [ ] ランチャー（`phases/start/launcher.sh`）/ `sf-next.sh` などで、無効の段階のブランチを、利用者が誤って使わないようにするか（今は `branches.txt` を読むので、案内には出ない。直接 `git checkout develop` するのは止めない）

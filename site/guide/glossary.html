@@ -39,7 +39,7 @@
   <thead><tr><th>言葉</th><th>意味</th></tr></thead>
   <tbody>
     <tr><td><strong>プロジェクト</strong>（<code>force-XXXX</code>）</td><td>1 つの Salesforce 開発の単位です。GitHub 上のリポジトリ 1 つに対応します。名前は <code>force-</code> で始まり、<code>XXXX</code> の部分は管理者が決めます（例: <code>force-acme</code>）。<strong>管理者が、sf-tools の雛形で先に作ります。</strong>開発者は、それができてから使い始めます</td></tr>
-    <tr><td><strong>ランチャー</strong>（<code>sf-launcher.sh</code>）</td><td>sf-tools の毎日のコマンド（Check・Dryrun・Deploy・Push・PullRequest など）を、メニューの番号で選んで実行する画面です。番号を 1 文字押すだけで（Enter は不要）実行し、終わるとメニューに戻ります。<code>sf-start.sh</code> の最後に、自動で開きます（<code>sf-job.sh</code> も、最後に <code>sf-start.sh</code> を動かすので、同じく開きます）。コマンドの名前を覚えなくても使えるので、開発者の方には、ランチャーをおすすめします</td></tr>
+    <tr><td><strong>ランチャー</strong>（<code>sf-start.sh</code> が開くメニュー）</td><td>sf-tools の毎日のコマンド（Check・Dryrun・Deploy・Push・PullRequest など）を、メニューの番号で選んで実行する画面です。番号を 1 文字押すだけで（Enter は不要）実行し、終わるとメニューに戻ります。<code>sf-start.sh</code> の最後に、自動で開きます（<code>sf-job.sh</code> も、最後に <code>sf-start.sh</code> を動かすので、同じく開きます）。コマンドの名前を覚えなくても使えるので、開発者の方には、ランチャーをおすすめします</td></tr>
     <tr><td><strong>リポジトリ</strong></td><td>ファイルと、その変更の履歴を、しまっておく場所です（GitHub 上にあります）</td></tr>
     <tr><td><strong>クローン</strong>（clone）</td><td>リポジトリを、自分のパソコンにコピーすることです。コピーしたものも、クローンと呼びます</td></tr>
     <tr><td><strong>作業フォルダ</strong></td><td>作業用のフォルダを、まとめて置く場所です。どこでも構いません（おすすめは <code>~/sf</code> のような短い名前）</td></tr>

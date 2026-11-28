@@ -19,7 +19,7 @@
 <div class="box">
   <div class="title">このページの要点</div>
   <ul>
-    <li>毎日の操作は、<strong>ランチャー（<code>sf-launcher.sh</code>）のメニュー</strong>で足ります。このページは、コマンドを<strong>直接打つとき</strong>や、動きを詳しく知りたいときの説明です。</li>
+    <li>毎日の操作は、<strong>ランチャー（<code>sf-start.sh</code> が開くメニュー）</strong>で足ります。このページは、コマンドを<strong>直接打つとき</strong>や、動きを詳しく知りたいときの説明です。</li>
     <li>新しい作業は、<code>sf-job.sh</code> から始めます。始めたあとは、ランチャーが自動で開きます。</li>
     <li>リリース・検証（<code>sf-release.sh</code> / <code>sf-dryrun.sh</code> / <code>sf-deploy.sh</code>）は、個人用の組織だけが対象です。共有環境の予約名の組織と、本番の組織には、ローカルから実行できません。</li>
   </ul>
@@ -100,7 +100,7 @@ sf-job.sh [--project XXXX] [--owner OWNER] [--name ジョブ名]</code></pre>
   <li><code>.sf/config.json</code> と <code>.sfdx/sfdx-config.json</code> を、そのエイリアスで上書きする（書き込めなければ中断）。<code>code .</code> で VS Code を起動する（<code>code</code> コマンドがなければ、警告だけで先へ進む）</li>
   <li><a href="commands-auto.html#sf-install"><code>sf-install.sh</code></a> を、バックグラウンドで実行する（出力は、<code>sf-start.sh</code> のログに追記）。内容は、<code>~/sf-tools</code> の <code>git pull</code>・設定ファイル（<code>metadata.txt</code>・<code>branches.txt</code>）の確認・Git フック（<code>pre-commit</code> / <code>pre-push</code>）の設置・リリース用フォルダの準備と <code>branch_name.txt</code> の更新（<code>main</code> ブランチでは行わない）・<code>npm install</code>（<code>package.json</code> があるとき。更新済みなら省略）・開発ツールの更新（<code>sf-upgrade.sh</code>。24 時間に 1 回）</li>
   <li>デバッグログを、ランチャーの起動中に裏で取る準備をする（<a href="#sf-log"><code>sf-log.sh</code></a> があるとき）。このプロジェクト・この組織のエイリアスで初めてのときだけ、AI への送信の注意を表示して「自動で取るか」を聞きます（Y/N）。取るときは、ログを出させる設定（TraceFlag）の準備と取得を、<strong>裏で</strong>始めます（ランチャーは待たずに開きます）。共有環境の組織・本番の組織・「取らない」と答えたときは、取りません。取れなくても、先へ進みます</li>
-  <li>最後に、ランチャー（<code>sf-launcher.sh</code>）を前面で起動する（ランチャーから呼ばれたときは、二重に起動しない。<code>sf-launcher.sh</code> を直接打ったときも、ここを通って開きます）</li>
+  <li>最後に、ランチャー（メニュー）を前面で起動する（ランチャーから呼ばれたときは、二重に起動しない。メニューを開く入口は、<code>sf-start.sh</code> だけです）</li>
   <li>終わるとき（ランチャーを <code>q</code> で閉じたとき）は、ほかに起動中の <code>sf-start.sh</code> がなければ、デバッグログの取得を止め、TraceFlag を消します（数十秒かかることがあります）</li>
 </ol>
 <h3>補足</h3>
@@ -114,13 +114,10 @@ sf-job.sh [--project XXXX] [--owner OWNER] [--name ジョブ名]</code></pre>
   <li>ログは <code>./sf-tools/logs/sf-start.log</code> です（実行のたびに作り直します）。</li>
 </ul>
 
-<h2 id="sf-launcher"><code>sf-launcher.sh</code>（ランチャー）</h2>
+<h2 id="launcher">ランチャー（<code>sf-start.sh</code> が開くメニュー）</h2>
 <p><strong>開発者の毎日の操作は、このランチャーで足ります（おすすめ）。</strong>使い方は、<a href="../guide/daily.html#launcher">日々の開発の流れ</a>にあります。</p>
-<pre><code>sf-start.sh              # 接続の確認・デバッグログの準備のあと、メニューを開く（ふだんは、これだけ）
-sf-launcher.sh           # 上と同じ（sf-start.sh に切り替わる）
-sf-launcher.sh 4         # 番号を直接指定して、すぐ実行
-sf-launcher.sh --fzf     # fzf でインクリメンタル検索</code></pre>
-<p>sf-tools の日常のコマンドを、メニューから選んで実行できます。<code>sf-start.sh</code> の最後に自動で起動します。<code>sf-launcher.sh</code> でメニューを開こうとしたときも、「sf-start で開きます」と出して、<code>sf-start.sh</code> に切り替わります（デバッグログを取り始め、閉じるときに後始末をするのは <code>sf-start.sh</code> だけのため、入口をそろえています）。番号の指定と <code>--fzf</code> は、切り替わらず、デバッグログも取り始めません。<code>force-*</code> フォルダの中で使います。</p>
+<pre><code>sf-start.sh              # 接続の確認・デバッグログの準備のあと、メニューを開く</code></pre>
+<p>sf-tools の日常のコマンドを、メニューから選んで実行できます。<code>sf-start.sh</code> の最後に、自動で開きます。ランチャーは <code>sf-start.sh</code> の中の部品（<code>~/sf-tools/phases/start/launcher.sh</code>）で、単独で打つコマンドではありません（<code>bin/</code> の <code>sf-*.sh</code> は、単独で起動するコマンドのためです。デバッグログを取り始め、閉じるときに後始末をするのも、<code>sf-start.sh</code> です）。2026-11-28 に、<code>bin/</code> から移しました（番号を付けて 1 回だけ動かす使い方と、名前で絞り込むモードも、なくしました。1 つのコマンドだけを動かしたいときは、<code>sf-dryrun.sh</code> などを直接打ちます）。<code>force-*</code> フォルダの中で使います。</p>
 <pre><code>  ──────────────────────────────────────────────────
   >> LAUNCHER <<   JOB-20261127 @ dev-tama ／ 変更 0 件 ／ Log: 取得中 (15:30/23本)
                    Branch: ✓ develop ⇒ ▸ staging (次のPR) ⇒ × main
@@ -141,12 +138,10 @@ sf-launcher.sh --fzf     # fzf でインクリメンタル検索</code></pre>
   <li>メニューの上の 2 行に、今の状況を出します。1 行目は、ブランチ @ 組織・まだコミットしていない変更の数・デバッグログの状態。2 行目（<code>Branch:</code>）は、段階の並びで、出し終わった段階に <code>✓</code>、次に PR を出す段階に <code>▸</code>（発行中の PR があれば番号）、まだの段階に <code>×</code> を付けます。読み取りだけで、通信はしません。2 行目は、<code>sf-next.sh</code>（5 PullRequest）が最後に判定した結果（<code>sf-tools/logs/next-status.txt</code>）です。結果がない・そのあとにコミットが変わったときは、裏で <code>sf-next.sh --status</code>（判定だけ）を動かし、そのあいだは「（確かめています…）」、終わったら描き直します（判定は、先端のコミットごとに 1 回）。判定できなければ「（5 PullRequest で確かめる）」と出します。環境ブランチの上では、2 行目の代わりに注意を出します。</li>
   <li>動いているあいだに sf-tools が更新されると（<code>sf-start.sh</code> は、裏で sf-tools を最新にしながら、ランチャーを開きます）、数秒のうちに「↻ sf-tools が更新されたため、ランチャーを読み込み直します」と出て、新しい版のメニューに切り替わります。</li>
   <li>コマンドが終わると、結果を 1 行で出します（成功 → <code>✓ &lt;表示名&gt;: 終わりました（成功）</code>、それ以外 → <code>✗ &lt;表示名&gt;: 失敗、または中断しました（終了コード N）</code>）。</li>
-  <li>番号を直接指定したとき（<code>sf-launcher.sh 4</code> など）は、そのコマンドを 1 回だけ実行して終わります。番号は、数字だけを受け付け、10 進数として扱います（<code>08</code> は 8）。見るのは 1 つ目の引数だけで、数字以外の引数（<code>-h</code> / <code>--help</code> / <code>--fzf</code> 以外）は、エラー（終了コード 1）です。</li>
-  <li>選んだコマンドは、ランチャーと同じフォルダのスクリプトを、<strong>引数なし</strong>で実行します。スクリプトがなければ、警告を表示します。</li>
-  <li><code>--fzf</code> では、Enter で実行、Esc で終了です。実行のあとは、選択に戻ります。<code>fzf</code> がなければ、警告を表示して終了します（終了コード 1）。</li>
-  <li>フォルダの名前が <code>force-</code> で始まらなければ、警告を表示して終了します（終了コード 1。<code>-h</code> は、フォルダの外でも動きます）。</li>
-  <li>メニューと <code>--fzf</code> の中では、実行したコマンドが失敗しても、ランチャーは終了しません。</li>
-  <li>終了コードは、メニューを <code>q</code>・EOF で終了したとき・<code>--fzf</code> を Esc で終了したときが <code>0</code>、番号を指定したときは、実行したコマンドの終了コードです（番号が範囲外・スクリプトがないときは <code>1</code>）。</li>
+  <li>選んだコマンドは、sf-tools の <code>bin/</code> のスクリプトを、<strong>引数なし</strong>で実行します。スクリプトがなければ、警告を表示します。</li>
+  <li>フォルダの名前が <code>force-</code> で始まらないとき・引数を付けたときは、警告を表示して終了します（終了コード 1）。</li>
+  <li>実行したコマンドが失敗しても、ランチャーは終了しません。</li>
+  <li>終了コードは、<code>q</code>・EOF で終了したときが <code>0</code> です。</li>
   <li>見出しの下の「デバッグログ」の 1 行は、<a href="#sf-log"><code>sf-log.sh</code></a> の状態です（取得中・準備中・取っていません・取れていません・止まっています。注意があれば、もう 1 行）。止まっているときは「。sf-start で取り始めます」と添えます（取り始めるのは <code>sf-start.sh</code> だけです）。色で状態が分かります（取得中 = 緑・準備中 = 水色・取れていません = 赤・取っていません／止まっています = 黄色）。<code>logs/apex/.status</code> がなければ、表示しません。メニューを表示するたびに、読み直します。準備中のあいだは、5 秒ごとに読み直し、変わったらメニューを描き直します（コマンドは動きません）。</li>
   <li>ランチャーは、ログファイルを作りません（共通のライブラリを読み込まない、単独の設計です）。</li>
 </ul>

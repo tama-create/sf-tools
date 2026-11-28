@@ -3,7 +3,7 @@
 # sf-check.sh - デプロイターゲットファイル構文チェッカー
 # ==============================================================================
 # ターゲットファイル（deploy-target.txt / remove-target.txt）の内容を検証する。
-# sf-release.sh・sf-push.sh・sf-precommit.sh・sf-prepush.sh・sf-launcher.sh（メニューの Check）から呼ばれる。単体でも実行できる。
+# sf-release.sh・sf-push.sh・sf-precommit.sh・sf-prepush.sh・メニュー（phases/start/launcher.sh の Check）から呼ばれる。単体でも実行できる。
 #
 # 【使い方】
 #   sf-check.sh [deploy-target.txt のパス] [remove-target.txt のパス]

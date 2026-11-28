@@ -142,10 +142,10 @@ test_coverage_guard_detects() {
     out=$(_cov_check "$td/a.md" "$SF_TOOLS_DIR")
     [[ "$out" == *"sf-push が、10.2 の表に載っていない"* ]] && pass "行を削除 → 載っていないと、検出する" || fail "行を削除 → 検出する" "$out"
 
-    # (b) 結合なしの理由を消す: sf-launcher の理由を「—」にする
-    sed 's/^\(| `sf-launcher` | なし | — | \).*$/\1— |/' "$PLAN_DOC" > "$td/b.md"
+    # (b) 結合なしの理由を消す: sf-log の理由を「—」にする
+    sed 's/^\(| `sf-log` | なし | — | \).*$/\1— |/' "$PLAN_DOC" > "$td/b.md"
     out=$(_cov_check "$td/b.md" "$SF_TOOLS_DIR")
-    [[ "$out" == *"sf-launcher: 結合なしなのに、理由がない"* ]] && pass "結合なしの理由を削除 → 検出する" || fail "結合なしの理由を削除 → 検出する" "$out"
+    [[ "$out" == *"sf-log: 結合なしなのに、理由がない"* ]] && pass "結合なしの理由を削除 → 検出する" || fail "結合なしの理由を削除 → 検出する" "$out"
 
     # (c) 結合ありのパターンを消す: sf-job のパターンを「—」にする
     sed 's/^\(| `sf-job` | あり | \)[^|]* |/\1— |/' "$PLAN_DOC" > "$td/c.md"

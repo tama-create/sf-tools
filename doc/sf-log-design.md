@@ -1,6 +1,6 @@
 # sf-log.sh 設計書（AI の開発サイクル用のデバッグログ取得）
 
-> **ステータス: 実装済み（第 3 段まで。2026-11-23）。** `bin/sf-log.sh`（`begin`・`start`・`pull`・`stop`・`status`・`auto`・`collect`・`leave`）・`lib/apexlog.js`・`sf-start.sh` と `sf-launcher.sh` とのつなぎを実装した（テスト: `tests/test_sf-log.sh`・`tests/test_apexlog-js.sh`・`tests/test_sf-start.sh`・`tests/test_sf-launcher.sh`）。実機（Windows の Git Bash・開発用の Developer Edition）では、手動の段と取得役を確かめた。sf-start からの自動の流れの実機確認と、macOS・Linux での確認は、まだ（13.1）。
+> **ステータス: 実装済み（第 3 段まで。2026-11-23）。** `bin/sf-log.sh`（`begin`・`start`・`pull`・`stop`・`status`・`auto`・`collect`・`leave`）・`lib/apexlog.js`・`sf-start.sh` とランチャー（当時の `bin/sf-launcher.sh`。2026-11-28 に `phases/start/launcher.sh` へ移した）とのつなぎを実装した（テスト: `tests/test_sf-log.sh`・`tests/test_apexlog-js.sh`・`tests/test_sf-start.sh`・`tests/test_sf-launcher.sh`）。実機（Windows の Git Bash・開発用の Developer Edition）では、手動の段と取得役を確かめた。sf-start からの自動の流れの実機確認と、macOS・Linux での確認は、まだ（13.1）。
 > 経緯: 2026-11-21 に、旧設計（`sf-logwatch.sh`。10 秒ごとに見張り、Ctrl+C で止める、人が見る道具）を、AI が読む前提で作り直し、Codex のレビュー（4 回。8・7・3・0 件）を反映した。2026-11-22 に、TAMAさんの提案で、**ランチャーの起動中は裏で自動で取り続ける方式**を主な使い方にした（2 章）。
 > 下のコード片は、設計の段階の下書き。実装するときは、12 章の規約に合わせて書き直す。
 
@@ -40,7 +40,7 @@ sf-start（組織に接続）──→ 裏の取得役（collector）を起動 �
 | AI | 質問を受けたら `sf-log.sh pull` を実行し、`logs/apex/latest.md` を読む（4.4） |
 
 - ランチャーを使わない人・`sf-start` を使わない場面のために、手動の `start` / `pull` / `stop` も残す（3 章）
-- ランチャー（`sf-launcher.sh`）のメニューには、sf-log.sh を入れない（取得役の状態の 1 行だけを表示する。5.4）
+- ランチャー（`phases/start/launcher.sh`）のメニューには、sf-log.sh を入れない（取得役の状態の 1 行だけを表示する。5.4）
 
 ### 1.3 対象の組織
 
@@ -333,7 +333,7 @@ bash ~/sf-tools/bin/sf-log.sh leave --owner <印>   # sf-start の終了時: 持
 
 ### 5.4 ランチャーの表示
 
-- `sf-launcher.sh` のメニューの上の 1 行目に、`logs/apex/.status` から、ログの状態を短く表示する（例: `Log: 取得中 (15:30/23本)`／`Log: 取っていません`。WARNING は `⚠ Log: …` の 1 行。2026-11-27 に、見出しの 2 行の形に変えた。正本は `bin/sf-launcher.sh` の冒頭コメント）
+- ランチャー（`phases/start/launcher.sh`）のメニューの上の 1 行目に、`logs/apex/.status` から、ログの状態を短く表示する（例: `Log: 取得中 (15:30/23本)`／`Log: 取っていません`。WARNING は `⚠ Log: …` の 1 行。2026-11-27 に、見出しの 2 行の形に変えた。正本は `phases/start/launcher.sh` の冒頭コメント）
 - ランチャーは `lib/common.sh` を読まない単独の設計のため、`.status` は `キー=値` の行にして、`while read` で読めるようにする（9.2）。ファイルがなければ、何も表示しない
 - 準備中（`starting`）のあいだは、入力を 5 秒ずつ待ち（`read -t`）、`STATE` が変わったら、コマンドを動かさずにメニューを描き直す（裏の準備は、実機で約 3 分かかった。つながっても「準備中」のままだと迷うため。2026-11-23。13.3）。待ち切れと EOF は、待った時間でも見分ける（Bash 3.2 では、待ち切れの戻り値が 128 を超えないため）
 - 色は状態で変える: 取得中 = 太字の緑・準備中 = 太字の水色・取れていません = 太字の赤・取っていません／止まっています = 黄色（以前は薄い灰色で、メニューの中で目立たなかった。2026-11-24）
@@ -833,7 +833,7 @@ force-*/logs/apex/
 
 ## 12. 実装時に守る規約
 
-- **冒頭コメント（仕様の正本）**: 書式は `doc/doc-style.md` 3.2（【使い方】【オプション】【処理の流れ】【前提条件】【補足】）。`--help` / `-h` で第 2 ブロックを表示する（CLAUDE.md 2.5）。`tests/test_cli_args.sh` が【オプション】を確かめる。`sf-start.sh`・`sf-launcher.sh` の冒頭コメントも、5 章に合わせて直す
+- **冒頭コメント（仕様の正本）**: 書式は `doc/doc-style.md` 3.2（【使い方】【オプション】【処理の流れ】【前提条件】【補足】）。`--help` / `-h` で第 2 ブロックを表示する（CLAUDE.md 2.5）。`tests/test_cli_args.sh` が【オプション】を確かめる。`sf-start.sh`・ランチャー（`phases/start/launcher.sh`）の冒頭コメントも、5 章に合わせて直す
 - **ログ**: `lib/common.sh` を source する前に `LOG_FILE`（`./sf-tools/logs/sf-log.log`）・`SCRIPT_NAME`・`LOG_MODE` を定義する。`die` のメッセージに復旧の案内を含めない
 - **`run` ラッパー**: sf コマンドは `run` で実行する。例外（`sleep`・`kill -0`・裏での起動 `&` など）には、その行に理由のコメントを付ける（CLAUDE.md 2.1）
 - **Bash 3.2 / BSD 互換**: `declare -A`・`mapfile`・`timeout`・`date -d`・`sed -i`・`flock` を使わない（CLAUDE.md 2.2）
@@ -866,13 +866,13 @@ force-*/logs/apex/
   - `.consent`: 組織の ID・文面の版が変わったら、もう一度聞く
   - sf-restart で、新しい組織の `start --auto` が失敗したとき、前の組織の取得役も止まり、`.status` に理由が出る
   - `sf-start.sh`: sf-log.sh の終了コード（0・10・1）ごとの表示と、どれでもランチャーが起動すること。入れ子（sf-restart）の終了時に、取得役を止めないこと（`tests/test_sf-start.sh`）
-  - `sf-launcher.sh`: `.status` があれば 1 行を表示し、なければ何も表示しないこと（`tests/test_sf-launcher.sh`）
+  - ランチャー（`phases/start/launcher.sh`）: `.status` があれば 1 行を表示し、なければ何も表示しないこと（`tests/test_launcher.sh`）
 - **一緒に直すもの**:
   - `tests/run_tests.sh` の `TEST_FILES` に `test_sf-log.sh` を足す
-  - 利用者向けの文書（`site/reference/` のコマンドのページと、`sf-start`・ランチャーの説明）に書き、`doc/doc-stamps.txt` に行を足して印を付ける（`bash tests/docs-stamp.sh --update <文書> bin/sf-log.sh`。`sf-start.sh`・`sf-launcher.sh` の冒頭コメントを変えたら、その文書の印も付け直す）
+  - 利用者向けの文書（`site/reference/` のコマンドのページと、`sf-start`・ランチャーの説明）に書き、`doc/doc-stamps.txt` に行を足して印を付ける（`bash tests/docs-stamp.sh --update <文書> bin/sf-log.sh`。`sf-start.sh`・ランチャー（`phases/start/launcher.sh`）の冒頭コメントを変えたら、その文書の印も付け直す）
   - `doc/dev-reference.md` 4（スクリプト別処理概要）に流れを書く
   - `README.md` の設計書の一覧の「（未実装）」と、`tests/docs-facts-allow.txt` の `command sf-log.sh` の行
-  - e2e: `bin/sf-start.sh`・`bin/sf-launcher.sh` は e2e の対象のパス（`tests/e2e/needs-e2e.sh`）なので、rr の前に e2e が要る（CLAUDE.md 1.2）。`bin/sf-log.sh`・`lib/apexlog.js` を除外に足すかは、実装時に決める。e2e の環境（Actions）で、sf-start の自動の取得が動かないこと（`GITHUB_ACTIONS=true` では取らない）を確かめる
+  - e2e: `bin/sf-start.sh`・`phases/start/launcher.sh` は e2e の対象のパス（`tests/e2e/needs-e2e.sh`）なので、rr の前に e2e が要る（CLAUDE.md 1.2）。`bin/sf-log.sh`・`lib/apexlog.js` を除外に足すかは、実装時に決める。e2e の環境（Actions）で、sf-start の自動の取得が動かないこと（`GITHUB_ACTIONS=true` では取らない）を確かめる
   - 本書の冒頭のステータス
 
 ---

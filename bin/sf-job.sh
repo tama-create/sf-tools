@@ -50,7 +50,7 @@
 #      https://github.com/{OWNER}/force-XXXX.git ./{ジョブ名}/force-XXXX を実行する
 #      （core.longpaths は Windows のパス長の上限対策。クローン先の設定に残る）
 #   8. ./{ジョブ名}/force-XXXX に移動し、sf-start.sh を引数なしで実行する（組織への接続・VS Code の起動・
-#      sf-launcher.sh の起動）。sf-launcher.sh を終了するまで、sf-job.sh も終わらない。
+#      メニュー（ランチャー）の起動）。メニューを終了するまで、sf-job.sh も終わらない。
 #      AI 操作（SF_TOOLS_AI=1）のときは、sf-start.sh を実行せず、移動もしない。クローン先と「sf-start.sh は、人がそのフォルダで
 #      実行する」を表示して、終了コード 0 で終わる（sf-start.sh は、VS Code・ランチャーを開き、閉じるまで終わらないため）
 #
@@ -64,7 +64,7 @@
 #
 # 【補足】
 #   - Ctrl+C は無効（引数の解析の前から。trap '' INT）。入力時に q で中断する。中断・失敗時の終了コードは 1。
-#     シグナルの無視は、子の bash（ここから起動する sf-start.sh・sf-launcher.sh と、ランチャーから実行する bash のコマンド）に
+#     シグナルの無視は、子の bash（ここから起動する sf-start.sh・メニュー（ランチャー）と、メニューから実行する bash のコマンド）に
 #     継承されるため、それらも Ctrl+C を無視する。ただし、sf・npm など Node のコマンドは、起動時にシグナルの扱いを既定に戻すため、
 #     実行中に Ctrl+C を押すと、そのコマンドだけが止まることがある（親の bash のスクリプトは、止まらない）
 #   - gh auth status が失敗したときの gh auth login は、run を使わずに実行する（gh の対話画面を、そのまま表示するため）
@@ -89,7 +89,7 @@ readonly LOG_MODE="NEW"
 # ------------------------------------------------------------------------------
 # 2. 共通ライブラリの読み込み
 # ------------------------------------------------------------------------------
-export SF_INIT_MODE=1   # force-* チェックをバイパス（export のため、子の sf-start.sh・sf-launcher.sh とその先にも引き継がれる）
+export SF_INIT_MODE=1   # force-* チェックをバイパス（export のため、子の sf-start.sh・メニューとその先にも引き継がれる）
 
 SCRIPT_DIR="${BASH_SOURCE[0]%/*}"
 [[ "$SCRIPT_DIR/" == /* && "$SCRIPT_DIR/" != *//* && "$SCRIPT_DIR/" != */./* && "$SCRIPT_DIR/" != */../* ]] || SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -350,7 +350,7 @@ phase_clone_repository() {
     return $RET_OK
 }
 
-# 【START】sf-start.sh を起動（組織への接続・VS Code 起動・sf-launcher.sh 起動）
+# 【START】sf-start.sh を起動（組織への接続・VS Code 起動・メニューの起動）
 phase_sf_start() {
     # AI 操作では、sf-start.sh（VS Code・ランチャーを開き、閉じるまで終わらない。人の操作）を動かさず、移動もしない
     if _ai_mode; then

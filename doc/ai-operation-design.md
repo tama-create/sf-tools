@@ -153,7 +153,7 @@
 | `doc/ai-dev-loop.md` | 2 章（コマンドの使い分け）を 3 章の区分に改め、5 章・6 章を足す |
 | `doc/dev-reference.md`・文書サイト | 確認の仕組みと、終了コード 20 |
 
-- ランチャー（`sf-launcher.sh`）は変えない（人のための画面のまま）
+- ランチャー（`phases/start/launcher.sh`。2026-11-28 に `bin/sf-launcher.sh` から移した）は変えない（人のための画面のまま）
 
 ## 8. テスト
 

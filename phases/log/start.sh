@@ -120,10 +120,25 @@ ensure_debuglevel() {
     [[ "$DL_ID" =~ $ID_RE ]] || finish_auto_or_die 1 "DebugLevel の ID の形が正しくありません"
 }
 
-# TraceFlag を延ばすか作る（4.2 の 3・8.2）。結果: TF_ID・TF_EXPIRES
-TF_ID=""; TF_EXPIRES=""
+# 別の場所の sf-log.sh の TraceFlag を引き継ぐ（--auto のみ。後から起動した sf-start を優先する。4.2）。引数: ID 期限（UTC）
+#   期限を縮めるのではなく消す: すぐに作れる（待たない）。残すと、古い取得役の延長が、あとで生き返らせることがある。
+#   古い取得役は、自分の TraceFlag がなくなったことに気づいて止まる（collect の c2）。消せなければ終了コード 1（作らない）
+take_over_traceflag() {
+    local j name
+    # 準備のあいだに sf-start が終了していたら、引き継がない（使う人がいないのに、相手の取得を止めないため）
+    if [[ -n "$OWNER" ]] && ! owner_present; then finish_auto_or_die 10 "sf-start が終了したため"; fi
+    if ! j=$(run sf data delete record --use-tooling-api --sobject TraceFlag --record-id "$1" --target-org "$TARGET_ORG" --json); then
+        name=$(sf_err_name "$j")  # VAR=$(cmd) のため run 不使用
+        sf_err_is_gone "$name" || finish_auto_or_die 1 "別の sf-start のログ設定を消せないため、引き継げません（${name}）"
+    fi
+    TOOK_OVER=1
+    log "WARNING" "別の場所の sf-start のログ設定（${1}・期限 ${2}）を引き継ぎました。あちらの取得は止まります。"
+}
+
+# TraceFlag を延ばすか作る（4.2 の 3・8.2）。結果: TF_ID・TF_EXPIRES・TOOK_OVER（引き継いだら 1）
+TF_ID=""; TF_EXPIRES=""; TOOK_OVER=""
 ensure_traceflag() {
-    local j now tsv mine other_ids=() other_exp=() line id type st ex state dl start new_exp shrunk="" rc
+    local j now tsv mine other_ids=() other_exp=() other_dl=() line id type st ex state dl start new_exp shrunk="" rc until_hm
     now=$(now_z)
     j=$(run sf data query --use-tooling-api --target-org "$TARGET_ORG" --json \
         --query "SELECT Id, LogType, StartDate, ExpirationDate, DebugLevel.DeveloperName FROM TraceFlag WHERE TracedEntityId = '${USER_ID}'") \
@@ -135,7 +150,7 @@ ensure_traceflag() {
     while IFS=$'\t' read -r id type st ex state dl; do
         [[ -n "$id" ]] || continue
         if [[ -n "$mine" && "$id" == "$mine" && "$type" == "USER_DEBUG" ]]; then found_mine=1; continue; fi
-        if [[ "$type" == "USER_DEBUG" && "$state" == "active" ]]; then other_ids+=("$id"); other_exp+=("$ex"); fi
+        if [[ "$type" == "USER_DEBUG" && "$state" == "active" ]]; then other_ids+=("$id"); other_exp+=("$ex"); other_dl+=("$dl"); fi
     done <<< "$tsv"
 
     # a. 自分が作ったもの → 延ばす
@@ -152,11 +167,16 @@ ensure_traceflag() {
     start="$now"
     if [[ ${#other_ids[@]} -ge 2 ]]; then
         finish_auto_or_die 10 "このユーザーに、有効な USER_DEBUG の TraceFlag が ${#other_ids[@]} つあります"
-    elif [[ ${#other_ids[@]} -eq 1 ]]; then
-        if [[ $AUTO -eq 1 ]]; then
+    elif [[ ${#other_ids[@]} -eq 1 && $AUTO -eq 1 ]]; then
+        if ! is_sftools_debuglevel "${other_dl[0]}"; then
+            # 人・ほかの道具の設定は、自動では触らない。いつまで残るかと、置き換え方を表示する
+            until_hm=$(local_hm "${other_exp[0]}")  # VAR=$(cmd) のため run 不使用
             log "WARNING" "ほかの USER_DEBUG の TraceFlag（${other_ids[0]}・期限 ${other_exp[0]}）があります。sf-log.sh start で置き換えられます。"
-            finish_auto_or_die 10 "ほかの USER_DEBUG の TraceFlag があるため"
+            finish_auto_or_die 10 "sf-tools 以外のログ設定があるため。期限 ${until_hm}。置き換えは sf-log.sh start"
         fi
+        take_over_traceflag "${other_ids[0]}" "${other_exp[0]}"
+        start=$(now_z)
+    elif [[ ${#other_ids[@]} -eq 1 ]]; then
         log "WARNING" "このユーザーに、ほかの USER_DEBUG の TraceFlag があります（設定画面などで作られた、このユーザーのログの設定です）。"
         log "WARNING" "  ID: ${other_ids[0]}・期限: ${other_exp[0]}"
         log "WARNING" "  止めると、期限を「元の期限」と「今から 2 分後」の早いほうに縮めます（消しません）。"
@@ -231,7 +251,8 @@ cmd_start() {
     fi
     # WARNING= : 裏の準備のやり直し（retry_prepare）の「やり直しています」を消す
     # COUNT_TODAY: 前回の値（前の日など）を残さない。ランチャーは「取得中」に変わった時点で 1 回だけ描き直すため、ここで正しい数を書く
-    state_set "$STATUS_F" "STATE=collecting" "ORG=${TARGET_ORG}" "EXPIRES=${TF_EXPIRES}" "EXPIRES_AT=$(local_hm "$TF_EXPIRES")" "COUNT_TODAY=$(count_today)" "REASON=" "WARNING=" || true   # 意図的エラー無視: 表示用
+    # TAKEOVER: 別の場所の sf-start の設定を引き継いだら 1（ランチャーが「引き継ぎ」と表示する。取得役は書き換えない）
+    state_set "$STATUS_F" "STATE=collecting" "ORG=${TARGET_ORG}" "EXPIRES=${TF_EXPIRES}" "EXPIRES_AT=$(local_hm "$TF_EXPIRES")" "COUNT_TODAY=$(count_today)" "REASON=" "WARNING=" "TAKEOVER=${TOOK_OVER}" || true   # 意図的エラー無視: 表示用
 
     # 組織のログの量（8.6）
     vol=$(run sf data query --use-tooling-api --target-org "$TARGET_ORG" --json \

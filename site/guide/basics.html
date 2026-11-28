@@ -158,7 +158,7 @@ sf-start.sh</code></pre>
   <li>VS Code を開きます。</li>
   <li>裏で、準備を進めます（<code>~/sf-tools</code> の更新・Git のフックの設置・リリース用のフォルダの準備・開発ツールの更新など）。</li>
   <li>AI（Claude Code など）が読むデバッグログを、裏で取り始めます。このプロジェクト・この組織で初めてのときだけ、「自動で取るか」を聞かれます（ログの中身が AI の提供元に送られるため。ダミーデータの組織なら Y。詳しくは <a href="../reference/commands-dev.html#sf-log"><code>sf-log.sh</code></a>）。</li>
-  <li>最後に、ランチャーを開きます。ランチャーを閉じると、デバッグログの取得も止まります。</li>
+  <li>最後に、ランチャーを開きます。ランチャーを閉じると、デバッグログの取得も止まります（同じ作業フォルダで、ほかの <code>sf-start.sh</code> が起動中なら、続きます。どちらになったかは、画面に表示します）。別のフォルダや別のパソコンで <code>sf-start.sh</code> を起動すると、Salesforce の同じユーザーでは、あとから起動した方がログを取ります。</li>
 </ol>
 <table>
   <thead><tr><th></th><th>sf-job</th><th>sf-start</th></tr></thead>

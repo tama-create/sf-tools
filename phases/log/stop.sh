@@ -43,7 +43,7 @@ cmd_leave() {
     n=$(owners_remove_locked "$OWNER")
     if [[ "$n" -gt 0 ]]; then
         lock_drop "$LOCK_DIR"
-        log "INFO" "ほかの sf-start が起動中のため、デバッグログの取得は止めません。"
+        log "INFO" "ほかの sf-start が起動中（残り ${n} 件）のため、デバッグログの取得は止めません（組織のログの設定は残ります。すべての sf-start を終了すると消します）。"
         exit 0
     fi
     printf 'CLOSING=%s\n' "$OWNER" >> "$OWNERS_F"   # 後始末の最中（新しい sf-start は、終わるまで登録を待つ）

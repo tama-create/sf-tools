@@ -79,6 +79,53 @@ collector_extend() {
     COLLECT_EXPIRES="$newexp"
 }
 
+# 別の場所の sf-start に引き継がれたので、取得をやめて止まる（4.3 の 2c2）。組織には書き込まない（相手の TraceFlag に触れない）。
+#   持ち主の一覧（.owners）は残す: この sf-start の終了時の leave と、ランチャーの Start（取り戻す）が、そのまま働くため。
+#   引数: 自分の TraceFlag の ID・相手の TraceFlag の ID。手元が、確かめたあとに変わっていたら、何もせずに戻る
+collector_yield() {
+    local tf="$1" other="$2"
+    lock_take "$LOCK_DIR" 50 || return 0
+    if [[ "$(kv_get "$STATE_F" TRACE_FLAG_ID)" != "$tf" || "$(kv_get "$STATE_F" ORG)" != "$TARGET_ORG" \
+          || -n "$(kv_get "$OWNERS_F" CLOSING)" || "$(kv_get "$COLLECTOR_F" PID)" != "$$" ]]; then
+        lock_drop "$LOCK_DIR"; return 0
+    fi
+    kv_set "$STATE_F" "TRACE_FLAG_ID="
+    kv_set "$STATUS_F" "STATE=stopped" "EXPIRES=" "EXPIRES_AT=" "BACKLOG=" "WARNING=" "TAKEOVER=" "REASON=別の場所の sf-start に引き継がれたため"
+    rm -f "$COLLECTOR_F" 2>/dev/null || true   # 意図的エラー無視: 取得役の印を消す
+    same_rt "$(kv_get "$CLAIM_F" RUNTIME)" && rm -f "$CLAIM_F" 2>/dev/null   # 自分の環境の名乗りも消す（取得役がいなくなるため）
+    lock_drop "$LOCK_DIR"
+    note_log "取得役: 別の場所の sf-start（TraceFlag ${other}）に引き継がれたため、止まります"
+    exit 0
+}
+
+# 自分の TraceFlag が、まだ自分のものかを確かめる（4.3 の 2c2。取得の回ごと）。
+#   自分のものが有効でなく、別の sf-log.sh の有効な TraceFlag があれば、引き継がれたとみなして止まる（戻らない）。
+#   自分のものがないだけ（人が消した・相手がもう終わった）なら、作り直さず、WARNING を書いて 1（延長もしない）。
+#   期限が切れただけ（PC のスリープなど）で、相手がいなければ 0（延長で、また有効になる）。問い合わせの失敗は 0（判断しない）
+collector_check_flag() {
+    local tf j tsv id type st ex state dl mine_state="" other=""
+    tf=$(kv_get "$STATE_F" TRACE_FLAG_ID)  # VAR=$(cmd) のため run 不使用
+    [[ "$tf" =~ $ID_RE ]] || return 0
+    [[ "$(kv_get "$STATE_F" ORG)" == "$TARGET_ORG" ]] || return 0   # 組織の切り替えの最中（別の組織の ID を、引き継ぎと誤らない）
+    heartbeat
+    j=$(run sf data query --use-tooling-api --target-org "$TARGET_ORG" --json \
+        --query "SELECT Id, LogType, StartDate, ExpirationDate, DebugLevel.DeveloperName FROM TraceFlag WHERE TracedEntityId = '${USER_ID}'") || return 0
+    tsv=$(printf '%s' "$j" | aj tflist 2>/dev/null) || return 0
+    while IFS=$'\t' read -r id type st ex state dl; do
+        [[ -n "$id" && "$type" == "USER_DEBUG" ]] || continue
+        if [[ "$id" == "$tf" ]]; then mine_state="$state"
+        elif [[ "$state" == "active" ]] && is_sftools_debuglevel "$dl"; then other="$id"; fi
+    done <<< "$tsv"
+    [[ "$mine_state" == "active" ]] && return 0
+    if [[ -n "$other" ]]; then
+        collector_yield "$tf" "$other"   # 引き継がれていれば、ここで終わる
+        return 1
+    fi
+    [[ -n "$mine_state" ]] && return 0
+    state_set "$STATUS_F" "WARNING=自分の TraceFlag が消えた・置き換わったため、新しいログは出ません（sf-start で取り直せます）" || true   # 意図的エラー無視: 表示用
+    return 1
+}
+
 cmd_collect() {
     local org user started pid corg i now next=0 backoff rc n first=1 today cnt soon
     trap '' INT   # Ctrl+C を無視する（止めるのは、持ち主の見張りと、stop・leave）
@@ -144,8 +191,9 @@ cmd_collect() {
                     *) respond_pulls error; backoff=$(( backoff * 2 > 600 ? 600 : backoff * 2 )); next=$(( $(date +%s) + backoff ))
                        state_set "$STATUS_F" "WARNING=取得に失敗しました（${backoff} 秒後にやり直します）" || true ;;
                 esac
-                # d. TraceFlag の残りが 60 分未満なら、今から 2 時間に延ばす（取得のあとに確かめる）
-                if [[ "$COLLECT_EXPIRES" =~ $ISO_RE ]]; then
+                # c2. 自分の TraceFlag が、まだ自分のものかを確かめる（取得のあと。引き継がれる前のログは、取り終えている）
+                # d. TraceFlag の残りが 60 分未満なら、今から 2 時間に延ばす
+                if collector_check_flag && [[ "$COLLECT_EXPIRES" =~ $ISO_RE ]]; then
                     soon=$(aj time add "$(now_z)" --sec 3600)
                     if [[ "$(aj time cmp "$COLLECT_EXPIRES" "$soon")" == "-1" ]]; then
                         collector_extend || note_log "取得役: TraceFlag を延ばせませんでした"

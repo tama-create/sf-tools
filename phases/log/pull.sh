@@ -70,7 +70,12 @@ cmd_pull() {
         [[ $rc -eq 2 ]] && notes+=("取り込みの残りがあります（200 本を超えました）。もう一度 sf-log.sh pull を実行すると、続きを取ります。")
         notes+=("取得役: 動いていません（この pull が、組織から直接取りました）")
     fi
-    [[ -n "$(kv_get "$STATE_F" TRACE_FLAG_ID)" ]] || notes+=("sf-log.sh の TraceFlag がありません（新しいログは出ません）。人に sf-start か sf-log.sh start を頼んでください")
+    if [[ -z "$(kv_get "$STATE_F" TRACE_FLAG_ID)" ]]; then
+        # 止まった理由（別の場所の sf-start に引き継がれた、など）があれば添える（AI が、状況を知れるように）
+        v=""
+        [[ "$(kv_get "$STATUS_F" STATE)" == "stopped" ]] && v=$(kv_get "$STATUS_F" REASON)  # VAR=$(cmd) のため run 不使用
+        notes+=("sf-log.sh の TraceFlag がありません（新しいログは出ません${v:+。理由: ${v}}）。人に sf-start か sf-log.sh start を頼んでください")
+    fi
     v=$(kv_get "$STATUS_F" EXPIRES); [[ -n "$v" ]] && notes+=("TraceFlag の期限: ${v}（UTC）")  # VAR=$(cmd) のため run 不使用
 
     # 要約に入れるログを選ぶ（4.4 の 3）。要約のロックを取ってから、しおりを読む（同時に動く pull が、先にしおりを進めることがあるため）。

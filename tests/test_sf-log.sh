@@ -21,7 +21,10 @@
 #      止まる: leave（最後の持ち主）・stop・持ち主が死んだ・上限の時間・印の入れ替わり（組織に何もしない）／
 #      leave: ほかの持ち主がいれば止めない／start --auto --owner: 登録・後始末の最中（CLOSING）は待つ・死んだ CLOSING は消す／
 #      別の組織の取得役が動いているときの pull は中断
-#   8. begin（sf-start の前面）: sf を呼ばない・答えがなければ 10・予約名 10・答えが on → 裏で準備して取得役になる／
+#   7b. 引き継ぎ（2 つのフォルダ）: 後から始めた方が、別の sf-log.sh の TraceFlag を消して作る／古い取得役は止まる（作り直さない）／
+#      改めて始めると取り戻す／引き継がれた側の終了で、相手の設定は消えない／引き継がない: sf-start が終了していた・消せない・
+#      人の DebugLevel の設定・期限切れだけ・設定が消されただけ
+#   8. begin（sf-start の前面）:sf を呼ばない・答えがなければ 10・予約名 10・答えが on → 裏で準備して取得役になる／
 #      登録していない印の leave は何もしない／止めたら期限の表示を消す／
 #      裏の準備の失敗 → 1 回だけやり直す（成功したら WARNING を消す・失敗が続けば error・持ち主が死んでいればやり直さない）
 #   9. 環境の混在（Git Bash と WSL。doc/sf-log-design.md 5.6。SF_LOG_TEST_RUNTIME で環境の代わりをする）:
@@ -306,6 +309,8 @@ test_start_auto() {
     _run start -o dev --auto
     assert_equals "$RC" "10" "--auto: ほかの USER_DEBUG → 10"
     assert_equals "$(_org 'o.traceFlags.length+" "+o.traceFlags[0].ExpirationDate')" "1 $before" "--auto: ほかの TraceFlag に触れない"
+    [[ "$(_kv .status REASON)" =~ 期限\ [0-9]{2}:[0-9]{2}。置き換えは\ sf-log\.sh\ start ]] \
+        && pass "--auto: 取らない理由に、期限と置き換え方を書く" || fail "--auto: 取らない理由に、期限と置き換え方を書く" "$(_kv .status REASON)"
     _done
 
     # 予約名・本番
@@ -710,6 +715,109 @@ test_collect_extend() {
     _done
 }
 
+# ------------------------------------------------------------------------------
+# 後から起動した sf-start を優先する（別のフォルダ・別の PC の代わりに、同じ偽の組織を使う 2 つのフォルダ。4.2・4.3 の 2c2）
+# ------------------------------------------------------------------------------
+test_takeover() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] 引き継ぎ: 後から起動した方を優先する${CLR_RST}"
+    _env
+    local dir_a="$TD" dir_b; dir_b=$(setup_force_dir)
+    # A（先に起動）
+    _run auto on -o dev; _live_mark; local ma="$MARK"
+    _run start -o dev --auto --owner "$ma"
+    local id_a; id_a=$(_kv .state TRACE_FLAG_ID)
+    _collect_bg; local cpid_a=$CPID
+    _wait_for 20 '[[ -f "$TD/logs/apex/.collector" ]]' && pass "A: 取得役が動く" || fail "A: 取得役が動く"
+
+    # B（後から起動）→ A の設定を引き継ぐ
+    TD="$dir_b"; _run auto on -o dev; _live_mark; local mb="$MARK"
+    _run start -o dev --auto --owner "$mb"
+    assert_exit_ok "$RC" "B: 別の sf-start の設定があっても、取り始める"
+    _has "$OUT" "引き継ぎました" "B: 引き継いだことを表示する"
+    local id_b; id_b=$(_kv .state TRACE_FLAG_ID)
+    [[ -n "$id_b" && "$id_b" != "$id_a" ]] && pass "B: 新しい TraceFlag を作る" || fail "B: 新しい TraceFlag を作る" "A=${id_a} B=${id_b}"
+    assert_equals "$(_org 'o.traceFlags.map(t=>t.Id).join(",")')" "$id_b" "B: A の TraceFlag は消え、B のものだけが残る"
+    assert_equals "$(_kv .status TAKEOVER)" "1" "B: .status に引き継ぎの印を書く"
+
+    # A の取得役は、引き継がれたことに気づいて止まる（作り直さない）
+    TD="$dir_a"
+    _wait_for 40 '! _alive "$cpid_a"' && pass "A: 取得役が止まる" || fail "A: 取得役が止まる" "$(cat "$TD/logs/apex/.status")"
+    assert_equals "$(_kv .status STATE)" "stopped" "A: .status を stopped にする"
+    _has "$(_kv .status REASON)" "引き継がれた" "A: 理由に、引き継がれたと書く"
+    assert_equals "$(_kv .state TRACE_FLAG_ID)" "" "A: 自分の TraceFlag の ID を消す"
+    assert_file_not_exists "$TD/logs/apex/.collector" "A: 取得役の印を消す"
+    assert_file_not_exists "$TD/logs/apex/.claim" "A: 名乗りを消す"
+    assert_file_contains "$TD/logs/apex/.owners" "$ma" "A: 持ち主の一覧は残す（終了時の leave と、取り戻しのため）"
+    assert_equals "$(_org 'o.traceFlags.map(t=>t.Id).join(",")')" "$id_b" "A: 取り返さない（B の TraceFlag のまま）"
+    _run pull -o dev
+    _has "$(cat "$TD/logs/apex/latest.md" 2>/dev/null)" "引き継がれた" "A: pull の要約に、引き継がれたことを書く"
+
+    # A で改めて始める（ランチャーの Start）→ A が後になり、取り戻す。B の取得役は止まる
+    TD="$dir_b"; _collect_bg; local cpid_b=$CPID
+    _wait_for 20 '[[ -f "$TD/logs/apex/.collector" ]]' && pass "B: 取得役が動く" || fail "B: 取得役が動く"
+    TD="$dir_a"; _run start -o dev --auto --owner "$ma"
+    assert_exit_ok "$RC" "A: 改めて始めると、取り戻す"
+    local id_a2; id_a2=$(_kv .state TRACE_FLAG_ID)
+    TD="$dir_b"
+    _wait_for 40 '! _alive "$cpid_b"' && pass "B: 取得役が止まる" || fail "B: 取得役が止まる"
+
+    # 引き継がれた側が終了しても、相手の設定は消さない
+    _run leave --owner "$mb"
+    assert_exit_ok "$RC" "B: leave が成功する"
+    assert_equals "$(_org 'o.traceFlags.map(t=>t.Id).join(",")')" "$id_a2" "B の終了で、A の TraceFlag は消えない"
+    TD="$dir_a"; _run leave --owner "$ma"
+    assert_equals "$(_tf_count)" "0" "A の終了で、A の TraceFlag を消す"
+    rm -rf "$dir_b"
+    _done
+}
+
+test_takeover_guards() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] 引き継ぎ: 引き継がない場合${CLR_RST}"
+    _env
+    local dir_a="$TD" dir_b; dir_b=$(setup_force_dir)
+    _run auto on -o dev; _live_mark; local ma="$MARK"
+    _run start -o dev --auto --owner "$ma"
+    local id_a; id_a=$(_kv .state TRACE_FLAG_ID)
+    TD="$dir_b"; _run auto on -o dev
+
+    # 準備のあいだに sf-start が終了していた → 引き継がない
+    local dead; bash -c 'exit 0' & dead=$!; wait "$dead"
+    _run start -o dev --auto --owner "${dead}:1:gone"
+    assert_equals "$RC" "10" "sf-start が終了していた → 取らない"
+    assert_equals "$(_org 'o.traceFlags.map(t=>t.Id).join(",")')" "$id_a" "sf-start が終了していた → 相手の TraceFlag に触れない"
+
+    # 相手の設定を消せない → 失敗（新しいものを作らない）
+    _live_mark; local mb="$MARK"
+    _org_set 'o.fail={"delete:TraceFlag":"UNKNOWN_EXCEPTION"}'
+    _run start -o dev --auto --owner "$mb"
+    assert_equals "$RC" "1" "相手の設定を消せない → 失敗"
+    _has "$(_kv .status REASON)" "引き継げません" "相手の設定を消せない → 理由を書く"
+    assert_equals "$(_org 'o.traceFlags.map(t=>t.Id).join(",")')" "$id_a" "相手の設定を消せない → 何も変えない"
+
+    # 人・ほかの道具が作った DebugLevel の設定 → 引き継がない
+    _org_set "o.fail={}; o.debugLevels.push({Id:'7dl000000000098AAA',DeveloperName:'MyDebugLevel'}); o.traceFlags[0].DebugLevelId='7dl000000000098AAA'"
+    _run start -o dev --auto --owner "$mb"
+    assert_equals "$RC" "10" "人の DebugLevel の設定 → 取らない"
+    assert_equals "$(_org 'o.traceFlags.map(t=>t.Id).join(",")')" "$id_a" "人の DebugLevel の設定 → 触れない"
+
+    # 期限が切れただけで、相手がいない → 取得役は止まらない（PC のスリープのあとなど）
+    TD="$dir_a"
+    _org_set "o.traceFlags[0].DebugLevelId=o.debugLevels.find(d=>d.DeveloperName==='sf_tools_log_standard').Id; o.traceFlags[0].ExpirationDate=Date.now()-1000"
+    _collect_bg; local cpid_a=$CPID
+    _wait_for 20 '[[ -f "$TD/logs/apex/.collector" ]]' && pass "取得役が動く" || fail "取得役が動く"
+    sleep 6
+    _alive "$cpid_a" && pass "期限切れだけ → 取得役は止まらない" || fail "期限切れだけ → 取得役は止まらない" "$(cat "$TD/logs/apex/.status")"
+
+    # 自分の設定が消されただけで、相手がいない → 止まらず、作り直さず、知らせる
+    _org_set 'o.traceFlags=[]'
+    _wait_for 30 '[[ "$(_kv .status WARNING)" == *"新しいログは出ません"* ]]' && pass "設定が消えた → WARNING で知らせる" || fail "設定が消えた → WARNING で知らせる" "$(cat "$TD/logs/apex/.status")"
+    _alive "$cpid_a" && pass "設定が消えただけ → 取得役は止まらない" || fail "設定が消えただけ → 取得役は止まらない"
+    assert_equals "$(_tf_count)" "0" "設定が消えた → 作り直さない"
+    _run leave --owner "$ma"
+    rm -rf "$dir_b"
+    _done
+}
+
 test_register_owner() {
     echo ""; echo -e "${CLR_HEAD}[TEST] start --auto --owner: 後始末の最中${CLR_RST}"
     _env
@@ -1083,6 +1191,8 @@ test_collect_basic
 test_collect_late
 test_collect_stops
 test_collect_extend
+test_takeover
+test_takeover_guards
 test_register_owner
 test_begin
 test_begin_retry

@@ -44,6 +44,7 @@
 #          ファイルの中身が前回と同じなら、node を起動せず、前回の結果を使う）
 #        デバッグログ: logs/apex/.status の STATE による（collecting = 取得中 (<期限>/<今日の本数>本) / starting = 準備中 /
 #          skipped = 取っていません / error = 取れていません / stopped = 止まっています。理由（REASON）があれば括弧で添える）。
+#          取得中で TAKEOVER=1 なら「・別の sf-start から引き継ぎ」を添える。
 #          止まっているときは「。sf-start で取り始めます」を添える（デバッグログを取り始め、閉じるときに後始末をするのは sf-start.sh
 #          だけ。ランチャー自身は、取り始めない。VS Code のターミナルでも、sf-start を打てば同じように取る。2026-11-28 の決定）。
 #          色は状態で変える（取得中 = 太字の緑 / 準備中 = 太字の水色 / 取れていません = 太字の赤 / 取っていません・止まっています = 黄色）。
@@ -153,7 +154,7 @@ clean_into() {
 #   結果は AL_TEXT（表示）・AL_COLOR（色）・AL_WARN（WARNING の文。あれば、もう 1 行出す）に入れる（$( ) を使わず、変数で返す）
 #   common.sh を読まないため、キー=値 の行を while read で読み、決まったキーだけを使う（source しない）
 apexlog_summary() {
-    local f="logs/apex/.status" line k v state="" at="" cnt="" reason=""
+    local f="logs/apex/.status" line k v state="" at="" cnt="" reason="" took=""
     AL_TEXT=""; AL_COLOR=""; AL_WARN=""
     [[ -f "$f" ]] || return 0
     while IFS= read -r line || [[ -n "$line" ]]; do
@@ -161,12 +162,13 @@ apexlog_summary() {
         case "$k" in
             STATE) state="$v" ;; EXPIRES_AT) at="$v" ;; COUNT_TODAY) cnt="$v" ;;
             REASON) reason="$v" ;; WARNING) AL_WARN="$v" ;;
+            TAKEOVER) [[ "$v" == "1" ]] && took="・別の sf-start から引き継ぎ" ;;
         esac
     done < "$f"
     clean_into at "$at"; clean_into cnt "$cnt"; clean_into reason "$reason"; clean_into AL_WARN "$AL_WARN"
     # 色は状態で変える（取得中 = 太字の緑 / 準備中 = 太字の水色 / 取れていません = 太字の赤 / 取っていません・止まっています = 黄色）
     case "$state" in
-        collecting) AL_TEXT="取得中 (${at:+${at}/}${cnt:-0}本)"; AL_COLOR="${BOLD}${GREEN}" ;;   # (期限/今日の本数)
+        collecting) AL_TEXT="取得中 (${at:+${at}/}${cnt:-0}本)${took}"; AL_COLOR="${BOLD}${GREEN}" ;;   # (期限/今日の本数)
         starting)   AL_TEXT="準備中"; AL_COLOR="${BOLD}${CYAN}" ;;
         skipped)    AL_TEXT="取っていません${reason:+（${reason}）}"; AL_COLOR="${YELLOW}" ;;
         error)      AL_TEXT="取れていません${reason:+（${reason}）}"; AL_COLOR="${BOLD}${RED}" ;;

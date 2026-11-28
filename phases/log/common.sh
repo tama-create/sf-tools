@@ -161,6 +161,19 @@ retry_prepare() {
 # sf の --json の応答から name を読む（読めなければ「不明」）
 sf_err_name() { local n; n=$(json_get "$1" name 2>/dev/null) || n=""; printf '%s' "${n:-不明}"; }  # VAR=$(cmd) のため run 不使用
 
+# 消そうとしたものが、もうないというエラーか（引数: sf_err_name の結果）
+sf_err_is_gone() {
+    case "$1" in *NOT_FOUND*|*ENTITY_IS_DELETED*|*INVALID_CROSS_REFERENCE_KEY*) return 0 ;; esac
+    return 1
+}
+
+# sf-log.sh が作るログの設定の DebugLevel の名前か（引数: DebugLevel の名前）。TraceFlag がこの DebugLevel を使っていれば、
+#   別の場所の sf-log.sh のものとみなし、自動の取り始めで引き継ぐ。人・ほかの道具の設定は、自動では触らない（4.2）
+is_sftools_debuglevel() {
+    case "$1" in sf_tools_log_standard|sf_tools_log_detail) return 0 ;; esac
+    return 1
+}
+
 # プロセスが生きているか（kill -0。PID が使い回されたときは「生きている」に見えるため、取得役は 12 時間で必ず止まる。5.5）
 pid_alive() { [[ "$1" =~ ^[0-9]+$ ]] && kill -0 "$1" 2>/dev/null; }  # 条件チェックのため run 不使用
 
@@ -416,14 +429,13 @@ do_cleanup() {
             log "SUCCESS" "TraceFlag を消しました（${tf}・組織: ${org}）。"
         else
             name=$(sf_err_name "$j")
-            case "$name" in
-                *NOT_FOUND*|*ENTITY_IS_DELETED*|*INVALID_CROSS_REFERENCE_KEY*)
-                    log "WARNING" "TraceFlag（${tf}）は、すでにありません（${name}）。" ;;
-                *)
-                    log "WARNING" "TraceFlag（${tf}）を消せませんでした（${name}）。最大 2 時間で切れます。"
-                    state_set "$STATUS_F" "STATE=error" "REASON=TraceFlag を消せませんでした（${name}）" || true   # 意図的エラー無視: 表示用
-                    return 2 ;;
-            esac
+            if sf_err_is_gone "$name"; then
+                log "WARNING" "TraceFlag（${tf}）は、すでにありません（${name}）。"
+            else
+                log "WARNING" "TraceFlag（${tf}）を消せませんでした（${name}）。最大 2 時間で切れます。"
+                state_set "$STATUS_F" "STATE=error" "REASON=TraceFlag を消せませんでした（${name}）" || true   # 意図的エラー無視: 表示用
+                return 2
+            fi
         fi
     else
         log "INFO" "sf-log.sh が作った TraceFlag はありません。"

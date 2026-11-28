@@ -101,7 +101,7 @@ sf-job.sh [--project XXXX] [--owner OWNER] [--name ジョブ名]</code></pre>
   <li><a href="commands-auto.html#sf-refresh"><code>sf-refresh.sh</code></a> を、バックグラウンドで実行する（出力は、<code>sf-start.sh</code> のログに追記）。内容は、<code>~/sf-tools</code> の <code>git pull</code>・設定ファイル（<code>metadata.txt</code>・<code>branches.txt</code>）の確認・Git フック（<code>pre-commit</code> / <code>pre-push</code>）の設置・リリース用フォルダの準備と <code>branch_name.txt</code> の更新（<code>main</code> ブランチでは行わない）・<code>npm install</code>（<code>package.json</code> があるとき。更新済みなら省略）・開発ツールの更新（<code>sf-update-cli.sh</code>。24 時間に 1 回）</li>
   <li>デバッグログを、ランチャーの起動中に裏で取る準備をする（<a href="#sf-log"><code>sf-log.sh</code></a> があるとき）。このプロジェクト・この組織のエイリアスで初めてのときだけ、AI への送信の注意を表示して「自動で取るか」を聞きます（Y/N）。取るときは、ログを出させる設定（TraceFlag）の準備と取得を、<strong>裏で</strong>始めます（ランチャーは待たずに開きます）。共有環境の組織・本番の組織・「取らない」と答えたときは、取りません。取れなくても、先へ進みます</li>
   <li>最後に、ランチャー（メニュー）を前面で起動する（ランチャーから呼ばれたときは、二重に起動しない。メニューを開く入口は、<code>sf-start.sh</code> だけです）</li>
-  <li>終わるとき（ランチャーを <code>q</code> で閉じたとき）は、ほかに起動中の <code>sf-start.sh</code> がなければ、デバッグログの取得を止め、TraceFlag を消します（数十秒かかることがあります）</li>
+  <li>終わるとき（ランチャーを <code>q</code> で閉じたとき）は、ほかに起動中の <code>sf-start.sh</code> がなければ、デバッグログの取得を止め、TraceFlag を消します（数十秒かかることがあります）。結果（消した・ほかの <code>sf-start.sh</code> が起動中なので残した・消せなかった）を表示します。<strong>表示されるまで、画面を閉じないでください</strong></li>
 </ol>
 <h3>補足</h3>
 <ul>
@@ -444,7 +444,8 @@ sf-log.sh auto on|off [-o ALIAS]</code></pre>
 <ul>
   <li><code>start</code>: ログの詳しさの設定（DebugLevel <code>sf_tools_log_standard</code> など）を作るか上書きし、自分のユーザーの TraceFlag（種類 <code>USER_DEBUG</code>）を作ります。<code>sf-log.sh</code> が前に作ったものがあれば、作り直さずに期限を延ばします。
     <ul>
-      <li>ほかの <code>USER_DEBUG</code> の TraceFlag（設定画面で作ったものなど）があると、同時には有効にできません。そのときは、内容を表示して「止めてよいか」を聞き、期限を「元の期限」と「今から 2 分後」の早いほうに縮めてから（消しません）、そのあとに始まる TraceFlag を作ります。</li>
+      <li>ほかの <code>USER_DEBUG</code> の TraceFlag（設定画面で作ったものなど）があると、同時には有効にできません。人が <code>start</code> を実行したときは、内容を表示して「止めてよいか」を聞き、期限を「元の期限」と「今から 2 分後」の早いほうに縮めてから（消しません）、そのあとに始まる TraceFlag を作ります。</li>
+      <li><code>sf-start.sh</code> からの自動の取り始めでは、<strong>人や他のツールが作った設定には触りません。</strong>ランチャーに、その設定の期限と置き換え方を表示します。<code>sf-log.sh</code> が作った設定の扱いは、下の「あとから起動した方が、ログを取ります」を見てください。</li>
       <li>Developer Console が作る TraceFlag（種類 <code>DEVELOPER_LOG</code>）には、触れません。</li>
       <li><code>--level detail</code> は、詳しいログ（変数の値の変化など）が要るときに使います。ログが大きくなるため、既定は <code>standard</code> です。<code>--hours</code> は期限（1〜23 時間。既定 2）です。<code>-y</code> で、確認を省きます。</li>
     </ul>
@@ -457,6 +458,7 @@ sf-log.sh auto on|off [-o ALIAS]</code></pre>
 <h3>補足</h3>
 <ul>
   <li>保存先は <code>logs/apex/&lt;日付&gt;/&lt;時刻&gt;_&lt;ログの ID&gt;_&lt;操作&gt;.log</code> です（日付と時刻は、PC の時刻）。<code>logs/</code> は Git の管理外です。<code>stop</code> でも消えないので、要らなくなったら、日付のフォルダを手で消してください。</li>
+  <li><strong>あとから起動した方が、ログを取ります。</strong>Salesforce の同じユーザーでは、ログを出させる設定を、同時に 1 つしか有効にできません。別のフォルダや別のパソコン（Windows と Mac など）で <code>sf-log.sh</code> が取っているとき（前の設定が残っているときを含みます）に、<code>sf-start.sh</code> を起動すると、古い設定を消して、あとから起動した方が取り始めます。ランチャーに「別の sf-start から引き継ぎ」と出ます。古い方は、次の取得のときに気づいて止まり、ランチャーに「別の場所の sf-start に引き継がれたため」と出ます（取り返すには、古い方で <code>sf-start.sh</code> を実行し直します）。古い方を終了しても、新しい方の設定は消えません。同じアカウントを複数の人で使うと、あとから始めた人が引き継ぎます。設定は、名前（DebugLevel <code>sf_tools_log_…</code>）で見分けるため、その名前を、設定画面で手作業で使わないでください。</li>
   <li>取るのは、自分のユーザーのログだけです。他の人のログは、本文を保存・記録・要約しません。まとめて取るときに、他の人のログが一時フォルダ（<code>logs/apex/.fetch/</code>）に一瞬書かれることがありますが、中を読まずに消します。</li>
   <li>組織のログは、24 時間で消えます。組織のログの合計が 1,000MB を超えると、TraceFlag を作れなくなるため、<code>start</code> は 700MB を超えたときに警告を出します。</li>
   <li>取得役は、3 分ごと（環境変数 <code>SF_LOG_INTERVAL</code>。30〜600 秒）に新しいログを手元に保存し、TraceFlag の期限が近づくと延ばします。<strong>長い処理のログは、処理が終わってから組織の一覧に現れる</strong>ため、あとから始まった短い処理のログより遅れます。取得役と <code>pull</code> は、毎回、直近 30 分に始まった自分のログを確かめ直し、まだ手元にないものを取ります（目安として、処理の時間と取得の間隔を足して 30 分を超えるログは、取れないことがあります）。<code>pull</code> は、取得役が動いていれば、取得役にすぐ取ってもらってから要約します。取得役は、<code>sf-start.sh</code> が全部終わったとき・起動から 12 時間たったとき・<code>stop</code> で止まり、TraceFlag を消します。</li>

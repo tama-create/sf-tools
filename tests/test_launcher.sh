@@ -131,6 +131,10 @@ test_apexlog_status_line() {
     out=$(cd "$td" && echo "q" | PATH="$mb:$PATH" bash "$LAUNCHER" 2>&1)
     [[ "$out" == *"取得中 (15:30/3本)"* ]] && pass "取得中 → 期限・今日の本数を表示する（Log: 取得中 (期限/本数)）" || fail "取得中 → 期限・今日の本数を表示する（Log: 取得中 (期限/本数)）" "$out"
     [[ "$out" == *$'\033[1m\033[0;32m取得中'* ]] && pass "取得中 → 太字の緑で表示する（目立たせる）" || fail "取得中 → 太字の緑で表示する（目立たせる）" "$out"
+    [[ "$out" != *"引き継ぎ"* ]] && pass "引き継いでいない → 引き継ぎは表示しない" || fail "引き継いでいない → 引き継ぎは表示しない" "$out"
+    printf 'STATE=collecting\nEXPIRES_AT=15:30\nCOUNT_TODAY=3\nTAKEOVER=1\n' > "$td/logs/apex/.status"
+    out=$(cd "$td" && echo "q" | PATH="$mb:$PATH" bash "$LAUNCHER" 2>&1)
+    [[ "$out" == *"取得中 (15:30/3本)・別の sf-start から引き継ぎ"* ]] && pass "引き継いだ → 取得中に添えて表示する" || fail "引き継いだ → 取得中に添えて表示する" "$out"
     printf 'STATE=skipped\nREASON=このプロジェクトでは、自動で取らない設定のため\n' > "$td/logs/apex/.status"
     out=$(cd "$td" && echo "q" | PATH="$mb:$PATH" bash "$LAUNCHER" 2>&1)
     [[ "$out" == *"取っていません（このプロジェクトでは、自動で取らない設定のため）"* ]] && pass "取らない → 理由を表示する" || fail "取らない → 理由を表示する" "$out"

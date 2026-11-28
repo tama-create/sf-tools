@@ -245,13 +245,14 @@ test_sf_log_begin_and_leave() {
     create_all_mocks "$mb"
     mkdir -p "$mh/sf-tools/bin" "$mh/sf-tools/phases/start"
     printf '#!/bin/bash\nexit 0\n' > "$mh/sf-tools/phases/start/launcher.sh"
-    printf '#!/bin/bash\necho "sflog $*" >> "%s"\nexit "${SFLOG_RC:-0}"\n' "$MOCK_CALL_LOG" > "$mh/sf-tools/bin/sf-log.sh"
+    printf '#!/bin/bash\necho "sflog $*" >> "%s"\n[ "$1" = leave ] && echo "LEAVE-RESULT-FROM-SFLOG"\nexit "${SFLOG_RC:-0}"\n' "$MOCK_CALL_LOG" > "$mh/sf-tools/bin/sf-log.sh"
     echo '{"target-org":"testorg"}' > "$td/.sf/config.json"
     export MOCK_SF_ORG_JSON='{"result":{"alias":"testorg","id":"00D000000000001AAA"}}'
 
     # 0（始めた）→ begin に印を渡し、終了時に同じ印で leave
     : > "$MOCK_CALL_LOG"
-    (cd "$td" && unset SF_LOG_OWNER && HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-start.sh" >/dev/null 2>&1)
+    out=$(cd "$td" && unset SF_LOG_OWNER && HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-start.sh" 2>&1)
+    assert_output_contains "$out" "LEAVE-RESULT-FROM-SFLOG" "終了時の leave の結果を表示する（残った・消せなかったことに気づけるように）"
     owner=$(grep "^sflog begin" "$MOCK_CALL_LOG" | sed 's/.*--owner //')
     [[ "$owner" =~ ^[0-9]+:[0-9]+:(gitbash|wsl|macos|linux|unknown)[0-9]+$ ]] && pass "begin に、自分の印（PID:時刻:環境の名前と乱数）を渡す" || fail "begin に、自分の印（PID:時刻:環境の名前と乱数）を渡す" "$(cat "$MOCK_CALL_LOG")"
     local rt; rt=$(bash -c "readonly SCRIPT_NAME=t LOG_FILE=/dev/null LOG_MODE=NEW; export SF_INIT_MODE=1; source '$SF_TOOLS_DIR/lib/common.sh'; detect_runtime" 2>/dev/null)

@@ -52,7 +52,8 @@
 #      （メニューの Start・SwitchOrg から呼ばれたときは、二重に起動しない）。メニューを開く入口は、このスクリプトだけ
 #      （2026-11-28 に bin/sf-launcher.sh を phases/start/ へ移した。利用者が打つコマンドは sf-start.sh）
 #   8. 終了時（ランチャーを q で閉じたとき・中断したとき）: 6 で自分の印を登録したときだけ、sf-log.sh leave --owner {印} を実行する
-#      （ほかの sf-start がなければ、取得役を止め、TraceFlag を消す。数十秒かかることがある。失敗は警告だけ）
+#      （ほかの sf-start がなければ、取得役を止め、TraceFlag を消す。数十秒かかることがある。失敗は警告だけ）。
+#      leave の出力（消した・ほかの sf-start が起動中のため残した・消せなかった）は、終わってから、まとめて表示する
 #
 # 【前提条件】
 #   - force-* フォルダ（カレントフォルダの名前が force- で始まる）で実行する。違えばエラーで終了する
@@ -105,8 +106,13 @@ SF_LOG_LEAVE=0
 _on_exit() {
     rm -rf /tmp/sf-wsl-bin 2>/dev/null
     if [[ "$SF_LOG_LEAVE" -eq 1 && -f "$SF_LOG_SH" ]]; then
-        log "INFO" "デバッグログの後始末をしています（取得役を止め、TraceFlag を消します。数十秒かかることがあります）..."
-        bash "$SF_LOG_SH" leave --owner "$SF_LOG_OWNER" >/dev/null 2>&1 || log "WARNING" "デバッグログの後始末に失敗しました（sf-tools/logs/sf-log.log を参照）。"
+        log "INFO" "デバッグログの後始末をしています（数十秒かかることがあります。結果を表示するまで、画面を閉じないでください）..."
+        # 結果（消した・ほかの sf-start がいるので残した・消せなかった）は、必ず表示する（捨てると、残ったことに気づけない）。
+        #   いったん変数に受けてから表示する: ウィンドウを閉じる途中で端末に書けなくても、後始末の処理は止まらないようにするため
+        local out rc=0
+        out=$(bash "$SF_LOG_SH" leave --owner "$SF_LOG_OWNER" 2>&1) || rc=$?  # VAR=$(cmd) のため run 不使用
+        [[ -n "$out" ]] && printf '%s\n' "$out"
+        [[ $rc -eq 0 ]] || log "WARNING" "デバッグログの後始末に失敗しました（sf-tools/logs/sf-log.log を参照）。"
     fi
 }
 trap _on_exit EXIT

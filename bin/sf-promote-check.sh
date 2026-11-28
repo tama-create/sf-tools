@@ -4,11 +4,11 @@
 # ==============================================================================
 # 開発物を、開発環境 → develop → staging → main の順に、同じコミットのまま上げる大原則（doc/one-way-promotion-design.md）を、
 # 確かめる。破っていれば、終了コード 1（ワークフローが、マージ・組織へのリリースを止める）。判定の本体は、ここ 1 か所
-# （wf-sequence・wf-validate・wf-release・sf-next が呼ぶ）。読み取りのみ（組織・GitHub を変えない）。
+# （wf-sequence・wf-validate・wf-release・sf-pr が呼ぶ）。読み取りのみ（組織・GitHub を変えない）。
 #
 # 【使い方】
 #   sf-promote-check.sh --pr <PR 番号> [--only sequence|stack] [--json]   # ワークフロー用（PR の情報は GitHub から読む）
-#   sf-promote-check.sh --plan [--json]                                    # sf-next 用（手元のブランチの、次の出し先）
+#   sf-promote-check.sh --plan [--json]                                    # sf-pr 用（手元のブランチの、次の出し先）
 #
 # 【オプション】
 #   --pr <番号>      : その PR（ブランチ B の先端のコミット H を、段階 T へ出す）を確かめる。H・B・T・フォークかは、
@@ -56,7 +56,7 @@
 #   - --json の形: {"mode":"pr|plan","ok":true|false,"skipped":true|false,"branch":"B","head":"H","target":"T",
 #     "next_tier":"develop|staging|main|none","pr_open":"<番号>","tiers":["develop","staging","main"]（下の段階から。構成にあるものだけ）,
 #     "violations":[{"rule":"R1","detail":"..."}],"error":"..."}
-#   - 管理者向けのコマンドではない（読み取りのみ）。手元でも動かせる（sf-next.sh が --plan で呼ぶ）
+#   - 管理者向けのコマンドではない（読み取りのみ）。手元でも動かせる（sf-pr.sh が --plan で呼ぶ）
 # ==============================================================================
 
 # ------------------------------------------------------------------------------

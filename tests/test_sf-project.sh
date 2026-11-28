@@ -1,9 +1,9 @@
 #!/bin/bash
 # ==============================================================================
-# test_sf-init.sh - sf-init.sh の単体テスト（モックベース。1/3）
+# test_sf-project.sh - sf-project.sh の単体テスト（モックベース。1/3）
 # ==============================================================================
-# sf-init.sh のテストは、時間がかかる（Windows の CI で約 10 分）ため、3 つのファイル（test_sf-init.sh・test_sf-init2.sh・
-# test_sf-init3.sh）に分け、並列に動かす。共通の部品は tests/init-test-lib.sh。関数の分け方は、実測の所要時間で、均等になるようにした。
+# sf-project.sh のテストは、時間がかかる（Windows の CI で約 10 分）ため、3 つのファイル（test_sf-project.sh・test_sf-project2.sh・
+# test_sf-project3.sh）に分け、並列に動かす。共通の部品は tests/init-test-lib.sh。関数の分け方は、実測の所要時間で、均等になるようにした。
 # どのテストが、どのファイルにあるかは、下の一覧（関数名）を参照。一覧は、このファイルにある分（ほかの 2 つのファイルにも、別の関数がある）。
 #
 # 【このファイルのテスト関数】
@@ -56,7 +56,7 @@ test_missing_tool_gh() {
     # PATH を $mb のみに限定して gh が見つからない状態を再現する
     printf 'x\n' \
         | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb" \
-              bash "$mock_home/sf-tools/bin/sf-init.sh" ) > /dev/null 2>&1
+              bash "$mock_home/sf-tools/bin/sf-project.sh" ) > /dev/null 2>&1
     exit_code=$?
 
     assert_exit_fail "$exit_code" "gh なしで失敗終了する"
@@ -85,7 +85,7 @@ test_unauthorized_user() {
     local exit_code
     printf 'x\n' \
         | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
-              bash "$mock_home/sf-tools/bin/sf-init.sh" ) > /dev/null 2>&1
+              bash "$mock_home/sf-tools/bin/sf-project.sh" ) > /dev/null 2>&1
     exit_code=$?
 
     assert_exit_fail "$exit_code" "許可されていないユーザーは失敗終了する"
@@ -118,7 +118,7 @@ test_flex_layout_prompt() {
     # 先頭の 3 行が、オーナーの入力・XXXX の入力・確認（Y）。以降は、通常の入力
     { printf 'tamashimon\ntestproject\nY\n'; _make_input_3branches; } \
         | ( cd "$work" && HOME="$mock_home" PATH="$mb:$PATH" \
-              env "${INIT_ECA_ENV[@]}" bash "$mock_home/sf-tools/bin/sf-init.sh" ) \
+              env "${INIT_ECA_ENV[@]}" bash "$mock_home/sf-tools/bin/sf-project.sh" ) \
           > /tmp/sf-init-test-flex2.log 2>&1
     exit_code=$?
 
@@ -153,7 +153,7 @@ test_admin_branch_failure_is_not_fatal() {
     export MOCK_GIT_CHECKOUT_FAIL_BRANCH=admin
     _make_input_3branches \
         | ( cd "$work" && HOME="$mock_home" PATH="$mb:$PATH" \
-              env "${INIT_ECA_ENV[@]}" bash "$mock_home/sf-tools/bin/sf-init.sh" --owner tamashimon --project testproject ) \
+              env "${INIT_ECA_ENV[@]}" bash "$mock_home/sf-tools/bin/sf-project.sh" --owner tamashimon --project testproject ) \
           > /tmp/sf-init-test-adminfail.log 2>&1
     exit_code=$?
     unset MOCK_GIT_CHECKOUT_FAIL_BRANCH
@@ -180,7 +180,7 @@ test_refuse_inside_admin_or_clone() {
         base=$(mktemp -d "${TMPDIR:-/tmp}/test-init-XXXX"); mkdir -p "$base/$d"
         : > "$MOCK_CALL_LOG"
         out=$(printf 'Y\n' | ( cd "$base/$d" && HOME="$mock_home" PATH="$mb:$PATH" \
-            bash "$mock_home/sf-tools/bin/sf-init.sh" ) 2>&1)
+            bash "$mock_home/sf-tools/bin/sf-project.sh" ) 2>&1)
         exit_code=$?
         assert_exit_fail "$exit_code"                                                    "${d} の中で実行 → 異常終了する"
         assert_output_contains "$out" "中では実行できません"                              "${d} の中で実行 → 理由を表示する"
@@ -214,7 +214,7 @@ ENVEOF
     export MOCK_GIT_C_REMOTE_URL="https://github.com/tamashimon/force-testproject.git"   # 同じリポジトリのクローン
     : > "$MOCK_CALL_LOG"
     out=$(printf 'Y\nq\n' | ( cd "$work" && HOME="$mock_home" PATH="$mb:$PATH" \
-        bash "$mock_home/sf-tools/bin/sf-init.sh" ) 2>&1)
+        bash "$mock_home/sf-tools/bin/sf-project.sh" ) 2>&1)
     exit_code=$?
     unset MOCK_GIT_C_REMOTE_URL
     assert_exit_ok "$exit_code"                                                          "後片付け・q: 正常終了する"
@@ -243,7 +243,7 @@ test_resume_state_case_insensitive() {
     printf 'SF_INIT_DONE_PHASE=5\nSF_INIT_DONE_AT="2026-10-17 01:00"\n' > "$work/admin/.sf-init-testproject.progress"
     : > "$MOCK_CALL_LOG"
     out=$(printf 'Y\nq\n' | ( cd "$work" && HOME="$mock_home" PATH="$mb:$PATH" \
-        bash "$mock_home/sf-tools/bin/sf-init.sh" --owner TAMASHIMON --project testproject ) 2>&1)
+        bash "$mock_home/sf-tools/bin/sf-project.sh" --owner TAMASHIMON --project testproject ) 2>&1)
     exit_code=$?
     assert_output_contains "$out" "前回のセットアップは、「ブランチの構成」まで完了しています"   "オーナーの大文字と小文字が違っても、続きをやる案内が出る"
     assert_file_exists "$work/admin/.sf-init-testproject.progress"                       "[q] 中断: 状態ファイルを、消さない（最初からやり直しにならない）"
@@ -268,14 +268,14 @@ test_flex_invalid_project_arg() {
     create_mock_gh_for_init "$mb"
 
     out=$( { printf 'x\n' | ( cd "$work" && HOME="$mock_home" PATH="$mb:$PATH" \
-              bash "$mock_home/sf-tools/bin/sf-init.sh" --owner tamashimon --project "bad name" ); } 2>&1 )
+              bash "$mock_home/sf-tools/bin/sf-project.sh" --owner tamashimon --project "bad name" ); } 2>&1 )
     assert_exit_fail "$?" "空白を含むプロジェクト名 → エラー終了"
     assert_output_contains "$out" "プロジェクト名" "エラーに、プロジェクト名（XXXX）の説明が出る"
     assert_file_not_contains "$MOCK_CALL_LOG" "gh repo create" "リポジトリを作る前に、止まる"
     assert_dir_not_exists "$work/init-bad name" "作業フォルダも作らない"
 
     out=$( { printf 'x\n' | ( cd "$work" && HOME="$mock_home" PATH="$mb:$PATH" \
-              bash "$mock_home/sf-tools/bin/sf-init.sh" --project ); } 2>&1 )
+              bash "$mock_home/sf-tools/bin/sf-project.sh" --project ); } 2>&1 )
     assert_exit_fail "$?" "--project に値がない → エラー終了"
 
     teardown "$mb" "$mock_home" "$base"
@@ -304,7 +304,7 @@ test_invalid_phase_args() {
     # 値なし（最後の引数）: 無限ループにならず、すぐにエラーで終了する
     for args in "--only" "--resume" "--add-tier"; do
         out=$( { printf 'x
-' | ( cd "$work" && HOME="$mock_home" PATH="$mb:$PATH"                   run_with_timeout 10 bash "$mock_home/sf-tools/bin/sf-init.sh" $args ); } 2>&1 )
+' | ( cd "$work" && HOME="$mock_home" PATH="$mb:$PATH"                   run_with_timeout 10 bash "$mock_home/sf-tools/bin/sf-project.sh" $args ); } 2>&1 )
         rc=$?
         assert_exit_fail "$rc" "${args} に値がない → エラー終了"
         [[ "$rc" != "124" ]] && pass "${args} に値がない → 時間切れ（無限ループ）にならない" || fail "${args} に値がない → 時間切れ（無限ループ）にならない" "終了コード 124（10 秒で打ち切り）"
@@ -314,7 +314,7 @@ test_invalid_phase_args() {
     # 値が Phase 番号でない（数字以外・0・範囲外・先頭が 0・次のオプション）: 何も実行せずに、エラーで終了する
     for args in "--resume 11" "--resume 0" "--resume abc" "--resume 02" "--resume --verify" "--only 11" "--only 0" "--only x" "--only -1"; do
         out=$( { printf 'x
-' | ( cd "$work" && HOME="$mock_home" PATH="$mb:$PATH"                   run_with_timeout 10 bash "$mock_home/sf-tools/bin/sf-init.sh" $args ); } 2>&1 )
+' | ( cd "$work" && HOME="$mock_home" PATH="$mb:$PATH"                   run_with_timeout 10 bash "$mock_home/sf-tools/bin/sf-project.sh" $args ); } 2>&1 )
         rc=$?
         assert_exit_fail "$rc" "${args} → エラー終了"
         [[ "$rc" != "124" ]] && pass "${args} → 時間切れにならない" || fail "${args} → 時間切れにならない" "終了コード 124（10 秒で打ち切り）"
@@ -324,7 +324,7 @@ test_invalid_phase_args() {
 
     # --add-tier に、次のオプションを値として渡さない
     out=$( { printf 'x
-' | ( cd "$work" && HOME="$mock_home" PATH="$mb:$PATH"               run_with_timeout 10 bash "$mock_home/sf-tools/bin/sf-init.sh" --add-tier --status ); } 2>&1 )
+' | ( cd "$work" && HOME="$mock_home" PATH="$mb:$PATH"               run_with_timeout 10 bash "$mock_home/sf-tools/bin/sf-project.sh" --add-tier --status ); } 2>&1 )
     assert_exit_fail "$?" "--add-tier の次がオプション → エラー終了"
     assert_output_contains "$out" "追加する段階（staging または develop）" "--add-tier の次がオプション → 指定のしかたが表示される"
 
@@ -350,7 +350,7 @@ test_resume_runs_from_specified_phase() {
     _stub_subscripts "$mock_home"
 
     # .sf-init.env を事前設定（Phase 2〜8 で書き出されるはずの内容）
-    # --only 時は sf-init.sh が init/ に cd してから .sf-init.env を参照するため事前作成
+    # --only 時は sf-project.sh が init/ に cd してから .sf-init.env を参照するため事前作成
     mkdir -p "$init_dir/admin"
     cat > "$init_dir/admin/.sf-init-testproject.env" << 'ENVEOF'
 GITHUB_OWNER="tamashimon"
@@ -365,7 +365,7 @@ ENVEOF
     local exit_code
     printf 'Y\nN\n' \
         | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
-              bash "$mock_home/sf-tools/bin/sf-init.sh" --only 9 ) > /dev/null 2>&1
+              bash "$mock_home/sf-tools/bin/sf-project.sh" --only 9 ) > /dev/null 2>&1
     exit_code=$?
 
     assert_exit_ok            "$exit_code"                         "--only 9 で正常終了する"
@@ -408,7 +408,7 @@ GITEOF
 
     local exit_code
     ( cd "$force_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
-          bash "$mock_home/sf-tools/bin/sf-init.sh" --add-tier develop ) > /dev/null 2>&1
+          bash "$mock_home/sf-tools/bin/sf-project.sh" --add-tier develop ) > /dev/null 2>&1
     exit_code=$?
 
     assert_exit_fail "$exit_code" "staging なしで develop 追加は失敗終了する"
@@ -444,7 +444,7 @@ test_phase9_ruleset_id() {
         : > "$MOCK_CALL_LOG"
         printf 'Y\n' \
             | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
-                  bash "$mock_home/sf-tools/bin/sf-init.sh" --only 9 ) > "$out" 2>&1
+                  bash "$mock_home/sf-tools/bin/sf-project.sh" --only 9 ) > "$out" 2>&1
         exit_code=$?
     }
 
@@ -513,7 +513,7 @@ test_phase5_8_write_failures() {
         > "$init_dir/admin/.sf-init-testproject.env"
     printf 'Y\n1\n' \
         | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
-              bash "$mock_home/sf-tools/bin/sf-init.sh" --only 5 ) > "$out" 2>&1
+              bash "$mock_home/sf-tools/bin/sf-project.sh" --only 5 ) > "$out" 2>&1
     exit_code=$?
     assert_exit_fail          "$exit_code"                                    "Phase 5: sf-tools/config を作れない → 中断する"
     assert_file_contains      "$out" "sf-tools/config を作成できません"         "Phase 5: 理由が表示される"
@@ -535,7 +535,7 @@ test_phase5_8_write_failures() {
     : > "$MOCK_CALL_LOG"
     printf 'Y\n' \
         | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
-              bash "$mock_home/sf-tools/bin/sf-init.sh" --only 8 ) > "$out" 2>&1
+              bash "$mock_home/sf-tools/bin/sf-project.sh" --only 8 ) > "$out" 2>&1
     exit_code=$?
     assert_exit_fail          "$exit_code"                                    "Phase 8: PAT_TOKEN_VALUE の行を消せない → 中断する"
     assert_file_contains      "$out" "PAT_TOKEN_VALUE の行を削除できませんでした" "Phase 8: 理由が表示される"
@@ -574,7 +574,7 @@ test_phase7_channel_id() {
         : > "$MOCK_CALL_LOG"
         printf '%b' "$1" \
             | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
-                  bash "$mock_home/sf-tools/bin/sf-init.sh" --only 7 ) > "$out" 2>&1
+                  bash "$mock_home/sf-tools/bin/sf-project.sh" --only 7 ) > "$out" 2>&1
         exit_code=$?
     }
 
@@ -625,14 +625,14 @@ C01ABCDEFGH
 }
 
 # ==============================================================================
-# テスト 20: e2e の入力の台本（tests/e2e/lib.sh の e2e_make_input）で、sf-init が最後まで進む
-#   実環境の通し検証（tests/e2e/run.sh）が流す標準入力が、sf-init の質問の順番と合っているかを、
+# テスト 20: e2e の入力の台本（tests/e2e/lib.sh の e2e_make_input）で、sf-project が最後まで進む
+#   実環境の通し検証（tests/e2e/run.sh）が流す標準入力が、sf-project の質問の順番と合っているかを、
 #   モックで確認する（質問の順番を変えたとき、台本の直し忘れをここで検知する）
 #   構成: 検証環境（SF_TOOLS_BRANCH=development）・main のみ・外部クライアントアプリ・DM ではない共有チャンネル
 # ==============================================================================
 test_e2e_input_sequence() {
     echo ""
-    echo -e "${CLR_HEAD}[TEST] e2e の入力の台本で、sf-init が Phase 1〜10 を最後まで進む${CLR_RST}"
+    echo -e "${CLR_HEAD}[TEST] e2e の入力の台本で、sf-project が Phase 1〜10 を最後まで進む${CLR_RST}"
 
     local mb mock_home init_base init_dir exit_code input
     mb=$(setup_mock_bin)
@@ -650,7 +650,7 @@ test_e2e_input_sequence() {
             bash -c "source '$SF_TOOLS_DIR/tests/e2e/lib.sh'; e2e_make_input")
     printf '%s\n' "$input" \
         | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
-              bash "$mock_home/sf-tools/bin/sf-init.sh" ) > "$mb/out.log" 2>&1
+              bash "$mock_home/sf-tools/bin/sf-project.sh" ) > "$mb/out.log" 2>&1
     exit_code=$?
 
     assert_exit_ok            "$exit_code"                                                          "台本で最後まで正常終了する"
@@ -739,7 +739,7 @@ REPO_NAME="force-testproject"
 REPO_FULL_NAME="tamashimon/force-testproject"
 ENVEOF
         printf "$1" | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
-              bash "$mock_home/sf-tools/bin/sf-init.sh" --only 6 ) > "$mb/out.log" 2>&1
+              bash "$mock_home/sf-tools/bin/sf-project.sh" --only 6 ) > "$mb/out.log" 2>&1
         exit_code=$?
     }
     local envf="$init_dir/admin/.sf-init-testproject.env"
@@ -822,8 +822,8 @@ test_resume_choice() {
     export SF_INIT_JWT_INTERVAL=0
 export SF_INIT_LOGIN_URL_PROD=login   # ログイン先を、質問せずに指定する
 
-    # 引数: 前回の完了 Phase / リポジトリ / sf-init.sh の引数 / 標準入力（printf %b） / 追加の .sf-init.env の行（省略可）
-    #   前回の状態（.sf-init.env）を作ってから、sf-init.sh を実行する
+    # 引数: 前回の完了 Phase / リポジトリ / sf-project.sh の引数 / 標準入力（printf %b） / 追加の .sf-init.env の行（省略可）
+    #   前回の状態（.sf-init.env）を作ってから、sf-project.sh を実行する
     _rc_run() {
         local done_phase="$1" repo="$2" args="$3" input="$4"
         init_base=$(_setup_init_dir "tamashimon" "testproject")
@@ -850,7 +850,7 @@ export SF_INIT_LOGIN_URL_PROD=login   # ログイン先を、質問せずに指�
         # shellcheck disable=SC2086
         printf '%b' "$input" \
             | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
-                  bash "$mock_home/sf-tools/bin/sf-init.sh" $args ) > "$out" 2>&1
+                  bash "$mock_home/sf-tools/bin/sf-project.sh" $args ) > "$out" 2>&1
         exit_code=$?
     }
 
@@ -940,7 +940,7 @@ export SF_INIT_LOGIN_URL_PROD=login   # ログイン先を、質問せずに指�
     _rc_run 10 "tamashimon/force-testproject" "--resume 10" 'Y\n'
     assert_exit_fail          "$exit_code"                                                  "完了済み・--resume 10: 拒否される"
     assert_file_contains      "$out" "完了済みのプロジェクトでは、--resume / --only は使えません"          "完了済み・--resume 10: 理由が表示される"
-    assert_file_contains      "$out" "sf-init.sh --reconnect"                                   "完了済み・--resume 10: --reconnect が案内される"
+    assert_file_contains      "$out" "sf-project.sh --reconnect"                                   "完了済み・--resume 10: --reconnect が案内される"
     assert_file_not_contains  "$MOCK_CALL_LOG" "gh secret set"                              "完了済み・--resume 10: 何も登録しない"
     rm -rf "$init_base"
     # 境界: 完了済み・--resume 2 も拒否される（N > 1 は、すべて）
@@ -1092,7 +1092,7 @@ N
     # 進捗ファイルがなく、.sf-init.env だけがある → 質問しない
     _rc_run 5 "tamashimon/force-testproject" "" 'Y\n'
     rm -f "$progf"
-    printf 'Y\n' | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" bash "$mock_home/sf-tools/bin/sf-init.sh" ) > "$out" 2>&1
+    printf 'Y\n' | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" bash "$mock_home/sf-tools/bin/sf-project.sh" ) > "$out" 2>&1
     assert_file_not_contains  "$out" "前回のセットアップは"                                   "進捗ファイルなし → 質問しない"
     rm -rf "$init_base"
 
@@ -1137,7 +1137,7 @@ test_required_checks_match_workflows() {
 # ==============================================================================
 # Phase 1（環境チェック）: Java 17 以上と、VS Code の Salesforce 拡張が、足りなければ止める
 #   管理者が、開発者と同じ環境をそろえてから始めるため（足りないまま進むと、開発者の困りごとを再現・指導できない）。
-#   Phase 1 のスクリプトを、admin という名前のフォルダで、直接動かす（sf-init.sh の対話を通さない）
+#   Phase 1 のスクリプトを、admin という名前のフォルダで、直接動かす（sf-project.sh の対話を通さない）
 # ==============================================================================
 test_phase1_java_vscode_check() {
     echo ""; echo -e "${CLR_HEAD}[TEST] Phase 1: Java 17 未満・Salesforce 拡張なしなら、止める（まとめて案内）${CLR_RST}"
@@ -1192,7 +1192,7 @@ test_phase1_java_vscode_check() {
 
 echo ""
 echo -e "${CLR_HEAD}========================================"
-echo "  sf-init.sh テスト（1/3）"
+echo "  sf-project.sh テスト（1/3）"
 echo -e "========================================${CLR_RST}"
 
 test_missing_tool_gh

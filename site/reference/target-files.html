@@ -33,8 +33,8 @@
 </table>
 <h2 id="folder">ファイルの置き場所</h2>
 <ul>
-  <li>フォルダ <code>sf-tools/release/&lt;ブランチ名&gt;/</code> と、2 つのファイルの雛形は、<code>sf-start.sh</code> がバックグラウンドで実行する <code>sf-install.sh</code> が、作業用のブランチで用意します（<code>main</code> ブランチでは作りません）。</li>
-  <li>どのフォルダを使うかは、<strong>今の Git のブランチではなく</strong>、<code>sf-tools/release/branch_name.txt</code>（<code>sf-install.sh</code> が書き込む、Git の管理外の手元のファイル）に書かれたブランチ名で決まります。<code>sf-check.sh</code>・<code>sf-release.sh</code> の両方が、このファイルを読みます。</li>
+  <li>フォルダ <code>sf-tools/release/&lt;ブランチ名&gt;/</code> と、2 つのファイルの雛形は、<code>sf-start.sh</code> がバックグラウンドで実行する <code>sf-refresh.sh</code> が、作業用のブランチで用意します（<code>main</code> ブランチでは作りません）。</li>
+  <li>どのフォルダを使うかは、<strong>今の Git のブランチではなく</strong>、<code>sf-tools/release/branch_name.txt</code>（<code>sf-refresh.sh</code> が書き込む、Git の管理外の手元のファイル）に書かれたブランチ名で決まります。<code>sf-check.sh</code>・<code>sf-release.sh</code> の両方が、このファイルを読みます。</li>
   <li><code>sf-release.sh</code> は、<code>branch_name.txt</code> と 2 つのファイルの、どれか 1 つでもないと中断します。<code>sf-check.sh</code> は、ないファイルの検証を飛ばします（<code>branch_name.txt</code> がないときは、警告を出して、何も検証せずに成功します）。</li>
 </ul>
 

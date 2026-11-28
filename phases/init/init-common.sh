@@ -1,8 +1,8 @@
 #!/bin/bash
 # ==============================================================================
-# init-common.sh - sf-init.sh 専用ヘルパー関数ライブラリ
+# init-common.sh - sf-project.sh 専用ヘルパー関数ライブラリ
 # ==============================================================================
-# sf-init.sh と、phases/init/ のスクリプト（Phase 1〜10・add_tier.sh・reconnect.sh・status.sh。verify.sh は読み込まない）が
+# sf-project.sh と、phases/init/ のスクリプト（Phase 1〜10・add_tier.sh・reconnect.sh・status.sh。verify.sh は読み込まない）が
 # source して使う、共通のヘルパー関数集。
 #
 # 【使い方】
@@ -45,7 +45,7 @@
 #   - register_jwt_secret_eca は、登録先のリポジトリとして、変数 REPO_FULL_NAME を使う
 #     （アプリ名 SF_TOOLS_<REPO_NAME の英数字以外を _> のために、REPO_NAME も使う）
 #   - 従来の接続アプリケーション用の register_jwt_secret（コンシューマー鍵・ユーザー名の手動の入力）は、廃止した
-#     （sf-init.sh --legacy-connected-app の廃止。外部クライアントアプリだけを使う）
+#     （sf-project.sh --legacy-connected-app の廃止。外部クライアントアプリだけを使う）
 # ==============================================================================
 
 # Salesforce 組織の接続情報の共通部品（ログイン先の選択・組織の種類の読み取り・本番は main のみ）
@@ -566,14 +566,14 @@ register_jwt_secret_eca() {
     run gh variable set "SF_INSTANCE_URL_${suffix}" --body "$instance_url" -R "$REPO_FULL_NAME" \
         || die "SF_INSTANCE_URL_${suffix} の登録に失敗しました。"
     log "SUCCESS" "  SF_CONSUMER_KEY_${suffix}（Secret）/ SF_USERNAME_${suffix}（Variable）/ SF_INSTANCE_URL_${suffix}（Variable）を登録しました。"
-    # 組織の情報（ID・名前・種類・確認日時）を保存する（sf-init.sh --status の表示用。読み取れていなければ、保存しない）
+    # 組織の情報（ID・名前・種類・確認日時）を保存する（sf-project.sh --status の表示用。読み取れていなければ、保存しない）
     org_save "$suffix"
 }
 
 # ------------------------------------------------------------------------------
 # initial_metadata_sync - セットアップの最後に、Salesforce のメタデータを、リポジトリと、管理者用のクローンに入れる
 # ------------------------------------------------------------------------------
-# 【使い方】 initial_metadata_sync REPO_FULL_NAME REPO_DIR        （Phase 10 のあと。sf-init.sh が呼ぶ）
+# 【使い方】 initial_metadata_sync REPO_FULL_NAME REPO_DIR        （Phase 10 のあと。sf-project.sh が呼ぶ）
 # 【理由】   初期コミットの force-app は、空のひな型。何もしないと、メタデータは、次の定期実行（平日 3 時間おき）まで入らない。
 #           セットアップが終わった瞬間に、クローンへ、同期済みのメタデータが、全部入っているようにする。
 #           クローン（Phase 3）は、初期コミットの push に必要なため、同期（Phase 10 の接続情報が必要）より、先になる。

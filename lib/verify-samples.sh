@@ -4,7 +4,7 @@
 # ==============================================================================
 # lib/verify-common.sh から source される（単独では、source しない）。verify-common.sh の VERIFY_APEX_HELLO_TEST・
 # verify_hello_cls・verify_hello_test_cls・verify_apex_meta を使う。
-# sf-init.sh --verify --components が、develop の組織に、リリースして、削除する（verify-common.sh の verify_set_* から呼ばれる）。
+# sf-project.sh --verify --components が、develop の組織に、リリースして、削除する（verify-common.sh の verify_set_* から呼ばれる）。
 #
 # 【提供する関数】
 #   verify_sample_labels_file_is_ours          ... labels のファイル（標準入力）が、サンプル自身のものか

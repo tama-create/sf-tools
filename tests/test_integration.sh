@@ -7,8 +7,8 @@
 # サンドボックスは 1 つを使い回す（作成に時間がかかるため）。シナリオは、上から順に、前のシナリオの状態を引き継ぐ。
 #
 # 【シナリオ】
-#   A13a  新しい開発者の最初の 1 時間（sf-job → sf-start → sf-install → sf-hook → sf-dryrun → sf-push）
-#         ※ sf-init の生成物ではなく、テンプレートから作った最小のリポジトリ。sf-init との通しは L2（C1）
+#   A13a  新しい開発者の最初の 1 時間（sf-job → sf-start → sf-refresh → sf-hook → sf-dryrun → sf-push）
+#         ※ sf-project の生成物ではなく、テンプレートから作った最小のリポジトリ。sf-project との通しは L2（C1）
 #   X2-3  sf-push: コミットは成功・プッシュは失敗 → 再実行で、コミットが二重にならず、未プッシュのコミットが届く
 #   X6-2  確認の入力（n / q / EOF / 空 Enter）で、破壊的な操作（gh・sf の書き込み）が、起きないこと
 #   X6-1  管理者向けコマンドの、GitHub Actions 上での挙動（コマンドごとの表。実装の仕様どおり）
@@ -21,11 +21,11 @@ trap 'it_teardown' EXIT
 
 CL=""   # 作業中のクローン（A13a が作る）
 
-# バックグラウンドの sf-install の完了を待つ。引数: クローン 待つ秒数（既定 120）
+# バックグラウンドの sf-refresh の完了を待つ。引数: クローン 待つ秒数（既定 120）
 _it_wait_install() {
     local cl="$1" max="${2:-300}" i=0
     while (( i < max )); do
-        grep -q "npm install の確認が完了しました" "$cl/sf-tools/logs/sf-install.log" 2>/dev/null && return 0
+        grep -q "npm install の確認が完了しました" "$cl/sf-tools/logs/sf-refresh.log" 2>/dev/null && return 0
         sleep 1; i=$((i + 1))
     done
     return 1
@@ -51,16 +51,16 @@ test_A13a() {
     assert_file_contains "$CL/.sf/config.json" '"itorg"' "A13a: sf-start が .sf/config.json に、エイリアスを書く"
     assert_equals "$(cat "$IT_STATE/sf.alias")" "itorg" "A13a: sf のログイン状態（エイリアス）が残る"
 
-    # 2. sf-start がバックグラウンドで起動した sf-install の完了を待つ
-    if _it_wait_install "$CL"; then pass "A13a: バックグラウンドの sf-install が、完了する"; else fail "A13a: バックグラウンドの sf-install が、完了する" "待ちきれなかった"; return 1; fi
-    assert_file_exists "$CL/.git/hooks/pre-push" "A13a: pre-push フックが入る（sf-install → sf-hook）"
+    # 2. sf-start がバックグラウンドで起動した sf-refresh の完了を待つ
+    if _it_wait_install "$CL"; then pass "A13a: バックグラウンドの sf-refresh が、完了する"; else fail "A13a: バックグラウンドの sf-refresh が、完了する" "待ちきれなかった"; return 1; fi
+    assert_file_exists "$CL/.git/hooks/pre-push" "A13a: pre-push フックが入る（sf-refresh → sf-hook）"
     assert_file_exists "$CL/sf-tools/release/JOB-1/deploy-target.txt" "A13a: release/JOB-1/ が準備される"
     assert_equals "$(cat "$CL/sf-tools/release/branch_name.txt")" "JOB-1" "A13a: branch_name.txt がジョブ名になる"
 
-    # 3. sf-install の再実行は、冪等（コミットが増えない・フックが増えない）
+    # 3. sf-refresh の再実行は、冪等（コミットが増えない・フックが増えない）
     snap=$(it_snap "$CL")
-    it_run "$CL" bash "$IT_HOME/sf-tools/bin/sf-install.sh"
-    assert_exit_ok "$IT_RC" "A13a: sf-install の再実行が成功する"
+    it_run "$CL" bash "$IT_HOME/sf-tools/bin/sf-refresh.sh"
+    assert_exit_ok "$IT_RC" "A13a: sf-refresh の再実行が成功する"
     assert_equals "$(it_snap_get "$(it_snap "$CL")" head)" "$(it_snap_get "$snap" head)" "A13a: 再実行で HEAD は動かない"
     assert_equals "$(it_snap_get "$(it_snap "$CL")" hooks)" "$(it_snap_get "$snap" hooks)" "A13a: 再実行でフックは増えない"
 
@@ -133,7 +133,7 @@ test_X6_2() {
     # 入力の種類: n / q / EOF（入力なし）/ 空 Enter。IT_X62_QUICK=1 のときは n と EOF だけ（Windows は、プロセスの起動が遅く、時間の予算のため）
     local inputs="n q eof enter"
     [[ "${IT_X62_QUICK:-}" == "1" ]] && inputs="n eof"
-    for spec in "sf-metasync.sh" "sf-update-secret.sh" "sf-sync-wf.sh" "sf-release.sh --release" "sf-typecheck.sh" "sf-deploy.sh"; do
+    for spec in "sf-metasync.sh" "sf-update-secret.sh" "sf-update-workflows.sh" "sf-release.sh --release" "sf-test-types.sh" "sf-deploy.sh"; do
         for label in $inputs; do
             case "$label" in n) inp='n\n' ;; q) inp='q\n' ;; eof) inp='' ;; *) inp='\n' ;; esac
             snap=$(it_snap "$CL"); remote_before=$(it_remote_snap); it_calls_clear
@@ -152,8 +152,8 @@ test_X6_2() {
 # X6-1: 管理者向けコマンドの、GitHub Actions 上（GITHUB_ACTIONS=true）での挙動
 # ------------------------------------------------------------------------------
 # 実装の仕様どおりの表（コマンドごとに違う）。確認（続行しますか）を、省くか・省かないか、拒否するか
-#   sf-typecheck  : 確認の後に「GitHub Actions 上では、実行できません」で拒否する（-y で確認を省いても、拒否される）
-#   sf-sync-wf    : 確認を省かない（ワークフローを書き換えるコマンドのため）
+#   sf-test-types  : 確認の後に「GitHub Actions 上では、実行できません」で拒否する（-y で確認を省いても、拒否される）
+#   sf-update-workflows    : 確認を省かない（ワークフローを書き換えるコマンドのため）
 #   sf-deploy     : --force の確認は、省かない（予約名の組織の拒否だけが、Actions 上では、外れる）
 #   sf-metasync / sf-update-secret / sf-release --release : 確認を省いて、先へ進む（Actions で動かす前提のコマンド）
 test_X6_1() {
@@ -173,8 +173,8 @@ test_X6_1() {
         fi
         [[ -z "$want_text" ]] || { it_out_has "$want_text" && pass "X6-1: ${spec} の出力に「${want_text}」" || fail "X6-1: ${spec} の出力に「${want_text}」"; }
     done << 'ROWS'
-sf-typecheck.sh -y --org itorg|0|GitHub Actions 上では、実行できません
-sf-sync-wf.sh|1|
+sf-test-types.sh -y --org itorg|0|GitHub Actions 上では、実行できません
+sf-update-workflows.sh|1|
 sf-deploy.sh|1|
 sf-metasync.sh|0|
 sf-update-secret.sh|0|
@@ -182,9 +182,9 @@ sf-release.sh --release|0|デプロイ/検証が完了しました
 ROWS
     # Actions 上で拒否されるコマンドは、外部へ何も書かない
     it_calls_clear
-    it_run "$CL" -i '' env GITHUB_ACTIONS=true bash "$IT_HOME/sf-tools/bin/sf-typecheck.sh" -y --org itorg
-    assert_exit_fail "$IT_RC" "X6-1: sf-typecheck は、Actions 上では、失敗で終わる"
-    assert_equals "$(it_mutating_calls | wc -l | tr -d ' ')" "0" "X6-1: sf-typecheck は、Actions 上では、外部へ書き込まない"
+    it_run "$CL" -i '' env GITHUB_ACTIONS=true bash "$IT_HOME/sf-tools/bin/sf-test-types.sh" -y --org itorg
+    assert_exit_fail "$IT_RC" "X6-1: sf-test-types は、Actions 上では、失敗で終わる"
+    assert_equals "$(it_mutating_calls | wc -l | tr -d ' ')" "0" "X6-1: sf-test-types は、Actions 上では、外部へ書き込まない"
     IT_TIMEOUT=300
 }
 

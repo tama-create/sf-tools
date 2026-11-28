@@ -6,7 +6,7 @@
 # リポジトリ・クローンがすでにあるときは、作成・クローンをせずに使う（再実行できる）。
 #
 # 【使い方】
-#   sf-init.sh が、管理者用の作業フォルダ（admin）をカレントにして、bash で呼び出す。
+#   sf-project.sh が、管理者用の作業フォルダ（admin）をカレントにして、bash で呼び出す。
 #
 # 【処理の流れ】
 #   1. 状態ファイルの REPO_FULL_NAME / REPO_DIR / REPO_NAME のいずれかが空なら die
@@ -24,25 +24,25 @@
 #
 # 【前提条件】
 #   - Phase 2 が書き出した状態ファイル（SF_INIT_ENV_FILE）
-#   - 環境変数 SF_TOOLS_DIR（sf-tools のルート。sf-init.sh が export する）
+#   - 環境変数 SF_TOOLS_DIR（sf-tools のルート。sf-project.sh が export する）
 #
 # 【補足】
 #   - 可視性は、常に Private
 #   - sf-tools/templates/ が、雛形の唯一の正本（force-template リポジトリは廃止済み）
 #   - templates/ には、force-* にそのまま置くもの（同じ名前・同じ場所）だけを入れる。手順 4 は、除外なしで丸ごとコピーするため。
-#     sf-install.sh が名前や場所を変えて使うコピー元（release/<ブランチ名>/ の雛形・.gitmessage の雛形）は、
-#     sf-tools/config/install/ に置く（tests/test_sf-install.sh の test_templates_only_force_files が確かめる）
+#     sf-refresh.sh が名前や場所を変えて使うコピー元（release/<ブランチ名>/ の雛形・.gitmessage の雛形）は、
+#     sf-tools/config/install/ に置く（tests/test_sf-refresh.sh の test_templates_only_force_files が確かめる）
 #   - core.longpaths=true は、この Phase でクローンしたときだけ付け、クローンの設定に残る（Windows のパスの長さの上限対策。
 #     ほかの OS では無視される）。既存のクローンには、設定しない
 #   - 終了コード: 0 = OK / 1 = die
 # ==============================================================================
 
-# SF_TOOLS_DIR は sf-init.sh（司令塔）から export される
+# SF_TOOLS_DIR は sf-project.sh（司令塔）から export される
 PHASE_DIR="${BASH_SOURCE[0]%/*}"
 [[ "$PHASE_DIR/" == /* && "$PHASE_DIR/" != *//* && "$PHASE_DIR/" != */./* && "$PHASE_DIR/" != */../* ]] || PHASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SF_TOOLS_DIR="${SF_TOOLS_DIR:-$(dirname "$(dirname "$PHASE_DIR")")}"
 
-readonly SCRIPT_NAME="sf-init"
+readonly SCRIPT_NAME="sf-project"
 mkdir -p "$HOME/sf-tools/logs" 2>/dev/null || true  # run 不使用: common.sh の読み込み前（run が未定義）
 readonly LOG_FILE="$HOME/sf-tools/logs/${SCRIPT_NAME}.log"
 readonly LOG_MODE="APPEND"  # 司令塔が NEW で初期化済みのため追記
@@ -76,7 +76,7 @@ else
 考えられる原因:
   - GitHub ユーザー名・組織名が誤っている（入力値: ${GITHUB_OWNER}）
   - GitHub CLI の認証トークンの権限が不足している → gh auth status で確認
-詳細は ~/sf-tools/logs/sf-init.log を確認してください。"
+詳細は ~/sf-tools/logs/sf-project.log を確認してください。"
     fi
     log "SUCCESS" "リポジトリを作成しました: ${REPO_FULL_NAME}"
 fi

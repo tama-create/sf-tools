@@ -56,17 +56,17 @@ test_guards() {
 }
 
 test_entry() {
-    echo ""; echo -e "${CLR_HEAD}[TEST] 入口: sf-init.sh --verify${CLR_RST}"
+    echo ""; echo -e "${CLR_HEAD}[TEST] 入口: sf-project.sh --verify${CLR_RST}"
     _env
-    local init="$SF_TOOLS_DIR/bin/sf-init.sh"
-    # sf-init.sh は、起動時に sf の終了コードを確認する（check_sf_cli）。実機の sf を使わないよう、成功するモックを置く
+    local init="$SF_TOOLS_DIR/bin/sf-project.sh"
+    # sf-project.sh は、起動時に sf の終了コードを確認する（check_sf_cli）。実機の sf を使わないよう、成功するモックを置く
     create_mock_sf "$MB"
     # --verify --plan: verify.sh に、オプションが渡る（診断と、実行内容の表示だけ。何も変更しない）
     ( cd "$FDIR" && HOME="$HM" PATH="$MB:$PATH" bash "$init" --verify --plan ) > "$OUT" 2>&1 < /dev/null
     assert_exit_ok $? "--verify --plan: 正常終了する"
     assert_file_contains "$OUT" "PR を 6 本" "--verify --plan: 実行内容が表示される"
     assert_file_not_contains "$MOCK_CALL_LOG" "pr create" "--verify --plan: PR を作らない"
-    # --verify なしの --plan / --cleanup / --no-metasync は、拒否する（sf-init の通常の実行に、混ぜない）
+    # --verify なしの --plan / --cleanup / --no-metasync は、拒否する（sf-project の通常の実行に、混ぜない）
     local opt
     for opt in --plan --cleanup --no-metasync; do
         ( cd "$FDIR" && HOME="$HM" PATH="$MB:$PATH" bash "$init" "$opt" ) > "$OUT" 2>&1 < /dev/null
@@ -186,7 +186,7 @@ test_failure() {
     _run "\n"   # Enter だけ
     assert_exit_fail "$RC" "wf-release が失敗すれば、中断する"
     assert_file_contains "$OUT" "残っている可能性があります: develop" "リリースをマージした段階が、残っている可能性として表示される"
-    assert_file_contains "$OUT" "sf-init.sh --verify --cleanup" "削除のみのやり直しが、案内される"
+    assert_file_contains "$OUT" "sf-project.sh --verify --cleanup" "削除のみのやり直しが、案内される"
 }
 
 test_identity_mismatch() {

@@ -6,7 +6,7 @@
 # 最後に sf-hook.sh で pre-commit / pre-push フックを入れなおす。
 #
 # 【使い方】
-#   sf-init.sh が、管理者用の作業フォルダ（admin）をカレントにして、bash で呼び出す。
+#   sf-project.sh が、管理者用の作業フォルダ（admin）をカレントにして、bash で呼び出す。
 #
 # 【処理の流れ】
 #   1. 状態ファイルの REPO_DIR / REPO_FULL_NAME / PAT_TOKEN_VALUE のいずれかが空なら die
@@ -17,13 +17,13 @@
 #        origin にあれば、何もしない。なければ、現在の main から git checkout -B <ブランチ> → push --no-verify -u →
 #        git checkout main（いずれも失敗は die）
 #   5. 状態ファイルから PAT_TOKEN_VALUE の行を削除する（sed_inplace。失敗したとき・削除のあとに行が残っているときは die。
-#      Token が平文のまま残るため。sf-init.sh の後処理でも、Token の値の行を消す）
+#      Token が平文のまま残るため。sf-project.sh の後処理でも、Token の値の行を消す）
 #   6. bash sf-hook.sh を実行し、pre-commit / pre-push フックを上書きで入れなおす（失敗は die）
 #
 # 【前提条件】
 #   - Phase 3〜5 で用意したクローン（REPO_DIR）と branches.txt
 #   - Phase 6 が状態ファイルに書き出した PAT_TOKEN_VALUE（repo + workflow スコープ）
-#   - 環境変数 SF_TOOLS_DIR（sf-tools のルート。sf-init.sh が export する）
+#   - 環境変数 SF_TOOLS_DIR（sf-tools のルート。sf-project.sh が export する）
 #
 # 【補足】
 #   - PAT を使う理由: gh の OAuth 認証は workflow スコープを持たないため、ワークフロー（.github/workflows/）を含む
@@ -37,12 +37,12 @@
 #   - 終了コード: 0 = OK / 1 = die
 # ==============================================================================
 
-# SF_TOOLS_DIR は sf-init.sh（司令塔）から export される
+# SF_TOOLS_DIR は sf-project.sh（司令塔）から export される
 PHASE_DIR="${BASH_SOURCE[0]%/*}"
 [[ "$PHASE_DIR/" == /* && "$PHASE_DIR/" != *//* && "$PHASE_DIR/" != */./* && "$PHASE_DIR/" != */../* ]] || PHASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SF_TOOLS_DIR="${SF_TOOLS_DIR:-$(dirname "$(dirname "$PHASE_DIR")")}"
 
-readonly SCRIPT_NAME="sf-init"
+readonly SCRIPT_NAME="sf-project"
 mkdir -p "$HOME/sf-tools/logs" 2>/dev/null || true  # run 不使用: common.sh の読み込み前（run が未定義）
 readonly LOG_FILE="$HOME/sf-tools/logs/${SCRIPT_NAME}.log"
 readonly LOG_MODE="APPEND"  # 司令塔が NEW で初期化済みのため追記
@@ -143,7 +143,7 @@ fi
 log "SUCCESS" "初回コミット＆プッシュ完了。"
 
 # pre-commit / pre-push フックを、上書きで入れなおす
-# （フックは Phase 4 の sf-install.sh でも入れている。この Phase の push は --no-verify のため、フックを実行しない）
+# （フックは Phase 4 の sf-refresh.sh でも入れている。この Phase の push は --no-verify のため、フックを実行しない）
 log "INFO" "pre-push フックをインストール中..."
 run bash "${SF_TOOLS_DIR}/bin/sf-hook.sh" \
     || die "sf-hook.sh の実行に失敗しました。"

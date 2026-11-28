@@ -292,7 +292,7 @@ test_ai_mode() {
     assert_file_not_contains "$MOCK_CALL_LOG" "project deploy" "AI・答えなし → 反映しない"
 
     : > "$MOCK_CALL_LOG"
-    out=$( ( cd "$td" && HOME="$mh" PATH="$mb:$PATH" SF_TOOLS_AI=1 SF_TOOLS_ANSWERS="next.pr=y" bash "$SF_TOOLS_DIR/bin/sf-deploy.sh" --no-open ) 2>&1 ); ec=$?
+    out=$( ( cd "$td" && HOME="$mh" PATH="$mb:$PATH" SF_TOOLS_AI=1 SF_TOOLS_ANSWERS="pr.create=y" bash "$SF_TOOLS_DIR/bin/sf-deploy.sh" --no-open ) 2>&1 ); ec=$?
     assert_equals "$ec" "20" "AI・ほかの名前の答えだけ → 20（流用しない）"
     assert_file_not_contains "$MOCK_CALL_LOG" "project deploy" "AI・ほかの名前の答えだけ → 反映しない"
 

@@ -14,7 +14,7 @@
 # 【ジョブ】
 #   1. 対象ファイル確認（check-branch）: デプロイ対象があるかを判定し、出力 skip（true / false）を返す。常に実行する
 #   2. デプロイ検証（validate）: check-branch のあと（needs）。skip が true のときは、スキップされる
-#   ブランチ保護との関係: ジョブ名「対象ファイル確認」「デプロイ検証」は、sf-init の Phase 9（phases/init/09_repo_rules.sh）が、
+#   ブランチ保護との関係: ジョブ名「対象ファイル確認」「デプロイ検証」は、sf-project の Phase 9（phases/init/09_repo_rules.sh）が、
 #   Ruleset protect-main / protect-staging（対象: main / staging）に登録する必須チェック 3 つのうちの 2 つ（もう 1 つは
 #   wf-sequence.yml の「順序チェック」。名前の正本は lib/project.sh の required_status_check_names）。ジョブ名（name:）を
 #   変えると、必須チェックが永久に満たされず、PR をマージできなくなる。
@@ -65,8 +65,8 @@
 #    10. （常に）exit_code で終了する（空なら 1）。0 以外なら、ジョブ「デプロイ検証」が失敗する
 #
 # 【必要な Secrets / Variables】
-#   Secrets（このリポジトリに設定する。SF_PRIVATE_KEY は sf-init の Phase 10・sf-update-secret.sh が、SF_CONSUMER_KEY_* は
-#   それに加えて sf-init.sh --add-tier（_STG・_DEV だけ）/ --reconnect も登録する）:
+#   Secrets（このリポジトリに設定する。SF_PRIVATE_KEY は sf-project の Phase 10・sf-update-secret.sh が、SF_CONSUMER_KEY_* は
+#   それに加えて sf-project.sh --add-tier（_STG・_DEV だけ）/ --reconnect も登録する）:
 #     SF_PRIVATE_KEY       : JWT の秘密鍵（server.key の PEM を、1 行の Base64 にした値。全組織共通）
 #     SF_CONSUMER_KEY_PROD : main の組織のアプリ（外部クライアントアプリケーション）のコンシューマー鍵
 #     SF_CONSUMER_KEY_STG  : staging の組織のアプリのコンシューマー鍵

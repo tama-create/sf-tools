@@ -105,13 +105,13 @@ test_missing() {
     assert_file_contains "$OUT" "PAT_TOKEN がありません"                             "Secret の不足が表示される"
     assert_file_contains "$OUT" "gh secret set PAT_TOKEN"                           "PAT_TOKEN の直し方（gh secret set）が表示される"
     assert_file_contains "$OUT" "SF_CONSUMER_KEY_STG がありません"                    "段階ごとの Secret の不足が表示される"
-    assert_file_contains "$OUT" "sf-init.sh --reconnect staging"                    "段階の接続の直し方（--reconnect）が表示される"
+    assert_file_contains "$OUT" "sf-project.sh --reconnect staging"                    "段階の接続の直し方（--reconnect）が表示される"
     assert_file_contains "$OUT" "SLACK_CHANNEL_ID がありません"                       "Variable の不足が表示される"
     assert_file_contains "$OUT" "SF_USERNAME_DEV がありません"                        "段階ごとの Variable の不足が表示される"
     assert_file_contains "$OUT" "ブランチ develop がありません"                       "ブランチの不足が表示される"
-    assert_file_contains "$OUT" "sf-init.sh --add-tier develop"                     "ブランチの直し方（--add-tier）が表示される"
+    assert_file_contains "$OUT" "sf-project.sh --add-tier develop"                     "ブランチの直し方（--add-tier）が表示される"
     assert_file_contains "$OUT" "ワークフロー wf-release.yml がありません"            "ワークフローの不足が表示される"
-    assert_file_contains "$OUT" "sf-sync-wf.sh"                                     "ワークフローの直し方（sf-sync-wf.sh）が表示される"
+    assert_file_contains "$OUT" "sf-update-workflows.sh"                                     "ワークフローの直し方（sf-update-workflows.sh）が表示される"
     assert_file_contains "$OUT" "不足が 6 件あります"                                 "不足の件数が表示される"
     _dc
 }
@@ -219,7 +219,7 @@ test_rulesets() {
     assert_file_contains "$OUT" "Ruleset protect-staging: 必須チェックの名前が、ワークフローのジョブ名と合っています"  "protect-staging が ✓"
     _dc
 
-    # 以前の sf-init が登録していた形（ワークフロー名つき）→ ✗ 2 件（main・staging）。余分・足りない・直し方が出る
+    # 以前の sf-project が登録していた形（ワークフロー名つき）→ ✗ 2 件（main・staging）。余分・足りない・直し方が出る
     export MOCK_GH_RULESET_CHECKS=$'validate / 対象ファイル確認\nvalidate / デプロイ検証\nsequence / 順序チェック'
     _d main staging develop
     assert_equals "$NG" "2"                                                       "「validate / …」の形 → 不足は 2 件（main・staging）"
@@ -270,7 +270,7 @@ test_leftover_propagate() {
     _d main staging develop
     assert_equals "$NG" "0"                                                        "不足には数えない"
     assert_file_contains "$OUT" "廃止したワークフロー wf-propagate.yml が残っています"   "注意が表示される"
-    assert_file_contains "$OUT" "sf-sync-wf.sh --remove wf-propagate.yml"            "消し方が表示される"
+    assert_file_contains "$OUT" "sf-update-workflows.sh --remove wf-propagate.yml"            "消し方が表示される"
     _dc
 }
 

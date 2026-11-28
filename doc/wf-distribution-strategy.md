@@ -1,6 +1,6 @@
 # WF 配布・更新戦略
 
-> **ステータス: 実装済み（`bin/sf-sync-wf.sh`。2026-10-06）**
+> **ステータス: 実装済み（`bin/sf-update-workflows.sh`。2026-10-06）**
 
 ---
 
@@ -8,12 +8,12 @@
 
 `force-XXXX` 側に設置する WF（`wf-validate.yml` / `wf-release.yml` 等）は、**セルフコンテインド WF**（reusable workflow を呼ばず、
 起動の条件・ジョブ・ステップを、各ファイルに直接書く形式。2026-03-28 の c632154 で、reusable の形式から移行）であり、
-`sf-init` の Phase 3（`phases/init/03_repo_create.sh`）が、`sf-tools/templates/` からコピーして配布する（`force-template` リポジトリは廃止済み）。
+`sf-project` の Phase 3（`phases/init/03_repo_create.sh`）が、`sf-tools/templates/` からコピーして配布する（`force-template` リポジトリは廃止済み）。
 
 ただし、リリース・検証・メタ同期の処理の中身（`sf-release.sh`・`sf-metasync.sh`）は、WF に書かず、sf-tools のスクリプトを実行時に取得して使う（2.1）。
 
-`sf-init` は、新しいリポジトリを作るときに、雛形をコピーするだけである。実運用開始後に WF を変更・追加・削除する必要が生じた場合
-（不具合の修正・安全対策など）、作成済みの全プロジェクトへ反映する手段として、専用コマンド `sf-sync-wf.sh` を用意した。
+`sf-project` は、新しいリポジトリを作るときに、雛形をコピーするだけである。実運用開始後に WF を変更・追加・削除する必要が生じた場合
+（不具合の修正・安全対策など）、作成済みの全プロジェクトへ反映する手段として、専用コマンド `sf-update-workflows.sh` を用意した。
 
 ---
 
@@ -29,15 +29,15 @@ sf-tools（テンプレートの正本）
 
 force-XXXX（各プロジェクト）
 └── .github/workflows/
-    ├── wf-validate.yml  ← sf-init（Phase 3）時に templates/ からコピー。以後は sf-sync-wf.sh で更新
+    ├── wf-validate.yml  ← sf-project（Phase 3）時に templates/ からコピー。以後は sf-update-workflows.sh で更新
     ├── wf-release.yml   ← 同上
     └── ...
 ```
 
 - WF の正本は `sf-tools/templates/.github/workflows/` に一元管理する
-- `sf-init` は `sf-tools/templates/` からそのままコピーして配布する（WF にはプレースホルダーの置換はない。置換するのは `sfdx-project.json` の `__REPO_NAME__` だけ）
+- `sf-project` は `sf-tools/templates/` からそのままコピーして配布する（WF にはプレースホルダーの置換はない。置換するのは `sfdx-project.json` の `__REPO_NAME__` だけ）
 - WF のうち、sf-tools のスクリプトを使うもの（2.1）は、実行のたびに sf-tools を clone するため、スクリプトの修正は、sf-tools の `main` へのマージ（rr）で、全プロジェクトにすぐ届く
-- そのため、問題になるのは **WF 自体の変更**（secrets の追加削除、job 構造変更、不具合の修正など）のみ。これは配布済みの `force-*` に自動では届かない（4 章の `sf-sync-wf.sh` で反映する）
+- そのため、問題になるのは **WF 自体の変更**（secrets の追加削除、job 構造変更、不具合の修正など）のみ。これは配布済みの `force-*` に自動では届かない（4 章の `sf-update-workflows.sh` で反映する）
 
 ### 2.1 各 WF と sf-tools の関係
 
@@ -57,31 +57,31 @@ force-XXXX（各プロジェクト）
 
 ## 3. 方針（決定済み）
 
-- `sf-install.sh` への WF 自動同期は **実装しない**
-  - sf-start → sf-install のバックグラウンド自動実行チェーンに入れると、
+- `sf-refresh.sh` への WF 自動同期は **実装しない**
+  - sf-start → sf-refresh のバックグラウンド自動実行チェーンに入れると、
     ユーザーの意思に関係なく `.github/workflows/` が書き換わるため不適切
-- 専用 CLI `sf-sync-wf.sh` を、管理者が、必要なときに、手動で実行する
+- 専用 CLI `sf-update-workflows.sh` を、管理者が、必要なときに、手動で実行する
 - ワークフローの更新は、通常の変更と同じく、ブランチ → PR → レビュー → マージの道を通す
   - 作業用ブランチは、`sf-job.sh` で、ジョブ名 `system-日付`（例: `system-20261006`）として作る
   - 固定の `system` ブランチは、**あらかじめ作らない**（`sf-job.sh` は同名のブランチを拒否する。長く残るブランチは `main` から遅れる）
 
 ---
 
-## 4. `sf-sync-wf.sh` の仕様
+## 4. `sf-update-workflows.sh` の仕様
 
 ### 4.1 責務
 
 | 対応する | 対応しない |
 |---|---|
 | `sf-tools/templates/` との差分表示 | 自動コミット・プッシュ |
-| ユーザー確認後にコピー | sf-install からの自動実行 |
+| ユーザー確認後にコピー | sf-refresh からの自動実行 |
 | `--remove` フラグ付き削除（雛形から廃止されたファイルだけ） | バージョン管理 |
 | `--check`（差分の有無だけを調べる） | 雛形にないファイルの自動削除 |
 
 ### 4.2 処理フロー
 
 ```
-実行: sf-sync-wf.sh [--check] [--remove <filename>]
+実行: sf-update-workflows.sh [--check] [--remove <filename>]
 
 通常実行:
   1. force-* のフォルダか、雛形のフォルダがあるか、環境ブランチ（branches.txt のブランチ。HEAD がブランチでない場合も）でないかを確認
@@ -108,7 +108,7 @@ force-XXXX（各プロジェクト）
   4. Y → 削除（コミットはしない）
 ```
 
-> 詳細（終了コード・ログ）は、`bin/sf-sync-wf.sh` の冒頭コメント（`--help`）と、`doc/dev-reference.md` の 4.15。
+> 詳細（終了コード・ログ）は、`bin/sf-update-workflows.sh` の冒頭コメント（`--help`）と、`doc/dev-reference.md` の 4.15。
 
 ### 4.3 実装上の注意
 
@@ -119,20 +119,20 @@ force-XXXX（各プロジェクト）
 - 自動コミット・プッシュは行わない（ユーザーに委ねる）
 - 削除は `--remove` フラグ明示時のみ（誤操作防止）。雛形にあるファイルは削除できない
 - ワークフローをプッシュするには、`workflow` スコープのある権限が必要（開発者が、作業用ブランチを push するとき）
-- 廃止した `wf-propagate.yml` は、`sf-sync-wf.sh --remove wf-propagate.yml` で消す（`sf-init.sh --status` が「！」で知らせる。`--remove-tier` は、残っていると止まる）
-- `sf-sync-wf.sh` が書き換えるのは `.github/workflows/` のファイルだけで、Ruleset は変更しない。雛形で必須チェックのジョブ名（2.1）を変えたときは、既存の `force-*` の Ruleset も直す必要がある（食い違いは `sf-init.sh --status` が検出する。詳細は `doc/dev-reference.md` の 9.5）
+- 廃止した `wf-propagate.yml` は、`sf-update-workflows.sh --remove wf-propagate.yml` で消す（`sf-project.sh --status` が「！」で知らせる。`--remove-tier` は、残っていると止まる）
+- `sf-update-workflows.sh` が書き換えるのは `.github/workflows/` のファイルだけで、Ruleset は変更しない。雛形で必須チェックのジョブ名（2.1）を変えたときは、既存の `force-*` の Ruleset も直す必要がある（食い違いは `sf-project.sh --status` が検出する。詳細は `doc/dev-reference.md` の 9.5）
 
 ### 4.4 更新の手順（推奨）
 
 1. `sf-job.sh` で、ジョブ名 `system-日付` の作業用ブランチを作る
-2. そのフォルダで `sf-sync-wf.sh` を実行し、差分を確認して Y
+2. そのフォルダで `sf-update-workflows.sh` を実行し、差分を確認して Y
 3. `git diff .github/workflows/` で内容を確認する
 4. `sf-push.sh` でコミット・プッシュする
-5. PR を出してマージする。`develop` / `staging` がある構成では、通常の変更と同じ順序（`develop` → `staging` → `main`）で PR を出す（次の PR 先は `sf-next.sh` が案内する）
+5. PR を出してマージする。`develop` / `staging` がある構成では、通常の変更と同じ順序（`develop` → `staging` → `main`）で PR を出す（次の PR 先は `sf-pr.sh` が案内する）
 
 ---
 
 ## 5. 対応状況
 
-- 2026-10-06: `bin/sf-sync-wf.sh` を実装（`tests/test_sf-sync-wf.sh`）
+- 2026-10-06: `bin/sf-update-workflows.sh` を実装（`tests/test_sf-update-workflows.sh`）
 - 雛形（`sf-tools/templates/.github/workflows/`）の内容を正しく保つことが、これまでどおり、前提である

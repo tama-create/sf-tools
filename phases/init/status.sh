@@ -1,13 +1,13 @@
 #!/bin/bash
 # ==============================================================================
-# status.sh - セットアップの診断と、段階ごとの Salesforce 接続先の一覧（sf-init.sh --status）
+# status.sh - セットアップの診断と、段階ごとの Salesforce 接続先の一覧（sf-project.sh --status）
 # ==============================================================================
 # force-* ディレクトリの中で、セットアップの診断と、段階ごとの Salesforce 組織の接続先を表示する。
 # 何も変更しない（読み取りのみ）。
 #
 # 【使い方】
-#   force-* ディレクトリの中で sf-init.sh --status を実行する（sf-init.sh が、このスクリプトを呼び出す）。
-#   sf-init.sh は、完了済みのプロジェクトの選択画面（[1] いまの Salesforce の接続を見る）からも、呼び出す。
+#   force-* ディレクトリの中で sf-project.sh --status を実行する（sf-project.sh が、このスクリプトを呼び出す）。
+#   sf-project.sh は、完了済みのプロジェクトの選択画面（[1] いまの Salesforce の接続を見る）からも、呼び出す。
 #
 # 【処理の流れ】
 #   1. カレントのフォルダ名が force- で始まらなければ die。origin の URL からリポジトリ名を求める（parse_github_remote。
@@ -34,7 +34,7 @@
 #        - origin/main に branches.txt がない → WARNING（workflow は、今までの動き）
 #
 # 【補足】
-#   - 組織の種類・ID・名前・確認日時は、sf-init.sh（または --reconnect / --add-tier）が、ログイン後に、組織から読み取って
+#   - 組織の種類・ID・名前・確認日時は、sf-project.sh（または --reconnect / --add-tier）が、ログイン後に、組織から読み取って
 #     保存したもの。保存されていない（以前のバージョンで作ったプロジェクト）場合は、組織は「未確認」、種類は
 #     「種類を判定できません」と表示する。ここに表示するのは「GitHub に保存された値」であり、いま実際にログインして確認した値ではない
 #   - 管理者向けの警告・確認は、出さない（読み取りのみのため）
@@ -46,7 +46,7 @@ PHASE_DIR="${BASH_SOURCE[0]%/*}"
 [[ "$PHASE_DIR/" == /* && "$PHASE_DIR/" != *//* && "$PHASE_DIR/" != */./* && "$PHASE_DIR/" != */../* ]] || PHASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SF_TOOLS_DIR="${SF_TOOLS_DIR:-$(dirname "$(dirname "$PHASE_DIR")")}"
 
-readonly SCRIPT_NAME="sf-init"
+readonly SCRIPT_NAME="sf-project"
 mkdir -p "$HOME/sf-tools/logs" 2>/dev/null || true  # run 不使用: common.sh の読み込み前（run が未定義）
 readonly LOG_FILE="$HOME/sf-tools/logs/${SCRIPT_NAME}.log"
 readonly LOG_MODE="NEW"
@@ -141,7 +141,7 @@ for tier in main staging develop; do
     fi
 done
 echo "" >&2
-[[ $found -eq 1 ]] || log "WARNING" "接続情報が、見つかりませんでした（sf-init.sh が、完了していない可能性があります）。"
+[[ $found -eq 1 ]] || log "WARNING" "接続情報が、見つかりませんでした（sf-project.sh が、完了していない可能性があります）。"
 
 # ------------------------------------------------------------------------------
 # 段階の切り替え（origin/main の branches.txt。doc/tier-scaling-design.md 7 章）
@@ -179,7 +179,7 @@ if run git fetch origin main; then
                 log "INFO" "  ${_t} ブランチは残っていますが、段階としては無効です（branches.txt にない）。"
             fi
             if printf '%s\n%s\n' "$_sn" "$_vn" | grep -qE "^SF_(CONSUMER_KEY|USERNAME|INSTANCE_URL)_${_sfx}$"; then  # 条件チェックのため run 不使用
-                log "INFO" "  ${_t} の接続情報が残っています（使われません。消すには sf-init.sh --remove-tier ${_t} --purge-secrets）。"
+                log "INFO" "  ${_t} の接続情報が残っています（使われません。消すには sf-project.sh --remove-tier ${_t} --purge-secrets）。"
             fi
             while IFS= read -r _r; do
                 [[ -z "$_r" ]] && continue
@@ -194,7 +194,7 @@ if run git fetch origin main; then
     _bad_wf=$(tier_switch_wf_problems)  # VAR=$(cmd) のため run 不使用（init-common.sh）
     if [[ -n "$_bad_wf" ]]; then
         log "WARNING" "  workflow が、段階の切り替えに対応していません（または、雛形と違います）: ${_bad_wf}"
-        log "WARNING" "    branches.txt から行を消しても、リリース・検証は止まりません。作業用のブランチで sf-sync-wf.sh を実行し、main まで入れてください（廃止した wf-propagate.yml は、sf-sync-wf.sh --remove wf-propagate.yml で消します）。"
+        log "WARNING" "    branches.txt から行を消しても、リリース・検証は止まりません。作業用のブランチで sf-update-workflows.sh を実行し、main まで入れてください（廃止した wf-propagate.yml は、sf-update-workflows.sh --remove wf-propagate.yml で消します）。"
     fi
     _stb=$(_var "SF_TOOLS_BRANCH")  # VAR=$(cmd) のため run 不使用
     case "$_stb" in
@@ -205,7 +205,7 @@ else
     log "WARNING" "  origin/main を取得できないため、段階の切り替えの診断を省きます。"
 fi
 echo "" >&2
-log "INFO" "接続先を変えるとき: sf-init.sh --reconnect <main|staging|develop>"
+log "INFO" "接続先を変えるとき: sf-project.sh --reconnect <main|staging|develop>"
 # 本番が main 以外にある、または、診断で不足があれば、非ゼロで終了する（管理者のスクリプトから、検知できるように）
 [[ $violation -eq 0 && "$DIAG_NG" -eq 0 ]] || exit $RET_NG
 exit $RET_OK

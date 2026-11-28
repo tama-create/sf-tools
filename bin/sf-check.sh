@@ -9,12 +9,12 @@
 #   sf-check.sh [deploy-target.txt のパス] [remove-target.txt のパス]
 #     引数 2 つ以上: 1 つ目を deploy-target.txt、2 つ目を remove-target.txt として検証する（3 つ目以降は無視）
 #     引数 1 つ    : deploy-target.txt だけを検証する
-#     引数なし     : sf-tools/release/branch_name.txt（sf-install.sh が保存する。sf-start.sh が sf-install.sh を実行する）に書かれたブランチ名で、
+#     引数なし     : sf-tools/release/branch_name.txt（sf-refresh.sh が保存する。sf-start.sh が sf-refresh.sh を実行する）に書かれたブランチ名で、
 #                    sf-tools/release/<ブランチ名>/deploy-target.txt と remove-target.txt を検証する。
 #                    branch_name.txt がないときは、何も検証せず、WARNING を表示して、終了コード 0 で終了する
 #                    （branch_name.txt は Git の管理外の、手元のファイル。一度も作られていないとき（新しいクローンの
 #                    main など）は、このファイルがない。コミットは止めない）
-#                    （ブランチ名は、今の Git のブランチではなく、branch_name.txt の内容を使う。sf-install.sh は、main では
+#                    （ブランチ名は、今の Git のブランチではなく、branch_name.txt の内容を使う。sf-refresh.sh は、main では
 #                    branch_name.txt を書き込みも削除もしないため、作業用ブランチのあと main に切り替えると、前のブランチの
 #                    値が残り、そのブランチのターゲットファイルを検証する）
 #
@@ -36,7 +36,7 @@
 #                         広がりすぎるため、エラー
 #        - [members]: 「種別名:メンバー名」の形でない（: がない・先頭か末尾が :）ときはエラー
 #   2. 1 でエラーにならなかった行について、種類の可否を確認する
-#      （config/metadata-capability.txt。sf-typecheck.sh が実際の組織で確かめた表）
+#      （config/metadata-capability.txt。sf-test-types.sh が実際の組織で確かめた表）
 #        deploy-target.txt は release 列、remove-target.txt は delete 列を見る
 #        ng: エラー / limited: 警告（止めない） / ok・unknown・表にない種類: 何もしない
 #        種類は、[members] では最初の「:」より前。[files] では、パスから推定できる次の種類だけ（ほかは確認しない）:
@@ -122,7 +122,7 @@ else
     if [[ ! -f "$BRANCH_NAME_FILE" ]]; then
         # 以前は INFO で、気づけなかった。検証を飛ばしたことを、警告として目立たせる（コミット・プッシュは止めない:
         #   branch_name.txt は Git の管理外の手元のファイルで、一度も作られていないとき（新しいクローンの main など）はないため。
-        #   なお、sf-install.sh は main では書き込みも削除もしないため、main でも、前のブランチの値が残っていることがある）
+        #   なお、sf-refresh.sh は main では書き込みも削除もしないため、main でも、前のブランチの値が残っていることがある）
         log "WARNING" "ブランチ情報ファイル（${BRANCH_NAME_FILE}）がありません。ターゲットファイルの構文チェックを、スキップしました。"
         exit 0
     fi

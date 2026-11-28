@@ -1,9 +1,9 @@
 #!/bin/bash
 # ==============================================================================
-# test_sf-restart.sh - sf-restart.sh のテスト
+# test_sf-switch-org.sh - sf-switch-org.sh のテスト
 # ==============================================================================
 source "$(dirname "${BASH_SOURCE[0]}")/test_helper.sh"
-echo -e "${CLR_HEAD}=== sf-restart.sh ===${CLR_RST}"
+echo -e "${CLR_HEAD}=== sf-switch-org.sh ===${CLR_RST}"
 
 # 設定ファイルがクリアされる
 test_clears_config_files() {
@@ -23,7 +23,7 @@ exit 0
 EOF
     chmod +x "$mh/sf-tools/bin/sf-start.sh"
 
-    cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$mh/sf-tools/bin/sf-restart.sh" 2>&1 >/dev/null
+    cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$mh/sf-tools/bin/sf-switch-org.sh" 2>&1 >/dev/null
 
     assert_file_not_exists "$td/.sf/config.json" ".sf/config.json がクリアされた"
     assert_file_not_exists "$td/.sfdx/sfdx-config.json" ".sfdx/sfdx-config.json がクリアされた"
@@ -44,7 +44,7 @@ exit 0
 EOF
     chmod +x "$mh/sf-tools/bin/sf-start.sh"
 
-    cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$mh/sf-tools/bin/sf-restart.sh" 2>&1 >/dev/null
+    cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$mh/sf-tools/bin/sf-switch-org.sh" 2>&1 >/dev/null
 
     assert_file_contains "$MOCK_CALL_LOG" "FORCE_RELOGIN=1" "sf-start.sh が FORCE_RELOGIN=1 で呼び出された"
     teardown "$td" "$mb" "$mh"
@@ -63,7 +63,7 @@ exit 1
 ' > "$mh/sf-tools/bin/sf-start.sh"     # 設定ファイルを書かずに失敗する
     chmod +x "$mh/sf-tools/bin/sf-start.sh"
 
-    out=$(cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$mh/sf-tools/bin/sf-restart.sh" 2>&1)
+    out=$(cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$mh/sf-tools/bin/sf-switch-org.sh" 2>&1)
     ec=$?
 
     assert_exit_fail "$ec" "sf-start.sh が失敗 → 終了コードも失敗"
@@ -76,7 +76,7 @@ exit 1
 echo "{\\"target-org\\":\\"neworg\\"}" > .sf/config.json
 exit 1
 ' > "$mh/sf-tools/bin/sf-start.sh"
-    (cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$mh/sf-tools/bin/sf-restart.sh" >/dev/null 2>&1)
+    (cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$mh/sf-tools/bin/sf-switch-org.sh" >/dev/null 2>&1)
     assert_file_contains "$td/.sf/config.json" "neworg" "新しい設定が書かれていれば、元の設定で上書きしない"
     # 退避用の一時フォルダは、残さない
     ls "${TMPDIR:-/tmp}"/sf-restart-* >/dev/null 2>&1         && fail "退避用の一時フォルダを残さない" "残っている"         || pass "退避用の一時フォルダを残さない"
@@ -102,7 +102,7 @@ exec "$real_cp" "\$@"
 CPEOF
     chmod +x "$mb/cp"
 
-    out=$(cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$mh/sf-tools/bin/sf-restart.sh" 2>&1)
+    out=$(cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$mh/sf-tools/bin/sf-switch-org.sh" 2>&1)
     ec=$?
 
     assert_exit_fail "$ec" "退避に失敗 → 中断する"
@@ -124,7 +124,7 @@ test_no_restore_on_success() {
 exit 0
 ' > "$mh/sf-tools/bin/sf-start.sh"   # 何も書かずに成功する
     chmod +x "$mh/sf-tools/bin/sf-start.sh"
-    (cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$mh/sf-tools/bin/sf-restart.sh" >/dev/null 2>&1)
+    (cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$mh/sf-tools/bin/sf-switch-org.sh" >/dev/null 2>&1)
     assert_file_not_exists "$td/.sf/config.json" "sf-start.sh が成功 → 元の設定を戻さない"
     teardown "$td" "$mb" "$mh"
 }
@@ -138,7 +138,7 @@ test_no_sf_start() {
     mkdir -p "$mh/sf-tools/bin"
     rm -f "$mh/sf-tools/bin/sf-start.sh"
 
-    local out; out=$(cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$mh/sf-tools/bin/sf-restart.sh" 2>&1)
+    local out; out=$(cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$mh/sf-tools/bin/sf-switch-org.sh" 2>&1)
     local ec=$?
 
     assert_exit_fail $ec "sf-start.sh なし → エラー終了"
@@ -155,7 +155,7 @@ test_outside_force_dir() {
     printf '#!/bin/bash\nexit 0\n' > "$mh/sf-tools/bin/sf-start.sh"
     chmod +x "$mh/sf-tools/bin/sf-start.sh"
 
-    local out; out=$(cd "$rd" && HOME="$mh" PATH="$mb:$PATH" bash "$mh/sf-tools/bin/sf-restart.sh" 2>&1)
+    local out; out=$(cd "$rd" && HOME="$mh" PATH="$mb:$PATH" bash "$mh/sf-tools/bin/sf-switch-org.sh" 2>&1)
     local ec=$?
 
     assert_exit_fail $ec "force-* 外 → エラー終了"

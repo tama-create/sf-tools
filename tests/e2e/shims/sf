@@ -2,7 +2,7 @@
 # ==============================================================================
 # sf（差し替え用）- e2e テストで PATH の先頭に置く
 # ==============================================================================
-# sf-init が呼ぶ「sf org login web」だけを、認証 URL でのログイン（sf org login sfdx-url）に置き換える。
+# sf-project が呼ぶ「sf org login web」だけを、認証 URL でのログイン（sf org login sfdx-url）に置き換える。
 # （ブラウザでのログインを自動化するため。ログイン後の deploy / retrieve / JWT ログインは本物の sf が動く）
 # それ以外のコマンドは、本物の sf にそのまま渡す。
 #
@@ -13,7 +13,7 @@
 #   E2E_SFDX_URL_FILE_DEV  develop の組織の認証 URL を書いたファイル（3 層のとき）
 #   E2E_SHIM_LOGIN_TRIES / E2E_SHIM_LOGIN_WAIT  ログインの試行回数（既定 3）と、やり直すまでの待ち（秒。既定 5）
 #
-# どの組織にログインするかは、--alias の末尾で決める（sf-init が、段階ごとに sf-tools-PROD / sf-tools-STG / sf-tools-DEV を付ける）:
+# どの組織にログインするかは、--alias の末尾で決める（sf-project が、段階ごとに sf-tools-PROD / sf-tools-STG / sf-tools-DEV を付ける）:
 #   末尾が STG → staging の組織 / 末尾が DEV → develop の組織 / それ以外 → main の組織
 # ==============================================================================
 _real_sf=$(PATH="${PATH//${E2E_SHIM_DIR}:/}" command -v sf)

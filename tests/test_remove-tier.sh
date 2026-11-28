@@ -1,19 +1,19 @@
 #!/bin/bash
 # ==============================================================================
-# test_remove-tier.sh - sf-init.sh --remove-tier（phases/init/remove_tier.sh）のテスト
+# test_remove-tier.sh - sf-project.sh --remove-tier（phases/init/remove_tier.sh）のテスト
 # ==============================================================================
 # 設計: doc/tier-scaling-design.md の 5 章・9 章。
 # 実際の git リポジトリ（ローカルのリモートつき。origin/main に branches.txt と workflow）と、gh の偽物（呼び出しを記録し、
-# 一覧の問い合わせに決まった答えを返す）で動かす。sf-init.sh の引数の解析は、sf-init.sh を通して確かめる。
+# 一覧の問い合わせに決まった答えを返す）で動かす。sf-project.sh の引数の解析は、sf-project.sh を通して確かめる。
 # 確認すること:
 #   - 段階がない・develop があるのに staging を外す・workflow が古い（判定の部分が雛形と違う・印がない・wf-metasync が自分で push する）→ 止まる
 #   - 影響の表示（main にない変更・開いている PR・接続情報の名前（値は出さない）・Ruleset）
 #   - 作る PR の branches.txt から、その段階の行だけが消える（コメント・ほかの行は残る。CR・前後の空白があっても一致する）
 #   - GitHub の設定（Secrets / Variables・Ruleset・ブランチ）を変えない（gh の書き込みは pr create だけ）
 #   - --purge-secrets: 行がまだある → 止まる／決まった名前だけを消す／一部の失敗で終了コード 1、再実行で残りだけ
-#   - sf-init.sh の引数: 値なし・--purge-secrets だけ・--add-tier との同時指定
+#   - sf-project.sh の引数: 値なし・--purge-secrets だけ・--add-tier との同時指定
 source "$(dirname "${BASH_SOURCE[0]}")/test_helper.sh"
-echo -e "${CLR_HEAD}=== sf-init.sh --remove-tier ===${CLR_RST}"
+echo -e "${CLR_HEAD}=== sf-project.sh --remove-tier ===${CLR_RST}"
 
 TMPL_WF="$SF_TOOLS_DIR/templates/.github/workflows"
 
@@ -218,19 +218,19 @@ test_purge() {
 
 test_sf_init_args() {
     echo ""
-    echo -e "${CLR_HEAD}[TEST] sf-init.sh の引数${CLR_RST}"
+    echo -e "${CLR_HEAD}[TEST] sf-project.sh の引数${CLR_RST}"
     local mb out rc
     mb=$(setup_mock_bin)
-    out=$( cd "$mb" && HOME="$mb" bash "$SF_TOOLS_DIR/bin/sf-init.sh" --remove-tier < /dev/null 2>&1 ); rc=$?
+    out=$( cd "$mb" && HOME="$mb" bash "$SF_TOOLS_DIR/bin/sf-project.sh" --remove-tier < /dev/null 2>&1 ); rc=$?
     assert_exit_fail "$rc" "--remove-tier の値なし → 終了する"
     assert_output_contains "$out" "外す段階" "  → 理由"
-    out=$( cd "$mb" && HOME="$mb" bash "$SF_TOOLS_DIR/bin/sf-init.sh" --purge-secrets < /dev/null 2>&1 ); rc=$?
+    out=$( cd "$mb" && HOME="$mb" bash "$SF_TOOLS_DIR/bin/sf-project.sh" --purge-secrets < /dev/null 2>&1 ); rc=$?
     assert_exit_fail "$rc" "--purge-secrets だけ → 終了する"
     assert_output_contains "$out" "remove-tier と一緒に" "  → 理由"
-    out=$( cd "$mb" && HOME="$mb" bash "$SF_TOOLS_DIR/bin/sf-init.sh" --add-tier develop --remove-tier develop < /dev/null 2>&1 ); rc=$?
+    out=$( cd "$mb" && HOME="$mb" bash "$SF_TOOLS_DIR/bin/sf-project.sh" --add-tier develop --remove-tier develop < /dev/null 2>&1 ); rc=$?
     assert_exit_fail "$rc" "--add-tier と --remove-tier の同時指定 → 終了する"
     assert_output_contains "$out" "同時に指定できません" "  → 理由"
-    out=$( cd "$mb" && HOME="$mb" bash "$SF_TOOLS_DIR/bin/sf-init.sh" --purge-secrets --remove-tier develop < /dev/null 2>&1 ); rc=$?
+    out=$( cd "$mb" && HOME="$mb" bash "$SF_TOOLS_DIR/bin/sf-project.sh" --purge-secrets --remove-tier develop < /dev/null 2>&1 ); rc=$?
     assert_output_contains "$out" "tier を外すモード: develop（--purge-secrets）" "順を入れ替えても、--purge-secrets のモードになる"
     rm -rf "$mb"
 }

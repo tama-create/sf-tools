@@ -1,6 +1,6 @@
 #!/bin/bash
 # ==============================================================================
-# remove_tier.sh - 段階を外す（sf-init.sh --remove-tier staging|develop [--purge-secrets]）
+# remove_tier.sh - 段階を外す（sf-project.sh --remove-tier staging|develop [--purge-secrets]）
 # ==============================================================================
 # 既存のプロジェクト（force-*）から、段階 staging または develop を外す。設計は doc/tier-scaling-design.md の 5 章。
 # 本体は、sf-tools/config/branches.txt からその段階の行を消す PR を作ることだけ。PR をマージすると、リリース・PR の検証が
@@ -9,7 +9,7 @@
 # --purge-secrets は、行を消す PR のマージ後に、その段階の接続情報（Secrets / Variables）を消す、別のモード。
 #
 # 【使い方】
-#   force-* ディレクトリの中で sf-init.sh --remove-tier <staging|develop> [--purge-secrets] を実行する。sf-init.sh が、
+#   force-* ディレクトリの中で sf-project.sh --remove-tier <staging|develop> [--purge-secrets] を実行する。sf-project.sh が、
 #   環境変数 REMOVE_TIER（段階）と REMOVE_TIER_PURGE（--purge-secrets のとき 1）を export して、このスクリプトを呼び出す。
 #
 # 【処理の流れ】（段階を外す。REMOVE_TIER_PURGE が 1 でないとき）
@@ -24,7 +24,7 @@
 #          この sf-tools の雛形と同じ（行頭の空白を除いて比べる）で、判定の呼び出しの印（# sf-tools: tier-check）がある
 #        wf-metasync.yml: sf-metasync.sh を呼んでいて、workflow の中に（コメントの行を除いて）git push がない
 #        wf-propagate.yml: ない（廃止。残っていれば、対応していない扱い）
-#      満たさないファイルがあれば、INFO で、そのファイル名と、sf-sync-wf.sh で workflow を main まで入れてから実行すること、を
+#      満たさないファイルがあれば、INFO で、そのファイル名と、sf-update-workflows.sh で workflow を main まで入れてから実行すること、を
 #      表示して die
 #   4. 影響を表示する（読み取りのみ。読めないものは WARNING を出して続ける）:
 #        a. その段階にだけあって、main にない変更（git log --no-merges --oneline origin/main..origin/<段階>。最大 20 行と件数）
@@ -62,16 +62,16 @@
 #     もう一度実行すると、新しい作業用ブランチで PR を作る。ただし、未コミットの変更が残っていると、手順 6 で中断する
 #   - branches.txt の変更は、PR をマージすると main に入る（段階として無効になる）。マージ前にもう一度実行すると、origin/main には
 #     まだ行があるため止まらない（PR が 2 本できる）
-#   - ログは ~/sf-tools/logs/sf-init.log に、実行ごとに新しく書く（LOG_MODE=NEW）
+#   - ログは ~/sf-tools/logs/sf-project.log に、実行ごとに新しく書く（LOG_MODE=NEW）
 #   - 終了コード: 0 = OK / 1 = die・--purge-secrets の一部の失敗
 # ==============================================================================
 
-# SF_TOOLS_DIR は sf-init.sh（司令塔）から export される
+# SF_TOOLS_DIR は sf-project.sh（司令塔）から export される
 PHASE_DIR="${BASH_SOURCE[0]%/*}"
 [[ "$PHASE_DIR/" == /* && "$PHASE_DIR/" != *//* && "$PHASE_DIR/" != */./* && "$PHASE_DIR/" != */../* ]] || PHASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SF_TOOLS_DIR="${SF_TOOLS_DIR:-$(dirname "$(dirname "$PHASE_DIR")")}"
 
-readonly SCRIPT_NAME="sf-init"
+readonly SCRIPT_NAME="sf-project"
 mkdir -p "$HOME/sf-tools/logs" 2>/dev/null || true  # run 不使用: common.sh の読み込み前（run が未定義）
 readonly LOG_FILE="$HOME/sf-tools/logs/${SCRIPT_NAME}.log"
 readonly LOG_MODE="NEW"
@@ -80,7 +80,7 @@ export SF_INIT_MODE=1
 source "${SF_TOOLS_DIR}/lib/common.sh"
 source "${SF_TOOLS_DIR}/phases/init/init-common.sh"
 
-REMOVE_TIER="${REMOVE_TIER:-}"              # sf-init.sh から export される
+REMOVE_TIER="${REMOVE_TIER:-}"              # sf-project.sh から export される
 REMOVE_TIER_PURGE="${REMOVE_TIER_PURGE:-}"  # --purge-secrets のとき 1
 [[ -z "$REMOVE_TIER" ]] && die "REMOVE_TIER が未設定です。"
 
@@ -144,7 +144,7 @@ if [[ "$REMOVE_TIER_PURGE" == "1" ]]; then
     print_admin_warning "!!  このコマンドは管理者専用です" "    ${REMOVE_TIER} の接続情報を消します。この段階の" "    組織に、CI からつながらなくなります"
     log "INFO" "消す Secrets  : ${targets_s:-（なし）}"
     log "INFO" "消す Variables: ${targets_v:-（なし）}"
-    log "WARNING" "Secret の値は、消すと戻せません（戻すときは sf-init.sh --add-tier ${REMOVE_TIER} で、新しくつなぎ直します）。"
+    log "WARNING" "Secret の値は、消すと戻せません（戻すときは sf-project.sh --add-tier ${REMOVE_TIER} で、新しくつなぎ直します）。"
     check_gh_owner "${REPO_FULL_NAME%%/*}"
     ask_yn "  消しますか？" || die "中断しました。"
     failed=0
@@ -179,8 +179,8 @@ fi
 bad_wf=$(tier_switch_wf_problems)  # VAR=$(cmd) のため run 不使用（init-common.sh）
 if [[ -n "$bad_wf" ]]; then
     log "INFO" "origin/main の workflow が、段階の切り替えに対応していません（または、雛形と違います）: ${bad_wf}"
-    log "INFO" "  sf-tools を更新し、作業用のブランチで sf-sync-wf.sh を実行して、workflow を main まで入れてから、実行してください。"
-    log "INFO" "  （古い workflow のままでは、branches.txt から行を消しても、リリース・検証は止まりません。廃止した wf-propagate.yml は sf-sync-wf.sh --remove で消します）"
+    log "INFO" "  sf-tools を更新し、作業用のブランチで sf-update-workflows.sh を実行して、workflow を main まで入れてから、実行してください。"
+    log "INFO" "  （古い workflow のままでは、branches.txt から行を消しても、リリース・検証は止まりません。廃止した wf-propagate.yml は sf-update-workflows.sh --remove で消します）"
     die "origin/main の workflow が、段階の切り替えに対応していません: ${bad_wf}"
 fi
 log "SUCCESS" "origin/main の workflow は、段階の切り替えに対応しています。"
@@ -208,7 +208,7 @@ for n in $SECRET_NAMES $VARIABLE_NAMES; do
     printf '%s\n%s\n' "$es" "$ev" | grep -qxF -- "$n" && names="${names}${n} "  # 条件チェックのため run 不使用
 done
 log "INFO" "c. ${REMOVE_TIER} の接続情報（名前だけ）: ${names:-なし}"
-[[ -n "$names" ]] && log "INFO" "     残します（段階が無効のあいだは、使われません）。消すには、PR のマージ後に sf-init.sh --remove-tier ${REMOVE_TIER} --purge-secrets"
+[[ -n "$names" ]] && log "INFO" "     残します（段階が無効のあいだは、使われません）。消すには、PR のマージ後に sf-project.sh --remove-tier ${REMOVE_TIER} --purge-secrets"
 rs=$(gh api "repos/${REPO_FULL_NAME}/rulesets" --jq '.[] | "\(.id) \(.name)"' 2>/dev/null) || rs="__ERR__"  # VAR=$(cmd) のため run 不使用（読み取りのみ）
 if [[ "$rs" == "__ERR__" ]]; then
     log "WARNING" "d. Ruleset の一覧を取得できません。"
@@ -261,7 +261,7 @@ run git push --no-verify -u origin "$PR_BRANCH" || die "git push に失敗しま
 
 PR_URL=$(run gh pr create --base main --head "$PR_BRANCH" -R "$REPO_FULL_NAME" \
     --title "chore: ${REMOVE_TIER} tier を外す" \
-    --body "branches.txt から ${REMOVE_TIER} を外します（sf-init.sh --remove-tier ${REMOVE_TIER} で作成）。マージすると、${REMOVE_TIER} へのリリース・PR の検証が止まります。ブランチ・接続情報（Secrets / Variables）・Ruleset は残すので、sf-init.sh --add-tier ${REMOVE_TIER} で戻せます。") \
+    --body "branches.txt から ${REMOVE_TIER} を外します（sf-project.sh --remove-tier ${REMOVE_TIER} で作成）。マージすると、${REMOVE_TIER} へのリリース・PR の検証が止まります。ブランチ・接続情報（Secrets / Variables）・Ruleset は残すので、sf-project.sh --add-tier ${REMOVE_TIER} で戻せます。") \
     || die "PR の作成に失敗しました。"  # VAR=$(cmd) のため、PR の URL を取得する
 
 # 8. 実行前のブランチに戻る
@@ -272,7 +272,7 @@ log "SUCCESS" "段階を外す PR を作りました: ${PR_URL}"
 log "INFO"    "次のステップ:"
 log "INFO"    "  1. PR をマージすると、${REMOVE_TIER} へのリリース・PR の検証が止まります"
 log "INFO"    "  2. 残したもの: ${REMOVE_TIER} ブランチ・接続情報（Secrets / Variables）・Ruleset・組織の外部クライアントアプリ"
-log "INFO"    "  3. 戻すとき: sf-init.sh --add-tier ${REMOVE_TIER}（接続情報が残っていれば、つなぎ直さずに戻せます）"
-log "INFO"    "  4. 接続情報を消すとき: PR のマージ後に sf-init.sh --remove-tier ${REMOVE_TIER} --purge-secrets"
+log "INFO"    "  3. 戻すとき: sf-project.sh --add-tier ${REMOVE_TIER}（接続情報が残っていれば、つなぎ直さずに戻せます）"
+log "INFO"    "  4. 接続情報を消すとき: PR のマージ後に sf-project.sh --remove-tier ${REMOVE_TIER} --purge-secrets"
 log "INFO"    "  5. ブランチを消すときは、手で（消す前に、上の a の「main にない変更」を確かめてください）"
 exit $RET_OK

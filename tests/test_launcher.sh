@@ -3,7 +3,7 @@
 # test_launcher.sh - phases/start/launcher.sh（sf-start.sh が開くメニュー）のテスト
 # ==============================================================================
 source "$(dirname "${BASH_SOURCE[0]}")/test_helper.sh"
-export SF_LAUNCHER_BG_STATUS=0   # 2 行目の裏の判定（sf-next.sh --status）を止める。確かめるテストだけで 1 にする
+export SF_LAUNCHER_BG_STATUS=0   # 2 行目の裏の判定（sf-pr.sh --status）を止める。確かめるテストだけで 1 にする
 unset SF_LAUNCHER_ACTIVE
 LAUNCHER="$SF_TOOLS_DIR/phases/start/launcher.sh"
 echo -e "${CLR_HEAD}=== phases/start/launcher.sh ===${CLR_RST}"
@@ -75,8 +75,8 @@ test_quit_interactive() {
 }
 
 # ------------------------------------------------------------------------------
-# メニューの並び: 日々の作業の順（Check → Dryrun → Deploy → Push → Next）。Start・Restart は線の下（2026-11-26 に並べ替え）。
-# VS Code の中では Start・Restart と線を出さない
+# メニューの並び: 日々の作業の順（Check → Dryrun → Deploy → Push → Next）。Start・SwitchOrg は線の下（2026-11-26 に並べ替え）。
+# VS Code の中では Start・SwitchOrg と線を出さない
 # ------------------------------------------------------------------------------
 test_menu_order() {
     local td mb out plain
@@ -88,7 +88,7 @@ test_menu_order() {
     plain=$(printf '%s\n' "$out" | sed $'s/\033\\[[0-9;]*m//g')
     local order
     order=$(printf '%s\n' "$plain" | grep -oE '\[[0-9]\] [A-Za-z]+' | tr '\n' ' ')
-    assert_equals "$order" "[1] Check [2] Dryrun [3] Deploy [4] Push [5] PullRequest [6] Start [7] Restart " "番号は、作業の順（Check・Dryrun・Deploy・Push・PullRequest）、その下に Start・Restart"
+    assert_equals "$order" "[1] Check [2] Dryrun [3] Deploy [4] Push [5] PullRequest [6] Start [7] SwitchOrg " "番号は、作業の順（Check・Dryrun・Deploy・Push・PullRequest）、その下に Start・SwitchOrg"
     # Next と Start の間に、短い線がある
     printf '%s\n' "$plain" | grep -A1 '\[5\] PullRequest' | tail -1 | grep -q '^  ──────────$' \
         && pass "PullRequest と Start の間に線を引く" || fail "PullRequest と Start の間に線を引く" "$plain"
@@ -96,7 +96,7 @@ test_menu_order() {
     out=$(cd "$td" && printf '2' | PATH="$mb:$PATH" bash "$LAUNCHER" 2>&1)
     [[ "$out" == *"▶ sf-dryrun"* ]] && pass "番号 2 → sf-dryrun を動かす" || fail "番号 2 → sf-dryrun を動かす" "$(printf '%s' "$out" | head -5)"
 
-    # VS Code の中: Start・Restart と、線を出さない
+    # VS Code の中: Start・SwitchOrg と、線を出さない
     out=$(cd "$td" && printf "q" | TERM_PROGRAM=vscode PATH="$mb:$PATH" bash "$LAUNCHER" 2>&1)
     plain=$(printf '%s\n' "$out" | sed $'s/\033\\[[0-9;]*m//g')
     order=$(printf '%s\n' "$plain" | grep -oE '\[[0-9]\] [A-Za-z]+' | tr '\n' ' ')
@@ -359,7 +359,7 @@ test_result_line() {
     assert_output_contains "$out" "✓ Check: 終わりました（成功）" "成功 → ✓ の 1 行"
     git -C "$td" checkout -q -b develop
     out=$(cd "$td" && printf '5' | bash "$LAUNCHER" 2>&1 | sed $'s/\033\\[[0-9;]*m//g')
-    assert_output_contains "$out" "✗ PullRequest: 失敗、または中断しました（終了コード 1）" "失敗（環境ブランチの上の sf-next）→ ✗ の 1 行と終了コード"
+    assert_output_contains "$out" "✗ PullRequest: 失敗、または中断しました（終了コード 1）" "失敗（環境ブランチの上の sf-pr）→ ✗ の 1 行と終了コード"
     teardown "$td" "${td}.origin.git"
 }
 test_result_line
@@ -388,7 +388,7 @@ test_reload_when_updated() {
 test_reload_when_updated
 
 test_bg_status() {
-    echo ""; echo -e "${CLR_HEAD}[TEST] 2 行目の結果がないとき、裏で sf-next.sh --status を動かし、終わったら描き直す${CLR_RST}"
+    echo ""; echo -e "${CLR_HEAD}[TEST] 2 行目の結果がないとき、裏で sf-pr.sh --status を動かし、終わったら描き直す${CLR_RST}"
     local td mk out n
     td=$(_st_repo); mk=$(mktemp -d)
     mkdir -p "$td/sf-tools/logs"
@@ -403,7 +403,7 @@ MOCK
     assert_output_contains "$out" "Branch: （確かめています…）" "結果がない → 裏で判定し、そのあいだは「確かめています」"
     assert_output_contains "$out" "Branch: ▸ develop (次のPR) ⇒ × staging ⇒ × main" "裏の判定が終わる → 描き直して、段階の並びを出す"
     assert_file_contains "$td/sf-tools/logs/next-status.txt" "TIERS=develop staging main" "裏の判定が、next-status.txt を書く"
-    [[ -f "$td/sf-tools/logs/sf-next-status.log" ]] && pass "裏の判定は、別のログ（sf-next-status.log）に書く" || fail "裏の判定は、別のログ（sf-next-status.log）に書く"
+    [[ -f "$td/sf-tools/logs/sf-pr-status.log" ]] && pass "裏の判定は、別のログ（sf-pr-status.log）に書く" || fail "裏の判定は、別のログ（sf-pr-status.log）に書く"
     n=$(wc -l < "$mk/count" | tr -d ' ')
     assert_equals "$n" "1" "同じ先端のコミットでは、判定は 1 回だけ"
 
@@ -428,10 +428,10 @@ echo x >> "${0%/*}/count"
 sleep 6
 exit 2
 MOCK
-    local bd; bd=$(mktemp -d)   # 書き換えてよい sf-tools の写し（phases/start/・bin/・lib/。sf-next.sh が ../lib を読むため）
+    local bd; bd=$(mktemp -d)   # 書き換えてよい sf-tools の写し（phases/start/・bin/・lib/。sf-pr.sh が ../lib を読むため）
     mkdir -p "$bd/bin" "$bd/phases/start"
     cp "$LAUNCHER" "$bd/phases/start/"
-    cp "$SF_TOOLS_DIR/bin/sf-next.sh" "$bd/bin/"
+    cp "$SF_TOOLS_DIR/bin/sf-pr.sh" "$bd/bin/"
     cp -r "$SF_TOOLS_DIR/lib" "$bd/lib"
     out=$( (cd "$td" && { sleep 3; echo '# 書き換え' >> "$bd/phases/start/launcher.sh"; sleep 14; printf 'q'; } | SF_LAUNCHER_BG_STATUS=1 SF_PROMOTE_CHECK_CMD="$mk/pc.sh" TERM_PROGRAM= bash "$bd/phases/start/launcher.sh" 2>&1) | sed $'s/\033\\[[0-9;]*m//g')
     assert_output_contains "$out" "読み込み直します" "判定中に書き換わる → 読み込み直す"

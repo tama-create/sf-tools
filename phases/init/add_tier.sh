@@ -6,7 +6,7 @@
 # Salesforce 組織への接続（Secrets / Variables の登録）を先に行い、そのあとブランチを作り、branches.txt の変更を PR にする。
 #
 # 【使い方】
-#   force-* ディレクトリの中で sf-init.sh --add-tier <staging|develop> を実行する。sf-init.sh が、環境変数 ADD_TIER を
+#   force-* ディレクトリの中で sf-project.sh --add-tier <staging|develop> を実行する。sf-project.sh が、環境変数 ADD_TIER を
 #   export して、このスクリプトを呼び出す。
 #
 # 【処理の流れ】
@@ -39,7 +39,7 @@
 #
 # 【前提条件】
 #   - force-* ディレクトリ（リポジトリのクローン）の中で実行すること
-#   - ~/.sf-jwt/<REPO_NAME>/server.key・server.crt。sf-init Phase 10 が作る
+#   - ~/.sf-jwt/<REPO_NAME>/server.key・server.crt。sf-project Phase 10 が作る
 #   - gh の認証ユーザーが、リポジトリのオーナー（組織では、その組織の有効な管理者）であること（check_gh_owner）
 #
 # 【補足】
@@ -63,21 +63,21 @@
 #   - branches.txt の変更は、PR をマージすると main に入る（段階として有効になる）。マージ前に、もう一度 --add-tier を
 #     実行すると、origin/main にはまだないため、重複の確認では止まらない（PR が 2 本できる）
 #   - 環境変数:
-#       ADD_TIER                         : 追加する段階（staging | develop。sf-init.sh が export する）
+#       ADD_TIER                         : 追加する段階（staging | develop。sf-project.sh が export する）
 #       SF_INIT_LOGIN_URL_<STG|DEV>      : ログイン先を、質問せずに指定する（login | test | URL）
 #       SF_INIT_JWT_RETRIES              : JWT 接続テストの最大の試行回数（既定 20）
 #       SF_INIT_JWT_INTERVAL             : 試行の間の待ち時間（秒。既定 30）。待つのは試行の間だけで、既定では、最大
 #                                          (20 - 1) × 30 = 570 秒（約 10 分）待つ（作成したアプリの反映待ち）
-#   - ログは ~/sf-tools/logs/sf-init.log に、実行ごとに新しく書く（LOG_MODE=NEW。前回の内容は消える）
+#   - ログは ~/sf-tools/logs/sf-project.log に、実行ごとに新しく書く（LOG_MODE=NEW。前回の内容は消える）
 #   - 終了コード: 0 = OK / 1 = die
 # ==============================================================================
 
-# SF_TOOLS_DIR は sf-init.sh（司令塔）から export される
+# SF_TOOLS_DIR は sf-project.sh（司令塔）から export される
 PHASE_DIR="${BASH_SOURCE[0]%/*}"
 [[ "$PHASE_DIR/" == /* && "$PHASE_DIR/" != *//* && "$PHASE_DIR/" != */./* && "$PHASE_DIR/" != */../* ]] || PHASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SF_TOOLS_DIR="${SF_TOOLS_DIR:-$(dirname "$(dirname "$PHASE_DIR")")}"
 
-readonly SCRIPT_NAME="sf-init"
+readonly SCRIPT_NAME="sf-project"
 mkdir -p "$HOME/sf-tools/logs" 2>/dev/null || true  # run 不使用: common.sh の読み込み前（run が未定義）
 readonly LOG_FILE="$HOME/sf-tools/logs/${SCRIPT_NAME}.log"
 readonly LOG_MODE="NEW"
@@ -89,7 +89,7 @@ source "${SF_TOOLS_DIR}/phases/init/init-common.sh"
 # ------------------------------------------------------------------------------
 # 引数取得
 # ------------------------------------------------------------------------------
-ADD_TIER="${ADD_TIER:-}"  # sf-init.sh から export される
+ADD_TIER="${ADD_TIER:-}"  # sf-project.sh から export される
 [[ -z "$ADD_TIER" ]] && die "ADD_TIER が未設定です。"
 
 # ------------------------------------------------------------------------------
@@ -195,7 +195,7 @@ fi
 if [[ "$SKIP_CONNECT" -eq 0 ]]; then
     JWT_DIR="$HOME/.sf-jwt/${REPO_NAME}"
     [[ ! -f "${JWT_DIR}/server.key" ]] && die "秘密鍵が見つかりません: ${JWT_DIR}/server.key
-  sf-init Phase 10 を先に実行してください。"
+  sf-project Phase 10 を先に実行してください。"
     [[ ! -f "${JWT_DIR}/server.crt" ]] && die "証明書が見つかりません: ${JWT_DIR}/server.crt"
 
     # 外部クライアントアプリケーションを、自動で作成する
@@ -266,7 +266,7 @@ run git push --no-verify -u origin "$PR_BRANCH" \
 
 PR_URL=$(run gh pr create --base main --head "$PR_BRANCH" -R "$REPO_FULL_NAME" \
     --title "chore: ${ADD_TIER} tier を追加" \
-    --body "branches.txt に ${ADD_TIER} を追加します（sf-init.sh --add-tier ${ADD_TIER} で作成）。マージすると、段階として有効になります。") \
+    --body "branches.txt に ${ADD_TIER} を追加します（sf-project.sh --add-tier ${ADD_TIER} で作成）。マージすると、段階として有効になります。") \
     || die "PR の作成に失敗しました。"  # VAR=$(cmd) のため、PR の URL を取得する
 run git checkout "$ORIGINAL_BRANCH" || die "${ORIGINAL_BRANCH} ブランチへの切り替えに失敗しました。"
 
@@ -274,6 +274,6 @@ log "SUCCESS" "tier 追加の準備ができました: ${ADD_TIER}（${LABEL}）
 log "INFO"    "次のステップ:"
 log "INFO"    "  ・PR をマージしてください（マージすると、branches.txt が main に反映されます）: $(echo "$PR_URL" | tail -n 1)"
 log "INFO"    "  ・GitHub Actions（wf-release / wf-validate）が ${ADD_TIER} ブランチに対して動作することを確認してください。"
-log "INFO"    "  ・いまの接続を見る: sf-init.sh --status"
+log "INFO"    "  ・いまの接続を見る: sf-project.sh --status"
 
 exit $RET_OK

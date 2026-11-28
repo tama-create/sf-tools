@@ -1,22 +1,22 @@
 #!/bin/bash
 # ==============================================================================
-# sf-init.sh - 新規 Salesforce プロジェクトの初期セットアップ
+# sf-project.sh - プロジェクトの作成と保守（管理者向け。2026-11-28 に sf-init.sh から改名）
 # ==============================================================================
 # 新しい force-XXXX リポジトリを GitHub に作成し、sf-tools と連携させるまでの一連のセットアップ（Phase 1〜10 と後処理）を
 # 自動化する。セットアップ後の保守用のモード（--add-tier / --remove-tier / --reconnect / --status / --verify）も持つ。管理者向けのコマンド。
 #
 # 【使い方】
 #   cd {作業フォルダ}                                  # sf-job.sh を実行する場所（admin・force-* の中は不可）
-#   ~/sf-tools/bin/sf-init.sh [--owner OWNER] [--project XXXX]
-#   ~/sf-tools/bin/sf-init.sh [--owner OWNER] [--project XXXX] --resume N
-#   ~/sf-tools/bin/sf-init.sh [--owner OWNER] [--project XXXX] --only N
+#   ~/sf-tools/bin/sf-project.sh [--owner OWNER] [--project XXXX]
+#   ~/sf-tools/bin/sf-project.sh [--owner OWNER] [--project XXXX] --resume N
+#   ~/sf-tools/bin/sf-project.sh [--owner OWNER] [--project XXXX] --only N
 #
 #   cd {作業フォルダ}/admin/force-XXXX                 # 保守用のモードは、force-* の中で実行する
-#   ~/sf-tools/bin/sf-init.sh --add-tier staging|develop
-#   ~/sf-tools/bin/sf-init.sh --remove-tier staging|develop [--purge-secrets]
-#   ~/sf-tools/bin/sf-init.sh --reconnect main|staging|develop
-#   ~/sf-tools/bin/sf-init.sh --status
-#   ~/sf-tools/bin/sf-init.sh --verify [--plan] [--cleanup] [--no-metasync] [--components] [--validate-only] [--with-objects]
+#   ~/sf-tools/bin/sf-project.sh --add-tier staging|develop
+#   ~/sf-tools/bin/sf-project.sh --remove-tier staging|develop [--purge-secrets]
+#   ~/sf-tools/bin/sf-project.sh --reconnect main|staging|develop
+#   ~/sf-tools/bin/sf-project.sh --status
+#   ~/sf-tools/bin/sf-project.sh --verify [--plan] [--cleanup] [--no-metasync] [--components] [--validate-only] [--with-objects]
 #
 # 【オプション】
 #   --owner OWNER         : GitHub のオーナー（組織名またはユーザー名）。英数字とハイフンのみ（先頭・末尾は英数字。39 文字まで）。
@@ -91,7 +91,7 @@
 #        Phase 2:  プロジェクト情報の確認（OWNER・XXXX の確認、sf-tools の版（配布版 main / 開発版 development）の選択、
 #                  .sf-init-XXXX.env の作成）
 #        Phase 3:  リポジトリ作成（gh repo create + git clone）
-#        Phase 4:  ファイル生成（sf-install.sh。sf-install.sh が sf-hook.sh でフックを設置する）
+#        Phase 4:  ファイル生成（sf-refresh.sh。sf-refresh.sh が sf-hook.sh でフックを設置する）
 #        Phase 5:  ブランチ構成（対話選択 → branches.txt 更新）
 #        Phase 6:  PAT_TOKEN の設定
 #        Phase 7:  Slack 連携の設定
@@ -123,6 +123,8 @@
 #     Slack App の作成・Bot Token の取得 / 通知先 Slack チャンネルで Bot を招待（/invite @sf-notify-<プロジェクト名>）
 #
 # 【補足】
+#   - 内部の名前（状態ファイル admin/.sf-init-XXXX.env・.progress・.lock、環境変数 SF_INIT_*、phases/init/、ログの名前を除く
+#     一時ファイル）は、改名（2026-11-28。sf-init.sh → sf-project.sh）の前の名前のまま（既存の管理者フォルダを壊さないため）
 #   - 開始画面（--resume N（2 以上）/ --only の指定がないとき。続き・完了済みの選択画面より前に出る）には、作るもの・
 #     かかる時間の目安（30〜60 分。ブラウザでの作業と Salesforce の反映待ちを含む）・先に用意するもの・9 つのステップを表示する
 #   ◆ 途中で止まったとき（続きから）
@@ -154,7 +156,7 @@
 #     - Phase 3〜10 のスクリプトは、Phase 2 が作る .sf-init-XXXX.env の値（REPO_FULL_NAME など）がないと、「〜が未設定です」で
 #       終了する。完了済みのプロジェクトでは、--only N は、Phase を実行する前に拒否する（◆ 完了済みのとき。終了コード 1）
 #   ◆ 同時実行
-#     - 同じ admin・同じ XXXX で、sf-init.sh を、同時に 2 つ動かすことはできない（後から起動した方は「すでに実行中です」で終了する）。
+#     - 同じ admin・同じ XXXX で、sf-project.sh を、同時に 2 つ動かすことはできない（後から起動した方は「すでに実行中です」で終了する）。
 #       admin/.sf-init-XXXX.lock（フォルダ。中に PID）で排他する。PID のプロセスがもういないときは、古いロックとして引き継ぐ。
 #       ロックを取るのは【処理の流れ】4（警告・確認のあと）。保守用のモードは、ロックを取らない。
 #       Phase 2 の終了コード 75 で実行しなおすときは、作業フォルダに戻り、ロックを解放してから、実行しなおす
@@ -165,7 +167,7 @@
 #     - 確認するときは、管理者用のクローン（REPO_DIR）で、verify.sh（環境全体の確認 → Hello World のリリースと削除）を、
 #       SF_VERIFY_CONFIRMED=1 で実行する（verify.sh の確認は出ない）。失敗しても、セットアップの失敗にはしない（完了画面に結果を出す）
 #   ◆ admin フォルダ（管理者用フォルダ）
-#     - 完了後も削除しない（削除の質問は廃止した）。ワークフローの更新（sf-sync-wf.sh）・--status・--reconnect などの保守に使う。
+#     - 完了後も削除しない（削除の質問は廃止した）。ワークフローの更新（sf-update-workflows.sh）・--status・--reconnect などの保守に使う。
 #       日常の開発には使わない（開発は、sf-job.sh の作業フォルダで行う）。完了画面に、このフォルダのパスを表示する
 #     - 同じ admin に、複数のプロジェクトを置ける（状態ファイル・ロックは、XXXX ごとに分かれる）
 #     - admin ブランチ: ローカルに admin があれば切り替え、なければ main から作る。動作の確認を実行し、クローンが main のときは、
@@ -192,7 +194,7 @@
 #     - 知らないオプションは、使い方を表示して終了する
 #   ◆ そのほか
 #     - Ctrl+C は、--help の判定のあと、引数の解析の前から無効（trap '' INT。子プロセスにも継承）。中断するには、ターミナルを閉じる
-#     - ログ: ~/sf-tools/logs/sf-init.log（起動のたびに空にする。各 Phase は追記する）。verify.sh（--verify・動作の確認）の
+#     - ログ: ~/sf-tools/logs/sf-project.log（起動のたびに空にする。各 Phase は追記する）。verify.sh（--verify・動作の確認）の
 #       記録は ~/sf-tools/logs/verify.log
 #     - 終了コード: 0 = 成功（完了済みの選択画面の [1] / [q] を含む）/ 1 = エラー（die）/
 #       --verify・--status・完了済みの [2] は、verify.sh・status.sh の終了コードを、そのまま返す
@@ -202,7 +204,7 @@
 # 1. 共通ライブラリの必須設定
 # ------------------------------------------------------------------------------
 SCRIPT_NAME="${0##*/}"; readonly SCRIPT_NAME="${SCRIPT_NAME%.sh}"
-# sf-init.sh はプロジェクト外から実行するため、ログは sf-tools 配下に記録する
+# sf-project.sh はプロジェクト外から実行するため、ログは sf-tools 配下に記録する
 mkdir -p "$HOME/sf-tools/logs" 2>/dev/null || true  # run 不使用: common.sh（run）の読み込み前の準備（意図的エラー無視）
 readonly LOG_FILE="$HOME/sf-tools/logs/${SCRIPT_NAME}.log"
 readonly LOG_MODE="NEW"  # 司令塔が起動のたびにログをリセットする
@@ -210,7 +212,7 @@ readonly LOG_MODE="NEW"  # 司令塔が起動のたびにログをリセット�
 # ------------------------------------------------------------------------------
 # 2. 共通ライブラリの読み込み
 # ------------------------------------------------------------------------------
-# sf-init.sh はプロジェクト外から実行するため、force-* チェックをバイパスする
+# sf-project.sh はプロジェクト外から実行するため、force-* チェックをバイパスする
 export SF_INIT_MODE=1
 
 SCRIPT_DIR="${BASH_SOURCE[0]%/*}"
@@ -312,19 +314,19 @@ while [[ $# -gt 0 ]]; do
         *)
             die "不明なオプションです: $1
 使い方:
-  ~/sf-tools/bin/sf-init.sh                       # Phase 1〜10 を順次実行（途中で止まった状態があれば、続き / 最初からを選ぶ）
-  ~/sf-tools/bin/sf-init.sh --project XXXX         # プロジェクト名（force-XXXX の XXXX）を指定する（--owner でオーナーも指定できる）
-  ~/sf-tools/bin/sf-init.sh --resume N             # Phase N から最後まで順次実行（質問なし）
-  ~/sf-tools/bin/sf-init.sh --only N               # Phase N のみ実行
-  ~/sf-tools/bin/sf-init.sh --add-tier staging     # staging tier を追加
-  ~/sf-tools/bin/sf-init.sh --add-tier develop     # develop tier を追加
-  ~/sf-tools/bin/sf-init.sh --remove-tier develop  # develop tier を外す（branches.txt の行を消す PR を作る）
-  ~/sf-tools/bin/sf-init.sh --remove-tier develop --purge-secrets  # 外したあと（PR のマージ後）に、接続情報を消す
-  ~/sf-tools/bin/sf-init.sh --reconnect main       # main の接続先（Salesforce 組織）を付け替える
-  ~/sf-tools/bin/sf-init.sh --status               # セットアップの診断と、段階ごとの接続先を一覧にする
-  ~/sf-tools/bin/sf-init.sh --verify               # 動作の確認（Hello World を、各段階にリリースして、削除する。--plan / --cleanup / --no-metasync）
-  ~/sf-tools/bin/sf-init.sh --verify --components  # パターン別のサンプルを、develop の組織だけに、リリースして、削除する（--validate-only: 検証のみ）
-  ~/sf-tools/bin/sf-init.sh --verify --components --with-objects  # オブジェクト系も、リリースして、削除する"
+  ~/sf-tools/bin/sf-project.sh                       # Phase 1〜10 を順次実行（途中で止まった状態があれば、続き / 最初からを選ぶ）
+  ~/sf-tools/bin/sf-project.sh --project XXXX         # プロジェクト名（force-XXXX の XXXX）を指定する（--owner でオーナーも指定できる）
+  ~/sf-tools/bin/sf-project.sh --resume N             # Phase N から最後まで順次実行（質問なし）
+  ~/sf-tools/bin/sf-project.sh --only N               # Phase N のみ実行
+  ~/sf-tools/bin/sf-project.sh --add-tier staging     # staging tier を追加
+  ~/sf-tools/bin/sf-project.sh --add-tier develop     # develop tier を追加
+  ~/sf-tools/bin/sf-project.sh --remove-tier develop  # develop tier を外す（branches.txt の行を消す PR を作る）
+  ~/sf-tools/bin/sf-project.sh --remove-tier develop --purge-secrets  # 外したあと（PR のマージ後）に、接続情報を消す
+  ~/sf-tools/bin/sf-project.sh --reconnect main       # main の接続先（Salesforce 組織）を付け替える
+  ~/sf-tools/bin/sf-project.sh --status               # セットアップの診断と、段階ごとの接続先を一覧にする
+  ~/sf-tools/bin/sf-project.sh --verify               # 動作の確認（Hello World を、各段階にリリースして、削除する。--plan / --cleanup / --no-metasync）
+  ~/sf-tools/bin/sf-project.sh --verify --components  # パターン別のサンプルを、develop の組織だけに、リリースして、削除する（--validate-only: 検証のみ）
+  ~/sf-tools/bin/sf-project.sh --verify --components --with-objects  # オブジェクト系も、リリースして、削除する"
             ;;
     esac
 done
@@ -435,7 +437,7 @@ FULL_START=0
 #   別のクローンに書き込む経路になる。作業フォルダ（sf-job.sh を実行する場所）で実行すること
 _cwd_top=$(git rev-parse --show-toplevel 2>/dev/null || true)  # VAR=$(cmd) のため run 不使用（Git の作業ツリーの外なら、空）
 if [[ "$(basename "$PWD")" == "admin" || "$(basename "$PWD")" == force-* || "$(basename "${_cwd_top:-.}")" == force-* ]]; then
-    die "sf-init.sh は、管理者用フォルダ（admin）・クローン（force-*）の中では実行できません: ${PWD}"
+    die "sf-project.sh は、管理者用フォルダ（admin）・クローン（force-*）の中では実行できません: ${PWD}"
 fi
 
 resolve_init_identity  # GITHUB_OWNER / COMPANY_NAME（XXXX）をセット（引数 → 対話）
@@ -527,7 +529,7 @@ export SF_INIT_ENV_FILE="${PWD}/.sf-init${_state_suffix}.env"
 # 進捗ファイル（成功した Phase を記録する。.sf-init-XXXX.env とは別にする: 書き換えるときに、外部コマンドを使わないため）
 export SF_INIT_PROGRESS_FILE="${PWD}/.sf-init${_state_suffix}.progress"
 
-# 同じプロジェクト（同じ admin フォルダ・同じ XXXX）の sf-init を、同時に 2 つ動かさない（状態ファイルの取り合い・重複作成を防ぐ）。
+# 同じプロジェクト（同じ admin フォルダ・同じ XXXX）の sf-project を、同時に 2 つ動かさない（状態ファイルの取り合い・重複作成を防ぐ）。
 #   ロックは、フォルダ（mkdir は、原子的）。中に、実行中の PID を書く。PID のプロセスが、もういなければ、古いロックとして引き継ぐ
 #   （強制終了・SIGTERM では、ロックが残るため）。終了時に、削除する（EXIT トラップ）。
 #   exec で実行しなおすとき（Phase 2 が終了コード 75 を返したとき）は、EXIT トラップが動かないため、exec の前に削除する
@@ -536,12 +538,12 @@ _init_lock_dir="${PWD}/.sf-init${_state_suffix}.lock"
 if ! mkdir "$_init_lock_dir" 2>/dev/null; then  # 条件チェックのため run 不使用（ロックの取得は、mkdir の成否で決まる）
     _init_lock_pid=$(cat "$_init_lock_dir/pid" 2>/dev/null || true)  # VAR=$(cmd) のため run 不使用
     if [[ "$_init_lock_pid" =~ ^[0-9]+$ ]] && kill -0 "$_init_lock_pid" 2>/dev/null; then  # 存在確認のため run 不使用
-        die "同じプロジェクト（${COMPANY_NAME}）の sf-init が、すでに実行中です（PID ${_init_lock_pid}。${_init_lock_dir}）。"
+        die "同じプロジェクト（${COMPANY_NAME}）の sf-project が、すでに実行中です（PID ${_init_lock_pid}。${_init_lock_dir}）。"
     fi
-    log "WARNING" "前回の sf-init の、古いロックを引き継ぎます（実行中のプロセスは、ありません）: ${_init_lock_dir}"
+    log "WARNING" "前回の sf-project の、古いロックを引き継ぎます（実行中のプロセスは、ありません）: ${_init_lock_dir}"
     run rm -rf "$_init_lock_dir" || die "古いロックを削除できません: ${_init_lock_dir}"  # 実行中のプロセスがいないことは確認済み
-    # 条件チェックのため run 不使用（ロックの取得は、mkdir の成否で決まる。失敗は、別の sf-init が先に取った場合）
-    mkdir "$_init_lock_dir" 2>/dev/null || die "ロックを取得できません（別の sf-init が、同時に、起動した可能性があります）: ${_init_lock_dir}"
+    # 条件チェックのため run 不使用（ロックの取得は、mkdir の成否で決まる。失敗は、別の sf-project が先に取った場合）
+    mkdir "$_init_lock_dir" 2>/dev/null || die "ロックを取得できません（別の sf-project が、同時に、起動した可能性があります）: ${_init_lock_dir}"
 fi
 echo "$$" > "$_init_lock_dir/pid"
 trap 'rm -rf "$_init_lock_dir"' EXIT
@@ -695,8 +697,8 @@ fi
 #   （[1] 接続を見る / [2] 動作を確認 / [3] 最初から）か、--reconnect を使う
 if [[ ( "$RESUME_PHASE" -gt 1 || -n "$ONLY_PHASE" ) ]] && _project_completed; then
     log "ERROR" "  このプロジェクト（${COMPLETED_REPO}）は、セットアップが、すでに完了しています。"
-    log "WARNING" "  接続先を付け替える        : force-* の中で sf-init.sh --reconnect <main|staging|develop>"
-    log "WARNING" "  いまの状態を見る・動作を確認する・最初からやり直す : --resume / --only を付けずに（--owner / --project は付けてよい）sf-init.sh を実行して、選んでください"
+    log "WARNING" "  接続先を付け替える        : force-* の中で sf-project.sh --reconnect <main|staging|develop>"
+    log "WARNING" "  いまの状態を見る・動作を確認する・最初からやり直す : --resume / --only を付けずに（--owner / --project は付けてよい）sf-project.sh を実行して、選んでください"
     die "完了済みのプロジェクトでは、--resume / --only は使えません。"
 fi
 
@@ -765,12 +767,12 @@ for phase_num in $PHASE_LIST; do
         if [[ -z "$ONLY_PHASE" && "$phase_num" -ge 3 ]]; then
             wizard_fail "「${WIZ_PHASE_TITLES[$phase_num]}」で、中断しました（上の表示を、確認してください）" \
                 "" \
-                "もう一度 sf-init.sh を実行し、「続きをやる」を選ぶと、「${WIZ_PHASE_TITLES[$phase_num]}」の最初から、再開します（ここまでの内容は、保存されています）"
+                "もう一度 sf-project.sh を実行し、「続きをやる」を選ぶと、「${WIZ_PHASE_TITLES[$phase_num]}」の最初から、再開します（ここまでの内容は、保存されています）"
         elif [[ -z "$ONLY_PHASE" ]]; then
             # 準備の確認・プロジェクトの確認: 保存された状態がないため、最初から、実行しなおす
             wizard_fail "「${WIZ_PHASE_TITLES[$phase_num]}」で、中断しました（上の表示を、確認してください）" \
                 "" \
-                "もう一度 sf-init.sh を実行してください（最初から、始まります）"
+                "もう一度 sf-project.sh を実行してください（最初から、始まります）"
         fi
         die "「${WIZ_PHASE_TITLES[$phase_num]}」が失敗しました。"
     fi
@@ -898,9 +900,9 @@ _admin_dir="${REPO_DIR:-${INIT_DIR}/force-${COMPANY_NAME}}"
 # 動作の確認の結果の行。$( ) の中に case を書かない（Bash 3.2 は、case の「)」を、$( ) の終わりと取り違える）
 case "$VERIFY_RESULT" in
     done)    _verify_line="4. 動作の確認: 成功しました（リリースと削除を、各段階の組織で確認済みです）" ;;
-    failed)  _verify_line="4. 動作の確認: 失敗した項目があります。上の [NG] を確認してください（削除のみのやり直し: sf-init.sh --verify --cleanup）" ;;
-    skipped) _verify_line="4. 動作の確認は、あとで行えます: 管理者用フォルダで、~/sf-tools/bin/sf-init.sh --verify（または、作業フォルダ（${INIT_BASE}）で、同じオーナー・プロジェクト名で sf-init.sh を再実行して、2 を選ぶ）" ;;
-    *)       _verify_line="4. 動作の確認は、あとで行えます: 管理者用フォルダで、~/sf-tools/bin/sf-init.sh --verify" ;;
+    failed)  _verify_line="4. 動作の確認: 失敗した項目があります。上の [NG] を確認してください（削除のみのやり直し: sf-project.sh --verify --cleanup）" ;;
+    skipped) _verify_line="4. 動作の確認は、あとで行えます: 管理者用フォルダで、~/sf-tools/bin/sf-project.sh --verify（または、作業フォルダ（${INIT_BASE}）で、同じオーナー・プロジェクト名で sf-project.sh を再実行して、2 を選ぶ）" ;;
+    *)       _verify_line="4. 動作の確認は、あとで行えます: 管理者用フォルダで、~/sf-tools/bin/sf-project.sh --verify" ;;
 esac
 # 最初のメタデータの同期の結果の行（行わなかったときは、その理由）
 case "$SYNC_RESULT" in

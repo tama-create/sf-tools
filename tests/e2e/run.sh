@@ -1,13 +1,13 @@
 #!/bin/bash
 # ==============================================================================
-# run.sh - sf-init の通し検証（e2e）。実際の GitHub / Salesforce で Phase 1〜10 を自動実行する
+# run.sh - sf-project の通し検証（e2e）。実際の GitHub / Salesforce で Phase 1〜10 を自動実行する
 # ==============================================================================
 # テスト用のリポジトリ（force-e2e-日時）と外部クライアントアプリを実際に作り、検証する（既定では、終了後も残し、次回の最初に削除する）。
 # 通常のテスト（bash tests/run_tests.sh）には含まれない。実環境を使うため、開発者が手動で実行する。
 #
 # 【処理の流れ】
 #   1. 前掃除      : 前回の失敗で残ったテスト用リソースを削除する（名前の形式とオーナーが一致するものだけ）
-#   2. 実行        : sf-init を Phase 1〜10 まで自動で実行する（既定は検証環境 = SF_TOOLS_BRANCH=development。
+#   2. 実行        : sf-project を Phase 1〜10 まで自動で実行する（既定は検証環境 = SF_TOOLS_BRANCH=development。
 #                    環境変数 E2E_TOOLS_BRANCH=main なら配布版 = Variable SF_TOOLS_BRANCH なし・Actions は sf-tools の main。層数は --layout で選ぶ。既定は main のみ）
 #                    ・既定は、引数なしの対話（管理者が実際に行う操作）: オーナーの選択 → XXXX の入力 → 確認を、標準入力で流す。
 #                      --with-args を付けると、引数 --owner / --project で指定する（対話の画面は通らない）
@@ -21,14 +21,14 @@
 #                    → ファイルを書く → sf-dryrun.sh（ローカルの検証）→ sf-push.sh（commit・push・pre-push フック）。PR の作成・マージは gh。
 #                    リリースが成功するたびに、PR の先端のコミットに、リリースの印（commit status: sf-tools/released-<段階>。
 #                    付けたのは github-actions[bot]）が付くことを確認する（一方通行の決まり。doc/one-way-promotion-design.md）。
-#                    リリース後は、sf-next.sh（全段階にリリース済みの表示）と、sf-deploy.sh（共有環境への強制リリースの拒否）も確認する。
+#                    リリース後は、sf-pr.sh（全段階にリリース済みの表示）と、sf-deploy.sh（共有環境への強制リリースの拒否）も確認する。
 #                    削除後は、同じ削除のジョブで、もう一度 sf-dryrun.sh を動かし、組織にない削除の対象を外して、成功することを確認する
 #                    【管理者用フォルダ（admin）の確認】 admin/force-XXXX ができたこと・状態ファイルがプロジェクト名つきであること・
 #                    古い形のフォルダ（init / init-*）がないこと・クローンが admin ブランチ（ローカルと GitHub の両方）であること・
-#                    完了画面の案内・admin ブランチで sf-sync-wf.sh --check が実行でき、main では断られること。
+#                    完了画面の案内・admin ブランチで sf-update-workflows.sh --check が実行でき、main では断られること。
 #                    sf-job.sh は、既定では引数なしで実行し、作業フォルダの下のクローンの git remote から、プロジェクトが決まること
 #                    【--add-tier の確認】 1 層のとき（鍵一式に staging の組織があれば）、最後に、管理者用のクローン（admin ブランチ）で
-#                    sf-init.sh --add-tier staging を実行し、組織への接続・Secret / Variable・ブランチ・PR ができること、
+#                    sf-project.sh --add-tier staging を実行し、組織への接続・Secret / Variable・ブランチ・PR ができること、
 #                    終わったあとも admin ブランチにいること、main へ直接 push していないことを確認する。そのあと、管理者と同じく、
 #                    その PR をマージし（--no-actions のときは、マージしない）、main の branches.txt に staging が入ること、
 #                    マージで動く wf-release（リリース対象なしでスキップ）が成功し、staging のブランチは変わらない（main からの伝播はしない）ことを確認する
@@ -59,7 +59,7 @@
 #   ・gh に delete_repo の権限があること: gh auth refresh -h github.com -s delete_repo
 #   ・~/sf-tools が development ブランチで、origin/development と一致していること
 #     （GitHub Actions は sf-tools の origin/development を使うため。E2E_TOOLS_BRANCH=main の配布版の確認では、origin/main を使うため不要）
-#   ・E2E_TOOLS_BRANCH（development または main。既定 development）: sf-init の版の選択に答える版。週 1 回の定期実行は main
+#   ・E2E_TOOLS_BRANCH（development または main。既定 development）: sf-project の版の選択に答える版。週 1 回の定期実行は main
 #     （利用者が受け取るものの見張り）。手元の sf-tools が main 以外のブランチのときは、Phase 2 の「ブランチ違い」の確認にも Y と答える
 #
 # 【関連】 管理者の実際のリポジトリ・実際の組織での検証は、phases/init/verify.sh（この e2e は、sf-tools の開発者の回帰テスト）
@@ -68,13 +68,13 @@
 #   --cleanup     : 終了時に、テスト用のものを削除する（既定は削除しない。次回の前掃除、または cleanup.sh で削除される）
 #   --keep        : 何もしない（以前の名残り。既定が「削除しない」になったため）
 #   --resume      : 前回残したテスト用リポジトリ（最新の 1 つ）を使い、Hello World の部分（sf-job → sf-dryrun → sf-push → PR → リリース → 削除、
-#                   sf-next・sf-deploy の確認）だけを再実行する。前掃除・sf-init・wf-metasync は、行わない（約 15 分。直しの確認を、早く繰り返すため）。
+#                   sf-pr・sf-deploy の確認）だけを再実行する。前掃除・sf-project・wf-metasync は、行わない（約 15 分。直しの確認を、早く繰り返すため）。
 #                   ジョブ名は、毎回、時刻付きの別の名前になる。前回の残りの Hello World の Apex が、組織にあれば、最初に削除する
 #   --no-add-tier : --add-tier の確認（1 層のとき、最後に staging を足し、その PR をマージする。約 6 分）を省略する
-#   --with-args   : sf-init.sh / sf-job.sh に、引数 --owner / --project を付けて実行する（既定は、引数なしの対話・自動判定）
+#   --with-args   : sf-project.sh / sf-job.sh に、引数 --owner / --project を付けて実行する（既定は、引数なしの対話・自動判定）
 #   --layout N    : 新しく作るリポジトリの層数（1 = main のみ（既定）/ 2 = main + staging / 3 = main + staging + develop）。
 #                   2・3 には、鍵一式に staging（3 は develop も）の組織が必要。--resume では、リポジトリの構成を、自動で判定する
-#   --interrupt   : sf-init を、わざと途中（Phase 8 の初回コミットの push）で失敗させ、「続きをやる」で再開してから、いつもの確認を行う（B1・X8-2 の実環境版）。
+#   --interrupt   : sf-project を、わざと途中（Phase 8 の初回コミットの push）で失敗させ、「続きをやる」で再開してから、いつもの確認を行う（B1・X8-2 の実環境版）。
 #                   git の shim（tests/e2e/shims/git）が、main への push を 1 回だけ失敗させる（ほかは本物の git）。中断した時点で、リポジトリがあり、main がなく、
 #                   進捗が Phase 7 まで、失敗の画面が復旧の手順を案内し、秘密が出ていないこと、再開後に、main のコミットが 1 つ（重複しない）で、
 #                   ほかの確認（Secret・Variable・ブランチ・ワークフロー・Actions）が、再開した状態で通ることを確認する。--resume とは、同時に指定できない
@@ -103,9 +103,9 @@ START_SEC=$SECONDS   # 経過時間の表示用
 KEEP=1   # 既定は、終了時に削除しない（あとから見返せるように。次回の前掃除で削除される）
 SKIP_ACTIONS=0
 RESUME=0
-INTERRUPT=0      # 1 = sf-init を Phase 8 の push で、わざと失敗させ、「続きをやる」で再開する（中断→再開の確認）
+INTERRUPT=0      # 1 = sf-project を Phase 8 の push で、わざと失敗させ、「続きをやる」で再開する（中断→再開の確認）
 ADD_TIER_CHECK=1 # 1 = 最後に、admin ブランチから --add-tier staging を実行して確認する（1 層で、staging の組織があるとき）
-WITH_ARGS=0      # 1 = sf-init / sf-job に、引数 --owner / --project を付ける（既定: 引数なし。対話と、クローンからの自動判定を確認する）
+WITH_ARGS=0      # 1 = sf-project / sf-job に、引数 --owner / --project を付ける（既定: 引数なし。対話と、クローンからの自動判定を確認する）
 LAYOUT=""        # 新しく作るリポジトリの層数（1 / 2 / 3）。--resume では、リポジトリの構成から判定する
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -126,7 +126,7 @@ if [[ -n "$LAYOUT" ]]; then
     [[ "$LAYOUT" =~ ^[123]$ ]] || die "--layout は、1・2・3 のいずれかです: ${LAYOUT}"
     [[ $RESUME -eq 0 ]] || die "--layout は、新しくリポジトリを作るときだけ指定できます（--resume では、リポジトリの構成を自動で判定します）。"
 fi
-[[ $INTERRUPT -eq 0 || $RESUME -eq 0 ]] || die "--interrupt は、新しくリポジトリを作るときだけ指定できます（--resume では、sf-init を実行しません）。"
+[[ $INTERRUPT -eq 0 || $RESUME -eq 0 ]] || die "--interrupt は、新しくリポジトリを作るときだけ指定できます（--resume では、sf-project を実行しません）。"
 [[ -n "$LAYOUT" ]] || LAYOUT=1
 e2e_load_fixture
 e2e_guard_env
@@ -143,7 +143,7 @@ fi
 # ------------------------------------------------------------------------------
 # 管理者向けの警告（実際のリポジトリ・組織を作成・削除する）
 # ------------------------------------------------------------------------------
-log "HEADER" "sf-init の通し検証（e2e）を開始します (${SCRIPT_NAME}.sh)"
+log "HEADER" "sf-project の通し検証（e2e）を開始します (${SCRIPT_NAME}.sh)"
 echo -e "${CLR_ERR}╔══════════════════════════════════════════════════════╗${CLR_RESET}" >&2
 echo -e "${CLR_ERR}║  !!  実際の GitHub / Salesforce を操作します         ║${CLR_RESET}" >&2
 echo -e "${CLR_ERR}║                                                      ║${CLR_RESET}" >&2
@@ -154,13 +154,13 @@ echo -e "${CLR_ERR}║    前回の残りは、最初に削除します         
 echo -e "${CLR_ERR}║  ・sf の認証が、テスト用組織の認証 URL で置き換わり  ║${CLR_RESET}" >&2
 echo -e "${CLR_ERR}╚══════════════════════════════════════════════════════╝${CLR_RESET}" >&2
 log "INFO" "  オーナー: ${E2E_OWNER}  /  gh ユーザー: ${E2E_GH_USER}"
-# sf-init の版の選択に答える版（E2E_TOOLS_BRANCH。既定 development）。不正な値は、確認の前に止める
+# sf-project の版の選択に答える版（E2E_TOOLS_BRANCH。既定 development）。不正な値は、確認の前に止める
 TOOLS_BRANCH=$(e2e_tools_branch) || die "E2E_TOOLS_BRANCH は development または main にしてください（値: ${E2E_TOOLS_BRANCH:-}）。"  # VAR=$(cmd) のため run 不使用
 log "INFO" "  sf-tools の版: ${TOOLS_BRANCH}（GitHub Actions は origin/${TOOLS_BRANCH} の sf-tools を使います）"
 ask_yn "続行しますか？" || die "中断しました。"
 
 # 開発版: 手元の sf-tools が origin/development と違うと、GitHub Actions の確認結果が手元の変更を反映しない
-#   配布版（main）: Actions は origin/main を使う。手元の sf-tools は、クライアント側（sf-init など）の動作にだけ使われるため、この比較はしない
+#   配布版（main）: Actions は origin/main を使う。手元の sf-tools は、クライアント側（sf-project など）の動作にだけ使われるため、この比較はしない
 if [[ "$TOOLS_BRANCH" == "development" ]]; then
     _head=$(git -C "$SF_TOOLS_ROOT" rev-parse HEAD 2>/dev/null)                 # VAR=$(cmd) のため run 不使用
     _origin=$(git -C "$SF_TOOLS_ROOT" rev-parse origin/development 2>/dev/null)  # VAR=$(cmd) のため run 不使用
@@ -213,7 +213,7 @@ JOB_RELEASE="e2e-hello-${RUN_ID}"
 JOB_DELETE="e2e-hello-delete-${RUN_ID}"
 
 # ------------------------------------------------------------------------------
-# 1・2. 前掃除 → sf-init の実行（Phase 1〜10）。--resume のときは、前回残したリポジトリを使う
+# 1・2. 前掃除 → sf-project の実行（Phase 1〜10）。--resume のときは、前回残したリポジトリを使う
 # ------------------------------------------------------------------------------
 # 前回残したテスト用の作業フォルダ（名前が決まった形式のもののうち、最新の 1 つ）の名前を、標準出力に返す。なければ、戻り値 1
 #   名前は、日時（e2e-YYYYMMDD-HHMMSS）なので、フォルダ名の並び順が、新しい順になる
@@ -228,9 +228,9 @@ _set_project() {   # 引数: プロジェクト名。PROJECT / REPO_NAME / REPO_
     [[ $WITH_ARGS -eq 0 ]] || JOB_ARGS=(--owner "$E2E_OWNER" --project "$PROJECT")
 }
 
-# --interrupt の 1 回目: git の shim で、main への push を 1 回だけ失敗させて、sf-init を、Phase 8 で止める。
+# --interrupt の 1 回目: git の shim で、main への push を 1 回だけ失敗させて、sf-project を、Phase 8 で止める。
 #   止まった時点の状態（リポジトリ・main・進捗）を、MID_* に記録する（再開すると、変わるため。確認は、あとで chk で行う）
-#   引数: 先頭の入力（オーナーの選択など。空でもよい） [sf-init への引数...]
+#   引数: 先頭の入力（オーナーの選択など。空でもよい） [sf-project への引数...]
 MID_RC1=""; MID_OUT1=""; MID_PUSH_BLOCKED=0; MID_REPO_EXISTS=0; MID_MAIN_EXISTS=0; MID_PROGRESS=""
 _interrupt_first_run() {
     local ident="$1"; shift
@@ -243,7 +243,7 @@ _interrupt_first_run() {
     log "HEADER" "（中断→再開）1 回目: Phase 8 の push を、わざと失敗させます"
     { [[ -z "$ident" ]] || printf '%s\n' "$ident"; e2e_make_input "$LAYOUT"; } \
         | ( cd "$WORK" && E2E_REAL_GIT="$real_git" E2E_GIT_FAIL_MARK="$mark" PATH="${gdir}:${SHIM_DIR}:${PATH}" \
-            bash "${SF_TOOLS_ROOT}/bin/sf-init.sh" "$@" 2>&1 ) \
+            bash "${SF_TOOLS_ROOT}/bin/sf-project.sh" "$@" 2>&1 ) \
         | tee "$MID_OUT1"
     MID_RC1=${PIPESTATUS[1]}
     [[ -e "$mark" ]] && MID_PUSH_BLOCKED=1
@@ -251,7 +251,7 @@ _interrupt_first_run() {
     _e2e_gh repo view "$REPO_FULL" >/dev/null 2>&1 && MID_REPO_EXISTS=1  # 戻り値で判定するため run 不使用
     _e2e_gh api "repos/${REPO_FULL}/branches/main" >/dev/null 2>&1 && MID_MAIN_EXISTS=1  # 戻り値で判定するため run 不使用
     MID_PROGRESS=$(sed -n 's/^SF_INIT_DONE_PHASE=//p' "${WORK}/admin/.sf-init-${PROJECT}.progress" 2>/dev/null | head -1)  # VAR=$(cmd) のため run 不使用
-    _elapsed "sf-init（1 回目。わざと失敗）の終了"
+    _elapsed "sf-project（1 回目。わざと失敗）の終了"
 }
 
 _fresh_start() {
@@ -259,8 +259,8 @@ _fresh_start() {
     _set_project "$(e2e_new_project_name)"
     run mkdir -p "$WORK" || die "作業フォルダを作成できません: ${WORK}"
 
-    log "HEADER" "sf-init を実行します（${REPO_FULL}。${LAYOUT} 層）"
-    INIT_OUT="${E2E_TMP}/sf-init.out"
+    log "HEADER" "sf-project を実行します（${REPO_FULL}。${LAYOUT} 層）"
+    INIT_OUT="${E2E_TMP}/sf-project.out"
     # 既定は、引数なしの対話: 先頭に、オーナーの選択・XXXX・確認の入力を足す。--with-args は、引数で指定する
     local _init_args=() _ident_input=""
     if [[ $WITH_ARGS -eq 1 ]]; then
@@ -271,20 +271,20 @@ _fresh_start() {
     fi
     if [[ $INTERRUPT -eq 1 ]]; then
         _interrupt_first_run "$_ident_input" "${_init_args[@]+"${_init_args[@]}"}"
-        log "HEADER" "sf-init を再開します（「続きをやる」を選びます）"
+        log "HEADER" "sf-project を再開します（「続きをやる」を選びます）"
         # 再開の入力: [オーナーの選択・XXXX・確認] → 管理者向けの警告の確認 Y → 「続きをやる」1 → Phase 10 のログイン先（段階の数だけ 1）
         { [[ -z "$_ident_input" ]] || printf '%s\n' "$_ident_input"; printf '%s\n' "Y" "1"; local _i; for ((_i = 1; _i <= LAYOUT; _i++)); do printf '%s\n' "1"; done; } \
-            | ( cd "$WORK" && PATH="${SHIM_DIR}:${PATH}" bash "${SF_TOOLS_ROOT}/bin/sf-init.sh" ${_init_args[@]+"${_init_args[@]}"} 2>&1 ) \
+            | ( cd "$WORK" && PATH="${SHIM_DIR}:${PATH}" bash "${SF_TOOLS_ROOT}/bin/sf-project.sh" ${_init_args[@]+"${_init_args[@]}"} 2>&1 ) \
             | tee "$INIT_OUT"
         INIT_RC=${PIPESTATUS[1]}
-        _elapsed "sf-init（再開）の終了"
+        _elapsed "sf-project（再開）の終了"
         return 0
     fi
     { [[ -z "$_ident_input" ]] || printf '%s\n' "$_ident_input"; e2e_make_input "$LAYOUT"; } \
-        | ( cd "$WORK" && PATH="${SHIM_DIR}:${PATH}" bash "${SF_TOOLS_ROOT}/bin/sf-init.sh" ${_init_args[@]+"${_init_args[@]}"} 2>&1 ) \
+        | ( cd "$WORK" && PATH="${SHIM_DIR}:${PATH}" bash "${SF_TOOLS_ROOT}/bin/sf-project.sh" ${_init_args[@]+"${_init_args[@]}"} 2>&1 ) \
         | tee "$INIT_OUT"
     INIT_RC=${PIPESTATUS[1]}
-    _elapsed "sf-init の終了"
+    _elapsed "sf-project の終了"
 }
 
 _resume_start() {
@@ -295,7 +295,7 @@ _resume_start() {
     _e2e_check_repo "$REPO_FULL"
     _e2e_gh repo view "$REPO_FULL" >/dev/null 2>&1 || die "再開できるリポジトリがありません: ${REPO_FULL}"  # 戻り値で判定するため run 不使用
     log "INFO" "  リポジトリ: https://github.com/${REPO_FULL}"
-    log "INFO" "  前掃除・sf-init・wf-metasync は、行いません。Hello World の部分だけを、再実行します。"
+    log "INFO" "  前掃除・sf-project・wf-metasync は、行いません。Hello World の部分だけを、再実行します。"
     INIT_OUT=""
     INIT_RC=0
 }
@@ -394,7 +394,7 @@ _hello_local_job() {
     # 引数なしのとき: 作業フォルダの下のクローンの git remote から、プロジェクトが決まった（入力なしで、先へ進んだ）
     [[ $WITH_ARGS -eq 1 ]] || chk "${label}: sf-job.sh は、引数なしで、作業フォルダの下のクローンから、プロジェクトを決めた" \
         grep -qF "このフォルダの下のクローンから取得" "${E2E_TMP}/sf-job-${job}.out"
-    chk "${label}: sf-install.sh（sf-start.sh が背景で実行）が完了した" e2e_wait_sf_install "$repo" || return 1
+    chk "${label}: sf-refresh.sh（sf-start.sh が背景で実行）が完了した" e2e_wait_sf_install "$repo" || return 1
     chk "${label}: Git フック（pre-push）が設置された" test -f "${repo}/.git/hooks/pre-push"
     chk "${label}: リリース管理フォルダ release/${job}/ が用意された（雛形）" \
         test -f "${repo}/sf-tools/release/${job}/deploy-target.txt" -a -f "${repo}/sf-tools/release/${job}/remove-target.txt" || return 1
@@ -464,12 +464,12 @@ _hello_pr_flow() {
     return 0
 }
 
-# sf-next.sh: リリースしたジョブのクローンで実行し、全段階にリリース済みと表示されること（質問には N で答える）
+# sf-pr.sh: リリースしたジョブのクローンで実行し、全段階にリリース済みと表示されること（質問には N で答える）
 #   引数: クローンのフォルダ [段階の数（既定 1）]。段階の数以上の行に、「リリース済み（このコミット）」と表示されること
 _hello_sf_next() {
-    e2e_run_sf_cmd "sf-next" "$1" "N\n" "${SF_TOOLS_ROOT}/bin/sf-next.sh" \
-        && grep -qF "全段階にリリース済みです" "${E2E_TMP}/sf-next.out" \
-        && [[ "$(grep -c "リリース済み（このコミット）" "${E2E_TMP}/sf-next.out")" -ge "${2:-1}" ]]
+    e2e_run_sf_cmd "sf-pr" "$1" "N\n" "${SF_TOOLS_ROOT}/bin/sf-pr.sh" \
+        && grep -qF "全段階にリリース済みです" "${E2E_TMP}/sf-pr.out" \
+        && [[ "$(grep -c "リリース済み（このコミット）" "${E2E_TMP}/sf-pr.out")" -ge "${2:-1}" ]]
 }
 # sf-deploy.sh: 予約名の組織へのローカルからの強制リリースは、確認の前に拒否される（終了コード 0 以外、拒否の文言、デプロイしない）
 #   予約名は main を使う（開発者の本物の組織に付いていることがある prod / staging / develop は、避ける。
@@ -619,7 +619,7 @@ _hello_flow() {
 
     # 通常の運用で使う、そのほかの sf-tools のコマンド（リリースしたジョブのクローンで実行する）
     repo="${WORK}/${JOB_RELEASE}/${REPO_NAME}"
-    chk "sf-next.sh: 全段階にリリース済みと表示する（このコミットに、全段階の印がある）" _hello_sf_next "$repo" "$n"
+    chk "sf-pr.sh: 全段階にリリース済みと表示する（このコミットに、全段階の印がある）" _hello_sf_next "$repo" "$n"
     chk "sf-deploy.sh: 共有環境（予約名 main）へのローカルからの強制リリースを、拒否する" _hello_deploy_refused "$repo"
 
     # 削除: リリースと同じく、同じブランチから、develop → staging → main の順に、段階ごとの PR（remove-target.txt）で行う（一方通行の決まり）
@@ -658,8 +658,8 @@ _add_tier_check() {
     main_before=$(_main_sha)  # VAR=$(cmd) のため run 不使用
     chk "add-tier: 実行前、管理者用のクローンは admin ブランチにいる" _admin_branch_is admin
     # 入力: 続行（Y）→ ログイン先（1 = login.salesforce.com。e2e では、認証 URL でログインするため、選んだ URL は、使われない）
-    chk "add-tier: sf-init.sh --add-tier ${t} が成功した（組織への接続・ブランチ・PR）" \
-        e2e_run_sf_cmd "sf-init-add-tier" "$_ADMIN_CLONE" "Y\n1\n" "${SF_TOOLS_ROOT}/bin/sf-init.sh" --add-tier "$t" || return 0
+    chk "add-tier: sf-project.sh --add-tier ${t} が成功した（組織への接続・ブランチ・PR）" \
+        e2e_run_sf_cmd "sf-init-add-tier" "$_ADMIN_CLONE" "Y\n1\n" "${SF_TOOLS_ROOT}/bin/sf-project.sh" --add-tier "$t" || return 0
     chk "add-tier: 終わったあとも、admin ブランチにいる（main に居座らない）" _admin_branch_is admin
     chk "add-tier: GitHub に ${t} ブランチができた" _has_branch "$t"
     chk "add-tier: Secret SF_CONSUMER_KEY_${sfx} が登録された" _has_secret "SF_CONSUMER_KEY_${sfx}"
@@ -696,7 +696,7 @@ _main_branches_has() {
 log "HEADER" "確認"
 # 中断→再開（--interrupt）: 止まった時点の状態と、再開が正しかったこと
 if [[ $INTERRUPT -eq 1 ]]; then
-    chk "（中断→再開）1 回目の sf-init は、push の失敗で、失敗した（終了コード ${MID_RC1}）" test "${MID_RC1:-0}" -ne 0
+    chk "（中断→再開）1 回目の sf-project は、push の失敗で、失敗した（終了コード ${MID_RC1}）" test "${MID_RC1:-0}" -ne 0
     chk "（中断→再開）git の shim が、main への push を 1 回だけ止めた" test "$MID_PUSH_BLOCKED" -eq 1
     chk "（中断→再開）失敗の画面に、復旧の手順（「続きをやる」を選ぶ）が案内された" grep -qF "「続きをやる」を選ぶと" "$MID_OUT1"
     chk "（中断→再開）中断した時点で、リポジトリは作成済み（作成後の失敗）" test "$MID_REPO_EXISTS" -eq 1
@@ -706,10 +706,10 @@ if [[ $INTERRUPT -eq 1 ]]; then
     chk "（中断→再開）1 回目の出力に、Slack Token が出ていない" _not_in_file "$E2E_SLACK_BOT_TOKEN" "$MID_OUT1"
     chk "（中断→再開）1 回目の出力に、認証 URL が出ていない" _not_in_file "$E2E_SFDX_AUTH_URL" "$MID_OUT1"
     chk "（中断→再開）再開の画面に、前回の続きの案内が出た（前回のセットアップは）" grep -qF "前回のセットアップは" "$INIT_OUT"
-    # sf-init は、初回コミット（chore: sf-tools 初期セットアップ）のあと、最初の同期のコミット（定期更新）も作る。重複を疑うのは、初回コミットが 2 つ以上あるとき
+    # sf-project は、初回コミット（chore: sf-tools 初期セットアップ）のあと、最初の同期のコミット（定期更新）も作る。重複を疑うのは、初回コミットが 2 つ以上あるとき
     chk "（中断→再開）再開で、初回コミットは 1 つ（重複しない）"         test "$(_e2e_gh api "repos/${REPO_FULL}/commits?sha=main&per_page=100" --jq '[.[] | select(.commit.message | startswith("chore: sf-tools 初期セットアップ"))] | length' 2>/dev/null | tr -d '[:space:]')" == "1"
 fi
-[[ $RESUME -eq 1 ]] || chk "sf-init が正常終了した（終了コード ${INIT_RC}）" test "$INIT_RC" -eq 0   # --resume では、sf-init を実行しない
+[[ $RESUME -eq 1 ]] || chk "sf-project が正常終了した（終了コード ${INIT_RC}）" test "$INIT_RC" -eq 0   # --resume では、sf-project を実行しない
 
 # リポジトリの構成（層数）を、ブランチから判定する。TIERS は、リリースの順（develop → staging → main）
 #   LAYOUT_DETECTED: 1 = main のみ / 2 = main + staging / 3 = main + staging + develop
@@ -779,15 +779,15 @@ if [[ "$INIT_RC" -eq 0 ]]; then
         chk "完了後、状態ファイル（.sf-init-${PROJECT}.env / .progress）が、admin から消えている" \
             test ! -e "$_ADMIN_ENV" -a ! -e "$_ADMIN_PROGRESS"
         chk "admin に、状態ファイルの残骸（.sf-init-*）がない" _no_state_files
-        # 完了済みの判定は、クローンで行う: 同じオーナー・XXXX で、もう一度 sf-init.sh を実行すると、完了済みの案内が出る
+        # 完了済みの判定は、クローンで行う: 同じオーナー・XXXX で、もう一度 sf-project.sh を実行すると、完了済みの案内が出る
         #   （対話では、すでにあるプロジェクトでも、admin のクローンがあれば、受け付ける。入力: [オーナーの番号] XXXX、Y（続行の確認）、q（終了））
         if [[ $WITH_ARGS -eq 1 ]]; then
             _rerun_input="Y\nq\n"; _rerun_args=(--owner "$E2E_OWNER" --project "$PROJECT")
         else
             _rerun_input="$(e2e_make_identity_input "$E2E_OWNER" "$PROJECT" | awk '{ printf "%s\\n", $0 }')q\n"; _rerun_args=()
         fi
-        chk "完了済みのプロジェクトで、sf-init.sh をもう一度実行すると、完了済みの案内が出る（クローンで判定）" \
-            e2e_run_sf_cmd "sf-init-rerun" "$WORK" "$_rerun_input" "${SF_TOOLS_ROOT}/bin/sf-init.sh" ${_rerun_args[@]+"${_rerun_args[@]}"}
+        chk "完了済みのプロジェクトで、sf-project.sh をもう一度実行すると、完了済みの案内が出る（クローンで判定）" \
+            e2e_run_sf_cmd "sf-init-rerun" "$WORK" "$_rerun_input" "${SF_TOOLS_ROOT}/bin/sf-project.sh" ${_rerun_args[@]+"${_rerun_args[@]}"}
         chk "完了済みの案内の文言が出た（セットアップが、すでに完了しています）" grep -qF "セットアップが、すでに完了しています" "${E2E_TMP}/sf-init-rerun.out"
         chk "案内を終了（q）しても、状態ファイルは作られない（何も実行されていない）" _no_state_files
         chk "古い形のフォルダ（init / init-*）ができていない" _no_old_style_dirs
@@ -805,19 +805,19 @@ if [[ "$INIT_RC" -eq 0 ]]; then
         chk "GitHub の main に、同期のコミット（定期更新: Salesforce変更の自動反映）がある" _main_has_sync_commit
         chk "ローカルの main が、origin/main と一致している（同期した内容を、取り込み済み）" _local_main_is_remote
         [[ $WITH_ARGS -eq 1 ]] || chk "対話: 「force- は自動で付く。XXXX の部分だけ入力」の案内が出た" _in_init_out "XXXX の部分だけを入力してください"
-        # sf-sync-wf.sh: admin ブランチでは実行できる（--check は、読み取りのみ）。main（保護ブランチ）では断られる
-        chk "admin ブランチで、sf-sync-wf.sh --check が実行できる" \
-            e2e_run_sf_cmd "sf-sync-wf-admin" "$_ADMIN_CLONE" "" "${SF_TOOLS_ROOT}/bin/sf-sync-wf.sh" --check
+        # sf-update-workflows.sh: admin ブランチでは実行できる（--check は、読み取りのみ）。main（保護ブランチ）では断られる
+        chk "admin ブランチで、sf-update-workflows.sh --check が実行できる" \
+            e2e_run_sf_cmd "sf-sync-wf-admin" "$_ADMIN_CLONE" "" "${SF_TOOLS_ROOT}/bin/sf-update-workflows.sh" --check
         if chk "管理者用のクローンを、一時的に main に切り替えた（確認のため）" git -C "$_ADMIN_CLONE" checkout -q main; then
-            chk "main ブランチ（保護ブランチ）では、sf-sync-wf.sh が断られる" \
-                e2e_run_sf_cmd_refused "sf-sync-wf-main" "$_ADMIN_CLONE" "" "${SF_TOOLS_ROOT}/bin/sf-sync-wf.sh" --check
+            chk "main ブランチ（保護ブランチ）では、sf-update-workflows.sh が断られる" \
+                e2e_run_sf_cmd_refused "sf-sync-wf-main" "$_ADMIN_CLONE" "" "${SF_TOOLS_ROOT}/bin/sf-update-workflows.sh" --check
             chk "断られた理由が、保護ブランチ（環境ブランチ）である" grep -qF "では実行できません" "${E2E_TMP}/sf-sync-wf-main.out"
             chk "管理者用のクローンを、admin ブランチに戻した" git -C "$_ADMIN_CLONE" checkout -q admin
         fi
     fi
 
-    # トークンが、sf-init の出力・ログに出ていないこと
-    for _f in "$INIT_OUT" "$HOME/sf-tools/logs/sf-init.log" "$HOME/sf-tools/logs/error.log"; do
+    # トークンが、sf-project の出力・ログに出ていないこと
+    for _f in "$INIT_OUT" "$HOME/sf-tools/logs/sf-project.log" "$HOME/sf-tools/logs/error.log"; do
         chk "PAT_TOKEN の値が $(basename "$_f") に出ていない"      _not_in_file "$E2E_PAT_TOKEN"       "$_f"
         chk "SLACK_BOT_TOKEN の値が $(basename "$_f") に出ていない" _not_in_file "$E2E_SLACK_BOT_TOKEN" "$_f"
         chk "認証 URL が $(basename "$_f") に出ていない"            _not_in_file "$E2E_SFDX_AUTH_URL"   "$_f"

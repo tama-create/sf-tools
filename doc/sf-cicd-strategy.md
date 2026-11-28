@@ -20,7 +20,7 @@ Salesforce メタデータの「パッチ形式」の特性を最大限に活か
 ### 2.1 ブランチ構成の動的設定（branches.txt）
 
 ブランチ階層は、各プロジェクト（force-*）の `sf-tools/config/branches.txt` で **プロジェクトごとに設定可能**。
-`sf-init` が作る（Phase 4 で雛形 `templates/sf-tools/config/branches.txt` をコピーし、Phase 5 で選んだ構成に書き直す。リモートのブランチは Phase 8 が作る）。あとから階層を足すときは `sf-init.sh --add-tier staging|develop`。日常の `sf-install.sh` は、branches.txt がなければ、生成せずに中断する（プロジェクトの破損として扱う）。
+`sf-project` が作る（Phase 4 で雛形 `templates/sf-tools/config/branches.txt` をコピーし、Phase 5 で選んだ構成に書き直す。リモートのブランチは Phase 8 が作る）。あとから階層を足すときは `sf-project.sh --add-tier staging|develop`。日常の `sf-refresh.sh` は、branches.txt がなければ、生成せずに中断する（プロジェクトの破損として扱う）。
 
 | パターン | branches.txt | 用途 |
 | :--- | :--- | :--- |
@@ -44,7 +44,7 @@ main は必須。develop を使う場合は staging も必須（雛形のコメ�
 
 ### 2.3 プロジェクトの作成（管理者が先）
 
-プロジェクト（`force-XXXX`）は、**管理者が先に** `sf-init.sh` で作る（リポジトリ・ワークフロー・ブランチ・Ruleset・Secrets / Variables・組織への JWT 接続・最初のメタデータの同期）。管理者用のクローンは `admin/force-XXXX`（`admin` ブランチ。日常の開発には使わない）。
+プロジェクト（`force-XXXX`）は、**管理者が先に** `sf-project.sh` で作る（リポジトリ・ワークフロー・ブランチ・Ruleset・Secrets / Variables・組織への JWT 接続・最初のメタデータの同期）。管理者用のクローンは `admin/force-XXXX`（`admin` ブランチ。日常の開発には使わない）。
 
 開発者は、管理者から完成の連絡を受けてから、`sf-job.sh` で作業を始める。リポジトリがまだなければ、`sf-job.sh` は中断するため、**管理者と開発者の作業は、並行して進められない**（詳細は `doc/dev-reference.md` の 4.13・8）。
 
@@ -75,7 +75,7 @@ JOB-xxx ──→ main      （本番組織へリリース）
 - **R2 積み重ね**: wf-validate が、同じブランチから前に同じ段階へ出した（まだ main まで届いていない）リリースの部品が、今回の宣言に全部あるかを確かめる（dry-run の前。破ればジョブ「デプロイ検証」が失敗）
 - **R3 環境ブランチ**: 環境ブランチからの PR は失敗（3.4）
 - **最後の守り**: wf-release は、マージのあと、R0〜R3 をすべて確かめ直し、破っていれば組織へ出さない（Ruleset が効かない組織でも、組織を守る）。wf-release の手動の実行（workflow_dispatch）は、なくした
-- 開発者が `sf-next.sh` を使う限り、順序は守られる（3.3）
+- 開発者が `sf-pr.sh` を使う限り、順序は守られる（3.3）
 
 **段階の並びは、常に `origin/main` の branches.txt で決める**（`get_tier_list --strict`。読めない・構成が正しくないときは止める）。
 
@@ -84,9 +84,9 @@ JOB-xxx ──→ main      （本番組織へリリース）
 | staging への PR | PR の先端のコミットに、develop のリリースの印があるか |
 | main への PR | PR の先端のコミットに、staging のリリースの印があるか（staging の印は、develop の印があるコミットにしか付かない） |
 
-### 3.3 sf-next.sh（次のPR先の自動判定）
+### 3.3 sf-pr.sh（次のPR先の自動判定）
 
-`sf-next.sh`（ランチャーの 5 PullRequest）を実行すると、現在のブランチの**先端のコミット**が、どの段階まで出たかを確かめ、次に PR を出してよい段階を表示する。Y 入力でブラウザのPR作成画面を直接開く（PR そのものは作らない）。保護ブランチ（branches.txt のブランチ）・detached HEAD の上では、エラーで終了する。判定は `sf-promote-check.sh --plan` に任せる（自分では計算しない）。詳細は `doc/dev-reference.md` の 4.5。
+`sf-pr.sh`（ランチャーの 5 PullRequest）を実行すると、現在のブランチの**先端のコミット**が、どの段階まで出たかを確かめ、次に PR を出してよい段階を表示する。Y 入力でブラウザのPR作成画面を直接開く（PR そのものは作らない）。保護ブランチ（branches.txt のブランチ）・detached HEAD の上では、エラーで終了する。判定は `sf-promote-check.sh --plan` に任せる（自分では計算しない）。詳細は `doc/dev-reference.md` の 4.5。
 
 **判定:** 段階を下から順に見て、先端のコミットに印がない最初の段階を「次のPR先」にする（全部にあれば完了）。develop に出したあとで変更して push すると、先端のコミットが変わるため、次の PR 先は develop に戻る。次の PR 先で R2 も確かめ、破っていれば PR を勧めない。
 
@@ -119,9 +119,9 @@ JOB-xxx ──→ main      （本番組織へリリース）
 - develop → main
 - staging → main
 
-実際にマージを止めるのは、`sf-init` の Phase 9 が作る Ruleset（`protect-main` / `protect-staging`）の必須チェック（4.2）。Ruleset を作れなかった場合（無料プランの Private リポジトリなど）は、失敗の表示だけで、マージは止まらない（レビュアーが却下する）。リポジトリの Admin は、Ruleset をバイパスできる。
+実際にマージを止めるのは、`sf-project` の Phase 9 が作る Ruleset（`protect-main` / `protect-staging`）の必須チェック（4.2）。Ruleset を作れなかった場合（無料プランの Private リポジトリなど）は、失敗の表示だけで、マージは止まらない（レビュアーが却下する）。リポジトリの Admin は、Ruleset をバイパスできる。
 
-**環境ブランチへの直接プッシュの禁止:** ローカルでは、pre-push フック（3.5）が、保護ブランチ（branches.txt のブランチ。ファイルがない・空なら main）の上からのプッシュと、保護ブランチへのプッシュ（`git push origin feature:main`・削除を含む）を拒否する。`sf-push.sh`・`sf-next.sh` も、保護ブランチの上では実行できない。サーバー側では、Ruleset の必須チェックを満たさない main / staging への push が拒否される（そのため、`wf-metasync`・`wf-propagate` は `PAT_TOKEN` でバイパスする）。
+**環境ブランチへの直接プッシュの禁止:** ローカルでは、pre-push フック（3.5）が、保護ブランチ（branches.txt のブランチ。ファイルがない・空なら main）の上からのプッシュと、保護ブランチへのプッシュ（`git push origin feature:main`・削除を含む）を拒否する。`sf-push.sh`・`sf-pr.sh` も、保護ブランチの上では実行できない。サーバー側では、Ruleset の必須チェックを満たさない main / staging への push が拒否される（そのため、`wf-metasync`・`wf-propagate` は `PAT_TOKEN` でバイパスする）。
 
 ### 3.5 ローカルでのプッシュ前チェック（pre-push フック）
 
@@ -130,7 +130,7 @@ JOB-xxx ──→ main      （本番組織へリリース）
 2. `sf-check.sh` でターゲットファイルを検証する（エラーなら中止）
 3. リモートの最新 `origin/<現在のブランチ>` と `origin/main`（自動更新された本番の状態）に未取り込みのコミットがあれば、merge で取り込む。取り込んだときは、**そのプッシュを中止する**（git はフックの前にプッシュするコミットを決めているため）。もう一度プッシュすると通る
 
-フック（pre-commit / pre-push）は、`sf-install.sh`（`sf-start.sh` がバックグラウンドで実行する）が `sf-hook.sh` で自動インストールする。pre-commit も、`sf-check.sh` でターゲットファイルを検証する。`sf-metasync.sh` の push は、`--no-verify` でフックを通さない（詳細は `doc/dev-reference.md` の 4.3・4.12）。
+フック（pre-commit / pre-push）は、`sf-refresh.sh`（`sf-start.sh` がバックグラウンドで実行する）が `sf-hook.sh` で自動インストールする。pre-commit も、`sf-check.sh` でターゲットファイルを検証する。`sf-metasync.sh` の push は、`--no-verify` でフックを通さない（詳細は `doc/dev-reference.md` の 4.3・4.12）。
 
 ### 3.6 ローカルでの検証と、共有環境へのリリースの禁止
 
@@ -142,10 +142,10 @@ JOB-xxx ──→ main      （本番組織へリリース）
 ### 3.7 開発者の日々の流れ（ランチャー）
 
 1. `sf-job.sh`: ジョブ名を入力 → GitHub 上の `main` から作業用ブランチを作成 → `./{ジョブ名}/force-XXXX` にクローン → `sf-start.sh` を実行
-2. `sf-start.sh`: 組織に接続（個人用の Sandbox など）→ VS Code を起動 → バックグラウンドで `sf-install.sh`（フック・`sf-tools/release/<ブランチ>/`・ツールの更新）→ 前面でメニュー（ランチャー。`phases/start/launcher.sh`）を起動
-3. ランチャー（`sf-start.sh` が開くメニュー）: 1 Check（`sf-check.sh`）/ 2 Dryrun（`sf-dryrun.sh`）/ 3 Deploy（`sf-deploy.sh`）/ 4 Push（`sf-push.sh`）/ 5 PullRequest（`sf-next.sh`）/ 6 Start / 7 Restart（VS Code のターミナルでは 6・7 は出ない）
+2. `sf-start.sh`: 組織に接続（個人用の Sandbox など）→ VS Code を起動 → バックグラウンドで `sf-refresh.sh`（フック・`sf-tools/release/<ブランチ>/`・ツールの更新）→ 前面でメニュー（ランチャー。`phases/start/launcher.sh`）を起動
+3. ランチャー（`sf-start.sh` が開くメニュー）: 1 Check（`sf-check.sh`）/ 2 Dryrun（`sf-dryrun.sh`）/ 3 Deploy（`sf-deploy.sh`）/ 4 Push（`sf-push.sh`）/ 5 PullRequest（`sf-pr.sh`）/ 6 Start / 7 SwitchOrg（VS Code のターミナルでは 6・7 は出ない）
 4. `sf-push.sh`: `origin/main` を取り込み → カレント配下だけをコミット（`sf-check.sh` の検証のあと、VS Code でメッセージを入力）→ プッシュ
-5. `sf-next.sh`: 次の PR 先を判定して、PR の作成画面を開く（3.3）。PR のマージで、wf-release が対応する組織へリリースする
+5. `sf-pr.sh`: 次の PR 先を判定して、PR の作成画面を開く（3.3）。PR のマージで、wf-release が対応する組織へリリースする
 
 ---
 
@@ -153,18 +153,18 @@ JOB-xxx ──→ main      （本番組織へリリース）
 
 ### 4.1 セルフコンテインド WF パターン
 
-ワークフローの定義は各 Salesforce プロジェクト（force-*）の `.github/workflows/` に **内包**する（reusable workflow を呼ばない）。`sf-tools/templates/.github/workflows/` が唯一の正本であり、`sf-init` 実行時（Phase 3）にコピーされる。
+ワークフローの定義は各 Salesforce プロジェクト（force-*）の `.github/workflows/` に **内包**する（reusable workflow を呼ばない）。`sf-tools/templates/.github/workflows/` が唯一の正本であり、`sf-project` 実行時（Phase 3）にコピーされる。
 
 ```
 sf-tools（テンプレートの正本）                force-* リポジトリ（完全内包版）
-templates/.github/workflows/  ─sf-init→   .github/workflows/
+templates/.github/workflows/  ─sf-project→   .github/workflows/
 ├── wf-validate.yml                        ├── wf-validate.yml
 ├── wf-sequence.yml                        ├── wf-sequence.yml
 ├── wf-release.yml                         ├── wf-release.yml
 └── wf-metasync.yml                        └── wf-metasync.yml
 ```
 
-**設計理由:** reusable workflow を通じた sf-tools リポジトリへの依存をなくし、各プロジェクトのワークフローが独立して動作する。WF を変更する場合は `sf-tools/templates/` を更新し、`sf-sync-wf.sh` で各プロジェクトへ反映する（管理者が手動で実行し、作業用ブランチ → PR で入れる。詳細は `doc/wf-distribution-strategy.md`）。
+**設計理由:** reusable workflow を通じた sf-tools リポジトリへの依存をなくし、各プロジェクトのワークフローが独立して動作する。WF を変更する場合は `sf-tools/templates/` を更新し、`sf-update-workflows.sh` で各プロジェクトへ反映する（管理者が手動で実行し、作業用ブランチ → PR で入れる。詳細は `doc/wf-distribution-strategy.md`）。
 
 ただし、wf-validate・wf-release・wf-metasync は、実行のたびに、公開リポジトリの sf-tools を Token なしで clone し（Variable `SF_TOOLS_BRANCH` のブランチ。未設定なら `main`）、`sf-release.sh`・`sf-metasync.sh` を使う。そのため、スクリプトの修正は、sf-tools の `main` へのマージで、全プロジェクトにすぐ届く。配布済みの `force-*` に自動で届かないのは、WF 自体の変更だけ。
 
@@ -179,7 +179,7 @@ templates/.github/workflows/  ─sf-init→   .github/workflows/
 | **wf-release**（`[release] デプロイ`） | PR のマージで、一方通行の決まり（R0〜R3）を確かめ直し、対応組織へリリース → リリースの印 → Slack 通知 | マージは止められないが、破っていれば組織へ出さない（最後の守り） |
 | **wf-metasync**（`[metasync] メタ同期`） | 本番組織のメタデータを main へ定期同期 | — |
 
-**必須チェック:** Ruleset（`protect-main` / `protect-staging`。`sf-init` の Phase 9 が作る）に登録するのは、ワークフローの**ジョブ名だけ**（`対象ファイル確認`・`デプロイ検証`・`順序チェック`。正本は `lib/project.sh` の `required_status_check_names`）。`ワークフロー名 / ジョブ名` の形では永久に満たされず、PR がマージできなくなる。ジョブ名を変えるときは、既存の force-* の Ruleset も直す（食い違いは `sf-init.sh --status` が検出する。詳細は `doc/dev-reference.md` の 9.5）。デプロイ対象のない PR は、検証のジョブがスキップされ、必須チェックとしては成功として扱われる。
+**必須チェック:** Ruleset（`protect-main` / `protect-staging`。`sf-project` の Phase 9 が作る）に登録するのは、ワークフローの**ジョブ名だけ**（`対象ファイル確認`・`デプロイ検証`・`順序チェック`。正本は `lib/project.sh` の `required_status_check_names`）。`ワークフロー名 / ジョブ名` の形では永久に満たされず、PR がマージできなくなる。ジョブ名を変えるときは、既存の force-* の Ruleset も直す（食い違いは `sf-project.sh --status` が検出する。詳細は `doc/dev-reference.md` の 9.5）。デプロイ対象のない PR は、検証のジョブがスキップされ、必須チェックとしては成功として扱われる。
 
 ### 4.3 Slack 通知
 
@@ -230,7 +230,7 @@ main / staging への PR 時（opened / synchronize / reopened）にプロモー
 - 順序 OK → 正常終了（以前の ⛔ のコメントがあれば「✅ 問題ありません」に更新）
 - 判定は `sf-promote-check.sh --pr <番号> --only sequence --json`（PR の先端のコミットを `force-promote-check/` に取得して、その中で実行）
 
-**設計判断（2026-11-26 に変更）:** 順序は、開発者がランチャー（`sf-next.sh`）を使う限り守られる。以前は、ランチャーを使わずに GitHub 上で直接 PR を作った場合に、**レビュアーが気づける**ことを目的に、警告だけにしていた（Hotfix を妨げないため）。前の段階を飛ばしたリリースで本番だけが失敗した事故（force-test-win・PR #18）から、仕組みで止める形に変えた（`doc/one-way-promotion-design.md`）。以下は、以前の判断の記録（判定は、PR を作った時点で行う。push だけでは、どの段階へ出すか分からないため）。警告のみにして、設定ファイルやチェックの失敗は、設けない（Free プランの Private リポジトリでは、GitHub がマージを止められず、失敗にしても、却下するのは、レビュアーであるため。緊急の Hotfix も、妨げない）。
+**設計判断（2026-11-26 に変更）:** 順序は、開発者がランチャー（`sf-pr.sh`）を使う限り守られる。以前は、ランチャーを使わずに GitHub 上で直接 PR を作った場合に、**レビュアーが気づける**ことを目的に、警告だけにしていた（Hotfix を妨げないため）。前の段階を飛ばしたリリースで本番だけが失敗した事故（force-test-win・PR #18）から、仕組みで止める形に変えた（`doc/one-way-promotion-design.md`）。以下は、以前の判断の記録（判定は、PR を作った時点で行う。push だけでは、どの段階へ出すか分からないため）。警告のみにして、設定ファイルやチェックの失敗は、設けない（Free プランの Private リポジトリでは、GitHub がマージを止められず、失敗にしても、却下するのは、レビュアーであるため。緊急の Hotfix も、妨げない）。
 
 **テスト:** `tests/test_wf-sequence.sh`（YAML の判定スクリプトを取り出して、実際の git リポジトリで、全パターンを実行する）。
 
@@ -242,7 +242,7 @@ PR が main / staging / develop にマージされたあとに、マージ先ブ
 1. ジョブ「リリース対象確認」: ターゲットファイルに実質的な行がなければ、リリースをスキップする（Slack にも通知しない）
 2. ジョブ「リリース実行」: リリース先情報を GitHub Actions Summary に記録
 3. マージ先に応じた組織だけに JWT で認証（main → prod、staging → staging、develop → develop）
-4. `sf-tools/release/branch_name.txt` にソースブランチ名を書く（ローカルでは `sf-install.sh` が書く）
+4. `sf-tools/release/branch_name.txt` にソースブランチ名を書く（ローカルでは `sf-refresh.sh` が書く）
 5. **一方通行の確認（最後の守り）**: PR の先端のコミットを `force-promote-check/` に取得し、`sf-promote-check.sh --pr <番号>`（`--only` なし = R0〜R3）を実行する。破っていれば、組織へ出さずに失敗する
 6. `sf-release.sh --release --no-open --target <alias>` を実行
 7. 成功したら、PR の先端のコミットに、リリースの印（commit status `sf-tools/released-<段階>`）を付ける（3 回まで試し、だめならジョブを失敗にする。権限 `statuses: write`）
@@ -252,7 +252,7 @@ PR が main / staging / develop にマージされたあとに、マージ先ブ
 
 ### 5.4 wf-propagate（下流ブランチ伝播。2026-11-26 に廃止）
 
-**廃止した**（雛形から消した。既存の force-* は `sf-sync-wf.sh --remove wf-propagate.yml` で消す）。サーバーで全員のブランチへ一斉にマージすると、作業中の手元と食い違い、コンフリクトを解けないため。main の最新は、開発者の PC で `sf-push.sh` が取り込む。環境のブランチは、PR で上がってくる開発のブランチだけで更新され、main とずれてよい（組織と中身の一致は、上りの PR の一方通行の決まりで守る。`doc/one-way-promotion-design.md` 3.7）。以下は、以前の動きの記録。
+**廃止した**（雛形から消した。既存の force-* は `sf-update-workflows.sh --remove wf-propagate.yml` で消す）。サーバーで全員のブランチへ一斉にマージすると、作業中の手元と食い違い、コンフリクトを解けないため。main の最新は、開発者の PC で `sf-push.sh` が取り込む。環境のブランチは、PR で上がってくる開発のブランチだけで更新され、main とずれてよい（組織と中身の一致は、上りの PR の一方通行の決まりで守る。`doc/one-way-promotion-design.md` 3.7）。以下は、以前の動きの記録。
 
 以前の動き: main への PR マージ後に、下位ブランチへ変更を自動伝播していた（手動の workflow_dispatch もあった。main で実行したときだけ伝播した）。
 
@@ -274,7 +274,7 @@ develop / staging で並行開発中の変更と main の変更が同じ箇所�
 
 ### 5.5 wf-metasync（本番組織の自動同期）
 
-**実行スケジュール:** `cron: "0 0 * * 1-5"`（UTC 0:00 = JST 9:00、平日、毎日 1 回。`--full` 付き）と `cron: "0 3-10/3 * * 1-5"`（UTC 3:00 / 6:00 / 9:00 = JST 12:00 / 15:00 / 18:00、平日のみ、3 時間おき）。変更の検知（Variable `SF_METASYNC_DETECT` が shadow・on のとき）が「変更なし」なら、全件取得を省く（`--full` の回と手動の実行は、省かない）。手動の workflow_dispatch もある（`sf-init` のセットアップの最後と、`sf-init.sh --verify` が起動する）。同時実行は、1 つずつ（concurrency `metasync`）。
+**実行スケジュール:** `cron: "0 0 * * 1-5"`（UTC 0:00 = JST 9:00、平日、毎日 1 回。`--full` 付き）と `cron: "0 3-10/3 * * 1-5"`（UTC 3:00 / 6:00 / 9:00 = JST 12:00 / 15:00 / 18:00、平日のみ、3 時間おき）。変更の検知（Variable `SF_METASYNC_DETECT` が shadow・on のとき）が「変更なし」なら、全件取得を省く（`--full` の回と手動の実行は、省かない）。手動の workflow_dispatch もある（`sf-project` のセットアップの最後と、`sf-project.sh --verify` が起動する）。同時実行は、1 つずつ（concurrency `metasync`）。
 
 **処理フロー:**
 1. main ブランチを全履歴付きでチェックアウト（直近のマージの確認（`git log --since`。削除の守り S5）に、履歴が要るため。`PAT_TOKEN` で checkout することで、後続の push が Ruleset `protect-main` / `protect-staging` をバイパス可能。PAT の持ち主が Admin のとき）
@@ -289,7 +289,7 @@ develop / staging で並行開発中の変更と main の変更が同じ箇所�
 詳細は `sf-metasync.sh` の冒頭コメントと `doc/dev-reference.md` の 4.3。
 
 **対象メタデータタイプ:**
-force-* の `sf-tools/config/metadata.txt` の設定に従う。このファイルは force-*（Salesforce プロジェクト）の管理者が、sf-metasync で同期するメタデータタイプを定義する。1 行 1 タイプ、`#` でコメント、空行は無視。雛形（`templates/sf-tools/config/metadata.txt`）は、Developer Edition でリリース・削除を確認した標準セットを有効にしている（種類ごとの可否は `config/metadata-capability.txt`・`sf-typecheck.sh`）。
+force-* の `sf-tools/config/metadata.txt` の設定に従う。このファイルは force-*（Salesforce プロジェクト）の管理者が、sf-metasync で同期するメタデータタイプを定義する。1 行 1 タイプ、`#` でコメント、空行は無視。雛形（`templates/sf-tools/config/metadata.txt`）は、Developer Edition でリリース・削除を確認した標準セットを有効にしている（種類ごとの可否は `config/metadata-capability.txt`・`sf-test-types.sh`）。
 
 ---
 
@@ -303,9 +303,9 @@ sf-tools/release/<作業用ブランチ名>/   ← force-* のリポジトリの
 └── remove-target.txt    # 削除対象
 ```
 
-作業用ブランチで `sf-install.sh`（`sf-start.sh` が実行する）が、ディレクトリを作り、ファイルがなければ雛形（`config/install/release/`。sf-init が丸ごとコピーする `templates/` には置かない）からコピーする。`main` では作らない。
+作業用ブランチで `sf-refresh.sh`（`sf-start.sh` が実行する）が、ディレクトリを作り、ファイルがなければ雛形（`config/install/release/`。sf-project が丸ごとコピーする `templates/` には置かない）からコピーする。`main` では作らない。
 
-`sf-tools/release/branch_name.txt` にブランチ名を書き込むことで、どの release ディレクトリを参照するかを sf-release.sh・sf-check.sh に伝える（Git の管理外の手元のファイル。ローカルでは `sf-install.sh`、GitHub Actions では wf-validate・wf-release が、ソースブランチ名を書く）。
+`sf-tools/release/branch_name.txt` にブランチ名を書き込むことで、どの release ディレクトリを参照するかを sf-release.sh・sf-check.sh に伝える（Git の管理外の手元のファイル。ローカルでは `sf-refresh.sh`、GitHub Actions では wf-validate・wf-release が、ソースブランチ名を書く）。
 
 ### 6.2 deploy-target.txt の形式
 
@@ -329,7 +329,7 @@ deploy-target.txt が空で remove-target.txt にだけ対象があれば、削�
 
 ### 7.1 GitHub Secrets / Variables（force-* リポジトリに設定）
 
-すべて `sf-init` が登録する（登録元は各行。再登録は `sf-update-secret.sh`・`sf-init.sh --reconnect`・`sf-init.sh --add-tier`）。手で設定する必要はない。
+すべて `sf-project` が登録する（登録元は各行。再登録は `sf-update-secret.sh`・`sf-project.sh --reconnect`・`sf-project.sh --add-tier`）。手で設定する必要はない。
 
 | 名前 | 種別 | 用途（登録元） |
 | :--- | :--- | :--- |
@@ -343,7 +343,7 @@ deploy-target.txt が空で remove-target.txt にだけ対象があれば、削�
 | `SF_INSTANCE_URL_PROD` / `_STG` / `_DEV` | Variable | 各組織の接続 URL（例: `https://login.salesforce.com`。Phase 10） |
 | `SLACK_CHANNEL_ID` | Variable | 通知先 Slack チャンネル ID（Phase 7） |
 | `SF_TOOLS_BRANCH` | Variable | Actions が clone する sf-tools のブランチ（任意。未設定なら `main`。Phase 9 が、開発版のときだけ `development` を登録） |
-| `SF_ORG_*` | Variable | 組織の情報（`sf-init.sh --status` の表示用） |
+| `SF_ORG_*` | Variable | 組織の情報（`sf-project.sh --status` の表示用） |
 
 JWT の秘密鍵・証明書: Phase 10 が `openssl` で生成し（`~/.sf-jwt/<リポジトリ名>/`）、外部クライアントアプリケーションを組織ごとに自動作成して、コンシューマー鍵を取得する（従来の接続アプリケーション（`--legacy-connected-app`）は、廃止した）。
 PAT の作成: Phase 6 が、Note・Scopes・Expiration を入力済みの作成ページをブラウザで開き、貼り付けた Token のスコープと Admin 権限を確かめてから登録する（詳細は `doc/dev-reference.md` の 4.13）。
@@ -351,20 +351,20 @@ PAT の作成: Phase 6 が、Note・Scopes・Expiration を入力済みの作成
 
 ### 7.2 GitHub リポジトリ設定
 
-`sf-init` の Phase 9 が自動で設定する（どれが失敗しても WARNING で続行する）。
+`sf-project` の Phase 9 が自動で設定する（どれが失敗しても WARNING で続行する）。
 - **基本設定（`gh repo edit`）:** 既定のブランチ main・マージの方法をすべて許可・マージ後のブランチの自動削除を無効 など
 - **Ruleset `protect-main` / `protect-staging`:** 削除の禁止・強制プッシュの禁止・必須のステータスチェック 3 つ（ジョブ名だけ: `対象ファイル確認`・`デプロイ検証`・`順序チェック`。4.2）。バイパスはリポジトリの Admin。ブランチ構成に関係なく両方を作る。無料プランの Private リポジトリなど、Ruleset が使えない場合は、マージは止まらない
 - **ブランチ構成:** `sf-tools/config/branches.txt` に記載されたブランチが存在すること（Phase 8 が push する）
 
 ### 7.3 ローカル環境
 
-`sf-init` の Phase 1 が、`git` / `gh` / `node` / `npm` / `sf` / `code` の有無を確認する（利用者向けの手順は `site/guide/install.html`）。
+`sf-project` の Phase 1 が、`git` / `gh` / `node` / `npm` / `sf` / `code` の有無を確認する（利用者向けの手順は `site/guide/install.html`）。
 - Git（Windows は Git Bash。PowerShell・コマンドプロンプトでは動かない）
 - GitHub CLI（`gh` コマンド。認証済みであること）
 - Node.js / npm（Salesforce CLI のインストール・依存管理に必要）
 - Salesforce CLI（`sf` コマンド。**npm 版が前提**。Windows の Git Bash で公式インストーラー版を使うと、成功しても終了コード 1 になるため）
 - Visual Studio Code（`code` コマンドが PATH に含まれること）
-- 管理者のみ: `openssl`（`sf-init` の Phase 10・`sf-update-secret.sh`）。手元で `sf-metasync.sh` を実行するときは、sf のプラグイン sfdx-git-delta（`sf sgd`）
+- 管理者のみ: `openssl`（`sf-project` の Phase 10・`sf-update-secret.sh`）。手元で `sf-metasync.sh` を実行するときは、sf のプラグイン sfdx-git-delta（`sf sgd`）
 - Bash 3.2 以上（macOS 標準の `/bin/bash` のままで動く）
 
 ---
@@ -379,8 +379,8 @@ PAT の作成: Phase 6 が、Note・Scopes・Expiration を入力済みの作成
 | 一方通行の決まりを、仕組みで強制する（2026-11-26。以前は、マージ順序チェックを警告のみにしていた） | 前の段階を飛ばしたリリースで、本番だけが失敗した事故があったため。Hotfix の例外・wf-release の手動の実行もなくした。Ruleset が効かない組織でも、wf-release が組織を守る。 |
 | 環境ブランチ間の直接マージはブロック | 意図しない変更の混入を防止。feature 経由を強制し、各環境のデプロイ内容を追跡可能にする。 |
 | ターゲットファイルが空なら正常終了（WF はスキップ。sf-release.sh は内部的には RET_NO_CHANGE、終了コードは 0） | CI でリリース定義だけ先に準備する運用を許容するため。 |
-| セルフコンテインド WF + `sf-tools/templates/` 一元管理 | reusable workflow を通じた sf-tools への依存をなくし、各プロジェクトのワークフローが独立して動作する。処理の中身（sf-release.sh・sf-metasync.sh）は実行時に sf-tools を clone するため、スクリプトの修正は rr で全プロジェクトに届く。WF 変更は sf-sync-wf.sh で各プロジェクトへ反映（管理者が手動で実行）。 |
-| 24 時間スロットルでツール更新 | 毎回 sf-start.sh 実行時にアップデートすると起動が遅くなるため（`sf-install.sh` が、24 時間以上経っていれば `sf-upgrade.sh` をバックグラウンドで起動する）。 |
+| セルフコンテインド WF + `sf-tools/templates/` 一元管理 | reusable workflow を通じた sf-tools への依存をなくし、各プロジェクトのワークフローが独立して動作する。処理の中身（sf-release.sh・sf-metasync.sh）は実行時に sf-tools を clone するため、スクリプトの修正は rr で全プロジェクトに届く。WF 変更は sf-update-workflows.sh で各プロジェクトへ反映（管理者が手動で実行）。 |
+| 24 時間スロットルでツール更新 | 毎回 sf-start.sh 実行時にアップデートすると起動が遅くなるため（`sf-refresh.sh` が、24 時間以上経っていれば `sf-update-cli.sh` をバックグラウンドで起動する）。 |
 | 本番の変更を定期同期（平日 3 時間おき）で main へ取り込む | 古いコードベースでの開発によるデグレを防止する（開発のブランチは、sf-push.sh で main を取り込む）。 |
 | branches.txt でブランチ構成を動的化 | プロジェクト規模に応じて 1〜3 階層を選択可能にする。wf-sequence は origin/main から読み込む。 |
-| sf-next.sh で次の PR 先を自動判定 | マージ順序の間違いを防止。ブラウザで PR 作成画面を直接開ける。 |
+| sf-pr.sh で次の PR 先を自動判定 | マージ順序の間違いを防止。ブラウザで PR 作成画面を直接開ける。 |

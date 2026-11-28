@@ -1,7 +1,7 @@
 # 段階（tier）の増減 設計書
 
 > **ステータス: 実装済み（2026-11-22。development へ未反映・rr 待ち）。** 設計の正本は本書、処理の流れの正本は各スクリプトの冒頭コメント（`phases/init/remove_tier.sh`・`add_tier.sh`・`status.sh`・`lib/project.sh` の `get_tier_list`・3 つの workflow）。
-> 目的: `sf-tools/config/branches.txt` を、段階（main / staging / develop）の**唯一のスイッチ**にする。行を足せば段階が動き、消せば止まる。減らすための `sf-init.sh --remove-tier` を作る（足すための `--add-tier` は既存）。
+> 目的: `sf-tools/config/branches.txt` を、段階（main / staging / develop）の**唯一のスイッチ**にする。行を足せば段階が動き、消せば止まる。減らすための `sf-project.sh --remove-tier` を作る（足すための `--add-tier` は既存）。
 > きっかけ: TAMAさんが、検証環境（force-test-win・force-test-mac）を 3 段階から 2 段階にして、develop の組織を開発用（AI の開発サイクル。`doc/sf-log-design.md`）に回したい。セットアップのやり直しなしに、増やしたり減らしたりできる設計にしたい。
 > **2026-11-26 追記（一方通行のリリース）:** 下りの伝播（`wf-propagate.yml` と、`sf-metasync.sh` の手順 12。main の変更を staging・develop のブランチへ流す）は**廃止した**。本書の伝播の記述は、当時の設計の記録として残す。今の決まりは `doc/one-way-promotion-design.md`（develop → staging → main に同じコミットのまま上げる・リリースの印・R0〜R3）。
 
@@ -18,7 +18,7 @@
 | `wf-validate.yml`（PR の検証の dry-run） | main → PROD・staging → STG・**それ以外はすべて DEV** | ❌ develop・feature への PR を、develop の組織で検証し続ける（Secrets が残っていれば） |
 | GitHub の Secrets / Variables（`*_STG`・`*_DEV`） | ― | 残る（接続できる状態のまま） |
 
-減らすモードはない（`sf-init.sh` にあるのは `--add-tier` / `--reconnect` / `--status` / `--verify`）。
+減らすモードはない（`sf-project.sh` にあるのは `--add-tier` / `--reconnect` / `--status` / `--verify`）。
 
 ---
 
@@ -31,7 +31,7 @@
 3. **戻すときは `--add-tier`。** ブランチと接続情報が残っていれば、**つなぎ直さずに、`branches.txt` に行を戻す PR だけを作れる**（6 章）。残っていなければ、今までどおりつなぎ直す
 4. 接続情報を本当に消したいとき（組織を別の用途に回すなど）は、**行を消す PR をマージしたあとに**、`--remove-tier <段階> --purge-secrets` で消す（5.3）。PR のマージ前に消すと、PR をやめたときに接続情報だけが失われるため
 5. **段階は、最初に作った構成に縛られない。** 1 段階で作ったプロジェクトも、`--add-tier` で 2・3 段階に増やせる（今もできる）。増やせる上限は 3 段階（名前は main / staging / develop の固定）。順番の決まり（develop には staging が要る）と、段階ごとに別の Salesforce 組織が要ることだけが条件
-6. workflow の変更は、雛形（`templates/.github/workflows/`）を直し、各 force-* には `sf-sync-wf.sh` で配る（今の配り方のまま）
+6. workflow の変更は、雛形（`templates/.github/workflows/`）を直し、各 force-* には `sf-update-workflows.sh` で配る（今の配り方のまま）
 
 **不変条件**（実装とテストで守る）:
 - 無効の段階へは、**どの経路でも**（PR のマージ・手動の実行・伝播）、組織に書き込まない。ブランチへの伝播もしない
@@ -95,7 +95,7 @@ tier_enabled() {
     - wf-metasync.yml は、main を取得してから、sf-tools を**実行のたびに公開リポジトリから取得して**（Variable `SF_TOOLS_BRANCH`。未設定なら main）、`sf-metasync.sh` を動かす。伝播（ほかのブランチへの push）は、`sf-metasync.sh` の中だけで行い、workflow 自体はしない
     - そのため、判定の規則は、sf-tools の取得元のブランチに入った時点で、そのブランチを使うすべての force-* に届く。force-* の wf-metasync.yml を配り直す必要はない
       - Variable `SF_TOOLS_BRANCH` が未設定（`main`）のプロジェクト → rr（main へのマージ）で届く
-      - `SF_TOOLS_BRANCH=development`（検証環境。sf-init の Phase 9 が登録するのは development だけ）のプロジェクト → mm（development への push）で届く。development は main より先に進むので、main を使うプロジェクトより遅れることはない
+      - `SF_TOOLS_BRANCH=development`（検証環境。sf-project の Phase 9 が登録するのは development だけ）のプロジェクト → mm（development への push）で届く。development は main より先に進むので、main を使うプロジェクトより遅れることはない
       - それ以外のブランチを設定したプロジェクトは、想定しない（`--status` で、`SF_TOOLS_BRANCH` が main・development 以外なら WARNING を出す。7 章）
     - 今の版の `sf-metasync.sh` でも、伝播先は main の `branches.txt` の行（`get_branch_list`）なので、行を消せば伝播しない。新しい `get_tier_list` で増えるのは、名前でない行の無視と、develop の staging の条件だけ
   - `--remove-tier` は、wf-metasync.yml について、「伝播を `sf-metasync.sh` に任せている（workflow の中に、ほかのブランチへの push がない）」ことだけを確かめる（5.2 の 3）
@@ -152,7 +152,7 @@ tier_enabled() {
 | それ以外（develop・feature など） | DEV（今と同じ） | develop が無効なら、`skip=true`・`::notice`（「develop の段階がないため、この PR は検証しません」） |
 
 - ジョブ「デプロイ検証」は、check-branch の `skip` で動かない（今の仕組みのまま）
-- 必須チェック（main・staging への PR）への影響: main への PR は、判定で止まらない。staging への PR は、staging が有効なら今までどおり。staging が無効なのに staging への PR が出たときは、検証が skip され、必須チェックは GitHub の仕様で「スキップ」の扱いになる（staging を外したあとは、staging への PR を出さない運用。`sf-next.sh` は `branches.txt` で次の PR 先を案内するので、staging を案内しない）
+- 必須チェック（main・staging への PR）への影響: main への PR は、判定で止まらない。staging への PR は、staging が有効なら今までどおり。staging が無効なのに staging への PR が出たときは、検証が skip され、必須チェックは GitHub の仕様で「スキップ」の扱いになる（staging を外したあとは、staging への PR を出さない運用。`sf-pr.sh` は `branches.txt` で次の PR 先を案内するので、staging を案内しない）
 
 ---
 
@@ -161,26 +161,26 @@ tier_enabled() {
 `--remove-tier` で行を消しても、force-* の workflow（wf-propagate・wf-release・wf-validate）が古いままだと、伝播・リリース・検証が止まらない（1 章）。そのため、次の順にする。wf-metasync の伝播は、sf-tools の `sf-metasync.sh` が決める（3.1 の例外）ので、配り直しは要らない（`SF_TOOLS_BRANCH` が main のプロジェクトは 1 の rr で、development のプロジェクトはその前の mm で届く）。
 
 1. sf-tools を rr する（雛形の workflow が新しくなる）
-2. 各 force-* で `sf-sync-wf.sh` を実行し、新しい workflow を、通常の変更と同じ順序（feature → staging → main など）で main まで入れる
-3. `sf-init.sh --remove-tier develop` を実行する。**origin/main の workflow に印（3.1）がなければ、止める**（5.2 の 3）
+2. 各 force-* で `sf-update-workflows.sh` を実行し、新しい workflow を、通常の変更と同じ順序（feature → staging → main など）で main まで入れる
+3. `sf-project.sh --remove-tier develop` を実行する。**origin/main の workflow に印（3.1）がなければ、止める**（5.2 の 3）
 4. できた PR（`branches.txt` から develop を消す）をマージする。この時点から、develop の伝播・リリース・検証が止まる
 
 ---
 
-## 5. sf-init.sh --remove-tier
+## 5. sf-project.sh --remove-tier
 
 ### 5.1 使い方
 
 ```bash
 cd {作業フォルダ}/admin/force-XXXX
-~/sf-tools/bin/sf-init.sh --remove-tier develop     # develop の段階を外す
-~/sf-tools/bin/sf-init.sh --remove-tier staging     # staging の段階を外す（develop がないときだけ）
+~/sf-tools/bin/sf-project.sh --remove-tier develop     # develop の段階を外す
+~/sf-tools/bin/sf-project.sh --remove-tier staging     # staging の段階を外す（develop がないときだけ）
 ```
 
-- 実体は `phases/init/remove_tier.sh`（`add_tier.sh` と同じ形。`sf-init.sh` が環境変数 `REMOVE_TIER`（段階）と `REMOVE_TIER_PURGE`（`--purge-secrets` のとき 1）を export して呼ぶ）
+- 実体は `phases/init/remove_tier.sh`（`add_tier.sh` と同じ形。`sf-project.sh` が環境変数 `REMOVE_TIER`（段階）と `REMOVE_TIER_PURGE`（`--purge-secrets` のとき 1）を export して呼ぶ）
 - 管理者向けのコマンド（CLAUDE.md 2.4 の警告ボックス＋確認。`GITHUB_ACTIONS=true` でも省略しない）
 
-**引数の決まり**（`bin/sf-init.sh` の引数の解析）:
+**引数の決まり**（`bin/sf-project.sh` の引数の解析）:
 
 | 指定 | 扱い |
 |---|---|
@@ -191,7 +191,7 @@ cd {作業フォルダ}/admin/force-XXXX
 | `--remove-tier` と、`--verify` / `--status` / `--reconnect` / `--resume` / `--only` | `--remove-tier` だけを行う（今の「最初に該当した 1 つだけ」の決まりに足す。判定の順は `--add-tier` → `--remove-tier` → `--verify` → `--status` → `--reconnect`） |
 
 - `--purge-secrets` のときは、workflow の確かめ（5.2 の 3）をしない。段階は、すでに branches.txt から外れている（5.3 の 1 で確かめる）。古い workflow のままでも、接続情報を消せば、その段階への書き込みは、むしろ止まる側になる
-- `sf-init.sh` の冒頭コメント（【使い方】【オプション】【処理の流れ】）と、`--help` の例に、`--remove-tier` を足す（CLAUDE.md 2.5。`tests/test_cli_args.sh` が、書いたオプションを受け付けるかを確かめる）
+- `sf-project.sh` の冒頭コメント（【使い方】【オプション】【処理の流れ】）と、`--help` の例に、`--remove-tier` を足す（CLAUDE.md 2.5。`tests/test_cli_args.sh` が、書いたオプションを受け付けるかを確かめる）
 
 ### 5.2 処理の流れ
 
@@ -203,7 +203,7 @@ cd {作業フォルダ}/admin/force-XXXX
  3. origin/main の .github/workflows/ の wf-propagate.yml・wf-release.yml・wf-validate.yml のそれぞれで、段階の判定が、
     この sf-tools の雛形と同じかを確かめる（印 >>> sf-tools: tier-switch v1 と <<< の間を取り出し、雛形の同じ部分と比べる。
     さらに、その判定を使う箇所（3.2〜3.4 の判定の呼び出し）の印 sf-tools: tier-check があるか）
-      ない・違う → INFO で「workflow が段階の切り替えに対応していません（または、雛形と違います）。sf-tools を更新し、sf-sync-wf.sh で
+      ない・違う → INFO で「workflow が段階の切り替えに対応していません（または、雛形と違います）。sf-tools を更新し、sf-update-workflows.sh で
              workflow を main まで入れてから、実行してください」と、該当するファイル名を出し、die（die のメッセージは事実だけ。CLAUDE.md 2.2）
       ファイル全体は比べない（sf-tools の版が進むと、段階に関係のない部分が雛形と違うことがあり、止めすぎるため）
     wf-metasync.yml は、判定の印ではなく、「sf-metasync.sh を呼んでいる」「workflow の中に、main 以外のブランチへの git push がない」ことを確かめる（3.1 の例外）。
@@ -233,7 +233,7 @@ cd {作業フォルダ}/admin/force-XXXX
 ### 5.3 --purge-secrets（接続情報を消す。行を消す PR のマージ後）
 
 ```bash
-~/sf-tools/bin/sf-init.sh --remove-tier develop --purge-secrets
+~/sf-tools/bin/sf-project.sh --remove-tier develop --purge-secrets
 ```
 
 ```
@@ -275,7 +275,7 @@ cd {作業フォルダ}/admin/force-XXXX
 
 - 段階が `branches.txt` にないのに、その段階の**ブランチ**がリモートにある → INFO「develop ブランチは残っていますが、段階としては無効です（branches.txt にない）」
 - 段階が無効なのに、その段階の **Secrets / Variables** が残っている → INFO「develop の接続情報が残っています（使われません）」
-- origin/main の workflow の段階の判定が、雛形と違う・ない（5.2 の 3 と同じ確かめ）→ WARNING「workflow が段階の切り替えに対応していません（branches.txt から行を消しても、伝播・リリース・検証は止まりません）。sf-sync-wf.sh で更新してください」
+- origin/main の workflow の段階の判定が、雛形と違う・ない（5.2 の 3 と同じ確かめ）→ WARNING「workflow が段階の切り替えに対応していません（branches.txt から行を消しても、伝播・リリース・検証は止まりません）。sf-update-workflows.sh で更新してください」
 - 段階が無効なのに、その段階のブランチを対象にする Ruleset が残っている → INFO（名前と対象）
 - `branches.txt` に、段階の名前でない行がある・develop があって staging がない → WARNING / ERROR（3.1 の規則）
 - Variable `SF_TOOLS_BRANCH` が、未設定・`main`・`development` のどれでもない → WARNING（wf-metasync が、想定しない版の `sf-metasync.sh` を使うため。3.1 の例外）
@@ -288,13 +288,13 @@ cd {作業フォルダ}/admin/force-XXXX
 
 **2026-11-22 の決定（TAMAさん。案 1）**: TAMA_DEVELOP は、CI と e2e に残す。force-test-win・force-test-mac は 3 段階のまま。開発用（`doc/sf-log-design.md`）には、新しい Developer Edition を用意する（TAMAさんが申し込む）。エイリアスは `develop` 以外（例: `tama-dev`）。
 
-本書の機能は、それとは別に作る（段階を増やしたり減らしたりできるようにする）。force-test-win・force-test-mac には、workflow の更新（`sf-sync-wf.sh`）だけを入れる（3 段階のままで、動きは変わらない）。段階を外す動作の確かめは、9 章のテストと e2e で行う。
+本書の機能は、それとは別に作る（段階を増やしたり減らしたりできるようにする）。force-test-win・force-test-mac には、workflow の更新（`sf-update-workflows.sh`）だけを入れる（3 段階のままで、動きは変わらない）。段階を外す動作の確かめは、9 章のテストと e2e で行う。
 
 参考: develop の組織を開発用に回すときの手順（今回は行わない）:
 
 1. 本書の実装を rr する（e2e を含む。CLAUDE.md 1.3.2）
-2. その組織を使うすべての force-* で、`sf-sync-wf.sh` → main まで入れる
-3. それぞれで `sf-init.sh --remove-tier develop` → PR をマージ → 必要なら `--purge-secrets`
+2. その組織を使うすべての force-* で、`sf-update-workflows.sh` → main まで入れる
+3. それぞれで `sf-project.sh --remove-tier develop` → PR をマージ → 必要なら `--purge-secrets`
    - マージのあと、確かめる: wf-metasync を手動で実行し（Actions の画面）、ログの「伝播したブランチ」に develop がないこと。main への小さな PR をマージし、wf-propagate のログに「develop は段階として無効です」が出ること
 4. e2e がその組織を使っていれば、e2e の develop 用の組織を替える（`tests/e2e/bootstrap.sh --add-orgs`）
 5. 開発用には、`develop` 以外のエイリアスで、`sf-start` でログインする（`develop` は予約名で、`sf-deploy`・`sf-log` が止めるため）
@@ -327,7 +327,7 @@ cd {作業フォルダ}/admin/force-XXXX
   - 名前でない行がある → その名前には伝播しない
   - `branches.txt` がない → 伝播しない（今の動き: main のみ）
 - **`remove_tier.sh` の wf-metasync の確かめ**: `sf-metasync.sh` を呼んでいない、または workflow の中に main 以外への push がある wf-metasync.yml で、止まること
-- **`remove_tier.sh`**（`tests/test_sf-init3.sh` など、`add_tier.sh` のテストと同じ方式。gh・git をモックか、ローカルのリモート）:
+- **`remove_tier.sh`**（`tests/test_sf-project3.sh` など、`add_tier.sh` のテストと同じ方式。gh・git をモックか、ローカルのリモート）:
   - 段階がない・develop があるのに staging を外す・印がない → 止まる
   - 4 の影響の表示（main にない変更・開いている PR・Secrets の名前。値を出さない）
   - 作る PR の `branches.txt` から、その段階の行だけが消える（コメント・ほかの行は残る。CR・前後の空白があっても一致する）
@@ -335,7 +335,7 @@ cd {作業フォルダ}/admin/force-XXXX
   - workflow の段階の判定が、雛形と違う（書き換えられた・古い）とき、止まる
   - `--purge-secrets`: 行がまだある（PR が未マージ）と止まる／決まった一覧の名前だけを消す／一部の失敗で終了コード 1
 - **`add_tier.sh`**: 接続情報が 3 つとも残っているとき、Y でつなぎ直さずに PR だけ作る／N でつなぎ直す／1 つでも欠けていれば（`SF_CONSUMER_KEY_<接尾辞>`・`SF_USERNAME_<接尾辞>`・`SF_INSTANCE_URL_<接尾辞>` のそれぞれを、1 つずつ欠かした場合）、聞かずにつなぎ直す
-- **`sf-init.sh` の引数**（`tests/test_sf-init.sh` など）: 5.1 の表の行ごと（値なし・`--purge-secrets` だけ・`--add-tier` との同時指定・順の入れ替え・ほかのモードとの同時指定）
+- **`sf-project.sh` の引数**（`tests/test_sf-project.sh` など）: 5.1 の表の行ごと（値なし・`--purge-secrets` だけ・`--add-tier` との同時指定・順の入れ替え・ほかのモードとの同時指定）
 - **`--purge-secrets`**: 一部の削除の失敗で終了コード 1、もう一度実行すると、残りだけを消して 0
 - **`add_tier.sh`**: 既存のブランチが遅れているとき、本数を表示する
 - **`status.sh`**: 7 章の 3 つの表示
@@ -349,13 +349,13 @@ cd {作業フォルダ}/admin/force-XXXX
 
 | # | 操作 | 合格の条件 |
 |---|---|---|
-| 1 | 管理者用のクローンで `sf-init.sh --remove-tier <対象の段階>`（確認に Y） | PR ができる。Secrets / Variables・Ruleset・ブランチが、実行の前と同じ |
+| 1 | 管理者用のクローンで `sf-project.sh --remove-tier <対象の段階>`（確認に Y） | PR ができる。Secrets / Variables・Ruleset・ブランチが、実行の前と同じ |
 | 2 | その PR をマージする | origin/main の `branches.txt` に対象の段階がない |
 | 3 | feature ブランチから対象の段階への PR（デプロイ対象のある、小さな Apex）を作る | wf-validate のジョブ「対象ファイル確認」のログに「段階として無効」。ジョブ「デプロイ検証」は skipped（組織に検証のデプロイをしない） |
 | 4 | 3 の PR をマージする | wf-release のジョブ「リリース対象確認」のログに「段階として無効」。ジョブ「リリース実行」は skipped（組織にリリースしない） |
 | 5 | wf-release を対象の段階で手動の実行 | 4 と同じ |
 | 6 | 2 のマージで動く wf-propagate を待つ | 対象の段階のステップは「段階として無効」で skipped。対象の段階のブランチの SHA が変わらない |
-| 7 | `sf-init.sh --add-tier <対象の段階>`（接続情報が残っているので、「つなぎ直さずに戻す」に Y） | ブラウザのログインなしで PR ができる |
+| 7 | `sf-project.sh --add-tier <対象の段階>`（接続情報が残っているので、「つなぎ直さずに戻す」に Y） | ブラウザのログインなしで PR ができる |
 | 8 | 7 の PR をマージする | origin/main の `branches.txt` に対象の段階がある |
 | 9 | feature ブランチから対象の段階への PR をもう一度作る | wf-validate の「デプロイ検証」が動き、成功する（対象の段階の組織で dry-run）。PR は、マージせずに閉じる |
 
@@ -370,4 +370,4 @@ cd {作業フォルダ}/admin/force-XXXX
 
 - [x] e2e の develop 用の組織は TAMA_DEVELOP と同じだった（8 章）→ 2026-11-22 に決定: TAMA_DEVELOP は CI と e2e に残し、開発用に新しい Developer Edition を用意する（案 1）
 - [x] e2e に、段階を外したときのシナリオを足すか → 足す（9.1 の tier-switch）。時間と無料枠は、実装のあとに測って確かめる
-- [ ] ランチャー（`phases/start/launcher.sh`）/ `sf-next.sh` などで、無効の段階のブランチを、利用者が誤って使わないようにするか（今は `branches.txt` を読むので、案内には出ない。直接 `git checkout develop` するのは止めない）
+- [ ] ランチャー（`phases/start/launcher.sh`）/ `sf-pr.sh` などで、無効の段階のブランチを、利用者が誤って使わないようにするか（今は `branches.txt` を読むので、案内には出ない。直接 `git checkout develop` するのは止めない）

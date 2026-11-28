@@ -78,7 +78,7 @@
 | 終了時の trap（元のブランチ・stash pop・一時フォルダの削除） | 同 5 | 拡張（中断時に管理対象のフォルダを戻す。6 章） |
 | `print_admin_warning`・`ask_yn`・`run`・`run_with_timeout`・`json_get` | `lib/common.sh`・`lib/platform.sh` | そのまま |
 | Node の境界の作り（1 ファイル・標準ライブラリだけ・`--list`・終了コード・コマンドの差し替え用の環境変数） | `lib/typecheck.js` | 同じ形で `lib/metasync.js` を作る |
-| 書き込みの安全の作り（実行してよい sf のコマンドの一覧・`SfToolsE2eMin`・予約名の拒否・Actions 上の拒否・本番の拒否） | `lib/typecheck.js`・`bin/sf-typecheck.sh` | 更新日時の検証（9.6）に流用（**緩めない**） |
+| 書き込みの安全の作り（実行してよい sf のコマンドの一覧・`SfToolsE2eMin`・予約名の拒否・Actions 上の拒否・本番の拒否） | `lib/typecheck.js`・`bin/sf-test-types.sh` | 更新日時の検証（9.6）に流用（**緩めない**） |
 | sf のモック（`project retrieve`）・結合テストの fake（`it_set_retrieve`）・e2e のシナリオ `metasync-diff` | `tests/test_helper.sh`・`tests/integration/lib.sh`・`tests/e2e/scenario.sh` | 拡張 |
 
 ---
@@ -292,7 +292,7 @@ node lib/metasync.js apply --plan PLAN --repo DIR --fetched DIR
 ### 4.6 定期的な全件（フェーズ 3）
 
 - **Actions:** その日の最初の定期実行（UTC 0 時台。cron の 1 本目）は全件。判定は、シェルで `GITHUB_EVENT_NAME=schedule` かつ `date -u +%H` が 03 未満。**ワークフローを変えずに動く**（配り直しが要らない）。
-- **`workflow_dispatch`（手動・sf-init の最初の同期・`--verify`）:** 全件。
+- **`workflow_dispatch`（手動・sf-project の最初の同期・`--verify`）:** 全件。
 - **手元:** 既定は全件（管理者が手で動かすのは、確かめたいときのため。11.2 の U7）。`--diff` で差分。
 - **状態がない・読めない・版が違う:** 全件（3.5.3）。
 - 取りこぼしが残る最大の期間は、平日で約 1 日（週末をまたぐと、金曜の最初の回から月曜の最初の回まで）。
@@ -361,7 +361,7 @@ node lib/metasync.js apply --plan PLAN --repo DIR --fetched DIR
 | 中断: コミットのあと、push の前 | — | 次の回に、未プッシュのコミットだけを push（現行） | はい |
 | 中断: 伝播の途中 | — | 現行と同じ（次の同期・`wf-propagate` の手動実行で補う） | はい |
 | ディスク不足 | 一時フォルダ・取得・反映の失敗 | 中断（反映の途中なら、上の「手順 11 のあと」と同じく戻す） | 空きを作れば |
-| Windows のパスの長さ | — | Node・sf は長いパスを扱える【推測】。Git は `core.longpaths`（sf-init が設定する。【事実】`doc/dev-reference.md`） | — |
+| Windows のパスの長さ | — | Node・sf は長いパスを扱える【推測】。Git は `core.longpaths`（sf-project が設定する。【事実】`doc/dev-reference.md`） | — |
 | 状態ファイルの衝突（フェーズ 3） | 伝播の merge の失敗 | 現行の伝播の失敗と同じ（WARNING でスキップ）。下流で状態ファイルを編集しない前提 | 手で直す |
 
 ---
@@ -372,8 +372,8 @@ node lib/metasync.js apply --plan PLAN --repo DIR --fetched DIR
 
 | 観点 | 既存の `sf-metasync.sh` を拡張 | 新しいコマンド（例: `sf-metasync2.sh`） |
 |---|---|---|
-| 配布 | sf-tools の `main` へのマージだけで、全 force-* に届く（ワークフローは、毎回 sf-tools を clone して `sf-metasync.sh` を呼ぶ。【事実】`wf-metasync.yml` Step 8・9） | 各 force-* の `wf-metasync.yml` を書き換え、`sf-sync-wf.sh` で配り直す必要がある |
-| 既存の利用者 | sf-init の最初の同期・`sf-init.sh --verify`・e2e・文書の印が、そのまま使える | すべて書き換え |
+| 配布 | sf-tools の `main` へのマージだけで、全 force-* に届く（ワークフローは、毎回 sf-tools を clone して `sf-metasync.sh` を呼ぶ。【事実】`wf-metasync.yml` Step 8・9） | 各 force-* の `wf-metasync.yml` を書き換え、`sf-update-workflows.sh` で配り直す必要がある |
+| 既存の利用者 | sf-project の最初の同期・`sf-project.sh --verify`・e2e・文書の印が、そのまま使える | すべて書き換え |
 | 並走（新旧の比較） | `--dry-run` で代わりができる（10.2） | しやすい |
 | 切り戻し | revert → rr | ワークフローを戻す（配り直し） |
 
@@ -405,7 +405,7 @@ node lib/metasync.js apply --plan PLAN --repo DIR --fetched DIR
 # ==============================================================================
 # sf-metasync.sh - Salesforce メタデータ Git 自動同期スクリプト
 # ==============================================================================
-# main の組織（sf-init で 1 番目に登録した組織。本番・Sandbox・Developer Edition のどれでもよい）から、metadata.txt の種類のメタデータを取得し、
+# main の組織（sf-project で 1 番目に登録した組織。本番・Sandbox・Developer Edition のどれでもよい）から、metadata.txt の種類のメタデータを取得し、
 # main ブランチの管理対象のフォルダ（【補足】）を、取得した内容と同じにする（追加・変更・削除）。差分があればコミットして
 # push し、push したときは、branches.txt の main 以外のブランチへ、main をマージして push する。
 # どのブランチから実行しても、main に切り替えて処理し、終了時に元のブランチへ戻る。
@@ -459,7 +459,7 @@ node lib/metasync.js apply --plan PLAN --repo DIR --fetched DIR
 ### 7.5 ワークフローの変更と、配布との関係
 
 - フェーズ 1 のスクリプトは、**今の `wf-metasync.yml`（SGD・Java を入れる）のままでも動く**（`sf sgd` を呼ばなくなるだけ）。そのため、rr だけで全 force-* に届き、各プロジェクトの作業は要らない。
-- 雛形からは、Step 3（Java）・Step 5（SGD）を外す。各 force-* への反映は、管理者が `sf-sync-wf.sh` で行う（任意。時間の節約だけ）。
+- 雛形からは、Step 3（Java）・Step 5（SGD）を外す。各 force-* への反映は、管理者が `sf-update-workflows.sh` で行う（任意。時間の節約だけ）。
 - 雛形に `timeout-minutes` を明示するかは、フェーズ 0 の測定で決める（GitHub の既定は 360 分【仕様】）。
 
 ---
@@ -544,7 +544,7 @@ node lib/metasync.js apply --plan PLAN --repo DIR --fetched DIR
 
 ### 9.6 更新日時の正確さの検証（書き込みあり）
 
-- **対象の組織:** e2e 専用の使い捨ての Developer Edition だけ。予約名（`prod`・`staging`・`develop`・`main`）は拒否、組織の種類が本番なら拒否、GitHub Actions 上では拒否（いずれも `sf-typecheck.sh` の既存の守りを、そのまま使う。**緩めない**）。
+- **対象の組織:** e2e 専用の使い捨ての Developer Edition だけ。予約名（`prod`・`staging`・`develop`・`main`）は拒否、組織の種類が本番なら拒否、GitHub Actions 上では拒否（いずれも `sf-test-types.sh` の既存の守りを、そのまま使う。**緩めない**）。
 - **方法:** `lib/typecheck.js` に `--mode datecheck` を足す（サンプルの定義と、名前に `SfToolsE2eMin` を含むものだけを書く・消す守りを、そのまま使う）。実行してよい sf のコマンドの一覧には、`org list metadata` だけを足す（読み取り）。
 - **手順（種類ごと）:** リリース → 一覧で更新日時 D1 を記録 → 70 秒待つ → 中身を少し変えてリリース（バンドルは、メタ以外のファイルだけを変える）→ 一覧で D2 を記録（D2 > D1 か）→ 削除 → 一覧から消えたか → 結果を TSV に出す。後始末は、既存の削除の段階（null 区切り）で必ず行う。
 - **分からないまま残ること:** 画面（Lightning のレポートビルダー・フロービルダーなど）での編集で日時が動くか。これは、本番での影の比較（10.2）で補う（差分が取りこぼせば、全件との食い違いとして見える）。
@@ -663,7 +663,7 @@ node lib/metasync.js apply --plan PLAN --repo DIR --fetched DIR
 | `lib/metasync.js` | `inventory`（SOAP・並列・フォルダ型・やり直し・XML の簡易な解析）、方式の判定、差分の計画、状態ファイルの読み書き | +500 行 |
 | `bin/sf-metasync.sh` | 方式の決定（4.6）、トークンの受け渡し（5.4）、`--full`・`--diff`・`--verify-diff` | +120 行 |
 | `config/metasync-diff-types.txt`（新規） | 許可リスト | 約 20 行 |
-| `lib/typecheck.js`・`bin/sf-typecheck.sh` | `--mode datecheck`（9.6） | +150 行 |
+| `lib/typecheck.js`・`bin/sf-test-types.sh` | `--mode datecheck`（9.6） | +150 行 |
 | テスト | SOAP のモック（Node の `http` で偽のサーバー）・状態・判定 | +400 行 |
 
 ---
@@ -756,7 +756,7 @@ node lib/metasync.js apply --plan PLAN --repo DIR --fetched DIR
 
 #### 15.1.1 測定 1: 設定変更の履歴（`SetupAuditTrail`）に、変更が記録されるか
 
-- 52 種類（`metadata.txt` の種類のうち、`sf-typecheck` にサンプルがあるもの）を、作成 → 削除した。リリース ok 52・削除 ok 52。
+- 52 種類（`metadata.txt` の種類のうち、`sf-test-types` にサンプルがあるもの）を、作成 → 削除した。リリース ok 52・削除 ok 52。
 - 履歴に記録されたのは 112 件。**作成・削除の両方が記録された種類は 31**。**作成も削除も記録されない種類が 12**: `Report`・`ReportType`・`Document`・`EmailTemplate`・`EmailFolder`・`HomePageComponent`・`HomePageLayout`・`Letterhead`・`CustomNotificationType`・`CustomHelpMenuSection`・`CspTrustedSite`・`CorsWhitelistOrigin`。作成だけ記録された種類が 4（`LightningMessageChannel`・`DashboardFolder`・`ContentAsset`・`ExternalServiceRegistration`）。
 - 履歴と時間の窓の対応は、時刻による割り当てのため、種類ごとの細かい数には誤差がある。確かなのは「12 種類は、まったく記録されない」点。
 - **意味:** レポート・ドキュメント・メールテンプレートは、利用者が画面から日常的に編集する種類だが、履歴に残らない。**履歴だけで「変更なし」と判定すると、これらの変更を見逃す。**
@@ -1042,7 +1042,7 @@ node lib/metasync.js apply --plan PLAN --repo DIR --fetched DIR
 - Salesforce の組織の Git 管理は、**非公開リポジトリが原則**。公開にすると開発物を外部にさらす。
 - 実行の最初（取得の前）に、リポジトリの公開・非公開を確認する（`gh repo view --json visibility`、Actions 上は `GITHUB_REPOSITORY` で API）。**公開、または確認できない場合は、取得せずに止める**（上書きの設定は設けない）。止めたら Slack に通知する（16.7.4）。
 
-**実装での決定（P3）:** 公開範囲の確認は `gh repo view` ではなく `gh api repos/<owner>/<repo> --jq .visibility`（Actions 上は `GH_TOKEN` = `github.token`）。`private`・`internal` だけ通し、失敗時は 3 回まで試す。確認できないときは、止める（終了コード 5）。**既存の force-\* は、`wf-metasync.yml` を更新するまで（`GH_TOKEN` がないため）、この理由で止まる。mm のあと、`sf-sync-wf` を先に行う。**
+**実装での決定（P3）:** 公開範囲の確認は `gh repo view` ではなく `gh api repos/<owner>/<repo> --jq .visibility`（Actions 上は `GH_TOKEN` = `github.token`）。`private`・`internal` だけ通し、失敗時は 3 回まで試す。確認できないときは、止める（終了コード 5）。**既存の force-\* は、`wf-metasync.yml` を更新するまで（`GH_TOKEN` がないため）、この理由で止まる。mm のあと、`sf-update-workflows` を先に行う。**
 
 #### 16.7.4 Slack 通知（決定済み）
 

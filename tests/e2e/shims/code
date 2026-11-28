@@ -6,7 +6,7 @@
 # VS Code を開かない。
 #   ・--wait とファイルが渡されたとき（sf-push.sh のコミットメッセージ入力）: メッセージを書き込んで終わる
 #     （開発者が、VS Code でメッセージを入力して閉じる操作の代わり）
-#   ・--list-extensions: Salesforce 拡張が入っている応答を返す（sf-init の Phase 1 の、拡張の確認のため。
+#   ・--list-extensions: Salesforce 拡張が入っている応答を返す（sf-project の Phase 1 の、拡張の確認のため。
 #     この PC の VS Code の状態に、e2e の結果が左右されないように）
 #   ・それ以外（code .）: 何もしない
 #

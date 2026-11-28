@@ -5,7 +5,7 @@
 # 実行場所（管理者用の作業フォルダ admin）・必要なコマンド・GitHub CLI の認証を確認する。
 #
 # 【使い方】
-#   sf-init.sh が、管理者用の作業フォルダ（admin）をカレントにして、bash で呼び出す。
+#   sf-project.sh が、管理者用の作業フォルダ（admin）をカレントにして、bash で呼び出す。
 #
 # 【処理の流れ】
 #   1. カレントのフォルダ名が admin でなければ die
@@ -17,25 +17,25 @@
 #   4. gh auth status が失敗したら、gh auth login を実行する（ログインに失敗したら die）
 #
 # 【前提条件】
-#   - 環境変数 SF_TOOLS_DIR（sf-tools のルート。sf-init.sh が export する）。未設定のときは、このスクリプトの
+#   - 環境変数 SF_TOOLS_DIR（sf-tools のルート。sf-project.sh が export する）。未設定のときは、このスクリプトの
 #     2 つ上のフォルダ（sf-tools のルート）を使う（以前は 1 つ上の phases/ を指し、lib/common.sh を読み込めなかった）
 #
 # 【補足】
 #   - SF_INIT_ENV_FILE（未設定時は ${PWD}/.sf-init.env）があれば source する（この Phase では、その値を使わない）
 #   - Java と VS Code の拡張の確認は、GitHub Actions 上（GITHUB_ACTIONS=true）では省く。環境変数 SF_TOOLS_SKIP_JAVA_CHECK=1・
 #     SF_TOOLS_SKIP_VSCODE_CHECK=1 でも、それぞれ省ける（VS Code の設定で Java を指している・別の VS Code を使う場合）
-#   - 状態ファイルに何も書かない。sf-init.sh は、通常の実行（はじめから）と、「続きをやる」（前回の続きから再開。
+#   - 状態ファイルに何も書かない。sf-project.sh は、通常の実行（はじめから）と、「続きをやる」（前回の続きから再開。
 #     RESUMED=1）のときに、この Phase を実行する（「続きをやる」では、続きの Phase の前に足す）。
 #     --resume N（N が 2 以上）・--only N（N が 2 以上）のときは、実行しない
 #   - 終了コード: 0 = OK / 1 = die
 # ==============================================================================
 
-# SF_TOOLS_DIR は sf-init.sh（司令塔）から export される
+# SF_TOOLS_DIR は sf-project.sh（司令塔）から export される
 PHASE_DIR="${BASH_SOURCE[0]%/*}"
 [[ "$PHASE_DIR/" == /* && "$PHASE_DIR/" != *//* && "$PHASE_DIR/" != */./* && "$PHASE_DIR/" != */../* ]] || PHASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SF_TOOLS_DIR="${SF_TOOLS_DIR:-$(dirname "$(dirname "$PHASE_DIR")")}"
 
-readonly SCRIPT_NAME="sf-init"
+readonly SCRIPT_NAME="sf-project"
 mkdir -p "$HOME/sf-tools/logs" 2>/dev/null || true  # run 不使用: common.sh の読み込み前（run が未定義）
 readonly LOG_FILE="$HOME/sf-tools/logs/${SCRIPT_NAME}.log"
 readonly LOG_MODE="APPEND"  # 司令塔が NEW で初期化済みのため追記
@@ -57,8 +57,8 @@ log "HEADER" "環境チェック"
 local_dir=$(basename "$PWD")  # VAR=$(cmd) のため run 不使用
 if [[ "$local_dir" != "admin" ]]; then
     die "このスクリプトは、管理者用の作業フォルダ（admin）から実行してください。
-実行方法（通常は、sf-init.sh が、このフォルダを作って移動します）:
-  ~/sf-tools/bin/sf-init.sh [--owner OWNER] [--project XXXX]"
+実行方法（通常は、sf-project.sh が、このフォルダを作って移動します）:
+  ~/sf-tools/bin/sf-project.sh [--owner OWNER] [--project XXXX]"
 fi
 
 log "INFO" "必要なツールを確認中..."

@@ -1,11 +1,11 @@
 #!/bin/bash
 # ==============================================================================
-# test_sf-typecheck.sh - sf-typecheck.sh / lib/typecheck.js のテスト
+# test_sf-test-types.sh - sf-test-types.sh / lib/typecheck.js のテスト
 # ==============================================================================
 # 実際の組織には、つながない。sf は、モック（SF_TYPECHECK_CMD で、差し替える）。
 # 確認すること: 安全の確認（予約名・本番・GitHub Actions）・--list・結果の表の形式・許可した sf のコマンドだけを呼ぶこと
 source "$(dirname "${BASH_SOURCE[0]}")/test_helper.sh"
-echo -e "${CLR_HEAD}=== sf-typecheck.sh ===${CLR_RST}"
+echo -e "${CLR_HEAD}=== sf-test-types.sh ===${CLR_RST}"
 
 # node が無い環境（WSL など）では、実行できない（lib/typecheck.js は、Node で動く）。CI の各 OS には、node がある
 if ! command -v node > /dev/null 2>&1; then  # 存在確認のため run 不使用
@@ -31,7 +31,7 @@ FEOF
 
 _run_typecheck() {   # 引数: mb mh td [追加の引数...]  （環境変数は、呼び出し側で設定）
     local mb="$1" mh="$2" td="$3"; shift 3
-    ( cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$mh/sf-tools/bin/sf-typecheck.sh" "$@" 2>&1 )
+    ( cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$mh/sf-tools/bin/sf-test-types.sh" "$@" 2>&1 )
 }
 
 test_typecheck_help_and_list() {

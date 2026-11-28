@@ -172,11 +172,11 @@ test_components() {
     export MOCK_GH_RELEASE_FAIL=1
     _run "\n" --components --with-objects
     assert_exit_fail "$RC" "リリースの失敗: 非ゼロで終了する"
-    assert_file_contains "$OUT" "sf-init.sh --verify --components --with-objects --cleanup" "リリースの失敗: 後始末の案内に、--components --with-objects が入る"
+    assert_file_contains "$OUT" "sf-project.sh --verify --components --with-objects --cleanup" "リリースの失敗: 後始末の案内に、--components --with-objects が入る"
     _env
     export MOCK_GH_RELEASE_FAIL=1
     _run "\n" --components
-    assert_file_contains "$OUT" "sf-init.sh --verify --components --cleanup" "リリースの失敗（既定）: 後始末の案内に、--components が入る"
+    assert_file_contains "$OUT" "sf-project.sh --verify --components --cleanup" "リリースの失敗（既定）: 後始末の案内に、--components が入る"
     assert_file_not_contains "$OUT" "--components --with-objects --cleanup" "リリースの失敗（既定）: --with-objects は、案内しない"
 
     # develop がない構成: 拒否する（本番・staging に、サンプルを入れない）
@@ -241,14 +241,14 @@ test_components() {
     assert_file_contains "$OUT" "--components" "--help: --components が表示される"
     assert_file_contains "$OUT" "--validate-only" "--help: --validate-only が表示される"
 
-    # 入口: sf-init.sh --verify --components --plan（verify.sh に、オプションが渡る）
-    local init="$SF_TOOLS_DIR/bin/sf-init.sh" opt
+    # 入口: sf-project.sh --verify --components --plan（verify.sh に、オプションが渡る）
+    local init="$SF_TOOLS_DIR/bin/sf-project.sh" opt
     create_mock_sf "$MB"
     ( cd "$FDIR" && HOME="$HM" PATH="$MB:$PATH" bash "$init" --verify --components --plan ) > "$OUT" 2>&1 < /dev/null
-    assert_exit_ok $? "sf-init.sh --verify --components --plan: 正常終了する"
-    assert_file_contains "$OUT" "サンプル（" "sf-init.sh --verify --components --plan: サンプルの実行内容が表示される"
-    assert_file_not_contains "$MOCK_CALL_LOG" "pr create" "sf-init.sh --verify --components --plan: PR を作らない"
-    # --verify なしの --components / --validate-only は、拒否する（sf-init の通常の実行に、混ぜない）
+    assert_exit_ok $? "sf-project.sh --verify --components --plan: 正常終了する"
+    assert_file_contains "$OUT" "サンプル（" "sf-project.sh --verify --components --plan: サンプルの実行内容が表示される"
+    assert_file_not_contains "$MOCK_CALL_LOG" "pr create" "sf-project.sh --verify --components --plan: PR を作らない"
+    # --verify なしの --components / --validate-only は、拒否する（sf-project の通常の実行に、混ぜない）
     for opt in --components --validate-only --with-objects; do
         ( cd "$FDIR" && HOME="$HM" PATH="$MB:$PATH" bash "$init" "$opt" ) > "$OUT" 2>&1 < /dev/null
         assert_exit_fail $? "${opt} だけの指定は、拒否される"

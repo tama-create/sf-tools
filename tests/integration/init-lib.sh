@@ -1,9 +1,9 @@
 #!/bin/bash
 # ==============================================================================
-# init-lib.sh - sf-init の結合テスト（test_integration-init*.sh）の共通部品
+# init-lib.sh - sf-project の結合テスト（test_integration-init*.sh）の共通部品
 # ==============================================================================
 # tests/integration/lib.sh（ハーネス）を、読み込んだあとで、source する。
-# 標準の入力（1 層）・sf-init の実行・完了後の状態の取得・秘密の漏れの検査・シグナルで止める実行、を提供する。
+# 標準の入力（1 層）・sf-project の実行・完了後の状態の取得・秘密の漏れの検査・シグナルで止める実行、を提供する。
 # ==============================================================================
 
 
@@ -19,7 +19,7 @@ RESUME_HEAD="Y\n1\n"
 _init() {   # 入力 [追加の引数]  → IT_RC・IT_OUT（作業フォルダは、$IT_WORK/proj）
     local inp="$1"; shift
     mkdir -p "$IT_WORK/proj"
-    it_run "$IT_WORK/proj" -i "$inp" bash "$IT_HOME/sf-tools/bin/sf-init.sh" --owner "$IT_OWNER" --project "$IT_PROJECT" "$@"
+    it_run "$IT_WORK/proj" -i "$inp" bash "$IT_HOME/sf-tools/bin/sf-project.sh" --owner "$IT_OWNER" --project "$IT_PROJECT" "$@"
 }
 _admin() { echo "$IT_WORK/proj/admin/$IT_REPO"; }
 _progress() { sed -n 's/^SF_INIT_DONE_PHASE=//p' "$IT_WORK/proj/admin/.sf-init-${IT_PROJECT}.progress" 2>/dev/null; }
@@ -48,7 +48,7 @@ _state_mode_600() { case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) return 0 ;; esac
 
 _fresh() { it_teardown; it_setup || return 1; }
 
-# sf-init をバックグラウンドで起動し、指定の fake の呼び出しが始まったら、シグナルで止める。引数: 入力 呼び出しの目印（calls.log の語）シグナル
+# sf-project をバックグラウンドで起動し、指定の fake の呼び出しが始まったら、シグナルで止める。引数: 入力 呼び出しの目印（calls.log の語）シグナル
 _init_kill() {
     local inp="$1" mark="$2" sig="$3" pid i
     mkdir -p "$IT_WORK/proj"
@@ -61,7 +61,7 @@ _init_kill() {
         export GIT_TERMINAL_PROMPT=0 GIT_CONFIG_NOSYSTEM=1 GIT_SSH_COMMAND="$IT_BIN/ssh" TMPDIR="$IT_ROOT/tmp"
         unset GITHUB_ACTIONS CI GH_TOKEN GITHUB_TOKEN
         mkdir -p "$TMPDIR"
-        exec bash "$IT_HOME/sf-tools/bin/sf-init.sh" --owner "$IT_OWNER" --project "$IT_PROJECT" < "$IT_ROOT/kill.in" > "$IT_ROOT/kill.out" 2>&1
+        exec bash "$IT_HOME/sf-tools/bin/sf-project.sh" --owner "$IT_OWNER" --project "$IT_PROJECT" < "$IT_ROOT/kill.in" > "$IT_ROOT/kill.out" 2>&1
     ) &
     pid=$!
     for i in $(seq 1 600); do

@@ -49,7 +49,7 @@ _hasnt() { [[ "$1" == *"$2"* ]] && fail "$3" "'$2' が出力に含まれてい�
 _env() {
     TD=$(setup_force_dir); MB=$(setup_mock_bin); FK=$(mktemp -d "${TMPDIR:-/tmp}/fake-org-XXXX")
     export MOCK_CALL_LOG="$MB/calls.log"; : > "$MOCK_CALL_LOG"
-    # sf の更新のロックは、本物のホームのものを見ない（手元で sf-upgrade.sh が動いていても、テストを待たせない）
+    # sf の更新のロックは、本物のホームのものを見ない（手元で sf-update-cli.sh が動いていても、テストを待たせない）
     export SF_TOOLS_UPGRADE_LOCK="$FK/upgrade.lock"
     # Windows の Node が読めるよう、パスを Windows の形にしてから渡す（cygpath がない OS では、そのまま）
     cat > "$MB/sf" <<EOF
@@ -126,7 +126,7 @@ test_mock_org_lock() {
     _done
 }
 
-# start は、sf の更新（sf-upgrade.sh）が動いているあいだ、sf を呼ばずに待つ（入れ替えの途中に sf を呼ぶと失敗する。2026-11-24）
+# start は、sf の更新（sf-update-cli.sh）が動いているあいだ、sf を呼ばずに待つ（入れ替えの途中に sf を呼ぶと失敗する。2026-11-24）
 test_start_waits_for_upgrade() {
     echo ""; echo -e "${CLR_HEAD}[TEST] start: sf の更新が終わるのを待つ${CLR_RST}"
     _env
@@ -138,7 +138,7 @@ test_start_waits_for_upgrade() {
     _run start -o dev -y
     assert_exit_ok "$RC" "更新が終わったら、start が成功する"
     [[ $((SECONDS - t0)) -ge 2 ]] && pass "更新が終わるまで待つ" || fail "更新が終わるまで待つ" "$((SECONDS - t0)) 秒"
-    _has "$OUT" "sf の更新（sf-upgrade.sh）が終わるのを待ちます" "待つことを表示する"
+    _has "$OUT" "sf の更新（sf-update-cli.sh）が終わるのを待ちます" "待つことを表示する"
     _has "$OUT" "sf の更新が終わりました" "終わったことを表示する"
     # 死んだ PID のロック → 待たない
     printf 'PID=%s\n' "$sp" > "$SF_TOOLS_UPGRADE_LOCK"

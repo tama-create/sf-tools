@@ -9,7 +9,7 @@
 # 【提供する関数】
 #   get_target_org [ALIAS]    ... 接続先組織エイリアスを解決
 #   check_force_dir           ... force-* ディレクトリ内か確認
-#   resolve_init_identity     ... sf-init 用: オーナーとプロジェクト名（XXXX）を、環境変数 SF_INIT_OWNER / SF_INIT_PROJECT・対話で決める
+#   resolve_init_identity     ... sf-project 用: オーナーとプロジェクト名（XXXX）を、環境変数 SF_INIT_OWNER / SF_INIT_PROJECT・対話で決める
 #   resolve_job_identity O P  ... sf-job 用: 同上（引数・カレントの下のクローンの git remote・対話）
 #   prompt_project_identity MODE ... オーナーと XXXX を、対話で決める（MODE: init / job。上の 2 つが使う）
 #   parse_github_remote URL   ... GitHub の URL から「owner repo」を取り出す（HTTPS / SSH）
@@ -315,7 +315,7 @@ check_gh_owner() {
 # ------------------------------------------------------------------------------
 # プロジェクトの特定（オーナーと、プロジェクト名 XXXX。リポジトリ名は force-XXXX）
 # ------------------------------------------------------------------------------
-# リポジトリ名は「force-」（固定）+ XXXX（任意。管理者が決める）。sf-init.sh と sf-job.sh は、どのリポジトリかを、
+# リポジトリ名は「force-」（固定）+ XXXX（任意。管理者が決める）。sf-project.sh と sf-job.sh は、どのリポジトリかを、
 # フォルダ構成に頼らず（作業フォルダは、どこでもよい）、次の順で決める（上にあるものが優先）:
 #   1. 引数（--owner / --project）
 #   2. sf-job のみ: カレントの下にある、クローンの git remote（実際の設定から取るため、フォルダ名に依存しない）
@@ -377,7 +377,7 @@ discover_clones() {
 }
 
 # gh_owner_candidates - gh のログインから、オーナーの候補を 1 行ずつ出す（組織 → 自分のアカウント。重複なし）
-#   引数: admin = 自分が管理者（admin かつ active）の組織（sf-init 用） / member = 自分が所属する組織（sf-job 用。省略時）
+#   引数: admin = 自分が管理者（admin かつ active）の組織（sf-project 用） / member = 自分が所属する組織（sf-job 用。省略時）
 #   gh が使えない・未認証なら、何も出さない（呼び出し側が、入力に切り替える）。戻り値は、常に 0
 gh_owner_candidates() {
     # run 不使用: 出力を、そのまま候補の一覧にする（gh の失敗は、何も出さない扱い）
@@ -504,8 +504,8 @@ prompt_project_identity() {
     COMPANY_NAME="$norm"
 }
 
-# resolve_init_identity - sf-init 用: オーナーと XXXX を決める（環境変数 SF_INIT_OWNER / SF_INIT_PROJECT → 対話）
-#   SF_INIT_OWNER / SF_INIT_PROJECT は、sf-init.sh が --owner / --project から export する。関数の引数は、取らない。
+# resolve_init_identity - sf-project 用: オーナーと XXXX を決める（環境変数 SF_INIT_OWNER / SF_INIT_PROJECT → 対話）
+#   SF_INIT_OWNER / SF_INIT_PROJECT は、sf-project.sh が --owner / --project から export する。関数の引数は、取らない。
 #   値が不正なら die。どちらかが空なら、prompt_project_identity init で、空の項目を対話で決める
 #   結果: GITHUB_OWNER / COMPANY_NAME
 #   決めた値は SF_INIT_OWNER / SF_INIT_PROJECT に export する（sf-tools を更新して、実行しなおすときと、Phase 2 が使う）
@@ -724,7 +724,7 @@ get_tier_list() {
 #   共有環境（main・staging・develop）へのリリースは、ローカルの PC からはできない。
 #   GitHub にコミットし、レビューを通して、GitHub Actions で行う。
 #   prod / staging / develop は、sf-tools が、共有環境の組織（prod は main の組織。組織の種類は、問わない）に使う名前
-#   （GitHub Actions のワークフローが、JWT ログインで、この名前の組織を作る）。sf-init は、この PC の sf には、エイリアスを残さない
+#   （GitHub Actions のワークフローが、JWT ログインで、この名前の組織を作る）。sf-project は、この PC の sf には、エイリアスを残さない
 #   （接続テストは、一時的なホームの中で行う。運用中のエイリアスと衝突させないため）。
 #   この名前を予約名とし、ローカルからのリリースを禁止する（sf-release.sh / sf-deploy.sh）。
 #   main は、ブランチ名と同じ名前（互換のため、予約名に含める）。
@@ -756,8 +756,8 @@ is_reserved_org_alias() {
 #   required_status_check_names     # 1 行に 1 つ（対象ファイル確認 / デプロイ検証 / 順序チェック）
 #   名前は、ワークフロー（templates/.github/workflows/wf-validate.yml・wf-sequence.yml）の「ジョブ名」（name:）。
 #   ワークフロー名は、含めない（「validate / 対象ファイル確認」の形では、永久に満たされず、PR がマージできなくなる）。
-#   sf-init の Phase 9（Ruleset の作成）と、lib/diag.sh（sf-init.sh --status・--verify の、既存のプロジェクトの診断）が、使う。
-#   ジョブ名を変えるときは、ここも直す（tests/test_sf-init.sh の突き合わせのテストが、食い違いを検出する）。
+#   sf-project の Phase 9（Ruleset の作成）と、lib/diag.sh（sf-project.sh --status・--verify の、既存のプロジェクトの診断）が、使う。
+#   ジョブ名を変えるときは、ここも直す（tests/test_sf-project.sh の突き合わせのテストが、食い違いを検出する）。
 required_status_check_names() {
     printf '%s\n' "対象ファイル確認" "デプロイ検証" "順序チェック"
 }
@@ -864,7 +864,7 @@ ensure_sf_tools_latest() {
 # ------------------------------------------------------------------------------
 # 【使い方】 ensure_admin_branch DIR
 # 【理由】   管理者用のクローン（admin/force-XXXX）は、セットアップ後も、メンテナンス用に残る。main のままだと、
-#           main の上で作業してしまう（main は保護ブランチ。sf-sync-wf.sh も、保護ブランチでは実行を断る）。
+#           main の上で作業してしまう（main は保護ブランチ。sf-update-workflows.sh も、保護ブランチでは実行を断る）。
 #           そこで、main から admin ブランチを作って、そこに置く。この関数は、ローカルだけを扱う（GitHub への push は、
 #           push_admin_branch）
 # 【動作】   すでに admin ブランチがあれば、作り直さずに、そこへ切り替える（作業を消さない）。なければ、main から作る

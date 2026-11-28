@@ -6,7 +6,7 @@
 # 取得日: 2026-10-16（全 683 種類のうち、337 種類）
 #
 # 1 行 1 種類。# で始まる行と空行は、無視される。
-# bin/sf-typecheck.sh --coverage が、この一覧と config/metadata-capability.txt（実機で確認した結果）を突き合わせて、
+# bin/sf-test-types.sh --coverage が、この一覧と config/metadata-capability.txt（実機で確認した結果）を突き合わせて、
 # 「確認済み / 条件つき / 判定できない / 未確認」を表示する。
 #
 # 更新: 新しい API バージョンが出たら、上の URL（v の番号を変える）から、ChangeSets 列が ✔ の種類を取り直す。

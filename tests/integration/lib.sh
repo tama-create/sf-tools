@@ -54,7 +54,7 @@ it_setup() {
     _it_git config --global advice.detachedHead false
     # https://github.com/ を ssh://git@github.com/ に読み替える（fake の ssh が、ローカルの bare に向ける。理由は、it_seed_repo の説明）
     _it_git config --global "url.ssh://git@github.com/.insteadOf" "https://github.com/"
-    # ~/sf-tools を git リポジトリにする（sf-install の git pull が、本物と同じように動くように。origin は、ローカルの bare）
+    # ~/sf-tools を git リポジトリにする（sf-refresh の git pull が、本物と同じように動くように。origin は、ローカルの bare）
     _it_git init -q --bare -b main "$IT_ROOT/sftools-origin.git"
     (
         cd "$IT_HOME/sf-tools" || exit 1
@@ -64,7 +64,7 @@ it_setup() {
         _it_git commit -q -m "sf-tools の写し" || exit 1
         _it_git push -q -u origin main
     ) || return 1
-    # sf-install のツール更新（24 時間に 1 回）を、止める。Windows では git update-git-for-windows（本物の更新）が動くため。
+    # sf-refresh のツール更新（24 時間に 1 回）を、止める。Windows では git update-git-for-windows（本物の更新）が動くため。
     #   更新の経路を確かめるときは、it_block_git_update を呼んでから、スタンプを消すこと
     touch "$IT_HOME/.sf-tools-last-update"
     _it_write_fakes
@@ -76,7 +76,7 @@ it_attach() { IT_ROOT="$1"; IT_HOME="$IT_ROOT/home"; IT_BIN="$IT_ROOT/bin"; IT_S
 it_teardown() {
     [[ -n "${IT_SHOW_RUNS:-}" && -f "$IT_STATE/runs.log" ]] && sort -rn "$IT_STATE/runs.log" | head -15
     [[ -n "${IT_KEEP:-}" ]] && { echo "IT_KEEP: $IT_ROOT" >&2; return 0; }
-    # sf-start がバックグラウンドで起動した sf-install などが、まだ書き込んでいることがある。消えるまで、数回やり直す
+    # sf-start がバックグラウンドで起動した sf-refresh などが、まだ書き込んでいることがある。消えるまで、数回やり直す
     local _i
     for _i in 1 2 3 4 5 6 7 8 9 10 11 12; do
         [[ -n "${IT_ROOT:-}" && -d "$IT_ROOT" ]] || break
@@ -92,7 +92,7 @@ _it_git() {
 }
 
 # ------------------------------------------------------------------------------
-# リポジトリ（テンプレートから、最小のものを作る。sf-init の生成物そのものではない）
+# リポジトリ（テンプレートから、最小のものを作る。sf-project の生成物そのものではない）
 # ------------------------------------------------------------------------------
 it_seed_repo() {
     local layout="${1:-1}" seed="$IT_ROOT/seed" br
@@ -485,7 +485,7 @@ CURLEOF
 _last=""; _wait=0
 for _a in "$@"; do [[ "$_a" == "--wait" || "$_a" == "-w" ]] && _wait=1; _last="$_a"; done
 echo "code $*" >> "$IT_STATE/calls.log"
-[[ "${1:-}" == "--list-extensions" ]] && echo "salesforce.salesforcedx-vscode"   # sf-init の Phase 1（拡張の確認）の代わり
+[[ "${1:-}" == "--list-extensions" ]] && echo "salesforce.salesforcedx-vscode"   # sf-project の Phase 1（拡張の確認）の代わり
 [[ $_wait -eq 1 && -f "$_last" ]] && printf '%s\n' "${E2E_COMMIT_MSG:-it}" > "$_last"
 exit 0
 CODEEOF
@@ -514,7 +514,7 @@ SSHEOF
     chmod +x "$IT_BIN"/*
 }
 
-# git の update-git-for-windows（本物の更新）だけを、止める git の包み。スタンプを消して sf-upgrade を動かすテストの前に、必ず呼ぶ
+# git の update-git-for-windows（本物の更新）だけを、止める git の包み。スタンプを消して sf-update-cli を動かすテストの前に、必ず呼ぶ
 it_block_git_update() {
     [[ -f "$IT_STATE/realgit" ]] || command -v git > "$IT_STATE/realgit"   # 本物の git の場所（2 回目以降は、包みを指さないように、最初の 1 回だけ）
     cat > "$IT_BIN/git" << 'GITEOF'
@@ -545,7 +545,7 @@ it_origin_reject() {
 }
 
 # ------------------------------------------------------------------------------
-# 作業用のクローンを、手早く作る（sf-job・sf-start・sf-install を通さない版。通しは A13a が確認する）
+# 作業用のクローンを、手早く作る（sf-job・sf-start・sf-refresh を通さない版。通しは A13a が確認する）
 # ------------------------------------------------------------------------------
 # it_make_clone 名前 ブランチ [分岐元]  → クローンを $IT_WORK/名前/$IT_REPO に作り、IT_CL に入れる
 #   ・origin からクローン → ブランチを作って push → sf のログイン状態 → sf-hook でフック設置 → release/ブランチ/ を準備
@@ -562,7 +562,7 @@ it_make_clone() {
     [[ $IT_RC -eq 0 ]] || return 1
     mkdir -p "$IT_CL/sf-tools/release/$branch"
     printf '%s\n' "$branch" > "$IT_CL/sf-tools/release/branch_name.txt"
-    cp "$IT_HOME/sf-tools/config/install/release/"*.txt "$IT_CL/sf-tools/release/$branch/"   # sf-install.sh の phase_setup_release_dir と同じコピー元
+    cp "$IT_HOME/sf-tools/config/install/release/"*.txt "$IT_CL/sf-tools/release/$branch/"   # sf-refresh.sh の phase_setup_release_dir と同じコピー元
     mkdir -p "$IT_CL/force-app/main/default/classes"
     return 0
 }

@@ -17,18 +17,19 @@
 #
 # 【処理の流れ】
 #   1. 環境変数 SF_LAUNCHER_ACTIVE=1 を export する（sf-start.sh が、ランチャーを二重に起動しないため。
-#      メニューの Start・Restart から動いた sf-start.sh は、メニューを開かずに戻る）
+#      メニューの Start・SwitchOrg から動いた sf-start.sh は、メニューを開かずに戻る）
 #   2. 引数があれば、エラーで終了する（終了コード 1）。カレントフォルダの名前が force- で始まらなければ、
 #      警告を表示して終了する（終了コード 1）
 #   3. メニュー（番号: 表示名 → 実行するスクリプト）。1〜5 は、日々の作業の順（上から順に押せば、確かめる → 試す → 反映 → コミット → PR）:
 #        1: Check → sf-check.sh   2: Dryrun → sf-dryrun.sh   3: Deploy → sf-deploy.sh
-#        4: Push → sf-push.sh     5: PullRequest → sf-next.sh（中身は、次の段階へプルリクエストを出す。出し先を確かめる）
-#        6: Start → sf-start.sh   7: Restart → sf-restart.sh（1 日の最初・組織の切り替えのときだけ使うため、5 との間に線を引く）
-#      表示名は、sf- を除いて先頭を大文字にした名前（sf-next だけは PullRequest）。名前の欄は 11 文字の幅でそろえる。
+#        4: Push → sf-push.sh     5: PullRequest → sf-pr.sh（中身は、次の段階へプルリクエストを出す。出し先を確かめる）
+#        6: Start → sf-start.sh   7: SwitchOrg → sf-switch-org.sh（1 日の最初・組織の切り替えのときだけ使うため、5 との間に線を引く）
+#      表示名は、sf- を除いて先頭を大文字にした名前（sf-pr は PullRequest・sf-switch-org は SwitchOrg）。名前の欄は 11 文字の幅でそろえる。
 #      起動のときに 1 回だけ作る（MENU_LABELS）
 #      VS Code のターミナル（環境変数 TERM_PROGRAM=vscode）では 6・7 を表示しない（番号 6・7 は範囲外になる。線も引かない）
 #      （2026-11-26 に、1: Check 2: Push 3: Next 4: Dryrun 5: Deploy の並びから、作業の順に並べ替えた。2026-11-27 に、
-#       5 の表示名を Next から PullRequest にした）
+#       5 の表示名を Next から PullRequest にした。2026-11-28 に、コマンドの改名（sf-next → sf-pr・sf-restart → sf-switch-org）に合わせ、
+#       7 の表示名を Restart から SwitchOrg にした）
 #   4. 選んだコマンドは、sf-tools の bin/ の sf-xxx.sh（このファイルの 2 つ上のフォルダの bin/）を、引数なしで bash で
 #      実行する。スクリプトがなければ、警告を表示する
 #   5. メニューを表示するたびに、線と線の間に、見出しの 2 行を表示する（読み取りのみ。通信しない。2026-11-27）
@@ -56,10 +57,10 @@
 #      次の段階 = 「▸ <段階> (次のPR)」、発行中の PR があれば「▸ <段階> (PR #N 発行中)」（太字の水色）/ まだの段階 = 「× <段階>」（薄く）。
 #      全段階に出し終わり（NEXT=none）→ すべて ✓ で、最後に「(全段階にリリース済み)」。
 #      出すものなし（SKIPPED=true）→ 「出すものなし（ターゲットファイル sf-tools/release/<ブランチ>/ が空）」。
-#      元は、sf-tools/logs/next-status.txt（sf-next.sh が判定のたびに書く HEAD=・NEXT=・PR=・SKIPPED=・TIERS=）。
+#      元は、sf-tools/logs/next-status.txt（sf-pr.sh が判定のたびに書く HEAD=・NEXT=・PR=・SKIPPED=・TIERS=）。
 #      HEAD= が今の先端のコミットと同じで、NEXT= が段階名の形（40 文字まで）、TIERS= が段階名を空白でつないだ形（10 個まで）、
 #      TIERS= に同じ段階が 2 回出てこず、NEXT= が none か TIERS= の中にあり、SKIPPED= が true か false のときだけ使う。PR= は 9 桁まで。キー=値 を while read で読み、source しない。
-#      使えないとき（ファイルがない・古い・形が違う）は、裏で sf-next.sh --status を動かし（標準入力・出力は閉じる。判定だけで、
+#      使えないとき（ファイルがない・古い・形が違う）は、裏で sf-pr.sh --status を動かし（標準入力・出力は閉じる。判定だけで、
 #      PR は作らない）、終わるまで「（確かめています…）」と出す。終わったら（待ち切れのときに kill -0 で見る）、メニューを描き直す。
 #      裏の判定は、先端のコミットごとに 1 回だけ（失敗しても繰り返さない）。判定できなかったとき（オフライン・gh の認証切れ・
 #      push していない変更など）は「（5 PullRequest で確かめる）」（番号はメニューの並びから引く）。環境変数
@@ -67,14 +68,14 @@
 #      ランチャーを終えても、裏の判定は止めない（終わるまで動いて、結果を書く）。読み込み直す（処理の流れ 8）ときは、
 #      判定したコミットとプロセスの番号を、環境変数（SF_LAUNCHER_BG_HEAD・SF_LAUNCHER_BG_PID）で新しい版へ引き継ぐ
 #      （exec のあとも同じプロセスのため、裏の判定は、そのまま子として残る）。前面の 5 PullRequest と同時に動いても、
-#      sf-next.sh は、一時ファイルに書いてから置き換えるため、書きかけを読まない
+#      sf-pr.sh は、一時ファイルに書いてから置き換えるため、書きかけを読まない
 #   7. コマンドが終わったら、結果を 1 行で出す: 終了コード 0 → 「✓ <表示名>: 終わりました（成功）」（太字の緑）/
 #      それ以外 → 「✗ <表示名>: 失敗、または中断しました（終了コード N）」（太字の赤。q での中断も 1 になるため、両方を書く）
 #   8. メニューの入力は、5 秒ずつ待つ（read -t。Bash 3.2 は、待ち切れと EOF の戻り値が同じ 1 のため、待った時間で見分ける。
 #      4 秒以上たってからの EOF は、1 回だけ待ち切れとして扱い、次の読み取り（すぐ EOF で返る）で終わる）。待ち切れたとき・メニューを描き直す前に、
 #      このスクリプト自身のファイルが、起動のあとに書き換わったかを見る（起動のときに sf-tools/logs/.launcher-<PID> を作り、
 #      それより新しいか（-nt）で比べる。コマンドを起動しない）。書き換わっていたら「↻ …読み込み直します」と出して、新しい版を
-#      exec し直す（sf-start.sh は、裏の sf-install.sh が git pull で sf-tools を最新にするのと同時に、
+#      exec し直す（sf-start.sh は、裏の sf-refresh.sh が git pull で sf-tools を最新にするのと同時に、
 #      前面でランチャーを起動するため、ランチャーは古い版を読み込んだまま動いていた。2026-11-27）。
 #      sf-tools/logs がない・印のファイルを作れないときは、確かめない。秒の単位で比べる環境（Bash 3.2）では、起動と同じ秒の
 #      書き換えは見分けられない。印のファイルは、終了のときに消す（exec の前にも消す）
@@ -113,16 +114,16 @@ MENU_ITEMS_ALL=(
     "sf-dryrun   | 現在接続中の組織へリリース検証"
     "sf-deploy   | 現在接続中の組織へリリース"
     "sf-push     | 変更をコミット & プッシュ"
-    "sf-next     | 次の段階へプルリクエストを出す（出し先を確かめる）"
+    "sf-pr     | 次の段階へプルリクエストを出す（出し先を確かめる）"
     "sf-start    | 開発環境を起動（Salesforce ログイン・VSCode 起動）"
-    "sf-restart  | 接続組織を切り替えて Start 実行"
+    "sf-switch-org  | 接続組織を切り替えて Start 実行"
 )
 
 # VSCode 内では start / restart を除外
 MENU_ITEMS=()
 for _item in "${MENU_ITEMS_ALL[@]}"; do
     if [[ "$TERM_PROGRAM" == "vscode" ]]; then
-        [[ "$_item" =~ ^(sf-start|sf-restart) ]] && continue
+        [[ "$_item" =~ ^(sf-start|sf-switch-org) ]] && continue
     fi
     MENU_ITEMS+=("$_item")
 done
@@ -189,7 +190,7 @@ APEXLOG_REFRESH=5   # 準備中のあいだ、状態を見直す間隔（秒）
 # ------------------------------------------------------------------------------
 # 今の状況（メニューの上の数行。読み取りのみ。通信しない。冒頭コメントの処理の流れ 6）
 # ------------------------------------------------------------------------------
-NEXT_STATUS_FILE="sf-tools/logs/next-status.txt"   # sf-next.sh が、最後に判定した結果を書く（ここでは読むだけ）
+NEXT_STATUS_FILE="sf-tools/logs/next-status.txt"   # sf-pr.sh が、最後に判定した結果を書く（ここでは読むだけ）
 
 # コマンド名（sf-check など）→ メニューの番号。並びが変わっても、案内の番号が合うように、MENU_ITEMS から引く
 number_of() {
@@ -202,9 +203,10 @@ number_of() {
     return 1
 }
 
-# コマンド名 → 表示名（sf-check → Check・sf-next → PR）。${x^} は Bash 4 以降のため、tr で先頭を大文字にする
+# コマンド名 → 表示名（sf-check → Check・sf-pr → PullRequest・sf-switch-org → SwitchOrg）。${x^} は Bash 4 以降のため、tr で先頭を大文字にする
 label_of() {
-    [[ "$1" == "sf-next" ]] && { printf 'PullRequest'; return 0; }   # 中身は、次の段階へプルリクエストを出す（出し先を確かめる）
+    [[ "$1" == "sf-pr" ]] && { printf 'PullRequest'; return 0; }   # 中身は、次の段階へプルリクエストを出す（出し先を確かめる）
+    [[ "$1" == "sf-switch-org" ]] && { printf 'SwitchOrg'; return 0; }   # 接続する組織を切り替える（- を含む名前のため、ここで決める）
     local l="${1#sf-}"
     printf '%s' "$(printf '%s' "${l:0:1}" | tr '[:lower:]' '[:upper:]')${l:1}"
 }
@@ -247,7 +249,7 @@ read_target_org() {
     return 0
 }
 
-# メニューの表示名（MENU_ITEMS と同じ並び。sf-next は「PR」。それ以外は、sf- を除いて先頭を大文字にした名前）。
+# メニューの表示名（MENU_ITEMS と同じ並び。sf-pr は「PR」。それ以外は、sf- を除いて先頭を大文字にした名前）。
 #   描画のたびには変わらないため、起動のときに 1 回だけ作る（描画のたびの tr の起動を減らす。Windows の Git Bash では、起動が特に遅い）
 MENU_LABELS=()
 for _item in "${MENU_ITEMS[@]}"; do _c="${_item%%|*}"; MENU_LABELS+=("$(label_of "${_c// /}")"); done
@@ -266,9 +268,9 @@ BG_PID=""    # 裏の判定のプロセス（終わったら空にする）
 unset SF_LAUNCHER_BG_HEAD SF_LAUNCHER_BG_PID   # 子のコマンドには渡さない
 bg_status_start() {
     [[ -n "$1" && "$1" != "$BG_HEAD" ]] || return 0
-    [[ "${SF_LAUNCHER_BG_STATUS:-1}" == "1" && -f "$BIN_DIR/sf-next.sh" ]] || return 0
+    [[ "${SF_LAUNCHER_BG_STATUS:-1}" == "1" && -f "$BIN_DIR/sf-pr.sh" ]] || return 0
     BG_HEAD="$1"
-    bash "$BIN_DIR/sf-next.sh" --status < /dev/null > /dev/null 2>&1 &   # cmd &（裏で動かす。結果は next-status.txt）
+    bash "$BIN_DIR/sf-pr.sh" --status < /dev/null > /dev/null 2>&1 &   # cmd &（裏で動かす。結果は next-status.txt）
     BG_PID=$!
 }
 bg_status_running() { [[ -n "$BG_PID" ]] && kill -0 "$BG_PID" 2>/dev/null; }   # kill は組み込み（コマンドを起動しない）
@@ -312,7 +314,7 @@ print_status() {
         return 0
     fi
 
-    # 2 行目: Branch: 段階の並び（sf-next.sh が最後に判定した結果。今の先端のコミットと同じときだけ使う。source しない）
+    # 2 行目: Branch: 段階の並び（sf-pr.sh が最後に判定した結果。今の先端のコミットと同じときだけ使う。source しない）
     bg_status_running || BG_PID=""   # 裏の判定が終わっていれば、待つのをやめる（結果は、下でファイルから読む）
     if [[ -f "$NEXT_STATUS_FILE" ]]; then
         while IFS= read -r line || [[ -n "$line" ]]; do
@@ -339,7 +341,7 @@ print_status() {
             i=$((i + 1))
         done
         if [[ $dup -eq 1 || ( "$next" != "none" && $nidx -lt 0 ) ]]; then
-            rel="${DIM}（$(number_of sf-next) PullRequest で確かめる）${RESET}"   # 段階の重複・次の段階が一覧にない（形の崩れ）→ 使わない
+            rel="${DIM}（$(number_of sf-pr) PullRequest で確かめる）${RESET}"   # 段階の重複・次の段階が一覧にない（形の崩れ）→ 使わない
         else
             i=0
             for t in $tiers; do
@@ -362,7 +364,7 @@ print_status() {
         if bg_status_running; then
             rel="${DIM}（確かめています…）${RESET}"
         else
-            rel="${DIM}（$(number_of sf-next) PullRequest で確かめる）${RESET}"
+            rel="${DIM}（$(number_of sf-pr) PullRequest で確かめる）${RESET}"
         fi
     fi
     echo -e "${HEAD_PAD}Branch: ${rel}"
@@ -379,7 +381,7 @@ print_menu() {
     for item in "${MENU_ITEMS[@]}"; do
         local desc="${item#*|}"
         label="${MENU_LABELS[$((num - 1))]}"
-        # 日々の作業（1〜5）と、環境の起動・切り替え（Start・Restart）の間に線を引く
+        # 日々の作業（1〜5）と、環境の起動・切り替え（Start・SwitchOrg）の間に線を引く
         [[ "$label" == "Start" ]] && echo -e "${DIM}  ──────────${RESET}"
         printf "  ${CYAN}[%d]${RESET} ${BOLD}%-11s${RESET} ${DIM}%s${RESET}\n" "$num" "$label" "$desc"
         (( num++ ))

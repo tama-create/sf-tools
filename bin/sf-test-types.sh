@@ -1,24 +1,24 @@
 #!/bin/bash
 # ==============================================================================
-# sf-typecheck.sh - メタデータの種類ごとに、リリースと削除ができるかを、実際の組織で確かめる（管理者向け）
+# sf-test-types.sh - メタデータの種類ごとに、リリースと削除ができるかを、実際の組織で確かめる（管理者向け。2026-11-28 に sf-typecheck.sh から改名）
 # ==============================================================================
 # 種類ごとの最小のサンプル（lib/typecheck.js に定義）を、一時フォルダの使い捨てのプロジェクトに作り、指定した組織に、
 # 実際にリリースして、削除し、結果を表（種類 / release / delete / 備考）にする。この表は、config/metadata-capability.txt の元になる。
 # sf-check.sh が、その表を読んで、リリース・削除できないと確認済みの種類を、ターゲットファイルの検証で止める。
 #
 # 【使い方】
-#   sf-typecheck.sh --org ALIAS                       # リリースして、削除する
-#   sf-typecheck.sh --org ALIAS --validate-only       # 検証だけ（組織には、何も反映しない。削除は、確認しない）
-#   sf-typecheck.sh --org ALIAS --only ApexPage,Queue # 種類を絞る
-#   sf-typecheck.sh --list                            # 確認する種類の一覧だけ（組織には、接続しない）
-#   sf-typecheck.sh --coverage                        # 変更セット対応の種類の、確認の進み具合（組織には、接続しない）
+#   sf-test-types.sh --org ALIAS                       # リリースして、削除する
+#   sf-test-types.sh --org ALIAS --validate-only       # 検証だけ（組織には、何も反映しない。削除は、確認しない）
+#   sf-test-types.sh --org ALIAS --only ApexPage,Queue # 種類を絞る
+#   sf-test-types.sh --list                            # 確認する種類の一覧だけ（組織には、接続しない）
+#   sf-test-types.sh --coverage                        # 変更セット対応の種類の、確認の進み具合（組織には、接続しない）
 #
 # 【オプション】
 #   --org ALIAS        : 接続先の組織のエイリアス（--list・--coverage 以外では必須）
 #   --validate-only    : 検証（sf project deploy validate）だけ行う。delete の列は unknown のまま
 #   --only A,B         : 指定した種類だけ確認する（--list に出る名前と完全一致。一致しない名前は無視し、
 #                        1 つも一致しなければ 0 種類で正常終了する）
-#   --out FILE         : 結果の表（TSV・見出し行なし）の出力先。既定: ./sf-typecheck-result.txt（カレントディレクトリ）。
+#   --out FILE         : 結果の表（TSV・見出し行なし）の出力先。既定: ./sf-test-types-result.txt（カレントディレクトリ）。
 #                        すべての種類を処理し終えたときだけ書く（上書き）
 #   --list             : 確認する種類の一覧（lib/typecheck.js のサンプルの種類）を出して終了する
 #   --coverage         : config/changeset-types.txt（変更セットで扱える種類。公式の一覧）と、
@@ -66,7 +66,7 @@
 #     リリース・削除（--validate-only なら検証）は、実行済みのまま残り、結果の表（--out）は、書かれない
 #   - 終了コード: 0 = 完了（release / delete に ng の種類があっても 0。WARNING を表示する）・--list・--coverage /
 #     1 = 中断（不明なオプション・値のないオプション、N / q の回答、4. の拒否、必要なファイル・node がない、lib/typecheck.js の失敗）
-#   - ログ: ~/sf-tools/logs/sf-typecheck.log（実行ごとに作り直す）
+#   - ログ: ~/sf-tools/logs/sf-test-types.log（実行ごとに作り直す）
 #   - 環境変数: SF_TYPECHECK_CHANGESET_FILE・SF_CHECK_CAPABILITY_FILE で、--coverage が読む 2 つの表を差し替えられる
 # ==============================================================================
 
@@ -102,7 +102,7 @@ source "${SCRIPT_DIR}/../lib/org.sh"
 ORG_ALIAS=""
 MODE="full"
 ONLY=""
-OUT_FILE="./sf-typecheck-result.txt"
+OUT_FILE="./sf-test-types-result.txt"
 LIST_ONLY=0
 COVERAGE=0
 ASSUME_YES=0

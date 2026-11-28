@@ -32,7 +32,7 @@
 <p>sf-tools には、3 種類の人が関わり、4 つの場所（手元のパソコン・GitHub・Salesforce の組織・Slack）を使います。まず、全体を、1 枚の図で見てください。</p>
 <p><strong>この図の見方:</strong> 上から下へ読みます（人 → 手元のパソコン → GitHub → Salesforce の組織 → Slack → 業務担当）。①②の番号は、作業の順番です。管理者が先に準備し、そのあとで、開発者が始めます。</p>
 <figure class="photo" id="fig-overview-image">
-  <a href="assets/system-overview.png"><img src="assets/system-overview.png" width="1024" height="1536" loading="lazy" alt="システム構成図。上から順に、①管理者（sf-init.sh で土台を作る・保守する）、②開発者（sf-job.sh で始めて、ランチャーで進める。手元のパソコンの中に、sf-tools のスクリプト集と作業用のフォルダ、Git・VS Code・Salesforce CLI・GitHub CLI・Node.js がある）、GitHub（リポジトリ force-XXXX。ブランチ・PR・保護のルール・認証情報と、GitHub Actions の 4 つのワークフロー）、Salesforce の組織（共有の環境 develop・staging・main は Actions が JWT 認証で接続し、手元からは反映できない。自分用の組織は手元から直接試す）、Slack（結果の通知）、業務担当（通知を見る）。GitHub から Salesforce へは、マージするとリリース。Salesforce の本番から GitHub の main へは、平日 3 時間おきに変更を取り込む。"></a>
+  <a href="assets/system-overview.png"><img src="assets/system-overview.png" width="1024" height="1536" loading="lazy" alt="システム構成図。上から順に、①管理者（sf-project.sh で土台を作る・保守する）、②開発者（sf-job.sh で始めて、ランチャーで進める。手元のパソコンの中に、sf-tools のスクリプト集と作業用のフォルダ、Git・VS Code・Salesforce CLI・GitHub CLI・Node.js がある）、GitHub（リポジトリ force-XXXX。ブランチ・PR・保護のルール・認証情報と、GitHub Actions の 4 つのワークフロー）、Salesforce の組織（共有の環境 develop・staging・main は Actions が JWT 認証で接続し、手元からは反映できない。自分用の組織は手元から直接試す）、Slack（結果の通知）、業務担当（通知を見る）。GitHub から Salesforce へは、マージするとリリース。Salesforce の本番から GitHub の main へは、平日 3 時間おきに変更を取り込む。"></a>
   <figcaption>画像をクリックすると、大きく表示します。下の「文字で読む版」は、同じ内容です（色の凡例つき）。</figcaption>
 </figure>
 <details>
@@ -42,7 +42,7 @@
   <p class="lane-label">誰が、どこで、何を使って、何が自動で動くのか</p>
   <p class="legend"><span class="sw admin"></span>管理者が用意・操作する<span class="sw dev"></span>開発者が使う<span class="sw ok"></span>業務担当<span class="sw auto"></span>自動で動く</p>
   <div class="tiles">
-    <div class="node admin"><span class="who">🔑 プロジェクト管理者（① 先に）</span><strong>土台を作る・保守する</strong><small>sf-init.sh で、GitHub のリポジトリ・Salesforce への接続・Slack・認証情報を用意する</small></div>
+    <div class="node admin"><span class="who">🔑 プロジェクト管理者（① 先に）</span><strong>土台を作る・保守する</strong><small>sf-project.sh で、GitHub のリポジトリ・Salesforce への接続・Slack・認証情報を用意する</small></div>
     <div class="node dev"><span class="who">💻 開発者（② 管理者の準備のあと）</span><strong>毎日、作って、送る</strong><small>sf-job.sh で始めて、ランチャーの番号で進める</small></div>
   </div>
   <div class="down">↓<small>手元のパソコンで、コマンドを実行する</small></div>
@@ -86,7 +86,7 @@
   <div class="flow">
     <div class="node ok"><span class="who">👀 業務担当</span><strong>結果を見る</strong><small>コマンドは、ほぼ使わない</small></div>
   </div>
-  <figcaption>実線は人が行うこと、点線は自動で動くことです。管理者の準備（sf-init.sh）が終わってから、開発者が始めます（並行しては進められません）。共有の環境の組織へは、手元からではなく、GitHub Actions だけが反映します。</figcaption>
+  <figcaption>実線は人が行うこと、点線は自動で動くことです。管理者の準備（sf-project.sh）が終わってから、開発者が始めます（並行しては進められません）。共有の環境の組織へは、手元からではなく、GitHub Actions だけが反映します。</figcaption>
 </figure>
 </details>
 
@@ -94,7 +94,7 @@
 <table>
   <thead><tr><th>役割</th><th>やること</th><th>使うもの</th></tr></thead>
   <tbody>
-    <tr><td>🔑 プロジェクト管理者（先に）</td><td>最初に 1 回、土台を作ります（GitHub のリポジトリ・ブランチと保護のルール・Salesforce への接続・Slack・認証情報・ワークフロー）。あとから、認証情報の更新・ワークフローの更新・構成の変更と診断（段階の追加・取り外し・接続先の付け替え・状態の確認）・動作の確認を行います。</td><td><code>sf-init.sh</code>（<code>--add-tier</code>・<code>--reconnect</code>・<code>--status</code>・<code>--verify</code>）・<code>sf-update-secret.sh</code>・<code>sf-sync-wf.sh</code></td></tr>
+    <tr><td>🔑 プロジェクト管理者（先に）</td><td>最初に 1 回、土台を作ります（GitHub のリポジトリ・ブランチと保護のルール・Salesforce への接続・Slack・認証情報・ワークフロー）。あとから、認証情報の更新・ワークフローの更新・構成の変更と診断（段階の追加・取り外し・接続先の付け替え・状態の確認）・動作の確認を行います。</td><td><code>sf-project.sh</code>（<code>--add-tier</code>・<code>--reconnect</code>・<code>--status</code>・<code>--verify</code>）・<code>sf-update-secret.sh</code>・<code>sf-update-workflows.sh</code></td></tr>
     <tr><td>💻 開発者（管理者の準備のあと）</td><td>作業を始めて、手元で作り、自分用の組織で試して、push と PR で送ります。</td><td><code>sf-job.sh</code>・<code>sf-start.sh</code> が開くランチャー（Check・Dryrun・Push・PullRequest など）</td></tr>
     <tr><td>👀 業務担当</td><td>Slack に届く、結果の通知を見ます。</td><td>Slack（コマンドを使う必要は、ほとんどありません）</td></tr>
   </tbody>
@@ -172,7 +172,7 @@
   <a class="card" href="#f-setup">
     <span class="tag">特長 1</span>
     <h3>土台を、コマンド 1 つで作れる</h3>
-    <p>sf-init.sh が、対話しながら順に案内して、リポジトリから接続・自動処理までを用意します。</p>
+    <p>sf-project.sh が、対話しながら順に案内して、リポジトリから接続・自動処理までを用意します。</p>
   </a>
   <a class="card" href="#f-git">
     <span class="tag">特長 2</span>
@@ -192,11 +192,11 @@
 </div>
 
 <h3 id="f-setup">土台を、コマンド 1 つで作れる</h3>
-<p>管理者が <code>sf-init.sh</code> を実行すると、<strong>対話しながら、順に案内します</strong>（ウィザード）。GitHub のリポジトリの作成から、ワークフローの配置まで、手作業の設定は、ほぼ要りません。かかる時間の目安は、30〜60 分です（ブラウザでの作業と、Salesforce の反映待ちを含みます）。</p>
+<p>管理者が <code>sf-project.sh</code> を実行すると、<strong>対話しながら、順に案内します</strong>（ウィザード）。GitHub のリポジトリの作成から、ワークフローの配置まで、手作業の設定は、ほぼ要りません。かかる時間の目安は、30〜60 分です（ブラウザでの作業と、Salesforce の反映待ちを含みます）。</p>
 <figure class="diagram">
   <p class="lane-label">土台を、コマンド 1 つで</p>
   <div class="flow">
-    <div class="node admin"><span class="who">🔑 管理者</span><strong>sf-init.sh</strong><small>コマンドは、これ 1 つ</small></div>
+    <div class="node admin"><span class="who">🔑 管理者</span><strong>sf-project.sh</strong><small>コマンドは、これ 1 つ</small></div>
   </div>
   <div class="down">↓<small>対話しながら、順に案内する</small></div>
   <div class="tiles c3">
@@ -208,7 +208,7 @@
     <div class="node auto"><span class="who">⚙️</span><strong>ワークフロー</strong><small>GitHub Actions の自動処理</small></div>
   </div>
   <div class="say">人がやるのは、おもに、ブラウザでの作業（Salesforce へのログイン・GitHub のトークン（PAT）の発行・Slack の Bot Token とチャンネル ID の用意）と、画面への貼り付けです。手順は、画面に案内が出ます。</div>
-  <figcaption>点線の箱は、sf-init.sh が、自動で用意するものです。ブランチの保護は、GitHub のプランによっては、設定できないことがあります（<a href="admin/setup.html">最初のセットアップ</a>）。</figcaption>
+  <figcaption>点線の箱は、sf-project.sh が、自動で用意するものです。ブランチの保護は、GitHub のプランによっては、設定できないことがあります（<a href="admin/setup.html">最初のセットアップ</a>）。</figcaption>
 </figure>
 
 <h3 id="f-git">リリースが、Git の流れの中で起きる</h3>
@@ -284,9 +284,9 @@
 <figure class="diagram">
   <p class="lane-label">🔑 ① 管理者（最初に、1 回だけ）</p>
   <div class="flow">
-    <div class="node admin"><span class="who">🔑 管理者</span><strong>sf-init.sh を実行</strong><small>雛形から、リポジトリ force-XXXX を作る</small></div>
+    <div class="node admin"><span class="who">🔑 管理者</span><strong>sf-project.sh を実行</strong><small>雛形から、リポジトリ force-XXXX を作る</small></div>
     <div class="arrow">→</div>
-    <div class="node admin"><span class="who">🔑 管理者</span><strong>接続と設定を整える</strong><small>Salesforce 組織・認証情報・ブランチの保護・自動処理（sf-init.sh が、順に案内する）</small></div>
+    <div class="node admin"><span class="who">🔑 管理者</span><strong>接続と設定を整える</strong><small>Salesforce 組織・認証情報・ブランチの保護・自動処理（sf-project.sh が、順に案内する）</small></div>
     <div class="arrow">→</div>
     <div class="node ok"><span class="who">✅ できあがり</span><strong>開発者に連絡する</strong><small>リポジトリ名（force-XXXX）を知らせる</small></div>
   </div>
@@ -359,7 +359,7 @@ sf-job.sh</code></pre>
   [5] PullRequest  次の段階へプルリクエストを出す（出し先を確かめる）
   ──────────
   [6] Start        開発環境を起動（VS Code のターミナルでは出ません）
-  [7] Restart      接続組織を切り替えて Start 実行（同上）</code></pre>
+  [7] SwitchOrg    接続組織を切り替えて Start 実行（同上）</code></pre>
     <p>ふだんの順番は、<code>[1]</code> Check → <code>[2]</code> Dryrun（自分の組織で試す）→ <code>[4]</code> Push（送る）→ <code>[5]</code> PullRequest（次の段階へ PR を出す）です。番号は、使う順に並んでいます（<code>[3]</code> Deploy は、自分の組織に実際に反映したいときに使います）。</p>
     <p>コマンドに慣れている方は、<code>sf-push.sh</code> のように、直接打つこともできます。メニューを出し直したいときは、<code>sf-start.sh</code> と打ちます（くわしくは<a href="guide/daily.html#launcher">日々の開発の流れ</a>）。</p>
   </li>

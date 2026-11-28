@@ -16,7 +16,7 @@ CLR_RST='\033[0m'
 # check_sf_cli の「24 時間は確認を省略」の記録先。テストでは、無効にする（本物のホームに記録を作らず、
 # 省略のテスト以外で、確認が省略されないようにするため。省略のテストは、独自の記録先を指定する）
 export SF_TOOLS_SF_CHECK_STAMP=/dev/null
-# sf-upgrade.sh が書く「入れ替えの跡」の印も、本物のホーム（~/.sf-tools-sf-broken）に作らない（check_sf_cli が、起動の画面に出すため）
+# sf-update-cli.sh が書く「入れ替えの跡」の印も、本物のホーム（~/.sf-tools-sf-broken）に作らない（check_sf_cli が、起動の画面に出すため）
 export SF_TOOLS_SF_BROKEN_MARK="${TMPDIR:-/tmp}/sf-tools-test-broken-$$"
 
 # die が、ログに git・node・sf の版を残すために、それらを呼ばないようにする（テストの偽のコマンドの呼び出しの記録を、変えないため。
@@ -29,7 +29,7 @@ export SF_TOOLS_SKIP_ENV_VERSIONS=1
 export SF_TOOLS_JAVA_CHECK_STAMP=/dev/null
 unset JAVA_HOME SF_TOOLS_SKIP_JAVA_CHECK SF_TOOLS_JAVA_MIN_MAJOR
 
-# check_vscode_extension（sf-init の Phase 1）も、本物の環境の設定で、結果が変わらないようにする
+# check_vscode_extension（sf-project の Phase 1）も、本物の環境の設定で、結果が変わらないようにする
 # （本物の VS Code の代わりに、create_mock_code の code が、拡張の一覧を返す）
 unset SF_TOOLS_SKIP_VSCODE_CHECK
 
@@ -170,7 +170,7 @@ case "$1" in
                 [[ -n "${MOCK_GIT_CHECKOUT_FAIL_BRANCH:-}" && "$4" == "${MOCK_GIT_CHECKOUT_FAIL_BRANCH}" ]] && exit 1
                 exit 0 ;;
             rev-parse)
-                # 既定では「Git リポジトリではない」を返す（sf-init の sf-tools 最新化確認をスキップさせ、
+                # 既定では「Git リポジトリではない」を返す（sf-project の sf-tools 最新化確認をスキップさせ、
                 # 対話入力を消費しないようにする）。最新化確認自体のテストは test_init-common.sh で実際の Git を使う
                 [[ "$4" == "--is-inside-work-tree" ]] && exit "${MOCK_GIT_IS_REPO_EXIT:-1}"
                 # admin ブランチが、すでにあるか（rev-parse --verify）。既定は「ある」。MOCK_GIT_REV_VERIFY_EXIT=1 → ない（新しく作る）
@@ -245,7 +245,7 @@ case "$1 $2" in
         echo "@salesforce/cli/2.152.14 win32-x64 node-v24.14.0"
         exit "${MOCK_SF_VERSION_EXIT:-0}" ;;
     "org display")
-        # sf-init の一時エイリアス（sf-tools-*）は、ブラウザログインに失敗した場合は未接続として扱う
+        # sf-project の一時エイリアス（sf-tools-*）は、ブラウザログインに失敗した場合は未接続として扱う
         # （MOCK_SF_LOGIN_WEB_FAIL=1。ログイン失敗の再現）
         if [[ "${MOCK_SF_LOGIN_WEB_FAIL:-}" == "1" && "$*" == *"--target-org sf-tools-"* ]]; then
             echo "Error: No authorization information found" >&2
@@ -327,7 +327,7 @@ case "$1 $2" in
             echo "${MOCK_SF_ORG_INFO:-$_org_default}"
             exit 0
         fi
-        # 接続ユーザーのプロファイル名の取得（sf-init の外部クライアントアプリ作成）
+        # 接続ユーザーのプロファイル名の取得（sf-project の外部クライアントアプリ作成）
         echo "{\"status\":0,\"result\":{\"records\":[{\"Profile\":{\"Name\":\"${MOCK_SF_PROFILE_NAME:-System Administrator}\"}}]}}"
         exit 0 ;;
     "org auth")
@@ -463,7 +463,7 @@ echo "npm $*" >> "${MOCK_CALL_LOG:-/dev/null}"
 # npm config get prefix（npm の置き場所）: MOCK_NPM_PREFIX で再現（既定は何も出力しない）
 [[ "$1 $2 $3" == "config get prefix" ]] && { [[ -n "${MOCK_NPM_PREFIX:-}" ]] && echo "$MOCK_NPM_PREFIX"; exit 0; }
 # npm install -g npm@latest --dry-run: 出力と終了コードを再現（既定は成功）。npm 12 は、これだけが EALLOWREMOTE で壊れる（npm/cli#9800）。
-#   sf-upgrade.sh は --dry-run を使わない（使っていたら、このモックの失敗に巻き込まれて、テストが落ちる）
+#   sf-update-cli.sh は --dry-run を使わない（使っていたら、このモックの失敗に巻き込まれて、テストが落ちる）
 [[ "$*" == *"--dry-run"* ]] && { [[ -n "${MOCK_NPM_DRYRUN_OUT:-}" ]] && echo "$MOCK_NPM_DRYRUN_OUT"; exit "${MOCK_NPM_DRYRUN_EXIT:-0}"; }
 # npm install -g npm@latest（npm 自身の更新）: 出力と終了コードを再現（MOCK_NPM_SELF_OUT / MOCK_NPM_SELF_EXIT。既定は MOCK_NPM_EXIT）
 [[ "$*" == *"npm@latest"* ]] && { [[ -n "${MOCK_NPM_SELF_OUT:-}" ]] && echo "$MOCK_NPM_SELF_OUT"; exit "${MOCK_NPM_SELF_EXIT:-${MOCK_NPM_EXIT:-0}}"; }

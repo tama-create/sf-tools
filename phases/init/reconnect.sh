@@ -1,13 +1,13 @@
 #!/bin/bash
 # ==============================================================================
-# reconnect.sh - 1 つの段階の接続先（Salesforce 組織）を、付け替える（sf-init.sh --reconnect <段階>）
+# reconnect.sh - 1 つの段階の接続先（Salesforce 組織）を、付け替える（sf-project.sh --reconnect <段階>）
 # ==============================================================================
 # 「お試しで Sandbox に入れた → 本番に入れる」「組織を作り直した」ときなどに、1 つの段階（main / staging / develop）の
 # 接続先だけを、同じ画面の流れで、やり直す。外部クライアントアプリの自動作成まで含む。
 # 段階（ブランチ）は、増やさない（増やすときは --add-tier）。鍵・ユーザー名の部分的な更新は sf-update-secret.sh。
 #
 # 【使い方】
-#   force-* ディレクトリの中で sf-init.sh --reconnect <main|staging|develop> を実行する。sf-init.sh が、
+#   force-* ディレクトリの中で sf-project.sh --reconnect <main|staging|develop> を実行する。sf-project.sh が、
 #   環境変数 RECONNECT_TIER を export して、このスクリプトを呼び出す。
 #
 # 【処理の流れ】（doc/wizard-ux-design.md 4.7.7）
@@ -21,19 +21,19 @@
 #   4. register_jwt_secret_eca（init-common.sh）で、ログイン先の選択 → ブラウザでログイン → 組織の種類の読み取り →
 #      本番は main のみのガード（F8）→ 外部クライアントアプリの deploy → コンシューマー鍵の retrieve → JWT 接続テスト →
 #      Secrets / Variables の更新。関数が 0 以外を返したときも die
-#   5. 以前の組織 ID（SF_ORG_ID_<接尾辞>）と、新しい組織 ID が両方あって違うときは、以前の組織に、sf-init が作った
+#   5. 以前の組織 ID（SF_ORG_ID_<接尾辞>）と、新しい組織 ID が両方あって違うときは、以前の組織に、sf-project が作った
 #      外部クライアントアプリ SF_TOOLS_<REPO_NAME の英数字以外を _ にした名前> が残っていることと、削除の場所
 #      （外部クライアントアプリ マネージャ）を表示する（自動では削除しない）。
 #      以前の組織 ID が保存されていなかったときは、確認を促す INFO を表示する。同じ組織のとき・新しい組織 ID を
 #      読み取れなかったときは、何も表示しない
 #
 # 【前提条件】
-#   - ~/.sf-jwt/<REPO_NAME>/server.key・server.crt（sf-init.sh を実行した管理者の PC にある、JWT 用の鍵と証明書）
+#   - ~/.sf-jwt/<REPO_NAME>/server.key・server.crt（sf-project.sh を実行した管理者の PC にある、JWT 用の鍵と証明書）
 #   - gh の認証ユーザーが、リポジトリのオーナー（組織では、その組織の有効な管理者）であること（check_gh_owner）
 #
 # 【補足】
 #   - 環境変数:
-#       RECONNECT_TIER                   : 段階（main | prod | staging | develop。sf-init.sh が export する）
+#       RECONNECT_TIER                   : 段階（main | prod | staging | develop。sf-project.sh が export する）
 #       SF_INIT_LOGIN_URL_<PROD|STG|DEV> : ログイン先を、質問せずに指定する（login | test | URL）
 #       SF_INIT_JWT_RETRIES              : JWT 接続テストの最大の試行回数（既定 20）
 #       SF_INIT_JWT_INTERVAL             : 試行の間の待ち時間（秒。既定 30）。待つのは試行の間だけで、既定では、最大
@@ -45,7 +45,7 @@
 #       ・登録は SF_CONSUMER_KEY_<接尾辞> → SF_USERNAME_<接尾辞> → SF_INSTANCE_URL_<接尾辞> の順に 1 つずつ行い、
 #         失敗したところで die する。途中で止まると、Secrets / Variables に、新しい組織の値と、以前の組織の値が
 #         混在する（SF_ORG_* も、以前の組織の値のまま）。もう一度 --reconnect を実行して、そろえること
-#   - ログは ~/sf-tools/logs/sf-init.log に、実行ごとに新しく書く（LOG_MODE=NEW。前回の内容は消える）
+#   - ログは ~/sf-tools/logs/sf-project.log に、実行ごとに新しく書く（LOG_MODE=NEW。前回の内容は消える）
 #   - 終了コード: 0 = OK / 1 = die
 # ==============================================================================
 
@@ -53,7 +53,7 @@ PHASE_DIR="${BASH_SOURCE[0]%/*}"
 [[ "$PHASE_DIR/" == /* && "$PHASE_DIR/" != *//* && "$PHASE_DIR/" != */./* && "$PHASE_DIR/" != */../* ]] || PHASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SF_TOOLS_DIR="${SF_TOOLS_DIR:-$(dirname "$(dirname "$PHASE_DIR")")}"
 
-readonly SCRIPT_NAME="sf-init"
+readonly SCRIPT_NAME="sf-project"
 mkdir -p "$HOME/sf-tools/logs" 2>/dev/null || true  # run 不使用: common.sh の読み込み前（run が未定義）
 readonly LOG_FILE="$HOME/sf-tools/logs/${SCRIPT_NAME}.log"
 readonly LOG_MODE="NEW"
@@ -131,7 +131,7 @@ register_jwt_secret_eca "$ORG_ALIAS" "$SUFFIX" "$LABEL" "${JWT_DIR}/server.key" 
     || die "${LABEL}（${SUFFIX}）の接続先の付け替えに失敗しました。"
 
 # ------------------------------------------------------------------------------
-# 5. 古い組織に残るもの（sf-init が作った外部クライアントアプリ。自動では削除しない）
+# 5. 古い組織に残るもの（sf-project が作った外部クライアントアプリ。自動では削除しない）
 # ------------------------------------------------------------------------------
 echo "" >&2
 eca_name="SF_TOOLS_${REPO_NAME//[^A-Za-z0-9]/_}"
@@ -142,5 +142,5 @@ elif [[ -z "$old_id" ]]; then
     log "INFO" "以前の接続先の組織 ID は、保存されていませんでした。古い組織に、以前の接続に使った外部クライアントアプリ「${eca_name}」が残っていないか、必要なら、確認してください。"
 fi
 log "SUCCESS" "付け替えが完了しました: ${TIER}"
-log "INFO"    "いまの接続を見る: sf-init.sh --status"
+log "INFO"    "いまの接続を見る: sf-project.sh --status"
 exit $RET_OK

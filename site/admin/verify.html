@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>動作の確認（--verify） | sf-tools ドキュメント</title>
-<meta name="description" content="実際のリポジトリと Salesforce 組織で、リリースと削除が動くことを確かめる sf-init.sh --verify と、種類ごとの可否を確かめる sf-typecheck.sh。">
+<meta name="description" content="実際のリポジトリと Salesforce 組織で、リリースと削除が動くことを確かめる sf-project.sh --verify と、種類ごとの可否を確かめる sf-test-types.sh。">
 <link rel="stylesheet" href="../assets/style.css">
 </head>
 <body data-root="../">
@@ -14,7 +14,7 @@
 <main id="doc" class="doc">
 
 <h1>✅ 動作の確認（--verify）</h1>
-<p class="lead"><code>sf-init.sh</code> で作ったプロジェクトが、実際に動くことを確かめます。本物のリポジトリと、本物の Salesforce 組織を使って、リリースと削除までを、通しで試します。後半では、メタデータの種類ごとに、リリースと削除ができるかを確かめる <code>sf-typecheck.sh</code> も説明します。</p>
+<p class="lead"><code>sf-project.sh</code> で作ったプロジェクトが、実際に動くことを確かめます。本物のリポジトリと、本物の Salesforce 組織を使って、リリースと削除までを、通しで試します。後半では、メタデータの種類ごとに、リリースと削除ができるかを確かめる <code>sf-test-types.sh</code> も説明します。</p>
 
 <div class="box">
   <div class="title">安心して使うための、3 つのポイント</div>
@@ -32,10 +32,10 @@
 
 <h2 id="usage">使い方</h2>
 <p><code>force-*</code> フォルダの中で実行します（管理者用の <code>admin/force-XXXX</code> など。GitHub のリポジトリを origin に持つクローンであることが必要です）。</p>
-<pre><code>sf-init.sh --verify               # 診断 → 実行内容の表示 → 確認 → リリース → 削除 → 結果
-sf-init.sh --verify --plan        # 診断と、実行内容の表示だけ（何も変更しない。確認も出ない）
-sf-init.sh --verify --no-metasync # wf-metasync（Salesforce → Git の同期）の実行を、省略する
-sf-init.sh --verify --cleanup     # 削除のみ（リリースの途中で止まって、組織に Hello World が残ったとき）</code></pre>
+<pre><code>sf-project.sh --verify               # 診断 → 実行内容の表示 → 確認 → リリース → 削除 → 結果
+sf-project.sh --verify --plan        # 診断と、実行内容の表示だけ（何も変更しない。確認も出ない）
+sf-project.sh --verify --no-metasync # wf-metasync（Salesforce → Git の同期）の実行を、省略する
+sf-project.sh --verify --cleanup     # 削除のみ（リリースの途中で止まって、組織に Hello World が残ったとき）</code></pre>
 <ul>
   <li><code>--cleanup</code> は、すべての段階に、削除の PR を出します。組織にすでにないものがあっても、エラーにしないので、どこまで消えているか分からなくても、何度でも実行できます。対象は、固定の名前のクラス（<code>SfToolsE2eHello</code> / <code>SfToolsE2eHelloTest</code>）だけです。</li>
   <li>ほかの引数は、「不明なオプションです」で終了します。</li>
@@ -43,7 +43,7 @@ sf-init.sh --verify --cleanup     # 削除のみ（リリースの途中で止�
 <p>次の 2 つの場面からも、同じ確認を呼び出せます。</p>
 <ul>
   <li><strong>セットアップの最後（ステップ 9）:</strong> 「動作を確認しますか？ [Enter = 確認する / s = あとで]」と聞かれます。Enter なら、環境全体の確認から、リリースと削除までを、続けて実行します（⏱️ 約 20 分。3 層の場合）。ここで答えているので、確認の画面は、もう一度は出ません。確認で失敗があっても、セットアップは、完了扱いです（結果と直し方が表示されます）。</li>
-  <li><strong>セットアップが完了済みのプロジェクトで、オプションなしの <code>sf-init.sh</code>:</strong> メニューの「[2] 動作を、確認する」を選ぶと、実行します（こちらは、確認の画面が出ます）。</li>
+  <li><strong>セットアップが完了済みのプロジェクトで、オプションなしの <code>sf-project.sh</code>:</strong> メニューの「[2] 動作を、確認する」を選ぶと、実行します（こちらは、確認の画面が出ます）。</li>
 </ul>
 
 <h2 id="flow">流れ</h2>
@@ -64,7 +64,7 @@ sf-init.sh --verify --cleanup     # 削除のみ（リリースの途中で止�
 <ol class="steps">
   <li><p><strong>診断:</strong> <a href="maintenance.html#status"><code>--status</code></a> と同じ診断です（対象は、下の「対象にする段階」で決まった段階だけ）。不足があれば、ここで中断します（直し方が表示されます）。検証用と同じ名前のクラスのファイルが、どれかの段階のブランチに、すでにあるときも、中断します（<a href="#notes">注意</a>）。</p></li>
   <li><p><strong>実行内容の表示:</strong> リポジトリ・段階ごとの組織の名前と種類（本番は、赤く表示）・実行する内容・目安の時間。<code>--plan</code> は、ここで終わります。</p></li>
-  <li><p><strong>確認:</strong> 管理者向けの警告のあと、Enter を 1 回押すだけです（<code>sf-init</code> と同じ Git Bash で、続けて実行する想定のため、入力は最小です）。セットアップの最後のステップから呼ばれたときは、そこで答え済みのため、聞きません。</p></li>
+  <li><p><strong>確認:</strong> 管理者向けの警告のあと、Enter を 1 回押すだけです（<code>sf-project</code> と同じ Git Bash で、続けて実行する想定のため、入力は最小です）。セットアップの最後のステップから呼ばれたときは、そこで答え済みのため、聞きません。</p></li>
   <li>
     <p><strong>環境の確認</strong>（<code>--cleanup</code> 以外。リリースの前。NG があれば、リリースへ進まず、組織には、何も変更しません）。</p>
     <ul>
@@ -90,7 +90,7 @@ sf-init.sh --verify --cleanup     # 削除のみ（リリースの途中で止�
 <ul>
   <li><code>wf-validate</code>・<code>wf-release</code> が失敗したときは、ログの末尾を表示して、<strong>1 回だけ</strong>実行し直します。</li>
   <li>上の「確認すること」が失敗しても、記録して、続けます（削除まで進めて、組織を元に戻すためです）。</li>
-  <li>PR の作成・ワークフローの実行・マージなど、流れそのものが失敗したときは、そこで止め、案内を表示して、終了コード 1 で終わります。リリースのあとで止まった場合は、組織に Hello World が残ることがあります。残った段階と、<code>sf-init.sh --verify --cleanup</code>（削除のみ）を、表示します。</li>
+  <li>PR の作成・ワークフローの実行・マージなど、流れそのものが失敗したときは、そこで止め、案内を表示して、終了コード 1 で終わります。リリースのあとで止まった場合は、組織に Hello World が残ることがあります。残った段階と、<code>sf-project.sh --verify --cleanup</code>（削除のみ）を、表示します。</li>
   <li>ブランチ保護で、PR のマージが拒否されたとき・<code>wf-validate</code> が失敗したときは、その段階で止まり、PR が残ります。</li>
 </ul>
 
@@ -103,13 +103,13 @@ sf-init.sh --verify --cleanup     # 削除のみ（リリースの途中で止�
   <li>gh にログインしているユーザーが、リポジトリのオーナー（オーナーが組織なら、その組織の有効な管理者）でないと、中断します。</li>
   <li>GitHub Actions の上では、実行できません。</li>
   <li>対象にする段階は、GitHub にあるブランチから決まります。<code>main</code> は必須です。<code>staging</code> があれば <code>staging</code> も、<code>develop</code> と <code>staging</code> の両方があれば <code>develop</code> も対象です。</li>
-  <li>終了コードは、すべての確認が成功したとき（<code>--plan</code> を含む）が <code>0</code>、失敗した確認がある・途中で止めたときが <code>1</code> です。ログは <code>~/sf-tools/logs/verify.log</code> に、実行のたびに新しく書かれます（<code>sf-init.log</code> とは別です）。</li>
+  <li>終了コードは、すべての確認が成功したとき（<code>--plan</code> を含む）が <code>0</code>、失敗した確認がある・途中で止めたときが <code>1</code> です。ログは <code>~/sf-tools/logs/verify.log</code> に、実行のたびに新しく書かれます（<code>sf-project.log</code> とは別です）。</li>
 </ul>
 
 <h2 id="components">パターン別のサンプルの確認（<code>--components</code>）</h2>
-<pre><code>sf-init.sh --verify --components                  # パターン別のサンプルを、develop の組織だけに、リリースして、削除する
-sf-init.sh --verify --components --validate-only  # 検証（dry-run）だけ。マージせず、組織には、何も反映しない（オブジェクト系も含む）
-sf-init.sh --verify --components --with-objects   # オブジェクト系（トリガー・Layout・オブジェクト・項目）も、リリースして、削除する</code></pre>
+<pre><code>sf-project.sh --verify --components                  # パターン別のサンプルを、develop の組織だけに、リリースして、削除する
+sf-project.sh --verify --components --validate-only  # 検証（dry-run）だけ。マージせず、組織には、何も反映しない（オブジェクト系も含む）
+sf-project.sh --verify --components --with-objects   # オブジェクト系（トリガー・Layout・オブジェクト・項目）も、リリースして、削除する</code></pre>
 <p>Hello World（Apex だけ）の代わりに、<strong>書き方のパターンが違うコンポーネント</strong>を、小さく 1 つずつ試します。develop の組織にリリースして、削除します。全種類を試すものではなく、「種類ごとに、ターゲットファイルの書式（<code>[files]</code> / <code>[members]</code>）・パス・名前の書き方が違っても、リリースの仕組みが動く」ことの確認です。</p>
 <table>
   <thead><tr><th>パターン</th><th>サンプル</th></tr></thead>
@@ -136,28 +136,28 @@ sf-init.sh --verify --components --with-objects   # オブジェクト系（ト�
   <li><strong>Flow は、検証のみ（<code>--validate-only</code>）で検証し、リリースと削除の通しには含めません。</strong>接続ユーザーに、API で Flow を削除する権限がない組織があり（<code>insufficient access rights on cross-reference id</code>。<code>Flow</code> 型・<code>FlowDefinition</code> 型のどちらでも拒否されます）、削除できずに組織に残ってしまうためです。<code>--cleanup</code> は、リポジトリの Flow のファイルを削除します。組織に残った Flow は、画面（設定 → フロー）で、手動で削除してください。</li>
   <li>Layout は、オブジェクトの最後の 1 つにできないため、削除対象にせず、オブジェクトの削除に任せます。</li>
   <li>名前は、すべて <code>SfToolsE2eHello</code> 系で、誰も使いません。ほかのファイルを、上書きしません（検証用と同名のファイルが、develop にすでにあるときは、実行しません）。</li>
-  <li>途中で止まって、組織に残ったときは、<code>sf-init.sh --verify --components --cleanup</code>（削除のみ。<code>--with-objects</code> でリリースしたときは、<code>--with-objects</code> も付けます）で消します。失敗したときの案内にも、付けるべきコマンドが表示されます。<code>--cleanup</code> は、何度実行しても通ります（組織にすでにないものがあっても、エラーにしません）。前回の検証が残した labels のファイル（サンプルのラベルだけのもの）も、サンプルのものとして、削除します。</li>
+  <li>途中で止まって、組織に残ったときは、<code>sf-project.sh --verify --components --cleanup</code>（削除のみ。<code>--with-objects</code> でリリースしたときは、<code>--with-objects</code> も付けます）で消します。失敗したときの案内にも、付けるべきコマンドが表示されます。<code>--cleanup</code> は、何度実行しても通ります（組織にすでにないものがあっても、エラーにしません）。前回の検証が残した labels のファイル（サンプルのラベルだけのもの）も、サンプルのものとして、削除します。</li>
 </ul>
 
-<h2 id="typecheck">メタデータの種類ごとの可否の確認（<code>sf-typecheck.sh</code>）</h2>
+<h2 id="typecheck">メタデータの種類ごとの可否の確認（<code>sf-test-types.sh</code>）</h2>
 <div class="box admin">
   <div class="title">管理者専用（個人用の組織）</div>
   <p>実行の前に、赤い警告ボックスと確認（Y/N/q）が表示されます（<code>-y</code> で確認だけを省略できます）。共有の組織・本番の組織では、実行できません（下の<a href="#typecheck-guard">安全のための拒否</a>）。</p>
 </div>
 <p>個人用の組織（自分だけが使う Developer Edition や Sandbox など）で、メタデータの種類ごとに、小さなサンプルを実際にリリースして、削除し、できたかどうかを表にします。サンプルは、パソコンの一時フォルダに作る使い捨てのプロジェクトに置くので、<code>force-*</code> の外でも実行できます（一時フォルダは、終了時に消します）。</p>
-<p>結果の表（既定は、カレントフォルダの <code>sf-typecheck-result.txt</code>）は、可否の表 <code>config/metadata-capability.txt</code> の<strong>元になります</strong>（結果を人が確かめて、可否の表に反映します）。可否の表は、<code>sf-check.sh</code> が、ターゲットファイルの確認に使います（リリース・削除できないと確認済みの種類を書くと、止めます）。</p>
-<pre><code>sf-typecheck.sh --org ALIAS                        # リリースして、削除する
-sf-typecheck.sh --org ALIAS --validate-only        # 検証だけ（組織には、何も反映しない）
-sf-typecheck.sh --org ALIAS --only ApexPage,Queue  # 種類を絞る
-sf-typecheck.sh --list                             # 確認する種類の一覧だけ（組織には接続しない）
-sf-typecheck.sh --coverage                         # 確認の進み具合だけ（組織には接続しない）</code></pre>
+<p>結果の表（既定は、カレントフォルダの <code>sf-test-types-result.txt</code>）は、可否の表 <code>config/metadata-capability.txt</code> の<strong>元になります</strong>（結果を人が確かめて、可否の表に反映します）。可否の表は、<code>sf-check.sh</code> が、ターゲットファイルの確認に使います（リリース・削除できないと確認済みの種類を書くと、止めます）。</p>
+<pre><code>sf-test-types.sh --org ALIAS                        # リリースして、削除する
+sf-test-types.sh --org ALIAS --validate-only        # 検証だけ（組織には、何も反映しない）
+sf-test-types.sh --org ALIAS --only ApexPage,Queue  # 種類を絞る
+sf-test-types.sh --list                             # 確認する種類の一覧だけ（組織には接続しない）
+sf-test-types.sh --coverage                         # 確認の進み具合だけ（組織には接続しない）</code></pre>
 <table>
   <thead><tr><th>オプション</th><th>内容</th></tr></thead>
   <tbody>
     <tr><td><code>--org ALIAS</code></td><td>接続先の組織のエイリアス（<code>sf</code> でログインしたときに付けた、組織の呼び名）。<code>--list</code> と <code>--coverage</code> 以外では必須です。その組織に、<code>sf</code> でログイン済みであることが必要です</td></tr>
     <tr><td><code>--validate-only</code></td><td>検証だけを行います。削除の列は「unknown」（実行していない）のままです</td></tr>
     <tr><td><code>--only A,B</code></td><td>指定した種類だけを確認します（<code>--list</code> に出る名前と完全に一致するもの。一致しない名前は無視され、1 つも一致しなければ 0 種類で正常終了します）</td></tr>
-    <tr><td><code>--out FILE</code></td><td>結果の表の出力先（既定: カレントフォルダの <code>sf-typecheck-result.txt</code>。上書きします）。<strong>すべての種類を処理し終えたときだけ</strong>書きます</td></tr>
+    <tr><td><code>--out FILE</code></td><td>結果の表の出力先（既定: カレントフォルダの <code>sf-test-types-result.txt</code>。上書きします）。<strong>すべての種類を処理し終えたときだけ</strong>書きます</td></tr>
     <tr><td><code>--list</code></td><td>確認する種類の一覧を表示して終了します</td></tr>
     <tr><td><code>--coverage</code></td><td>変更セットで扱える種類（<code>config/changeset-types.txt</code>。Salesforce の公式の一覧）と、可否の表を突き合わせ、確認済み・未確認の数を、区分ごとに表示します（リリースも削除も ok / リリースのみ ok / ng または limited を含む / 判定できない / 表にない）。種類の一覧は、ok 以外の 4 区分だけ出ます</td></tr>
     <tr><td><code>-y</code>, <code>--yes</code></td><td>冒頭の確認（Y/N）を省略します（警告ボックスは表示されます）</td></tr>
@@ -191,7 +191,7 @@ sf-typecheck.sh --coverage                         # 確認の進み具合だけ
   <li>カスタムオブジェクトは、削除したあと 15 日間、名前が予約されるため、名前に、実行したときの日時を入れます。</li>
   <li>名前の条件に当たらないものがあると、その時点で全体を中断します。それまでに処理した種類は、実行済みのまま残り、結果の表も書かれません。</li>
   <li>Sandbox が「個人用」か「共有」かは、判定しません。個人用の組織を指定していることを、確認してから実行してください。</li>
-  <li>ログは <code>~/sf-tools/logs/sf-typecheck.log</code> です（実行のたびに作り直します）。</li>
+  <li>ログは <code>~/sf-tools/logs/sf-test-types.log</code> です（実行のたびに作り直します）。</li>
 </ul>
 
 </main>

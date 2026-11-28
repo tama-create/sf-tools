@@ -184,9 +184,9 @@ test_coverage_guard_detects() {
     rm -f "$root/templates/.github/workflows/wf-new.yml"
 
     # (g) 表にだけ、あって、実体がない（コマンドを消して、表に残した）
-    rm -f "$root/bin/sf-typecheck.sh"
+    rm -f "$root/bin/sf-test-types.sh"
     out=$(_cov_check "$PLAN_DOC" "$root")
-    [[ "$out" == *"表の sf-typecheck は、実在しない"* ]] && pass "表にだけあって、実体がない → 検出する" || fail "表にだけあって、実体がない → 検出する" "$out"
+    [[ "$out" == *"表の sf-test-types は、実在しない"* ]] && pass "表にだけあって、実体がない → 検出する" || fail "表にだけあって、実体がない → 検出する" "$out"
 
     rm -rf "$td"
 }

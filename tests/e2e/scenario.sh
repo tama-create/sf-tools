@@ -2,7 +2,7 @@
 # ==============================================================================
 # scenario.sh - e2e のシナリオ方式（実環境の L2。シナリオを 1 つずつ、短く動かす）
 # ==============================================================================
-# run.sh（sf-init の通し検証）が前回残したテスト用リポジトリを使い、名前で選んだシナリオだけを実行する。
+# run.sh（sf-project の通し検証）が前回残したテスト用リポジトリを使い、名前で選んだシナリオだけを実行する。
 # 通常のテスト（bash tests/run_tests.sh）には含まれない。実環境を使うため、e2e.yml（Actions）が、run.sh のあとに実行する。手元では、調査・新しい環境の確認のときだけ実行する。
 # 設計: doc/integration-test-plan.md の 11
 #
@@ -33,28 +33,28 @@
 #                    戻して（先端のコミットが変わる）N へ PR → wf-sequence の「順序チェック」が失敗（R1）・⛔ のコメント →
 #                    そのままマージ → wf-release が止める（N の組織へ出さない・印なし・Slack 通知）。2 段階以上のリポジトリと、P・N の組織が要る。
 #                    終了時に、P の組織のクラスを消し、P・N に入れたファイル・ブランチ・PR を片付ける（書き込みあり）
-#   restart-org    : sf-restart.sh で、ジョブのクローンの接続先を、別の組織（staging の組織）に切り替える → 接続先が変わり、sf-dryrun が新しい組織を使う → 元の組織に戻す（A8。
+#   restart-org    : sf-switch-org.sh で、ジョブのクローンの接続先を、別の組織（staging の組織）に切り替える → 接続先が変わり、sf-dryrun が新しい組織を使う → 元の組織に戻す（A8。
 #                    鍵一式に staging の組織があるときだけ。ログインは、認証 URL への差し替え。終了時に、必ず、元の組織へ戻す）
 #   update-secret  : 管理者用のクローンで、sf-update-secret.sh の「1) 秘密鍵」を、同じ秘密鍵（~/.sf-jwt/force-XXXX/server.key）で実行 → Secret SF_PRIVATE_KEY の
 #                    更新日時が進む・ほかの Secret は変わらない・出力に秘密鍵が出ない・誤ったパスは拒否され、更新されない（B2）。値は変わらない（同じ鍵で上書き）。
 #                    このあとの validate-fail などが、上書きした鍵で、JWT ログインできることを、実際のワークフローで確かめる（順番を、その前にしている）
 #   cross-os       : リポジトリを clone し（GitHub から。手元の作業フォルダを使わない）、OS 混在の問題（C2）を確認する: 記録されたテキストファイルに CRLF が
 #                    ない・sf-hook.sh で入れたフック（pre-commit・pre-push）が、sf-tools の hooks/ と同じ内容で、CR がなく、実行できる・作業用ブランチで
-#                    sf-sync-wf.sh --check が成功する（雛形と同じ）。リポジトリを作った OS とは別の OS で動かすと、OS 混在の確認になる
+#                    sf-update-workflows.sh --check が成功する（雛形と同じ）。リポジトリを作った OS とは別の OS で動かすと、OS 混在の確認になる
 #                    （e2e.yml の macOS のジョブが、Windows が作ったリポジトリに対して動かす）。GitHub・組織へは書き込まない（一時フォルダの中だけ）
-#   sync-wf        : 管理者用のクローン（admin ブランチ）で、ワークフローを改変 → sf-sync-wf.sh --check が見つける → sf-sync-wf.sh が雛形の内容に直す
+#   sync-wf        : 管理者用のクローン（admin ブランチ）で、ワークフローを改変 → sf-update-workflows.sh --check が見つける → sf-update-workflows.sh が雛形の内容に直す
 #                    （コミット・push はしない）→ 雛形にあるファイルの --remove は拒否される・雛形にない不要なファイルは --remove で消せる（B4）。
 #                    クローンの中だけ（GitHub・組織へは、書き込まない）。終了時に、クローンの .github/workflows を、元（HEAD）に戻す
 #   tier-switch    : 段階の切り替え（doc/tier-scaling-design.md 9.1）。対象は、いちばん下の有効な段階（3 段階なら develop・
 #                    2 段階なら staging。CI の e2e は、1 層で作って --add-tier staging したリポジトリのため、staging）。
-#                    管理者用のクローンで sf-init.sh --remove-tier <対象> → PR をマージ →
+#                    管理者用のクローンで sf-project.sh --remove-tier <対象> → PR をマージ →
 #                    対象のブランチの先頭が変わらない（下りの伝播はしない）・対象への PR の wf-validate が「デプロイ検証」を skipped にする・
 #                    そのマージの wf-release が「リリース実行」を skipped にする（組織に書き込まない）・wf-release は手動で実行できない
 #                    （workflow_dispatch がない。PR を通らずに組織へ出す道はない）→
-#                    sf-init.sh --add-tier <対象>（接続情報が残っているので、つなぎ直さずに戻す）→ PR をマージ → 対象への PR が、また検証される。
+#                    sf-project.sh --add-tier <対象>（接続情報が残っているので、つなぎ直さずに戻す）→ PR をマージ → 対象への PR が、また検証される。
 #                    2 段階以上（main の branches.txt に staging がある）のリポジトリが要る。段階を変えるため、最後に実行する。
 #                    終了時に、main の branches.txt を元に戻し、PR を閉じ、作ったブランチと、対象に足したファイルを消す（書き込みあり）
-#   manual-delete  : テスト用リポジトリの Secret（SLACK_BOT_TOKEN）と Variable（SLACK_CHANNEL_ID）を、手で削除 → sf-init.sh --status が
+#   manual-delete  : テスト用リポジトリの Secret（SLACK_BOT_TOKEN）と Variable（SLACK_CHANNEL_ID）を、手で削除 → sf-project.sh --status が
 #                    不足を見つけ、直し方を示す → 元に戻す → 診断が、元に戻る（書き込みあり。終了時に、必ず元に戻す）
 #
 # 【安全】
@@ -101,9 +101,9 @@ _scn_desc() {
         metasync-diff) echo "組織側だけの Apex が、wf-metasync で main に反映される（組織と main に書き込み、必ず戻す）" ;;
         one-way)       echo "一方通行の決まり: 印が付く・積み重ねの抜けで検証が失敗・前の段階に出していないコミットは順序チェックが失敗・マージしても wf-release が止める（2 段階以上が要る）" ;;
         update-secret) echo "sf-update-secret で秘密鍵を同じ鍵で上書き → 更新日時が進む・ほかは変わらない・誤ったパスは拒否される（同じ値で上書き。あとのシナリオが、JWT ログインを確かめる）" ;;
-        cross-os)      echo "リポジトリを clone して、OS 混在の問題を確認する: CRLF がない・フックが同じ内容で実行できる・sf-sync-wf --check が成功する（読み取りのみ）" ;;
-        sync-wf)       echo "sf-sync-wf が、改変したワークフローを見つけて、雛形に戻す。--remove は、雛形にあるファイルを拒否し、不要なファイルだけ消す（クローンの中だけ）" ;;
-        restart-org)   echo "sf-restart で接続先を staging の組織に切り替え、sf-dryrun が新しい組織を使う → 元に戻す（ジョブのクローンの接続設定を、一時的に変える）" ;;
+        cross-os)      echo "リポジトリを clone して、OS 混在の問題を確認する: CRLF がない・フックが同じ内容で実行できる・sf-update-workflows --check が成功する（読み取りのみ）" ;;
+        sync-wf)       echo "sf-update-workflows が、改変したワークフローを見つけて、雛形に戻す。--remove は、雛形にあるファイルを拒否し、不要なファイルだけ消す（クローンの中だけ）" ;;
+        restart-org)   echo "sf-switch-org で接続先を staging の組織に切り替え、sf-dryrun が新しい組織を使う → 元に戻す（ジョブのクローンの接続設定を、一時的に変える）" ;;
         tier-switch)   echo "--remove-tier（いちばん下の段階）→ その段階への検証・リリースが止まる（手動の実行もできない） → --add-tier（つなぎ直さずに戻す）→ また検証される（2 段階以上のリポジトリが要る）" ;;
         *) echo "" ;;
     esac
@@ -116,9 +116,9 @@ _scn_writes() {
         dist-main)     echo "Variable SF_TOOLS_BRANCH を一時的に削除し、テスト用ブランチ（e2e-dm-時刻）と PR で wf-validate を動かします（dry-run のみ）。終了時に、Variable を戻し、PR を閉じ、ブランチを削除します" ;;
         one-way)       echo "開発のブランチ（e2e-ow-時刻）と PR を作り、いちばん下の段階へマージして、その組織に Apex（SfToolsE2eHello・SfToolsE2eHelloTest）をリリースします。次の段階へも、止められた PR をマージします（wf-release が組織へ出さない想定）。終了時に、その組織の Apex を削除し、両方の段階に入れたファイル・ブランチを消します" ;;
         update-secret) echo "Secret SF_PRIVATE_KEY を、同じ秘密鍵（~/.sf-jwt/${REPO_NAME}/server.key）で上書きします（値は変わりません。更新日時だけが進みます）" ;;
-        sync-wf)       echo "管理者用のクローンの .github/workflows を、一時的に改変し（wf-validate.yml に 1 行・不要なファイル e2e-obsolete.yml）、sf-sync-wf.sh で直します。GitHub・組織へは書き込みません。終了時に、HEAD の状態へ戻します" ;;
-        restart-org)   echo "ジョブのクローンの接続先を、sf-restart.sh で、staging の組織に切り替え（sf のエイリアス sf-tools-e2e-restart-STG を、一時的に作る）、dry-run を行います。終了時に、元の組織へ戻し、エイリアスを元の状態にします" ;;
-        tier-switch)   echo "管理者用のクローンで、いちばん下の有効な段階（3 段階なら develop・2 段階なら staging）に sf-init.sh --remove-tier と --add-tier を実行し、その PR を main にマージします（main の branches.txt から、いったんその段階がなくなります）。その段階へのテスト用の PR（e2e-ts-時刻）をマージします（組織へは書き込まない想定。wf-release を手動で実行できないことも確かめます）。終了時に、branches.txt を元に戻し、PR を閉じ、ブランチとその段階に足したファイルを消します" ;;
+        sync-wf)       echo "管理者用のクローンの .github/workflows を、一時的に改変し（wf-validate.yml に 1 行・不要なファイル e2e-obsolete.yml）、sf-update-workflows.sh で直します。GitHub・組織へは書き込みません。終了時に、HEAD の状態へ戻します" ;;
+        restart-org)   echo "ジョブのクローンの接続先を、sf-switch-org.sh で、staging の組織に切り替え（sf のエイリアス sf-tools-e2e-restart-STG を、一時的に作る）、dry-run を行います。終了時に、元の組織へ戻し、エイリアスを元の状態にします" ;;
+        tier-switch)   echo "管理者用のクローンで、いちばん下の有効な段階（3 段階なら develop・2 段階なら staging）に sf-project.sh --remove-tier と --add-tier を実行し、その PR を main にマージします（main の branches.txt から、いったんその段階がなくなります）。その段階へのテスト用の PR（e2e-ts-時刻）をマージします（組織へは書き込まない想定。wf-release を手動で実行できないことも確かめます）。終了時に、branches.txt を元に戻し、PR を閉じ、ブランチとその段階に足したファイルを消します" ;;
         metasync-diff) echo "テスト用の組織に Apex（SfToolsE2eHello・SfToolsE2eHelloTest）を直接デプロイし、wf-metasync を起動します。main に、その Apex のファイルが、コミットされます（main にすでにあるものは、いったん外します）。終了時に、組織の Apex を削除し、main を実行前の状態に戻します" ;;
         *) echo "" ;;
     esac
@@ -327,12 +327,12 @@ _scn_restore() {
         fi
     fi
     if [[ -n "$RESTORE_RESTART_CLONE" ]]; then
-        # 接続先を、元の組織へ戻す（sf-restart.sh を、元のエイリアスで、もう一度。ログインは、認証 URL への差し替え）
-        if e2e_run_sf_cmd "sf-restart-back" "$RESTORE_RESTART_CLONE" "${RESTORE_RESTART_ALIAS}\n2\n" "${E2E_SF_RESTART:-${SF_TOOLS_ROOT}/bin/sf-restart.sh}" \
+        # 接続先を、元の組織へ戻す（sf-switch-org.sh を、元のエイリアスで、もう一度。ログインは、認証 URL への差し替え）
+        if e2e_run_sf_cmd "sf-restart-back" "$RESTORE_RESTART_CLONE" "${RESTORE_RESTART_ALIAS}\n2\n" "${E2E_SF_RESTART:-${SF_TOOLS_ROOT}/bin/sf-switch-org.sh}" \
             && e2e_wait_sf_install "$RESTORE_RESTART_CLONE"; then
             log "INFO" "  元に戻しました: ジョブのクローンの接続先を、${RESTORE_RESTART_ALIAS} に戻しました"; RESTORE_RESTART_CLONE=""
         else
-            log "ERROR" "  ジョブのクローンの接続先を、元（${RESTORE_RESTART_ALIAS}）に戻せませんでした（${RESTORE_RESTART_CLONE}）。そのフォルダで、bash ~/sf-tools/bin/sf-restart.sh を実行して、${RESTORE_RESTART_ALIAS} を選んでください。"; rc=1
+            log "ERROR" "  ジョブのクローンの接続先を、元（${RESTORE_RESTART_ALIAS}）に戻せませんでした（${RESTORE_RESTART_CLONE}）。そのフォルダで、bash ~/sf-tools/bin/sf-switch-org.sh を実行して、${RESTORE_RESTART_ALIAS} を選んでください。"; rc=1
         fi
     fi
     if [[ -n "$RESTORE_XOS_DIR" ]]; then
@@ -466,11 +466,11 @@ scn_log_secrets() {
     log "INFO" "  検査した範囲: Actions の実行 ${n_runs} 件・PR ${n_prs} 件"
 }
 
-# manual-delete: Secret・Variable を手で削除 → sf-init.sh --status が、不足を見つけ、直し方を示す → 元に戻す → 診断が、元に戻る
-#   --status は、管理者用のクローン（admin/force-XXXX）で実行する（E2E_SF_INIT: 実行する sf-init.sh を差し替える。テスト用）。もともと診断が通らないとき（不足がある）は、確認の意味がないため、実行できないとする
+# manual-delete: Secret・Variable を手で削除 → sf-project.sh --status が、不足を見つけ、直し方を示す → 元に戻す → 診断が、元に戻る
+#   --status は、管理者用のクローン（admin/force-XXXX）で実行する（E2E_SF_INIT: 実行する sf-project.sh を差し替える。テスト用）。もともと診断が通らないとき（不足がある）は、確認の意味がないため、実行できないとする
 _scn_status() {   # 出力を SCN_STATUS_OUT に入れ、戻り値は --status の終了コード
     local admin="${E2E_HOME_ROOT}/${E2E_OWNER}/${PROJECT}/admin/${REPO_NAME}"
-    SCN_STATUS_OUT=$( cd "$admin" && printf 'Y\n' | bash "${E2E_SF_INIT:-${SF_TOOLS_ROOT}/bin/sf-init.sh}" --status 2>&1 | _strip_ansi; exit "${PIPESTATUS[1]}" )  # VAR=$(cmd) のため run 不使用
+    SCN_STATUS_OUT=$( cd "$admin" && printf 'Y\n' | bash "${E2E_SF_INIT:-${SF_TOOLS_ROOT}/bin/sf-project.sh}" --status 2>&1 | _strip_ansi; exit "${PIPESTATUS[1]}" )  # VAR=$(cmd) のため run 不使用
 }
 _scn_names() {   # 引数: secret|variable。名前の一覧（並べ替えて、カンマ区切り）
     local out
@@ -828,7 +828,7 @@ scn_one_way() {
 
 # tier-switch: 段階を外す → 検証・リリースが止まる（下りの伝播はしない・手動の実行もできない）→ 戻す → また動く（doc/tier-scaling-design.md 9.1）
 #   2 段階以上のテスト用リポジトリで、いちばん下の有効な段階（3 段階なら develop・2 段階なら staging。以下「対象の段階」）を、
-#   管理者用のクローンから sf-init.sh --remove-tier・--add-tier で外して戻す（CI の e2e は、1 層で作って --add-tier staging で
+#   管理者用のクローンから sf-project.sh --remove-tier・--add-tier で外して戻す（CI の e2e は、1 層で作って --add-tier staging で
 #   2 段階にしたリポジトリで動かすため、staging が対象になる）。
 #   組織に書き込まないことは、組織に書き込むジョブ（wf-validate の「デプロイ検証」・wf-release の「リリース実行」）が skipped であることで確かめる
 #   （組織へのデプロイ・検証は、この 2 つのジョブの中だけで行うため）。
@@ -844,7 +844,7 @@ _scn_pr_by_head_prefix() {   # 引数: head ブランチ名の先頭。開いて
     _e2e_gh pr list -R "$REPO_FULL" --state open --json number,headRefName --jq ".[] | select(.headRefName | startswith(\"$1\")) | \"\(.number) \(.headRefName)\"" 2>/dev/null | head -1  # 出力をそのまま返すため run 不使用
 }
 scn_tier_switch() {
-    local work="${E2E_HOME_ROOT}/${E2E_OWNER}/${PROJECT}" clone sfinit="${SF_TOOLS_ROOT}/bin/sf-init.sh" orig t dev0 dev1 pr br b0 run1 line
+    local work="${E2E_HOME_ROOT}/${E2E_OWNER}/${PROJECT}" clone sfinit="${SF_TOOLS_ROOT}/bin/sf-project.sh" orig t dev0 dev1 pr br b0 run1 line
     clone="${work}/admin/${REPO_NAME}"
     [[ -d "${clone}/.git" ]] || { SCN_SKIP="管理者用のクローン（${clone}）がありません（run.sh が作ります）"; return; }
     [[ -z "$(git -C "$clone" status --porcelain 2>/dev/null)" ]] || { SCN_SKIP="管理者用のクローンに、未コミットの変更があります"; return; }  # VAR=$(cmd) のため run 不使用
@@ -864,7 +864,7 @@ scn_tier_switch() {
     RESTORE_TIER_ORIG="$orig"       # 書き込む前に登録する（途中で止まっても、終了時に、main の branches.txt を元の中身に戻す）
 
     # --- 1・2: 対象の段階を外す → PR をマージ ---
-    e2e_run_sf_cmd "remove-tier" "$clone" "y\n" "$sfinit" --remove-tier "$t"; _chk "sf-init.sh --remove-tier ${t} が成功した" $? || return
+    e2e_run_sf_cmd "remove-tier" "$clone" "y\n" "$sfinit" --remove-tier "$t"; _chk "sf-project.sh --remove-tier ${t} が成功した" $? || return
     grep -qF "ブランチ・Secrets / Variables・Ruleset・Salesforce 組織は、変えません" "${E2E_TMP}/remove-tier.out"; _chk "GitHub の設定を変えないことが表示された" $?
     line=$(_scn_pr_by_head_prefix "system-remove-tier-${t}-")  # VAR=$(cmd) のため run 不使用
     pr="${line%% *}"; br="${line#* }"
@@ -911,7 +911,7 @@ scn_tier_switch() {
     _chk "wf-release を ${t} で手動の実行できない（workflow_dispatch がない）" "$([[ -z "$run1" ]] && echo 0 || echo 1)"
 
     # --- 7・8: 戻す（接続情報が残っているので、つなぎ直さない）→ PR をマージ ---
-    e2e_run_sf_cmd "add-tier" "$clone" "y\ny\n" "$sfinit" --add-tier "$t"; _chk "sf-init.sh --add-tier ${t}（つなぎ直さずに戻す）が成功した" $? || return
+    e2e_run_sf_cmd "add-tier" "$clone" "y\ny\n" "$sfinit" --add-tier "$t"; _chk "sf-project.sh --add-tier ${t}（つなぎ直さずに戻す）が成功した" $? || return
     grep -qF "つなぎ直さずに、段階だけ戻します" "${E2E_TMP}/add-tier.out"; _chk "つなぎ直さなかった（ブラウザのログインなし）" $?
     line=$(_scn_pr_by_head_prefix "system-add-tier-${t}-")  # VAR=$(cmd) のため run 不使用
     pr="${line%% *}"; br="${line#* }"
@@ -939,14 +939,14 @@ scn_tier_switch() {
     _scn_restore; _chk "後始末をした（PR・ブランチ・${t} のファイル）" $?
 }
 
-# restart-org: sf-restart.sh で、ジョブのクローンの接続先を、別の組織（staging の組織）に切り替える（A8）
+# restart-org: sf-switch-org.sh で、ジョブのクローンの接続先を、別の組織（staging の組織）に切り替える（A8）
 #   run.sh が残した、リリース用のジョブのクローン（{作業フォルダ}/e2e-hello-時刻/force-XXXX）を使う。
 #   確認: 接続先（.sf/config.json の target-org）が、新しいエイリアスに変わる・その組織のユーザーが、staging の組織のユーザー（Variable SF_USERNAME_STG）で、
 #         元の組織のユーザーとは違う・sf-dryrun.sh が、新しいエイリアスの組織で、検証する。そのあと、元のエイリアスへ戻し、元の組織のユーザーに戻ったことを確認する。
-#   書き込み: クローンの .sf/config.json・.sfdx/sfdx-config.json（sf-restart が作り直す）・sf のエイリアス sf-tools-e2e-restart-STG（終了時に、元の一覧へ戻す）。
+#   書き込み: クローンの .sf/config.json・.sfdx/sfdx-config.json（sf-switch-org が作り直す）・sf のエイリアス sf-tools-e2e-restart-STG（終了時に、元の一覧へ戻す）。
 #             組織への書き込みはない（dry-run のみ）
 #   前提: 鍵一式に staging の組織がある・ジョブのクローン（接続済み）がある・Variable SF_USERNAME_STG がある
-#   E2E_SF_RESTART / E2E_SF_DRYRUN: 実行する sf-restart.sh / sf-dryrun.sh を差し替える（テスト用）
+#   E2E_SF_RESTART / E2E_SF_DRYRUN: 実行する sf-switch-org.sh / sf-dryrun.sh を差し替える（テスト用）
 _scn_org_user() {   # 引数: クローン エイリアス。その組織の接続ユーザー名を返す
     local out
     out=$(cd "$1" && sf org display --target-org "$2" --json 2>/dev/null) || return 1  # VAR=$(cmd) のため run 不使用
@@ -954,7 +954,7 @@ _scn_org_user() {   # 引数: クローン エイリアス。その組織の接�
 }
 scn_restart_org() {
     local work="${E2E_HOME_ROOT}/${E2E_OWNER}/${PROJECT}" d clone="" alias0 alias1="sf-tools-e2e-restart-STG" user0 user1 stg_user cfg
-    local restart="${E2E_SF_RESTART:-${SF_TOOLS_ROOT}/bin/sf-restart.sh}" dryrun="${E2E_SF_DRYRUN:-${SF_TOOLS_ROOT}/bin/sf-dryrun.sh}"
+    local restart="${E2E_SF_RESTART:-${SF_TOOLS_ROOT}/bin/sf-switch-org.sh}" dryrun="${E2E_SF_DRYRUN:-${SF_TOOLS_ROOT}/bin/sf-dryrun.sh}"
     e2e_tier_available staging || { SCN_SKIP="鍵一式に、staging の組織がありません（bootstrap.sh --add-orgs で追加してください）"; return; }
     for d in "$work"/e2e-hello-[0-9][0-9][0-9][0-9][0-9][0-9]; do   # 名前の並び順が、時刻順（最新が、最後）
         [[ -f "${d}/${REPO_NAME}/.sf/config.json" ]] && clone="${d}/${REPO_NAME}"
@@ -976,11 +976,11 @@ scn_restart_org() {
     [[ "$user0" != "$stg_user" ]] || { SCN_SKIP="元の接続先が、すでに staging の組織です（切り替えの確認ができません）"; return; }
 
     RESTORE_RESTART_CLONE="$clone"; RESTORE_RESTART_ALIAS="$alias0"   # 切り替える前に登録する（途中で止まっても、終了時に戻す）
-    rm -f "${clone}/sf-tools/logs/sf-install.log"  # run 不使用: 前回の完了メッセージを、完了の待ちに、使わないため（ログファイルだけ）
+    rm -f "${clone}/sf-tools/logs/sf-refresh.log"  # run 不使用: 前回の完了メッセージを、完了の待ちに、使わないため（ログファイルだけ）
 
     # --- staging の組織へ切り替える ---
-    e2e_run_sf_cmd "sf-restart-stg" "$clone" "${alias1}\n2\n" "$restart"; _chk "sf-restart.sh で、接続先を ${alias1} に切り替えた" $? || return
-    e2e_wait_sf_install "$clone"; _chk "切り替えのあとの sf-install.sh（背景）が完了した" $? || return
+    e2e_run_sf_cmd "sf-restart-stg" "$clone" "${alias1}\n2\n" "$restart"; _chk "sf-switch-org.sh で、接続先を ${alias1} に切り替えた" $? || return
+    e2e_wait_sf_install "$clone"; _chk "切り替えのあとの sf-refresh.sh（背景）が完了した" $? || return
     cfg=$(cat "${clone}/.sf/config.json")  # VAR=$(cmd) のため run 不使用
     _chk "接続先（.sf/config.json の target-org）が、${alias1} に変わった" "$([[ "$(json_get "$cfg" target-org)" == "$alias1" ]] && echo 0 || echo 1)"
     user1=$(_scn_org_user "$clone" "$alias1") || user1=""  # VAR=$(cmd) のため run 不使用
@@ -997,22 +997,22 @@ scn_restart_org() {
     _chk "元の組織のユーザーに、戻った" "$([[ "$user1" == "$user0" ]] && echo 0 || echo 1)"
 }
 
-# sync-wf: sf-sync-wf.sh（B4）。管理者用のクローン（{作業フォルダ}/admin/force-XXXX。run.sh が作る。admin ブランチ）の中だけで確認する
+# sync-wf: sf-update-workflows.sh（B4）。管理者用のクローン（{作業フォルダ}/admin/force-XXXX。run.sh が作る。admin ブランチ）の中だけで確認する
 #   確認: 改変なしで、--check が成功する → wf-validate.yml に 1 行足すと、--check が失敗する（終了コード 1）・差分にそのファイル名が出る →
-#         sf-sync-wf.sh（確認に Y）が、雛形の内容で上書きする（--check が成功・コミット済みの内容と同じ・HEAD は変わらない = コミット・push しない）→
+#         sf-update-workflows.sh（確認に Y）が、雛形の内容で上書きする（--check が成功・コミット済みの内容と同じ・HEAD は変わらない = コミット・push しない）→
 #         雛形にあるファイルの --remove は、拒否される → 雛形にない不要なファイル（e2e-obsolete.yml）は、案内に出て、--remove で消せる
 #   書き込み: クローンの .github/workflows だけ（終了時に、HEAD の状態へ戻す）。GitHub・組織へは、書き込まない
 #   前提: 管理者用のクローンがある・環境ブランチ（main / staging / develop）の上ではない・作業ツリーがきれい
-#   E2E_SF_SYNC_WF: 実行する sf-sync-wf.sh を差し替える（テスト用）
+#   E2E_SF_SYNC_WF: 実行する sf-update-workflows.sh を差し替える（テスト用）
 scn_sync_wf() {
     local work="${E2E_HOME_ROOT}/${E2E_OWNER}/${PROJECT}" clone head0 branch0 wfdir=".github/workflows" target="wf-validate.yml"
-    local syncwf="${E2E_SF_SYNC_WF:-${SF_TOOLS_ROOT}/bin/sf-sync-wf.sh}"
+    local syncwf="${E2E_SF_SYNC_WF:-${SF_TOOLS_ROOT}/bin/sf-update-workflows.sh}"
     clone="${work}/admin/${REPO_NAME}"
     [[ -d "${clone}/.git" ]] || { SCN_SKIP="管理者用のクローン（${clone}）がありません（run.sh が作ります）"; return; }
     [[ -f "${clone}/${wfdir}/${target}" ]] || { SCN_SKIP="${wfdir}/${target} が、クローンにありません"; return; }
     branch0=$(git -C "$clone" symbolic-ref --short HEAD 2>/dev/null) || branch0=""  # VAR=$(cmd) のため run 不使用
     case "$branch0" in
-        ""|main|staging|develop) SCN_SKIP="クローンのブランチが、環境ブランチ（または、ブランチの上ではない）です（${branch0:-なし}）。sf-sync-wf.sh は、環境ブランチでは動きません"; return ;;
+        ""|main|staging|develop) SCN_SKIP="クローンのブランチが、環境ブランチ（または、ブランチの上ではない）です（${branch0:-なし}）。sf-update-workflows.sh は、環境ブランチでは動きません"; return ;;
     esac
     [[ -z "$(git -C "$clone" status --porcelain 2>/dev/null)" ]] || { SCN_SKIP="管理者用のクローンに、未コミットの変更があります（元に戻せなくなるため、実行しません）"; return; }  # VAR=$(cmd) のため run 不使用
     _scn_shims_prepare || { SCN_SKIP="一時フォルダの準備に失敗しました"; return; }   # e2e_run_sf_cmd が使う一時フォルダ（E2E_TMP）を用意する
@@ -1021,7 +1021,7 @@ scn_sync_wf() {
     RESTORE_SYNCWF_CLONE="$clone"   # 改変する前に登録する（途中で止まっても、終了時に戻す）
 
     # --- 1. 改変なし: 差分なし ---
-    e2e_run_sf_cmd "sf-sync-wf-base" "$clone" "" "$syncwf" --check; _chk "改変なしで、sf-sync-wf.sh --check が成功した（差分なし）" $?
+    e2e_run_sf_cmd "sf-sync-wf-base" "$clone" "" "$syncwf" --check; _chk "改変なしで、sf-update-workflows.sh --check が成功した（差分なし）" $?
 
     # --- 2. 改変 → --check が見つける ---
     printf '
@@ -1033,7 +1033,7 @@ scn_sync_wf() {
     # --- 3. 雛形の内容に直す（確認に Y。コミット・push はしない）---
     e2e_run_sf_cmd "sf-sync-wf-fix" "$clone" "Y
 Y
-" "$syncwf"; _chk "sf-sync-wf.sh が、雛形の内容で上書きした" $?
+" "$syncwf"; _chk "sf-update-workflows.sh が、雛形の内容で上書きした" $?
     e2e_run_sf_cmd "sf-sync-wf-recheck" "$clone" "" "$syncwf" --check; _chk "上書きのあと、--check が成功した（差分なし）" $?
     git -C "$clone" diff --quiet -- "${wfdir}/${target}"; _chk "改変が消え、コミット済みの内容と同じに戻った" $?
     _chk "コミットしていない（HEAD が変わらない）" "$([[ "$(git -C "$clone" rev-parse HEAD)" == "$head0" ]] && echo 0 || echo 1)"
@@ -1058,7 +1058,7 @@ Y
     _chk "作業ツリーが、きれいに戻っている（コミット・push はしていない）" "$([[ -z "$(git -C "$clone" status --porcelain)" ]] && echo 0 || echo 1)"
 }
 
-# update-secret: sf-update-secret.sh（B2）。管理者用のクローンから、「1) 秘密鍵」を、sf-init が作った同じ秘密鍵で実行する
+# update-secret: sf-update-secret.sh（B2）。管理者用のクローンから、「1) 秘密鍵」を、sf-project が作った同じ秘密鍵で実行する
 #   確認: Secret SF_PRIVATE_KEY の更新日時（updated_at）が進む・Secret の名前の一覧は変わらない・出力に、秘密鍵の中身（PEM の見出し）が出ない・
 #         存在しない鍵のパスを渡すと、拒否され（終了コード 0 以外）、更新日時は変わらない
 #   書き込み: Secret SF_PRIVATE_KEY を、同じ値で上書きする（値は変わらない。元に戻す必要がない）
@@ -1074,7 +1074,7 @@ scn_update_secret() {
     clone="${work}/admin/${REPO_NAME}"
     key="${HOME}/.sf-jwt/${REPO_NAME}/server.key"
     [[ -d "${clone}/.git" ]] || { SCN_SKIP="管理者用のクローン（${clone}）がありません（run.sh が作ります）"; return; }
-    [[ -f "$key" ]] || { SCN_SKIP="秘密鍵（${key}）がありません（sf-init が作るものです）"; return; }
+    [[ -f "$key" ]] || { SCN_SKIP="秘密鍵（${key}）がありません（sf-project が作るものです）"; return; }
     before=$(_scn_secret_updated_at SF_PRIVATE_KEY) && [[ -n "$before" ]] || { SCN_SKIP="Secret SF_PRIVATE_KEY の更新日時を取得できません（Secret がありません）"; return; }  # VAR=$(cmd) のため run 不使用
     names_before=$(_scn_names secret) || { SCN_SKIP="Secret の一覧を取得できません"; return; }  # VAR=$(cmd) のため run 不使用
     _scn_shims_prepare || { SCN_SKIP="一時フォルダの準備に失敗しました"; return; }   # e2e_run_sf_cmd が使う一時フォルダ（E2E_TMP）を用意する
@@ -1108,13 +1108,13 @@ Y
 # cross-os: OS 混在の問題（C2）を確認する。リポジトリを、GitHub から、一時フォルダに clone して、読み取りと、手元の確認だけを行う
 #   確認: 記録された（git のインデックスの）テキストファイルに、CRLF がない（Windows で作ったファイルの改行が、別の OS で壊れない）→
 #         sf-hook.sh で入れたフック（pre-commit・pre-push）が、sf-tools の hooks/ と同じ内容で、CR がなく、実行できる →
-#         作業用のブランチ（手元だけ）で、sf-sync-wf.sh --check が成功する（ワークフローが、雛形と同じ）
+#         作業用のブランチ（手元だけ）で、sf-update-workflows.sh --check が成功する（ワークフローが、雛形と同じ）
 #   書き込み: 一時フォルダの中だけ（終了時に削除する）。GitHub・組織へは、書き込まない。作業用のブランチは、push しない
 #   使い方: リポジトリを作った OS とは別の OS で動かすと、OS 混在の確認になる（--repo で、別の OS が作ったリポジトリを指定する）
-#   E2E_SF_HOOK / E2E_SF_SYNC_WF: 実行する sf-hook.sh / sf-sync-wf.sh を差し替える（テスト用）。E2E_SF_HOOKS_DIR: フックの元のフォルダ（既定は ~/sf-tools/hooks）
+#   E2E_SF_HOOK / E2E_SF_SYNC_WF: 実行する sf-hook.sh / sf-update-workflows.sh を差し替える（テスト用）。E2E_SF_HOOKS_DIR: フックの元のフォルダ（既定は ~/sf-tools/hooks）
 scn_cross_os() {
     local tmp base clone branch h os n eol_bad
-    local hook_cmd="${E2E_SF_HOOK:-${SF_TOOLS_ROOT}/bin/sf-hook.sh}" syncwf="${E2E_SF_SYNC_WF:-${SF_TOOLS_ROOT}/bin/sf-sync-wf.sh}"
+    local hook_cmd="${E2E_SF_HOOK:-${SF_TOOLS_ROOT}/bin/sf-hook.sh}" syncwf="${E2E_SF_SYNC_WF:-${SF_TOOLS_ROOT}/bin/sf-update-workflows.sh}"
     local hooks_src="${E2E_SF_HOOKS_DIR:-${HOME}/sf-tools/hooks}"
     os=$(uname -s)  # VAR=$(cmd) のため run 不使用
     log "INFO" "  この確認を動かす OS: ${os}（リポジトリを作った OS とは別の OS で動かすと、OS 混在の確認になります）"
@@ -1125,7 +1125,7 @@ scn_cross_os() {
     RESTORE_XOS_DIR="$tmp"   # clone する前に登録する（途中で止まっても、終了時に削除する）
     clone="${tmp}/${REPO_NAME}"
     _scn_shims_prepare || { SCN_SKIP="一時フォルダの準備に失敗しました"; return; }   # e2e_run_sf_cmd が使う一時フォルダ（E2E_TMP）を用意する
-    # core.longpaths=true: 通常の運用（sf-job.sh・sf-init）と同じ。Windows のパスの長さの上限（260 文字）対策（組織に長い名前のレイアウトなどがあると、チェックアウトで失敗する）。
+    # core.longpaths=true: 通常の運用（sf-job.sh・sf-project）と同じ。Windows のパスの長さの上限（260 文字）対策（組織に長い名前のレイアウトなどがあると、チェックアウトで失敗する）。
     #   失敗したときの原因は、出力のファイルに残し、末尾を表示する（以前は捨てていて、原因が見えなかった）
     if ! _e2e_gh repo clone "$REPO_FULL" "$clone" -- -c core.longpaths=true --quiet > "${E2E_TMP}/xos-clone.out" 2>&1; then  # 戻り値で判定するため run 不使用
         e2e_show_file_tail "${E2E_TMP}/xos-clone.out" "xos-clone"
@@ -1133,7 +1133,7 @@ scn_cross_os() {
     fi
     branch="e2e-xos-$(date +%H%M%S)"
     git -C "$clone" checkout -q -b "$branch" >/dev/null 2>&1 \
-        || { SCN_SKIP="作業用のブランチを作れません（clone したリポジトリが、空かもしれません）"; return; }  # 手元だけのブランチ（push しない）。環境ブランチの上では、sf-sync-wf が動かないため
+        || { SCN_SKIP="作業用のブランチを作れません（clone したリポジトリが、空かもしれません）"; return; }  # 手元だけのブランチ（push しない）。環境ブランチの上では、sf-update-workflows が動かないため
 
     # --- 1. 記録されたテキストファイルに、CRLF がない（インデックスの改行。作業ツリーは、OS・設定で変わるため、見ない）---
     n=$(git -C "$clone" ls-files --eol 2>/dev/null | awk -F'\t' '{ split($1, a, " "); if (a[1] == "i/lf") c++ } END { print c + 0 }')  # VAR=$(cmd) のため run 不使用
@@ -1158,7 +1158,7 @@ scn_cross_os() {
     done
 
     # --- 3. ワークフローが、雛形と同じ（作業用のブランチの上で）---
-    e2e_run_sf_cmd "xos-sync" "$clone" "" "$syncwf" --check; _chk "sf-sync-wf.sh --check が成功した（ワークフローが、雛形と同じ）" $?
+    e2e_run_sf_cmd "xos-sync" "$clone" "" "$syncwf" --check; _chk "sf-update-workflows.sh --check が成功した（ワークフローが、雛形と同じ）" $?
 
     rm -rf "$tmp"  # run 不使用: 一時フォルダの後始末（この関数が作る、決まった名前のフォルダだけ）
     RESTORE_XOS_DIR=""

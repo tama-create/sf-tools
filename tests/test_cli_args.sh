@@ -79,7 +79,7 @@ test_unknown_option_does_not_hang() {
 
 # 回帰: phases/init/*.sh は、SF_TOOLS_DIR が未設定でも、sf-tools のルートを使い、lib/common.sh を読み込める
 #   （以前は、既定値が 1 つ上の phases/ を指し、14 本のうち 12 本が lib/common.sh を読み込めなかった。
-#   通常は sf-init.sh が SF_TOOLS_DIR を export するため、直接実行したときにだけ起きた）
+#   通常は sf-project.sh が SF_TOOLS_DIR を export するため、直接実行したときにだけ起きた）
 test_phase_scripts_default_sf_tools_dir() {
     echo ""
     echo -e "${CLR_HEAD}[TEST] phases/init/*.sh は、SF_TOOLS_DIR が未設定でも、lib/common.sh を読み込める${CLR_RST}"

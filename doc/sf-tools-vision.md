@@ -19,7 +19,7 @@ Salesforce DevOps Center は「Git を知らない Admin でも変更管理で�
 | コンフリクト発生 | GUI では解決不能 → Git 職人が登場 | 最初から Git で管理しているため普通に解決できる |
 | 複数人の並行開発 | ブランチ管理が GUI 前提で破綻しやすい | PR ベースのワークフローがそのまま使える |
 | CI（自動テスト） | DevOps Center 単体では完結しない | GitHub Actions と直結している |
-| 新メンバーのオンボード | GUI の操作を覚えさせる必要がある | 管理者が `sf-init` で用意したプロジェクトに、`sf-job` 一発で参加できる |
+| 新メンバーのオンボード | GUI の操作を覚えさせる必要がある | 管理者が `sf-project` で用意したプロジェクトに、`sf-job` 一発で参加できる |
 
 DevOps Center はコンフリクトが**起きてから**どう解決するかを前提とした設計になっている。
 sf-tools は**コンフリクトが起きにくい構造を最初から作る**設計になっている。
@@ -71,7 +71,7 @@ sf-job      → 作業用ブランチの作成 + クローン + sf-start を隠�
 sf-start    → org 接続 + VSCode 起動 + ランチャー起動
 ランチャー → 日常のコマンドを番号で選んで実行（sf-start の最後に自動で開くメニュー）
 sf-push     → git add / commit / push を隠蔽（main の取り込み込み）
-sf-next     → どのブランチに PR を出すべきか案内
+sf-pr     → どのブランチに PR を出すべきか案内
 pre-push    → 保護ブランチへの push の拒否 + ターゲットファイルの検査 + main の取り込み（知らないうちに守られている）
 ```
 
@@ -86,7 +86,7 @@ Salesforce 開発者が意識するのは「今日は○○機能を作った �
 - **sf-metasync で本番（main の組織）の最新状態を定期取得**（GitHub Actions の wf-metasync が平日に 1 日 4 回。main にコミットし、各ブランチへ伝播） → 本番と開発の乖離を最小化
 - **main へのマージを wf-propagate が staging・develop へ自動で伝播** → 環境ブランチどうしのずれを残さない
 - **マージの順序を wf-sequence が PR で確認**（順序外は警告、環境ブランチから直接の PR はエラー） → 段階を飛ばしたリリースに気づける
-- **ブランチ構成を sf-init で統一** → 全員が同じルールで動く
+- **ブランチ構成を sf-project で統一** → 全員が同じルールで動く
 
 「コンフリクトが起きたらどう解決するか」ではなく、「そもそも起きにくい構造を作る」という思想を
 プロジェクト開始時点から組み込んでいる。
@@ -96,7 +96,7 @@ Salesforce 開発者が意識するのは「今日は○○機能を作った �
 sf-tools は Salesforce 開発の全フローをカバーしている。
 
 ```
-プロジェクト作成  sf-init（管理者が最初に 1 回。終わるまで、開発者は始められない）
+プロジェクト作成  sf-project（管理者が最初に 1 回。終わるまで、開発者は始められない）
         ↓
 ブランチ作成      sf-job（main から作業用ブランチを作成 + クローン）
         ↓
@@ -108,7 +108,7 @@ sf-tools は Salesforce 開発の全フローをカバーしている。
         ↓
 プッシュ          sf-push（main の取り込み込み）+ pre-push フック（保護ブランチの拒否・ターゲットファイルの検査）
         ↓
-PR 管理           sf-next（次の PR 先を案内）→ wf-validate（dry-run の検証）・wf-sequence（順序チェック）
+PR 管理           sf-pr（次の PR 先を案内）→ wf-validate（dry-run の検証）・wf-sequence（順序チェック）
         ↓
 リリース          PR のマージで wf-release が自動リリース（結果を Slack に通知）。main へのマージは wf-propagate が下流へ伝播
         ↓
@@ -123,9 +123,9 @@ Git・GitHub・VSCode・Slack をそれぞれ得意な役割で使い、
 開発者の誤操作で共有環境（本番・staging・develop）が壊れない構造も、最初から組み込んでいる。
 
 - **共有環境へは、手元からリリースできない**（dry-run も含む）。接続先のエイリアスが予約名（`prod` / `staging` / `develop` / `main`）か、組織の種類が本番（または確認できない）なら、`sf-release` / `sf-deploy` が止める。共有環境へのリリースは、PR のレビューを通して、GitHub Actions だけで行う
-- **main / staging は、sf-init が Ruleset で保護する**。必須チェック（対象ファイル確認・デプロイ検証・順序チェック）が通らない PR は、マージできない（Ruleset を作れない無料プランの Private リポジトリなどを除く）
-- **GitHub Actions から組織への接続は JWT 認証**。秘密鍵・証明書の作成、Salesforce 側のアプリ（外部クライアントアプリ）の作成、GitHub Secrets への登録までを、sf-init が自動で行う
-- **リリース・削除できない種類のメタデータは、ターゲットファイルに書いた時点で知らせる**（`sf-check` が、`sf-typecheck` で実機確認した可否の表 `config/metadata-capability.txt` を読む）。対象範囲の目標は、変更セットで扱える 337 種類（公式の Metadata Coverage Report、API v64.0。`config/changeset-types.txt`）。Developer Edition で確認済みの種類を、メタデータ同期の標準セット（`metadata.txt` の雛形）にしている
+- **main / staging は、sf-project が Ruleset で保護する**。必須チェック（対象ファイル確認・デプロイ検証・順序チェック）が通らない PR は、マージできない（Ruleset を作れない無料プランの Private リポジトリなどを除く）
+- **GitHub Actions から組織への接続は JWT 認証**。秘密鍵・証明書の作成、Salesforce 側のアプリ（外部クライアントアプリ）の作成、GitHub Secrets への登録までを、sf-project が自動で行う
+- **リリース・削除できない種類のメタデータは、ターゲットファイルに書いた時点で知らせる**（`sf-check` が、`sf-test-types` で実機確認した可否の表 `config/metadata-capability.txt` を読む）。対象範囲の目標は、変更セットで扱える 337 種類（公式の Metadata Coverage Report、API v64.0。`config/changeset-types.txt`）。Developer Edition で確認済みの種類を、メタデータ同期の標準セット（`metadata.txt` の雛形）にしている
 
 ---
 
@@ -206,7 +206,7 @@ Salesforce 純正の DevOps Center が進化中のため、2〜4 年以内に「
 
 - DevOps Center は GitHub 連携があるが、ワークフロー設計・テスト自動化・JWT 管理は自前
 - 「ツールが整っても使いこなせる人がいない」という問題は DevOps Center では解決しない
-- **「新規プロジェクトの初期構築（sf-init）から日常運用（ランチャー）まで一気通貫で面倒を見る」** という価値は DevOps Center では提供できない
+- **「新規プロジェクトの初期構築（sf-project）から日常運用（ランチャー）まで一気通貫で面倒を見る」** という価値は DevOps Center では提供できない
 
 競合が「ツール導入」どまりのところ、**「使えるようになるまで面倒を見る」** のが差別化のポイントになる。
 

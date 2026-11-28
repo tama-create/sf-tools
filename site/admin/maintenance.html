@@ -18,7 +18,7 @@
 
 <div class="box">
   <div class="title">まず困ったら、診断から</div>
-  <p>「どこで間違えたか分からない」というときは、<a href="#status"><code>sf-init.sh --status</code></a> から始めてください。何も変更せずに、足りないものと、直し方を教えてくれます。</p>
+  <p>「どこで間違えたか分からない」というときは、<a href="#status"><code>sf-project.sh --status</code></a> から始めてください。何も変更せずに、足りないものと、直し方を教えてくれます。</p>
 </div>
 
 <h2 id="which">どのコマンドを使うか</h2>
@@ -26,13 +26,13 @@
 <table>
   <thead><tr><th>やりたいこと</th><th>コマンド</th><th>説明</th></tr></thead>
   <tbody>
-    <tr><td>いまの状態を調べたい（何も変えない）</td><td><code>sf-init.sh --status</code></td><td><a href="#status">セットアップを診断する</a></td></tr>
-    <tr><td>段階（staging・develop）を足したい・外した段階を戻したい</td><td><code>sf-init.sh --add-tier</code></td><td><a href="#add-tier">段階を足す</a></td></tr>
-    <tr><td>段階を外したい（その組織を、別の用途に回したいなど）</td><td><code>sf-init.sh --remove-tier</code></td><td><a href="#remove-tier">段階を外す</a></td></tr>
-    <tr><td>接続先の Salesforce 組織を、付け替えたい</td><td><code>sf-init.sh --reconnect</code></td><td><a href="#reconnect">接続先を付け替える</a></td></tr>
+    <tr><td>いまの状態を調べたい（何も変えない）</td><td><code>sf-project.sh --status</code></td><td><a href="#status">セットアップを診断する</a></td></tr>
+    <tr><td>段階（staging・develop）を足したい・外した段階を戻したい</td><td><code>sf-project.sh --add-tier</code></td><td><a href="#add-tier">段階を足す</a></td></tr>
+    <tr><td>段階を外したい（その組織を、別の用途に回したいなど）</td><td><code>sf-project.sh --remove-tier</code></td><td><a href="#remove-tier">段階を外す</a></td></tr>
+    <tr><td>接続先の Salesforce 組織を、付け替えたい</td><td><code>sf-project.sh --reconnect</code></td><td><a href="#reconnect">接続先を付け替える</a></td></tr>
     <tr><td>秘密鍵・ユーザー名などを、登録し直したい</td><td><code>sf-update-secret.sh</code></td><td><a href="secrets.html#update">再登録する</a></td></tr>
-    <tr><td>ワークフローを、最新の雛形に合わせたい</td><td><code>sf-sync-wf.sh</code></td><td><a href="workflows.html#sync">雛形に合わせて更新する</a></td></tr>
-    <tr><td>実際に動くことを、確かめたい</td><td><code>sf-init.sh --verify</code></td><td><a href="verify.html">動作の確認</a></td></tr>
+    <tr><td>ワークフローを、最新の雛形に合わせたい</td><td><code>sf-update-workflows.sh</code></td><td><a href="workflows.html#sync">雛形に合わせて更新する</a></td></tr>
+    <tr><td>実際に動くことを、確かめたい</td><td><code>sf-project.sh --verify</code></td><td><a href="verify.html">動作の確認</a></td></tr>
   </tbody>
 </table>
 
@@ -56,8 +56,8 @@
 <h2 id="add-tier">段階を足す（<code>--add-tier</code>）</h2>
 <p>セットアップのあとで、<code>main</code> だけの構成から、<code>staging</code>・<code>develop</code> へ、段階を足せます。</p>
 <pre><code># force-* フォルダの中で実行
-sf-init.sh --add-tier staging    # main のみ → main + staging
-sf-init.sh --add-tier develop    # main + staging → main + staging + develop</code></pre>
+sf-project.sh --add-tier staging    # main のみ → main + staging
+sf-project.sh --add-tier develop    # main + staging → main + staging + develop</code></pre>
 <figure class="diagram">
   <div class="flow">
     <div class="node dev"><span class="who">最初</span><strong>main のみ</strong><small>1 段階</small></div>
@@ -96,7 +96,7 @@ sf-init.sh --add-tier develop    # main + staging → main + staging + develop</
   <div class="title">実行する前に</div>
   <ul>
     <li>未コミットの変更があると、エラーで止まります。先にコミットするか、取り除いてください。</li>
-    <li>JWT の鍵（<code>~/.sf-jwt/force-XXXX/server.key</code>。既定の方式では <code>server.crt</code> も）が、この PC に必要です。<code>sf-init.sh</code> を実行した PC で行ってください。</li>
+    <li>JWT の鍵（<code>~/.sf-jwt/force-XXXX/server.key</code>。既定の方式では <code>server.crt</code> も）が、この PC に必要です。<code>sf-project.sh</code> を実行した PC で行ってください。</li>
     <li>新しいブランチ（<code>staging</code> / <code>develop</code> と、<code>branches.txt</code> を更新する作業用のブランチ）は、リモートの最新の <code>main</code>（<code>origin/main</code>）から作ります。手元の <code>main</code> が古くても、古い内容からは派生しません（手元の <code>main</code> は、更新しません）。</li>
   </ul>
 </div>
@@ -112,9 +112,9 @@ sf-init.sh --add-tier develop    # main + staging → main + staging + develop</
 
 <h2 id="remove-tier">段階を外す（<code>--remove-tier</code>）</h2>
 <pre><code>cd {作業フォルダ}/admin/force-XXXX
-sf-init.sh --remove-tier develop                    # main + staging + develop → main + staging
-sf-init.sh --remove-tier staging                    # main + staging → main のみ（develop を先に外す）
-sf-init.sh --remove-tier develop --purge-secrets    # 外したあと（PR のマージ後）に、接続情報を消す（任意）</code></pre>
+sf-project.sh --remove-tier develop                    # main + staging + develop → main + staging
+sf-project.sh --remove-tier staging                    # main + staging → main のみ（develop を先に外す）
+sf-project.sh --remove-tier develop --purge-secrets    # 外したあと（PR のマージ後）に、接続情報を消す（任意）</code></pre>
 <p>段階を外すと、その段階への<strong>リリース・PR の検証が止まります</strong>（一方通行の決まりでも、外した段階は、前の段階として数えません）。組織を別の用途に回したいとき（検証環境の組織を、開発用に使うなど）や、段階を減らして運用を軽くしたいときに使います。最初に作った構成に関係なく、1〜3 段階の間で、いつでも減らしたり戻したりできます（戻すときは <a href="#re-add"><code>--add-tier</code></a>）。</p>
 
 <h3 id="remove-tier-how">しくみ</h3>
@@ -128,7 +128,7 @@ sf-init.sh --remove-tier develop --purge-secrets    # 外したあと（PR の�
 <h3 id="remove-tier-before">実行する前に</h3>
 <div class="box warn">
   <div class="title">ワークフローを、新しい雛形にしておく</div>
-  <p>古いワークフローは、<code>branches.txt</code> を見ずに動くため、行を消しても止まりません。<code>--remove-tier</code> は、GitHub の <code>main</code> のワークフローが、段階の切り替えに対応しているか（廃止した <code>wf-propagate.yml</code> が残っていないかも）を確かめ、対応していなければ止まります。そのときは、sf-tools を更新し、作業用のブランチで <a href="workflows.html#sync"><code>sf-sync-wf.sh</code></a> を実行して、ワークフローを <code>main</code> まで入れてから、もう一度実行してください。</p>
+  <p>古いワークフローは、<code>branches.txt</code> を見ずに動くため、行を消しても止まりません。<code>--remove-tier</code> は、GitHub の <code>main</code> のワークフローが、段階の切り替えに対応しているか（廃止した <code>wf-propagate.yml</code> が残っていないかも）を確かめ、対応していなければ止まります。そのときは、sf-tools を更新し、作業用のブランチで <a href="workflows.html#sync"><code>sf-update-workflows.sh</code></a> を実行して、ワークフローを <code>main</code> まで入れてから、もう一度実行してください。</p>
 </div>
 
 <h3 id="remove-tier-flow">流れ</h3>
@@ -143,14 +143,14 @@ sf-init.sh --remove-tier develop --purge-secrets    # 外したあと（PR の�
 <p>組織を別の用途に回すなど、CI から、その組織につながらないようにしたいときだけ、PR をマージしたあとに実行します。消すのは、その段階の決まった名前（<code>SF_CONSUMER_KEY_*</code>・<code>SF_USERNAME_*</code>・<code>SF_INSTANCE_URL_*</code>・<code>SF_ORG_*</code>）だけです。<code>branches.txt</code> に、まだその段階の行があるとき（PR がまだマージされていないとき）は、止まります。Secret の値は、消すと戻せません（戻すときは、<code>--add-tier</code> で新しくつなぎ直します）。一部を消せなかったときは、もう一度実行すると、残っているものだけを消します。</p>
 
 <h2 id="reconnect">接続先を付け替える（<code>--reconnect</code>）</h2>
-<pre><code>sf-init.sh --reconnect &lt;段階&gt;      # 段階: main / staging / develop</code></pre>
+<pre><code>sf-project.sh --reconnect &lt;段階&gt;      # 段階: main / staging / develop</code></pre>
 <p>1 つの段階について、接続先の Salesforce 組織を、別の組織に付け替えます（「お試しで Sandbox につないだが、本番につなぎたい」「組織を作り直した」ときなど）。最初のセットアップと同じ画面の流れで、外部クライアントアプリの自動作成まで行います。ログイン先の選び方と、本番は main にだけつなげるというルールは、<a href="#org">最初の章</a>のとおりです。段階は増やしません（増やすときは <code>--add-tier</code>）。鍵やユーザー名の部分的な更新は、<a href="secrets.html#update"><code>sf-update-secret.sh</code></a> で行います。</p>
 <ol>
   <li>いまの接続（ログイン先・組織の種類・ユーザー・組織名・組織の ID）を表示します。</li>
   <li>管理者向けの警告が出て、gh にログインしているユーザーが、オーナー本人か、その組織の管理者かを確かめてから、「付け替えますか？」（Y/N/q）と聞かれます（<code>N</code> / <code>q</code> で中止）。</li>
   <li>ログイン先を選んで、ブラウザで、新しい組織にログインします。組織の種類を確かめて、外部クライアントアプリを作り、接続をテストします。</li>
   <li>Secret <code>SF_CONSUMER_KEY_*</code> と、Variable <code>SF_USERNAME_*</code>・<code>SF_INSTANCE_URL_*</code>・<code>SF_ORG_*</code> を、新しい組織の値に更新します。</li>
-  <li>以前の組織と新しい組織が違うときは、以前の組織に、sf-init が作った外部クライアントアプリ（<code>SF_TOOLS_</code> で始まる名前）が残っていることと、削除する場所（外部クライアントアプリ マネージャ）を表示します。<strong>自動では削除しません。</strong>以前の組織の ID が記録されていなかったときは、確かめるよう案内が出ます。</li>
+  <li>以前の組織と新しい組織が違うときは、以前の組織に、sf-project が作った外部クライアントアプリ（<code>SF_TOOLS_</code> で始まる名前）が残っていることと、削除する場所（外部クライアントアプリ マネージャ）を表示します。<strong>自動では削除しません。</strong>以前の組織の ID が記録されていなかったときは、確かめるよう案内が出ます。</li>
 </ol>
 <ul>
   <li>段階は、<code>main</code>（<code>prod</code> も <code>main</code> として受け付けます）・<code>staging</code>・<code>develop</code> のいずれかです。<code>staging</code> と <code>develop</code> は、<code>branches.txt</code> にその段階があるときだけ指定できます。</li>
@@ -166,8 +166,8 @@ sf-init.sh --remove-tier develop --purge-secrets    # 外したあと（PR の�
 </div>
 
 <h2 id="status">セットアップを診断する（<code>--status</code>）</h2>
-<pre><code>sf-init.sh --status</code></pre>
-<p><span class="badge safe">🔍 読み取りのみ</span> 何も変更せずに、いまの状態を調べます。「どこで間違えたか分からない」ときの、最初の手がかりです。管理者向けの警告と確認は、出ません。セットアップが済んだプロジェクトで、オプションなしの <code>sf-init.sh</code> を実行して「[1] いまの Salesforce の接続を見る」を選んでも、同じ表示になります。</p>
+<pre><code>sf-project.sh --status</code></pre>
+<p><span class="badge safe">🔍 読み取りのみ</span> 何も変更せずに、いまの状態を調べます。「どこで間違えたか分からない」ときの、最初の手がかりです。管理者向けの警告と確認は、出ません。セットアップが済んだプロジェクトで、オプションなしの <code>sf-project.sh</code> を実行して「[1] いまの Salesforce の接続を見る」を選んでも、同じ表示になります。</p>
 <p>調べる段階は、<code>main</code> と、<code>branches.txt</code> にある <code>staging</code> / <code>develop</code> です。項目ごとに、次の記号で示します。</p>
 <table>
   <thead><tr><th>記号</th><th>意味</th><th>不足に数えるか</th></tr></thead>
@@ -182,7 +182,7 @@ sf-init.sh --remove-tier develop --purge-secrets    # 外したあと（PR の�
 <table>
   <thead><tr><th>項目</th><th>調べること</th></tr></thead>
   <tbody>
-    <tr><td>リポジトリ</td><td>GitHub にリポジトリがあるか。段階のブランチがあるか（なければ、直し方は <code>--add-tier</code>）。ワークフロー 4 本（<code>wf-metasync</code>・<code>wf-release</code>・<code>wf-sequence</code>・<code>wf-validate</code>）があるか（なければ、<a href="workflows.html#sync"><code>sf-sync-wf.sh</code></a>）。廃止した <code>wf-propagate.yml</code> が残っていれば「！」（<code>sf-sync-wf.sh --remove wf-propagate.yml</code> で消します。不足には数えません）</td></tr>
+    <tr><td>リポジトリ</td><td>GitHub にリポジトリがあるか。段階のブランチがあるか（なければ、直し方は <code>--add-tier</code>）。ワークフロー 4 本（<code>wf-metasync</code>・<code>wf-release</code>・<code>wf-sequence</code>・<code>wf-validate</code>）があるか（なければ、<a href="workflows.html#sync"><code>sf-update-workflows.sh</code></a>）。廃止した <code>wf-propagate.yml</code> が残っていれば「！」（<code>sf-update-workflows.sh --remove wf-propagate.yml</code> で消します。不足には数えません）</td></tr>
     <tr><td>Secrets</td><td><code>PAT_TOKEN</code>・<code>SLACK_BOT_TOKEN</code>・<code>SF_PRIVATE_KEY</code>・段階ごとの <code>SF_CONSUMER_KEY_*</code> があるか（名前だけを調べます。値は、だれにも読めません）</td></tr>
     <tr><td>Variables</td><td><code>SLACK_CHANNEL_ID</code>・段階ごとの <code>SF_USERNAME_*</code>・<code>SF_INSTANCE_URL_*</code> があるか。組織の種類の記録（<code>SF_ORG_ID_*</code>）がないときは「！」（以前のバージョンで作ったプロジェクト。<code>--reconnect</code> で記録できます）。<code>SF_TOOLS_BRANCH</code> は、開発版のときだけ使うものなので、なくても不足にしません</td></tr>
     <tr><td>ブランチ保護</td><td>Ruleset（<code>protect-main</code>・<code>protect-staging</code>）の<strong>必須チェックの名前</strong>が、ワークフローのジョブの名前（<code>対象ファイル確認</code>・<code>デプロイ検証</code>・<code>順序チェック</code>）と、過不足なく合っているか（<a href="troubleshooting.html#required-checks">合っていないと、PR をマージできません</a>）。Ruleset が無い（無料プランの非公開リポジトリなど）・読めないときは、「？」と表示するだけで、不足には数えません</td></tr>

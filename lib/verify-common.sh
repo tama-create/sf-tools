@@ -1,6 +1,6 @@
 #!/bin/bash
 # ==============================================================================
-# verify-common.sh - リポジトリの検証（phases/init/verify.sh = sf-init.sh --verify）と、e2e が共有する部品
+# verify-common.sh - リポジトリの検証（phases/init/verify.sh = sf-project.sh --verify）と、e2e が共有する部品
 # ==============================================================================
 # Hello World の Apex（本文）・GitHub での PR の作成とマージ・ワークフローの実行の待ち・結果の読み取り。
 # verify.sh（管理者が、実際のリポジトリで実行する）と、tests/e2e（開発者の通し検証）が、同じ部品を使う。
@@ -8,7 +8,7 @@
 #
 # 【前提・読み込み】
 #   呼び出し側が、lib/common.sh を source 済みであること（verify_gh が、platform.sh の run_with_timeout を使う）。
-#   使う側: phases/init/verify.sh・bin/sf-init.sh（最初のメタデータの同期）・tests/e2e/lib.sh。
+#   使う側: phases/init/verify.sh・bin/sf-project.sh（最初のメタデータの同期）・tests/e2e/lib.sh。
 #   読み込むと、同じフォルダの lib/verify-samples.sh も source する。
 #   gh は run を通さずに呼ぶ（verify_gh。時間の上限つき・標準入力は /dev/null）。失敗は、戻り値・空の出力で返す（die しない）
 #
@@ -107,7 +107,7 @@ verify_empty_target_text() { printf '%s\n' '[files]' '' '[members]'; }
 
 # ------------------------------------------------------------------------------
 # 確認に使うサンプルの切替（VERIFY_SET: hello = Hello World の Apex のみ（既定）/ components = パターン別のコンポーネント）
-#   components のサンプルは、lib/verify-samples.sh（sf-init.sh --verify --components。develop のみ）
+#   components のサンプルは、lib/verify-samples.sh（sf-project.sh --verify --components。develop のみ）
 # ------------------------------------------------------------------------------
 source "$(dirname "${BASH_SOURCE[0]}")/verify-samples.sh"
 VERIFY_SET="${VERIFY_SET:-hello}"

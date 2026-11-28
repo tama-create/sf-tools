@@ -8,7 +8,7 @@
 #
 # 【前提】
 #   lib/common.sh を source 済みであること（CLR_* / die / read_input を使う）。common.sh からは source しない
-#   （sf-init.sh・phases/init/verify.sh が、個別に source する）。
+#   （sf-project.sh・phases/init/verify.sh が、個別に source する）。
 #   表示は、標準エラー出力（log と同じ）。色は、CLR_*（端末でないときは空）。
 #   文言の中の \ で始まるエスケープ（\n など）は、解釈される（_wiz_out が printf '%b' で出すため）。
 #

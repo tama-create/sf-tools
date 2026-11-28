@@ -72,7 +72,7 @@
   [<span class="num">5</span>] PullRequest  次の段階へプルリクエストを出す（出し先を確かめる）
   ──────────
   [<span class="num">6</span>] Start        開発環境を起動（Salesforce ログイン・VSCode 起動）
-  [<span class="num">7</span>] Restart      接続組織を切り替えて Start 実行
+  [<span class="num">7</span>] SwitchOrg    接続組織を切り替えて Start 実行
 <span class="dim">  ──────────────────────────────────────────────────</span>
   番号を入力 (1-7 / q で終了):</div>
   <figcaption>ランチャーの画面です。上の 2 行に今の状況と、段階の並びの中の「次」が出て、番号のキーを 1 つ押すと（Enter は不要）、そのコマンドが動きます。</figcaption>
@@ -94,9 +94,9 @@
     <tr><td>自分専用の組織に、反映できるか確かめる（dry-run）</td><td><strong>2</strong> Dryrun</td><td><code>sf-dryrun.sh</code></td></tr>
     <tr><td>自分専用の組織に、実際に反映する</td><td><strong>3</strong> Deploy</td><td><code>sf-deploy.sh</code></td></tr>
     <tr><td>変更を GitHub に送る</td><td><strong>4</strong> Push</td><td><code>sf-push.sh</code></td></tr>
-    <tr><td>次の段階へ PR を出す（出し先を確かめる）</td><td><strong>5</strong> PullRequest</td><td><code>sf-next.sh</code></td></tr>
+    <tr><td>次の段階へ PR を出す（出し先を確かめる）</td><td><strong>5</strong> PullRequest</td><td><code>sf-pr.sh</code></td></tr>
     <tr><td>前日の続きなど、作業を再開する</td><td><strong>6</strong> Start</td><td><code>sf-start.sh</code></td></tr>
-    <tr><td>接続先の組織を切り替える</td><td><strong>7</strong> Restart</td><td><code>sf-restart.sh</code></td></tr>
+    <tr><td>接続先の組織を切り替える</td><td><strong>7</strong> SwitchOrg</td><td><code>sf-switch-org.sh</code></td></tr>
   </tbody>
 </table>
 <ul>
@@ -173,9 +173,9 @@
   <p>そのときは、<code>sf-job.sh</code> で作った、作業用のブランチに移ってから、もう一度実行してください。</p>
 </div>
 
-<h2 id="next">PR の状況を確認する（sf-next）</h2>
+<h2 id="next">PR の状況を確認する（sf-pr）</h2>
 <p><span class="badge">🎛️ ランチャーの [5] PullRequest</span> コマンドで打つなら:</p>
-<pre><code>sf-next.sh</code></pre>
+<pre><code>sf-pr.sh</code></pre>
 <p>いまの作業用のブランチの<strong>最新のコミット</strong>が、<code>develop</code> → <code>staging</code> → <code>main</code> のどこまでリリースされたかを、一覧で表示します（段階は、プロジェクトの <code>branches.txt</code> の設定によります。<code>main</code> だけのプロジェクトもあります）。次に PR（取り込みの依頼）を出す先も、案内します。</p>
 <pre><code>JOB-20261024 のリリース状況（先端のコミット）
   ✓ develop   リリース済み（このコミット）
@@ -193,8 +193,8 @@
 <ul>
   <li>次の PR 先があるときは、「〜にPRを出しますか？」と聞かれます。<code>Y</code> を押すと、GitHub の <strong>PR の作成画面</strong>がブラウザで開きます。PR そのものは、まだ作られていません。画面で内容を確かめて、作成のボタンを押してください。<code>N</code> は何もせず終了、<code>q</code> は中断です。<code>staging</code>・<code>main</code> へ上げるときは、「develop の組織で、動作を確かめ終えましたか？」のように、1 つ前の段階で確かめたかも、同じ確認の中で聞かれます。</li>
   <li><strong>同じブランチで、変更とリリースを繰り返せます。</strong>develop にリリースしたあとに変更を足して push すると、コミットが変わるので、次の PR 先は develop に戻ります（もう一度 develop へ PR を出す案内になります）。develop の組織で満足するまで確かめてから、<code>staging</code> へ上げます。<code>staging</code>・<code>main</code> へは、develop で確かめた<strong>同じコミットのまま</strong>上げます（staging で問題が出たら、staging では直さず、手元で直して、develop から出し直します）。</li>
-  <li>繰り返すときは、前に develop へ出した部品を、ターゲットファイルから消さないでください（前の部品が、上の段階に届かなくなるため、<code>sf-next.sh</code> と検証が止まります）。組織から消したいものは、<code>remove-target.txt</code> に書きます。</li>
-  <li><strong>PR は、段階の順番どおり（<code>develop</code> → <code>staging</code> → <code>main</code>）に出します。</strong>これは決まりで、順番を飛ばした PR は、検証（順序チェック）が失敗し、マージしても組織へは出ません（<a href="../reference/commands-dev.html#sf-next">詳しくは、リファレンス</a>）。<code>sf-next.sh</code> の案内に従えば、順番どおりになります。</li>
+  <li>繰り返すときは、前に develop へ出した部品を、ターゲットファイルから消さないでください（前の部品が、上の段階に届かなくなるため、<code>sf-pr.sh</code> と検証が止まります）。組織から消したいものは、<code>remove-target.txt</code> に書きます。</li>
+  <li><strong>PR は、段階の順番どおり（<code>develop</code> → <code>staging</code> → <code>main</code>）に出します。</strong>これは決まりで、順番を飛ばした PR は、検証（順序チェック）が失敗し、マージしても組織へは出ません（<a href="../reference/commands-dev.html#sf-pr">詳しくは、リファレンス</a>）。<code>sf-pr.sh</code> の案内に従えば、順番どおりになります。</li>
   <li><code>main</code> などの保護ブランチの上では、使えません（作業用のブランチの上で実行します）。</li>
 </ul>
 

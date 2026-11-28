@@ -6,7 +6,7 @@
 # 開発版（SF_TOOLS_BRANCH=development）のときは、Variable SF_TOOLS_BRANCH も登録する。
 #
 # 【使い方】
-#   sf-init.sh が、管理者用の作業フォルダ（admin）をカレントにして、bash で呼び出す。
+#   sf-project.sh が、管理者用の作業フォルダ（admin）をカレントにして、bash で呼び出す。
 #
 # 【処理の流れ】
 #   1. gh repo edit で基本設定を適用する（失敗は WARNING）
@@ -39,12 +39,12 @@
 #   - 終了コード: 0 = OK（上の WARNING の場合を含む）/ 1 = die（REPO_FULL_NAME が空のとき）
 # ==============================================================================
 
-# SF_TOOLS_DIR は sf-init.sh（司令塔）から export される
+# SF_TOOLS_DIR は sf-project.sh（司令塔）から export される
 PHASE_DIR="${BASH_SOURCE[0]%/*}"
 [[ "$PHASE_DIR/" == /* && "$PHASE_DIR/" != *//* && "$PHASE_DIR/" != */./* && "$PHASE_DIR/" != */../* ]] || PHASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SF_TOOLS_DIR="${SF_TOOLS_DIR:-$(dirname "$(dirname "$PHASE_DIR")")}"
 
-readonly SCRIPT_NAME="sf-init"
+readonly SCRIPT_NAME="sf-project"
 mkdir -p "$HOME/sf-tools/logs" 2>/dev/null || true  # run 不使用: common.sh の読み込み前（run が未定義）
 readonly LOG_FILE="$HOME/sf-tools/logs/${SCRIPT_NAME}.log"
 readonly LOG_MODE="APPEND"  # 司令塔が NEW で初期化済みのため追記

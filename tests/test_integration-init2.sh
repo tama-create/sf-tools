@@ -1,8 +1,8 @@
 #!/bin/bash
 # ==============================================================================
-# test_integration-init2.sh - 結合テスト L1: sf-init の状態の食い違い・入力の不正・外部サービスの失敗・同時実行
+# test_integration-init2.sh - 結合テスト L1: sf-project の状態の食い違い・入力の不正・外部サービスの失敗・同時実行
 # ==============================================================================
-# 実際の git と、状態を持つ fake の gh・sf（tests/integration/lib.sh）で、sf-init の異常な状態・失敗を確かめる。
+# 実際の git と、状態を持つ fake の gh・sf（tests/integration/lib.sh）で、sf-project の異常な状態・失敗を確かめる。
 # 共通の部品は tests/integration/init-lib.sh。計画: doc/integration-test-plan.md の X1・X3・X4
 #
 # 【シナリオ】
@@ -11,11 +11,11 @@
 #   X3-7  進捗が 10（完了の直前）だが、origin に main がない → 完了にしない
 #   X1-2  PAT の権限不足（workflow スコープなし）・無効な PAT → 登録しない
 #   X1-3  別のユーザーでログイン・リポジトリ名の衝突 → 何も作らない／既存を壊さない
-#   X4-1  同じプロジェクトを、2 つ同時に sf-init → 状態が壊れない（二重に作らない）
+#   X4-1  同じプロジェクトを、2 つ同時に sf-project → 状態が壊れない（二重に作らない）
 # ==============================================================================
 source "$(dirname "${BASH_SOURCE[0]}")/test_helper.sh"
 source "$(dirname "${BASH_SOURCE[0]}")/integration/lib.sh"
-echo -e "${CLR_HEAD}=== 結合テスト L1: sf-init の状態の食い違い・失敗・同時実行 ===${CLR_RST}"
+echo -e "${CLR_HEAD}=== 結合テスト L1: sf-project の状態の食い違い・失敗・同時実行 ===${CLR_RST}"
 
 trap 'it_teardown' EXIT
 source "$(dirname "${BASH_SOURCE[0]}")/integration/init-lib.sh"
@@ -75,7 +75,7 @@ test_X3_7b() {
     # (2) 完了済み（印 1・状態ファイルなし）のプロジェクトの、印を 0 に戻す → 完了済みとは、扱わない（途中で止まった「やり直し」の扱い）
     _fresh || return 1; IT_TIMEOUT=900
     _init "$FULL_INPUT"
-    assert_exit_ok "$IT_RC" "X3-7（印 0）: 準備: sf-init が、最後まで成功する"
+    assert_exit_ok "$IT_RC" "X3-7（印 0）: 準備: sf-project が、最後まで成功する"
     IT_TIMEOUT=300
     _it_git -C "$(_admin)" config sf-tools.setup-complete 0
     it_calls_clear
@@ -111,7 +111,7 @@ test_X1_3() {
     echo "someone-else" > "$IT_STATE/gh.login"
     it_calls_clear
     _init "$FULL_INPUT"
-    assert_exit_fail "$IT_RC" "X1-3: 別のユーザーでは、sf-init が拒否される"
+    assert_exit_fail "$IT_RC" "X1-3: 別のユーザーでは、sf-project が拒否される"
     it_out_has "リポジトリオーナー" && pass "X1-3: 拒否の理由（オーナーとの不一致）が出る" || fail "X1-3: 拒否の理由（オーナーとの不一致）が出る"
     assert_equals "$(it_mutating_calls | wc -l | tr -d ' ')" "0" "X1-3: 別のユーザーでは、外部へ何も書き込まない"
     assert_equals "$(it_calls gh | grep -c 'repo create')" "0" "X1-3: 別のユーザーでは、リポジトリを作らない"
@@ -129,7 +129,7 @@ test_X1_3() {
 }
 
 test_X4_1() {
-    echo -e "\n${CLR_HEAD}--- X4-1: 同じプロジェクトを、2 つ同時に sf-init ---${CLR_RST}"
+    echo -e "\n${CLR_HEAD}--- X4-1: 同じプロジェクトを、2 つ同時に sf-project ---${CLR_RST}"
     _fresh || return 1; IT_TIMEOUT=900
     it_fault gh "secret set SLACK_BOT_TOKEN*" 1 1 0 "" 20     # 1 つ目を、Phase 7 で、20 秒止める（その間に、2 つ目を起動する）
     local pid i
@@ -138,10 +138,10 @@ test_X4_1() {
     (
         cd "$IT_WORK/proj" || exit 99
         export HOME="$IT_HOME" PATH="$IT_BIN:$PATH" IT_STATE IT_ORIGIN SF_LAUNCHER_ACTIVE=1 SF_TOOLS_SF_CHECK_STAMP=/dev/null
-        export SF_TOOLS_SKIP_JAVA_CHECK=1   # 実機の Java で、sf-init の Phase 1 が止まらないように（Java の確認は、test_common.sh が検査する）
+        export SF_TOOLS_SKIP_JAVA_CHECK=1   # 実機の Java で、sf-project の Phase 1 が止まらないように（Java の確認は、test_common.sh が検査する）
         export GIT_TERMINAL_PROMPT=0 GIT_CONFIG_NOSYSTEM=1 GIT_SSH_COMMAND="$IT_BIN/ssh" TMPDIR="$IT_ROOT/tmp"
         unset GITHUB_ACTIONS CI GH_TOKEN GITHUB_TOKEN; mkdir -p "$TMPDIR"
-        exec bash "$IT_HOME/sf-tools/bin/sf-init.sh" --owner "$IT_OWNER" --project "$IT_PROJECT" < "$IT_ROOT/a.in" > "$IT_ROOT/a.out" 2>&1
+        exec bash "$IT_HOME/sf-tools/bin/sf-project.sh" --owner "$IT_OWNER" --project "$IT_PROJECT" < "$IT_ROOT/a.in" > "$IT_ROOT/a.out" 2>&1
     ) &
     pid=$!
     for i in $(seq 1 400); do grep -qF "secret set SLACK_BOT_TOKEN" "$IT_STATE/calls.log" 2>/dev/null && break; kill -0 "$pid" 2>/dev/null || break; sleep 1; done

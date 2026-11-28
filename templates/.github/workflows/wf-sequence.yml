@@ -22,7 +22,7 @@
 #   1. 対象ファイル確認（check-branch）: 順序チェックが必要かを判定し、出力 skip（true / false）を返す。常に実行する
 #   2. 順序チェック（check-promotion-order）: check-branch のあと（needs）。skip が true のときは、スキップされる。
 #      権限: contents: read・pull-requests: write（コメント・PR を読む）・statuses: read（印）・actions: read（印を付けた実行）
-#   ブランチ保護との関係: ジョブ名「対象ファイル確認」「順序チェック」は、sf-init の Phase 9（phases/init/09_repo_rules.sh）が、
+#   ブランチ保護との関係: ジョブ名「対象ファイル確認」「順序チェック」は、sf-project の Phase 9（phases/init/09_repo_rules.sh）が、
 #   Ruleset protect-main / protect-staging（対象: main / staging）に登録する必須チェック 3 つのうちの 2 つ（もう 1 つは
 #   wf-validate.yml の「デプロイ検証」。名前の正本は lib/project.sh の required_status_check_names）。ジョブ名（name:）を変えると、必須チェックが永久に満たされず、
 #   PR をマージできなくなる。
@@ -62,9 +62,9 @@
 #        既存のコメントがない場合は、何も投稿しない）
 #
 # 【必要な Secrets / Variables】
-#   Secrets（このリポジトリに設定する。sf-init の Phase 7 が登録する）:
+#   Secrets（このリポジトリに設定する。sf-project の Phase 7 が登録する）:
 #     SLACK_BOT_TOKEN  : Slack API の Bot Token（順序外・環境ブランチからの PR の通知に使用）
-#   Variables（このリポジトリに設定する。sf-init の Phase 7 が登録する）:
+#   Variables（このリポジトリに設定する。sf-project の Phase 7 が登録する）:
 #     SLACK_CHANNEL_ID : 通知先 Slack チャンネル ID
 #     SF_TOOLS_BRANCH  : clone する sf-tools のブランチ（任意。未設定なら main）
 #   このほか、PR へのコメント・一方通行の確認に、自動の GITHUB_TOKEN を使う（設定不要）
@@ -270,7 +270,7 @@ jobs:
                 '',
                 `\`${process.env.FEATURE}\` は、環境ブランチ（\`branches.txt\` に記載のブランチ）です。\`${process.env.BASE_REF}\` への PR は、feature ブランチから作成してください。`,
                 '',
-                '**この PR は却下し、feature ブランチから作り直してください。**（通常は、`sf-next.sh` が示す順序で、PR を出します）',
+                '**この PR は却下し、feature ブランチから作り直してください。**（通常は、`sf-pr.sh` が示す順序で、PR を出します）',
               ].join('\n');
             } else if (順序外) {
               本文 = [
@@ -280,7 +280,7 @@ jobs:
                 process.env.DETAIL,
                 '',
                 `開発物は develop → staging → main の順に、同じコミットのまま上げます（staging で問題が出たら、開発環境で直して develop から出し直します）。`,
-                '**前の段階に、同じコミットを出してから、この PR を出し直してください。**（通常は、`sf-next.sh` が示す順序で、PR を出します）。この PR をマージしても、組織へのリリース（wf-release）は止まります',
+                '**前の段階に、同じコミットを出してから、この PR を出し直してください。**（通常は、`sf-pr.sh` が示す順序で、PR を出します）。この PR をマージしても、組織へのリリース（wf-release）は止まります',
               ].join('\n');
             } else {
               本文 = [目印, '## ✅ マージ順序は、問題ありません', '', '前の段階に出した、同じコミットであることを確認しました。'].join('\n');

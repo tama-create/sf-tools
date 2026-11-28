@@ -66,8 +66,8 @@
 #   テストクラスの指定・sf project deploy start）と終了コードは、sf-release.sh の冒頭コメントを参照
 #
 # 【必要な Secrets / Variables】
-#   Secrets（このリポジトリに設定する。SF_PRIVATE_KEY は sf-init の Phase 10・sf-update-secret.sh が、SF_CONSUMER_KEY_* は
-#   それに加えて sf-init.sh --add-tier（_STG・_DEV だけ）/ --reconnect も登録する。SLACK_BOT_TOKEN は Phase 7 が登録する）:
+#   Secrets（このリポジトリに設定する。SF_PRIVATE_KEY は sf-project の Phase 10・sf-update-secret.sh が、SF_CONSUMER_KEY_* は
+#   それに加えて sf-project.sh --add-tier（_STG・_DEV だけ）/ --reconnect も登録する。SLACK_BOT_TOKEN は Phase 7 が登録する）:
 #     SF_PRIVATE_KEY       : JWT の秘密鍵（server.key の PEM を、1 行の Base64 にした値。全組織共通）
 #     SF_CONSUMER_KEY_PROD : main の組織のアプリ（外部クライアントアプリケーション）のコンシューマー鍵
 #     SF_CONSUMER_KEY_STG  : staging の組織のアプリのコンシューマー鍵

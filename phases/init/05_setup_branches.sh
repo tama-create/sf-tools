@@ -6,7 +6,7 @@
 # リモートのブランチは、この Phase では作らない（Phase 8 の 08_initial_commit.sh が作る）。
 #
 # 【使い方】
-#   sf-init.sh が、管理者用の作業フォルダ（admin）をカレントにして、bash で呼び出す。
+#   sf-project.sh が、管理者用の作業フォルダ（admin）をカレントにして、bash で呼び出す。
 #
 # 【処理の流れ】
 #   1. 状態ファイルの REPO_DIR が空なら die。REPO_DIR に移動する
@@ -22,18 +22,18 @@
 #
 # 【前提条件】
 #   - Phase 3 で作ったクローン（REPO_DIR）
-#   - 環境変数 SF_TOOLS_DIR（sf-tools のルート。sf-init.sh が export する）
+#   - 環境変数 SF_TOOLS_DIR（sf-tools のルート。sf-project.sh が export する）
 #
 # 【補足】
 #   - 終了コード: 0 = OK / 1 = die
 # ==============================================================================
 
-# SF_TOOLS_DIR は sf-init.sh（司令塔）から export される
+# SF_TOOLS_DIR は sf-project.sh（司令塔）から export される
 PHASE_DIR="${BASH_SOURCE[0]%/*}"
 [[ "$PHASE_DIR/" == /* && "$PHASE_DIR/" != *//* && "$PHASE_DIR/" != */./* && "$PHASE_DIR/" != */../* ]] || PHASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SF_TOOLS_DIR="${SF_TOOLS_DIR:-$(dirname "$(dirname "$PHASE_DIR")")}"
 
-readonly SCRIPT_NAME="sf-init"
+readonly SCRIPT_NAME="sf-project"
 mkdir -p "$HOME/sf-tools/logs" 2>/dev/null || true  # run 不使用: common.sh の読み込み前（run が未定義）
 readonly LOG_FILE="$HOME/sf-tools/logs/${SCRIPT_NAME}.log"
 readonly LOG_MODE="APPEND"  # 司令塔が NEW で初期化済みのため追記

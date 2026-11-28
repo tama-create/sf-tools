@@ -11,8 +11,8 @@
 #   A12  sf-deploy: 強制デプロイの確認（n は何も呼ばない・Y は --ignore-conflicts で呼ぶ）
 #   X3-2 branches.txt が壊れている（空・重複・不正な名前）→ push のフックが、安全に動く
 #   X3-3 deploy-target.txt の書式の不正・CRLF → sf-dryrun が、止める／通す
-#   X3-4 ~/sf-tools が古い → sf-sync-wf が、更新を求める（--check は、更新せず中断）
-#   A10  sf-install: node_modules の最新判定（package-lock）と、ツール更新の 24 時間の間隔
+#   X3-4 ~/sf-tools が古い → sf-update-workflows が、更新を求める（--check は、更新せず中断）
+#   A10  sf-refresh: node_modules の最新判定（package-lock）と、ツール更新の 24 時間の間隔
 #   X8-1 再実行の表: sf-hook・sf-unhook を、続けて 2 回実行しても、同じ結果になる
 #   X5-3 環境の不備（インストーラー版の sf・node なし・npm の失敗・CRLF）→ 安全に止まる／警告して続ける
 #   X4-1c 同じ組織への、同時のデプロイ → ロックの競合で、片方が待つ・止まる
@@ -98,9 +98,9 @@ test_X5_3() {
 
     # sf が、npm 版でない（インストーラー版: sf --version が、成功しても 1 を返す）
     it_fault_clear; it_fault sf "--version" 1 99 1 "sf: command failed"
-    it_run "$CL" bash "$IT_HOME/sf-tools/bin/sf-install.sh"
-    assert_exit_ok "$IT_RC" "X5-3（インストーラー版の sf）: sf-install は、警告だけで、続行する（sf-tools の最新化を、止めない）"
-    it_out_has "インストーラー版" && pass "X5-3（インストーラー版の sf）: sf-install は、警告で知らせる" || fail "X5-3（インストーラー版の sf）: sf-install は、警告で知らせる"
+    it_run "$CL" bash "$IT_HOME/sf-tools/bin/sf-refresh.sh"
+    assert_exit_ok "$IT_RC" "X5-3（インストーラー版の sf）: sf-refresh は、警告だけで、続行する（sf-tools の最新化を、止めない）"
+    it_out_has "インストーラー版" && pass "X5-3（インストーラー版の sf）: sf-refresh は、警告で知らせる" || fail "X5-3（インストーラー版の sf）: sf-refresh は、警告で知らせる"
     for c in "sf-metasync.sh" "sf-release.sh --release" "sf-dryrun.sh -n" "sf-start.sh"; do
         read -ra _sp <<< "$c"; it_calls_clear
         it_run "$CL" -i 'Y\nY\n' bash "$IT_HOME/sf-tools/bin/${_sp[0]}" "${_sp[@]:1}"
@@ -121,16 +121,16 @@ test_X5_3() {
     echo "{}" > "$CL/package-lock.json"; touch "$CL/package-lock.json"
     rm -rf "$CL/node_modules"
     it_fault npm "install" 1 99 1 "npm ERR! network"
-    it_run "$CL" bash "$IT_HOME/sf-tools/bin/sf-install.sh"
-    assert_exit_ok "$IT_RC" "X5-3（npm install の失敗）: sf-install は、警告だけで、続行する"
+    it_run "$CL" bash "$IT_HOME/sf-tools/bin/sf-refresh.sh"
+    assert_exit_ok "$IT_RC" "X5-3（npm install の失敗）: sf-refresh は、警告だけで、続行する"
     it_out_has "npm install に失敗しました" && pass "X5-3（npm install の失敗）: 警告で知らせる" || fail "X5-3（npm install の失敗）: 警告で知らせる"
     it_fault_clear
     rm -f "$CL/package-lock.json"
 
-    # sf-tools の origin に、つながらない（ネットワークの断）: sf-install は、警告だけで、続行する（フックの設置などを、止めない）
+    # sf-tools の origin に、つながらない（ネットワークの断）: sf-refresh は、警告だけで、続行する（フックの設置などを、止めない）
     mv "$IT_ROOT/sftools-origin.git" "$IT_ROOT/sftools-origin.git.off"
-    it_run "$CL" bash "$IT_HOME/sf-tools/bin/sf-install.sh"
-    assert_exit_ok "$IT_RC" "X1-8（sf-tools の origin に、つながらない）: sf-install は、警告だけで、続行する"
+    it_run "$CL" bash "$IT_HOME/sf-tools/bin/sf-refresh.sh"
+    assert_exit_ok "$IT_RC" "X1-8（sf-tools の origin に、つながらない）: sf-refresh は、警告だけで、続行する"
     it_out_has "最新化に失敗しました" && pass "X1-8（sf-tools の origin に、つながらない）: 警告で知らせる" || fail "X1-8（sf-tools の origin に、つながらない）: 警告で知らせる" "$(it_out | tail -6)"
     assert_file_exists "$CL/.git/hooks/pre-push" "X1-8（sf-tools の origin に、つながらない）: フックは、入っている（設置を、止めない）"
     mv "$IT_ROOT/sftools-origin.git.off" "$IT_ROOT/sftools-origin.git"
@@ -205,31 +205,31 @@ test_X3_4() {
     echo -e "\n${CLR_HEAD}--- X3-4: ~/sf-tools が古い ---${CLR_RST}"
     local h0; h0=$(_head "$CL")
     it_sftools_advance || { fail "X3-4: 準備（sf-tools の新しい版）"; return; }
-    it_run "$CL" bash "$IT_HOME/sf-tools/bin/sf-sync-wf.sh" --check
+    it_run "$CL" bash "$IT_HOME/sf-tools/bin/sf-update-workflows.sh" --check
     assert_exit_fail "$IT_RC" "X3-4: ~/sf-tools が古いとき、--check は、更新せずに中断する"
     # 通常の実行: 更新の確認 n → 中断（sf-tools は、古いまま）
     local before; before=$(_it_git -C "$IT_HOME/sf-tools" rev-parse HEAD)
-    it_run "$CL" -i 'n\n' bash "$IT_HOME/sf-tools/bin/sf-sync-wf.sh"
-    assert_exit_fail "$IT_RC" "X3-4: 更新を断ると、sf-sync-wf は中断する"
+    it_run "$CL" -i 'n\n' bash "$IT_HOME/sf-tools/bin/sf-update-workflows.sh"
+    assert_exit_fail "$IT_RC" "X3-4: 更新を断ると、sf-update-workflows は中断する"
     assert_equals "$(_it_git -C "$IT_HOME/sf-tools" rev-parse HEAD)" "$before" "X3-4: 更新を断ると、~/sf-tools は、変わらない"
     # 更新を許可: 更新して、続行する
-    it_run "$CL" -i 'Y\nn\nn\n' bash "$IT_HOME/sf-tools/bin/sf-sync-wf.sh"   # 更新に Y → 更新した版で再実行 → 警告の確認に n
+    it_run "$CL" -i 'Y\nn\nn\n' bash "$IT_HOME/sf-tools/bin/sf-update-workflows.sh"   # 更新に Y → 更新した版で再実行 → 警告の確認に n
     [[ "$(_it_git -C "$IT_HOME/sf-tools" rev-parse HEAD)" != "$before" ]] && pass "X3-4: 更新を許可すると、~/sf-tools が新しい版になる" || fail "X3-4: 更新を許可すると、~/sf-tools が新しい版になる" "$(it_out | tail -6)"
     assert_equals "$(_head "$CL")" "$h0" "X3-4: クローンのコミットは、変わらない"
 }
 
 test_A10() {
-    echo -e "\n${CLR_HEAD}--- A10: sf-install の node_modules の判定・ツール更新の間隔 ---${CLR_RST}"
+    echo -e "\n${CLR_HEAD}--- A10: sf-refresh の node_modules の判定・ツール更新の間隔 ---${CLR_RST}"
     local lock="$CL/package-lock.json" nm="$CL/node_modules/.package-lock.json" i
     echo "{}" > "$lock"; mkdir -p "$CL/node_modules"; echo "{}" > "$nm"
     touch -t 202601010000 "$lock"        # lock が古い・node_modules が新しい → 最新
     it_calls_clear
-    it_run "$CL" bash "$IT_HOME/sf-tools/bin/sf-install.sh"
-    assert_exit_ok "$IT_RC" "A10: sf-install が成功する（node_modules は最新）"
+    it_run "$CL" bash "$IT_HOME/sf-tools/bin/sf-refresh.sh"
+    assert_exit_ok "$IT_RC" "A10: sf-refresh が成功する（node_modules は最新）"
     assert_equals "$(it_calls npm | grep -c '^npm install$')" "0" "A10: node_modules が最新なら、npm install を呼ばない"
     touch "$lock"; touch -t 202601010000 "$nm"   # lock が新しい → 更新が必要
     it_calls_clear
-    it_run "$CL" bash "$IT_HOME/sf-tools/bin/sf-install.sh"
+    it_run "$CL" bash "$IT_HOME/sf-tools/bin/sf-refresh.sh"
     assert_equals "$(it_calls npm | grep -c '^npm install$')" "1" "A10: package-lock が新しければ、npm install を呼ぶ"
     # ツール更新: スタンプが新しい（24 時間以内）→ 起動しない
     it_calls_clear
@@ -238,14 +238,14 @@ test_A10() {
     it_block_git_update
     touch -t 202601010000 "$IT_HOME/.sf-tools-last-update"
     it_calls_clear
-    it_run "$CL" bash "$IT_HOME/sf-tools/bin/sf-install.sh"
+    it_run "$CL" bash "$IT_HOME/sf-tools/bin/sf-refresh.sh"
     for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
         it_calls npm | grep -q 'install -g @salesforce/cli' && break
         sleep 1
     done
-    it_calls npm | grep -q 'install -g @salesforce/cli' && pass "A10: スタンプが古ければ、ツール更新（sf-upgrade）が動く" || fail "A10: スタンプが古ければ、ツール更新（sf-upgrade）が動く"
+    it_calls npm | grep -q 'install -g @salesforce/cli' && pass "A10: スタンプが古ければ、ツール更新（sf-update-cli）が動く" || fail "A10: スタンプが古ければ、ツール更新（sf-update-cli）が動く"
     [[ "$(uname -s)" == MINGW* || "$(uname -s)" == MSYS* ]] && { it_calls git | grep -q 'update-git-for-windows' && pass "A10: Git の更新は、代理が受け止め、本物は動かない" || true; }
-    sleep 2   # バックグラウンドの sf-upgrade の終了を待つ
+    sleep 2   # バックグラウンドの sf-update-cli の終了を待つ
 }
 
 test_X8_1() {

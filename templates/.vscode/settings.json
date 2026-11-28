@@ -24,7 +24,7 @@
     "package-lock.json": true,
     "sfdx-project.json": true,
     "sf-start.sh": true,
-    "sf-restart.sh": true,
+    "sf-switch-org.sh": true,
     "README.md": true
   },
   "search.exclude": {

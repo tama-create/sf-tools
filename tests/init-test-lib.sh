@@ -1,12 +1,12 @@
 #!/bin/bash
 # ==============================================================================
-# init-test-lib.sh - sf-init.sh の単体テスト（test_sf-init.sh・test_sf-init2.sh・test_sf-init3.sh）の共通の部品
+# init-test-lib.sh - sf-project.sh の単体テスト（test_sf-project.sh・test_sf-project2.sh・test_sf-project3.sh）の共通の部品
 # ==============================================================================
 # 3 つのテストファイルが source する。時間のかかる 1 ファイル（Windows の CI で約 10 分）を、3 つに分けて、並列に動かすために、
 # 共通の準備（環境変数・作業フォルダ・gh のモック・サブスクリプトの差し替え・入力の台本）を、ここに置く。
 # テストの本体は、各ファイルにある（どのファイルにあるかは、各ファイルの冒頭の一覧を参照）。
 #
-# 以下は、分割する前の test_sf-init.sh の冒頭にあった、テストケースの一覧（3 つのファイルの合計）。
+# 以下は、分割する前の test_sf-project.sh の冒頭にあった、テストケースの一覧（3 つのファイルの合計）。
 #
 # 【テストケース】
 #   1.  ハッピーパス（3ブランチ構成）- フルフロー正常終了
@@ -33,7 +33,7 @@
 
 source "$(dirname "${BASH_SOURCE[0]}")/test_helper.sh"
 
-# sf-init.sh は、オーナーと XXXX を、引数（--owner / --project。環境変数 SF_INIT_OWNER / SF_INIT_PROJECT）か、
+# sf-project.sh は、オーナーと XXXX を、引数（--owner / --project。環境変数 SF_INIT_OWNER / SF_INIT_PROJECT）か、
 # 対話で決める（フォルダ構成には頼らない）。既定のテストは、環境変数で渡す（引数・対話のテストは、個別に指定する）
 export SF_INIT_OWNER="tamashimon" SF_INIT_PROJECT="testproject"
 # 最初のメタデータの同期（wf-metasync の起動と、完了の待ち）の確認の間隔。モックの gh は、すぐに答えるため
@@ -41,7 +41,7 @@ export VERIFY_POLL_SEC=0
 
 # ==============================================================================
 # ヘルパー：作業フォルダ（{base}/home/{github-owner}/{company}/。フォルダ名に意味はない）を作成
-# （admin/ は sf-init.sh が自動作成するため、ここでは作らない）
+# （admin/ は sf-project.sh が自動作成するため、ここでは作らない）
 # 戻り値: ベースディレクトリのパス（teardown に渡す）
 # ==============================================================================
 _setup_init_dir() {
@@ -54,7 +54,7 @@ _setup_init_dir() {
 }
 
 # ==============================================================================
-# ヘルパー：sf-init.sh 用 gh モック（repo view カウンター付き）
+# ヘルパー：sf-project.sh 用 gh モック（repo view カウンター付き）
 #
 # 通常フロー:
 #   - 1回目の "repo view" → exit 1（リポジトリ未存在 → create をトリガー）
@@ -180,10 +180,10 @@ GHEOF
 _stub_subscripts() {
     local mock_home="$1"
 
-    # sf-install.sh スタブ（何もしない）
+    # sf-refresh.sh スタブ（何もしない）
     mkdir -p "$mock_home/sf-tools/bin"
-    printf '#!/bin/bash\nexit 0\n' > "$mock_home/sf-tools/bin/sf-install.sh"
-    chmod +x "$mock_home/sf-tools/bin/sf-install.sh"
+    printf '#!/bin/bash\nexit 0\n' > "$mock_home/sf-tools/bin/sf-refresh.sh"
+    chmod +x "$mock_home/sf-tools/bin/sf-refresh.sh"
 
     # sf-hook.sh スタブ（何もしない）
     printf '#!/bin/bash\nexit 0\n' > "$mock_home/sf-tools/bin/sf-hook.sh"
@@ -194,7 +194,7 @@ _stub_subscripts() {
 # ==============================================================================
 # ヘルパー：3ブランチ構成用の stdin 入力シーケンス
 #
-# 入力順（sf-init.sh 冒頭の管理者警告）:
+# 入力順（sf-project.sh 冒頭の管理者警告）:
 #   1. Y                  (ask_yn "続行しますか？" - read_key 1文字読み。\n は buffer 残留)
 #   ★ \n は read_key [YyNnQq] が無効として読み飛ばし
 # 入力順（Phase 2: プロジェクト情報確認）:
@@ -220,10 +220,10 @@ _stub_subscripts() {
 #  ★ 組織の種類は、モックの既定（Sandbox）。接続ユーザー名は、INIT_ECA_ENV の MOCK_SF_ORG_JSON から読む
 # 入力順（後処理）: なし（admin フォルダの削除の質問は、廃止した。admin フォルダは、管理者用として残す。Phase 10 が最後）
 #
-# 外部クライアントアプリの道で、最後まで進めるには、sf-init.sh を、次の環境変数つきで実行する（INIT_ECA_ENV）:
+# 外部クライアントアプリの道で、最後まで進めるには、sf-project.sh を、次の環境変数つきで実行する（INIT_ECA_ENV）:
 #   MOCK_SF_ORG_JSON  : sf org display の応答に、接続ユーザー名を入れる（ないと「接続ユーザー名を取得できません」で止まる）
 #   SF_INIT_JWT_INTERVAL=0 : JWT 接続テストの、試行の間の待ち時間をなくす
-#   使い方: ( cd "$dir" && HOME=... PATH=... env "${INIT_ECA_ENV[@]}" bash "$mock_home/sf-tools/bin/sf-init.sh" ... )
+#   使い方: ( cd "$dir" && HOME=... PATH=... env "${INIT_ECA_ENV[@]}" bash "$mock_home/sf-tools/bin/sf-project.sh" ... )
 # ==============================================================================
 INIT_ECA_ENV=(MOCK_SF_ORG_JSON='{"result":{"username":"admin@example.com","alias":"x"}}' SF_INIT_JWT_INTERVAL=0)
 _make_input_3branches() {

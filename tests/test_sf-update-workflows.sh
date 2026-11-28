@@ -1,9 +1,9 @@
 #!/bin/bash
 # ==============================================================================
-# test_sf-sync-wf.sh - sf-sync-wf.sh のテスト
+# test_sf-update-workflows.sh - sf-update-workflows.sh のテスト
 # ==============================================================================
 source "$(dirname "${BASH_SOURCE[0]}")/test_helper.sh"
-echo -e "${CLR_HEAD}=== sf-sync-wf.sh ===${CLR_RST}"
+echo -e "${CLR_HEAD}=== sf-update-workflows.sh ===${CLR_RST}"
 
 # テスト環境を作る。force-* のフォルダ（td）・モックの bin（mb）・sf-tools 一式を置いた HOME（mh）
 #   雛形（mh の sf-tools/templates/.github/workflows/）に、2 つのワークフローを置き、
@@ -25,18 +25,18 @@ _wf_env() {
     printf -v "$3" '%s' "$_h"
 }
 
-# sf-sync-wf.sh を実行する。使い方: _wf_run td mb mh 標準入力 [引数...]
+# sf-update-workflows.sh を実行する。使い方: _wf_run td mb mh 標準入力 [引数...]
 _wf_run() {
     local td="$1" mb="$2" mh="$3" input="$4"; shift 4
-    printf '%b' "$input" | ( cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$mh/sf-tools/bin/sf-sync-wf.sh" "$@" ) 2>&1
+    printf '%b' "$input" | ( cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$mh/sf-tools/bin/sf-update-workflows.sh" "$@" ) 2>&1
 }
 
 # --help → 説明が表示される
 test_help() {
     local out ec
-    out=$(bash "$SF_TOOLS_DIR/bin/sf-sync-wf.sh" --help 2>&1); ec=$?
+    out=$(bash "$SF_TOOLS_DIR/bin/sf-update-workflows.sh" --help 2>&1); ec=$?
     assert_exit_ok "$ec" "--help → 終了コード 0"
-    assert_output_contains "$out" "sf-sync-wf.sh" "--help → スクリプト名が表示される"
+    assert_output_contains "$out" "sf-update-workflows.sh" "--help → スクリプト名が表示される"
     assert_output_contains "$out" "system-日付" "--help → 更新の手順（作業用ブランチの名前）が表示される"
 }
 
@@ -46,7 +46,7 @@ test_guards() {
     _wf_env td mb mh
 
     local rd; rd=$(setup_regular_dir)
-    out=$( cd "$rd" && HOME="$mh" PATH="$mb:$PATH" bash "$mh/sf-tools/bin/sf-sync-wf.sh" 2>&1 < /dev/null ); ec=$?
+    out=$( cd "$rd" && HOME="$mh" PATH="$mb:$PATH" bash "$mh/sf-tools/bin/sf-update-workflows.sh" 2>&1 < /dev/null ); ec=$?
     assert_exit_fail "$ec" "force-* 以外 → エラー終了"
     teardown "$rd"
 
@@ -222,7 +222,7 @@ Y
     teardown "$td" "$mb" "$mh"
 }
 
-# 実際の雛形（templates/.github/workflows/）と、sf-init が作るもの（雛形のコピー）が、同じであること
+# 実際の雛形（templates/.github/workflows/）と、sf-project が作るもの（雛形のコピー）が、同じであること
 test_real_templates_are_synced() {
     local td mb mh out ec
     setup_std_env td mb mh

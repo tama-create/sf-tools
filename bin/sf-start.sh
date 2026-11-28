@@ -3,7 +3,7 @@
 # sf-start.sh - 開発環境スタートアップスクリプト
 # ==============================================================================
 # 開発環境を起動する。Salesforce 組織に接続（未接続ならログイン）し、VS Code を起動したあと、
-# sf-install.sh をバックグラウンドで実行し、メニュー（ランチャー。phases/start/launcher.sh）を前面で起動する。
+# sf-refresh.sh をバックグラウンドで実行し、メニュー（ランチャー。phases/start/launcher.sh）を前面で起動する。
 #
 # 【使い方】
 #   cd {ジョブフォルダ}/force-XXXX
@@ -12,7 +12,7 @@
 # 【オプション】
 #   -v, --verbose : run で実行したコマンドの応答（出力）を、コンソールにも表示する
 #   -h, --help    : この説明を表示して終了する（第 1 引数のときのみ）
-#   上記以外の引数は、「不明なオプションです」と表示して中断する。-v は、sf-install.sh にも渡す。
+#   上記以外の引数は、「不明なオプションです」と表示して中断する。-v は、sf-refresh.sh にも渡す。
 #
 # 【処理の流れ】
 #   1. sf の確認（check_sf_cli --cache）。sf --version の終了コードが 0 以外なら、案内を表示して中断する。
@@ -36,20 +36,20 @@
 #      続けて、AI 向けの案内（プロジェクトのルートの CLAUDE.md に「@~/sf-tools/doc/ai-dev-loop.md」の行、AGENTS.md に
 #      「~/sf-tools/doc/ai-dev-loop.md」を含む行）があるかを確かめ、なければ WARNING で、足し方を案内する（ファイルは書き換えない。
 #      書き換えると、リポジトリに未コミットの変更ができるため）
-#   5. ~/sf-tools/bin/sf-install.sh があれば、バックグラウンドで実行する（出力は、このスクリプトのログに追記）。
+#   5. ~/sf-tools/bin/sf-refresh.sh があれば、バックグラウンドで実行する（出力は、このスクリプトのログに追記）。
 #      内容: ~/sf-tools の git pull・設定ファイルの確認・Git フック（pre-commit / pre-push）の設置・
 #      sf-tools/release/{ブランチ}/ の準備と sf-tools/release/branch_name.txt の更新（main ブランチでは行わない）・
 #      npm install（package.json があるとき。node_modules/.package-lock.json が package-lock.json 以降に更新済みなら省略）・
-#      開発ツールの更新（sf-upgrade.sh。24 時間に 1 回）。詳細は sf-install.sh の冒頭コメント
+#      開発ツールの更新（sf-update-cli.sh。24 時間に 1 回）。詳細は sf-refresh.sh の冒頭コメント
 #   6. デバッグログ（~/sf-tools/bin/sf-log.sh があるとき。AI が読むログを、ランチャーの起動中に裏で取る。doc/sf-log-design.md 5 章）:
 #        a. 持ち主の印を決める。環境変数 SF_LOG_OWNER（PID:起動の時刻:環境の名前と乱数）があり、その PID が生きていれば引き継ぐ
-#           （ランチャーの Start・Restart からの入れ子の sf-start）。それ以外は、自分の印を作って export する
+#           （ランチャーの Start・SwitchOrg からの入れ子の sf-start）。それ以外は、自分の印を作って export する
 #           （乱数の頭に、環境の名前（detect_runtime。gitbash / wsl など）を付ける。Git Bash と WSL の混在の見分け。doc/sf-log-design.md 5.6）
 #        b. sf-log.sh begin -o {エイリアス} --owner {印} を実行する（sf を呼ばずにすぐ終わる。予約名・「自動で取らない」答えなら取らない。
 #           このプロジェクト・エイリアスで初めてのときは、AI への送信の注意を表示して Y/N で聞く）。取るときは、持ち主の一覧に登録し、
 #           TraceFlag の準備と取得役を裏で起動する。終了コード 0 = 始めた／10 = 取らない／それ以外 = 警告だけ（どれでも先に進む）
 #   7. ~/sf-tools/phases/start/launcher.sh（メニュー）があり、環境変数 SF_LAUNCHER_ACTIVE が 1 でなければ、前面で起動する
-#      （メニューの Start・Restart から呼ばれたときは、二重に起動しない）。メニューを開く入口は、このスクリプトだけ
+#      （メニューの Start・SwitchOrg から呼ばれたときは、二重に起動しない）。メニューを開く入口は、このスクリプトだけ
 #      （2026-11-28 に bin/sf-launcher.sh を phases/start/ へ移した。利用者が打つコマンドは sf-start.sh）
 #   8. 終了時（ランチャーを q で閉じたとき・中断したとき）: 6 で自分の印を登録したときだけ、sf-log.sh leave --owner {印} を実行する
 #      （ほかの sf-start がなければ、取得役を止め、TraceFlag を消す。数十秒かかることがある。失敗は警告だけ）
@@ -64,8 +64,8 @@
 #     シグナルの無視は、子の bash（前面で起動するメニューと、そこから実行する bash のコマンド）に継承されるため、
 #     それらも Ctrl+C を無視する。ただし、sf・npm など Node のコマンドは、起動時にシグナルの扱いを既定に戻すため、実行中に
 #     Ctrl+C を押すと、そのコマンドだけが止まることがある（sf-job.sh から呼ばれたときは、sf-job.sh の設定も、同じく引き継がれる）
-#   - 終了コードは、メニューの終了コードによらず 0。バックグラウンドの sf-install.sh の失敗も、終了コードに影響しない
-#   - 接続済みの組織を切り替えるときは sf-restart.sh を使う
+#   - 終了コードは、メニューの終了コードによらず 0。バックグラウンドの sf-refresh.sh の失敗も、終了コードに影響しない
+#   - 接続済みの組織を切り替えるときは sf-switch-org.sh を使う
 #   - ログ: ./sf-tools/logs/sf-start.log（実行のたびに作り直す）。終了時に /tmp/sf-wsl-bin を削除する
 # ==============================================================================
 
@@ -107,7 +107,7 @@ check_sf_cli --cache
 trap '' INT  # Ctrl+C を無効化（q で中断すること。無視の設定は子プロセスにも継承される）
 # 終了時の後始末。run 不使用: EXIT トラップの中の後始末（失敗しても、終了コード・表示に影響させない）
 #   デバッグログ（sf-log.sh）: このプロセスが持ち主として登録したときだけ、leave で一覧から外れる（誰もいなければ、取得を止める。
-#   doc/sf-log-design.md 5.2）。入れ子の sf-start（ランチャーの Start・Restart から）は、外側の印を引き継ぐので、何もしない
+#   doc/sf-log-design.md 5.2）。入れ子の sf-start（ランチャーの Start・SwitchOrg から）は、外側の印を引き継ぐので、何もしない
 SF_LOG_SH="$HOME/sf-tools/bin/sf-log.sh"
 SF_LOG_LEAVE=0
 _on_exit() {
@@ -126,7 +126,7 @@ log "INFO" "Salesforce 接続確認中..."
 SKIP_LOGIN=0
 
 # パターンA: 接続済みの場合はログインをスキップ
-#   FORCE_RELOGIN=1（sf-restart.sh 経由）の場合はこのブロックを飛ばして強制ログイン
+#   FORCE_RELOGIN=1（sf-switch-org.sh 経由）の場合はこのブロックを飛ばして強制ログイン
 #   .sf/config.json が存在しない場合はプロジェクト初回起動とみなし、強制的にエイリアス入力へ
 if [ "$FORCE_RELOGIN" != "1" ] && [ -f ".sf/config.json" ]; then
     DISPLAY_JSON=$(run sf org display --json || echo "")
@@ -204,7 +204,7 @@ else
 fi
 
 # AI 向けの案内（処理の流れの 4）: force-* の CLAUDE.md・AGENTS.md に、手順書 ~/sf-tools/doc/ai-dev-loop.md を指す行があるか。
-#   なければ知らせるだけ（書き換えない）。雛形は ~/sf-tools/templates/ の CLAUDE.md・AGENTS.md（sf-init が新しい force-* に写す）
+#   なければ知らせるだけ（書き換えない）。雛形は ~/sf-tools/templates/ の CLAUDE.md・AGENTS.md（sf-project が新しい force-* に写す）
 _ai_missing=""
 #   探す文字列の「~」は、ファイルに書かれた文字そのもの（ホームのパスに展開しない。展開したら一致しない）
 grep -qF '@~/sf-tools/doc/ai-dev-loop.md' CLAUDE.md 2>/dev/null || _ai_missing="CLAUDE.md"   # 条件チェックのため run 不使用
@@ -218,17 +218,17 @@ fi
 # ------------------------------------------------------------------------------
 # 6. バックグラウンド処理（VS Code 起動後に実行）
 # ------------------------------------------------------------------------------
-# sf-install.sh が以下をすべて担当する（GitHub Actions ワークフローの更新は、担当しない。管理者が sf-sync-wf.sh で手動で行う）:
+# sf-refresh.sh が以下をすべて担当する（GitHub Actions ワークフローの更新は、担当しない。管理者が sf-update-workflows.sh で手動で行う）:
 #   - sf-tools 最新化 (git pull)
 #   - 設定ファイル（sf-tools/config/metadata.txt・branches.txt）の確認
 #   - Git フック (pre-commit / pre-push) インストール
 #   - リリース管理ディレクトリ準備 & branch_name.txt 更新
-#   - npm install / sf-upgrade.sh (24h スロットル)
-log "INFO" "バックグラウンドで sf-install.sh を実行中..."
+#   - npm install / sf-update-cli.sh (24h スロットル)
+log "INFO" "バックグラウンドで sf-refresh.sh を実行中..."
 log "INFO" "  完了後に sf-tools/release/<branch>/ が準備されます（npm install を含む場合は数分かかります）"
 (
-    if [ -f "$HOME/sf-tools/bin/sf-install.sh" ]; then
-        bash "$HOME/sf-tools/bin/sf-install.sh" "$@" 2>&1 \
+    if [ -f "$HOME/sf-tools/bin/sf-refresh.sh" ]; then
+        bash "$HOME/sf-tools/bin/sf-refresh.sh" "$@" 2>&1 \
             || true
     fi
 ) >> "$LOG_FILE" 2>&1 &  # バックグラウンド起動のため run 不使用（出力は、このスクリプトのログに追記）
@@ -258,7 +258,7 @@ fi
 # ------------------------------------------------------------------------------
 # 7. ランチャ起動
 # ------------------------------------------------------------------------------
-# ランチャーから（Start / Restart で）呼ばれた場合は二重起動しない（SF_LAUNCHER_ACTIVE=1 はランチャーが export する）
+# ランチャーから（Start / SwitchOrg で）呼ばれた場合は二重起動しない（SF_LAUNCHER_ACTIVE=1 はランチャーが export する）
 if [[ -f "$HOME/sf-tools/phases/start/launcher.sh" ]] && [[ "${SF_LAUNCHER_ACTIVE:-}" != "1" ]]; then
     bash "$HOME/sf-tools/phases/start/launcher.sh"  # 対話のため run 不使用。終了コードは使わない（このスクリプトは 0 で終わる）
 fi

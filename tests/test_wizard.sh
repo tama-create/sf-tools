@@ -95,11 +95,11 @@ test_confirm() {
 
 test_fail_done() {
     echo ""; echo -e "${CLR_HEAD}[TEST] wizard_fail / wizard_done${CLR_RST}"
-    _w 'wizard_fail "workflow の権限がありません" "作成ページで、workflow にチェックを入れる" "もう一度 sf-init.sh を実行する"'
+    _w 'wizard_fail "workflow の権限がありません" "作成ページで、workflow にチェックを入れる" "もう一度 sf-project.sh を実行する"'
     assert_file_contains "$WOUT" "うまくいきませんでした"                       "失敗の見出しが出る"
     assert_file_contains "$WOUT" "原因     : workflow の権限がありません"        "原因が出る"
     assert_file_contains "$WOUT" "【直し方】 作成ページで、workflow にチェックを入れる" "直し方が出る"
-    assert_file_contains "$WOUT" "【やり直し】 もう一度 sf-init.sh を実行する"    "やり直しの方法が出る"
+    assert_file_contains "$WOUT" "【やり直し】 もう一度 sf-project.sh を実行する"    "やり直しの方法が出る"
     _wc
     _w 'wizard_fail "原因だけ"'
     assert_file_not_contains "$WOUT" "【直し方】"                              "直し方が空なら、出さない"

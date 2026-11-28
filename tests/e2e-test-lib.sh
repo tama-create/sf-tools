@@ -358,10 +358,10 @@ EOF
 }
 
 # ------------------------------------------------------------------------------
-# 31. シナリオ restart-org（sf-restart で接続先を staging の組織に切り替え → dry-run → 元に戻す）
+# 31. シナリオ restart-org（sf-switch-org で接続先を staging の組織に切り替え → dry-run → 元に戻す）
 # ------------------------------------------------------------------------------
-# sf-restart.sh の代わりの台本（E2E_SF_RESTART）: 標準入力の 1 行目（エイリアス）で、.sf/config.json を作り直し、その組織のユーザーを記録する
-#   （末尾が STG なら staging のユーザー・それ以外は main のユーザー）。sf-install.sh の完了メッセージも、ログに書く
+# sf-switch-org.sh の代わりの台本（E2E_SF_RESTART）: 標準入力の 1 行目（エイリアス）で、.sf/config.json を作り直し、その組織のユーザーを記録する
+#   （末尾が STG なら staging のユーザー・それ以外は main のユーザー）。sf-refresh.sh の完了メッセージも、ログに書く
 _mk_restart_stubs() {
     cat > "$MB/restart-stub.sh" << 'EOF'
 #!/bin/bash
@@ -372,7 +372,7 @@ echo "restart $alias" >> "$d/restart.log"
 mkdir -p .sf sf-tools/logs
 printf '{"target-org": "%s"}\n' "$alias" > .sf/config.json
 case "$alias" in *STG) echo "stg@example.com" > "$d/org_user.$alias" ;; *) echo "main@example.com" > "$d/org_user.$alias" ;; esac
-echo "npm install の確認が完了しました" > sf-tools/logs/sf-install.log
+echo "npm install の確認が完了しました" > sf-tools/logs/sf-refresh.log
 exit 0
 EOF
     cat > "$MB/dryrun-stub.sh" << 'EOF'

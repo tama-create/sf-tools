@@ -1,9 +1,9 @@
 #!/bin/bash
 # ==============================================================================
-# test_sf-init2.sh - sf-init.sh の単体テスト（モックベース。2/3）
+# test_sf-project2.sh - sf-project.sh の単体テスト（モックベース。2/3）
 # ==============================================================================
-# sf-init.sh のテストは、時間がかかる（Windows の CI で約 10 分）ため、3 つのファイル（test_sf-init.sh・test_sf-init2.sh・
-# test_sf-init3.sh）に分け、並列に動かす。共通の部品は tests/init-test-lib.sh。関数の分け方は、実測の所要時間で、均等になるようにした。
+# sf-project.sh のテストは、時間がかかる（Windows の CI で約 10 分）ため、3 つのファイル（test_sf-project.sh・test_sf-project2.sh・
+# test_sf-project3.sh）に分け、並列に動かす。共通の部品は tests/init-test-lib.sh。関数の分け方は、実測の所要時間で、均等になるようにした。
 # どのテストが、どのファイルにあるかは、下の一覧（関数名）を参照。全部で 53 の関数（件数は、3 つの合計）。
 #
 # 【このファイルのテスト関数】
@@ -52,7 +52,7 @@ test_repo_create_failure() {
     # 警告確認 + confirm + ENV_TYPE選択 のみ入力（リポジトリ作成で失敗するため以降は不要）
     printf 'Y\nY\n1\n' \
         | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
-              bash "$mock_home/sf-tools/bin/sf-init.sh" ) > /dev/null 2>&1
+              bash "$mock_home/sf-tools/bin/sf-project.sh" ) > /dev/null 2>&1
     exit_code=$?
 
     assert_exit_fail "$exit_code"                                              "リポジトリ作成失敗で非ゼロ終了する"
@@ -88,7 +88,7 @@ test_sf_login_failure() {
     local exit_code
     printf 'Y\nY\n1\n1\nghp_faketoken\n\nxoxb-faketoken\nC01ABCDEFGH\n\n1\n' \
         | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
-              env "${INIT_ECA_ENV[@]}" SF_INIT_JWT_RETRIES=1 bash "$mock_home/sf-tools/bin/sf-init.sh" ) > /dev/null 2>&1
+              env "${INIT_ECA_ENV[@]}" SF_INIT_JWT_RETRIES=1 bash "$mock_home/sf-tools/bin/sf-project.sh" ) > /dev/null 2>&1
     exit_code=$?
 
     assert_exit_fail "$exit_code"                                              "SF ログイン失敗で非ゼロ終了する"
@@ -122,7 +122,7 @@ test_invalid_owner_folder() {
     local exit_code
     printf 'x\n' \
         | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
-              bash "$mock_home/sf-tools/bin/sf-init.sh" ) > /dev/null 2>&1
+              bash "$mock_home/sf-tools/bin/sf-project.sh" ) > /dev/null 2>&1
     exit_code=$?
 
     assert_exit_fail "$exit_code" "無効なオーナー名で失敗終了する"
@@ -151,7 +151,7 @@ test_admin_branch_push_failure_is_not_fatal() {
     export MOCK_GIT_C_PUSH_EXIT=1
     _make_input_3branches \
         | ( cd "$work" && HOME="$mock_home" PATH="$mb:$PATH" \
-              env "${INIT_ECA_ENV[@]}" bash "$mock_home/sf-tools/bin/sf-init.sh" --owner tamashimon --project testproject ) \
+              env "${INIT_ECA_ENV[@]}" bash "$mock_home/sf-tools/bin/sf-project.sh" --owner tamashimon --project testproject ) \
           > /tmp/sf-init-test-pushfail.log 2>&1
     exit_code=$?
     unset MOCK_GIT_C_PUSH_EXIT
@@ -165,7 +165,7 @@ test_admin_branch_push_failure_is_not_fatal() {
 }
 
 # ==============================================================================
-# テスト 6g: Phase 3 のコピーの結果に、sf-install.sh のコピー元（release の雛形・gitmessage）が入らない
+# テスト 6g: Phase 3 のコピーの結果に、sf-refresh.sh のコピー元（release の雛形・gitmessage）が入らない
 #   templates/ には、force-* にそのまま置くものだけを入れる決まり（コピー元は config/install/）。
 #   以前は、templates/ の sf-tools/release/__BRANCH__/ と gitmessage が、force-* にそのまま残っていた
 # ==============================================================================
@@ -184,9 +184,9 @@ test_repo_has_no_install_sources() {
     create_mock_gh_for_init "$mb"
     _stub_subscripts "$mock_home"
 
-    _make_input_3branches         | ( cd "$work" && HOME="$mock_home" PATH="$mb:$PATH"               env "${INIT_ECA_ENV[@]}" bash "$mock_home/sf-tools/bin/sf-init.sh" --owner tamashimon --project testproject )           > /dev/null 2>&1
+    _make_input_3branches         | ( cd "$work" && HOME="$mock_home" PATH="$mb:$PATH"               env "${INIT_ECA_ENV[@]}" bash "$mock_home/sf-tools/bin/sf-project.sh" --owner tamashimon --project testproject )           > /dev/null 2>&1
     exit_code=$?
-    assert_exit_ok "$exit_code" "sf-init が正常終了する"
+    assert_exit_ok "$exit_code" "sf-project が正常終了する"
 
     # Phase 3 のコピー先（sfdx-project.json がある、クローンのフォルダ）
     repo=$(find "$work" -name sfdx-project.json -not -path '*/node_modules/*' | head -1)  # VAR=$(cmd) のため run 不使用
@@ -197,14 +197,14 @@ test_repo_has_no_install_sources() {
         assert_file_exists "$repo/sf-tools/config/metadata.txt" "雛形（sf-tools/config/metadata.txt）はそのまま入る"
         assert_file_exists "$repo/.github/workflows/wf-validate.yml" "雛形（ワークフロー）はそのまま入る"
         if [[ -e "$repo/gitmessage" ]]; then
-            fail "gitmessage（sf-install.sh のコピー元）が入らない" "$repo/gitmessage がある"
+            fail "gitmessage（sf-refresh.sh のコピー元）が入らない" "$repo/gitmessage がある"
         else
-            pass "gitmessage（sf-install.sh のコピー元）が入らない"
+            pass "gitmessage（sf-refresh.sh のコピー元）が入らない"
         fi
         if [[ -e "$repo/sf-tools/release/__BRANCH__" ]]; then
-            fail "sf-tools/release/__BRANCH__（sf-install.sh のコピー元）が入らない" "ある"
+            fail "sf-tools/release/__BRANCH__（sf-refresh.sh のコピー元）が入らない" "ある"
         else
-            pass "sf-tools/release/__BRANCH__（sf-install.sh のコピー元）が入らない"
+            pass "sf-tools/release/__BRANCH__（sf-refresh.sh のコピー元）が入らない"
         fi
     fi
 
@@ -233,7 +233,7 @@ test_initial_sync_failure_is_not_fatal() {
         : > "$MOCK_CALL_LOG"
         _make_input_3branches \
             | ( export "$k"; cd "$work" && HOME="$mock_home" PATH="$mb:$PATH" \
-                  env "${INIT_ECA_ENV[@]}" bash "$mock_home/sf-tools/bin/sf-init.sh" --owner tamashimon --project testproject ) \
+                  env "${INIT_ECA_ENV[@]}" bash "$mock_home/sf-tools/bin/sf-project.sh" --owner tamashimon --project testproject ) \
               > /tmp/sf-init-test-syncfail.log 2>&1
         exit_code=$?
         assert_exit_ok   "$exit_code"                                                         "同期に失敗しても（${k}）、セットアップは成功する"
@@ -266,7 +266,7 @@ test_refuse_foreign_clone() {
     export MOCK_GIT_C_REMOTE_URL="https://user:SECRETTOKEN@github.com/other/force-testproject.git"   # Token つきの URL
     : > "$MOCK_CALL_LOG"
     out=$(printf 'Y\n' | ( cd "$work" && HOME="$mock_home" PATH="$mb:$PATH" \
-        bash "$mock_home/sf-tools/bin/sf-init.sh" --owner tamashimon --project testproject ) 2>&1)
+        bash "$mock_home/sf-tools/bin/sf-project.sh" --owner tamashimon --project testproject ) 2>&1)
     exit_code=$?
     unset MOCK_GIT_C_REMOTE_URL
     assert_exit_fail "$exit_code"                                                        "別のリポジトリのクローン → 異常終了する"
@@ -296,7 +296,7 @@ test_restart_clears_mark() {
     export MOCK_GH_AUTH_STATUS_EXIT=1    # Phase 1（環境チェック）で、失敗して止まる
     : > "$MOCK_CALL_LOG"
     out=$(printf 'Y\n3\n' | ( cd "$work" && HOME="$mock_home" PATH="$mb:$PATH" \
-        bash "$mock_home/sf-tools/bin/sf-init.sh" ) 2>&1)
+        bash "$mock_home/sf-tools/bin/sf-project.sh" ) 2>&1)
     exit_code=$?
     unset MOCK_GIT_C_REMOTE_URL MOCK_GIT_C_CONFIG_VALUE MOCK_GH_AUTH_STATUS_EXIT
     assert_exit_fail "$exit_code"                                                        "[3]・Phase 1 の失敗で止まる → 異常終了する"
@@ -319,7 +319,7 @@ test_initial_sync_timeout_cancels() {
     export MOCK_GH_SYNC_STATUS=in_progress SF_INIT_SYNC_TIMEOUT=2
     _make_input_3branches \
         | ( cd "$work" && HOME="$mock_home" PATH="$mb:$PATH" \
-              env "${INIT_ECA_ENV[@]}" bash "$mock_home/sf-tools/bin/sf-init.sh" --owner tamashimon --project testproject ) \
+              env "${INIT_ECA_ENV[@]}" bash "$mock_home/sf-tools/bin/sf-project.sh" --owner tamashimon --project testproject ) \
           > /tmp/sf-init-test-synctimeout.log 2>&1
     exit_code=$?
     unset MOCK_GH_SYNC_STATUS SF_INIT_SYNC_TIMEOUT
@@ -349,7 +349,7 @@ test_restart_interrupted_notice() {
     export MOCK_GH_AUTH_STATUS_EXIT=1                                     # Phase 1 で、止まる（最初から、始まったことの確認）
     : > "$MOCK_CALL_LOG"
     out=$(printf 'Y\n' | ( cd "$work" && HOME="$mock_home" PATH="$mb:$PATH" \
-        bash "$mock_home/sf-tools/bin/sf-init.sh" ) 2>&1)
+        bash "$mock_home/sf-tools/bin/sf-project.sh" ) 2>&1)
     exit_code=$?
     unset MOCK_GIT_C_REMOTE_URL MOCK_GIT_C_CONFIG_VALUE MOCK_GH_AUTH_STATUS_EXIT
     assert_output_contains "$out" "前回の「最初から、やり直す」が、途中で止まっています"      "印が 0 → 途中で止まっていた旨を表示する"
@@ -377,7 +377,7 @@ test_only_option_runs_single_phase() {
     local exit_code
     printf 'Y\n' \
         | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
-              bash "$mock_home/sf-tools/bin/sf-init.sh" --only 1 ) > /dev/null 2>&1
+              bash "$mock_home/sf-tools/bin/sf-project.sh" --only 1 ) > /dev/null 2>&1
     exit_code=$?
 
     assert_exit_ok            "$exit_code"                    "--only 1 で正常終了する"
@@ -438,7 +438,7 @@ GITEOF
     # 既定は外部クライアントアプリ（自動で作成する）ため、鍵・ユーザー名の入力はない
     printf 'Y\n' \
         | ( cd "$force_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
-              bash "$mock_home/sf-tools/bin/sf-init.sh" --add-tier staging ) \
+              bash "$mock_home/sf-tools/bin/sf-project.sh" --add-tier staging ) \
           > /tmp/sf-init-add-tier.log 2>&1
     exit_code=$?
 
@@ -485,7 +485,7 @@ test_unknown_option_fails() {
 
     local exit_code
     ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
-          bash "$mock_home/sf-tools/bin/sf-init.sh" --unknown ) > /dev/null 2>&1
+          bash "$mock_home/sf-tools/bin/sf-project.sh" --unknown ) > /dev/null 2>&1
     exit_code=$?
 
     assert_exit_fail "$exit_code" "不明なオプションで失敗終了する"
@@ -494,12 +494,12 @@ test_unknown_option_fails() {
 }
 
 # ==============================================================================
-# テスト: e2e の入力の台本（2 層・3 層）で、sf-init が最後まで進む
+# テスト: e2e の入力の台本（2 層・3 層）で、sf-project が最後まで進む
 #   e2e_make_input の層数ごとの台本（Phase 5 の番号・ログイン先の答えの数）が、質問の順番と合っているかを、モックで確認する
 # ==============================================================================
 test_e2e_input_sequence_layouts() {
     echo ""
-    echo -e "${CLR_HEAD}[TEST] e2e の入力の台本（2 層・3 層）で、sf-init が最後まで進む${CLR_RST}"
+    echo -e "${CLR_HEAD}[TEST] e2e の入力の台本（2 層・3 層）で、sf-project が最後まで進む${CLR_RST}"
 
     local layout mb mock_home init_base init_dir exit_code input
     for layout in 2 3; do
@@ -518,7 +518,7 @@ test_e2e_input_sequence_layouts() {
                 bash -c "source '$SF_TOOLS_DIR/tests/e2e/lib.sh'; e2e_make_input $layout")
         printf '%s\n' "$input" \
             | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
-                  bash "$mock_home/sf-tools/bin/sf-init.sh" ) > "$mb/out.log" 2>&1
+                  bash "$mock_home/sf-tools/bin/sf-project.sh" ) > "$mb/out.log" 2>&1
         exit_code=$?
 
         assert_exit_ok            "$exit_code"                                                   "${layout} 層の台本で、最後まで正常終了する"
@@ -543,7 +543,7 @@ test_e2e_input_sequence_layouts() {
 # ==============================================================================
 test_sf_cli_check() {
     echo ""
-    echo -e "${CLR_HEAD}[TEST] sf の終了コードが 0 以外なら、sf-init は案内して中断する${CLR_RST}"
+    echo -e "${CLR_HEAD}[TEST] sf の終了コードが 0 以外なら、sf-project は案内して中断する${CLR_RST}"
 
     local mb mock_home init_base init_dir exit_code
     mb=$(setup_mock_bin)
@@ -555,10 +555,10 @@ test_sf_cli_check() {
     create_mock_gh_for_init "$mb"
     _stub_subscripts "$mock_home"
 
-    _run_init() {  # 引数: sf-init.sh のオプション。標準入力は、確認に進まないため、Y だけ
+    _run_init() {  # 引数: sf-project.sh のオプション。標準入力は、確認に進まないため、Y だけ
         : > "$MOCK_CALL_LOG"
         printf 'Y\n' | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" MOCK_SF_VERSION_EXIT=1 \
-              bash "$mock_home/sf-tools/bin/sf-init.sh" "$@" ) > "$mb/out.log" 2>&1
+              bash "$mock_home/sf-tools/bin/sf-project.sh" "$@" ) > "$mb/out.log" 2>&1
         exit_code=$?
     }
 
@@ -606,7 +606,7 @@ test_completed_by_clone() {
     # 引数なし → 完了済みの案内（[q] 終了: 何も実行しない）
     : > "$MOCK_CALL_LOG"
     printf 'Y\nq\n' | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
-        bash "$mock_home/sf-tools/bin/sf-init.sh" ) > "$out" 2>&1
+        bash "$mock_home/sf-tools/bin/sf-project.sh" ) > "$out" 2>&1
     exit_code=$?
     assert_exit_ok            "$exit_code"                                                  "クローンで完了済みと判定・q: 正常終了する"
     assert_file_contains      "$out" "セットアップが、すでに完了しています"                       "クローンで完了済みと判定: 完了済みの案内が出る"
@@ -616,7 +616,7 @@ test_completed_by_clone() {
     # --resume N → 拒否（状態ファイルがなくても、完了済みなら拒否する）
     : > "$MOCK_CALL_LOG"
     printf 'Y\n' | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
-        bash "$mock_home/sf-tools/bin/sf-init.sh" --resume 5 ) > "$out" 2>&1
+        bash "$mock_home/sf-tools/bin/sf-project.sh" --resume 5 ) > "$out" 2>&1
     exit_code=$?
     assert_exit_fail          "$exit_code"                                                  "クローンで完了済みと判定・--resume 5: 拒否される"
     assert_file_contains      "$out" "完了済みのプロジェクトでは、--resume / --only は使えません"          "クローンで完了済みと判定・--resume 5: 理由が表示される"
@@ -626,7 +626,7 @@ test_completed_by_clone() {
     printf '#!/bin/bash\necho "STATUS-STUB cwd=$PWD"\nexit 0\n' > "$mock_home/sf-tools/phases/init/status.sh"
     chmod +x "$mock_home/sf-tools/phases/init/status.sh"
     printf 'Y\n1\n' | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
-        bash "$mock_home/sf-tools/bin/sf-init.sh" ) > "$out" 2>&1
+        bash "$mock_home/sf-tools/bin/sf-project.sh" ) > "$out" 2>&1
     exit_code=$?
     assert_exit_ok            "$exit_code"                                                  "クローンで完了済みと判定・1: 正常終了する"
     assert_file_contains      "$out" "STATUS-STUB cwd="                                       "クローンで完了済みと判定・1: 接続の確認（status.sh）が実行される"
@@ -673,7 +673,7 @@ test_sf_tools_autoupdate() {
     # 入力: Y（sf-tools を更新しますか？）→ Y（実行しなおしたあとの、管理者向けの確認）。以降は、Phase 2 の確認で入力が尽きて中断する
     printf 'Y\nY\n' \
         | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
-              bash "$mock_home/sf-tools/bin/sf-init.sh" ) > "$out" 2>&1
+              bash "$mock_home/sf-tools/bin/sf-project.sh" ) > "$out" 2>&1
     exit_code=$?
     after=$(git -C "$mock_home/sf-tools" rev-list --count HEAD)
 
@@ -723,7 +723,7 @@ test_org_connection() {
     printf 'Y\n' \
         | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" MOCK_SF_ORG_INFO="$PROD_JSON" \
               SF_INIT_LOGIN_URL_PROD=login SF_INIT_LOGIN_URL_STG=login \
-              bash "$mock_home/sf-tools/bin/sf-init.sh" --only 10 ) > "$out" 2>&1
+              bash "$mock_home/sf-tools/bin/sf-project.sh" --only 10 ) > "$out" 2>&1
     exit_code=$?
     assert_exit_fail          "$exit_code"                                                    "本番 → main は通り、本番 → staging で中断する"
     assert_file_contains      "$out" "Salesforce の本番組織は、main にしか、つなげません"        "staging に本番: 理由が表示される"
@@ -744,7 +744,7 @@ test_org_connection() {
     printf 'Y\n' \
         | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" MOCK_SF_ORG_INFO="$DE_JSON" \
               SF_INIT_LOGIN_URL_PROD=login SF_INIT_LOGIN_URL_STG=login \
-              bash "$mock_home/sf-tools/bin/sf-init.sh" --only 10 ) > "$out" 2>&1
+              bash "$mock_home/sf-tools/bin/sf-project.sh" --only 10 ) > "$out" 2>&1
     exit_code=$?
     assert_exit_ok            "$exit_code"                                                    "Developer Edition を main・staging に、つなげられる"
     assert_file_contains      "$MOCK_CALL_LOG" "gh secret set SF_CONSUMER_KEY_STG"             "staging（Developer Edition）も、登録される"
@@ -779,7 +779,7 @@ GITEOF
         MOCK_GH_VAR_SF_ORG_NAME_PROD="My Developer Org" MOCK_GH_VAR_SF_ORG_CHECKED_PROD="2026-10-11 14:32" \
         MOCK_GH_VAR_SF_INSTANCE_URL_STG=https://login.salesforce.com MOCK_GH_VAR_SF_USERNAME_STG=admin@example.com \
         MOCK_GH_VAR_SF_ORG_KIND_STG=production MOCK_GH_VAR_SF_ORG_ID_STG=00D0000000DE0001 \
-        bash "$mock_home/sf-tools/bin/sf-init.sh" --status ) > "$out" 2>&1
+        bash "$mock_home/sf-tools/bin/sf-project.sh" --status ) > "$out" 2>&1
     exit_code=$?
     assert_exit_fail          "$exit_code"                                                    "--status: 本番が main 以外にあれば、非ゼロで終了する"
     assert_file_contains      "$out" "main"                                                    "--status: main が表示される"
@@ -797,7 +797,7 @@ GITEOF
               SF_INIT_LOGIN_URL_PROD=login \
               MOCK_GH_VAR_SF_INSTANCE_URL_PROD=https://test.salesforce.com MOCK_GH_VAR_SF_USERNAME_PROD=old@example.com \
               MOCK_GH_VAR_SF_ORG_KIND_PROD=sandbox MOCK_GH_VAR_SF_ORG_ID_PROD=00D0000000SBX001 MOCK_GH_VAR_SF_ORG_NAME_PROD="Acme Sandbox" \
-              bash "$mock_home/sf-tools/bin/sf-init.sh" --reconnect main ) > "$out" 2>&1
+              bash "$mock_home/sf-tools/bin/sf-project.sh" --reconnect main ) > "$out" 2>&1
     exit_code=$?
     assert_exit_ok            "$exit_code"                                                    "--reconnect main: 正常終了する"
     assert_file_contains      "$out" "ログイン先 : https://test.salesforce.com"                  "いまの接続（ログイン先）が表示される"
@@ -814,7 +814,7 @@ GITEOF
     printf 'Y\n' \
         | ( cd "$force_dir" && HOME="$mock_home" PATH="$mb:$PATH" MOCK_SF_ORG_INFO="$PROD_JSON" \
               SF_INIT_LOGIN_URL_STG=login \
-              bash "$mock_home/sf-tools/bin/sf-init.sh" --reconnect staging ) > "$out" 2>&1
+              bash "$mock_home/sf-tools/bin/sf-project.sh" --reconnect staging ) > "$out" 2>&1
     exit_code=$?
     assert_exit_fail          "$exit_code"                                                    "--reconnect staging に本番 → 拒否する"
     assert_file_contains      "$out" "本番組織は、main にしか、つなげません"                      "拒否の理由が表示される"
@@ -826,7 +826,7 @@ GITEOF
     printf 'Y\n' \
         | ( cd "$force_dir" && HOME="$mock_home" PATH="$mb:$PATH" MOCK_SF_ORG_QUERY_EXIT=1 \
               SF_INIT_LOGIN_URL_STG=test \
-              bash "$mock_home/sf-tools/bin/sf-init.sh" --reconnect staging ) > "$out" 2>&1
+              bash "$mock_home/sf-tools/bin/sf-project.sh" --reconnect staging ) > "$out" 2>&1
     exit_code=$?
     assert_exit_fail          "$exit_code"                                                    "--reconnect staging + 種類を判定できない → 拒否する"
     assert_file_contains      "$out" "組織の種類を判定できませんでした"                          "判定不能: 理由が表示される"
@@ -843,7 +843,7 @@ GITEOF
     printf 'Y\n' \
         | ( cd "$force_dir2" && HOME="$mock_home" PATH="$mb:$PATH" MOCK_SF_ORG_INFO="$PROD_JSON" \
               SF_INIT_LOGIN_URL_STG=login \
-              bash "$mock_home/sf-tools/bin/sf-init.sh" --add-tier staging ) > "$out" 2>&1
+              bash "$mock_home/sf-tools/bin/sf-project.sh" --add-tier staging ) > "$out" 2>&1
     exit_code=$?
     assert_exit_fail          "$exit_code"                                                    "--add-tier staging に本番 → 拒否する"
     assert_file_not_contains  "$MOCK_CALL_LOG" "gh pr create"                                  "--add-tier: PR を作らない"
@@ -864,7 +864,7 @@ GITEOF
         MOCK_GH_VAR_SF_ORG_KIND_PROD=production MOCK_GH_VAR_SF_ORG_ID_PROD=00D0000000PROD01 MOCK_GH_VAR_SF_ORG_NAME_PROD="Acme Production" \
         MOCK_GH_VAR_SF_INSTANCE_URL_STG=https://test.salesforce.com MOCK_GH_VAR_SF_USERNAME_STG=admin@example.com.test \
         MOCK_GH_VAR_SF_ORG_KIND_STG=sandbox MOCK_GH_VAR_SF_ORG_ID_STG=00D0000000SBX001 \
-        bash "$mock_home/sf-tools/bin/sf-init.sh" --status ) > "$out" 2>&1
+        bash "$mock_home/sf-tools/bin/sf-project.sh" --status ) > "$out" 2>&1
     exit_code=$?
     assert_exit_ok            "$exit_code"                                                    "--status: main = 本番・staging = Sandbox → 正常終了する"
     assert_file_contains      "$out" "種類: 本番"                                               "--status: main の種類（本番）が表示される"
@@ -878,24 +878,24 @@ GITEOF
         MOCK_GH_BRANCHES="main" MOCK_GH_WORKFLOWS="$diag_wf" \
         MOCK_GH_VAR_SF_INSTANCE_URL_PROD=https://login.salesforce.com MOCK_GH_VAR_SF_USERNAME_PROD=admin@example.com \
         MOCK_GH_VAR_SF_ORG_KIND_PROD=developer MOCK_GH_VAR_SF_ORG_ID_PROD=00D0000000DE0001 \
-        bash "$mock_home/sf-tools/bin/sf-init.sh" --status ) > "$out" 2>&1
+        bash "$mock_home/sf-tools/bin/sf-project.sh" --status ) > "$out" 2>&1
     exit_code=$?
     assert_exit_fail          "$exit_code"                                                    "--status: 診断で不足があれば、非ゼロで終了する"
     assert_file_contains      "$out" "PAT_TOKEN がありません"                                    "--status: 不足している Secret が表示される"
     assert_file_contains      "$out" "gh secret set PAT_TOKEN"                                  "--status: 直し方が表示される"
     assert_file_contains      "$out" "SF_CONSUMER_KEY_STG がありません"                           "--status: 段階（staging）の不足が表示される"
-    assert_file_contains      "$out" "sf-init.sh --add-tier staging"                            "--status: ブランチがないときの直し方が表示される"
+    assert_file_contains      "$out" "sf-project.sh --add-tier staging"                            "--status: ブランチがないときの直し方が表示される"
     assert_file_not_contains  "$out" "--status が失敗しました"                                    "--status: 診断の結果を、エラー終了のメッセージにしない"
     assert_file_not_contains  "$MOCK_CALL_LOG" "gh secret set"                                  "--status: 何も変更しない（Secrets）"
     assert_file_not_contains  "$MOCK_CALL_LOG" "gh variable set"                                "--status: 何も変更しない（Variables）"
 
     # --- E. 段階の指定が正しくない / branches.txt にない ---
     printf 'Y\n' | ( cd "$force_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
-        bash "$mock_home/sf-tools/bin/sf-init.sh" --reconnect develop ) > "$out" 2>&1
+        bash "$mock_home/sf-tools/bin/sf-project.sh" --reconnect develop ) > "$out" 2>&1
     assert_exit_fail          "$?"                                                            "--reconnect develop（branches.txt にない）→ 中断する"
     assert_file_contains      "$out" "develop は、branches.txt にありません"                       "理由が表示される"
     printf 'Y\n' | ( cd "$force_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
-        bash "$mock_home/sf-tools/bin/sf-init.sh" --reconnect foo ) > "$out" 2>&1
+        bash "$mock_home/sf-tools/bin/sf-project.sh" --reconnect foo ) > "$out" 2>&1
     assert_exit_fail          "$?"                                                            "--reconnect foo → 中断する"
 
     # --- F. 従来の接続アプリケーションの廃止: 以前の状態ファイルの APP_TYPE=1 は無視し、外部クライアントアプリで進む ---
@@ -908,7 +908,7 @@ GITEOF
     : > "$MOCK_CALL_LOG"
     printf 'Y\n' \
         | ( cd "$init_dir" && HOME="$mock_home" PATH="$mb:$PATH" SF_INIT_LOGIN_URL_PROD=login \
-              bash "$mock_home/sf-tools/bin/sf-init.sh" --only 10 ) > "$out" 2>&1
+              bash "$mock_home/sf-tools/bin/sf-project.sh" --only 10 ) > "$out" 2>&1
     exit_code=$?
     assert_exit_ok            "$exit_code"                                                    "保存済みの APP_TYPE=1 → 無視して、正常終了する"
     assert_file_contains      "$MOCK_CALL_LOG" "sf project deploy start"                       "APP_TYPE=1 が残っていても、外部クライアントアプリを作る"
@@ -919,7 +919,7 @@ GITEOF
     # --- F2. --legacy-connected-app は、廃止した（不明なオプションとして、何もせずに止まる）---
     : > "$MOCK_CALL_LOG"
     out_txt=$(printf 'Y\n' | ( cd "$base" && HOME="$mock_home" PATH="$mb:$PATH" \
-        bash "$mock_home/sf-tools/bin/sf-init.sh" --legacy-connected-app ) 2>&1)
+        bash "$mock_home/sf-tools/bin/sf-project.sh" --legacy-connected-app ) 2>&1)
     assert_exit_fail          "$?"                                                            "--legacy-connected-app → 中断する"
     assert_output_contains    "$out_txt" "不明なオプションです: --legacy-connected-app"           "--legacy-connected-app → 不明なオプションと表示する"
     assert_file_not_contains  "$MOCK_CALL_LOG" "gh repo create"                                "--legacy-connected-app → 何も作らない"
@@ -930,7 +930,7 @@ GITEOF
 
 echo ""
 echo -e "${CLR_HEAD}========================================"
-echo "  sf-init.sh テスト（2/3）"
+echo "  sf-project.sh テスト（2/3）"
 echo -e "========================================${CLR_RST}"
 
 # ==============================================================================
@@ -966,7 +966,7 @@ GITEOF
         : > "$MOCK_CALL_LOG"
         # shellcheck disable=SC2086  # args は、オプションと値に分けて渡す
         printf 'Y\n' | ( cd "$force_dir" && HOME="$mock_home" PATH="$mb:$PATH" \
-            bash "$mock_home/sf-tools/bin/sf-init.sh" $args ) > "$out" 2>&1
+            bash "$mock_home/sf-tools/bin/sf-project.sh" $args ) > "$out" 2>&1
         exit_code=$?
         assert_exit_fail         "$exit_code"                                    "${args}: GitHub 以外の origin → 中断する"
         assert_file_contains     "$out" "origin が GitHub のリポジトリではありません" "${args}: 理由が表示される"

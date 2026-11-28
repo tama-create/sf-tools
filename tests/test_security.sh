@@ -49,7 +49,7 @@ test_static_mktemp_used_in_common() {
 }
 
 # --- 3. バックグラウンド実行で stderr を /dev/null に捨てていないこと ---
-# sf-install.sh の bg 実行で stderr をログに記録するよう変更した修正のリグレッションを検出する。
+# sf-refresh.sh の bg 実行で stderr をログに記録するよう変更した修正のリグレッションを検出する。
 test_static_no_devnull_bg_stderr() {
     local found
     found=$(grep -rEn '>/dev/null[[:space:]]+2>&1[[:space:]]*&' \
@@ -67,7 +67,7 @@ test_static_no_devnull_bg_stderr() {
 # PAT_TOKEN 等の機密情報を含む .sf-init.env にファイル権限を設定する修正のリグレッションを検出する。
 test_static_chmod600_sf_init_env() {
     local target="$SF_TOOLS_DIR/phases/init/02_project_info.sh"
-    if grep -qE 'chmod 600.*(SF_INIT_ENV_FILE|sf-init\.env)' "$target"; then
+    if grep -qE 'chmod 600.*(SF_INIT_ENV_FILE|sf-project\.env)' "$target"; then
         pass "02_project_info.sh に chmod 600 が設定されている"
     else
         fail "02_project_info.sh に chmod 600 が見つからない（.sf-init.env が保護されていない）" "$target"

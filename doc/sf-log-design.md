@@ -283,12 +283,12 @@ bash ~/sf-tools/bin/sf-log.sh leave --owner <印>   # sf-start の終了時: 持
 
 ### 5.1 sf-start.sh の起動時
 
-`sf-start.sh` の処理の流れの 5（sf-install.sh の裏での起動）と 7（ランチャーの起動）の間（6）に、次を足す。**sf-start の前面では、sf を呼ばない**（ランチャーを待たせないため。2026-11-23。13.3）。
+`sf-start.sh` の処理の流れの 5（sf-refresh.sh の裏での起動）と 7（ランチャーの起動）の間（6）に、次を足す。**sf-start の前面では、sf を呼ばない**（ランチャーを待たせないため。2026-11-23。13.3）。
 
 ```
  a. ~/sf-tools/bin/sf-log.sh がなければ、何もしない
  b. 持ち主の印を決める
-      環境変数 SF_LOG_OWNER（「PID:起動の時刻:環境の名前と乱数」。5.6）があり、その PID が生きている（ランチャーの Start・Restart からの入れ子の sf-start）
+      環境変数 SF_LOG_OWNER（「PID:起動の時刻:環境の名前と乱数」。5.6）があり、その PID が生きている（ランチャーの Start・SwitchOrg からの入れ子の sf-start）
         → それを使う（後始末は外側が行う）
       それ以外 → 自分の印を作り（乱数の頭に、環境の名前 RUNTIME を付ける。5.6）、export SF_LOG_OWNER=…
  c. bash sf-log.sh begin -o <エイリアス> --owner "$SF_LOG_OWNER" を実行する（前面。sf を呼ばない）
@@ -308,7 +308,7 @@ bash ~/sf-tools/bin/sf-log.sh leave --owner <印>   # sf-start の終了時: 持
 - `begin` の確認（10.2）は、`read_key` で Y/N を聞く（`q` は「取らない」。端末でなければ聞かない。`read_key` の EOF の `die` で sf-start を止めないよう、`$( )` の中で呼ぶ）
 - **裏での起動**: `nohup bash sf-log.sh start --auto --collect --retry 1 … </dev/null >/dev/null 2>>"$LOG_FILE" &` のあと `disown` する（端末の入力・出力から切り離し、端末を閉じたときの SIGHUP で一緒に止まらないようにする。止めるのは、持ち主の見張りと 5.2 の後始末）。Ctrl+C の無視（`trap '' INT`）も引き継がれる。Windows の Git Bash では効くことを確かめた（13.1）。`nohup` では `$!` と、取得役が記録した PID が違うため、取得役の生死は `.collector` の PID で見る
 - `sf-start.sh` の冒頭コメント（【処理の流れ】）に、この流れを書く（CLAUDE.md 2.5）
-- **sf の更新との競合**: sf-start は、`sf-install.sh`（24 時間ごとに、その中で `sf-upgrade.sh` が `npm install -g @salesforce/cli@latest`）と `begin` の裏の準備を、同時に動かす。sf の入れ替えの途中に sf を呼ぶと、部品が見つからずに失敗する（2026-11-24 に WSL で発生。13.3）。そこで、`sf-upgrade.sh` は動いているあいだ、ロック `~/.sf-tools-upgrade.lock`（`PID=<数字>`）を置き、`start` は最初に、その PID が生きているあいだ待つ（最大 10 分。`.status` の WARNING に「sf の更新が終わるのを待っています」。待つあいだに持ち主がいなくなれば、準備をやめる）。取得役も、更新中は取らずに次に回す。ロックができる前に準備が sf を呼んで失敗したときは、30 秒後のやり直し（`--retry`）が、ロックを待ってから動く
+- **sf の更新との競合**: sf-start は、`sf-refresh.sh`（24 時間ごとに、その中で `sf-update-cli.sh` が `npm install -g @salesforce/cli@latest`）と `begin` の裏の準備を、同時に動かす。sf の入れ替えの途中に sf を呼ぶと、部品が見つからずに失敗する（2026-11-24 に WSL で発生。13.3）。そこで、`sf-update-cli.sh` は動いているあいだ、ロック `~/.sf-tools-upgrade.lock`（`PID=<数字>`）を置き、`start` は最初に、その PID が生きているあいだ待つ（最大 10 分。`.status` の WARNING に「sf の更新が終わるのを待っています」。待つあいだに持ち主がいなくなれば、準備をやめる）。取得役も、更新中は取らずに次に回す。ロックができる前に準備が sf を呼んで失敗したときは、30 秒後のやり直し（`--retry`）が、ロックを待ってから動く
 
 ### 5.2 sf-start.sh の終了時（ランチャーを q で閉じたとき）
 
@@ -319,13 +319,13 @@ bash ~/sf-tools/bin/sf-log.sh leave --owner <印>   # sf-start の終了時: 持
     - 新しい sf-start（5.1 の b の登録）は、ロックの中で `CLOSING` を見つけたら、登録せずにロックを外し、`CLOSING` が消えるのを最大 60 秒待ってから、登録をやり直す。`CLOSING` の印の持ち主が死んでいれば、古いものとして消して進む
     - これで、古い後始末が、新しいランチャーの TraceFlag を消すことはない（新しい sf-start の `start --auto` は、後始末が終わってから動く）。60 秒待っても消えなければ、WARNING を出し、今回は取らない（`.status` に理由を書く）
     - 人が打つ `stop` も、同じく `CLOSING` を書いてから後始末をする
-- 入れ子の sf-start（sf-restart から。印を外側から引き継いだ）は、終了時に何もしない
+- 入れ子の sf-start（sf-switch-org から。印を外側から引き継いだ）は、終了時に何もしない
 - 後始末の失敗は、WARNING だけ（終了コードは、今までどおり 0）
 - 人が打つ `stop` は、持ち主の一覧にかかわらず止める（人の判断のため。一覧も空にする）
 
-### 5.3 組織の切り替え（sf-restart）
+### 5.3 組織の切り替え（sf-switch-org）
 
-- `sf-restart.sh` は、ランチャーの中から、`FORCE_RELOGIN=1` で `sf-start.sh` を入れ子で呼ぶ（ランチャーは二重に起動しない）
+- `sf-switch-org.sh` は、ランチャーの中から、`FORCE_RELOGIN=1` で `sf-start.sh` を入れ子で呼ぶ（ランチャーは二重に起動しない）
 - 入れ子の sf-start は、5.1 の b で外側の印を引き継ぎ、新しい組織で `start --auto` を行う
   - 0 → `collect` を裏で起動する。`collect` は、前の組織の取得役に停止を頼んで入れ替わる（4.3 の 1）
   - 0 以外 → 前の組織の取得役にも停止を頼む（つないでいない組織のログを取り続けないため）。`.status` に「取れていません（組織を切り替えたため・理由）」を書き、ランチャーに表示する（5.4）。前の組織に戻すことはしない（接続先は、もう新しい組織のため）
@@ -806,8 +806,8 @@ force-*/logs/apex/
 
 - `~/sf-tools/doc/ai-dev-loop.md`（sf-tools のリポジトリ内）に置く
   - force-* の `CLAUDE.md` などには、「開発のサイクルは `~/sf-tools/doc/ai-dev-loop.md` に従う」の 1 行だけを書く
-  - 理由: 手順を直したとき、各利用者の `git pull` で届く（`templates/` に置くと、`sf-init` を実行した時点の写しのまま古くなる）
-- force-* の AI の指示ファイルへの入れ方（2026-11-24 に決定。13.2）: `templates/` に `CLAUDE.md`（`@~/sf-tools/doc/ai-dev-loop.md` の 1 行。Claude Code が手順書を読み込む）と `AGENTS.md`（Codex など向けに、同じことを文で書いた 1 行）を置く。新しく作る force-* には、`sf-init` の Phase 3 が写す（force-* のリポジトリにコミットされ、チーム全員の AI に届く）。すでにある force-* は、その 2 つのファイルを手でコピーしてコミットする（文書サイトの commands-dev に書いた）。雛形には「この行は消さないでください」の注意を入れ、プロジェクト独自の決まりは、その下に自由に書き足せる。`sf-start.sh` は、起動のたびに、その行があるかを確かめ、なければ WARNING で知らせる（書き換えない）。手順書は、デバッグログのサイクルに加え、sf-tools のコマンドの使い分け（AI が実行してよいもの・人に頼むもの・実行しないもの）も書く（2026-11-24。TAMAさんの依頼）
+  - 理由: 手順を直したとき、各利用者の `git pull` で届く（`templates/` に置くと、`sf-project` を実行した時点の写しのまま古くなる）
+- force-* の AI の指示ファイルへの入れ方（2026-11-24 に決定。13.2）: `templates/` に `CLAUDE.md`（`@~/sf-tools/doc/ai-dev-loop.md` の 1 行。Claude Code が手順書を読み込む）と `AGENTS.md`（Codex など向けに、同じことを文で書いた 1 行）を置く。新しく作る force-* には、`sf-project` の Phase 3 が写す（force-* のリポジトリにコミットされ、チーム全員の AI に届く）。すでにある force-* は、その 2 つのファイルを手でコピーしてコミットする（文書サイトの commands-dev に書いた）。雛形には「この行は消さないでください」の注意を入れ、プロジェクト独自の決まりは、その下に自由に書き足せる。`sf-start.sh` は、起動のたびに、その行があるかを確かめ、なければ WARNING で知らせる（書き換えない）。手順書は、デバッグログのサイクルに加え、sf-tools のコマンドの使い分け（AI が実行してよいもの・人に頼むもの・実行しないもの）も書く（2026-11-24。TAMAさんの依頼）
 
 ### 11.2 中身（`doc/ai-dev-loop.md` に書いた。2026-11-24）
 
@@ -864,8 +864,8 @@ force-*/logs/apex/
   - 取得: 51 本以上あるとき、古い順に 50 本を取り、次の回で続きを取る（取りこぼさない）。途中で失敗したとき、保存した分は取り直さない
   - `pull --max` を超えたとき、入れなかった本数と時間帯が要約に出る
   - `.consent`: 組織の ID・文面の版が変わったら、もう一度聞く
-  - sf-restart で、新しい組織の `start --auto` が失敗したとき、前の組織の取得役も止まり、`.status` に理由が出る
-  - `sf-start.sh`: sf-log.sh の終了コード（0・10・1）ごとの表示と、どれでもランチャーが起動すること。入れ子（sf-restart）の終了時に、取得役を止めないこと（`tests/test_sf-start.sh`）
+  - sf-switch-org で、新しい組織の `start --auto` が失敗したとき、前の組織の取得役も止まり、`.status` に理由が出る
+  - `sf-start.sh`: sf-log.sh の終了コード（0・10・1）ごとの表示と、どれでもランチャーが起動すること。入れ子（sf-switch-org）の終了時に、取得役を止めないこと（`tests/test_sf-start.sh`）
   - ランチャー（`phases/start/launcher.sh`）: `.status` があれば 1 行を表示し、なければ何も表示しないこと（`tests/test_launcher.sh`）
 - **一緒に直すもの**:
   - `tests/run_tests.sh` の `TEST_FILES` に `test_sf-log.sh` を足す
@@ -903,7 +903,7 @@ force-*/logs/apex/
 - [ ] **裏での起動**: `nohup … &` と `disown` → **Windows の Git Bash で効いた**（2026-11-23。取得役が裏で動き続け、停止の依頼・leave で止まった）。**`nohup` では `$!` と、取得役が記録した PID が違った**（nohup が bash を子として起動するため）。そのため、取得役の生死は `.collector` の PID で見る（sf-start は `$!` を使わない）。macOS・Linux と、ウィンドウを × で閉じたときの動きは未確認
 - [x] **TraceFlag の種類とログの中身** → USER_DEBUG＋7 章の DebugLevel で、`System.debug` 以外の行（SOQL・DML・例外・制限）も出た。`sf apex trace create --help` の説明（「USER_DEBUG は System.debug だけ」）は、実機と合わない。USER_DEBUG のままにする（6.3）
 - [x] `ORDER BY StartTime ASC, Id ASC` が使えなかったときの代わり → 使えたので不要（8.3 から代わりの説明を外した）
-- [ ] sf-restart で組織を切り替えたとき、取得役が入れ替わり、前の組織の TraceFlag が消えるか
+- [ ] sf-switch-org で組織を切り替えたとき、取得役が入れ替わり、前の組織の TraceFlag が消えるか
 - [ ] `sf apex get log -n` の範囲の決め方（8.4）が、ログが次々にできるときにも、取りこぼさず・他の人の本文を取らずに動くか（実装のあと、開発組織で確かめる）
 - [x] **長い処理のログの現れ方** → 処理が終わってから一覧に現れる（`Id`・`StartTime` は始まったとき）。tama-dev で、9.5 秒の匿名 Apex（05:10:53 開始）を、あとから始まった短い処理 3 本が見えている時点の一覧で探し、なかった。終わったあとに現れた（2026-11-24。組織の中から ApexLog を検索し、`System.assert(false, 一覧)` の失敗の文言で返す「観察役」の匿名 Apex で確認）。しおりの方式では取りこぼすため、拾い直しを足す（8.3）
 - [x] 拾い直し（8.3）が、実装のあと、開発組織で、長い処理のログを取り、要約に入れるか → 2026-11-24 に WSL の取得役で確認（短い処理を先に取り、11 秒の長い処理のログを拾い直した）
@@ -945,7 +945,7 @@ force-*/logs/apex/
   - 表示名を「Apex ログ」から「デバッグログ」にした（Apex だけでなく、フロー・入力規則なども載るため。Salesforce の画面の呼び名とも同じ）。オブジェクト名 `ApexLog`・保存先 `logs/apex/`・ファイル名 `apexlog.js` は変えない（手元の状態と、既にある記録をそのまま使うため）
   - 要約の 4 を「フロー・入力規則」にし、フローごとの開始・完了・エラーと実行した要素、入力規則ごとの評価・通過・停止を書く。一覧の操作に、フロー・入力規則の名前を添える。フローのエラーの文言から、リンクのタグを外す（6.2・6.3）
 
-- 2026-11-24（WSL で、準備中のまま進まなかった）: 原因は、sf-start が裏で動かす `sf-upgrade.sh` の sf の入れ替え（2.157.8 → 2.159.7。約 3 分）と、裏の準備の重なり。DebugLevel の上書きが、sf の部品（`llhttp-wasm.js`）が見つからずに失敗し、30 秒後のやり直しでは、入れ替えの途中で消えていた WSL の sf の代わりに、PATH の後ろの Windows の sf（`/mnt/c/.../npm`）を拾い、とても遅くなった。`sf-upgrade.sh` のロックと、`start`・取得役の待ちを足した（5.1）。2026-11-23 の Windows の「1 回目の準備が MODULE_NOT_FOUND で失敗」も、同じ原因だった可能性が高い
+- 2026-11-24（WSL で、準備中のまま進まなかった）: 原因は、sf-start が裏で動かす `sf-update-cli.sh` の sf の入れ替え（2.157.8 → 2.159.7。約 3 分）と、裏の準備の重なり。DebugLevel の上書きが、sf の部品（`llhttp-wasm.js`）が見つからずに失敗し、30 秒後のやり直しでは、入れ替えの途中で消えていた WSL の sf の代わりに、PATH の後ろの Windows の sf（`/mnt/c/.../npm`）を拾い、とても遅くなった。`sf-update-cli.sh` のロックと、`start`・取得役の待ちを足した（5.1）。2026-11-23 の Windows の「1 回目の準備が MODULE_NOT_FOUND で失敗」も、同じ原因だった可能性が高い
   - やり直しの前に `hash -r` で sf の場所を探し直す案は、入れない（やり直しは `exec` で新しいプロセスになり、もともと探し直している。拾ったのは、その瞬間に WSL の sf が無かったため）
   - 同じ日に、ランチャーの「今日 0 本」の誤り（`begin` が `COUNT_TODAY` を書き直していなかった）を直し、状態の行に色を付けた（5.4）
 

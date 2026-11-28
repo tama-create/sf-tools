@@ -6,7 +6,7 @@
 # Token の作成そのものは自動化できないため、ここで 1 回だけ、手動で用意したものを入力する。
 #
 # 【事前に用意するもの】
-#   1. Classic PAT（repo・workflow）            → sf-init の Phase 6 と同じもの
+#   1. Classic PAT（repo・workflow）            → sf-project の Phase 6 と同じもの
 #   2. Slack の Bot Token と、通知先の共有チャンネルの ID（Bot をそのチャンネルに招待済み）
 #   3. テスト用の Salesforce 組織（本番または Developer Edition。Sandbox ではない）の管理者ユーザー
 #      ・1 層（main のみ）の検証には、1 つ。

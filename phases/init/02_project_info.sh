@@ -2,11 +2,11 @@
 # ==============================================================================
 # 02_project_info.sh - Phase 2: プロジェクト情報の確認
 # ==============================================================================
-# sf-init.sh が決めたオーナーとプロジェクト名（XXXX）から、リポジトリ名・クローン先を決めて確認し、
+# sf-project.sh が決めたオーナーとプロジェクト名（XXXX）から、リポジトリ名・クローン先を決めて確認し、
 # sf-tools の版（配布版 = main / 開発版 = development）を選ばせる。結果を状態ファイル（SF_INIT_ENV_FILE）に書き出す。
 #
 # 【使い方】
-#   sf-init.sh が、管理者用の作業フォルダ（admin）をカレントにして、bash で呼び出す。
+#   sf-project.sh が、管理者用の作業フォルダ（admin）をカレントにして、bash で呼び出す。
 #
 # 【処理の流れ】
 #   1. PROJECT_NAME = SF_INIT_PROJECT（空なら die）、GITHUB_OWNER = SF_INIT_OWNER
@@ -21,29 +21,29 @@
 #        2 = 開発版: WARNING を表示して ask_yn。Y なら ENV_TYPE=staging・SF_TOOLS_BRANCH=development、
 #            N なら選択に戻る、q は die
 #   5. ~/sf-tools（SF_TOOLS_DIR）のブランチと最新化を確認する
-#        - SF_INIT_TOOLS_CHECKED_BRANCH が空でない（sf-init.sh が起動時に最新化を確認済み）: そのブランチが
+#        - SF_INIT_TOOLS_CHECKED_BRANCH が空でない（sf-project.sh が起動時に最新化を確認済み）: そのブランチが
 #          SF_TOOLS_BRANCH と違うときだけ、WARNING と ask_yn（N / q は die）。最新化の確認は、ここでは行わない
 #        - 空: ensure_sf_tools_branch（init-common.sh）を呼ぶ。sf-tools を更新した（戻り値 2）ときは、
-#          状態ファイルを書かずに、終了コード 75 で終了する（sf-init.sh が、更新した sf-tools で、はじめから実行しなおす）
+#          状態ファイルを書かずに、終了コード 75 で終了する（sf-project.sh が、更新した sf-tools で、はじめから実行しなおす）
 #   6. 状態ファイルを上書きで作り、次の 7 つを書き出す（書き込みの失敗は die。chmod 600。Windows では効果なし）
 #        GITHUB_OWNER / PROJECT_NAME / REPO_NAME / REPO_FULL_NAME / REPO_DIR / ENV_TYPE / SF_TOOLS_BRANCH
 #
 # 【前提条件】
-#   - 環境変数 SF_TOOLS_DIR（sf-tools のルート）・SF_INIT_OWNER・SF_INIT_PROJECT（sf-init.sh が export する）
+#   - 環境変数 SF_TOOLS_DIR（sf-tools のルート）・SF_INIT_OWNER・SF_INIT_PROJECT（sf-project.sh が export する）
 #
 # 【補足】
-#   - 状態ファイルは SF_INIT_ENV_FILE（sf-init.sh からは admin/.sf-init-XXXX.env。未設定時は ${PWD}/.sf-init.env）
+#   - 状態ファイルは SF_INIT_ENV_FILE（sf-project.sh からは admin/.sf-init-XXXX.env。未設定時は ${PWD}/.sf-init.env）
 #   - 版は、GitHub Actions が使う sf-tools のブランチを決める（Salesforce の本番・Sandbox とは関係ない）。
 #     開発版は sf-tools の開発者専用（未リリースのコードが使われる）
 #   - 終了コード: 0 = OK / 75 = sf-tools を更新した / 1 = die
 # ==============================================================================
 
-# SF_TOOLS_DIR は sf-init.sh（司令塔）から export される
+# SF_TOOLS_DIR は sf-project.sh（司令塔）から export される
 PHASE_DIR="${BASH_SOURCE[0]%/*}"
 [[ "$PHASE_DIR/" == /* && "$PHASE_DIR/" != *//* && "$PHASE_DIR/" != */./* && "$PHASE_DIR/" != */../* ]] || PHASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SF_TOOLS_DIR="${SF_TOOLS_DIR:-$(dirname "$(dirname "$PHASE_DIR")")}"
 
-readonly SCRIPT_NAME="sf-init"
+readonly SCRIPT_NAME="sf-project"
 mkdir -p "$HOME/sf-tools/logs" 2>/dev/null || true  # run 不使用: common.sh の読み込み前（run が未定義）
 readonly LOG_FILE="$HOME/sf-tools/logs/${SCRIPT_NAME}.log"
 readonly LOG_MODE="APPEND"  # 司令塔が NEW で初期化済みのため追記
@@ -63,10 +63,10 @@ log "HEADER" "プロジェクト情報の確認"
 
 log "INFO" "プロジェクト情報を確認中..."
 
-# sf-init.sh が決めた値（SF_INIT_OWNER / SF_INIT_PROJECT。引数・対話のいずれか）を使う
+# sf-project.sh が決めた値（SF_INIT_OWNER / SF_INIT_PROJECT。引数・対話のいずれか）を使う
 PROJECT_NAME="${SF_INIT_PROJECT:-}"
 GITHUB_OWNER="${SF_INIT_OWNER:-}"
-[[ -n "$PROJECT_NAME" ]] || die "プロジェクト名（SF_INIT_PROJECT）が設定されていません。sf-init.sh から実行してください。"
+[[ -n "$PROJECT_NAME" ]] || die "プロジェクト名（SF_INIT_PROJECT）が設定されていません。sf-project.sh から実行してください。"
 REPO_NAME="force-${PROJECT_NAME}"
 REPO_FULL_NAME="${GITHUB_OWNER}/${REPO_NAME}"
 REPO_DIR="${PWD}/${REPO_NAME}"
@@ -120,8 +120,8 @@ while true; do
 done
 
 # 選択した環境に合わせて ~/sf-tools の最新化を確認する。更新した場合（戻り値 2）は、終了コード 75 で終了する
-#   （司令塔の sf-init.sh が、更新した sf-tools で、自動的に、最初から実行しなおす）
-#   起動時（sf-init.sh）に、現在のブランチの最新化を、確認済みなら（SF_INIT_TOOLS_CHECKED_BRANCH）、
+#   （司令塔の sf-project.sh が、更新した sf-tools で、自動的に、最初から実行しなおす）
+#   起動時（sf-project.sh）に、現在のブランチの最新化を、確認済みなら（SF_INIT_TOOLS_CHECKED_BRANCH）、
 #   二重に確認せず、選んだ環境とのブランチ違いだけを確認する
 if [[ -n "${SF_INIT_TOOLS_CHECKED_BRANCH:-}" ]]; then
     if [[ "$SF_INIT_TOOLS_CHECKED_BRANCH" != "$SF_TOOLS_BRANCH" ]]; then

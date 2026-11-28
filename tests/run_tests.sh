@@ -29,9 +29,9 @@ fi
 # WSL で /mnt/ 配下（Windows FS）から実行された場合、ネイティブ FS に同期して再実行
 # /mnt/c/ 経由の tar / rsync は 9P プロトコルのオーバーヘッドで極めて遅いため、
 # テスト専用のフォルダ ~/.cache/sf-tools-test（ext4）に一度同期してから実行することで大幅に高速化する。
-# ~/sf-tools には写さない: WSL で sf-tools を本当に使う人の ~/sf-tools（sf-install.sh が git pull で最新化する）を、
+# ~/sf-tools には写さない: WSL で sf-tools を本当に使う人の ~/sf-tools（sf-refresh.sh が git pull で最新化する）を、
 # 作りかけのコードで上書きし、--delete で WSL にしかないファイルも消してしまうため（2026-11-24 に、写した未コミットの変更が
-# sf-install.sh の git pull を止め、WSL の sf-start が古い版で動いた）
+# sf-refresh.sh の git pull を止め、WSL の sf-start が古い版で動いた）
 if [[ "$(uname -s)" == "Linux" ]] && [[ "${BASH_SOURCE[0]}" == /mnt/* ]]; then
     _src="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
     # rsync --delete の送り先・送り元が空・/ にならないことを、先に確かめる（HOME が空なら「/.cache/…」になるため。
@@ -83,7 +83,7 @@ CLR_RST='\033[0m'
 unset GITHUB_ACTIONS CI
 
 # 実際の Git・npm・sf の「更新」を、テストが実行しないための保護。
-#   sf-install.sh は、sf-upgrade.sh をバックグラウンドで起動する。テストは、短い待ちのあとに、モック（偽の npm / sf / git）の
+#   sf-refresh.sh は、sf-update-cli.sh をバックグラウンドで起動する。テストは、短い待ちのあとに、モック（偽の npm / sf / git）の
 #   フォルダを消すため、動作の遅い環境（Windows の Git Bash）では、残りの処理が、本物の
 #   `git update-git-for-windows --yes`（Git for Windows のインストーラー。実行中の Git Bash 自体が壊れ、終了コード 2304 で
 #   異常終了した）・`npm install -g`・`sf update` を実行してしまう。
@@ -172,14 +172,14 @@ if [[ -n "$SHARD" ]]; then
 fi
 
 # 時間のかかるファイル（先に起動する。最後に長いものが残って、全体が伸びるのを避ける）
-HEAVY_FIRST=(test_integration-init.sh test_integration-init2.sh test_integration-init3.sh test_integration.sh test_integration-git.sh test_sf-init.sh test_sf-init2.sh test_sf-init3.sh test_e2e.sh test_e2e2.sh test_verify.sh test_verify2.sh test_verify3.sh test_sf-release.sh test_sf-install.sh test_sf-log.sh)
+HEAVY_FIRST=(test_integration-init.sh test_integration-init2.sh test_integration-init3.sh test_integration.sh test_integration-git.sh test_sf-project.sh test_sf-project2.sh test_sf-project3.sh test_e2e.sh test_e2e2.sh test_verify.sh test_verify2.sh test_verify3.sh test_sf-release.sh test_sf-refresh.sh test_sf-log.sh)
 
 # ファイルごとの所要時間の目安（秒。--shard が、組に分けるときの重み。未登録は 10）。
 #   値は、GitHub Actions の Windows での実測（2026-10-20・コミット 5eb8c6f の SF_TEST_TIMES=1 の [TIME] 行。ジョブの中で並列に動かした値）
 #   厳密である必要はない（目安が少しずれても、全ファイルが、ちょうど 1 回ずつ動く）。大きくずれたら、実測で直す
 _weight() {   # 結果は、変数 _W に入れる（$(...) で呼ぶと、Windows の Git Bash では、ファイルごとにプロセスを起動して遅い）
     case "$1" in
-        test_sf-init.sh|test_sf-init2.sh|test_sf-init3.sh) _W=320 ;;   # 元は 1 ファイルで 960 秒（Actions の Windows）。3 つに均等に分けた
+        test_sf-project.sh|test_sf-project2.sh|test_sf-project3.sh) _W=320 ;;   # 元は 1 ファイルで 960 秒（Actions の Windows）。3 つに均等に分けた
         test_verify.sh|test_verify2.sh|test_verify3.sh) _W=215 ;;   # 元は 1 ファイルで 640 秒。3 つに、ほぼ均等に分けた
         test_e2e.sh|test_e2e2.sh) _W=255 ;;   # 元は 1 ファイルで 510 秒。2 つに、ほぼ均等に分けた
         test_integration-init.sh) _W=370 ;;
@@ -187,7 +187,7 @@ _weight() {   # 結果は、変数 _W に入れる（$(...) で呼ぶと、Windo
         test_integration-init3.sh) _W=270 ;;
         test_integration-misc.sh) _W=230 ;;
         test_integration.sh) _W=220 ;;
-        test_sf-install.sh) _W=185 ;;
+        test_sf-refresh.sh) _W=185 ;;
         test_integration-git.sh) _W=140 ;;
         test_integration-job.sh) _W=125 ;;
         test_common.sh|test_integration-metasync.sh|test_sf-release.sh) _W=120 ;;
@@ -196,9 +196,9 @@ _weight() {   # 結果は、変数 _W に入れる（$(...) で呼ぶと、Windo
         test_metasync-js.sh) _W=40 ;;   # 手元の Windows で 約 22 秒
         test_sf-log.sh) _W=420 ;;   # 手元の Git Bash で 約 8 分（取得役のテストは、裏のプロセスを待つ。偽の sf が Node を毎回起動する。2026-11-23。Actions で実測して直す）
         test_integration-rerun.sh|test_init-common.sh|test_sf-deploy.sh) _W=62 ;;
-        test_sf-job.sh|test_sf-sync-wf.sh|test_sf-next.sh|test_sf-prepush.sh|test_sf-start.sh|test_wf-sequence.sh|test_wf-tier-switch.sh|test_remove-tier.sh) _W=50 ;;
+        test_sf-job.sh|test_sf-update-workflows.sh|test_sf-pr.sh|test_sf-prepush.sh|test_sf-start.sh|test_wf-sequence.sh|test_wf-tier-switch.sh|test_remove-tier.sh) _W=50 ;;
         test_integration-secrets.sh|test_sf-hook.sh) _W=40 ;;
-        test_sf-typecheck.sh|test_sf-push.sh|test_sf-upgrade.sh|test_org.sh|test_diag.sh|test_run-tests.sh) _W=28 ;;
+        test_sf-test-types.sh|test_sf-push.sh|test_sf-update-cli.sh|test_org.sh|test_diag.sh|test_run-tests.sh) _W=28 ;;
         *) _W=10 ;;
     esac
 }
@@ -215,13 +215,13 @@ TEST_FILES=(
     test_init-common.sh
     test_sf-unhook.sh
     test_sf-hook.sh
-    test_sf-init.sh
-    test_sf-init2.sh
-    test_sf-init3.sh
-    test_sf-upgrade.sh
-    test_sf-install.sh
+    test_sf-project.sh
+    test_sf-project2.sh
+    test_sf-project3.sh
+    test_sf-update-cli.sh
+    test_sf-refresh.sh
     test_sf-start.sh
-    test_sf-restart.sh
+    test_sf-switch-org.sh
     test_sf-metasync.sh
     test_metasync-js.sh
     test_apexlog-js.sh
@@ -231,9 +231,9 @@ TEST_FILES=(
     test_sf-deploy.sh
     test_sf-dryrun.sh
     test_sf-job.sh
-    test_sf-next.sh
+    test_sf-pr.sh
     test_sf-check.sh
-    test_sf-typecheck.sh
+    test_sf-test-types.sh
     test_sf-prepush.sh
     test_sf-push.sh
     test_sf-update-secret.sh
@@ -242,7 +242,7 @@ TEST_FILES=(
     test_security.sh
     test_e2e.sh
     test_e2e2.sh
-    test_sf-sync-wf.sh
+    test_sf-update-workflows.sh
     test_wf-sequence.sh
     test_wf-tier-switch.sh
     test_wf-one-way.sh
@@ -350,7 +350,7 @@ if [[ "${1:-}" == "--changed" ]]; then
                 # bin/sf-foo.sh → test_sf-foo.sh
                 _t="test_$(basename "$_file")"
                 _changed_tests+=("$_t")
-                [[ "$_t" == "test_sf-init.sh" ]] && _changed_tests+=("test_sf-init2.sh" "test_sf-init3.sh")   # sf-init のテストは、3 つのファイルに分けてある
+                [[ "$_t" == "test_sf-project.sh" ]] && _changed_tests+=("test_sf-project2.sh" "test_sf-project3.sh")   # sf-project のテストは、3 つのファイルに分けてある
                 ;;
             lib/common.sh|lib/input.sh|lib/platform.sh)
                 # common.sh は、input.sh / platform.sh / project.sh を source する（どれを変えても、test_common.sh）
@@ -373,19 +373,19 @@ if [[ "${1:-}" == "--changed" ]]; then
                 _changed_tests+=("test_sf-release.sh" "test_sf-promote-check.sh")
                 ;;
             lib/typecheck.js)
-                _changed_tests+=("test_sf-typecheck.sh")
+                _changed_tests+=("test_sf-test-types.sh")
                 ;;
             templates/.github/workflows/wf-sequence.yml)
-                _changed_tests+=("test_wf-sequence.sh" "test_sf-sync-wf.sh" "test_wf-one-way.sh")
+                _changed_tests+=("test_wf-sequence.sh" "test_sf-update-workflows.sh" "test_wf-one-way.sh")
                 ;;
             templates/.github/workflows/wf-release.yml|templates/.github/workflows/wf-validate.yml)
-                _changed_tests+=("test_wf-tier-switch.sh" "test_sf-sync-wf.sh" "test_remove-tier.sh" "test_wf-one-way.sh")   # 段階の切り替えの判定（doc/tier-scaling-design.md 3 章）。remove_tier.sh が雛形の判定と比べる
+                _changed_tests+=("test_wf-tier-switch.sh" "test_sf-update-workflows.sh" "test_remove-tier.sh" "test_wf-one-way.sh")   # 段階の切り替えの判定（doc/tier-scaling-design.md 3 章）。remove_tier.sh が雛形の判定と比べる
                 ;;
             phases/init/remove_tier.sh|tests/test_remove-tier.sh)
                 _changed_tests+=("test_remove-tier.sh")
                 ;;
             config/changeset-types.txt)
-                _changed_tests+=("test_sf-typecheck.sh")
+                _changed_tests+=("test_sf-test-types.sh")
                 ;;
             lib/metasync.js|config/metadata-dirs.txt|config/metasync-detect.txt|config/metasync-fingerprint.txt|config/metasync-extra.txt|tests/mock-soap-server.js|tests/test_metasync-js.sh)
                 _changed_tests+=("test_metasync-js.sh" "test_sf-metasync.sh")   # 鏡像の部品（lib/metasync.js）と、それを呼ぶ sf-metasync.sh
@@ -406,7 +406,7 @@ if [[ "${1:-}" == "--changed" ]]; then
                 _changed_tests+=("test_launcher.sh" "test_sf-start.sh")   # sf-start.sh が開くメニュー（ランチャー）
                 ;;
             phases/init/*|tests/init-test-lib.sh)
-                _changed_tests+=("test_sf-init.sh" "test_sf-init2.sh" "test_sf-init3.sh")   # sf-init のテストは、3 つのファイルに分けてある（共通の部品: tests/init-test-lib.sh）
+                _changed_tests+=("test_sf-project.sh" "test_sf-project2.sh" "test_sf-project3.sh")   # sf-project のテストは、3 つのファイルに分けてある（共通の部品: tests/init-test-lib.sh）
                 ;;
             hooks/pre-push)
                 _changed_tests+=("test_sf-prepush.sh")

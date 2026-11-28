@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>開発者向けコマンド | sf-tools ドキュメント</title>
-<meta name="description" content="sf-job・sf-start・sf-push・sf-next・sf-release など、開発者が使うコマンドの詳細。">
+<meta name="description" content="sf-job・sf-start・sf-push・sf-pr・sf-release など、開発者が使うコマンドの詳細。">
 <link rel="stylesheet" href="../assets/style.css">
 </head>
 <body data-root="../">
@@ -84,7 +84,7 @@ sf-job.sh [--project XXXX] [--owner OWNER] [--name ジョブ名]</code></pre>
 
 <h2 id="sf-start"><code>sf-start.sh</code></h2>
 <pre><code>sf-start.sh [-v]</code></pre>
-<p>開発環境を起動します。<code>force-*</code> フォルダ（フォルダの名前が <code>force-</code> で始まる）の中で実行します。<code>-v</code>（<code>--verbose</code>）は、コマンドの応答をコンソールにも表示します（<code>sf-install.sh</code> にも渡します）。<code>-h</code>（<code>--help</code>。1 つ目の引数のときだけ）以外の、ほかの引数は、「不明なオプションです」で中断します。</p>
+<p>開発環境を起動します。<code>force-*</code> フォルダ（フォルダの名前が <code>force-</code> で始まる）の中で実行します。<code>-v</code>（<code>--verbose</code>）は、コマンドの応答をコンソールにも表示します（<code>sf-refresh.sh</code> にも渡します）。<code>-h</code>（<code>--help</code>。1 つ目の引数のときだけ）以外の、ほかの引数は、「不明なオプションです」で中断します。</p>
 <h3>処理の流れ</h3>
 <ol>
   <li>Salesforce CLI（<code>sf</code>）を確認する。<code>sf --version</code> の終了コードが 0 以外なら、案内を表示して中断する（npm 版が前提のため）。成功したら、<code>~/.sf-tools-sf-check</code> に <code>sf</code> の場所を記録し、同じ場所の <code>sf</code> なら、24 時間は確認を省く（<code>sf</code> が未インストールのとき・GitHub Actions 上では、確認しない）</li>
@@ -98,7 +98,7 @@ sf-job.sh [--project XXXX] [--owner OWNER] [--name ジョブ名]</code></pre>
     </ul>
   </li>
   <li><code>.sf/config.json</code> と <code>.sfdx/sfdx-config.json</code> を、そのエイリアスで上書きする（書き込めなければ中断）。<code>code .</code> で VS Code を起動する（<code>code</code> コマンドがなければ、警告だけで先へ進む）</li>
-  <li><a href="commands-auto.html#sf-install"><code>sf-install.sh</code></a> を、バックグラウンドで実行する（出力は、<code>sf-start.sh</code> のログに追記）。内容は、<code>~/sf-tools</code> の <code>git pull</code>・設定ファイル（<code>metadata.txt</code>・<code>branches.txt</code>）の確認・Git フック（<code>pre-commit</code> / <code>pre-push</code>）の設置・リリース用フォルダの準備と <code>branch_name.txt</code> の更新（<code>main</code> ブランチでは行わない）・<code>npm install</code>（<code>package.json</code> があるとき。更新済みなら省略）・開発ツールの更新（<code>sf-upgrade.sh</code>。24 時間に 1 回）</li>
+  <li><a href="commands-auto.html#sf-refresh"><code>sf-refresh.sh</code></a> を、バックグラウンドで実行する（出力は、<code>sf-start.sh</code> のログに追記）。内容は、<code>~/sf-tools</code> の <code>git pull</code>・設定ファイル（<code>metadata.txt</code>・<code>branches.txt</code>）の確認・Git フック（<code>pre-commit</code> / <code>pre-push</code>）の設置・リリース用フォルダの準備と <code>branch_name.txt</code> の更新（<code>main</code> ブランチでは行わない）・<code>npm install</code>（<code>package.json</code> があるとき。更新済みなら省略）・開発ツールの更新（<code>sf-update-cli.sh</code>。24 時間に 1 回）</li>
   <li>デバッグログを、ランチャーの起動中に裏で取る準備をする（<a href="#sf-log"><code>sf-log.sh</code></a> があるとき）。このプロジェクト・この組織のエイリアスで初めてのときだけ、AI への送信の注意を表示して「自動で取るか」を聞きます（Y/N）。取るときは、ログを出させる設定（TraceFlag）の準備と取得を、<strong>裏で</strong>始めます（ランチャーは待たずに開きます）。共有環境の組織・本番の組織・「取らない」と答えたときは、取りません。取れなくても、先へ進みます</li>
   <li>最後に、ランチャー（メニュー）を前面で起動する（ランチャーから呼ばれたときは、二重に起動しない。メニューを開く入口は、<code>sf-start.sh</code> だけです）</li>
   <li>終わるとき（ランチャーを <code>q</code> で閉じたとき）は、ほかに起動中の <code>sf-start.sh</code> がなければ、デバッグログの取得を止め、TraceFlag を消します（数十秒かかることがあります）</li>
@@ -106,11 +106,11 @@ sf-job.sh [--project XXXX] [--owner OWNER] [--name ジョブ名]</code></pre>
 <h3>補足</h3>
 <ul>
   <li><code>sf-job.sh</code> が内部で自動で呼ぶので、<strong>新しい作業のときは、直接実行する必要はありません。</strong>前日の続きなど、既存のブランチに戻るときに使います。<code>sf-job.sh</code> から呼ばれたとき（環境変数 <code>SF_INIT_MODE=1</code>）は、<code>force-*</code> フォルダかどうかの確認を省きます。</li>
-  <li>環境変数 <code>FORCE_RELOGIN=1</code> のときは、接続済みかどうかを確かめず、ログインからやり直します（<code>sf-restart.sh</code> が使います）。</li>
+  <li>環境変数 <code>FORCE_RELOGIN=1</code> のときは、接続済みかどうかを確かめず、ログインからやり直します（<code>sf-switch-org.sh</code> が使います）。</li>
   <li>ログインに失敗したら、エラー（終了コード 1）で終了します（設定ファイルの書き込み・VS Code の起動・ランチャーの起動は、行いません）。</li>
-  <li>それ以外の終了コードは、ランチャーの結果によらず 0 です。バックグラウンドの <code>sf-install.sh</code> が失敗しても、影響しません。</li>
+  <li>それ以外の終了コードは、ランチャーの結果によらず 0 です。バックグラウンドの <code>sf-refresh.sh</code> が失敗しても、影響しません。</li>
   <li>Ctrl+C は、手順 1 の確認のあとから効きません。中断は、入力のときに <code>q</code> で行います。この設定は、ランチャーと、そこから実行するコマンドにも、引き継がれます（<code>sf</code>・<code>npm</code> など Node のコマンドは、実行中に Ctrl+C を押すと、そのコマンドだけが止まることがあります）。</li>
-  <li>接続済みの組織を切り替えるときは、<code>sf-restart.sh</code> を使います。</li>
+  <li>接続済みの組織を切り替えるときは、<code>sf-switch-org.sh</code> を使います。</li>
   <li>ログは <code>./sf-tools/logs/sf-start.log</code> です（実行のたびに作り直します）。</li>
 </ul>
 
@@ -129,13 +129,13 @@ sf-job.sh [--project XXXX] [--owner OWNER] [--name ジョブ名]</code></pre>
   [5] PullRequest  次の段階へプルリクエストを出す（出し先を確かめる）
   ──────────
   [6] Start        開発環境を起動（Salesforce ログイン・VSCode 起動）
-  [7] Restart      接続組織を切り替えて Start 実行
+  [7] SwitchOrg    接続組織を切り替えて Start 実行
   ──────────────────────────────────────────────────
   番号を入力 (1-7 / q で終了):</code></pre>
-<p>番号ごとに実行するのは、<code>sf-check.sh</code>・<code>sf-dryrun.sh</code>・<code>sf-deploy.sh</code>・<code>sf-push.sh</code>・<code>sf-next.sh</code>・<code>sf-start.sh</code>・<code>sf-restart.sh</code> です。1〜5 は、日々の作業の順（確かめる → 試す → 反映 → コミット → PR）に並べ、1 日の最初・組織の切り替えのときだけ使う 6・7 との間に線を引いています。VS Code のターミナル（環境変数 <code>TERM_PROGRAM=vscode</code>）では、<code>[6] Start</code> と <code>[7] Restart</code> は表示されません（二重に起動しないため。番号の 6・7 は、範囲外になります）。</p>
+<p>番号ごとに実行するのは、<code>sf-check.sh</code>・<code>sf-dryrun.sh</code>・<code>sf-deploy.sh</code>・<code>sf-push.sh</code>・<code>sf-pr.sh</code>・<code>sf-start.sh</code>・<code>sf-switch-org.sh</code> です。1〜5 は、日々の作業の順（確かめる → 試す → 反映 → コミット → PR）に並べ、1 日の最初・組織の切り替えのときだけ使う 6・7 との間に線を引いています。VS Code のターミナル（環境変数 <code>TERM_PROGRAM=vscode</code>）では、<code>[6] Start</code> と <code>[7] SwitchOrg</code> は表示されません（二重に起動しないため。番号の 6・7 は、範囲外になります）。</p>
 <ul>
   <li>メニューでは、番号を 1 文字入力すると（Enter 不要）実行し、終わるとメニューに戻ります。<code>q</code> で終了します。範囲外の数字や、数字と <code>q</code> 以外の入力は、無視されます。</li>
-  <li>メニューの上の 2 行に、今の状況を出します。1 行目は、ブランチ @ 組織・まだコミットしていない変更の数・デバッグログの状態。2 行目（<code>Branch:</code>）は、段階の並びで、出し終わった段階に <code>✓</code>、次に PR を出す段階に <code>▸</code>（発行中の PR があれば番号）、まだの段階に <code>×</code> を付けます。読み取りだけで、通信はしません。2 行目は、<code>sf-next.sh</code>（5 PullRequest）が最後に判定した結果（<code>sf-tools/logs/next-status.txt</code>）です。結果がない・そのあとにコミットが変わったときは、裏で <code>sf-next.sh --status</code>（判定だけ）を動かし、そのあいだは「（確かめています…）」、終わったら描き直します（判定は、先端のコミットごとに 1 回）。判定できなければ「（5 PullRequest で確かめる）」と出します。環境ブランチの上では、2 行目の代わりに注意を出します。</li>
+  <li>メニューの上の 2 行に、今の状況を出します。1 行目は、ブランチ @ 組織・まだコミットしていない変更の数・デバッグログの状態。2 行目（<code>Branch:</code>）は、段階の並びで、出し終わった段階に <code>✓</code>、次に PR を出す段階に <code>▸</code>（発行中の PR があれば番号）、まだの段階に <code>×</code> を付けます。読み取りだけで、通信はしません。2 行目は、<code>sf-pr.sh</code>（5 PullRequest）が最後に判定した結果（<code>sf-tools/logs/next-status.txt</code>）です。結果がない・そのあとにコミットが変わったときは、裏で <code>sf-pr.sh --status</code>（判定だけ）を動かし、そのあいだは「（確かめています…）」、終わったら描き直します（判定は、先端のコミットごとに 1 回）。判定できなければ「（5 PullRequest で確かめる）」と出します。環境ブランチの上では、2 行目の代わりに注意を出します。</li>
   <li>動いているあいだに sf-tools が更新されると（<code>sf-start.sh</code> は、裏で sf-tools を最新にしながら、ランチャーを開きます）、数秒のうちに「↻ sf-tools が更新されたため、ランチャーを読み込み直します」と出て、新しい版のメニューに切り替わります。</li>
   <li>コマンドが終わると、結果を 1 行で出します（成功 → <code>✓ &lt;表示名&gt;: 終わりました（成功）</code>、それ以外 → <code>✗ &lt;表示名&gt;: 失敗、または中断しました（終了コード N）</code>）。</li>
   <li>選んだコマンドは、sf-tools の <code>bin/</code> のスクリプトを、<strong>引数なし</strong>で実行します。スクリプトがなければ、警告を表示します。</li>
@@ -160,7 +160,7 @@ sf-job.sh [--project XXXX] [--owner OWNER] [--name ジョブ名]</code></pre>
     </ul>
   </li>
   <li><strong><code>[members]</code> セクション:</strong> <code>種別名:メンバー名</code> の形でない（<code>:</code> がない・先頭か末尾が <code>:</code>）ときは、エラーです。</li>
-  <li><strong>種類の可否:</strong> 上の確認でエラーにならなかった行について、<code>config/metadata-capability.txt</code>（<code>sf-typecheck.sh</code> が、実際の組織で確かめた表）を見ます。<code>deploy-target.txt</code> はリリースの列、<code>remove-target.txt</code> は削除の列です。
+  <li><strong>種類の可否:</strong> 上の確認でエラーにならなかった行について、<code>config/metadata-capability.txt</code>（<code>sf-test-types.sh</code> が、実際の組織で確かめた表）を見ます。<code>deploy-target.txt</code> はリリースの列、<code>remove-target.txt</code> は削除の列です。
     <ul>
       <li><code>ng</code>（API ではできないと確認済み）はエラー、<code>limited</code>（権限・使用中・標準のものなど、条件によってできないことがある）は警告です。<code>ok</code>・<code>unknown</code>・表にない種類は、何もしません</li>
       <li>種類は、<code>[members]</code> では最初の <code>:</code> より前です。<code>[files]</code> では、パスから推定できる次の種類だけを確かめます: <code>*/flows/*.flow-meta.xml</code>（Flow）・<code>*/classes/*.cls</code>（ApexClass）・<code>*/triggers/*.trigger</code>（ApexTrigger）・<code>*/lwc/*</code>（LightningComponentBundle）・<code>*/aura/*</code>（AuraDefinitionBundle）・<code>*/servicePresenceStatuses/*</code>（ServicePresenceStatus）・<code>*/standardValueSets/*</code>（StandardValueSet）</li>
@@ -177,10 +177,10 @@ sf-job.sh [--project XXXX] [--owner OWNER] [--name ジョブ名]</code></pre>
 </ul>
 <h3>引数</h3>
 <ul>
-  <li>引数を省略すると、<code>sf-tools/release/branch_name.txt</code>（<code>sf-install.sh</code> が保存する、Git の管理外の手元のファイル）に書かれたブランチ名で、<code>sf-tools/release/&lt;ブランチ名&gt;/</code> の 2 つのファイルを検証します。<strong>今の Git のブランチではなく、このファイルの内容を使います。</strong>
+  <li>引数を省略すると、<code>sf-tools/release/branch_name.txt</code>（<code>sf-refresh.sh</code> が保存する、Git の管理外の手元のファイル）に書かれたブランチ名で、<code>sf-tools/release/&lt;ブランチ名&gt;/</code> の 2 つのファイルを検証します。<strong>今の Git のブランチではなく、このファイルの内容を使います。</strong>
     <ul>
       <li>ファイルがないとき（一度も作られていない、新しいクローンの <code>main</code> など）は、何も検証せず、警告を表示して、正常（終了コード 0）で終わります（コミットは止めません）。</li>
-      <li><code>sf-install.sh</code> は、<code>main</code> では、このファイルを書き込みも削除もしません。作業用のブランチのあとで <code>main</code> に切り替えると、前のブランチの値が残り、そのブランチのターゲットファイルを検証します。</li>
+      <li><code>sf-refresh.sh</code> は、<code>main</code> では、このファイルを書き込みも削除もしません。作業用のブランチのあとで <code>main</code> に切り替えると、前のブランチの値が残り、そのブランチのターゲットファイルを検証します。</li>
     </ul>
   </li>
   <li>引数が 2 つ以上のときは、1 つ目を <code>deploy-target.txt</code>、2 つ目を <code>remove-target.txt</code> として検証します（3 つ目以降は無視）。1 つのときは、<code>deploy-target.txt</code> だけです。</li>
@@ -229,7 +229,7 @@ sf-job.sh [--project XXXX] [--owner OWNER] [--name ジョブ名]</code></pre>
   <div class="title">共有環境と本番の組織には、ローカルから実行できません（検証も含む）</div>
   <p>GitHub Actions の外では、次の組織を、確認（Y/N/q）より前に拒否します。リリースは、GitHub にコミットして、レビューを通し、GitHub Actions で行います。個人用の Sandbox / Developer Edition / Scratch Org には、ローカルから実行できます。</p>
   <ul>
-    <li><strong>エイリアスが予約名の組織:</strong> <code>prod</code> / <code>staging</code> / <code>develop</code>（と、互換のための <code>main</code>）。大文字・小文字を区別した、完全一致で判定します。<code>sf-init</code> は、共有環境の組織を、この名前で登録します。</li>
+    <li><strong>エイリアスが予約名の組織:</strong> <code>prod</code> / <code>staging</code> / <code>develop</code>（と、互換のための <code>main</code>）。大文字・小文字を区別した、完全一致で判定します。<code>sf-project</code> は、共有環境の組織を、この名前で登録します。</li>
     <li><strong>本番の組織（名前は問わない）:</strong> 名前だけでは、別の名前を付けた本番の組織を止められないため、<code>sf data query</code> で組織の種類を読み取ります。本番の組織と、<strong>種類を確認できない組織</strong>は、名前にかかわらず、実行できません。</li>
   </ul>
 </div>
@@ -288,7 +288,7 @@ sf-job.sh [--project XXXX] [--owner OWNER] [--name ジョブ名]</code></pre>
 <div class="box danger">
   <div class="title">個人用の Sandbox / Developer Edition / Scratch Org 専用です</div>
   <p>共有環境（本番・staging・develop）には、ローカルの PC からリリースできません。GitHub にコミットして、レビューを通し、GitHub Actions で行います。</p>
-  <p>GitHub Actions の外では、組織のエイリアスが予約名 <strong><code>prod</code> / <code>staging</code> / <code>develop</code></strong>（と、互換のための <code>main</code>）の組織を、確認（Y/N/q）の前に拒否します。<code>sf-init</code> は、共有環境の組織を、この名前で登録します。</p>
+  <p>GitHub Actions の外では、組織のエイリアスが予約名 <strong><code>prod</code> / <code>staging</code> / <code>develop</code></strong>（と、互換のための <code>main</code>）の組織を、確認（Y/N/q）の前に拒否します。<code>sf-project</code> は、共有環境の組織を、この名前で登録します。</p>
   <p>さらに、組織の種類も確かめ、<strong>本番の組織と、種類を確認できない組織は、名前にかかわらず拒否します</strong>（別の名前を付けた本番の組織も、止まります）。ただし、staging・develop の組織（本番以外の組織）を別の名前で接続すると、名前でしか判断できないため、この保護は働きません。共有環境の組織は、予約名のまま使ってください。</p>
 </div>
 <h3>処理の流れ</h3>
@@ -334,9 +334,9 @@ sf-job.sh [--project XXXX] [--owner OWNER] [--name ジョブ名]</code></pre>
   <li>終了コードは、正常終了（何もせず終わった場合を含む）が <code>0</code>、エラーが <code>1</code> です。ログは <code>./sf-tools/logs/sf-push.log</code> です（実行のたびに作り直します）。</li>
 </ul>
 
-<h2 id="sf-next"><code>sf-next.sh</code></h2>
-<pre><code>sf-next.sh [-v]
-sf-next.sh --create --title 題名 --body-file 本文のファイル</code></pre>
+<h2 id="sf-pr"><code>sf-pr.sh</code></h2>
+<pre><code>sf-pr.sh [-v]
+sf-pr.sh --create --title 題名 --body-file 本文のファイル</code></pre>
 <p>現在の作業用のブランチの<strong>先端のコミット</strong>が、どの段階（<code>develop</code> → <code>staging</code> → <code>main</code>）まで出たかを確かめ、次に PR を出してよい段階を案内します。<code>force-*</code> フォルダの中で実行します。<code>-v</code>（<code>--verbose</code>）・<code>-h</code>（<code>--help</code>。1 つ目の引数のときだけ）・下の表のオプション以外の引数は、「不明なオプションです」で中断します。</p>
 <table>
   <thead><tr><th>オプション</th><th>内容</th></tr></thead>
@@ -344,7 +344,7 @@ sf-next.sh --create --title 題名 --body-file 本文のファイル</code></pre
     <tr><td><code>--create</code></td><td>確認で <code>Y</code> のとき、ブラウザを開かずに、<code>gh pr create</code> で PR を作ります（おもに、AI に「PR を出して」と頼むときに使います）。<code>--title</code> と <code>--body-file</code> の両方が要ります</td></tr>
     <tr><td><code>--title 題名</code></td><td>PR の題名です。空でない 1 行（改行を含まない）にします。長さは GitHub が確かめます</td></tr>
     <tr><td><code>--body-file ファイル</code></td><td>PR の本文を書いたファイルです（中身は空でもよく、そのまま使います）。ファイルがない・読めないときは、中断します</td></tr>
-    <tr><td><code>--status</code></td><td>判定して、ランチャーの表示用の結果（<code>sf-tools/logs/next-status.txt</code>）を書くだけです（表示・確認・PR の作成をしません）。ランチャーが裏で動かします。ログは <code>sf-next-status.log</code>。<code>--create</code> とは一緒に使えません</td></tr>
+    <tr><td><code>--status</code></td><td>判定して、ランチャーの表示用の結果（<code>sf-tools/logs/next-status.txt</code>）を書くだけです（表示・確認・PR の作成をしません）。ランチャーが裏で動かします。ログは <code>sf-pr-status.log</code>。<code>--create</code> とは一緒に使えません</td></tr>
   </tbody>
 </table>
 <p>オプションの誤り（<code>--create</code> に <code>--title</code>・<code>--body-file</code> がない、<code>--create</code> なしで <code>--title</code>・<code>--body-file</code> を付けた、など）は、状況を確かめる前に中断します。</p>
@@ -374,7 +374,7 @@ sf-next.sh --create --title 題名 --body-file 本文のファイル</code></pre
   <li>上の段階にだけ印があり、下の段階にない（原則に反する状態）・push していない変更がある（手元と <code>origin</code> の先端が違う）・<code>origin</code> や PR の一覧が取れない・<code>branches.txt</code> の構成が正しくない、のときは、理由を表示して止まります（判断できないときは、止めます）。</li>
 </ul>
 <h4>順序を飛ばした PR を止める仕組み（<code>wf-sequence</code>・<code>wf-release</code>）</h4>
-<p><code>sf-next.sh</code> を使う限り、PR の先は「次の段階」だけです。ランチャーを使わず、GitHub 上で直接 PR を作って段階を飛び越したときは、<code>main</code> / <code>staging</code> への PR の時点で、<code>wf-sequence</code> の必須チェック「順序チェック」が<strong>失敗します</strong>（PR の会話欄に「⛔ 一方通行の決まりにより、この PR はマージできません」・Slack の通知）。ブランチ保護が効かない組織などで、マージしてしまっても、<code>wf-release</code> が組織へ出しません（最後の守り）。緊急の修正（Hotfix）も、例外にしません。</p>
+<p><code>sf-pr.sh</code> を使う限り、PR の先は「次の段階」だけです。ランチャーを使わず、GitHub 上で直接 PR を作って段階を飛び越したときは、<code>main</code> / <code>staging</code> への PR の時点で、<code>wf-sequence</code> の必須チェック「順序チェック」が<strong>失敗します</strong>（PR の会話欄に「⛔ 一方通行の決まりにより、この PR はマージできません」・Slack の通知）。ブランチ保護が効かない組織などで、マージしてしまっても、<code>wf-release</code> が組織へ出しません（最後の守り）。緊急の修正（Hotfix）も、例外にしません。</p>
 <h3>補足</h3>
 <ul>
   <li>保護ブランチ（<code>sf-tools/config/branches.txt</code> に書かれたブランチ。ファイルがない・空のときは <code>main</code>）の上と、ブランチを取得できないとき（detached HEAD など）は、エラーで終了します。</li>
@@ -384,14 +384,14 @@ sf-next.sh --create --title 題名 --body-file 本文のファイル</code></pre
   <li>開く URL は、<code>origin</code> の URL から作ります（URL に含まれる認証情報（<code>//&lt;ユーザー&gt;:&lt;Token&gt;@</code>）は除き、SSH の形は <code>https://github.com/</code> に直します）。<code>origin</code> の URL を取得できないときは、エラーで終了します。</li>
   <li>次の PR 先へ、PR が開いているときは、「発行済みです。検証が緑になってから、マージしてください」と表示して終わります。全段階に印があれば、「全段階にリリース済みです！」と表示して終わります。</li>
   <li>認証済みの <code>gh</code> が必要です（リリースの印・PR の一覧を読みます）。</li>
-  <li>終了コードは、正常終了（<code>N</code> で終了した場合を含む）が <code>0</code>、エラー・<code>q</code> での中断・決まりを破っているときが <code>1</code>、AI 操作の確認待ちが <code>20</code> です。ログは <code>./sf-tools/logs/sf-next.log</code> です（実行のたびに作り直します）。</li>
-  <li>AI 操作（環境変数 <code>SF_TOOLS_AI=1</code>）では、PR を出すかの質問の名前は <code>next.pr</code> です。<code>SF_TOOLS_ANSWERS="next.pr=n"</code> で状況の表示だけ、<code>"next.pr=y"</code> で PR の作成画面を開きます（<code>--create</code> を付ければ、PR を作ります）。答えがなければ、ブラウザを開く前（PR を作る前）に、終了コード 20 で止まります。AI は、出し先・ブランチ・題名・本文を示し、「はい」をもらってから動かします。</li>
+  <li>終了コードは、正常終了（<code>N</code> で終了した場合を含む）が <code>0</code>、エラー・<code>q</code> での中断・決まりを破っているときが <code>1</code>、AI 操作の確認待ちが <code>20</code> です。ログは <code>./sf-tools/logs/sf-pr.log</code> です（実行のたびに作り直します）。</li>
+  <li>AI 操作（環境変数 <code>SF_TOOLS_AI=1</code>）では、PR を出すかの質問の名前は <code>pr.create</code> です。<code>SF_TOOLS_ANSWERS="pr.create=n"</code> で状況の表示だけ、<code>"pr.create=y"</code> で PR の作成画面を開きます（<code>--create</code> を付ければ、PR を作ります）。答えがなければ、ブラウザを開く前（PR を作る前）に、終了コード 20 で止まります。AI は、出し先・ブランチ・題名・本文を示し、「はい」をもらってから動かします。</li>
 </ul>
 
 <h2 id="sf-promote-check"><code>sf-promote-check.sh</code></h2>
 <pre><code>sf-promote-check.sh --pr &lt;PR 番号&gt; [--only sequence|stack] [--json] [-v]   # ワークフロー用
-sf-promote-check.sh --plan [--json] [-v]                                      # sf-next 用</code></pre>
-<p>一方通行のリリースの決まり（<a href="../admin/workflows.html#one-way">R0〜R3</a>）を確かめる、判定の本体です（ここ 1 か所。<code>wf-sequence</code>・<code>wf-validate</code>・<code>wf-release</code>・<code>sf-next.sh</code> が呼びます）。読み取りのみで、組織・GitHub を変えません。ふだん、手で実行することはありません（<code>sf-next.sh</code> が <code>--plan</code> で呼びます）。<code>force-*</code> のプロジェクトのルートで実行します。</p>
+sf-promote-check.sh --plan [--json] [-v]                                      # sf-pr 用</code></pre>
+<p>一方通行のリリースの決まり（<a href="../admin/workflows.html#one-way">R0〜R3</a>）を確かめる、判定の本体です（ここ 1 か所。<code>wf-sequence</code>・<code>wf-validate</code>・<code>wf-release</code>・<code>sf-pr.sh</code> が呼びます）。読み取りのみで、組織・GitHub を変えません。ふだん、手で実行することはありません（<code>sf-pr.sh</code> が <code>--plan</code> で呼びます）。<code>force-*</code> のプロジェクトのルートで実行します。</p>
 <table>
   <thead><tr><th>オプション</th><th>意味</th></tr></thead>
   <tbody>
@@ -408,8 +408,8 @@ sf-promote-check.sh --plan [--json] [-v]                                      # 
   <li>終了コード: <code>0</code> = すべて満たす（またはスキップ）／ <code>1</code> = 破った（理由を <code>[R1]</code> などの印つきで表示）／ <code>2</code> = 判断できない（<code>[R0]</code>）。ログは <code>./sf-tools/logs/sf-promote-check.log</code> です。</li>
 </ul>
 
-<h2 id="sf-restart"><code>sf-restart.sh</code></h2>
-<pre><code>sf-restart.sh [-v]</code></pre>
+<h2 id="sf-switch-org"><code>sf-switch-org.sh</code></h2>
+<pre><code>sf-switch-org.sh [-v]</code></pre>
 <p>接続先の組織を切り替えたいときに使います。<code>force-*</code> フォルダの中で実行します。<code>-v</code>（<code>--verbose</code>。<code>sf-start.sh</code> にも渡す）・<code>-h</code>（<code>--help</code>。1 つ目の引数のときだけ）以外の引数は、「不明なオプションです」で中断します。</p>
 <h3>主な処理</h3>
 <ol>
@@ -421,7 +421,7 @@ sf-promote-check.sh --plan [--json] [-v]                                      # 
 <ul>
   <li><code>sf-start.sh</code> が失敗したとき（ログインの失敗・入力の中断など）は、新しい設定ファイルが書かれていなければ、退避しておいた元の設定ファイルを戻します（戻したとき・戻せなかったときは、警告を表示します）。成功したときは、新しい設定ファイルに置き換わります。退避した一時フォルダは、終了のときに削除します。</li>
   <li>終了コードは、<code>sf-start.sh</code> の終了コードです。<code>sf-start.sh</code> を呼ぶ前に中断したとき（不明なオプション・<code>sf-start.sh</code> がない・一時フォルダを作れない・退避できない）は <code>1</code> です。</li>
-  <li>ログは <code>./sf-tools/logs/sf-restart.log</code> です（実行のたびに作り直します）。</li>
+  <li>ログは <code>./sf-tools/logs/sf-switch-org.log</code> です（実行のたびに作り直します）。</li>
 </ul>
 
 <h2 id="sf-log"><code>sf-log.sh</code></h2>
@@ -439,7 +439,7 @@ sf-log.sh auto on|off [-o ALIAS]</code></pre>
   <li>AI が <code>sf-log.sh pull</code> を実行し、<code>logs/apex/latest.md</code> を読む（新しいログを取ってから、要約を作ります。組織には書き込みません）</li>
   <li>作業が終わったら、人が <code>sf-log.sh stop</code> を実行する（作った TraceFlag を消します）</li>
 </ol>
-<p><strong>ふだんは、<code>sf-start.sh</code>（とランチャー）を使うだけで、自動で取られます。</strong><code>sf-start.sh</code> が、ランチャーを開く前に、裏で取り始め（初めてのときだけ「自動で取るか」を聞きます）、ランチャーを閉じると止めます。裏で <code>sf</code> の更新（<code>sf-upgrade.sh</code>。24 時間に 1 回）が動いているあいだは、それが終わるのを待ってから準備します（最大 10 分。ランチャーに「sf の更新が終わるのを待っています」と出ます）。裏の準備が、sf の一時的な失敗で止まったときは、30 秒後に 1 回だけやり直します。ランチャーの見出しの下に、状態が 1 行出ます。AI は、必要なときに <code>sf-log.sh pull</code> を実行するだけです。AI が読む手順書は <code>~/sf-tools/doc/ai-dev-loop.md</code> です。新しく作る force-* には、この手順書を指す <code>CLAUDE.md</code>（Claude Code 用）と <code>AGENTS.md</code>（Codex など用）が、雛形から入ります。すでにある force-* では、<code>~/sf-tools/templates/</code> の 2 つのファイルを、プロジェクトのルートにコピーしてコミットしてください（手順書は <code>~/sf-tools</code> の <code>git pull</code> で最新になります）。この 2 つのファイルには、プロジェクト独自の決まりを自由に書き足せますが、「ここから sf-tools の案内」の部分（手順書を指す行）は消さないでください。<code>sf-start.sh</code> は、その行がないと、起動のたびに警告で知らせます（ファイルは書き換えません）。Claude Code は、最初に、外の文書（<code>~/sf-tools</code> の中）を読み込んでよいかを聞くことがあります。<code>sf-start.sh</code> を使わない場面では、上の手順のとおり、人が <code>start</code> と <code>stop</code> を実行します。</p>
+<p><strong>ふだんは、<code>sf-start.sh</code>（とランチャー）を使うだけで、自動で取られます。</strong><code>sf-start.sh</code> が、ランチャーを開く前に、裏で取り始め（初めてのときだけ「自動で取るか」を聞きます）、ランチャーを閉じると止めます。裏で <code>sf</code> の更新（<code>sf-update-cli.sh</code>。24 時間に 1 回）が動いているあいだは、それが終わるのを待ってから準備します（最大 10 分。ランチャーに「sf の更新が終わるのを待っています」と出ます）。裏の準備が、sf の一時的な失敗で止まったときは、30 秒後に 1 回だけやり直します。ランチャーの見出しの下に、状態が 1 行出ます。AI は、必要なときに <code>sf-log.sh pull</code> を実行するだけです。AI が読む手順書は <code>~/sf-tools/doc/ai-dev-loop.md</code> です。新しく作る force-* には、この手順書を指す <code>CLAUDE.md</code>（Claude Code 用）と <code>AGENTS.md</code>（Codex など用）が、雛形から入ります。すでにある force-* では、<code>~/sf-tools/templates/</code> の 2 つのファイルを、プロジェクトのルートにコピーしてコミットしてください（手順書は <code>~/sf-tools</code> の <code>git pull</code> で最新になります）。この 2 つのファイルには、プロジェクト独自の決まりを自由に書き足せますが、「ここから sf-tools の案内」の部分（手順書を指す行）は消さないでください。<code>sf-start.sh</code> は、その行がないと、起動のたびに警告で知らせます（ファイルは書き換えません）。Claude Code は、最初に、外の文書（<code>~/sf-tools</code> の中）を読み込んでよいかを聞くことがあります。<code>sf-start.sh</code> を使わない場面では、上の手順のとおり、人が <code>start</code> と <code>stop</code> を実行します。</p>
 <h3>サブコマンド</h3>
 <ul>
   <li><code>start</code>: ログの詳しさの設定（DebugLevel <code>sf_tools_log_standard</code> など）を作るか上書きし、自分のユーザーの TraceFlag（種類 <code>USER_DEBUG</code>）を作ります。<code>sf-log.sh</code> が前に作ったものがあれば、作り直さずに期限を延ばします。
@@ -467,7 +467,7 @@ sf-log.sh auto on|off [-o ALIAS]</code></pre>
 <h2 id="sf-hook"><code>sf-hook.sh</code> / <code>sf-unhook.sh</code></h2>
 <pre><code>sf-hook.sh
 sf-unhook.sh</code></pre>
-<p>どちらも、<code>force-*</code> フォルダの、Git リポジトリのルート（<code>.git</code> がある場所）で実行します（<code>.git</code> がなければ中断します）。<code>-v</code> / <code>--verbose</code> と、1 つ目の引数の <code>-h</code> / <code>--help</code> 以外の引数は、「不明なオプションです」で中断します（何もインストール・削除しません）。ふだんは、<code>sf-start.sh</code> がバックグラウンドで実行する <code>sf-install.sh</code> が、フックを設置するため、直接実行する必要はありません。</p>
+<p>どちらも、<code>force-*</code> フォルダの、Git リポジトリのルート（<code>.git</code> がある場所）で実行します（<code>.git</code> がなければ中断します）。<code>-v</code> / <code>--verbose</code> と、1 つ目の引数の <code>-h</code> / <code>--help</code> 以外の引数は、「不明なオプションです」で中断します（何もインストール・削除しません）。ふだんは、<code>sf-start.sh</code> がバックグラウンドで実行する <code>sf-refresh.sh</code> が、フックを設置するため、直接実行する必要はありません。</p>
 <h3><code>sf-hook.sh</code></h3>
 <ol>
   <li><code>git config --local core.hooksPath</code> の値に <code>husky</code> が含まれていれば、確認なしに設定を削除する（元には戻しません）</li>

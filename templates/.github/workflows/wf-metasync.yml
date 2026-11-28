@@ -13,7 +13,7 @@
 #     --full は、変更の検知（Variable SF_METASYNC_DETECT が shadow・on のとき）が「変更なし」でも、全件取得する指定
 #     （検知できない種類（区分 C）の変更を、毎日 1 回は反映するため）。手動の実行にも付く
 #   - workflow_dispatch（手動の実行。入力なし）。どのブランチで実行しても、main を取得して同期する
-#     （sf-init のセットアップの最後と、sf-init.sh --verify が、gh workflow run で起動する）
+#     （sf-project のセットアップの最後と、sf-project.sh --verify が、gh workflow run で起動する）
 #   - 起動しない場合: PR・push などのイベント（schedule と workflow_dispatch 以外では、動かない）
 #
 # 【ジョブ】
@@ -47,13 +47,13 @@
 #
 # 【必要な Secrets / Variables】
 #   Secrets（このリポジトリに設定する）:
-#     SF_PRIVATE_KEY       : JWT の秘密鍵（server.key の PEM を、1 行の Base64 にした値。全組織共通。sf-init の Phase 10・
+#     SF_PRIVATE_KEY       : JWT の秘密鍵（server.key の PEM を、1 行の Base64 にした値。全組織共通。sf-project の Phase 10・
 #                            sf-update-secret.sh が登録する）
 #     SF_CONSUMER_KEY_PROD : main の組織のアプリ（外部クライアントアプリケーション）のコンシューマー鍵
-#                            （sf-init の Phase 10・sf-update-secret.sh・sf-init.sh --reconnect が登録する）
+#                            （sf-project の Phase 10・sf-update-secret.sh・sf-project.sh --reconnect が登録する）
 #     SLACK_BOT_TOKEN      : Slack API の Bot Token（任意。秘密の疑い・公開リポジトリで止めたときの通知に使う。wf-release.yml と同じもの。
 #                            未設定なら、通知せずに WARNING を出す）
-#     PAT_TOKEN            : GitHub の PAT（Classic。repo・workflow の権限。sf-init の Phase 6 が登録する）。
+#     PAT_TOKEN            : GitHub の PAT（Classic。repo・workflow の権限。sf-project の Phase 6 が登録する）。
 #                            main・staging への push で、Ruleset protect-main / protect-staging（必須チェック）をバイパスする
 #                            （PAT の持ち主が Admin のとき）ために使う
 #   Variables（このリポジトリに設定する。SF_USERNAME_PROD・SF_INSTANCE_URL_PROD の登録元は、SF_CONSUMER_KEY_PROD と同じ）:

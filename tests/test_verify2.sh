@@ -106,7 +106,7 @@ test_environment() {
     assert_exit_ok "$RC" "--cleanup: 環境の確認の NG に、影響されない"
     assert_file_not_contains "$MOCK_CALL_LOG" "workflow run" "--cleanup: wf-metasync を起動しない"
 
-    # sf-init から呼ばれたとき（SF_VERIFY_CONFIRMED=1）: 確認を、二重には聞かない（標準入力が空でも、進む）
+    # sf-project から呼ばれたとき（SF_VERIFY_CONFIRMED=1）: 確認を、二重には聞かない（標準入力が空でも、進む）
     _env
     export SF_VERIFY_CONFIRMED=1
     _run ""

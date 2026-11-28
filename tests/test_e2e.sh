@@ -1,6 +1,6 @@
 #!/bin/bash
 # ==============================================================================
-# test_e2e.sh - tests/e2e/（実環境での sf-init 通し検証）の安全ガードと部品のテスト（1/2）
+# test_e2e.sh - tests/e2e/（実環境での sf-project 通し検証）の安全ガードと部品のテスト（1/2）
 # ==============================================================================
 # テストが多く、時間がかかる（Windows の CI で約 8 分）ため、2 つのファイル（test_e2e.sh・test_e2e2.sh）に分け、並列に動かす。
 # 共通の部品（モックの作成・関数の呼び出し・cleanup / scenario の実行）は tests/e2e-test-lib.sh。
@@ -20,7 +20,7 @@
 #   7. cleanup.sh の確認（N・delete 以外の入力で中止）
 #   8. sf の差し替え（login web だけを置き換え、他はそのまま渡す）
 #   9. sf のエイリアスの保存・復元
-#  10. sf-init に流す入力の台本
+#  10. sf-project に流す入力の台本
 #  11. run.sh のガード（GitHub Actions 上・鍵一式なしでは動かない）
 #  15. 一覧の取得に失敗したとき（再試行・「対象なし」と取り違えない）
 #  16. ローカルの削除の補強（想定外の中身・シンボリックリンクは消さない）
@@ -38,10 +38,10 @@
 #  28. シナリオ metasync-diff（組織側だけの Apex が、wf-metasync で main に反映される。組織と main を、必ず戻す）
 #  29. 中断→再開（run.sh --interrupt）と、git の shim（main への push を 1 回だけ失敗させる）
 #  30. シナリオ one-way（一方通行の決まり。前提の確認・開始の警告・途中で止まったときの後始末。流れ全体は e2e で確かめる）
-#  31. シナリオ restart-org（sf-restart で接続先を staging の組織に切り替え → dry-run → 元に戻す）
-#  33. シナリオ sync-wf（改変したワークフローを sf-sync-wf が見つけて直す・--remove は雛形にあるファイルを拒否・クローンの中だけ）
+#  31. シナリオ restart-org（sf-switch-org で接続先を staging の組織に切り替え → dry-run → 元に戻す）
+#  33. シナリオ sync-wf（改変したワークフローを sf-update-workflows が見つけて直す・--remove は雛形にあるファイルを拒否・クローンの中だけ）
 #  34. シナリオ update-secret（sf-update-secret で秘密鍵を同じ鍵で上書き・更新日時が進む・誤ったパスは拒否される）
-#  35. シナリオ cross-os（別の OS が作ったリポジトリの確認: CRLF がない・フックが同じ内容で実行できる・sf-sync-wf --check が成功する。読み取りのみ）
+#  35. シナリオ cross-os（別の OS が作ったリポジトリの確認: CRLF がない・フックが同じ内容で実行できる・sf-update-workflows --check が成功する。読み取りのみ）
 #  36. needs-e2e.sh（rr の前に、e2e が必要かの判定。対象のパスの正本）
 #  32. GitHub Actions で動かす準備（ci-fixture.sh が鍵一式を作る・e2e.yml とガードの整合。ガードは 2 で、Actions 上でも専用ワークフローだけ通る）
 # ==============================================================================
@@ -366,10 +366,10 @@ test_e2e_alias_restore() {
 }
 
 # ------------------------------------------------------------------------------
-# 10. sf-init に流す入力の台本
+# 10. sf-project に流す入力の台本
 # ------------------------------------------------------------------------------
 test_e2e_input() {
-    echo ""; echo -e "${CLR_HEAD}[TEST] sf-init に流す入力の台本${CLR_RST}"
+    echo ""; echo -e "${CLR_HEAD}[TEST] sf-project に流す入力の台本${CLR_RST}"
     local mb out; mb=$(setup_mock_bin); MB="$mb"; FX="$mb/fx.env"; HM="$mb"
     export MOCK_CALL_LOG="$mb/calls.log"; _mk_mocks "$mb"; _mk_fixture "$FX"
     _e2e_call 'e2e_load_fixture; e2e_make_input'
@@ -915,9 +915,9 @@ assert_file_contains "$E2E_DIR/run.sh" "削除後: Salesforce への管理用ロ
     assert_file_contains "$E2E_DIR/run.sh" "sf-job.sh" "run.sh: リリースは、sf-job.sh でブランチ作成・clone する（通常の運用と同じ道）"
     assert_file_contains "$E2E_DIR/run.sh" "sf-dryrun.sh" "run.sh: リリースは、sf-dryrun.sh でローカルの検証をする"
     assert_file_contains "$E2E_DIR/run.sh" "sf-push.sh" "run.sh: リリースは、sf-push.sh で commit・push する"
-    assert_file_contains "$E2E_DIR/run.sh" 'release/${job}/remove-target.txt' "run.sh: sf-install が用意した remove-target.txt の雛形を確認する"
+    assert_file_contains "$E2E_DIR/run.sh" 'release/${job}/remove-target.txt' "run.sh: sf-refresh が用意した remove-target.txt の雛形を確認する"
     assert_file_contains "$E2E_DIR/run.sh" "_hello_write_remove" "run.sh: 削除も、sf-job.sh のジョブで、remove-target.txt を書いて sf-push.sh する"
-    assert_file_contains "$E2E_DIR/run.sh" "sf-next.sh" "run.sh: sf-next.sh で、全段階にリリース済みの表示を確認する"
+    assert_file_contains "$E2E_DIR/run.sh" "sf-pr.sh" "run.sh: sf-pr.sh で、全段階にリリース済みの表示を確認する"
     assert_file_contains "$E2E_DIR/run.sh" "sf-deploy.sh" "run.sh: sf-deploy.sh が、共有環境（予約名）への強制リリースを拒否することを確認する"
 
     # Hello World の Apex のソース: 共有の部品（lib/verify-common.sh）から、そろっている
@@ -992,16 +992,16 @@ EOF2
     _e2e_call "$pre"" e2e_run_sf_cmd_refused rf3 $HM '' $CB/refuse.sh; echo DONE"
     assert_file_not_contains "$MB/out.log" "DONE"                            "拒否の確認: テスト用の作業フォルダの外では、実行しない"
 
-    # sf-install の完了待ち（ログの完了メッセージ）
+    # sf-refresh の完了待ち（ログの完了メッセージ）
     mkdir -p "$root/clone1/sf-tools/logs" "$root/clone2/sf-tools/logs"
-    echo "[SUCCESS] npm install の確認が完了しました。" > "$root/clone1/sf-tools/logs/sf-install.log"
-    echo "[INFO] 途中" > "$root/clone2/sf-tools/logs/sf-install.log"
+    echo "[SUCCESS] npm install の確認が完了しました。" > "$root/clone1/sf-tools/logs/sf-refresh.log"
+    echo "[INFO] 途中" > "$root/clone2/sf-tools/logs/sf-refresh.log"
     _e2e_call "$pre"" E2E_INSTALL_TIMEOUT=2 E2E_POLL_SEC=1 e2e_wait_sf_install $root/clone1; echo RC=\$?"
-    assert_file_contains "$MB/out.log" "RC=0"                                "sf-install の待ち: 完了メッセージがあれば、戻り値 0"
+    assert_file_contains "$MB/out.log" "RC=0"                                "sf-refresh の待ち: 完了メッセージがあれば、戻り値 0"
     _e2e_call "$pre"" E2E_INSTALL_TIMEOUT=2 E2E_POLL_SEC=1 e2e_wait_sf_install $root/clone2; echo RC=\$?"
-    assert_file_contains "$MB/out.log" "RC=1"                                "sf-install の待ち: 完了しなければ、時間切れで戻り値 1"
+    assert_file_contains "$MB/out.log" "RC=1"                                "sf-refresh の待ち: 完了しなければ、時間切れで戻り値 1"
     _e2e_call "$pre"" E2E_INSTALL_TIMEOUT=2 E2E_POLL_SEC=1 e2e_wait_sf_install $root/none; echo RC=\$?"
-    assert_file_contains "$MB/out.log" "RC=1"                                "sf-install の待ち: ログがなければ、戻り値 1"
+    assert_file_contains "$MB/out.log" "RC=1"                                "sf-refresh の待ち: ログがなければ、戻り値 1"
 
     # code の差し替え: --wait とファイルでメッセージを書き込む。code . は何もしない
     local sh="$E2E_DIR/shims/code" f="$CB/msg.txt"
@@ -1197,7 +1197,7 @@ EOF
 }
 
 # ------------------------------------------------------------------------------
-# 層数対応（段階ごとの PR・実行の取り違えの防止・段階ごとの掃除・sf-init の入力）
+# 層数対応（段階ごとの PR・実行の取り違えの防止・段階ごとの掃除・sf-project の入力）
 # ------------------------------------------------------------------------------
 test_e2e_layout() {
     echo ""; echo -e "${CLR_HEAD}[TEST] 層数対応（段階ごとの PR・実行の基準・段階ごとの掃除・入力の台本）${CLR_RST}"
@@ -1238,7 +1238,7 @@ test_e2e_layout() {
     assert_file_contains     "$MB/out.log" "RC=1" "中断する（終了コード 1）"
     assert_file_contains     "$MB/out.log" "bootstrap.sh --add-orgs" "追加の方法が表示される"
 
-    # sf-init に流す入力の台本（層数ごと）: Phase 5 の番号と、ログイン先の答えの数
+    # sf-project に流す入力の台本（層数ごと）: Phase 5 の番号と、ログイン先の答えの数
     _e2e_call 'e2e_load_fixture; e2e_make_input 2 | tr "\n" ","'
     assert_file_contains "$MB/out.log" "Y,Y,2,Y,2,ghp_fakepat,,xoxb-fakeslack,C01ABCDEFGH,,1,1," "台本（2 層）: Phase 5 は 2・ログイン先は 2 つ"
     _e2e_call 'e2e_load_fixture; e2e_make_input 3 | tr "\n" ","'
@@ -1267,7 +1267,7 @@ test_e2e_layout() {
 }
 
 # ------------------------------------------------------------------------------
-# 対話（引数なし）の sf-init に流す、先頭の入力（オーナーの選択 → XXXX → 確認）
+# 対話（引数なし）の sf-project に流す、先頭の入力（オーナーの選択 → XXXX → 確認）
 # ------------------------------------------------------------------------------
 test_e2e_identity_input() {
     echo ""; echo -e "${CLR_HEAD}[TEST] e2e_make_identity_input: 対話の入力の台本（オーナーの選択・XXXX・確認）${CLR_RST}"
@@ -1926,7 +1926,7 @@ CEOF
     # e2e の対象のパス: リリース・削除の流れに関係しない 6 ファイルは、除外する（e2e は、1 回で、テスト用の組織の無料枠を約 40 分ぶん使うため）。
     #   対象のパスと除外の一覧の正本は tests/e2e/needs-e2e.sh。CLAUDE.md・dev-guide.md・dev-reference.md の説明（6 ファイルの名前）と、そろえておく
     local _ex _in _ne="$SF_TOOLS_DIR/tests/e2e/needs-e2e.sh"
-    for _ex in bin/sf-metasync.sh bin/sf-upgrade.sh lib/metasync.js config/metasync-detect.txt config/metasync-fingerprint.txt config/metasync-extra.txt; do
+    for _ex in bin/sf-metasync.sh bin/sf-update-cli.sh lib/metasync.js config/metasync-detect.txt config/metasync-fingerprint.txt config/metasync-extra.txt; do
         assert_file_contains "$_ne" "$_ex" "needs-e2e.sh: ${_ex} は、除外の一覧にある（リリース・削除に関係しない）"
         [[ -f "$SF_TOOLS_DIR/$_ex" ]] && pass "needs-e2e.sh: 除外した ${_ex} が、実在する（名前を変えると、除外が効かなくなる）" \
             || fail "needs-e2e.sh: 除外した ${_ex} が、実在する（名前を変えると、除外が効かなくなる）" "ファイルがない"
@@ -1946,7 +1946,7 @@ CEOF
     done
     assert_file_not_contains "$_ne" "lib/common.sh" "needs-e2e.sh: 共有部品（lib/common.sh）は、除外しない"
     assert_file_not_contains "$_ne" "bin/sf-release.sh" "needs-e2e.sh: リリースのコマンド（bin/sf-release.sh）は、除外しない"
-    assert_file_contains     "$wf" 'touch "$HOME/.sf-tools-last-update"' "e2e.yml: 更新済みの印を先に置く（e2e の実行中に、バックグラウンドの sf-upgrade.sh が、sf を入れ替えない）"
+    assert_file_contains     "$wf" 'touch "$HOME/.sf-tools-last-update"' "e2e.yml: 更新済みの印を先に置く（e2e の実行中に、バックグラウンドの sf-update-cli.sh が、sf を入れ替えない）"
     assert_equals "$(grep -c 'touch "$HOME/.sf-tools-last-update"' "$wf")" "2" "e2e.yml: 更新済みの印は、Windows・macOS の両方のジョブで置く"
     # 組織名・ユーザー名・チャンネル ID は、公開ログに出さないため、Secrets から読む（Variables は使わない）
     for _n in E2E_OWNER E2E_GH_USER E2E_SLACK_CHANNEL_ID; do
@@ -1992,7 +1992,7 @@ test_e2e_needs_e2e() {
     # main: 配布物・e2e・除外の 6 ファイルがある状態（判定のスクリプト自体は、ここで置く。最初のコミットに入れると、対象のパスを変えた扱いになる）
     local f
     cp "$SF_TOOLS_DIR/tests/e2e/needs-e2e.sh" "$ne"
-    for f in bin/sf-release.sh bin/sf-metasync.sh bin/sf-upgrade.sh lib/common.sh lib/metasync.js config/metasync-detect.txt \
+    for f in bin/sf-release.sh bin/sf-metasync.sh bin/sf-update-cli.sh lib/common.sh lib/metasync.js config/metasync-detect.txt \
              config/metasync-fingerprint.txt config/metasync-extra.txt \
              tests/e2e/lib.sh tests/test_x.sh .github/workflows/e2e.yml .github/workflows/test.yml; do
         mkdir -p "$r/$(dirname "$f")"; echo a > "$r/$f"
@@ -2007,7 +2007,7 @@ test_e2e_needs_e2e() {
     assert_equals "$out" "" "差分がない → 何も表示しない"
 
     # 文書・単体テスト・test.yml・除外の 6 ファイルだけ → 不要
-    _ne_commit doc/a.md tests/test_x.sh .github/workflows/test.yml bin/sf-metasync.sh bin/sf-upgrade.sh lib/metasync.js config/metasync-detect.txt config/metasync-fingerprint.txt config/metasync-extra.txt
+    _ne_commit doc/a.md tests/test_x.sh .github/workflows/test.yml bin/sf-metasync.sh bin/sf-update-cli.sh lib/metasync.js config/metasync-detect.txt config/metasync-fingerprint.txt config/metasync-extra.txt
     out=$(bash "$ne" main development 2>&1); rc=$?
     assert_equals "$rc" "1" "文書・単体テスト・test.yml・除外の 6 ファイルだけの変更 → 不要（戻り値 1）"
     assert_equals "$out" "" "その場合、対象のパスの変更は、表示されない"

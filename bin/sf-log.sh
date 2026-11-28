@@ -35,9 +35,9 @@
 #
 # 【処理の流れ】
 #   共通（status・auto 以外）:
-#     0. （start のみ）sf の更新（sf-upgrade.sh。ロック ~/.sf-tools-upgrade.lock の PID が生きている）が動いていれば、
+#     0. （start のみ）sf の更新（sf-update-cli.sh。ロック ~/.sf-tools-upgrade.lock の PID が生きている）が動いていれば、
 #        終わるまで最大 10 分待つ（sf の入れ替えの途中に sf を呼ぶと、部品が見つからずに失敗するため。2026-11-24。
-#        sf-start は、sf-install.sh（その中で sf-upgrade.sh）と begin を同時に裏で動かす）。.status の WARNING に、待っていることを書く。
+#        sf-start は、sf-refresh.sh（その中で sf-update-cli.sh）と begin を同時に裏で動かす）。.status の WARNING に、待っていることを書く。
 #        待つあいだに持ち主（--owner）がいなくなれば、準備をやめて 0 で終わる。待ち切れなければ、WARNING を出して進む
 #     1a. 環境の判断（status 以外。0 より前。Git Bash と WSL の混在。doc/sf-log-design.md 5.6）: 手元のファイル（.collector・.claim）だけを
 #        読み、別の環境が、このプロジェクトのログを扱っていれば、ファイル・ロック・組織に触れずに終える
@@ -135,7 +135,7 @@
 #           起動から 12 時間（SF_LOG_MAX_SECONDS）でも、同じく止まる
 #        b. 停止の依頼・CLOSING・印の入れ替わり → 組織に何もせずに止まる（延長の直前にも確かめる）
 #        c. 間隔（SF_LOG_INTERVAL）が来た・pull の依頼がある・取り残しがある → 取得のロックが取れたら、pull と同じ方法で 1 回取る。
-#           sf の更新（sf-upgrade.sh）が動いているあいだは、取らずに次に回す（start の 0 と同じ理由）。
+#           sf の更新（sf-update-cli.sh）が動いているあいだは、取らずに次に回す（start の 0 と同じ理由）。
 #           追いついた回は、取得のロックを持ったまま拾い直し（pull の「拾い直し」）をし、目録に書き終えてから、待っている pull に応える。
 #           追いついたら、待っている pull に応答する。失敗したら、次の取得までの間隔を倍にする（最大 600 秒）
 #        d. TraceFlag の残りが 60 分未満なら、ID と種類を確かめてから、今から 2 時間に延ばす
@@ -159,7 +159,7 @@
 #   - sf-start.sh が、ランチャーを開く前に begin、終了時に leave を呼ぶ（5 章）。ランチャーは .status を 1 行で表示する
 #   - 環境変数: SF_LOG_INTERVAL（取得の間隔。秒。30〜600。既定 180。sf の 1 回が約 10 秒かかるため。pull はすぐ取らせる）・
 #     SF_LOG_MAX_SECONDS（取得役の上限。秒。既定 43200 = 12 時間）・SF_LOG_TEST_FAST=1（テスト用。間隔の下限を 1 にし、待ち時間を短くする）・
-#     SF_TOOLS_UPGRADE_LOCK（sf の更新のロックの場所。既定 ~/.sf-tools-upgrade.lock。sf-upgrade.sh と同じ。テストで差し替える）・
+#     SF_TOOLS_UPGRADE_LOCK（sf の更新のロックの場所。既定 ~/.sf-tools-upgrade.lock。sf-update-cli.sh と同じ。テストで差し替える）・
 #     SF_LOG_TEST_RUNTIME（テスト用。自分の環境の名前を決める。英小文字だけ）
 #   - 持ち主の生死は kill -0 で見る（PID が使い回されたときは、12 時間の上限で止まる）。別の環境（Git Bash と WSL）の PID は見えないため、
 #     環境の名前で見分ける（1a・doc/sf-log-design.md 5.6）。1 つのプロジェクトのログは、同時には 1 つの環境だけが扱う
@@ -272,10 +272,10 @@ TICK=5; [[ $_fast -eq 1 ]] && TICK=1    # 取得役が目を覚ます間隔（�
 MAX_RUN="${SF_LOG_MAX_SECONDS:-43200}"  # 取得役の上限（秒。12 時間。PID の再利用への備え。5.5）
 [[ "$MAX_RUN" =~ ^[0-9]+$ && "$MAX_RUN" -ge 1 ]] || die "SF_LOG_MAX_SECONDS は 1 以上の整数です: ${MAX_RUN}"
 PULL_WAIT=90; STOP_WAIT=30; CLOSING_WAIT=60; RETRY_WAIT=30   # RETRY_WAIT: 裏の準備の失敗から、やり直すまで（秒）
-UPGRADE_WAIT=600   # sf の更新（sf-upgrade.sh）が終わるのを待つ上限（秒）。WSL の実機で、sf の入れ替えに約 3 分かかった（2026-11-24）
+UPGRADE_WAIT=600   # sf の更新（sf-update-cli.sh）が終わるのを待つ上限（秒）。WSL の実機で、sf の入れ替えに約 3 分かかった（2026-11-24）
 READ_TRIES=450     # 要約のロックを待つ回数（0.2 秒ごと。最大 90 秒）
 [[ $_fast -eq 1 ]] && { PULL_WAIT=30; STOP_WAIT=10; CLOSING_WAIT=10; RETRY_WAIT=1; UPGRADE_WAIT=10; READ_TRIES=10; }
-# sf の更新のロック（sf-upgrade.sh が、動いているあいだ PID を書く。場所は sf-upgrade.sh と同じ）
+# sf の更新のロック（sf-update-cli.sh が、動いているあいだ PID を書く。場所は sf-update-cli.sh と同じ）
 UPGRADE_LOCK="${SF_TOOLS_UPGRADE_LOCK:-${HOME}/.sf-tools-upgrade.lock}"
 # 動いている環境（5.6。gitbash / wsl / macos / linux / unknown）。SF_LOG_TEST_RUNTIME はテスト用（別の環境の代わりをする）
 RUNTIME_SELF=$(detect_runtime)  # VAR=$(cmd) のため run 不使用
@@ -565,17 +565,17 @@ claim_refresh_locked() {
     fi
 }
 
-# sf の更新（sf-upgrade.sh）が動いているか（ロックの PID が生きている）。sf の入れ替えの途中に sf を呼ばないため（2026-11-24）
+# sf の更新（sf-update-cli.sh）が動いているか（ロックの PID が生きている）。sf の入れ替えの途中に sf を呼ばないため（2026-11-24）
 upgrade_running() { pid_alive "$(kv_get "$UPGRADE_LOCK" PID)"; }
 
 # sf の更新が終わるのを待つ（start の最初。最大 UPGRADE_WAIT 秒）。待つあいだに持ち主がいなくなれば、準備をやめて 0 で終わる。
-#   2026-11-24 に WSL の実機で、sf-start が裏で動かす sf-upgrade.sh（npm install -g @salesforce/cli@latest）と、裏の準備が重なり、
+#   2026-11-24 に WSL の実機で、sf-start が裏で動かす sf-update-cli.sh（npm install -g @salesforce/cli@latest）と、裏の準備が重なり、
 #   sf の部品が見つからずに準備が失敗した。やり直しでは、入れ替えの途中で消えていた WSL の sf の代わりに、PATH の後ろの
 #   Windows の sf を拾い、とても遅くなった
 wait_sf_upgrade() {
     local waited=0
     upgrade_running || return 0
-    log "INFO" "sf の更新（sf-upgrade.sh）が終わるのを待ちます（最大 ${UPGRADE_WAIT} 秒）..."
+    log "INFO" "sf の更新（sf-update-cli.sh）が終わるのを待ちます（最大 ${UPGRADE_WAIT} 秒）..."
     [[ $AUTO -eq 1 ]] && { state_set "$STATUS_F" "WARNING=sf の更新が終わるのを待っています" || true; }   # 意図的エラー無視: 表示用
     while upgrade_running; do
         if [[ -n "$OWNER" ]] && ! owner_present; then
@@ -916,7 +916,7 @@ cmd_start() {
     ensure_debuglevel
     ensure_traceflag
 
-    # 組織を切り替えた（sf-restart）: 前の組織の、sf-log.sh が作った TraceFlag を消す（5.3。消せなければ、最大 2 時間で切れる）
+    # 組織を切り替えた（sf-switch-org）: 前の組織の、sf-log.sh が作った TraceFlag を消す（5.3。消せなければ、最大 2 時間で切れる）
     if [[ -n "$prev_org" && "$prev_org" != "$TARGET_ORG" && "$prev_tf" =~ $ID_RE ]]; then
         if run sf data delete record --use-tooling-api --sobject TraceFlag --record-id "$prev_tf" --target-org "$prev_org" --json >/dev/null; then
             log "INFO" "前の組織（${prev_org}）の TraceFlag（${prev_tf}）を消しました。"
@@ -1496,7 +1496,7 @@ cmd_collect() {
         # b. 停止の依頼・後始末の最中・印の入れ替わり
         collector_should_quit && exit 0
         # c. 取得（間隔が来た・pull の依頼がある・前回の取り残しがある）
-        # sf の更新（sf-upgrade.sh）が動いているあいだは、取らずに次に回す（sf の入れ替えの途中に、sf を呼ばない）
+        # sf の更新（sf-update-cli.sh）が動いているあいだは、取らずに次に回す（sf の入れ替えの途中に、sf を呼ばない）
         if { [[ $now -ge $next ]] || has_pull_request; } && ! upgrade_running; then
             if lock_take "$FETCH_LOCK" 1; then
                 rc=0; fetch_round || rc=$?

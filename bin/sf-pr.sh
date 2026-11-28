@@ -1,6 +1,6 @@
 #!/bin/bash
 # ==============================================================================
-# sf-next.sh - 次のPR先ブランチを確認するスクリプト
+# sf-pr.sh - 次の段階へ PR を出す（出し先を確かめる。2026-11-28 に sf-next.sh から改名）
 # ==============================================================================
 # 現在のブランチ（の先端のコミット）が、どの段階（develop → staging → main）まで出たかを確かめ、次に PR を出してよい段階を
 # 表示する。確認（Y/N/q）のうえ、PR の作成画面をブラウザで開く（PR そのものは作らない）。--create を付けたときは、
@@ -10,9 +10,9 @@
 # 次の出し先は develop に戻る（staging を勧めない）。
 #
 # 【使い方】
-#   bash ~/sf-tools/bin/sf-next.sh [オプション]
-#   bash ~/sf-tools/bin/sf-next.sh --create --title <題名> --body-file <ファイル>
-#   bash ~/sf-tools/bin/sf-next.sh --status    # 判定して next-status.txt を書くだけ（ランチャーが裏で動かす）
+#   bash ~/sf-tools/bin/sf-pr.sh [オプション]
+#   bash ~/sf-tools/bin/sf-pr.sh --create --title <題名> --body-file <ファイル>
+#   bash ~/sf-tools/bin/sf-pr.sh --status    # 判定して next-status.txt を書くだけ（ランチャーが裏で動かす）
 #
 # 【オプション】
 #   --create               : 確認で Y のとき、ブラウザを開かずに、gh pr create で PR を作る。--title と --body-file の両方が要る
@@ -20,7 +20,7 @@
 #   --body-file <ファイル> : PR の本文のファイル（あって、読めること。中身は空でもよく、整形しない）。--create のときだけ指定できる
 #   --status               : 判定だけをする。処理の流れの 2 まで（next-status.txt を書く）で終わり、結果の表示・確認・PR の作成を
 #                            しない（ランチャーが、画面を出したあとに裏で動かす。phases/start/launcher.sh の処理の流れ 6）。ログは
-#                            ./sf-tools/logs/sf-next-status.log（手で動かしたときの sf-next.log を上書きしない）。--create と一緒には使えない。
+#                            ./sf-tools/logs/sf-pr-status.log（手で動かしたときの sf-pr.log を上書きしない）。--create と一緒には使えない。
 #                            判定の結果を書けなかったときは、エラー（終了コード 1）
 #   -v, --verbose          : コマンドの応答（出力）をコンソールにも表示する
 #   -h, --help             : このヘルプを表示して終了する（1 つ目の引数のときだけ）
@@ -45,7 +45,7 @@
 #      待ってください」と表示して終了する
 #   6. 「<next_tier> にPRを出しますか？」と確認する。next_tier が一番下の段階でないときは、前に「<1 つ前の段階> の組織で、
 #      動作を確かめ終えましたか？」を付ける（印の表示だけを見て、確かめずに上の段階へ上げるのを防ぐため。確認の回数は増やさない）。
-#      AI 操作では、質問の名前は next.pr（doc/ai-operation-design.md）
+#      AI 操作では、質問の名前は pr.create（doc/ai-operation-design.md）
 #        Y: ブラウザで <origin の URL>/compare/<next_tier>...<現在のブランチ>?expand=1 を開き、URL も表示する
 #           （origin の URL は、http(s):// の URL に含まれる認証情報（//<ユーザー>:<Token>@ の部分）を除き、
 #           git@github.com: / ssh://git@github.com/ を https://github.com/ に直し、末尾の .git を除いたもの。
@@ -78,7 +78,7 @@
 #   - 判定の本体は sf-promote-check.sh。環境変数 SF_PROMOTE_CHECK_CMD で、呼ぶコマンドを差し替えられる（テスト用。CI の強制は
 #     ワークフロー側の sf-promote-check.sh が行うため、ここを差し替えても、決まりは破れない）
 #   - 終了コード: 0 = 正常終了（N で終了した場合を含む） / 1 = エラー・q で中断・決まりを破っている / 20 = 確認待ち（AI 操作）
-#   - ログ: ./sf-tools/logs/sf-next.log（実行のたびに作り直す。--status のときは sf-next-status.log）
+#   - ログ: ./sf-tools/logs/sf-pr.log（実行のたびに作り直す。--status のときは sf-pr-status.log）
 # ==============================================================================
 
 # ------------------------------------------------------------------------------
@@ -265,7 +265,7 @@ for idx in "${!TIERS[@]}"; do
     fi
 done
 
-if ask_yn "$CONFIRM_MSG" next.pr; then   # next.pr: AI 操作の質問の名前（doc/ai-operation-design.md）
+if ask_yn "$CONFIRM_MSG" pr.create; then   # pr.create: AI 操作の質問の名前（doc/ai-operation-design.md）
     # リモートリポジトリ情報を取得
     #   http(s):// の URL に含まれる認証情報（//<ユーザー>:<Token>@）は除く（Token を、画面・ログ・ブラウザの履歴に出さないため）。
     #   lib/project.sh の git_origin_redacted は *** に置き換える（表示用）ため、ブラウザで開く URL には使えない

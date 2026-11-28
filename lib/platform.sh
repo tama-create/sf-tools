@@ -183,15 +183,15 @@ run_isolated_home() {
 #
 # 【使い方】
 #   check_sf_cli                       # 終了コードが 0 以外なら、案内を表示して die する
-#   check_sf_cli --warn-only           # 案内を表示するだけで、続行する（戻り値 1）。die したくない呼び出し元用（sf-install.sh）
+#   check_sf_cli --warn-only           # 案内を表示するだけで、続行する（戻り値 1）。die したくない呼び出し元用（sf-refresh.sh）
 #   check_sf_cli --cache               # 日常のコマンド用。成功したら 24 時間は、確認を省略する（下記）。NG なら die する
 #
 # 【動作】
 #   ・GitHub Actions 上（GITHUB_ACTIONS=true）では、何もしない（Linux の npm 版のため）
-#   ・sf-upgrade.sh が、Salesforce CLI の入れ替えが途中で切れた跡を見つけて置いた印（~/.sf-tools-sf-broken。環境変数
+#   ・sf-update-cli.sh が、Salesforce CLI の入れ替えが途中で切れた跡を見つけて置いた印（~/.sf-tools-sf-broken。環境変数
 #     SF_TOOLS_SF_BROKEN_MARK で変更可。跡の場所が 1 行ずつ）があれば、跡の場所と直し方を WARNING で表示する（止めない。
-#     sf-upgrade.sh は裏で動き、その表示は sf-upgrade.log にしか残らないため、ここで、毎回の起動の画面に出す。2026-11-27）。
-#     印は、sf-upgrade.sh が、跡がなくなったのを確かめたときに消す。sf が未インストールでも表示する（跡で sf が消えていることがあるため）
+#     sf-update-cli.sh は裏で動き、その表示は sf-update-cli.log にしか残らないため、ここで、毎回の起動の画面に出す。2026-11-27）。
+#     印は、sf-update-cli.sh が、跡がなくなったのを確かめたときに消す。sf が未インストールでも表示する（跡で sf が消えていることがあるため）
 #   ・sf が未インストールなら、何もしない（各スクリプトの環境チェックが扱う）
 #   ・--cache のとき、成功を ~/.sf-tools-sf-check（環境変数 SF_TOOLS_SF_CHECK_STAMP で変更可）に、sf の場所を
 #     記録し、同じ場所の sf なら、24 時間（ファイルの更新から 1440 分）は sf --version（1〜2 秒）の実行を省略する。
@@ -211,7 +211,7 @@ check_sf_cli() {
     [[ "${GITHUB_ACTIONS:-}" == "true" ]] && return 0
     local broken="${SF_TOOLS_SF_BROKEN_MARK:-$HOME/.sf-tools-sf-broken}" bline
     if [[ -f "$broken" ]]; then
-        log "WARNING" "Salesforce CLI の入れ替えが、途中で切れています（sf-upgrade.sh が見つけました。sf-tools/logs/sf-upgrade.log）:"
+        log "WARNING" "Salesforce CLI の入れ替えが、途中で切れています（sf-update-cli.sh が見つけました。sf-tools/logs/sf-update-cli.log）:"
         while IFS= read -r bline || [[ -n "$bline" ]]; do
             [[ -n "$bline" ]] && log "WARNING" "  $(printf '%s' "$bline" | LC_ALL=C tr -d '\000-\037\177')"   # 表示を崩す文字を除く
         done < "$broken"
@@ -252,13 +252,13 @@ check_sf_cli() {
 # 【背景】
 #   VS Code の Salesforce 拡張（Apex）の言語サーバーは、Java 17 以上が必要（拡張 68.6.1 で確認。クラスファイルが Java 17 の形式）。
 #   Java 11 などでは、起動に失敗し、「telemetry handler is null」という、原因の分かりにくいエラーだけが出る
-#   （本当の原因は、UnsupportedClassVersionError。隠れる）。そのため、sf-install.sh が、事前に気づけるようにする。
+#   （本当の原因は、UnsupportedClassVersionError。隠れる）。そのため、sf-refresh.sh が、事前に気づけるようにする。
 #
 # 【使い方】
 #   check_java_cli             # 17 未満・見つからない・判定できないとき、WARNING を表示して戻り値 1（die はしない）
 #   check_java_cli --cache     # 日常のコマンド用。成功したら 24 時間は、確認を省略する（下記）
 #   check_java_cli --error     # 案内を、WARNING ではなく ERROR で表示する（呼び出し元が、続けられないと判断して die するとき。
-#                              #   sf-init の Phase 1。戻り値は同じ。die は、呼び出し元がする）
+#                              #   sf-project の Phase 1。戻り値は同じ。die は、呼び出し元がする）
 #
 # 【動作】
 #   ・GitHub Actions 上（GITHUB_ACTIONS=true）・環境変数 SF_TOOLS_SKIP_JAVA_CHECK=1 のときは、何もしない（戻り値 0）
@@ -354,11 +354,11 @@ _java_cli_guidance() {
 # check_vscode_extension - VS Code に、Salesforce 拡張（Salesforce Extension Pack）が入っているか確認する
 # ------------------------------------------------------------------------------
 # 【背景】 sf-tools は、VS Code で Salesforce を開発する前提（Apex・LWC の補完・エラー表示など）。拡張が入っていないと、
-#         管理者が、開発者の環境を再現して指導できない。sf-init の Phase 1 が、他の必要なツールと同じく、事前に確認する。
+#         管理者が、開発者の環境を再現して指導できない。sf-project の Phase 1 が、他の必要なツールと同じく、事前に確認する。
 #
 # 【使い方】
 #   check_vscode_extension             # 入っていない・確認できないとき、WARNING を表示して戻り値 1（die はしない）
-#   check_vscode_extension --error     # 案内を、ERROR で表示する（呼び出し元が die するとき。sf-init の Phase 1）
+#   check_vscode_extension --error     # 案内を、ERROR で表示する（呼び出し元が die するとき。sf-project の Phase 1）
 #
 # 【動作】
 #   ・GitHub Actions 上（GITHUB_ACTIONS=true）・環境変数 SF_TOOLS_SKIP_VSCODE_CHECK=1 のときは、何もしない（戻り値 0）

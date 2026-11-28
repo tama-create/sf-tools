@@ -1,7 +1,7 @@
 # ウィザード形式への全面見直し（設計書）
 
-> **ステータス（2026-10-25 時点の実装に合わせた）: 設計（外部レビュー 3 回反映済み）。S1 は実装済み（共通部品 `lib/wizard.sh`・開始画面・ステップの見出し `n / 9`・失敗時の再開の案内・完了画面・sf-tools の自動更新）。S3 は、大部分を実装済み（4.7: ログイン先の 3 択・種類の読み取り・本番は main のみのガード・`--reconnect`・`--status`・`--legacy-connected-app`（のちに廃止。4.6）・sf-start のログイン先の 3 択・add_tier の PR 化。ほかに、アプリ種別の質問の削除・ログインの時間制限と反映待ちの進み具合の表示）。S3 の残り: 環境種別（sf-tools の版）の質問の削除（P4・Q1）、sf-start の「認証済みの組織の一覧から選ぶ」（F6）、ログイン先と実際の種類の食い違いの警告（4.4 (6)）、Trial の期限・接続時の重複の警告（4.7.6）、`--reconnect` のログイン後の確認（4.7.7）。S2（各ステップの画面の刷新）は未実装（各 Phase の画面は、従来の `log` の表示のまま。`wizard_*` を使うのは、`bin/sf-init.sh`（開始・見出し・失敗・完了）と `phases/init/verify.sh`（確認）だけ）。S4 以降は未着手。段階ごとの状態は 8 章**
-> 対象: `sf-init.sh`（最優先）、続いて他のコマンド（sf-start / sf-job / sf-next / sf-deploy / sf-release / sf-metasync / sf-update-secret / sf-sync-wf）
+> **ステータス（2026-10-25 時点の実装に合わせた）: 設計（外部レビュー 3 回反映済み）。S1 は実装済み（共通部品 `lib/wizard.sh`・開始画面・ステップの見出し `n / 9`・失敗時の再開の案内・完了画面・sf-tools の自動更新）。S3 は、大部分を実装済み（4.7: ログイン先の 3 択・種類の読み取り・本番は main のみのガード・`--reconnect`・`--status`・`--legacy-connected-app`（のちに廃止。4.6）・sf-start のログイン先の 3 択・add_tier の PR 化。ほかに、アプリ種別の質問の削除・ログインの時間制限と反映待ちの進み具合の表示）。S3 の残り: 環境種別（sf-tools の版）の質問の削除（P4・Q1）、sf-start の「認証済みの組織の一覧から選ぶ」（F6）、ログイン先と実際の種類の食い違いの警告（4.4 (6)）、Trial の期限・接続時の重複の警告（4.7.6）、`--reconnect` のログイン後の確認（4.7.7）。S2（各ステップの画面の刷新）は未実装（各 Phase の画面は、従来の `log` の表示のまま。`wizard_*` を使うのは、`bin/sf-project.sh`（開始・見出し・失敗・完了）と `phases/init/verify.sh`（確認）だけ）。S4 以降は未着手。段階ごとの状態は 8 章**
+> 対象: `sf-project.sh`（最優先）、続いて他のコマンド（sf-start / sf-job / sf-pr / sf-deploy / sf-release / sf-metasync / sf-update-secret / sf-update-workflows）
 > 外部レビュー（Codex）の指摘と、その対応は、10 章。
 
 ---
@@ -31,13 +31,13 @@
 
 ## 2. 現状の問題（洗い出し）
 
-`sf-init.sh` の、利用者の操作・待ち時間の箇所を、コードで確認した結果。「場所（根拠）」の行番号は、設計した時点のもの（その後の変更で、ずれている）。「状態」は、2026-10-25 時点の実装に合わせた。
+`sf-project.sh` の、利用者の操作・待ち時間の箇所を、コードで確認した結果。「場所（根拠）」の行番号は、設計した時点のもの（その後の変更で、ずれている）。「状態」は、2026-10-25 時点の実装に合わせた。
 
-### 2.1 sf-init.sh
+### 2.1 sf-project.sh
 
 | # | 場所（根拠） | 問題 | 状態 |
 |---|---|---|---|
-| P1 | 開始時（`bin/sf-init.sh`） | 全体像（何ステップか・所要時間・事前に用意するもの）が、出ない | **実装済み**（S1。開始画面。所要時間は「30〜60 分ほどが目安」のまま。V7 の実測による確定の記録はない） |
+| P1 | 開始時（`bin/sf-project.sh`） | 全体像（何ステップか・所要時間・事前に用意するもの）が、出ない | **実装済み**（S1。開始画面。所要時間は「30〜60 分ほどが目安」のまま。V7 の実測による確定の記録はない） |
 | P2 | 全体（各 `phases/init/*.sh`） | 表示が「Phase 6:」。Phase 3・4・8・9 は、利用者の操作がなく、10 個のうち何が残っているかも分からない | **一部実装**（S1。ステップの見出し `ステップ n / 9` と完了済みを出し、各 Phase の見出しから「Phase N」を外した。自動のステップの 1 行表示（`wizard_auto`）は、未使用で、各 Phase の `log` が、そのまま出る） |
 | P3 | `07_slack.sh` | 通知先の共有チャンネルを**先に作っておく**必要があるが、Phase 7 の途中で、初めて出る | **実装済み**（開始画面の「先に、用意してください」に、共有チャンネルを出す） |
 | P4 | `02_project_info.sh:81-112` | 「環境種別（本番／検証）」を聞く。検証環境は、sf-tools の開発者専用で、一般の利用者は答えられない | **未対応**（Phase 2 は、今も「sf-tools の版（1 = 配布版 main / 2 = 開発版 development）」を聞く。文言は「本番／検証」から「配布版／開発版」に変わった） |
@@ -47,14 +47,14 @@
 | P8 | `06_pat_token.sh` | 「発行済みの Token がありますか」と聞いていた。Token の値は、作成直後にしか見られない | **改善済み**（質問をやめ、ブラウザをすぐ開く） |
 | P9 | `07_slack.sh:41-56` | 手順が 7 つ並ぶだけで、「いま、どの画面か」の目印が少ない | **未対応**（S2。画面は 3 つに分けていない。Bot Token の入力は `*` で表示するようになった） |
 | P10 | 全体 | 操作の語彙が、揃っていない（Y/N/q・番号・Enter・貼り付け）。画面の下に、操作のヒントがない | **一部実装**（開始画面の確認・`verify.sh` の確認は、Enter / q（`wizard_confirm`）。各 Phase の中は、Y/N/q・番号のまま。画面の下のヒント（`wizard_hint`）は、未使用） |
-| P11 | `bin/sf-init.sh` | 失敗時に、Phase 番号の `--resume N` を、利用者が知る必要があった | **改善済み**（引数なしで再実行 → 「続きをやる」を選ぶ） |
-| P12 | `bin/sf-init.sh` 末尾 | 完了後に、次にやることが出ない | **実装済み**（S1。完了画面: 4.4 (7)） |
-| P13 | `bin/sf-init.sh`、`02_project_info.sh:79` | 確認が重なる（管理者の警告 → 続行？ → Phase 2 で よろしいですか？） | **一部実装**（管理者の警告と開始の確認は、開始画面の 1 回（`wizard_confirm`）にまとめた。Phase 2 の「よろしいですか？」（`ask_yn`）は、残っている） |
+| P11 | `bin/sf-project.sh` | 失敗時に、Phase 番号の `--resume N` を、利用者が知る必要があった | **改善済み**（引数なしで再実行 → 「続きをやる」を選ぶ） |
+| P12 | `bin/sf-project.sh` 末尾 | 完了後に、次にやることが出ない | **実装済み**（S1。完了画面: 4.4 (7)） |
+| P13 | `bin/sf-project.sh`、`02_project_info.sh:79` | 確認が重なる（管理者の警告 → 続行？ → Phase 2 で よろしいですか？） | **一部実装**（管理者の警告と開始の確認は、開始画面の 1 回（`wizard_confirm`）にまとめた。Phase 2 の「よろしいですか？」（`ask_yn`）は、残っている） |
 | P14 | `init-common.sh:232` | sf-tools が古いと、更新したうえで「中断」される。もう一度、実行しなおす必要がある | **実装済み**（S1。確認のうえ更新し、同じ引数で、自動で実行しなおす。4.2） |
 | P15 | `init-common.sh:437` | ブラウザでのログインは、約 2 分で時間切れになる。利用者には、その時間制限が、事前に伝わらない | **実装済み**（ログインの直前に「約 2 分で時間切れになります」を表示する） |
 | P16 | `init-common.sh` の JWT 接続テスト | 反映待ちのリトライ（最大 20 回 × 30 秒 = 約 10 分）の間、進み具合が分からない | **実装済み**（待つたびに「Salesforce の反映を待っています（i / 20 回目・最大 約 N 分）」を表示する） |
 | P17 | `bin/sf-start.sh:93-94` | ログイン先を、**エイリアスの名前**で決めている（`prod` なら `login.salesforce.com`、それ以外は `test.salesforce.com`）。Developer Edition や、別名の本番は、誤ったログイン先になる。毎日使うコマンド | **一部実装**（S3。エイリアスの名前では決めず、ログイン先の 3 択にした。エイリアスは、今も入力する。認証済みの組織の一覧から選ぶ（F6）のは、未実装） |
-| P18 | `init-common.sh`・`sf-update-secret.sh` ほか | 組織の種類が「本番／Sandbox」の 2 択で、Developer Edition を選べない。段階（main）と「本番」を、結びつけた文言が、約 40 か所ある | **一部実装**（S3。Y/N は、`init-common.sh`・`sf-update-secret.sh` とも、ログイン先の 3 択にした。ワークフローのステップ名は中立にした（例: `main の組織にログイン（JWT）`）。sf-init のブランチ構成の説明・ステップの目的の文言には、「本番」が残る） |
+| P18 | `init-common.sh`・`sf-update-secret.sh` ほか | 組織の種類が「本番／Sandbox」の 2 択で、Developer Edition を選べない。段階（main）と「本番」を、結びつけた文言が、約 40 か所ある | **一部実装**（S3。Y/N は、`init-common.sh`・`sf-update-secret.sh` とも、ログイン先の 3 択にした。ワークフローのステップ名は中立にした（例: `main の組織にログイン（JWT）`）。sf-project のブランチ構成の説明・ステップの目的の文言には、「本番」が残る） |
 | P19 | `phases/init/add_tier.sh:154-155` | **段階の追加で、`git push --no-verify origin main` を直接実行する**（フックを迂回し、main への直接 push）。Ruleset（PR 必須）がある環境では、失敗するか、管理者の権限で、通ってしまう。段階の追加と、組織の接続も、1 つの処理に、まとまっている | **対応済み**（S3。main へは直接 push せず、`branches.txt` の変更を PR にする（`gh pr create --base main`）。Salesforce の接続を先に行い、成功してから、ブランチと PR を作る。1 つのコマンドのまま、順序で分けた。詳細は `add_tier.sh` の冒頭コメント・`doc/dev-reference.md` 4.13.1） |
 
 ### 2.2 他のコマンド
@@ -64,7 +64,7 @@
 | sf-deploy / sf-release / sf-metasync | 確認の文言が、コマンドごとに違う。何が起きるか（影響）が、確認の直前に出ていない（本番に影響） | **高** |
 | sf-start | 「接続する組織のエイリアスを入力」。エイリアスが何か、一覧から選べない | 低 |
 | sf-job | 「ジョブ名」の書式・例が、入力のときに分かりにくい | 低 |
-| sf-next / sf-push / sf-sync-wf | 実行後の「次にやること」が、文章のみ・コマンドごとに形式が違う | 低 |
+| sf-pr / sf-push / sf-update-workflows | 実行後の「次にやること」が、文章のみ・コマンドごとに形式が違う | 低 |
 | sf-update-secret | 入力が 20 箇所。流れの全体像と、現在地がない | 中 |
 
 ---
@@ -88,7 +88,7 @@
 
 ---
 
-## 4. sf-init のウィザード設計
+## 4. sf-project のウィザード設計
 
 ### 4.1 ステップ一覧（内部の Phase との対応。表示と実行順は一致させる）
 
@@ -106,7 +106,7 @@
 | 8 / 9 Salesforce の接続 | 10 | 段階ごとに、ログイン先（URL）を選び、ブラウザでログイン（4.7。種類は、ログイン後に、組織から読み取る） |
 | 9 / 9 動作の確認 | なし（`phases/init/verify.sh`） | Enter で確認する / `s` で、あとで（通しの実行と、中断後の「続きをやる」のときだけ聞く） |
 
-- 対応の正本は、`bin/sf-init.sh` の `WIZ_STEP_TITLES` / `WIZ_PHASE_STEP`。ステップ 9 の条件・後処理の順は、`doc/dev-reference.md` 4.13。
+- 対応の正本は、`bin/sf-project.sh` の `WIZ_STEP_TITLES` / `WIZ_PHASE_STEP`。ステップ 9 の条件・後処理の順は、`doc/dev-reference.md` 4.13。
 
 ### 4.2 開始画面（R1）
 
@@ -251,7 +251,7 @@
     3. 【管理者用フォルダ】は、残してあります（削除しないでください）:
          ~/sf/admin/force-yamada
          ・（用途・admin ブランチ・main の取り込み・日常の開発には使わないこと）
-    4. 動作の確認: （結果。あとで行う場合は、sf-init.sh --verify）
+    4. 動作の確認: （結果。あとで行う場合は、sf-project.sh --verify）
     5. Salesforce のメタデータの同期: （結果。行わなかったときは、その理由）
 ```
 
@@ -269,7 +269,7 @@
 
   【直し方】 作成ページで、workflow にチェックが入っていることを確認して、
              作り直してください。
-  【やり直し】 もう一度 sf-init.sh を実行し、「続きをやる」を選ぶと、
+  【やり直し】 もう一度 sf-project.sh を実行し、「続きをやる」を選ぶと、
                「GitHub の Token」の最初から、再開します。
                （ここまでの内容は、保存されています）
 ```
@@ -279,7 +279,7 @@
 ```
   ✖ うまくいきませんでした
      原因     : 「GitHub の Token」で、中断しました（上の表示を、確認してください）
-  【やり直し】 もう一度 sf-init.sh を実行し、「続きをやる」を選ぶと、「GitHub の Token」の最初から、
+  【やり直し】 もう一度 sf-project.sh を実行し、「続きをやる」を選ぶと、「GitHub の Token」の最初から、
                再開します（ここまでの内容は、保存されています）
 ```
 
@@ -290,9 +290,9 @@
 
 ### 4.6 `--legacy-connected-app`（廃止）
 
-2026-11 に廃止した（Salesforce の接続アプリケーションのサポート終了（Summer '27）を前に、外部クライアントアプリだけにした）。オプションは、不明なオプションとして中断する。以前の状態ファイルに残る `APP_TYPE` は、読まない（値が残っていても、無視する）。正本は、`bin/sf-init.sh` と `phases/init/10_sf_auth.sh` の冒頭コメント。
+2026-11 に廃止した（Salesforce の接続アプリケーションのサポート終了（Summer '27）を前に、外部クライアントアプリだけにした）。オプションは、不明なオプションとして中断する。以前の状態ファイルに残る `APP_TYPE` は、読まない（値が残っていても、無視する）。正本は、`bin/sf-project.sh` と `phases/init/10_sf_auth.sh` の冒頭コメント。
 
-以前の仕様（S3 で実装）: `sf-init.sh --legacy-connected-app`（環境変数 `SF_INIT_LEGACY_CONNECTED_APP=1`）で、従来の手動手順（Connected App の作成案内・コンシューマー鍵とユーザー名の入力）に入り、種別を `APP_TYPE` として状態ファイルに保存していた。
+以前の仕様（S3 で実装）: `sf-project.sh --legacy-connected-app`（環境変数 `SF_INIT_LEGACY_CONNECTED_APP=1`）で、従来の手動手順（Connected App の作成案内・コンシューマー鍵とユーザー名の入力）に入り、種別を `APP_TYPE` として状態ファイルに保存していた。
 
 ---
 
@@ -325,11 +325,11 @@
 
 | 場面 | やること | 使うもの |
 |---|---|---|
-| お試し（Sandbox 1 つ） | 1 段階（main）にして、ログイン先に Sandbox を選ぶ | `sf-init.sh` |
-| 本番にも入れる | main の接続先を、本番に付け替える。または、段階を増やして、本番を後ろに置く | `sf-init.sh --reconnect main` / `--add-tier` |
-| 開発用・検証用の組織を増やす | 段階を増やす | `sf-init.sh --add-tier staging` / `--add-tier develop` |
-| 本番作業の代行 | 利用者の管理者として、ブラウザでログインして、接続する | `sf-init.sh`（F2 の [1]） |
-| いまの接続を見る | 段階ごとの、ログイン先・組織名・種類・ユーザーを、一覧にする（実装では、その前に、セットアップの診断も出す） | `sf-init.sh --status`（実装済み） |
+| お試し（Sandbox 1 つ） | 1 段階（main）にして、ログイン先に Sandbox を選ぶ | `sf-project.sh` |
+| 本番にも入れる | main の接続先を、本番に付け替える。または、段階を増やして、本番を後ろに置く | `sf-project.sh --reconnect main` / `--add-tier` |
+| 開発用・検証用の組織を増やす | 段階を増やす | `sf-project.sh --add-tier staging` / `--add-tier develop` |
+| 本番作業の代行 | 利用者の管理者として、ブラウザでログインして、接続する | `sf-project.sh`（F2 の [1]） |
+| いまの接続を見る | 段階ごとの、ログイン先・組織名・種類・ユーザーを、一覧にする（実装では、その前に、セットアップの診断も出す） | `sf-project.sh --status`（実装済み） |
 
 #### 4.7.4 完了画面と `--status` の表示（例）
 
@@ -339,10 +339,10 @@
     staging  → test.salesforce.com    Sandbox            admin@example.com.test   組織 ID 00D…BBB  確認 2026-10-11
     develop  → test.salesforce.com    Sandbox            admin@example.com.dev    組織 ID 00D…CCC  確認 2026-10-11
 
-  接続先を変えるとき: sf-init.sh --reconnect <main|staging|develop>
+  接続先を変えるとき: sf-project.sh --reconnect <main|staging|develop>
 ```
 
-- **実装**（`phases/init/status.sh`）: 完了画面には、接続の一覧を出さない（組織の数だけ。4.4 (7)）。`--status` は、セットアップの診断（`lib/diag.sh`）のあとに、「【Salesforce の接続（段階ごと）】」として、段階ごとに 3 行（ログイン先 / 種類・ユーザー / 組織名・組織 ID・最終確認）で出す。staging / develop は、`branches.txt` にあるときだけ。表示するのは、GitHub の Variables に保存した値（いまログインして確かめた値ではない）。同じ組織 ID の段階は警告、本番が main 以外なら ERROR で、終了コード 1（診断の不足も 1）。完了済みのプロジェクトで、引数なしの `sf-init.sh` の [1] からも見られる。
+- **実装**（`phases/init/status.sh`）: 完了画面には、接続の一覧を出さない（組織の数だけ。4.4 (7)）。`--status` は、セットアップの診断（`lib/diag.sh`）のあとに、「【Salesforce の接続（段階ごと）】」として、段階ごとに 3 行（ログイン先 / 種類・ユーザー / 組織名・組織 ID・最終確認）で出す。staging / develop は、`branches.txt` にあるときだけ。表示するのは、GitHub の Variables に保存した値（いまログインして確かめた値ではない）。同じ組織 ID の段階は警告、本番が main 以外なら ERROR で、終了コード 1（診断の不足も 1）。完了済みのプロジェクトで、引数なしの `sf-project.sh` の [1] からも見られる。
 
 #### 4.7.5 影響を受ける既存の箇所（コードで確認）
 
@@ -353,12 +353,12 @@
 | `bin/sf-start.sh:93-94` | **エイリアスが `prod` なら `login.salesforce.com`、それ以外は `test.salesforce.com`**。Developer Edition や、別名の本番は、誤ったログイン先になる | F6: 認証済みの組織の一覧から選ぶ。新規は F2 の 3 択（**一部実装**: 3 択は実装済み（`org_choose_login_url`）。一覧から選ぶのは未実装） |
 | `phases/init/init-common.sh`（2 か所）・`bin/sf-update-secret.sh`（3 か所） | 組織ごとに「Sandbox ですか？ Y/N」。Developer Edition は、「N」と答えるしかない | F2 の 3 択に統一する（**実装済み**: 両方とも `org_choose_login_url`。`register_jwt_secret` は、のちに接続アプリケーションの廃止で、削除した） |
 | テンプレートのワークフロー（`SF_INSTANCE_URL_*`） | ログイン先は、変数（URL）で決まる。**種類に依存しない**（コメントの文言が、「本番組織」と書いているだけ） | コメントの文言を、中立にする（**実装済み**: テンプレートのワークフローに「本番」の語はない。ステップ名は `main の組織にログイン（JWT）` など） |
-| 「本番」を前提にした文言（約 40 か所: ワークフロー・`sf-release.sh`・`sf-metasync.sh`・`sf-update-secret.sh` ほか） | main を「本番」と呼んでいる | F4: 段階の名前と、実際の組織名にする。`sf-release.sh` の確認文は、実際の組織名と種類を出す（**一部実装**: ワークフロー・`sf-metasync.sh` は中立にした。`sf-release.sh` の確認文に、組織名と種類は出ない（代わりに、ローカルからは、本番・種類を確認できない組織へのリリースを拒否する: `org_local_release_check`）。sf-init のブランチ構成の説明とステップ 4 の目的の文言に、「本番」が残る） |
+| 「本番」を前提にした文言（約 40 か所: ワークフロー・`sf-release.sh`・`sf-metasync.sh`・`sf-update-secret.sh` ほか） | main を「本番」と呼んでいる | F4: 段階の名前と、実際の組織名にする。`sf-release.sh` の確認文は、実際の組織名と種類を出す（**一部実装**: ワークフロー・`sf-metasync.sh` は中立にした。`sf-release.sh` の確認文に、組織名と種類は出ない（代わりに、ローカルからは、本番・種類を確認できない組織へのリリースを拒否する: `org_local_release_check`）。sf-project のブランチ構成の説明とステップ 4 の目的の文言に、「本番」が残る） |
 | Developer Edition での JWT 認証 | 過去に、原因未特定のエラー（メモリ） | 選択肢に出す前に、実機で確認する（Q8。確認の記録は、本書にない） |
 
 #### 4.7.6 接続情報のモデル（共通）
 
-`sf-init.sh`・`--reconnect`・`--status`・`sf-start.sh`・`sf-update-secret.sh` が、**同じ接続情報モデル**を使う（実装を、共通の関数に集約する）。段階ごとに、次を持つ。
+`sf-project.sh`・`--reconnect`・`--status`・`sf-start.sh`・`sf-update-secret.sh` が、**同じ接続情報モデル**を使う（実装を、共通の関数に集約する）。段階ごとに、次を持つ。
 
 | 項目 | 内容 | 保存先 |
 |---|---|---|
@@ -369,7 +369,7 @@
 | 組織の種類 | `IsSandbox`・`OrganizationType`・（Trial の場合）期限 | `SF_ORG_KIND_*`（実装済み。表示用。保存するのは、判定した種類 production / sandbox / developer / trial / unknown だけで、元の項目と Trial の期限は、保存しない） |
 | 最終確認日時 | 実際にログインして、確認した日時 | `SF_ORG_CHECKED_*`（実装済み） |
 
-- 保存は `org_save`（`lib/org.sh`）。組織の情報を読み取れたとき（組織 ID があるとき）だけ保存する。共通の関数は、`lib/org.sh`（ログイン先の選択・種類の読み取り・ガード・保存）にまとめた。`sf-init.sh`・`--reconnect`・`--add-tier` は、`phases/init/init-common.sh` の `register_jwt_secret_eca` を通して使う。`sf-update-secret.sh` は、`lib/org.sh` を直接使う（ログイン先の選択・`org_jwt_test`・`org_guard`・`org_save`）。`sf-start.sh` は、ログイン先の選択だけを使う。`--status` は、Variables を読むだけ。
+- 保存は `org_save`（`lib/org.sh`）。組織の情報を読み取れたとき（組織 ID があるとき）だけ保存する。共通の関数は、`lib/org.sh`（ログイン先の選択・種類の読み取り・ガード・保存）にまとめた。`sf-project.sh`・`--reconnect`・`--add-tier` は、`phases/init/init-common.sh` の `register_jwt_secret_eca` を通して使う。`sf-update-secret.sh` は、`lib/org.sh` を直接使う（ログイン先の選択・`org_jwt_test`・`org_guard`・`org_save`）。`sf-start.sh` は、ログイン先の選択だけを使う。`--status` は、Variables を読むだけ。
 
 - **用語**: 「ログイン入口」（`login.salesforce.com` など。組織そのものの URL ではない）と、「組織固有の URL」（My Domain）を、区別して書く。
 - **種類の読み取り**: ログイン後に、`sf data query` で、`Organization`（`Id`・`Name`・`IsSandbox`・`OrganizationType`・`TrialExpirationDate`）を取得する。**取得できない・矛盾する場合は、「判定不能」と表示し、推測しない。main 以外には、接続しない**（main は、続行する）。項目名・値は、実機の応答を記録してから、仕様にする（Q10）。（実装済み: `org_read_info` → `org_kind`。判定の順は `lib/org.sh` の冒頭コメント・`doc/jwt-auth-spec.md`）
@@ -390,11 +390,11 @@
 
 ## 5. 共通部品（lib の設計）
 
-画面の見た目を、コマンドごとに作らず、**共通の部品**で出す。実装は `lib/wizard.sh`（S1。引数・動作の正本は、その冒頭コメント。`common.sh` からは読み込まず、`bin/sf-init.sh`・`phases/init/verify.sh` が個別に読み込む。テストは `tests/test_wizard.sh`）。
+画面の見た目を、コマンドごとに作らず、**共通の部品**で出す。実装は `lib/wizard.sh`（S1。引数・動作の正本は、その冒頭コメント。`common.sh` からは読み込まず、`bin/sf-project.sh`・`phases/init/verify.sh` が個別に読み込む。テストは `tests/test_wizard.sh`）。
 
 | 関数（設計の案） | 役割 | 実装（2026-10-25） |
 |---|---|---|
-| `wizard_begin <タイトル> <ステップ名…>` | 開始画面（全体像・事前準備・ステップ一覧）を出し、Enter を待つ | **なし**。`sf-init.sh` が、`wizard_banner`（太枠のタイトル）・`wizard_checklist`（「□ 項目」の一覧）・`wizard_confirm` を組み合わせて出す |
+| `wizard_begin <タイトル> <ステップ名…>` | 開始画面（全体像・事前準備・ステップ一覧）を出し、Enter を待つ | **なし**。`sf-project.sh` が、`wizard_banner`（太枠のタイトル）・`wizard_checklist`（「□ 項目」の一覧）・`wizard_confirm` を組み合わせて出す |
 | `wizard_step <番号> <タイトル> <目的の 1 文>` | ステップの見出し（現在地・完了済み）を出す | `wizard_step N TOTAL TITLE [PURPOSE [完了したステップ名...]]`（全体の数と、完了済みの名前も渡す） |
 | `wizard_do <手順…>` | 「あなたがやること」を、番号付きで出す | あり（未使用） |
 | `wizard_next <説明>` | 「そのあと」を出す | あり（未使用） |
@@ -418,11 +418,11 @@
 
 | 順 | コマンド | 理由 | 見直す内容 |
 |---|---|---|---|
-| 1 | sf-init | 初見の利用者が、必ず通る。入力が最も多い | 本設計の全面適用 |
+| 1 | sf-project | 初見の利用者が、必ず通る。入力が最も多い | 本設計の全面適用 |
 | 2 | sf-deploy / sf-release / sf-metasync | **本番に影響する**。確認の不足は、安全性に直結する | 確認の直前に、「何が起きるか」（影響）を、定型で出す。確認の語彙を統一する |
 | 3 | sf-start | 毎日使う。**エイリアス名でログイン先を決めている不具合（P17）** | 認証済みの組織の一覧（`sf org list`）から選ぶ。新規は、ログイン先の 3 択（4.7）。初回の説明（ログイン先の 3 択だけ、S3 で実装済み） |
 | 4 | sf-job | 毎日使う | ジョブ名の書式と例を、入力の直前に出す。作ったあとの「次にやること」を出す |
-| 5 | sf-next / sf-push / sf-sync-wf | 実行後の案内 | 「次にやること」を、定型で出す |
+| 5 | sf-pr / sf-push / sf-update-workflows | 実行後の案内 | 「次にやること」を、定型で出す |
 | 6 | sf-update-secret | 利用頻度が低い。入力が多い | 全体像と現在地を出す |
 
 > 全コマンド共通の最低ライン: **終了時に、「できたこと」と「次にやること」を 1 行以上出す**。
@@ -437,7 +437,7 @@
 | V2 | 入力の流れ | 台本（標準入力）を、**シナリオごとに分けて**管理する（通常・途中で失敗・再開・q で中断・1/2/3 階層）。各シナリオで、期待するステップの見出しが、順に出ることを確認する（入力の位置だけを見る検証にしない） |
 | V3 | 失敗・再開 | 各ステップで失敗させ、三点セットが出ること、続きから再開できることを確認する |
 | V4 | 外部レビュー | 本設計書（済）と、各段階の実装後のコード・画面を、Codex にレビューさせ、指摘を反映する |
-| V5 | 実機 | **Windows の Git Bash**（最優先）で、検証環境（`SF_TOOLS_BRANCH=development`）の `sf-init` を、初見の操作として、通しで実行する（利用者による確認）。ブラウザが開かない場合の表示も確認する |
+| V5 | 実機 | **Windows の Git Bash**（最優先）で、検証環境（`SF_TOOLS_BRANCH=development`）の `sf-project` を、初見の操作として、通しで実行する（利用者による確認）。ブラウザが開かない場合の表示も確認する |
 | V6 | 「迷い」の確認 | 利用者が、1.2 の疑問を持たずに、最後まで進めたか。持った箇所は、設計の不具合として、直す |
 | V7 | 所要時間の測定 | 1・2・3 階層ごとに、実機で測り、開始画面の値を確定する |
 
@@ -447,10 +447,10 @@
 
 | 段階 | 内容 | 状態（2026-10-25） |
 |---|---|---|
-| S1 | 共通部品（`wizard_*`）と、その自動テスト。`sf-init` の開始画面・完了画面・現在地・sf-tools の自動更新（P14） | **実装済み**（ほかに、失敗時の再開の案内（`wizard_fail`）と、ステップ 9「動作の確認」。部品の一覧は 5 章） |
-| S2 | `sf-init` の各ステップの画面を、順に刷新（Token は、実装済みの文言を移植） | **未実装**（各 Phase の画面は、従来の `log` の表示のまま。`wizard_do` / `wizard_next` / `wizard_hint` / `wizard_auto` は、どの Phase も使っていない。対象: 4.3 の共通の見た目・4.4 (1) (3)〜(6)・4.5 の原因と直し方） |
+| S1 | 共通部品（`wizard_*`）と、その自動テスト。`sf-project` の開始画面・完了画面・現在地・sf-tools の自動更新（P14） | **実装済み**（ほかに、失敗時の再開の案内（`wizard_fail`）と、ステップ 9「動作の確認」。部品の一覧は 5 章） |
+| S2 | `sf-project` の各ステップの画面を、順に刷新（Token は、実装済みの文言を移植） | **未実装**（各 Phase の画面は、従来の `log` の表示のまま。`wizard_do` / `wizard_next` / `wizard_hint` / `wizard_auto` は、どの Phase も使っていない。対象: 4.3 の共通の見た目・4.4 (1) (3)〜(6)・4.5 の原因と直し方） |
 | S3 | 質問の削減（環境種別・アプリ種別）、**段階と組織の種類の独立（4.7: ログイン先の 3 択・種類の読み取り・`--reconnect`・`--status`・sf-start の修正）**、`--legacy-connected-app`、待ち時間・制限時間の表示（P15・P16）、台本・テストの更新 | **大部分を実装済み**（アプリ種別の質問の削除・4.7 の中心・`--legacy-connected-app`・P15・P16・add_tier の PR 化（P19）・外部レビュー（10.4））。**残り**: 環境種別の質問の削除（P4・Q1）、sf-start の一覧からの選択（F6）、ログイン先と種類の食い違いの警告（4.4 (6)）、組織 ID の必須化・接続時の重複の警告・Trial の期限の警告（4.7.6）、`--reconnect` のログイン後の確認と一括更新（4.7.7 の 2・4） |
-| S4 | sf-deploy / sf-release / sf-metasync の確認の統一（影響の表示）。続けて sf-start・sf-job・その他 | **未着手**（確認の文言は、コマンドごとに違うまま。`wizard.sh` を使うのは、`sf-init.sh` と `phases/init/verify.sh` だけ） |
+| S4 | sf-deploy / sf-release / sf-metasync の確認の統一（影響の表示）。続けて sf-start・sf-job・その他 | **未着手**（確認の文言は、コマンドごとに違うまま。`wizard.sh` を使うのは、`sf-project.sh` と `phases/init/verify.sh` だけ） |
 | S5 | 各段階ごとに、外部レビューと、実機の確認（検証環境）→ mm → rr | S3 の外部レビューは 10.4。実機の確認・リリースの記録は、本書の範囲外 |
 
 ---

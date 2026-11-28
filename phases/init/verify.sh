@@ -1,14 +1,14 @@
 #!/bin/bash
 # ==============================================================================
-# verify.sh - 実際のリポジトリと組織で、リリース・削除が動くことを検証する（sf-init.sh --verify。管理者向け）
+# verify.sh - 実際のリポジトリと組織で、リリース・削除が動くことを検証する（sf-project.sh --verify。管理者向け）
 # ==============================================================================
-# sf-init で作った、実際のリポジトリ（force-*）が、実際の Salesforce 組織に対して、正しく動くことを確認する。
+# sf-project で作った、実際のリポジトリ（force-*）が、実際の Salesforce 組織に対して、正しく動くことを確認する。
 # 誰も使わない、単純な Apex（Hello World: SfToolsE2eHello / SfToolsE2eHelloTest）を、各段階にリリースして、削除する。
 # 何をするかを先に表示し、Enter を 1 回押して確認してから、実行する。
 #
 # 【使い方】
-#   force-* ディレクトリの中で、sf-init.sh --verify [オプション] を実行する。下の【オプション】は、すべて、そのまま、
-#   このスクリプトに渡る。sf-init.sh は、セットアップの最後のステップ（動作の確認）と、完了済みのときのメニューからも、
+#   force-* ディレクトリの中で、sf-project.sh --verify [オプション] を実行する。下の【オプション】は、すべて、そのまま、
+#   このスクリプトに渡る。sf-project.sh は、セットアップの最後のステップ（動作の確認）と、完了済みのときのメニューからも、
 #   このスクリプトを呼び出す。
 #
 # 【オプション】
@@ -35,7 +35,7 @@
 #   --validate-only : （--components と一緒に。なければ die。--cleanup とは一緒に指定できない）検証だけを行う。
 #                 サンプルの PR を develop 向けに出し、wf-validate（dry-run）の成功を確認して、PR は、マージせずに閉じる。
 #                 組織には、何も反映しない
-#   -h, --help  : このヘルプを表示して終了する（第 1 引数に指定したときのみ。sf-init.sh --verify -h では、sf-init.sh の
+#   -h, --help  : このヘルプを表示して終了する（第 1 引数に指定したときのみ。sf-project.sh --verify -h では、sf-project.sh の
 #                 ヘルプが出る）
 #   ※ そのほかの引数は、「不明なオプションです」で終了する（終了コード 1）
 #
@@ -46,14 +46,14 @@
 #                      段階は、リモートのブランチから決める（一覧を取得できない・main がなければ die。staging があれば staging、
 #                      develop と staging の両方があれば develop も。--components のときは develop だけで、develop がなければ die）。
 #                      --components では、develop の labels のファイルを確かめる（【オプション】--components）
-#   1. 診断          : セットアップの状態（sf-init.sh --status と同じ lib/diag.sh の診断。対象は、手順 0 で決めた段階だけ）。
+#   1. 診断          : セットアップの状態（sf-project.sh --status と同じ lib/diag.sh の診断。対象は、手順 0 で決めた段階だけ）。
 #                      不足があれば die。
 #                      --cleanup 以外では、検証用と同じパスのファイルが、いずれかの段階のブランチにすでにあれば die
 #   2. 実行内容の表示 : リポジトリ・段階ごとの組織の名前と種類・実行する内容・目安の時間。本番（または種類を判定できない）
 #                      組織は、赤く表示する。--plan は、ここで終了する
 #   3. 確認          : 管理者向けの警告と、Enter の確認（Enter / Y で進む。N / q は、何も変更せずに中断）。本番（または
 #                      種類を判定できない）組織があるときは、質問の文面で、本番を含むことを明示する。
-#                      SF_VERIFY_CONFIRMED=1（sf-init.sh のセットアップの最後のステップから呼ばれたとき。sf-init.sh 側で
+#                      SF_VERIFY_CONFIRMED=1（sf-project.sh のセットアップの最後のステップから呼ばれたとき。sf-project.sh 側で
 #                      確認済み）は、警告と確認を省く
 #   3b. 環境の確認   : --cleanup 以外のとき、環境全体を、最初に確認する（e2e の確認と同じ観点）。NG があれば、そこで止める
 #                      （組織に、何も変更しない。wf-metasync は、手前の 2 つの確認が OK のときだけ、実行する）
@@ -89,7 +89,7 @@
 # 【前提条件】
 #   - force-* ディレクトリ（origin が GitHub のリポジトリ）の中で実行すること
 #   - gh の認証ユーザーが、リポジトリのオーナー（組織では、その組織の有効な管理者）であること（check_gh_owner）
-#   - sf-init のセットアップが済んでいること（手順 1 の診断が OK であること）
+#   - sf-project のセットアップが済んでいること（手順 1 の診断が OK であること）
 #
 # 【補足】
 #   ・リポジトリに、PR・コミット（追加と削除）が、残る（作業用ブランチは、最後に削除する）。Slack に、通知が届く。
@@ -100,7 +100,7 @@
 #   ・ブランチ保護で、PR のマージが拒否されると、その段階で止まり、PR が残る
 #   ・検証用と同じパスのファイル（Hello World では SfToolsE2eHello / SfToolsE2eHelloTest）が、すでにリポジトリにあると、
 #     上書きして削除してしまうため、実行しない（--cleanup を除く）。組織だけにある同名のクラスは、検出できない
-#   ・ログは ~/sf-tools/logs/verify.log に、実行ごとに新しく書く（sf-init.log とは別）
+#   ・ログは ~/sf-tools/logs/verify.log に、実行ごとに新しく書く（sf-project.log とは別）
 #   ・終了コード: 0 = すべての確認が成功（--plan・--help を含む）/ 1 = 失敗した確認がある・途中で止めた・die
 # ==============================================================================
 
@@ -113,12 +113,12 @@ if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
     exit 0
 fi
 
-# ログは、sf-init.log とは別のファイルに書く（sf-init.sh のステップ 9 から呼ばれたとき、sf-init のログを、上書きしないため）
+# ログは、sf-project.log とは別のファイルに書く（sf-project.sh のステップ 9 から呼ばれたとき、sf-project のログを、上書きしないため）
 readonly SCRIPT_NAME="verify"
 mkdir -p "$HOME/sf-tools/logs" 2>/dev/null || true  # run 不使用: common.sh の読み込み前（run が未定義）
 readonly LOG_FILE="$HOME/sf-tools/logs/${SCRIPT_NAME}.log"
 readonly LOG_MODE="NEW"
-export SF_INIT_MODE=1   # sf-init.sh の一部として動く（force-* のチェックは、下で行う）
+export SF_INIT_MODE=1   # sf-project.sh の一部として動く（force-* のチェックは、下で行う）
 
 source "${SF_TOOLS_DIR}/lib/common.sh"
 source "${SF_TOOLS_DIR}/lib/wizard.sh"
@@ -160,9 +160,9 @@ VERIFY_SAMPLE_FLOW=0
 _DEL_PRS=1
 [[ $VERIFY_SAMPLE_OBJECTS -eq 1 ]] && _DEL_PRS=2
 # 後始末（--cleanup）の案内に使う、オプションの指定
-_CLEANUP_CMD="sf-init.sh --verify --cleanup"
+_CLEANUP_CMD="sf-project.sh --verify --cleanup"
 if [[ $COMPONENTS -eq 1 ]]; then
-    _CLEANUP_CMD="sf-init.sh --verify --components"
+    _CLEANUP_CMD="sf-project.sh --verify --components"
     [[ $VERIFY_SAMPLE_OBJECTS -eq 1 ]] && _CLEANUP_CMD+=" --with-objects"
     _CLEANUP_CMD+=" --cleanup"
 fi
@@ -230,7 +230,7 @@ if [[ $CLEANUP_ONLY -eq 0 ]]; then
         while IFS= read -r p; do
             if verify_file_sha "$REPO" "$t" "$p" > /dev/null; then  # 条件チェック
                 log "ERROR" "  ${t} ブランチに、検証用と同じ名前のファイルが、すでにあります: ${p}"
-                log "WARNING" "  このまま実行すると、そのクラスを、上書きして、削除します。前回の検証の残りであれば、sf-init.sh --verify --cleanup を実行してください。"
+                log "WARNING" "  このまま実行すると、そのクラスを、上書きして、削除します。前回の検証の残りであれば、sf-project.sh --verify --cleanup を実行してください。"
                 die "検証用と同名のクラスのファイルが、すでにあります（${t}: ${p}）。"
             fi
         done < <(verify_set_paths all)
@@ -312,7 +312,7 @@ fi
 
 # ------------------------------------------------------------------------------
 # 3. 確認（管理者向けの警告・Enter の確認。本番を含むときは、文面で明示する）
-#    sf-init.sh から呼ばれたとき（SF_VERIFY_CONFIRMED=1）は、sf-init が、確認済みのため、二重には聞かない
+#    sf-project.sh から呼ばれたとき（SF_VERIFY_CONFIRMED=1）は、sf-project が、確認済みのため、二重には聞かない
 # ------------------------------------------------------------------------------
 if [[ "${SF_VERIFY_CONFIRMED:-}" != "1" ]]; then
     echo "" >&2
@@ -462,7 +462,7 @@ _pr_flow() {
     local label="$1" br="$2" title="$3" base="$4" mode="$5" prn runid b_val b_rel
     b_val=$(verify_latest_run_id "$REPO" wf-validate.yml "$br")    # VAR=$(cmd) のため run 不使用
     b_rel=$(verify_latest_run_id "$REPO" wf-release.yml "$br")     # VAR=$(cmd) のため run 不使用
-    prn=$(verify_pr_create "$REPO" "$br" "$title" "sf-init.sh --verify による検証（${_WHAT}）。" "$base") || prn=""  # VAR=$(cmd) のため run 不使用
+    prn=$(verify_pr_create "$REPO" "$br" "$title" "sf-project.sh --verify による検証（${_WHAT}）。" "$base") || prn=""  # VAR=$(cmd) のため run 不使用
     _vchk "${label}: PR を作成した（${base} 向け）" test -n "$prn" || return 1
     runid=$(verify_wait_pr_run "$REPO" wf-validate.yml "$br" "$b_val") || runid=""   # VAR=$(cmd) のため run 不使用
     _vchk "${label}: wf-validate（検証）が実行され、完了した" test -n "$runid" || return 1
@@ -513,7 +513,7 @@ _make_delete_branch() {
 }
 
 # 環境全体の確認（リリースの前に行う。NG があれば、リリースへ進まない: 組織に、何も変更していない状態で止まる）
-# ローカルのログに、Token・認証 URL が、残っていないこと（sf-init・verify などのログ）
+# ローカルのログに、Token・認証 URL が、残っていないこと（sf-project・verify などのログ）
 _logs_clean() {
     local f found=0
     for f in "$HOME"/sf-tools/logs/*.log; do

@@ -20,8 +20,8 @@
   <div class="title">最初に試すこと</div>
   <ul>
     <li>エラーの文章を、最後まで読んでみてください。直し方が、書いてあることが多いです。</li>
-    <li>ログは、<code>force-*</code> フォルダの中の <code>sf-tools/logs/&lt;コマンド名&gt;.log</code> に残っています（<code>sf-init.sh</code>・<code>sf-job.sh</code>・<code>sf-typecheck.sh</code> と、動作の確認の <code>verify.log</code> は、<code>~/sf-tools/logs/</code> の下です。くわしくは<a href="../reference/structure.html#logs">ログとリポジトリ構成</a>）。</li>
-    <li>管理者は、<a href="maintenance.html#status"><code>sf-init.sh --status</code></a> で、足りないものを調べられます（何も変更しません）。</li>
+    <li>ログは、<code>force-*</code> フォルダの中の <code>sf-tools/logs/&lt;コマンド名&gt;.log</code> に残っています（<code>sf-project.sh</code>・<code>sf-job.sh</code>・<code>sf-test-types.sh</code> と、動作の確認の <code>verify.log</code> は、<code>~/sf-tools/logs/</code> の下です。くわしくは<a href="../reference/structure.html#logs">ログとリポジトリ構成</a>）。</li>
+    <li>管理者は、<a href="maintenance.html#status"><code>sf-project.sh --status</code></a> で、足りないものを調べられます（何も変更しません）。</li>
     <li>GitHub のワークフローの失敗は、リポジトリの <strong>Actions</strong> の画面で、失敗したステップ（手順）の名前とログを見ます。下の見出しは、そのステップの名前でも探せます。</li>
   </ul>
 </div>
@@ -30,20 +30,20 @@
 <table>
   <thead><tr><th>症状</th><th>見るところ</th></tr></thead>
   <tbody>
-    <tr><td><code>sf-init.sh</code> が途中で止まった・中断したい</td><td><a href="#init">sf-init が止まった・中断したい</a></td></tr>
+    <tr><td><code>sf-project.sh</code> が途中で止まった・中断したい</td><td><a href="#init">sf-project が止まった・中断したい</a></td></tr>
     <tr><td><code>main</code> / <code>staging</code> への PR が、いつまでもマージできない</td><td><a href="#required-checks">必須チェックの名前の食い違い</a></td></tr>
     <tr><td><code>wf-metasync</code> が失敗する</td><td><a href="#pat">PAT_TOKEN</a>・<a href="#metasync-hold">削除の保留</a></td></tr>
     <tr><td>「⛔ 一方通行の決まりにより、この PR はマージできません」・「リリースを止めました」</td><td><a href="#one-way">一方通行の決まりで止められた</a></td></tr>
     <tr><td><code>wf-validate</code> / <code>wf-sequence</code> が動かない・失敗する</td><td><a href="#wf-missing">検証のワークフロー</a></td></tr>
     <tr><td>手元の <code>sf-metasync.sh</code> が「組織が、ログインされていません」「SF_ORG_ID_PROD を読み取れませんでした」と止まる</td><td><a href="#metasync-org">接続先の組織が決まらない</a></td></tr>
     <tr><td>マージしたのに、組織にリリースされない</td><td><a href="#release-skip">リリースされない</a></td></tr>
-    <tr><td><code>sf-sync-wf.sh</code> が止まる</td><td><a href="#sync-wf">sf-sync-wf が止まる</a></td></tr>
+    <tr><td><code>sf-update-workflows.sh</code> が止まる</td><td><a href="#sync-wf">sf-update-workflows が止まる</a></td></tr>
     <tr><td><code>sf-job.sh</code> が動かない</td><td><a href="#dev-job">sf-job が動かない</a></td></tr>
     <tr><td><code>sf-push.sh</code>・<code>git push</code> が止まる</td><td><a href="#dev-push">sf-push</a>・<a href="#dev-prepush">git push</a></td></tr>
     <tr><td>Dryrun・Deploy が、実行の前に断られる</td><td><a href="#dev-refused">手元から実行できない組織</a></td></tr>
-    <tr><td>VS Code の Apex 拡張に「telemetry handler is null」と出る・<code>sf-install.sh</code> が Java の警告を出す</td><td><a href="#dev-java">Java が古い（17 未満）</a></td></tr>
-    <tr><td><code>sf-init.sh</code> が、最初の確認で、「Java が…」「Salesforce の拡張機能が入っていません」と出て止まる</td><td><a href="#dev-java">Java</a>・<a href="#dev-vscode-ext">拡張機能</a></td></tr>
-    <tr><td><code>sf-upgrade.sh</code> が「Salesforce CLI のアップデートに失敗しました」「書き込めません」と出る</td><td><a href="#dev-npm-perm">npm の入れ先に書き込めない</a></td></tr>
+    <tr><td>VS Code の Apex 拡張に「telemetry handler is null」と出る・<code>sf-refresh.sh</code> が Java の警告を出す</td><td><a href="#dev-java">Java が古い（17 未満）</a></td></tr>
+    <tr><td><code>sf-project.sh</code> が、最初の確認で、「Java が…」「Salesforce の拡張機能が入っていません」と出て止まる</td><td><a href="#dev-java">Java</a>・<a href="#dev-vscode-ext">拡張機能</a></td></tr>
+    <tr><td><code>sf-update-cli.sh</code> が「Salesforce CLI のアップデートに失敗しました」「書き込めません」と出る</td><td><a href="#dev-npm-perm">npm の入れ先に書き込めない</a></td></tr>
     <tr><td>「npm の最新版は、今の Node では入れられません」と出る</td><td><a href="#dev-npm-node">npm が、Node に合わない</a></td></tr>
     <tr><td><code>sf</code> を入れ直したのに古いまま・プロジェクトの中に <code>%APPDATA%</code> というフォルダができた</td><td><a href="#dev-sf-path"><code>sf</code> の場所がおかしい</a></td></tr>
     <tr><td>デバッグログ（<code>sf-log.sh</code>）が「別の環境（wsl）で、デバッグログを取っています」と出て、動かない・取り始めない</td><td><a href="#dev-log-runtime">Git Bash と WSL の混在</a></td></tr>
@@ -54,28 +54,28 @@
 
 <h2 id="admin">管理者の方へ（セットアップや自動処理で困ったとき）</h2>
 
-<h3 id="init"><code>sf-init.sh</code> が途中で止まった・中断したい</h3>
+<h3 id="init"><code>sf-project.sh</code> が途中で止まった・中断したい</h3>
 <p>まず、ログを見ます。</p>
-<pre><code>cat ~/sf-tools/logs/sf-init.log</code></pre>
-<p>「どこで間違えたか分からない」ときは、管理者用の <code>admin</code> フォルダの中の <code>force-*</code> で、<code>sf-init.sh --status</code> を実行します。リポジトリ・ブランチ・ワークフロー・Secrets・Variables・ブランチ保護が、そろっているかを、✓（できている）と ✗（足りない。直し方も表示）で教えてくれます（何も変更しません。<a href="maintenance.html#status">診断の説明</a>）。</p>
-<p>原因を直したら、<strong>前と同じ作業フォルダで、もう一度 <code>sf-init.sh</code> を実行</strong>してください（同じオーナー・XXXX を選びます）。途中まで進んでいたときは、開始画面の確認のあとに、「続きをやる」「最初からやり直す」の選択肢が出ます（<a href="setup.html#resume">途中で止まったとき</a>）。</p>
+<pre><code>cat ~/sf-tools/logs/sf-project.log</code></pre>
+<p>「どこで間違えたか分からない」ときは、管理者用の <code>admin</code> フォルダの中の <code>force-*</code> で、<code>sf-project.sh --status</code> を実行します。リポジトリ・ブランチ・ワークフロー・Secrets・Variables・ブランチ保護が、そろっているかを、✓（できている）と ✗（足りない。直し方も表示）で教えてくれます（何も変更しません。<a href="maintenance.html#status">診断の説明</a>）。</p>
+<p>原因を直したら、<strong>前と同じ作業フォルダで、もう一度 <code>sf-project.sh</code> を実行</strong>してください（同じオーナー・XXXX を選びます）。途中まで進んでいたときは、開始画面の確認のあとに、「続きをやる」「最初からやり直す」の選択肢が出ます（<a href="setup.html#resume">途中で止まったとき</a>）。</p>
 <ul>
   <li><strong>中断したいとき:</strong> セットアップの間は、Ctrl+C が効きません（途中の半端な状態を作らないためです）。質問の画面で <code>q</code> を入力するか、ターミナルを閉じてください。閉じたあとも、もう一度実行すれば、続きから再開できます。</li>
-  <li><strong>「すでに実行中です」と出て止まる:</strong> 同じ作業フォルダ・同じ XXXX の <code>sf-init.sh</code> が、ほかのターミナルで動いています。そちらを終えてから実行してください。前の実行が、もう動いていない（ターミナルを閉じたなど）ときは、自動で引き継ぐので、このメッセージは出ません。</li>
-  <li><strong>完了済みのプロジェクトで、<code>--resume</code> / <code>--only</code> が断られる:</strong> 完了済みのプロジェクトでは、使えません。オプションなしで <code>sf-init.sh</code> を実行して、メニューから選ぶか、<a href="maintenance.html#reconnect"><code>--reconnect</code></a> / <a href="maintenance.html#add-tier"><code>--add-tier</code></a> を使います。</li>
+  <li><strong>「すでに実行中です」と出て止まる:</strong> 同じ作業フォルダ・同じ XXXX の <code>sf-project.sh</code> が、ほかのターミナルで動いています。そちらを終えてから実行してください。前の実行が、もう動いていない（ターミナルを閉じたなど）ときは、自動で引き継ぐので、このメッセージは出ません。</li>
+  <li><strong>完了済みのプロジェクトで、<code>--resume</code> / <code>--only</code> が断られる:</strong> 完了済みのプロジェクトでは、使えません。オプションなしで <code>sf-project.sh</code> を実行して、メニューから選ぶか、<a href="maintenance.html#reconnect"><code>--reconnect</code></a> / <a href="maintenance.html#add-tier"><code>--add-tier</code></a> を使います。</li>
   <li><strong>実行の場所が違う:</strong> 最初のセットアップは、作業フォルダ（<code>admin</code> や <code>force-*</code> の外）で実行します。<code>--status</code> などの保守のモードは、反対に、<code>force-*</code> の中で実行します。</li>
 </ul>
 
 <h3 id="required-checks"><code>main</code> / <code>staging</code> への PR が、マージできない（必須のチェックが「待機中」のまま）</h3>
 <p>PR の画面で、「Expected — Waiting for status to be reported」のような表示のまま、マージのボタンが押せないときの原因です。ブランチ保護（Ruleset）の<strong>必須チェックの名前が、ワークフローの実際のチェック名と合っていない</strong>ためです。名前が合わないと、条件は、永久に満たされません。</p>
-<p>以前のバージョンの <code>sf-init.sh</code> は、必須チェックの名前を <code>validate / 対象ファイル確認</code> のように、ワークフロー名つきで登録していました。正しい名前は、<strong>ジョブ名だけ</strong>の <code>対象ファイル確認</code>・<code>デプロイ検証</code>・<code>順序チェック</code> です（いまの <code>sf-init.sh</code> は、この 3 つで登録します）。この問題は、ブランチ保護が実際に効くリポジトリ（有料プラン、または公開リポジトリ）で起こります。管理者（リポジトリの Admin ロール）は、ブランチ保護を迂回できるので、マージできます。</p>
+<p>以前のバージョンの <code>sf-project.sh</code> は、必須チェックの名前を <code>validate / 対象ファイル確認</code> のように、ワークフロー名つきで登録していました。正しい名前は、<strong>ジョブ名だけ</strong>の <code>対象ファイル確認</code>・<code>デプロイ検証</code>・<code>順序チェック</code> です（いまの <code>sf-project.sh</code> は、この 3 つで登録します）。この問題は、ブランチ保護が実際に効くリポジトリ（有料プラン、または公開リポジトリ）で起こります。管理者（リポジトリの Admin ロール）は、ブランチ保護を迂回できるので、マージできます。</p>
 <p>確かめ方と直し方は、次のとおりです。</p>
 <ol class="steps">
-  <li><p>管理者用のフォルダ（<code>admin/force-XXXX</code>）で、<a href="maintenance.html#status"><code>sf-init.sh --status</code></a> を実行します。「Ruleset protect-main: 必須チェックの名前が、ワークフローのジョブ名と合っていません」と出たら、これが原因です（余分な名前と、足りない名前も表示されます。何も変更しません）。</p></li>
+  <li><p>管理者用のフォルダ（<code>admin/force-XXXX</code>）で、<a href="maintenance.html#status"><code>sf-project.sh --status</code></a> を実行します。「Ruleset protect-main: 必須チェックの名前が、ワークフローのジョブ名と合っていません」と出たら、これが原因です（余分な名前と、足りない名前も表示されます。何も変更しません）。</p></li>
   <li><p>GitHub のリポジトリの <strong>Settings → Rules → Rulesets</strong> で、<code>protect-main</code> と <code>protect-staging</code> を開きます。</p></li>
   <li><p>「Require status checks to pass」の一覧を、<code>対象ファイル確認</code>・<code>デプロイ検証</code>・<code>順序チェック</code> の <strong>3 つだけ</strong>にします（ワークフロー名は付けません）。保存します。</p></li>
 </ol>
-<p>新しく作るプロジェクトは、最初から、正しい名前で登録されます。<a href="workflows.html#sync"><code>sf-sync-wf.sh</code></a> はワークフローのファイルだけを書き換え、ブランチ保護は変えないので、この直し方は、手で行う必要があります。必須チェックの仕組みは、<a href="workflows.html#required-checks">ワークフローのページ</a>にあります。</p>
+<p>新しく作るプロジェクトは、最初から、正しい名前で登録されます。<a href="workflows.html#sync"><code>sf-update-workflows.sh</code></a> はワークフローのファイルだけを書き換え、ブランチ保護は変えないので、この直し方は、手で行う必要があります。必須チェックの仕組みは、<a href="workflows.html#required-checks">ワークフローのページ</a>にあります。</p>
 
 <h3 id="pat"><code>wf-metasync</code> が失敗する（<code>PAT_TOKEN</code>）</h3>
 <p><code>wf-metasync</code>（[metasync] メタ同期）は、Secret <code>PAT_TOKEN</code>（GitHub の Token）を使って、リポジトリを取得し、<code>main</code> へプッシュします。失敗したステップで、原因を見分けます。</p>
@@ -87,10 +87,10 @@
     <tr><td>プッシュ（ワークフローのファイルの変更を含むとき）</td><td>Token に <code>workflow</code> の権限がない</td></tr>
   </tbody>
 </table>
-<p>どの場合も、リポジトリのオーナー（組織の場合は、その組織の管理者）のアカウントで、新しい Token（Classic。<code>repo</code>・<code>workflow</code>）を発行し、リポジトリの Secrets の <code>PAT_TOKEN</code> を登録し直してください（手順は<a href="secrets.html#other">そのほかの情報の登録し直し</a>）。<code>sf-init.sh</code> は、登録のときに、Token の有効性・権限・持ち主が Admin であることを確かめますが、そのあとで Token を無効にしたり、期限が切れたり、持ち主の権限が変わったりすると、この状態になります。<code>sf-update-secret.sh</code> では、<code>PAT_TOKEN</code> は更新できません。</p>
+<p>どの場合も、リポジトリのオーナー（組織の場合は、その組織の管理者）のアカウントで、新しい Token（Classic。<code>repo</code>・<code>workflow</code>）を発行し、リポジトリの Secrets の <code>PAT_TOKEN</code> を登録し直してください（手順は<a href="secrets.html#other">そのほかの情報の登録し直し</a>）。<code>sf-project.sh</code> は、登録のときに、Token の有効性・権限・持ち主が Admin であることを確かめますが、そのあとで Token を無効にしたり、期限が切れたり、持ち主の権限が変わったりすると、この状態になります。<code>sf-update-secret.sh</code> では、<code>PAT_TOKEN</code> は更新できません。</p>
 <div class="box warn">
   <div class="title">この失敗は、Slack に通知されません</div>
-  <p><code>wf-metasync</code> は、成功も失敗も通知しません。Actions の画面か、<a href="maintenance.html#status"><code>sf-init.sh --status</code></a> の「直近の実行」で、ときどき確かめてください。</p>
+  <p><code>wf-metasync</code> は、成功も失敗も通知しません。Actions の画面か、<a href="maintenance.html#status"><code>sf-project.sh --status</code></a> の「直近の実行」で、ときどき確かめてください。</p>
 </div>
 <p>手元で <code>sf-metasync.sh</code> を実行した時刻と重なって、<code>wf-metasync</code> のプッシュが拒まれることもあります。このときは、Actions の画面から、もう一度実行してください。</p>
 
@@ -113,13 +113,13 @@
 <p>これまでの動作では、組織で削除されたものが <code>main</code> に残り続けていたため、<strong>初回は、たまっていた古いファイルが一度に削除の対象になります</strong>。上の手順で、1 回確かめてください。</p>
 
 <h3 id="metasync-org">手元の <code>sf-metasync.sh</code> が、接続先の組織を決められずに止まる</h3>
-<p>手元で <code>sf-metasync.sh</code> を実行すると、接続先の組織（<code>main</code> の組織）は、<strong>エイリアスの名前ではなく、組織の ID で決まります</strong>。<code>sf-init</code> が GitHub の Variable <code>SF_ORG_ID_PROD</code> に記録した、1 番目の組織の ID と、この PC の <code>sf</code> にログイン済みの組織の ID を突き合わせて、一致した組織を使います。名前（<code>prod</code> など）は、何でもかまいません。別のプロジェクトの組織で、<code>main</code> を書き換えてしまう取り違えを防ぐためです。次のどれかのときは、何も変えずに止まります（推測して、別の組織には進みません）。</p>
+<p>手元で <code>sf-metasync.sh</code> を実行すると、接続先の組織（<code>main</code> の組織）は、<strong>エイリアスの名前ではなく、組織の ID で決まります</strong>。<code>sf-project</code> が GitHub の Variable <code>SF_ORG_ID_PROD</code> に記録した、1 番目の組織の ID と、この PC の <code>sf</code> にログイン済みの組織の ID を突き合わせて、一致した組織を使います。名前（<code>prod</code> など）は、何でもかまいません。別のプロジェクトの組織で、<code>main</code> を書き換えてしまう取り違えを防ぐためです。次のどれかのときは、何も変えずに止まります（推測して、別の組織には進みません）。</p>
 <table>
   <thead><tr><th>表示</th><th>意味と対処</th></tr></thead>
   <tbody>
     <tr><td><code>origin の URL から、GitHub のリポジトリを特定できません</code></td><td><code>force-*</code> フォルダの <code>origin</code> が、GitHub の URL ではありません。<code>git remote get-url origin</code> で確かめてください</td></tr>
-    <tr><td><code>GitHub の Variable SF_ORG_ID_PROD を読み取れませんでした</code></td><td><code>gh</code> が使えない・ログインしていない・リポジトリの Variable を読む権限がない、または、Variable が記録されていません。管理者のアカウントで <code>gh auth login</code> し、<code>gh variable get SF_ORG_ID_PROD -R オーナー/リポジトリ</code> で読めるか確かめます。記録がないときは、<code>force-*</code> の中で <code>sf-init.sh --reconnect main</code> を実行すると、記録されます</td></tr>
-    <tr><td><code>この PC の sf に、組織 ID …（SF_ORG_ID_PROD。main の組織）の組織が、ログインされていません</code></td><td>この PC の <code>sf</code> に、<code>main</code> の組織（<code>sf-init</code> で 1 番目に入れた組織）が、ログインされていません。<code>sf org login web --alias 好きな名前</code> で、その組織にログインしてください（<code>sf-init</code> は、この PC の <code>sf</code> にエイリアスを残しません）。<code>sf org list</code> で、組織の ID が、表示の ID と同じ組織が、あるか確かめられます。別の組織にログインしても、ID が違えば、同じように止まります</td></tr>
+    <tr><td><code>GitHub の Variable SF_ORG_ID_PROD を読み取れませんでした</code></td><td><code>gh</code> が使えない・ログインしていない・リポジトリの Variable を読む権限がない、または、Variable が記録されていません。管理者のアカウントで <code>gh auth login</code> し、<code>gh variable get SF_ORG_ID_PROD -R オーナー/リポジトリ</code> で読めるか確かめます。記録がないときは、<code>force-*</code> の中で <code>sf-project.sh --reconnect main</code> を実行すると、記録されます</td></tr>
+    <tr><td><code>この PC の sf に、組織 ID …（SF_ORG_ID_PROD。main の組織）の組織が、ログインされていません</code></td><td>この PC の <code>sf</code> に、<code>main</code> の組織（<code>sf-project</code> で 1 番目に入れた組織）が、ログインされていません。<code>sf org login web --alias 好きな名前</code> で、その組織にログインしてください（<code>sf-project</code> は、この PC の <code>sf</code> にエイリアスを残しません）。<code>sf org list</code> で、組織の ID が、表示の ID と同じ組織が、あるか確かめられます。別の組織にログインしても、ID が違えば、同じように止まります</td></tr>
   </tbody>
 </table>
 <p>GitHub Actions の <code>wf-metasync</code> は、この仕組みを使いません（ワークフローが、JWT で、<code>main</code> の組織にログインします）。</p>
@@ -129,7 +129,7 @@
 <table>
   <thead><tr><th>表示</th><th>原因と直し方</th></tr></thead>
   <tbody>
-    <tr><td><code>順序チェック</code> が失敗・「⛔ 一方通行の決まりにより、この PR はマージできません」（<code>[R1]</code>「… は、まだ develop に出ていません」）</td><td>PR の先端のコミットが、前の段階にまだ出ていません。前の段階に出したあとで、変更を push したときも、こうなります（コミットが変わるため）。<code>sf-next.sh</code> が示す段階（前の段階）から、出し直します。この PR は閉じます</td></tr>
+    <tr><td><code>順序チェック</code> が失敗・「⛔ 一方通行の決まりにより、この PR はマージできません」（<code>[R1]</code>「… は、まだ develop に出ていません」）</td><td>PR の先端のコミットが、前の段階にまだ出ていません。前の段階に出したあとで、変更を push したときも、こうなります（コミットが変わるため）。<code>sf-pr.sh</code> が示す段階（前の段階）から、出し直します。この PR は閉じます</td></tr>
     <tr><td><code>デプロイ検証</code> が失敗・「<code>[R2]</code> 前に … へ出したリリース（PR #N）の部品が、今回の deploy-target.txt・remove-target.txt にありません」</td><td>同じブランチから、前に同じ段階へ出した部品を、ターゲットファイルから外しています（上の段階へ、前の部品が届かなくなるため）。外した部品を、<code>deploy-target.txt</code> に戻すか、組織から消すなら <code>remove-target.txt</code> に書いて、push し直します</td></tr>
     <tr><td><code>[R3]</code>「環境ブランチ … から、直接 … へは出せません」</td><td>環境ブランチから PR を出しています。作業用のブランチから出し直します</td></tr>
     <tr><td><code>[R0]</code>「判断できません」</td><td><code>main</code> の <code>branches.txt</code> がない・読めない・並びが正しくない、フォークからの PR、GitHub に問い合わせられない、などです。理由を見て、直してから、Actions の画面の「Re-run jobs」で、やり直します</td></tr>
@@ -141,7 +141,7 @@
 <h3 id="wf-missing"><code>wf-validate</code> / <code>wf-sequence</code> が動かない・失敗する</h3>
 <p>動かないときは、次を確かめてください。</p>
 <ul>
-  <li>ワークフローのファイルが、<code>.github/workflows/</code> の中にあるか。ないときは、<a href="workflows.html#sync"><code>sf-sync-wf.sh</code></a> で、最新の雛形から作り直せます。</li>
+  <li>ワークフローのファイルが、<code>.github/workflows/</code> の中にあるか。ないときは、<a href="workflows.html#sync"><code>sf-update-workflows.sh</code></a> で、最新の雛形から作り直せます。</li>
   <li>PR に、コンフリクトがないか。コンフリクトのある PR では、どちらも動きません。解消すると動きます。</li>
   <li><code>wf-sequence</code> は、<code>main</code> / <code>staging</code> への PR でだけ動きます。</li>
   <li>PR のタイトル・本文の編集では、動きません（PR の作成・ソースブランチへのプッシュ・再オープンで動きます）。</li>
@@ -162,7 +162,7 @@
   <li><code>main</code> / <code>staging</code> / <code>develop</code> 以外のブランチへのマージでは、リリースは行われません。</li>
 </ul>
 
-<h3 id="sync-wf"><code>sf-sync-wf.sh</code> が止まる</h3>
+<h3 id="sync-wf"><code>sf-update-workflows.sh</code> が止まる</h3>
 <table>
   <thead><tr><th>表示</th><th>原因と直し方</th></tr></thead>
   <tbody>
@@ -180,16 +180,16 @@
 
 <h3 id="clone-token"><code>wf-metasync</code> / <code>wf-validate</code> / <code>wf-release</code> が「自動化ツール（sf-tools）を取得」で失敗する</h3>
 <p><code>sf-tools</code> は公開リポジトリなので、新しいワークフローは、Token なしで取得します。このエラーは、<strong>以前のバージョンの雛形で作ったプロジェクト</strong>で起こります。ワークフローが <code>SF_TOOLS_TOKEN</code> 付きで取得していて、その Token が使えないときに起こります（登録されていない・期限が切れた・無効になった、のどれかです）。</p>
-<p><a href="workflows.html#sync"><code>sf-sync-wf.sh</code></a> で、ワークフローを最新の雛形に合わせると、Token なしの取得に変わります。新しい雛形の取得の行は、次の形です。</p>
+<p><a href="workflows.html#sync"><code>sf-update-workflows.sh</code></a> で、ワークフローを最新の雛形に合わせると、Token なしの取得に変わります。新しい雛形の取得の行は、次の形です。</p>
 <pre><code>git clone -b ${{ vars.SF_TOOLS_BRANCH || 'main' }} https://github.com/tama-create/sf-tools.git ...</code></pre>
 <p>Variable <code>SF_TOOLS_BRANCH</code> が、存在しないブランチを指しているときも、このステップで失敗します（ふつうは登録しません。未登録なら <code>main</code> を使います）。</p>
 
 <h3 id="node">「差分抽出ツール（Salesforce Git Delta）をインストール」で TypeError が出て失敗する</h3>
 <p>エラーの例: <code>TypeError: webidl.util.markAsUncloneable is not a function</code></p>
-<p>以前のバージョンの雛形で作ったプロジェクトで、ワークフローの Node.js のバージョン（<code>node-version</code>）が古いときに起こります。いまの雛形は、Node.js 22 を使います。<a href="workflows.html#sync"><code>sf-sync-wf.sh</code></a> で、ワークフローを最新の雛形に合わせてください（雛形の変更は、作成済みのプロジェクトには、自動では届きません）。</p>
+<p>以前のバージョンの雛形で作ったプロジェクトで、ワークフローの Node.js のバージョン（<code>node-version</code>）が古いときに起こります。いまの雛形は、Node.js 22 を使います。<a href="workflows.html#sync"><code>sf-update-workflows.sh</code></a> で、ワークフローを最新の雛形に合わせてください（雛形の変更は、作成済みのプロジェクトには、自動では届きません）。</p>
 
 <h2 id="dev">開発者の方へ（毎日の作業で困ったとき）</h2>
-<p>毎日の作業は、ランチャー（<code>sf-job.sh</code> や <code>sf-start.sh</code> のあとに開くメニュー）から行うのがおすすめです。メニューの番号は、1 Check・2 Dryrun・3 Deploy・4 Push・5 PullRequest です（VS Code のターミナル以外では、6 Start・7 Restart も出ます）。</p>
+<p>毎日の作業は、ランチャー（<code>sf-job.sh</code> や <code>sf-start.sh</code> のあとに開くメニュー）から行うのがおすすめです。メニューの番号は、1 Check・2 Dryrun・3 Deploy・4 Push・5 PullRequest です（VS Code のターミナル以外では、6 Start・7 SwitchOrg も出ます）。</p>
 
 <h3 id="dev-job"><code>sf-job.sh</code> が動かない</h3>
 <ul>
@@ -212,7 +212,7 @@
 <h3 id="dev-prepush"><code>git push</code> が止められる</h3>
 <p>プッシュのときに、自動のチェック（pre-push フック）が動きます。次のときは、プッシュを止めます。</p>
 <ul>
-  <li><code>main</code> / <code>staging</code> / <code>develop</code>（保護ブランチ）の上にいるとき、ブランチの上にいないとき、保護ブランチへプッシュしようとしたとき（<code>git push origin feature:main</code> など）。作業用のブランチに移って、PR（取り込みの依頼）を出して、反映してください（<code>sf-next.sh</code>、ランチャーの 5 PullRequest が、出し先を案内します）。</li>
+  <li><code>main</code> / <code>staging</code> / <code>develop</code>（保護ブランチ）の上にいるとき、ブランチの上にいないとき、保護ブランチへプッシュしようとしたとき（<code>git push origin feature:main</code> など）。作業用のブランチに移って、PR（取り込みの依頼）を出して、反映してください（<code>sf-pr.sh</code>、ランチャーの 5 PullRequest が、出し先を案内します）。</li>
   <li>ターゲットファイルの書き方にエラーがあるとき（画面に、エラーの行が出ます）。</li>
   <li>GitHub の最新の取得に失敗したとき（「リモート情報の取得に失敗しました」）・取り込みがコンフリクトしたとき（「… の自動取り込み（git merge）に失敗しました」。取り込みは取り消されます）。</li>
 </ul>
@@ -232,20 +232,20 @@
     <tr><td>「… の組織の種類を確認できないため、ローカルから実行できません」</td><td>組織の情報を読み取れず、本番でないことを確かめられません（ログインが切れている・組織につながらない など）</td></tr>
   </tbody>
 </table>
-<p>（<code>sf-deploy.sh</code> では、「実行できません」が「強制リリースできません」になります。）共有の段階の組織へは、変更を GitHub に送り、PR を作って、レビューを通し、マージします。そうすると、ワークフローが反映します。自分用の組織に切り替えるには、<code>sf-restart.sh</code>（VS Code のターミナル以外で開いたランチャーでは、7 Restart）を使います。</p>
+<p>（<code>sf-deploy.sh</code> では、「実行できません」が「強制リリースできません」になります。）共有の段階の組織へは、変更を GitHub に送り、PR を作って、レビューを通し、マージします。そうすると、ワークフローが反映します。自分用の組織に切り替えるには、<code>sf-switch-org.sh</code>（VS Code のターミナル以外で開いたランチャーでは、7 SwitchOrg）を使います。</p>
 <p><code>sf-deploy.sh</code> は、このほか、保護ブランチ（<code>main</code> など）の上や、ブランチの上にいないときも、断ります。作業用のブランチで実行してください。</p>
 
 <h3 id="dev-sf"><code>sf</code> は成功しているのに、失敗と表示される</h3>
 <p>Salesforce CLI が、公式インストーラー版のときに起こります。npm 版に入れ替えると、直ります（<a href="../guide/install.html#npm">Salesforce CLI は npm 版を使う</a>）。</p>
 
-<h3 id="dev-java">VS Code の Apex 拡張にエラーが出る・<code>sf-install.sh</code> が Java の警告を出す</h3>
+<h3 id="dev-java">VS Code の Apex 拡張にエラーが出る・<code>sf-refresh.sh</code> が Java の警告を出す</h3>
 <p>VS Code の「出力」パネルの「Apex 言語サーバ」に <code>telemetry handler is null</code> と出て、Apex の補完や定義ジャンプが働かないときは、<strong>Java のバージョンが古い</strong>ことが多いです。Apex 拡張（Salesforce Extension Pack）の言語サーバーは、<strong>Java 17 以上</strong>が必要です（拡張 68.6.1 で確認。Java 11 では、起動の途中で失敗します。画面に出るエラーは、本当の原因（<code>UnsupportedClassVersionError</code>）を隠しています）。</p>
-<p><code>sf-install.sh</code> は、<code>sf-start.sh</code> が起動のたびに実行するときに、Java のバージョンを確かめ、次のときに警告を表示します（警告だけで、作業は止まりません）。管理者が使う <code>sf-init.sh</code> は、同じ確認を最初の確認（Phase 1）で行い、<strong>足りないと、止まります</strong>（Salesforce の拡張機能が入っていない場合も、同じです。下の「拡張機能がないと止まるとき」）。</p>
+<p><code>sf-refresh.sh</code> は、<code>sf-start.sh</code> が起動のたびに実行するときに、Java のバージョンを確かめ、次のときに警告を表示します（警告だけで、作業は止まりません）。管理者が使う <code>sf-project.sh</code> は、同じ確認を最初の確認（Phase 1）で行い、<strong>足りないと、止まります</strong>（Salesforce の拡張機能が入っていない場合も、同じです。下の「拡張機能がないと止まるとき」）。</p>
 <ul>
   <li>Java が 17 未満（調べる場所は、環境変数 <code>JAVA_HOME</code>、なければ PATH の <code>java</code>。VS Code の設定は、読みません）</li>
   <li>Java が見つからない・バージョンを読み取れない</li>
 </ul>
-<p><strong>見る場所は、<code>JAVA_HOME</code> に一本化しています。</strong>VS Code の Apex 拡張・ターミナル・sf-tools が、同じ Java を見るため、「VS Code は動くのに、sf-install だけ警告が出る」というずれが起きません。</p>
+<p><strong>見る場所は、<code>JAVA_HOME</code> に一本化しています。</strong>VS Code の Apex 拡張・ターミナル・sf-tools が、同じ Java を見るため、「VS Code は動くのに、sf-refresh だけ警告が出る」というずれが起きません。</p>
 <p><strong>直し方:</strong></p>
 <ol>
   <li><strong>JDK 17 以上を入れる。</strong>Windows は <code>winget install --id Microsoft.OpenJDK.17</code>（管理者の確認画面が出ます）。管理者権限が使えないときは、<a href="https://learn.microsoft.com/java/openjdk/download">Microsoft Build of OpenJDK のダウンロードページ</a>から、17 の zip を取得し、自分のフォルダ（例: <code>C:Users（ユーザー名）	oolsjdk-17</code>）に展開します。</li>
@@ -258,18 +258,18 @@
       <li><strong>Linux:</strong> <code>~/.bashrc</code> などに、<code>export JAVA_HOME=（JDK のフォルダ）</code> を書きます。</li>
     </ul>
   </li>
-  <li><strong>ターミナルと VS Code を、開き直す。</strong>設定は、開き直したものから有効になります。そのあと <code>sf-install.sh</code> を実行して、警告が出ないことを確かめます。</li>
+  <li><strong>ターミナルと VS Code を、開き直す。</strong>設定は、開き直したものから有効になります。そのあと <code>sf-refresh.sh</code> を実行して、警告が出ないことを確かめます。</li>
 </ol>
 <p><strong>注意:</strong> Windows では、<code>PATH</code> の先頭に、古い Java（システム側）が残っていることがあり、<code>java -version</code> は、古い版のままかもしれません。sf-tools と Apex 拡張は、<code>JAVA_HOME</code> を先に見るので、動作には影響しません。</p>
-<p><strong>以前の案内（VS Code の設定で指定）を使っているとき:</strong> VS Code の設定 <code>salesforcedx-vscode-apex.java.home</code> で Java を指していると、<code>sf-install.sh</code> は、その設定を読めないため、システムの Java が古いままなら、警告が出ます。上の方法で <code>JAVA_HOME</code> を設定するのが、いちばん分かりやすい解決です。設定を残したままで、確認だけを省くときは、環境変数 <code>SF_TOOLS_SKIP_JAVA_CHECK=1</code> を設定します。なお、下限のバージョンは、環境変数 <code>SF_TOOLS_JAVA_MIN_MAJOR</code>（既定 17）で変えられます。</p>
-<h4 id="dev-vscode-ext">拡張機能がないと止まるとき（<code>sf-init.sh</code>）</h4>
-<p>管理者が使う <code>sf-init.sh</code> は、最初の確認で、VS Code に Salesforce の拡張機能（Salesforce Extension Pack。ID <code>salesforce.salesforcedx-vscode</code>）が入っているかを確かめ、なければ止まります。案内に出るコマンドで、入れてください（入れたあと、VS Code を開き直します）。自動では入れません。</p>
+<p><strong>以前の案内（VS Code の設定で指定）を使っているとき:</strong> VS Code の設定 <code>salesforcedx-vscode-apex.java.home</code> で Java を指していると、<code>sf-refresh.sh</code> は、その設定を読めないため、システムの Java が古いままなら、警告が出ます。上の方法で <code>JAVA_HOME</code> を設定するのが、いちばん分かりやすい解決です。設定を残したままで、確認だけを省くときは、環境変数 <code>SF_TOOLS_SKIP_JAVA_CHECK=1</code> を設定します。なお、下限のバージョンは、環境変数 <code>SF_TOOLS_JAVA_MIN_MAJOR</code>（既定 17）で変えられます。</p>
+<h4 id="dev-vscode-ext">拡張機能がないと止まるとき（<code>sf-project.sh</code>）</h4>
+<p>管理者が使う <code>sf-project.sh</code> は、最初の確認で、VS Code に Salesforce の拡張機能（Salesforce Extension Pack。ID <code>salesforce.salesforcedx-vscode</code>）が入っているかを確かめ、なければ止まります。案内に出るコマンドで、入れてください（入れたあと、VS Code を開き直します）。自動では入れません。</p>
 <pre><code>code --install-extension salesforce.salesforcedx-vscode</code></pre>
 <p>別の VS Code（Insiders など）に入れていて、この確認を省くときは、環境変数 <code>SF_TOOLS_SKIP_VSCODE_CHECK=1</code> を設定します。</p>
 
-<h3 id="dev-npm-perm"><code>sf-upgrade.sh</code> が「Salesforce CLI のアップデートに失敗しました」「npm のインストール先に書き込めません」と出る</h3>
+<h3 id="dev-npm-perm"><code>sf-update-cli.sh</code> が「Salesforce CLI のアップデートに失敗しました」「npm のインストール先に書き込めません」と出る</h3>
 <p>npm の入れ先（<code>npm config get prefix</code>）が、<code>C:\Program Files\nodejs</code> のように、書き込みに管理者権限が要る場所になっています。入れ先を、自分のフォルダに変えると、管理者権限なしで更新できます（最初の 1 回だけ。手順は、<a href="../guide/install.html#npm-prefix">npm の入れ先を、自分のフォルダにする</a>）。</p>
-<p>自動で動いたときの表示は、<code>sf-install.log</code> にだけ残るため、気づきにくい失敗です。<code>sf-upgrade.sh</code> を手動で実行すると、画面に出ます。</p>
+<p>自動で動いたときの表示は、<code>sf-refresh.log</code> にだけ残るため、気づきにくい失敗です。<code>sf-update-cli.sh</code> を手動で実行すると、画面に出ます。</p>
 
 <h3 id="dev-npm-node">「npm の最新版は、今の Node では入れられません」と出る</h3>
 <p>失敗ではなく、案内です。npm は Node に付いてきて、最新の npm は、Node が新しくないと入らないことがあります。そのときは、npm は今の版のままにして、更新しません。sf-tools は、npm の最低の版を決めていないので、<strong>そのままでも動きます</strong>。</p>
@@ -317,7 +317,7 @@
 <table>
   <thead><tr><th>いつ書かれるか</th><th>書かれること</th></tr></thead>
   <tbody>
-    <tr><td>コマンドを始めたとき（その実行の始まり。ログを実行のたびに作り直すコマンドでは、ログの先頭。追記するログでは、途中にも入ります）</td><td><code>[ENV] sf-tools 1a2b3c4 (main) | OS msys | bash 5.2.37 | sf-push</code> のように、sf-tools のバージョン（コミットの短い ID とブランチ）・OS・bash の版・コマンド名。sf-tools が Git のコピーでないときは、「不明」。<code>sf-init.sh</code> のように、1 つのログに、途中の手順（Phase）も追記するコマンドでは、最初の 1 行だけです</td></tr>
+    <tr><td>コマンドを始めたとき（その実行の始まり。ログを実行のたびに作り直すコマンドでは、ログの先頭。追記するログでは、途中にも入ります）</td><td><code>[ENV] sf-tools 1a2b3c4 (main) | OS msys | bash 5.2.37 | sf-push</code> のように、sf-tools のバージョン（コミットの短い ID とブランチ）・OS・bash の版・コマンド名。sf-tools が Git のコピーでないときは、「不明」。<code>sf-project.sh</code> のように、1 つのログに、途中の手順（Phase）も追記するコマンドでは、最初の 1 行だけです</td></tr>
     <tr><td>致命的なエラーで止まったとき</td><td><code>[ENV] git 2.56.0 | node v22.1.0 | sf @salesforce/cli/2.50.1</code> のように、git・node・sf の版（<code>sf</code> は、起動せず、インストールされた記録から読みます）。入っていないものは「なし」、見つからないものは「不明」</td></tr>
   </tbody>
 </table>

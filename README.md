@@ -22,7 +22,7 @@ sf-tools は、**ソースコードを Git で管理する、普通の開発の�
 
 #### 1.1.1 土台を、コマンド 1 つで作れる
 
-管理者が `sf-init.sh` を実行すると、対話しながら、順に案内します（ウィザード）。GitHub のリポジトリの作成、ブランチの構成、ブランチ保護のルール、Salesforce への接続、Slack などの周辺ツールとの接続、認証情報の登録、ワークフローの配置までを行います。手作業の設定は、ほぼ要りません（Salesforce へのログイン、GitHub のトークン（PAT）の発行、Slack の Bot Token・チャンネル ID の用意は、人が、ブラウザで行い、画面に貼り付けます。案内が出ます）。
+管理者が `sf-project.sh` を実行すると、対話しながら、順に案内します（ウィザード）。GitHub のリポジトリの作成、ブランチの構成、ブランチ保護のルール、Salesforce への接続、Slack などの周辺ツールとの接続、認証情報の登録、ワークフローの配置までを行います。手作業の設定は、ほぼ要りません（Salesforce へのログイン、GitHub のトークン（PAT）の発行、Slack の Bot Token・チャンネル ID の用意は、人が、ブラウザで行い、画面に貼り付けます。案内が出ます）。
 
 #### 1.1.2 リリースが、Git の流れの中で起きる
 
@@ -126,7 +126,7 @@ git clone https://github.com/tama-create/sf-tools.git ~/sf-tools
 export PATH="$HOME/sf-tools/bin:$PATH"
 ```
 
-- **① 管理者が先です。** 作業フォルダで `sf-init.sh` を実行して、プロジェクト（`force-XXXX`）を作ります。
+- **① 管理者が先です。** 作業フォルダで `sf-project.sh` を実行して、プロジェクト（`force-XXXX`）を作ります。
 - **② 開発者は、管理者から「できました」と連絡を受けてから**、作業フォルダで `sf-job.sh` を実行して、作業を始めます（リポジトリがまだないうちは、止まります）。ジョブ名（ブランチの名前になります）を入力すると、作業用のコピーの準備から、自分用の組織へのログイン、VS Code の起動までが進み、最後にランチャー（メニュー）が自動で開きます。
 
 詳しい手順は、文書サイトの「管理者ガイド」（先に行う）と「使い方ガイド」（開発者向け）にあります。
@@ -142,18 +142,18 @@ export PATH="$HOME/sf-tools/bin:$PATH"
 | 開発者 | `sf-job.sh` | 新しい作業を始める（作業用のブランチの作成から VS Code とランチャーの起動まで。管理者がリポジトリを作ったあとに使う） |
 | 開発者 | `sf-start.sh` | 開発環境を起動する（作業の再開） |
 | 開発者 | `sf-push.sh` | 変更をコミットして、GitHub に送る |
-| 開発者 | `sf-next.sh` | 次に PR を出す先を確認する |
+| 開発者 | `sf-pr.sh` | 次の段階へ PR を出す（出し先を確かめる） |
 | 開発者 | `sf-check.sh` | ターゲットファイル（`deploy-target.txt` など）の書き方を確認する |
 | 開発者 | `sf-dryrun.sh` / `sf-release.sh` | 反映できるかを確かめる（dry-run）/ 検証・リリースの本体（共有環境・本番の組織へは、手元からは、検証もできません） |
 | 開発者 | `sf-deploy.sh` | ⚠️ 自分用の組織へ、強制的に反映する（確認あり。共有環境・本番の組織には、使えません） |
-| 開発者 | `sf-restart.sh` | 接続先の組織を切り替える |
+| 開発者 | `sf-switch-org.sh` | 接続先の組織を切り替える |
 | 開発者 | `sf-log.sh` | デバッグログを手元に取り、AI が読む要約を作る（個人用の開発組織だけ。`sf-start.sh` のときに裏で自動で取り、AI は `pull` するだけ） |
 | 開発者 | `sf-hook.sh` / `sf-unhook.sh` | 手元のクローンの検証フックを、有効にする / 削除する |
-| 管理者 | 🔑 `sf-init.sh` | 新しいプロジェクトを作る。段階の追加（`--add-tier`）・診断（`--status`）・接続先の付け替え（`--reconnect`）・動作の確認（`--verify`）も |
+| 管理者 | 🔑 `sf-project.sh` | 新しいプロジェクトを作る。段階の追加（`--add-tier`）・診断（`--status`）・接続先の付け替え（`--reconnect`）・動作の確認（`--verify`）も |
 | 管理者 | 🔑 `sf-update-secret.sh` | GitHub の認証情報（Secrets / Variables）を登録し直す |
-| 管理者 | 🔑 `sf-sync-wf.sh` | 作成済みのワークフローを、最新の雛形に合わせて更新する |
-| 管理者 | 🔑 `sf-typecheck.sh` | 個人用の組織で、メタデータの種類ごとに、リリースと削除ができるかを確かめる |
-| 自動 | `sf-install.sh` / `sf-upgrade.sh` / `sf-prepush.sh` / `sf-precommit.sh` / `sf-metasync.sh` | ほかのコマンド・git のフック・GitHub Actions から、自動で動く（`sf-metasync.sh` を手元で実行すると、管理者向けの警告と確認が出ます） |
+| 管理者 | 🔑 `sf-update-workflows.sh` | 作成済みのワークフローを、最新の雛形に合わせて更新する |
+| 管理者 | 🔑 `sf-test-types.sh` | 個人用の組織で、メタデータの種類ごとに、リリースと削除ができるかを確かめる |
+| 自動 | `sf-refresh.sh` / `sf-update-cli.sh` / `sf-prepush.sh` / `sf-precommit.sh` / `sf-metasync.sh` | ほかのコマンド・git のフック・GitHub Actions から、自動で動く（`sf-metasync.sh` を手元で実行すると、管理者向けの警告と確認が出ます） |
 
 ---
 
@@ -180,9 +180,9 @@ export PATH="$HOME/sf-tools/bin:$PATH"
 | `doc/sf-cicd-strategy.md` | Git の運用と CI/CD の基本戦略・設計思想（詳細版） |
 | `doc/jwt-auth-spec.md` | JWT 認証方式の仕様 |
 | `doc/wf-distribution-strategy.md` | ワークフローの配布・更新の戦略 |
-| `doc/wizard-ux-design.md` | ウィザード形式の画面（`sf-init` など）の設計 |
+| `doc/wizard-ux-design.md` | ウィザード形式の画面（`sf-project` など）の設計 |
 | `doc/sf-log-design.md` | `sf-log.sh`（AI の開発サイクル用のデバッグログ取得）の設計書 |
-| `doc/tier-scaling-design.md` | 段階（main / staging / develop）の増減（`branches.txt` を唯一のスイッチにする・`sf-init.sh --remove-tier`）の設計書 |
+| `doc/tier-scaling-design.md` | 段階（main / staging / develop）の増減（`branches.txt` を唯一のスイッチにする・`sf-project.sh --remove-tier`）の設計書 |
 
 ### 6.3 sf-tools の開発者向け
 

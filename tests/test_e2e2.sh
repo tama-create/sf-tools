@@ -1,6 +1,6 @@
 #!/bin/bash
 # ==============================================================================
-# test_e2e2.sh - tests/e2e/（実環境での sf-init 通し検証）の安全ガードと部品のテスト（2/2）
+# test_e2e2.sh - tests/e2e/（実環境での sf-project 通し検証）の安全ガードと部品のテスト（2/2）
 # ==============================================================================
 # test_e2e.sh のテストが多く、時間がかかる（Windows の CI で約 8 分）ため、2 つのファイルに分け、並列に動かす。
 # 共通の部品は tests/e2e-test-lib.sh。実際の GitHub / Salesforce には接続しない（gh / sf はモック）。
@@ -12,8 +12,8 @@
 #  28. シナリオ metasync-diff（組織側だけの Apex が、wf-metasync で main に反映される。組織と main を、必ず戻す）
 #  29. 中断→再開（run.sh --interrupt）と、git の shim（main への push を 1 回だけ失敗させる）
 #  30. シナリオ one-way（一方通行の決まり。前提の確認・開始の警告・途中で止まったときの後始末。流れ全体は e2e で確かめる）
-#  31. シナリオ restart-org（sf-restart で接続先を staging の組織に切り替え → dry-run → 元に戻す）
-#  33. シナリオ sync-wf（改変したワークフローを sf-sync-wf が見つけて直す・--remove は雛形にあるファイルを拒否）
+#  31. シナリオ restart-org（sf-switch-org で接続先を staging の組織に切り替え → dry-run → 元に戻す）
+#  33. シナリオ sync-wf（改変したワークフローを sf-update-workflows が見つけて直す・--remove は雛形にあるファイルを拒否）
 #  34. シナリオ update-secret（sf-update-secret で秘密鍵を同じ鍵で上書き・更新日時が進む・誤ったパスは拒否される）
 #  35. シナリオ cross-os（別の OS が作ったリポジトリの確認）
 # ==============================================================================
@@ -467,7 +467,7 @@ test_e2e_scenario_restart_org() {
     [[ $rc -eq 0 ]] || sed 's/\x1b\[[0-9;]*m//g' "$MB/out.log" | tail -25
     assert_exit_ok "$rc" "restart-org: 成功する"
     assert_file_contains "$MB/out.log" "成功（" "restart-org: 結果が成功と表示される"
-    assert_equals "$(tr '\n' ',' < "$MB/restart.log")" "restart sf-tools-e2e-restart-STG,restart sf-tools-e2e-job," "restart-org: 切り替え（STG）→ 戻す（元のエイリアス）の順に、sf-restart を呼ぶ"
+    assert_equals "$(tr '\n' ',' < "$MB/restart.log")" "restart sf-tools-e2e-restart-STG,restart sf-tools-e2e-job," "restart-org: 切り替え（STG）→ 戻す（元のエイリアス）の順に、sf-switch-org を呼ぶ"
     assert_file_contains "$clone/.sf/config.json" "sf-tools-e2e-job" "restart-org: 終了後、クローンの接続先は、元のエイリアスに戻る"
     assert_file_contains "$MOCK_CALL_LOG" "org login sfdx-url" "restart-org: 元のエイリアスで、認証 URL でログインし直してから、ユーザーを読む"
     assert_file_not_contains "$MOCK_CALL_LOG" "project deploy" "restart-org: 組織へ、デプロイしない（dry-run は、台本）"
@@ -483,15 +483,15 @@ test_e2e_scenario_restart_org() {
     # --- 切り替え自体が失敗 → 失敗（元に戻す処理も、同じように失敗したら、手での戻し方を案内する）---
     _reset_ro
     MOCK_RESTART_FAIL=1 _run_scn_stg -y restart-org; rc=$?
-    assert_exit_fail "$rc" "restart-org: sf-restart が失敗したら、失敗する"
-    assert_file_contains "$MB/out.log" "sf-restart.sh を実行して" "restart-org: 戻せなかったときは、手での戻し方を案内する"
+    assert_exit_fail "$rc" "restart-org: sf-switch-org が失敗したら、失敗する"
+    assert_file_contains "$MB/out.log" "sf-switch-org.sh を実行して" "restart-org: 戻せなかったときは、手での戻し方を案内する"
 
     # --- 前提: staging の組織が、鍵一式にない → 実行できない ---
     _reset_ro
     _run_scenario -y restart-org; rc=$?
     assert_exit_fail "$rc" "restart-org: 鍵一式に staging の組織がなければ、実行できない"
     assert_file_contains "$MB/out.log" "実行できない" "restart-org: 「実行できない」と報告する"
-    assert_equals "$(wc -l < "$MB/restart.log" 2>/dev/null | tr -d ' ')" "" "restart-org: 実行できないときは、sf-restart を呼ばない"
+    assert_equals "$(wc -l < "$MB/restart.log" 2>/dev/null | tr -d ' ')" "" "restart-org: 実行できないときは、sf-switch-org を呼ばない"
 
     # --- 前提: 接続済みのジョブのクローンがない / SF_USERNAME_STG がない → 実行できない ---
     _reset_ro; rm -rf "$clone"
@@ -507,13 +507,13 @@ test_e2e_scenario_restart_org() {
     _run_scn_stg restart-org < <(printf 'N\n'); rc=$?
     assert_exit_fail "$rc" "restart-org: 開始の確認で N → 中止する"
     assert_file_contains "$MB/out.log" "書き込み（restart-org）" "restart-org: 警告に、書き込む内容が表示される"
-    assert_equals "$(wc -l < "$MB/restart.log" 2>/dev/null | tr -d ' ')" "" "restart-org: N のとき、sf-restart を呼ばない"
+    assert_equals "$(wc -l < "$MB/restart.log" 2>/dev/null | tr -d ' ')" "" "restart-org: N のとき、sf-switch-org を呼ばない"
     unset E2E_SF_RESTART E2E_SF_DRYRUN E2E_INSTALL_TIMEOUT E2E_CMD_POLL_SEC E2E_HEARTBEAT_SEC
     teardown "$CB"
 }
 
 # ------------------------------------------------------------------------------
-# 33. シナリオ sync-wf（改変したワークフローを sf-sync-wf が見つけて直す。--remove は、雛形にあるファイルを拒否する）
+# 33. シナリオ sync-wf（改変したワークフローを sf-update-workflows が見つけて直す。--remove は、雛形にあるファイルを拒否する）
 # ------------------------------------------------------------------------------
 test_e2e_scenario_sync_wf() {
     echo ""; echo -e "${CLR_HEAD}[TEST] scenario.sh sync-wf（B4。管理者用のクローンの中だけ）${CLR_RST}"
@@ -526,7 +526,7 @@ test_e2e_scenario_sync_wf() {
     mkdir -p "$tpl"; printf 'name: wf-validate
 on: pull_request
 ' > "$tpl/wf-validate.yml"
-    # 代役の sf-sync-wf.sh（雛形は $tpl。--check: 差分があれば終了コード 1・雛形にないファイルは案内だけ / 引数なし: 雛形で上書き / --remove: 雛形にあれば拒否）
+    # 代役の sf-update-workflows.sh（雛形は $tpl。--check: 差分があれば終了コード 1・雛形にないファイルは案内だけ / 引数なし: 雛形で上書き / --remove: 雛形にあれば拒否）
     cat > "$MB/syncwf-stub.sh" <<'SWEOF'
 #!/bin/bash
 tpl="${SYNCWF_TPL:?}"; dst=".github/workflows"
@@ -565,9 +565,9 @@ SWEOF
     assert_file_not_contains "$MOCK_CALL_LOG" "repo delete" "sync-wf: リポジトリは、削除しない"
     assert_file_not_contains "$MOCK_CALL_LOG" "secret set" "sync-wf: GitHub に、書き込まない（Secret）"
 
-    # --- sf-sync-wf が、雛形に戻せない（上書きが効かない）→ 失敗する。それでも、終了時に、クローンを元に戻す ---
+    # --- sf-update-workflows が、雛形に戻せない（上書きが効かない）→ 失敗する。それでも、終了時に、クローンを元に戻す ---
     _reset_sw
-    # 上書き（引数なし）だけを、何もせずに成功させる代役（壊れた sf-sync-wf.sh）。ほかは、元の代役に渡す
+    # 上書き（引数なし）だけを、何もせずに成功させる代役（壊れた sf-update-workflows.sh）。ほかは、元の代役に渡す
     printf '#!/bin/bash
 [[ -n "${1:-}" ]] || exit 0
 exec "%s" "$@"
@@ -698,7 +698,7 @@ case "${XOS_HOOK_MODE:-ok}" in
 esac
 exit 0
 XHEOF
-    # 代役の sf-sync-wf.sh（--check: 雛形と同じなら 0、違えば 1）
+    # 代役の sf-update-workflows.sh（--check: 雛形と同じなら 0、違えば 1）
     cat > "$MB/xos-sync.sh" <<'XSEOF'
 #!/bin/bash
 [[ "${1:-}" == "--check" ]] || exit 2
@@ -725,7 +725,7 @@ XSEOF
     assert_file_contains "$MB/out.log" "成功（" "cross-os: 結果が成功と表示される"
     assert_file_contains "$MB/out.log" "CRLF（または、混在）がない" "cross-os: 改行（CRLF がない）を確認する"
     assert_file_contains "$MB/out.log" "同じ内容である" "cross-os: フックが、sf-tools のものと同じ内容かを確認する"
-    assert_file_contains "$MB/out.log" "sf-sync-wf.sh --check が成功した" "cross-os: ワークフローが、雛形と同じかを確認する"
+    assert_file_contains "$MB/out.log" "sf-update-workflows.sh --check が成功した" "cross-os: ワークフローが、雛形と同じかを確認する"
     assert_file_contains "$MOCK_CALL_LOG" "gh repo clone tamashimon-org/$repo" "cross-os: 指定されたリポジトリを clone する"
     assert_file_contains "$MOCK_CALL_LOG" "core.longpaths=true" "cross-os: Windows のパス長の上限対策（core.longpaths=true）を付けて clone する（通常の運用と同じ）"
     assert_equals "$(_xos_left)" "0" "cross-os: 終了後、clone した一時フォルダは、残らない"

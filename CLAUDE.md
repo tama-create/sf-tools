@@ -24,12 +24,12 @@
 | 変更中 | `run` ラッパー必須・日本語コメント・UTF-8/LF 維持 |
 | 変更後 | **変えた箇所のコメント（冒頭コメント・コード本体の中のコメント）を見直す（2.5）。** 手元は `bash tests/run_tests.sh --changed`（変えたファイルのテスト）だけ → PASS したら mm を依頼。**全件は手元で回さない（CI が正）** |
 | mm 後 | push で、GitHub Actions が全件（Windows・macOS・Linux）と shellcheck を自動で動かす。**Claude が結果を確認して報告する。赤なら直して、もう一度 mm を依頼する**（目安 約 11 分。実績 7〜20 分。ランナーの空き待ちで延びる） |
-| 検証 | **e2e は GitHub Actions（`e2e.yml`）の結果が正。mm では動かさない**（1 回で、テスト用の組織の無料枠を約 40 分ぶん使うため）。**rr の最初の手順として、Claude が `development` に対して手動で動かす**（e2e の対象のパスが `main` との差分にあるときだけ。判定は `bash tests/e2e/needs-e2e.sh`。1.3.2）。目安: Windows の全部 25〜50 分 → macOS のクライアント側 5〜6 分。**Claude が結果を確認して報告する。手元では動かさない**（同じ 3 つの組織を取り合う。確認の内容は `doc/dev-reference.md` 9.6）。重い変更（リリース・削除の流れ・sf-init）を、rr の前に早めに確かめたいときも、同じ手動の実行を使う。ユーザーに手動の確認を頼むのは、e2e で見えないことだけ |
+| 検証 | **e2e は GitHub Actions（`e2e.yml`）の結果が正。mm では動かさない**（1 回で、テスト用の組織の無料枠を約 40 分ぶん使うため）。**rr の最初の手順として、Claude が `development` に対して手動で動かす**（e2e の対象のパスが `main` との差分にあるときだけ。判定は `bash tests/e2e/needs-e2e.sh`。1.3.2）。目安: Windows の全部 25〜50 分 → macOS のクライアント側 5〜6 分。**Claude が結果を確認して報告する。手元では動かさない**（同じ 3 つの組織を取り合う。確認の内容は `doc/dev-reference.md` 9.6）。重い変更（リリース・削除の流れ・sf-project）を、rr の前に早めに確かめたいときも、同じ手動の実行を使う。ユーザーに手動の確認を頼むのは、e2e で見えないことだけ |
 | リリース | CI 全緑の報告後に rr を依頼。rr の中で、必要なら e2e を動かし、緑を確認してから、PR・マージに進む（1.3.2） |
 
 > **mm の前に、`--changed` の PASS は必須。PASS 確認なしの mm 依頼は禁止。全件は、mm 後の CI の結果が正（手元の Windows は遅く、全件は 2 時間以上かかることもある。手元で全件が必要なときだけ、WSL で `run_tests.sh`）。CI が赤のまま、PR・rr を進めない。**
 > **レビュー（`/code-review` など）は、全指摘に「修正した」か「修正しない理由の申告」を行い、レビュアー（独立したエージェントかユーザー）が承認して、はじめて「通った」とする。自分の判断だけで見送って、通ったことにしない（無承認での「レビュー OK」の報告は禁止）。**
-> **rr の前に、CI の全件が緑（`development` の最新のコミットで）が必須。さらに、`main` との差分に **e2e の対象のパス**が含まれるとき（`bash tests/e2e/needs-e2e.sh` の戻り値が 0）は、e2e（Actions の `e2e.yml`）が、その対象のパスを最後に変えたコミット（`bash tests/e2e/needs-e2e.sh --last-change`）以降で成功していることも必須**（成功がなければ、rr の最初の手順として、Claude が動かす。1.3.2）。**対象のパスの定義の正本は `tests/e2e/needs-e2e.sh`**（配布物の `bin/` `lib/` `phases/` `hooks/` `templates/` `config/` と、e2e 自体の `tests/e2e/` `e2e.yml` のうち、リリース・削除に関係しない 6 ファイル `bin/sf-metasync.sh` `bin/sf-upgrade.sh` `lib/metasync.js` `config/metasync-detect.txt` `config/metasync-fingerprint.txt` `config/metasync-extra.txt` を除いたもの。詳細は `doc/dev-reference.md` 9.3）。戻り値が 1（`tests/`（e2e 以外）`doc/` `.github/workflows/test.yml` や、上の 6 ファイルなどだけの変更）なら、e2e は不要。**e2e は、1 回で、Actions の無料枠（テスト用の組織の月 2,000 分）を約 40 分ぶん使う。mm では動かさず、rr の前の 1 回にする。リリース・削除に関係する変更は、まとめて 1 回の rr にする。** CI が赤のままの rr 依頼・e2e が赤の rr は、進めない（直して、もう一度 mm → rr）。
+> **rr の前に、CI の全件が緑（`development` の最新のコミットで）が必須。さらに、`main` との差分に **e2e の対象のパス**が含まれるとき（`bash tests/e2e/needs-e2e.sh` の戻り値が 0）は、e2e（Actions の `e2e.yml`）が、その対象のパスを最後に変えたコミット（`bash tests/e2e/needs-e2e.sh --last-change`）以降で成功していることも必須**（成功がなければ、rr の最初の手順として、Claude が動かす。1.3.2）。**対象のパスの定義の正本は `tests/e2e/needs-e2e.sh`**（配布物の `bin/` `lib/` `phases/` `hooks/` `templates/` `config/` と、e2e 自体の `tests/e2e/` `e2e.yml` のうち、リリース・削除に関係しない 6 ファイル `bin/sf-metasync.sh` `bin/sf-update-cli.sh` `lib/metasync.js` `config/metasync-detect.txt` `config/metasync-fingerprint.txt` `config/metasync-extra.txt` を除いたもの。詳細は `doc/dev-reference.md` 9.3）。戻り値が 1（`tests/`（e2e 以外）`doc/` `.github/workflows/test.yml` や、上の 6 ファイルなどだけの変更）なら、e2e は不要。**e2e は、1 回で、Actions の無料枠（テスト用の組織の月 2,000 分）を約 40 分ぶん使う。mm では動かさず、rr の前の 1 回にする。リリース・削除に関係する変更は、まとめて 1 回の rr にする。** CI が赤のままの rr 依頼・e2e が赤の rr は、進めない（直して、もう一度 mm → rr）。
 > **変更に e2e の確認が足りないときは、e2e のほうを広げる**（手動の検証を、ユーザーに頼まない）。
 > **無言の時間を作らない（止まって見えるのは、サボりとみなす）。** ユーザーの画面には、ツールの中身も裏の処理も見えない。作業の開始時・調査や待ちに入る前に、今していること・待っていること・次にすることを 1〜2 行で書く。30 秒以上の処理は、ターミナルのタブでログの流れを見せ、途中経過をこまめに伝える。判断を求めているときは「指示待ち」とはっきり書き、完了したらすぐ結果を伝える（先に状況を聞かれたら失敗）。
 
@@ -163,21 +163,21 @@ git pull origin main                     # main の最新を取り込む
 | ルール | 内容 |
 |---|---|
 | 警告ボックス表示 | `print_admin_warning`（`lib/common.sh`。赤 = `CLR_ERR` の枠）で表示する。`echo` で直書きしない（使い方は `doc/dev-reference.md` 3.4.1） |
-| `ask_yn \|\| die` | N/q で必ず中断すること（`|| die` 必須）。`lib/wizard.sh` の `wizard_confirm`（Enter / Y で進み、N / q は die）も、同等として扱う（sf-init の開始画面）|
+| `ask_yn \|\| die` | N/q で必ず中断すること（`|| die` 必須）。`lib/wizard.sh` の `wizard_confirm`（Enter / Y で進み、N / q は die）も、同等として扱う（sf-project の開始画面）|
 | `check_gh_owner "$OWNER"` | gh 認証ユーザーがリポジトリオーナーと一致するか確認（不一致は `die`。ただしオーナーが組織で、ユーザーがその有効な admin なら通過）|
-| GITHUB_ACTIONS スキップ | `GITHUB_ACTIONS=true` の場合は警告・確認をスキップして自動実行（**例外**: `sf-sync-wf.sh`・`sf-init.sh`（`--add-tier`・`--remove-tier`・`--reconnect` を含む）は省略しない。`sf-typecheck.sh` と `sf-init.sh --verify` は、Actions 上では実行を拒否する）|
+| GITHUB_ACTIONS スキップ | `GITHUB_ACTIONS=true` の場合は警告・確認をスキップして自動実行（**例外**: `sf-update-workflows.sh`・`sf-project.sh`（`--add-tier`・`--remove-tier`・`--reconnect` を含む）は省略しない。`sf-test-types.sh` と `sf-project.sh --verify` は、Actions 上では実行を拒否する）|
 | 二重確認の防止 | `SF_DEPLOY_CONFIRMED=1` を export して呼び出し先の確認をスキップ |
 
 **管理者向けコマンド一覧（警告必須）:**
 
 | スクリプト | 状態 |
 |---|---|
-| `sf-init.sh`（`--add-tier`・`--remove-tier`・`--reconnect` の `phases/init/add_tier.sh`・`remove_tier.sh`・`reconnect.sh` を含む） | ✅ 実装済み |
+| `sf-project.sh`（`--add-tier`・`--remove-tier`・`--reconnect` の `phases/init/add_tier.sh`・`remove_tier.sh`・`reconnect.sh` を含む） | ✅ 実装済み |
 | `sf-metasync.sh` | ✅ 実装済み |
 | `sf-update-secret.sh` | ✅ 実装済み |
-| `sf-sync-wf.sh` | ✅ 実装済み |
-| `sf-init.sh --verify`（`phases/init/verify.sh`） | ✅ 実装済み（警告ボックス + 実行内容の表示 + `wizard_confirm`（Enter。入力を最小に）。本番を含むときは、文面で明示） |
-| `sf-typecheck.sh` | ✅ 実装済み（警告ボックス + `ask_yn \|\| die`（`-y` で省略可）。GitHub Actions 上・予約名のエイリアス・本番は拒否。作成・削除は `SfToolsE2eMin` を含むものだけ（LWC は名前が小文字で始まる決まりのため、`sfToolsE2eMin` の綴りも可）。**この安全ガードを緩めないこと**） |
+| `sf-update-workflows.sh` | ✅ 実装済み |
+| `sf-project.sh --verify`（`phases/init/verify.sh`） | ✅ 実装済み（警告ボックス + 実行内容の表示 + `wizard_confirm`（Enter。入力を最小に）。本番を含むときは、文面で明示） |
+| `sf-test-types.sh` | ✅ 実装済み（警告ボックス + `ask_yn \|\| die`（`-y` で省略可）。GitHub Actions 上・予約名のエイリアス・本番は拒否。作成・削除は `SfToolsE2eMin` を含むものだけ（LWC は名前が小文字で始まる決まりのため、`sfToolsE2eMin` の綴りも可）。**この安全ガードを緩めないこと**） |
 
 > **警告は、必ず、確認（`ask_yn || die` / `wizard_confirm`）とセットにする。** 警告を出しただけで、先へ進まない（表示だけで流れると、意味がない）。読み取りのみのモード（`--list` など）も、同じ（`-y` で省略できるようにする）
 > `sf-hook.sh` / `sf-unhook.sh`（手元のフックの入れ替え）・`sf-release.sh`（単独では、まず打たない。確認のみ）・`sf-deploy.sh`（開発者向けのラッパー）は、管理者向けではないため、警告ボックスは不要
@@ -249,14 +249,14 @@ Salesforce 開発の環境構築と日々の作業を自動化するシェルス
 |---|---|
 | `bin/sf-*.sh` | 各種自動化スクリプト本体 |
 | `lib/` | 共通ライブラリ。`common.sh` が窓口（`log` / `run` / `die` など。`input.sh`・`platform.sh`・`project.sh` を読み込む）。`org.sh`・`wizard.sh`・`diag.sh`・`verify-common.sh` などは、使うスクリプトが個別に読み込む（`doc/dev-reference.md` 3） |
-| `phases/init/` | sf-init.sh のサブスクリプト（Phase 01〜10・`init-common.sh`・`--add-tier` / `--remove-tier` / `--reconnect` / `--status` / `--verify` の `add_tier.sh` / `remove_tier.sh` / `reconnect.sh` / `status.sh` / `verify.sh`） |
-| `config/changeset-types.txt` | 変更セットで扱える種類の一覧（公式の Metadata Coverage Report。「全種類を対象にする」目標の一覧。`sf-typecheck.sh --coverage` で、確認の進み具合を見る） |
-| `config/metadata-capability.txt` | メタデータの種類ごとの「リリース・削除」の可否の表（`sf-typecheck.sh` が実機で確認した結果。`sf-check.sh` が読む） |
+| `phases/init/` | sf-project.sh のサブスクリプト（Phase 01〜10・`init-common.sh`・`--add-tier` / `--remove-tier` / `--reconnect` / `--status` / `--verify` の `add_tier.sh` / `remove_tier.sh` / `reconnect.sh` / `status.sh` / `verify.sh`） |
+| `config/changeset-types.txt` | 変更セットで扱える種類の一覧（公式の Metadata Coverage Report。「全種類を対象にする」目標の一覧。`sf-test-types.sh --coverage` で、確認の進み具合を見る） |
+| `config/metadata-capability.txt` | メタデータの種類ごとの「リリース・削除」の可否の表（`sf-test-types.sh` が実機で確認した結果。`sf-check.sh` が読む） |
 | `hooks/` | git フック（`pre-commit`・`pre-push`）の実体。`bin/` のスクリプトを呼ぶだけのラッパー |
-| `templates/` | force-* へ配布する雛形。**force-* にそのまま置くもの（同じ名前・同じ場所）だけを入れる**（Phase 3 が丸ごとコピーするため）。**参照は sf-init（Phase 3・sf-init から実行中の `sf-install.sh`）と `sf-sync-wf.sh`（ワークフロー）だけ** |
-| `config/install/` | `sf-install.sh` が名前や場所を変えて force-* に置く雛形（`release/` の deploy-target.txt・remove-target.txt と `gitmessage`）。`templates/` に置かない。日常運用で参照してよいのは、`sf-install.sh` の `phase_setup_release_dir`（release の雛形）のみ |
+| `templates/` | force-* へ配布する雛形。**force-* にそのまま置くもの（同じ名前・同じ場所）だけを入れる**（Phase 3 が丸ごとコピーするため）。**参照は sf-project（Phase 3・sf-project から実行中の `sf-refresh.sh`）と `sf-update-workflows.sh`（ワークフロー）だけ** |
+| `config/install/` | `sf-refresh.sh` が名前や場所を変えて force-* に置く雛形（`release/` の deploy-target.txt・remove-target.txt と `gitmessage`）。`templates/` に置かない。日常運用で参照してよいのは、`sf-refresh.sh` の `phase_setup_release_dir`（release の雛形）のみ |
 | `tests/` | モックベースの単体テスト一式と、結合テスト L1（`test_integration*.sh`・`tests/integration/`） |
-| `tests/e2e/` | 実環境での `sf-init` の通し検証（自動実行。作ったものは既定で残し、次回の前掃除で削除）。通常のテストには含めない |
+| `tests/e2e/` | 実環境での `sf-project` の通し検証（自動実行。作ったものは既定で残し、次回の前掃除で削除）。通常のテストには含めない |
 | `site/` | 利用者向けの文書サイト（HTML。GitHub Pages で公開。`doc/dev-reference.md` 9.8） |
 | `doc/` | 設計思想・戦略・開発リファレンス |
 

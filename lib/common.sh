@@ -82,8 +82,8 @@ if [[ -z "${LOG_FILE:-}" ]]; then
 fi
 
 # force-* ディレクトリ内でのみ実行を許可（mkdir-p より前に実行）
-# SF_INIT_MODE=1 の場合はチェックをスキップする（force-* の外で動く sf-init.sh とその phases/init/・sf-job.sh・
-# sf-typecheck.sh・tests/e2e/ が export する）
+# SF_INIT_MODE=1 の場合はチェックをスキップする（force-* の外で動く sf-project.sh とその phases/init/・sf-job.sh・
+# sf-test-types.sh・tests/e2e/ が export する）
 if [[ "${SF_INIT_MODE:-0}" != "1" ]]; then
     [[ "${PWD##*/}" =~ ^force- ]] \
         || { echo "[ERROR] このスクリプトは 'force-*' ディレクトリ内で実行してください。" >&2; exit 1; }  # 条件チェックのため run 不使用（run の定義前）
@@ -292,7 +292,7 @@ fi
 # sf-tools と、近い環境を用意して、再現できるようにする。書くのは、バージョンなどの番号だけ（パス・ユーザー名・Token は含めない）。
 #   source 時（_log_env_header）: sf-tools のコミット・OS・bash の版を、ログファイルに 1 行書く（[ENV] の行）。
 #                                 外部のプログラムを起動しない（ファイルの読み取りと組み込みの変数だけ。起動のたびに走るため）。
-#                                 親のプロセスが、同じログファイルに書いたあと（sf-init の Phase など）は、重ねて書かない
+#                                 親のプロセスが、同じログファイルに書いたあと（sf-project の Phase など）は、重ねて書かない
 #                                 （export した SF_TOOLS_ENV_LOGGED が、同じログファイルのパスのとき。LOG_MODE=NEW は、ログが空になるため、書き直す）
 #   die のとき（_log_env_tools）: git・node・sf の版を、ログファイルに 1 行書く。git・node は外部のプログラムを起動する（約 60ms ずつ）ため、
 #                                 die のときだけ。sf は起動が遅い（数秒）ため、起動せず、npm の package.json の version を読む
@@ -332,7 +332,7 @@ _sf_tools_commit_var() {
 
 # ログファイルに、sf-tools のコミット・OS・bash の版・スクリプト名を、1 行書く（追記のログでは、実行の区切りにもなる）。
 #   親のプロセスが、同じログファイルに、すでに書いているとき（export した SF_TOOLS_ENV_LOGGED が、LOG_FILE と同じ）は、書かない
-#   （sf-init.log は、各 Phase のサブスクリプトも追記する。source のたびに増えないように）。LOG_MODE=NEW は、source でログが空になるため、書き直す
+#   （sf-project.log は、各 Phase のサブスクリプトも追記する。source のたびに増えないように）。LOG_MODE=NEW は、source でログが空になるため、書き直す
 _log_env_header() {
     if [[ "${SF_TOOLS_ENV_LOGGED:-}" == "$LOG_FILE" && "${LOG_MODE:-}" != "NEW" ]]; then return 0; fi
     local _leh_ts _leh_commit
@@ -481,11 +481,11 @@ _prefix_lines() {
 #     恐れがあるため削除した（2026-03-24）。
 #   ※ Salesforce CLI が、成功しても終了コード 1 を返す環境（Windows の Git Bash で、公式インストーラー版を
 #     自動更新した場合）では、終了コードに頼る処理が失敗扱いになる。そのため sf-tools は Salesforce CLI の
-#     npm 版を前提とし、sf-init.sh / sf-start.sh / sf-release.sh / sf-metasync.sh / sf-update-secret.sh / sf-typecheck.sh の
-#     最初に check_sf_cli で確認する（NG なら中断。sf-install.sh だけは警告のみ）。sf の成否は、すべて終了コードで判定する。
+#     npm 版を前提とし、sf-project.sh / sf-start.sh / sf-release.sh / sf-metasync.sh / sf-update-secret.sh / sf-test-types.sh の
+#     最初に check_sf_cli で確認する（NG なら中断。sf-refresh.sh だけは警告のみ）。sf の成否は、すべて終了コードで判定する。
 #
 # 【使用例】
-#   run bash "./sf-install.sh"                      || die "失敗"
+#   run bash "./sf-refresh.sh"                      || die "失敗"
 #   run mkdir -p "release/${BRANCH_NAME}"           || return $RET_NG
 #   run sf org login web --set-default --alias "$A" || die "失敗"
 #   printf '{"target-org": "%s"}\n' "$A" | run tee .sf/config.json

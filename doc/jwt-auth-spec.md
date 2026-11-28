@@ -2,9 +2,9 @@
 
 > **本ドキュメントの範囲:** JWT 認証への移行設計・仕様・実装方針。実装の詳細（コマンド引数等）はコードを正とします。
 >
-> **補足（sf-init Phase 10）:** Salesforce 側のアプリは、**「外部クライアントアプリケーション（External Client App。以下 ECA）」だけで、自動で作成します**。従来の「接続アプリケーション（Connected App）」（手動で作成。`sf-init.sh --legacy-connected-app`）は、Salesforce のサポート終了（Summer '27）を前に、廃止しました（以前の状態ファイルに残る `APP_TYPE` は読みません）。
+> **補足（sf-project Phase 10）:** Salesforce 側のアプリは、**「外部クライアントアプリケーション（External Client App。以下 ECA）」だけで、自動で作成します**。従来の「接続アプリケーション（Connected App）」（手動で作成。`sf-project.sh --legacy-connected-app`）は、Salesforce のサポート終了（Summer '27）を前に、廃止しました（以前の状態ファイルに残る `APP_TYPE` は読みません）。
 >
-> **ECA は自動作成です。** Step 4 の組織ごとの設定で、ログイン先（URL）の選択 → `sf org login web`（ブラウザでログイン）→ 接続ユーザー名の取得 → 組織の種類の読み取りと「本番は main のみ」の確認（`org_guard`）→ プロファイル名（表示名）の取得 → メタデータ（5 ファイル）の `sf project deploy` でアプリ作成（証明書の登録、JWT Bearer、フルアクセス + refresh_token、管理者が承認したユーザーは事前承認済み）→ `sf project retrieve` でコンシューマー鍵を自動取得 → JWT 接続テスト（反映待ちのためリトライ）→ Secrets / Variables を登録、までを `sf-init` が行います（コンシューマーキー・ユーザー名の手入力は不要です。詳細は 4.2）。ログイン用の一時エイリアスは `sf-tools-PROD` / `sf-tools-STG` / `sf-tools-DEV` で、ユーザーが運用中のエイリアスと重ならない名前にしています。`sf` は npm 版が前提のため、ログイン（`sf org login web`）・接続情報の取得（`sf org display`）・プロファイル名の取得（`sf data query`）・deploy・retrieve・JWT 接続テストの成否は、すべて `sf` の終了コードで判定します（出力の文言では判定しません）。JWT 接続テスト以外は、0 以外なら中断します。JWT 接続テストは、リトライしても成功しなければ、「テストをスキップして登録だけ行う」かを確認します（N / q は中断）。**JWT 接続テストは、一時的なホームフォルダの中で実行します**（`run_isolated_home`）。`sf` の認証はユーザー名単位のため、そのまま実行すると、エイリアスが増える上に、同じユーザーの既存の認証が JWT の認証に置き換わってしまうからです。このため、`sf` の接続テストの `--alias`（`prod` / `staging` / `develop`）は、一時フォルダの中だけで有効で、ユーザーの `sf` には残りません（`sf-update-secret.sh` の接続テストも同様です。`lib/org.sh` の `org_jwt_test`）。実装は `phases/init/10_sf_auth.sh`、`phases/init/init-common.sh` の `register_jwt_secret_eca` / `generate_eca_metadata`、`lib/org.sh` を参照してください。
+> **ECA は自動作成です。** Step 4 の組織ごとの設定で、ログイン先（URL）の選択 → `sf org login web`（ブラウザでログイン）→ 接続ユーザー名の取得 → 組織の種類の読み取りと「本番は main のみ」の確認（`org_guard`）→ プロファイル名（表示名）の取得 → メタデータ（5 ファイル）の `sf project deploy` でアプリ作成（証明書の登録、JWT Bearer、フルアクセス + refresh_token、管理者が承認したユーザーは事前承認済み）→ `sf project retrieve` でコンシューマー鍵を自動取得 → JWT 接続テスト（反映待ちのためリトライ）→ Secrets / Variables を登録、までを `sf-project` が行います（コンシューマーキー・ユーザー名の手入力は不要です。詳細は 4.2）。ログイン用の一時エイリアスは `sf-tools-PROD` / `sf-tools-STG` / `sf-tools-DEV` で、ユーザーが運用中のエイリアスと重ならない名前にしています。`sf` は npm 版が前提のため、ログイン（`sf org login web`）・接続情報の取得（`sf org display`）・プロファイル名の取得（`sf data query`）・deploy・retrieve・JWT 接続テストの成否は、すべて `sf` の終了コードで判定します（出力の文言では判定しません）。JWT 接続テスト以外は、0 以外なら中断します。JWT 接続テストは、リトライしても成功しなければ、「テストをスキップして登録だけ行う」かを確認します（N / q は中断）。**JWT 接続テストは、一時的なホームフォルダの中で実行します**（`run_isolated_home`）。`sf` の認証はユーザー名単位のため、そのまま実行すると、エイリアスが増える上に、同じユーザーの既存の認証が JWT の認証に置き換わってしまうからです。このため、`sf` の接続テストの `--alias`（`prod` / `staging` / `develop`）は、一時フォルダの中だけで有効で、ユーザーの `sf` には残りません（`sf-update-secret.sh` の接続テストも同様です。`lib/org.sh` の `org_jwt_test`）。実装は `phases/init/10_sf_auth.sh`、`phases/init/init-common.sh` の `register_jwt_secret_eca` / `generate_eca_metadata`、`lib/org.sh` を参照してください。
 > **2026-11-26 追記（一方通行のリリース）:** 下りの伝播（`wf-propagate.yml` と、`sf-metasync.sh` の手順 12。main の変更を staging・develop のブランチへ流す）は**廃止した**。本書の伝播の記述は、当時の設計の記録として残す。今の決まりは `doc/one-way-promotion-design.md`（develop → staging → main に同じコミットのまま上げる・リリースの印・R0〜R3）。
 
 ---
@@ -27,7 +27,7 @@
 |---|---|
 | 有効期限なし | 秘密鍵そのものには期限がなく、トークンの再登録が不要（ただし、証明書は 10 年。3.2） |
 | ヘッドレス認証 | ブラウザ不要で CI/CD に最適 |
-| 利用者の限定 | アプリのポリシーで、使えるユーザーを、管理者が承認したプロファイルに限定できる（sf-init の設定は「事前承認済み」+ 接続ユーザーのプロファイル。スコープはフルアクセス + refresh_token） |
+| 利用者の限定 | アプリのポリシーで、使えるユーザーを、管理者が承認したプロファイルに限定できる（sf-project の設定は「事前承認済み」+ 接続ユーザーのプロファイル。スコープはフルアクセス + refresh_token） |
 | 業界標準 | OAuth 2.0 JWT Bearer Flow（RFC 7523） |
 
 ### 1.3 移行方針
@@ -48,11 +48,11 @@ STG は段階が 2 つ以上、DEV は 3 つのとき（または `--add-tier` �
 
 | 名前 | 種別 | 共通/組織別 | 内容 | 登録元 |
 |---|---|---|---|---|
-| `SF_PRIVATE_KEY` | Secret | **プロジェクト共通（1つ）** | 秘密鍵 `server.key`（PEM）から CR を除き、`base64_oneline` で 1 行の Base64 にした値。全組織のアプリに同一の証明書を登録するため共通 | sf-init Phase 10（Step 3。毎回上書き）/ `sf-update-secret.sh` のメニュー 1・4 |
-| `SF_CONSUMER_KEY_PROD` / `_STG` / `_DEV` | Secret | 組織別 | その組織のアプリ（ECA）のコンシューマー鍵 | Phase 10 / `sf-init.sh --add-tier`（`_STG`・`_DEV`）/ `sf-init.sh --reconnect` / `sf-update-secret.sh` のメニュー 2・4 |
+| `SF_PRIVATE_KEY` | Secret | **プロジェクト共通（1つ）** | 秘密鍵 `server.key`（PEM）から CR を除き、`base64_oneline` で 1 行の Base64 にした値。全組織のアプリに同一の証明書を登録するため共通 | sf-project Phase 10（Step 3。毎回上書き）/ `sf-update-secret.sh` のメニュー 1・4 |
+| `SF_CONSUMER_KEY_PROD` / `_STG` / `_DEV` | Secret | 組織別 | その組織のアプリ（ECA）のコンシューマー鍵 | Phase 10 / `sf-project.sh --add-tier`（`_STG`・`_DEV`）/ `sf-project.sh --reconnect` / `sf-update-secret.sh` のメニュー 2・4 |
 | `SF_USERNAME_PROD` / `_STG` / `_DEV` | Variable | 組織別 | 接続ユーザー名 | Phase 10 / `--add-tier` / `--reconnect` / `sf-update-secret.sh` のメニュー 3・4 |
 | `SF_INSTANCE_URL_PROD` / `_STG` / `_DEV` | Variable | 組織別 | ログイン先の URL（`sf org login jwt --instance-url` に渡す。2.3） | Phase 10 / `--add-tier` / `--reconnect` / `sf-update-secret.sh` のメニュー 4 のみ |
-| `SF_ORG_ID_*` / `SF_ORG_NAME_*` / `SF_ORG_KIND_*` / `SF_ORG_CHECKED_*` | Variable | 組織別 | 組織 ID・組織名・種類（production / sandbox / developer / trial / unknown）・確認日時。`sf-init.sh --status` の表示と、`--reconnect` の「古い組織」の判定に使う（ワークフローは使わない） | `org_save`（`lib/org.sh`）。Phase 10 / `--add-tier` / `--reconnect` / `sf-update-secret.sh` のメニュー 2〜4。組織の情報を読み取れたときだけ（保存の失敗は WARNING で続行） |
+| `SF_ORG_ID_*` / `SF_ORG_NAME_*` / `SF_ORG_KIND_*` / `SF_ORG_CHECKED_*` | Variable | 組織別 | 組織 ID・組織名・種類（production / sandbox / developer / trial / unknown）・確認日時。`sf-project.sh --status` の表示と、`--reconnect` の「古い組織」の判定に使う（ワークフローは使わない） | `org_save`（`lib/org.sh`）。Phase 10 / `--add-tier` / `--reconnect` / `sf-update-secret.sh` のメニュー 2〜4。組織の情報を読み取れたときだけ（保存の失敗は WARNING で続行） |
 
 > JWT のログインに使うのは、Secret 4 つ（`SF_PRIVATE_KEY` + `SF_CONSUMER_KEY_*` × 3）と Variable 6 つ（`SF_USERNAME_*` × 3 + `SF_INSTANCE_URL_*` × 3）。段階が main だけなら、Secret 2 つ・Variable 2 つ。
 
@@ -62,10 +62,10 @@ STG は段階が 2 つ以上、DEV は 3 つのとき（または `--add-tier` �
 
 | 名前 | 種別 | 用途 | 登録元 |
 |---|---|---|---|
-| `PAT_TOKEN` | Secret | wf-metasync・wf-propagate の checkout / push | sf-init Phase 6 |
-| `SLACK_BOT_TOKEN` | Secret | Slack への通知（wf-release・wf-propagate・wf-sequence） | sf-init Phase 7 |
-| `SLACK_CHANNEL_ID` | Variable | 通知先の Slack チャンネル ID | sf-init Phase 7 |
-| `SF_TOOLS_BRANCH` | Variable | ワークフローが clone する sf-tools のブランチ（未設定なら `main`） | sf-init Phase 9（開発版 = `development` のときだけ） |
+| `PAT_TOKEN` | Secret | wf-metasync・wf-propagate の checkout / push | sf-project Phase 6 |
+| `SLACK_BOT_TOKEN` | Secret | Slack への通知（wf-release・wf-propagate・wf-sequence） | sf-project Phase 7 |
+| `SLACK_CHANNEL_ID` | Variable | 通知先の Slack チャンネル ID | sf-project Phase 7 |
+| `SF_TOOLS_BRANCH` | Variable | ワークフローが clone する sf-tools のブランチ（未設定なら `main`） | sf-project Phase 9（開発版 = `development` のときだけ） |
 
 ### 2.3 SF_CONSUMER_KEY が組織ごとに異なる理由
 
@@ -96,13 +96,13 @@ STG は段階が 2 つ以上、DEV は 3 つのとき（または `--add-tier` �
   server.crt   ← 公開鍵証明書（メタデータに入れて deploy で登録）
 ```
 
-- 秘密鍵はプロジェクトリポジトリには含めない（リポジトリの外、sf-init を実行した管理者の PC のホームに保管する）
+- 秘密鍵はプロジェクトリポジトリには含めない（リポジトリの外、sf-project を実行した管理者の PC のホームに保管する）
 - 各組織のアプリに同一の `server.crt` を登録する
 - `--add-tier` / `--reconnect` / `sf-update-secret.sh`（メニュー 2〜4 の既定）も、このフォルダの鍵・証明書を使う（`--add-tier` / `--reconnect` は、なければ中断）
 
 ### 3.2 生成コマンド（openssl）
 
-sf-init Phase 10 の Step 1 で自動実行する（`generate_jwt_cert`。`phases/init/init-common.sh`）。
+sf-project Phase 10 の Step 1 で自動実行する（`generate_jwt_cert`。`phases/init/init-common.sh`）。
 
 ```bash
 openssl genrsa -out server.key.tmp 2048
@@ -120,7 +120,7 @@ openssl req -new -x509 -days 3650 \
 
 ---
 
-## 4. sf-init Phase 10 の処理フロー
+## 4. sf-project Phase 10 の処理フロー
 
 ### 4.1 フロー概要
 
@@ -179,9 +179,9 @@ openssl req -new -x509 -days 3650 \
 
 - Phase 10 を再実行する（中断後の「続きをやる」・`--resume N`）と、Step 1 から実行する（鍵・証明書の再利用の確認、Step 3 の `SF_PRIVATE_KEY` の上書きも、毎回行う）
 - Step 4 は段階ごとに再開できる。段階が完了するたびに、進捗ファイル（`admin/.sf-init-XXXX.progress`）に `SF_INIT_DONE_TIER_<接尾辞>=1` を追記し、再実行では、その記録があり、かつ `gh secret list` に `SF_CONSUMER_KEY_<接尾辞>` がいまもあるときだけ、その段階をスキップする（ブラウザのログインをやり直さなくてよいように。一覧を取得できなければスキップしない）
-- 記録とスキップは `SF_INIT_TIER_RESUME=1`（`sf-init.sh` が `--only` 以外のときに export する）のときだけ。`--only 10` では、記録も、スキップもしない
+- 記録とスキップは `SF_INIT_TIER_RESUME=1`（`sf-project.sh` が `--only` 以外のときに export する）のときだけ。`--only 10` では、記録も、スキップもしない
 - Step 1 で N（鍵の作り直し）を選んだ実行では、スキップしない（`SF_PRIVATE_KEY` が新しい鍵に置き換わり、古い証明書が残る組織が JWT 接続できなくなるため）
-- Phase 10 が成功すると、`sf-init.sh` が進捗ファイルを書き直すため、段階の記録は消える
+- Phase 10 が成功すると、`sf-project.sh` が進捗ファイルを書き直すため、段階の記録は消える
 
 ### 4.5 段階の追加・接続先の付け替え（--add-tier / --reconnect）
 
@@ -189,8 +189,8 @@ openssl req -new -x509 -days 3650 \
 
 | モード | スクリプト | 登録するもの | 補足 |
 |---|---|---|---|
-| `sf-init.sh --add-tier staging\|develop` | `phases/init/add_tier.sh` | `*_STG` または `*_DEV` | 組織への接続を先に行い、そのあとブランチを作り、`branches.txt` の変更を PR にする。接続で中断したときは、ブランチ・`branches.txt` は変更しない（deploy 済みの ECA は組織に残る） |
-| `sf-init.sh --reconnect main\|staging\|develop` | `phases/init/reconnect.sh` | その段階の `*_<接尾辞>` | いまの接続（Variables）を表示してから付け替える。以前の組織 ID と違う組織につないだときは、古い組織に残るアプリ（ECA `SF_TOOLS_<…>`）と削除の場所を表示する（自動では削除しない）。登録は 1 つずつ行うため、途中で止まると新旧の値が混在する（もう一度 `--reconnect` でそろえる） |
+| `sf-project.sh --add-tier staging\|develop` | `phases/init/add_tier.sh` | `*_STG` または `*_DEV` | 組織への接続を先に行い、そのあとブランチを作り、`branches.txt` の変更を PR にする。接続で中断したときは、ブランチ・`branches.txt` は変更しない（deploy 済みの ECA は組織に残る） |
+| `sf-project.sh --reconnect main\|staging\|develop` | `phases/init/reconnect.sh` | その段階の `*_<接尾辞>` | いまの接続（Variables）を表示してから付け替える。以前の組織 ID と違う組織につないだときは、古い組織に残るアプリ（ECA `SF_TOOLS_<…>`）と削除の場所を表示する（自動では削除しない）。登録は 1 つずつ行うため、途中で止まると新旧の値が混在する（もう一度 `--reconnect` でそろえる） |
 
 鍵・ユーザー名だけの部分的な更新は `sf-update-secret.sh`（6）。
 
@@ -233,7 +233,7 @@ openssl req -new -x509 -days 3650 \
 
 どれも `--set-default` で既定の組織にする。sf-tools は、公開リポジトリから Variable `SF_TOOLS_BRANCH` のブランチ（未設定なら `main`）を Token なしで clone する。
 
-`sf-tools/templates/.github/workflows/` が正本。変更時は `sf-sync-wf.sh` で各プロジェクトへ反映する（管理者が手動で実行する）。
+`sf-tools/templates/.github/workflows/` が正本。変更時は `sf-update-workflows.sh` で各プロジェクトへ反映する（管理者が手動で実行する）。
 
 ---
 

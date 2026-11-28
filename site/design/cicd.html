@@ -74,7 +74,7 @@
 </figure>
 
 <h2 id="branches">環境とブランチ</h2>
-<p>ブランチの階層は、<code>sf-tools/config/branches.txt</code> で、<strong>プロジェクトごとに</strong>決めます。管理者が、セットアップ（<code>sf-init.sh</code>）のときに、3 つのパターンから選びます。</p>
+<p>ブランチの階層は、<code>sf-tools/config/branches.txt</code> で、<strong>プロジェクトごとに</strong>決めます。管理者が、セットアップ（<code>sf-project.sh</code>）のときに、3 つのパターンから選びます。</p>
 <table>
   <thead><tr><th>パターン</th><th>ブランチ</th><th>使いどころ</th></tr></thead>
   <tbody>
@@ -84,7 +84,7 @@
   </tbody>
 </table>
 <p><code>main</code> は必ず使います。<code>develop</code> を使うときは、<code>staging</code> も必要です。</p>
-<p><strong>段階の有効・無効を決めるのは、GitHub の <code>main</code> の <code>branches.txt</code> だけです。</strong>リリース（<code>wf-release</code>）・PR の検証（<code>wf-validate</code>）・順序の確認（<code>wf-sequence</code>）は、毎回これを読み、表にない段階には、ブランチや接続情報が残っていても、何もしません。そのため、セットアップのあとでも、<code>sf-init.sh --add-tier</code> / <code>--remove-tier</code> で、1〜3 階層の間を、いつでも増やしたり減らしたりできます（<a href="../admin/maintenance.html#remove-tier">段階を外す</a>）。</p>
+<p><strong>段階の有効・無効を決めるのは、GitHub の <code>main</code> の <code>branches.txt</code> だけです。</strong>リリース（<code>wf-release</code>）・PR の検証（<code>wf-validate</code>）・順序の確認（<code>wf-sequence</code>）は、毎回これを読み、表にない段階には、ブランチや接続情報が残っていても、何もしません。そのため、セットアップのあとでも、<code>sf-project.sh --add-tier</code> / <code>--remove-tier</code> で、1〜3 階層の間を、いつでも増やしたり減らしたりできます（<a href="../admin/maintenance.html#remove-tier">段階を外す</a>）。</p>
 <p>3 階層の場合の対応は、次のとおりです。</p>
 <table>
   <thead><tr><th>層</th><th>組織</th><th>ブランチ</th><th>エイリアス</th><th>役割</th></tr></thead>
@@ -99,7 +99,7 @@
 <p>段階は、あとから足せます（<a href="../admin/maintenance.html#add-tier">構成の変更と診断</a>）。</p>
 
 <h3 id="admin-first">プロジェクトの作成（管理者が先）</h3>
-<p>プロジェクト（<code>force-XXXX</code>）は、<strong>管理者が先に</strong> <code>sf-init.sh</code> で作ります。リポジトリ・ワークフロー・ブランチ・ブランチ保護・GitHub に登録する情報（Secrets / Variables）・組織への接続・最初のメタデータの同期まで、まとめて用意します（<a href="../admin/setup.html">最初のセットアップ</a>）。</p>
+<p>プロジェクト（<code>force-XXXX</code>）は、<strong>管理者が先に</strong> <code>sf-project.sh</code> で作ります。リポジトリ・ワークフロー・ブランチ・ブランチ保護・GitHub に登録する情報（Secrets / Variables）・組織への接続・最初のメタデータの同期まで、まとめて用意します（<a href="../admin/setup.html">最初のセットアップ</a>）。</p>
 <p>開発者は、管理者から「できました」の連絡を受けてから、<code>sf-job.sh</code> で作業を始めます。リポジトリがまだないと、<code>sf-job.sh</code> は止まります。そのため、<strong>管理者と開発者の作業は、並行して進められません。</strong></p>
 
 <h2 id="release">リリースの流れ（スター型のプロモート）</h2>
@@ -124,7 +124,7 @@
 <h3 id="order">マージの順序（一方通行）</h3>
 <p>開発したものは、<code>branches.txt</code> の逆順（下位 → 上位）に、<strong>同じコミットのまま</strong>上げます。3 階層なら <code>develop → staging → main</code> の順です。<code>staging</code> で問題が出たら、<code>staging</code> では直さず、開発の環境で直して、<code>develop</code> から出し直します。これは、おすすめではなく、<strong>仕組みで強制する決まり</strong>です（2026-11-26 から。設計: <code>doc/one-way-promotion-design.md</code>）。</p>
 <ul>
-  <li><strong>開発者が <code>sf-next.sh</code> を使う限り、順序は守られます</strong>（<a href="../reference/commands-dev.html#sf-next">sf-next の説明</a>）。<code>sf-next.sh</code> は、今のコミットがどの段階まで出たかを確かめて、次の出し先を案内します。</li>
+  <li><strong>開発者が <code>sf-pr.sh</code> を使う限り、順序は守られます</strong>（<a href="../reference/commands-dev.html#sf-pr">sf-pr の説明</a>）。<code>sf-pr.sh</code> は、今のコミットがどの段階まで出たかを確かめて、次の出し先を案内します。</li>
   <li>リリースが成功すると、<code>wf-release</code> が、PR の先端のコミットに「リリースの印」（commit status <code>sf-tools/released-&lt;段階&gt;</code>）を付けます。</li>
   <li>前の段階の印がないコミットを、次の段階へ出すと、<code>wf-sequence</code> の必須チェック「順序チェック」が<strong>失敗します</strong>（R1。PR へのコメントと Slack の通知も行います）。前の段階に出したあとで変更したコミットも、同じです。</li>
   <li>同じブランチから、前に同じ段階へ出した部品を、ターゲットファイルから外すと、<code>wf-validate</code> の「デプロイ検証」が失敗します（R2。上の段階へ、前の部品が届かなくなるため）。</li>
@@ -144,7 +144,7 @@
   <li>ターゲットファイルの書き方を確かめます（エラーなら止めます）。</li>
   <li>リモートの最新の作業用のブランチと <code>main</code>（自動で更新された、本番の状態）に、まだ取り込んでいない変更があれば、自動でマージして取り込みます。取り込んだときは、<strong>そのプッシュは中止します</strong>（取り込んだ変更が、そのプッシュに含まれないためです）。もう一度プッシュすると、通ります。</li>
 </ol>
-<p>フックは、<code>sf-start.sh</code> が裏で動かす <code>sf-install.sh</code> が、自動で入れます。<code>sf-push.sh</code>・<code>sf-next.sh</code> も、環境ブランチの上では動きません。</p>
+<p>フックは、<code>sf-start.sh</code> が裏で動かす <code>sf-refresh.sh</code> が、自動で入れます。<code>sf-push.sh</code>・<code>sf-pr.sh</code> も、環境ブランチの上では動きません。</p>
 
 <h3 id="local">手元での検証と、共有の環境の保護</h3>
 <ul>
@@ -158,14 +158,14 @@
 </div>
 
 <h2 id="workflows">ワークフローの全体像</h2>
-<p>ワークフローの定義は、各プロジェクトの <code>.github/workflows/</code> に含まれます。雛形は <code>sf-tools/templates/.github/workflows/</code> にあり、<code>sf-init</code> がコピーします。</p>
+<p>ワークフローの定義は、各プロジェクトの <code>.github/workflows/</code> に含まれます。雛形は <code>sf-tools/templates/.github/workflows/</code> にあり、<code>sf-project</code> がコピーします。</p>
 <pre><code>sf-tools（雛形の正本）                       force-* リポジトリ（完全内包版）
-templates/.github/workflows/  ─ sf-init →   .github/workflows/
+templates/.github/workflows/  ─ sf-project →   .github/workflows/
 ├── wf-validate.yml                          ├── wf-validate.yml
 ├── wf-sequence.yml                          ├── wf-sequence.yml
 ├── wf-release.yml                           ├── wf-release.yml
 └── wf-metasync.yml                          └── wf-metasync.yml</code></pre>
-<p><strong>なぜ自己完結にするのか:</strong> ワークフローの定義が、ほかのリポジトリ（sf-tools）の定義を呼び出さずに、各プロジェクトの中だけで動くようにするためです。ワークフローを直すときは、まず雛形を更新します。そのあと、管理者が <a href="../admin/workflows.html#sync"><code>sf-sync-wf.sh</code></a> で、各プロジェクトに反映します。自動では書き換わりません（管理者が、作業用のブランチで実行し、PR で取り込みます）。</p>
+<p><strong>なぜ自己完結にするのか:</strong> ワークフローの定義が、ほかのリポジトリ（sf-tools）の定義を呼び出さずに、各プロジェクトの中だけで動くようにするためです。ワークフローを直すときは、まず雛形を更新します。そのあと、管理者が <a href="../admin/workflows.html#sync"><code>sf-update-workflows.sh</code></a> で、各プロジェクトに反映します。自動では書き換わりません（管理者が、作業用のブランチで実行し、PR で取り込みます）。</p>
 <p>ただし、<code>wf-validate</code>・<code>wf-sequence</code>・<code>wf-release</code>・<code>wf-metasync</code> は、動くたびに、公開されている sf-tools を取ってきて（Variable <code>SF_TOOLS_BRANCH</code> のブランチ。設定がなければ <code>main</code>）、その中の <code>sf-release.sh</code>・<code>sf-promote-check.sh</code>・<code>sf-metasync.sh</code> を使います。そのため、スクリプトの修正は、sf-tools の <code>main</code> に入ると、すべてのプロジェクトに、すぐ届きます。作成済みのプロジェクトに自動で届かないのは、ワークフローの定義そのものの変更だけです。</p>
 
 <table>
@@ -237,7 +237,7 @@ templates/.github/workflows/  ─ sf-init →   .github/workflows/
 
 
 <h3 id="metasync">wf-metasync（本番の自動同期）</h3>
-<p>平日の日本時間 9:00 / 12:00 / 15:00 / 18:00 に、本番の組織の最新の状態を、<code>main</code> に反映します。9:00 の回は、毎日 1 回の全件取得です。ほかの回は、変更の検知（Variable <code>SF_METASYNC_DETECT</code> を <code>shadow</code> / <code>on</code> にしたとき）で、組織に変更がなければ、取得そのものを省けます（既定は、検知を行わず、毎回、全件取得です）。また、Variable <code>SF_METASYNC_FINGERPRINT</code> を <code>shadow</code> にすると、組織の一覧から「指紋」を作り、実際の変更との食い違い（見逃し）をログに記録します（検証用。取得は省きません）。<code>on</code> にすると、指紋が「変更なし」の回は、取得を省きます（指紋の対象外の種類だけの変更は、9:00 の全件取得で反映されます）。さらに、リポジトリが公開のときは取得せずに止まり、取得した内容に秘密情報の疑いがあるときは（Variable <code>SF_METASYNC_SECRET_SCAN</code> が <code>on</code> のとき）コミットせずに止まって Slack に通知します（<code>shadow</code> が既定で、警告だけです）。手動でも実行できます（セットアップの最後と、<code>sf-init.sh --verify</code> が、手動の実行で動かします）。同時には 1 つずつしか動きません。</p>
+<p>平日の日本時間 9:00 / 12:00 / 15:00 / 18:00 に、本番の組織の最新の状態を、<code>main</code> に反映します。9:00 の回は、毎日 1 回の全件取得です。ほかの回は、変更の検知（Variable <code>SF_METASYNC_DETECT</code> を <code>shadow</code> / <code>on</code> にしたとき）で、組織に変更がなければ、取得そのものを省けます（既定は、検知を行わず、毎回、全件取得です）。また、Variable <code>SF_METASYNC_FINGERPRINT</code> を <code>shadow</code> にすると、組織の一覧から「指紋」を作り、実際の変更との食い違い（見逃し）をログに記録します（検証用。取得は省きません）。<code>on</code> にすると、指紋が「変更なし」の回は、取得を省きます（指紋の対象外の種類だけの変更は、9:00 の全件取得で反映されます）。さらに、リポジトリが公開のときは取得せずに止まり、取得した内容に秘密情報の疑いがあるときは（Variable <code>SF_METASYNC_SECRET_SCAN</code> が <code>on</code> のとき）コミットせずに止まって Slack に通知します（<code>shadow</code> が既定で、警告だけです）。手動でも実行できます（セットアップの最後と、<code>sf-project.sh --verify</code> が、手動の実行で動かします）。同時には 1 つずつしか動きません。</p>
 <ol>
   <li><code>main</code> を、全履歴つきでチェックアウトする（直近のマージの確認に、履歴が必要なため）</li>
   <li>Node.js と Salesforce CLI を入れる（sf のプラグインは、入れません）</li>
@@ -258,12 +258,12 @@ templates/.github/workflows/  ─ sf-init →   .github/workflows/
     <tr><td>一方通行の決まりを、仕組みで強制する（警告だけをやめた。Hotfix の例外も、手動のリリースもなくした。2026-11-26）</td><td>前の段階を飛ばしたリリースで、本番だけが失敗した事故があったため（前の段階に出していないコミットは、どこでも検証されていない）。ブランチ保護が効かない組織でも、<code>wf-release</code> が組織を守る</td></tr>
     <tr><td>環境ブランチどうしの直接マージは、ブロックする</td><td>意図しない変更の混入を防ぐ。作業用のブランチ経由を強制して、各環境のデプロイ内容を追えるようにする</td></tr>
     <tr><td>ターゲットファイル（<code>deploy-target.txt</code> と <code>remove-target.txt</code>）が両方とも空なら、正常に終わる</td><td>CI で、リリースの定義だけ、先に準備する運用を許すため</td></tr>
-    <tr><td>自己完結のワークフローと、雛形の一元管理</td><td>ワークフローの定義が、sf-tools の定義を呼び出さずに、各プロジェクトの中だけで動くようにするため。処理の中身（<code>sf-release.sh</code>・<code>sf-metasync.sh</code>）は、動くたびに sf-tools から取ってくるので、スクリプトの修正は、すぐ全プロジェクトに届く。ワークフローの定義の変更は、<code>sf-sync-wf.sh</code> で、管理者が反映する</td></tr>
-    <tr><td>ツールの更新は、24 時間に 1 回</td><td>毎回 <code>sf-start.sh</code> で更新すると、起動が遅くなるため（<code>sf-install.sh</code> が、前回から 24 時間以上たっていれば、<code>sf-upgrade.sh</code> を裏で動かす）</td></tr>
+    <tr><td>自己完結のワークフローと、雛形の一元管理</td><td>ワークフローの定義が、sf-tools の定義を呼び出さずに、各プロジェクトの中だけで動くようにするため。処理の中身（<code>sf-release.sh</code>・<code>sf-metasync.sh</code>）は、動くたびに sf-tools から取ってくるので、スクリプトの修正は、すぐ全プロジェクトに届く。ワークフローの定義の変更は、<code>sf-update-workflows.sh</code> で、管理者が反映する</td></tr>
+    <tr><td>ツールの更新は、24 時間に 1 回</td><td>毎回 <code>sf-start.sh</code> で更新すると、起動が遅くなるため（<code>sf-refresh.sh</code> が、前回から 24 時間以上たっていれば、<code>sf-update-cli.sh</code> を裏で動かす）</td></tr>
     <tr><td>本番の変更を、定期的に（平日の 3 時間おきに）<code>main</code> へ取り込む</td><td>古いコードをもとにした開発による、デグレを避けやすくするため（開発のブランチは、<code>sf-push.sh</code> で <code>main</code> を取り込むので、重なった変更は、その時点で見つかる）</td></tr>
     <tr><td>ブランチ保護の必須チェックは、ジョブ名だけで登録する</td><td>GitHub の必須チェックの名前は、ワークフロー名を含まない、ジョブ名だけのため（ワークフロー名つきで登録すると、条件が満たされず、PR をマージできない）。実際の GitHub で確かめた</td></tr>
     <tr><td><code>branches.txt</code> で、ブランチ構成を変えられるようにした</td><td>プロジェクトの規模に応じて、1〜3 階層を選べるようにするため</td></tr>
-    <tr><td><code>sf-next.sh</code> で、次の PR 先を自動で判定する</td><td>マージ順序の間違いを防ぐ（判定は <code>sf-promote-check.sh --plan</code> に任せ、ワークフローと同じ決まりで計算する）。ブラウザで PR の作成画面を、直接開ける</td></tr>
+    <tr><td><code>sf-pr.sh</code> で、次の PR 先を自動で判定する</td><td>マージ順序の間違いを防ぐ（判定は <code>sf-promote-check.sh --plan</code> に任せ、ワークフローと同じ決まりで計算する）。ブラウザで PR の作成画面を、直接開ける</td></tr>
   </tbody>
 </table>
 

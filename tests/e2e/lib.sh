@@ -1,12 +1,12 @@
 #!/bin/bash
 # ==============================================================================
-# lib.sh - e2e テスト（実環境での sf-init 通し検証）の共通関数
+# lib.sh - e2e テスト（実環境での sf-project 通し検証）の共通関数
 # ==============================================================================
 # run.sh / cleanup.sh / bootstrap.sh から source して使う。呼び出し側が先に
 # lib/common.sh を source し、SCRIPT_NAME / LOG_FILE / LOG_MODE を定義しておくこと。
 #
 # 【このテストの考え方】
-#   ・sf-init 本体のコードは変えず、外から標準入力・PATH の差し替えで自動操作する
+#   ・sf-project 本体のコードは変えず、外から標準入力・PATH の差し替えで自動操作する
 #   ・実際の GitHub / Salesforce に、テスト用のリポジトリとアプリを作り、終了時に削除する
 #   ・削除は「名前の形式」と「オーナー」が両方一致するものだけ（下記のガードを参照）
 #
@@ -213,7 +213,7 @@ e2e_require_guard() {
 }
 
 # ------------------------------------------------------------------------------
-# sf のエイリアスの保存・復元（sf-init は prod / staging / develop を付けるため、テスト後に元へ戻す）
+# sf のエイリアスの保存・復元（sf-project は prod / staging / develop を付けるため、テスト後に元へ戻す）
 # ------------------------------------------------------------------------------
 # 出力形式: 1 行に 1 つ「エイリアス=値」
 # sf alias list の失敗（戻り値 1）を、空の一覧と取り違えない。取り違えると、保存した一覧が空になり、
@@ -637,7 +637,7 @@ e2e_delete_local() {
     base=$(basename "$d")  # VAR=$(cmd) のため run 不使用
     e2e_is_target_project "$base" || e2e_is_target_jwt_dir "$base" || e2e_is_target_tmp "$base" \
         || die "削除対象外のフォルダ名です: ${d}"
-    # JWT 用の証明書フォルダは、sf-init が作る中身（server.key / server.crt）だけのときに限り、削除する
+    # JWT 用の証明書フォルダは、sf-project が作る中身（server.key / server.crt）だけのときに限り、削除する
     #   名前が一致しても、ほかのファイルが入っている（e2e が作ったものではない可能性がある）場合は、消さずに失敗として返す
     if e2e_is_target_jwt_dir "$base"; then
         local f
@@ -738,7 +738,7 @@ e2e_cleanup_all() {
     fi
 
     # Salesforce（管理用ログインに失敗しても、ほかの掃除（ローカル）は止めずに続ける）
-    #   main の組織と、鍵一式にある staging・develop の組織を、順に掃除する（sf-init が、段階ごとにアプリを作るため）
+    #   main の組織と、鍵一式にある staging・develop の組織を、順に掃除する（sf-project が、段階ごとにアプリを作るため）
     local tier
     for tier in main staging develop; do
         [[ "$tier" == "main" ]] || e2e_tier_available "$tier" || continue
@@ -767,7 +767,7 @@ e2e_cleanup_all() {
 }
 
 # ------------------------------------------------------------------------------
-# e2e が sf-init の「sf-tools の版の選択」に答える版（環境変数 E2E_TOOLS_BRANCH）。標準出力に development または main を表示する
+# e2e が sf-project の「sf-tools の版の選択」に答える版（環境変数 E2E_TOOLS_BRANCH）。標準出力に development または main を表示する
 #   development（既定）: 検証環境。force-* の Actions は sf-tools の development を使う（Variable SF_TOOLS_BRANCH=development）
 #   main              : 配布版。force-* の Actions は sf-tools の main を使う（Variable は登録されない）。週 1 回の定期実行（利用者が受け取るもの）
 #   それ以外は、戻り値 1（版を取り違えたまま、動かさない）
@@ -779,7 +779,7 @@ e2e_tools_branch() {
     esac
 }
 
-# sf-init に流す標準入力（質問の順番に依存する。質問を変えたら、ここも直すこと）
+# sf-project に流す標準入力（質問の順番に依存する。質問を変えたら、ここも直すこと）
 # ------------------------------------------------------------------------------
 #   Phase 1 続行 Y → Phase 2 確認 Y → 環境種別 2（検証）→ 検証環境で続行 Y（E2E_TOOLS_BRANCH=main なら、環境種別 1 のみ）→ Phase 5 ブランチ 3（main のみ）
 #   → Phase 6 PAT（先頭の改行は、直前の入力の残りを read_secret が空行として無視する。Token は、GitHub に問い合わせて
@@ -804,7 +804,7 @@ e2e_make_input() {
     esac
     if [[ "$tools" == "main" ]]; then
         printf '%s\n' "Y" "Y" "1"
-        # sf-init が調べるのと同じ、手元の sf-tools の現在のブランチ（ブランチでなければ空。そのときは Phase 2 が別の経路で動く）
+        # sf-project が調べるのと同じ、手元の sf-tools の現在のブランチ（ブランチでなければ空。そのときは Phase 2 が別の経路で動く）
         local_br=$(git -C "${SF_TOOLS_ROOT:-${SF_TOOLS_DIR:-.}}" symbolic-ref --short HEAD 2>/dev/null || true)  # VAR=$(cmd) のため run 不使用
         [[ -z "$local_br" || "$local_br" == "main" ]] || printf '%s\n' "Y"
     else
@@ -816,8 +816,8 @@ e2e_make_input() {
     for ((i = 1; i <= layout; i++)); do printf '%s\n' "1"; done
 }
 
-# 対話（引数なし）で sf-init.sh を実行するときの、先頭の入力（オーナーの選択 → XXXX → 確認）。e2e_make_input の前に流す
-#   引数: オーナー XXXX。オーナーの候補は、sf-init と同じ（gh_owner_candidates admin: lib/project.sh）。
+# 対話（引数なし）で sf-project.sh を実行するときの、先頭の入力（オーナーの選択 → XXXX → 確認）。e2e_make_input の前に流す
+#   引数: オーナー XXXX。オーナーの候補は、sf-project と同じ（gh_owner_candidates admin: lib/project.sh）。
 #     候補が複数 → 番号で選ぶ（番号は、候補の中の位置を調べて決める）/ 1 つ → 自動（入力なし）/ なし → オーナーを入力
 #     候補にオーナーがない → 戻り値 1（鍵一式のオーナーを、選べないため）
 e2e_make_identity_input() {
@@ -948,10 +948,10 @@ e2e_run_sf_cmd_refused() {
     return 0
 }
 
-# sf-start.sh が背景で実行する sf-install.sh（フック設置・release フォルダの準備・npm install）が終わるまで待つ。
+# sf-start.sh が背景で実行する sf-refresh.sh（フック設置・release フォルダの準備・npm install）が終わるまで待つ。
 #   引数: クローンのフォルダ。E2E_INSTALL_TIMEOUT 秒（既定 600）以内に終わらなければ、戻り値 1
 e2e_wait_sf_install() {
-    local log_file="$1/sf-tools/logs/sf-install.log" waited=0
+    local log_file="$1/sf-tools/logs/sf-refresh.log" waited=0
     local timeout="${E2E_INSTALL_TIMEOUT:-600}" poll="${E2E_POLL_SEC:-5}"
     while (( waited < timeout )); do
         grep -q "npm install の確認が完了しました" "$log_file" 2>/dev/null && return 0

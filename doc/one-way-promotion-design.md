@@ -1,6 +1,6 @@
 # 一方通行のリリース（develop → staging → main） 設計書
 
-> **ステータス: 設計は Codex のレビュー 4 回で承認（2026-11-26。9 章）。実装済み（2026-11-26。development。rr 待ち）。** 実装の正本は、`bin/sf-promote-check.sh`・`lib/manifest.sh`・`bin/sf-next.sh`・雛形の `wf-sequence.yml`・`wf-validate.yml`・`wf-release.yml` の冒頭コメント。e2e は `tests/e2e/run.sh`（印・伝播しないこと・削除も段階順）と `tests/e2e/scenario.sh one-way`（R1・R2・最後の守り）。既存の force-* への反映（`sf-sync-wf.sh` と `--remove wf-propagate.yml`）は、管理者が行う（5 章）。
+> **ステータス: 設計は Codex のレビュー 4 回で承認（2026-11-26。9 章）。実装済み（2026-11-26。development。rr 待ち）。** 実装の正本は、`bin/sf-promote-check.sh`・`lib/manifest.sh`・`bin/sf-pr.sh`・雛形の `wf-sequence.yml`・`wf-validate.yml`・`wf-release.yml` の冒頭コメント。e2e は `tests/e2e/run.sh`（印・伝播しないこと・削除も段階順）と `tests/e2e/scenario.sh one-way`（R1・R2・最後の守り）。既存の force-* への反映（`sf-update-workflows.sh` と `--remove wf-propagate.yml`）は、管理者が行う（5 章）。
 > 目的: 開発物は一方通行で、開発環境 → develop → staging → main と、**同じものを**順に上げる。この大原則（TAMAさん・2026-11-26）を、警告ではなく、**仕組みで破れないようにする**。
 > きっかけ: force-test-win の備品アプリ（JOB-EQL-1）で、develop・staging に段階を重ね、main を止めた。main には最後の段階の一覧だけが 1 回で出て、段階 1 のオブジェクトの本体が抜け、64 件の失敗になった（PR #18。本番は無変更）。順序の確認（wf-sequence）は警告だけで、tamashimon-org は無料プラン・非公開のため Ruleset も効かず、検証の途中でマージされた。
 > 守る相手: 開発者の**誤操作**（CLAUDE.md 1.1）。書き込みの権限を持つ人の悪意までは防がない（権限のある人は、ワークフローの雛形そのものも書き換えられるため）。ただし、手で付けた印などの、うっかりの抜け道はふさぐ（3.1）。
@@ -20,9 +20,9 @@
 | `wf-sequence.yml`（staging・main への PR） | PR の先頭のコミットが、前の段階のブランチに入っているか（`git merge-base --is-ancestor`）。入っていなければ**警告だけ**（緊急の Hotfix を妨げないため）。環境ブランチからの PR は失敗。`branches.txt` がなければ素通り | 順序外でもマージできる。ブランチに入ったことは見るが、**組織へのリリースが成功したか**は見ない |
 | `wf-validate.yml` | 検証の dry-run だけ | 積み重ねの抜け（原則 4）を見ない |
 | `wf-release.yml` | マージされたら、そのまま組織へ出す。手動の実行（workflow_dispatch）もある | 順序外の PR がマージされても、組織へ出してしまう（Ruleset が効かない組織では、最後の守りがない） |
-| `sf-next.sh` | マージ済みの段階の次を勧める（`merged_stale`: マージのあとの変更があれば、その段階へ出し直しを勧める） | 組織へのリリースの成否は見ない |
+| `sf-pr.sh` | マージ済みの段階の次を勧める（`merged_stale`: マージのあとの変更があれば、その段階へ出し直しを勧める） | 組織へのリリースの成否は見ない |
 | `wf-propagate.yml`・`sf-metasync.sh` の手順 12 | main の変更を、staging・develop のブランチへ、PR も検証も通さずに直接マージする（PAT で Ruleset を迂回） | **下りの流れ**（原則 5 に反する）。ブランチには入るが、その組織には出していないものができる |
-| Ruleset | sf-init の Phase 9 が作る（必須チェック） | 無料プランの非公開リポジトリでは使えない（`Upgrade to GitHub Pro or make this repository public`。2026-11-26 に tamashimon-org で確認） |
+| Ruleset | sf-project の Phase 9 が作る（必須チェック） | 無料プランの非公開リポジトリでは使えない（`Upgrade to GitHub Pro or make this repository public`。2026-11-26 に tamashimon-org で確認） |
 
 ## 3. 方針
 
@@ -80,8 +80,8 @@
 | main・staging | ―（同上） | R0・R2・R3 | R0・R1（staging の印）・R2・R3 |
 | main・staging・develop | R0・R2・R3 | R0・R1（develop の印）・R2・R3 | R0・R1（staging の印）・R2・R3 |
 
-- `sf-init.sh --add-tier` で段階を足した直後: 進行中のブランチは、新しい段階の印を持たないので、新しい段階から出し直す（原則どおり）。`--remove-tier` で段階を外した直後: 外した段階は P として数えない（origin/main の `branches.txt` だけで決まる）
-- `branches.txt` がない: 今は「今までの動き（3 つとも有効）」にしているが、R0 で止める（判断の材料がないため）。sf-init が必ず作るので、通常は起きない
+- `sf-project.sh --add-tier` で段階を足した直後: 進行中のブランチは、新しい段階の印を持たないので、新しい段階から出し直す（原則どおり）。`--remove-tier` で段階を外した直後: 外した段階は P として数えない（origin/main の `branches.txt` だけで決まる）
+- `branches.txt` がない: 今は「今までの動き（3 つとも有効）」にしているが、R0 で止める（判断の材料がないため）。sf-project が必ず作るので、通常は起きない
 
 ### 3.4 確かめる場所
 
@@ -92,7 +92,7 @@
 | `wf-sequence.yml`（staging・main への PR） | R0・R1・R3（git と gh で足りる） | ジョブ「順序チェック」を失敗にする（**警告だけをやめる**）。PR へのコメント・Slack は今のまま（補助） | Ruleset が効く組織では、マージを止める |
 | `wf-validate.yml`（すべての段階への PR） | R2（sf が要る。dry-run の前） | ジョブ「デプロイ検証」を失敗にする | 同上。develop への PR でも効く |
 | `wf-release.yml`（マージのあと） | R0〜R3（すべて） | **組織へ出さない**。ジョブを失敗にし、Slack に「❌ リリースを止めました（理由）」 | Ruleset が効かない組織でも、組織を守る（**最後の守り**。マージは止められないが、組織は変わらない） |
-| `sf-next.sh`（ランチャーの Next） | R1・R2 の結果を `sf-promote-check.sh --plan --json` から受け取って表示する（自分では計算しない） | 原則に反する出し先を勧めない（例: develop に出したあと変えたら「次は develop」）。勧める先で R2 を破るなら、PR を作る前に止める | 開発者が迷わない（補助。強制は CI がする） |
+| `sf-pr.sh`（ランチャーの Next） | R1・R2 の結果を `sf-promote-check.sh --plan --json` から受け取って表示する（自分では計算しない） | 原則に反する出し先を勧めない（例: develop に出したあと変えたら「次は develop」）。勧める先で R2 を破るなら、PR を作る前に止める | 開発者が迷わない（補助。強制は CI がする） |
 
 - 必須チェックの名前（`lib/project.sh` の `required_status_check_names`。「対象ファイル確認」「デプロイ検証」「順序チェック」）は変えない
 - wf-release は、マージのあとに動くため、マージを止めることはできない。Ruleset が効かない組織では、「マージはされたが、組織には出ていない」状態がありうる。その状態は、印がないので、次の段階でも R1 で止まる（先へは進まない）
@@ -108,28 +108,28 @@
 
 ```
 sf-promote-check.sh --pr <PR 番号> [--only sequence|stack] [--json]            # ワークフロー用
-sf-promote-check.sh --plan [--json]                                            # sf-next 用（手元のブランチの次の出し先を計算）
+sf-promote-check.sh --plan [--json]                                            # sf-pr 用（手元のブランチの次の出し先を計算）
 ```
 
 - `--pr`: PR の情報（先頭のコミット H・`head.ref`（B）・`base.ref`（T）・フォークか）は、引数でなく、`gh pr view <番号>` で GitHub から読む（呼ぶ側が違う H や T を渡して通すことができないように）。リポジトリは、作業ツリーの `origin` から決め、GitHub の応答のリポジトリと一致することを確かめる（違えば R0 で止める）
 - `--only`: 利用者が規則を選ぶ機能ではなく、**ワークフローの間の分担**（sf がない wf-sequence で R2 を省くため）だけ。値は `sequence`（R0・R1・R3。wf-sequence）と `stack`（R0・R2。wf-validate）の 2 つに限る。ほかの値・複数の指定・空は、終了コード 2 で拒否する。R0 は必ず確かめる。wf-release は、`--only` を付けずに、すべて（R0〜R3）を確かめる（雛形の静的テストで確かめる。7 章）
-- `--plan`: 手元のブランチについて、次に出してよい段階を返す。PR は作らない（sf-next が作る）。sf-next は、表示と PR の作成だけを行い、R1・R2 を自分では計算しない（判定の本体は 1 か所）
-  - 前提（満たさなければ、終了コード 2 = 判断できない。sf-next は、理由を出して止める）: `origin` を取得できる・HEAD とその `origin` の先端が同じ（違えば「push していない変更がある」）・PR の一覧を取得できる・`get_tier_list --strict` が通る
+- `--plan`: 手元のブランチについて、次に出してよい段階を返す。PR は作らない（sf-pr が作る）。sf-pr は、表示と PR の作成だけを行い、R1・R2 を自分では計算しない（判定の本体は 1 か所）
+  - 前提（満たさなければ、終了コード 2 = 判断できない。sf-pr は、理由を出して止める）: `origin` を取得できる・HEAD とその `origin` の先端が同じ（違えば「push していない変更がある」）・PR の一覧を取得できる・`get_tier_list --strict` が通る
   - `next_tier`: 段階を下から順に（develop → staging → main。構成にある段階だけ）見て、H にその段階の印（3.1）がない最初の段階。全部にあれば `none`（1 周が済んだ）。上の段階に印があるのに下の段階にない（原則に反する状態）は、終了コード 2
-  - `next_tier` に R2 を当てた結果も返す（破っていれば、sf-next は PR を作らずに、抜けた部品を出す）
-  - 今の sf-next の表示との対応: 「マージ済み」= その段階の印がある／「マージ済み・その後の変更が未反映（`merged_stale`）」= その段階へ出した PR はマージ済みだが、今の H には印がない（次の出し先はその段階になる）／「PR あり（`pr_open`）」= `next_tier` へ開いている PR がある（新しく作らず、その PR を表示する）／「順序外（`out_of_order`）」= 表示しない（`--plan` は、順序外の出し先を返さないため）
+  - `next_tier` に R2 を当てた結果も返す（破っていれば、sf-pr は PR を作らずに、抜けた部品を出す）
+  - 今の sf-pr の表示との対応: 「マージ済み」= その段階の印がある／「マージ済み・その後の変更が未反映（`merged_stale`）」= その段階へ出した PR はマージ済みだが、今の H には印がない（次の出し先はその段階になる）／「PR あり（`pr_open`）」= `next_tier` へ開いている PR がある（新しく作らず、その PR を表示する）／「順序外（`out_of_order`）」= 表示しない（`--plan` は、順序外の出し先を返さないため）
 - 実行する場所: force-* のプロジェクトのルート（ワークフローでは、PR のマージ結果ではなく、PR の先頭のコミット H を取得した作業ツリー。H と作業ツリーの HEAD が同じことを確かめる）
 - 依存: git・gh（`GH_TOKEN`）・R2 だけ sf（npm 版）
 - 終了コード: 0 = すべて満たす（または対象が空でスキップ）／ 1 = 破った（理由を ERROR で出す。事実だけ。CLAUDE.md の die の決まり）／ 2 = 判断できない（R0。止める側として扱う）
-- `--json`: `{"ok":…, "skipped":…, "violations":[{"rule":"R1","detail":…}], "next_tier":…}`。sf-next が使う
-- 管理者向けのコマンドではない（読み取りのみ。組織・GitHub を変えない）。手元でも動かせる（sf-next が呼ぶ）
+- `--json`: `{"ok":…, "skipped":…, "violations":[{"rule":"R1","detail":…}], "next_tier":…}`。sf-pr が使う
+- 管理者向けのコマンドではない（読み取りのみ。組織・GitHub を変えない）。手元でも動かせる（sf-pr が呼ぶ）
 
 ### 3.7 下りの伝播をやめる
 
-- `wf-propagate.yml` を雛形から消す。既存の force-* は `sf-sync-wf.sh --remove wf-propagate.yml` で消す
+- `wf-propagate.yml` を雛形から消す。既存の force-* は `sf-update-workflows.sh --remove wf-propagate.yml` で消す
 - `sf-metasync.sh` の手順 12（main → staging・develop の伝播）を消す。main への同期（手順 11 まで）は今のまま
 - main の最新は、開発者の PC で、`sf-push.sh` が push のたびに取り込む（今のまま。手順 2）。サーバーで全員のブランチへ一斉にマージはしない（作業中の手元と食い違い、コンフリクトを解けないため）。これは利便のためで、整合性は R1・R2 が守る（GitHub の画面で直接 push しても、R1・R2 で確かめられる）
-- 注意: develop に出したあとで push すると、main の新しい変更が入り、先頭のコミットが変わる。R1 で、develop から出し直しになる（原則どおり。sf-next がそう案内する）
+- 注意: develop に出したあとで push すると、main の新しい変更が入り、先頭のコミットが変わる。R1 で、develop から出し直しになる（原則どおり。sf-pr がそう案内する）
 - 環境のブランチ（develop・staging）は、PR で上がってくる開発のブランチだけで更新される。main とずれてよい（ずれは、組織とブランチの一致を崩さない。上り PR の R1・R2 で確かめる）。main の手での変更（本番の画面での変更を sf-metasync が取り込んだもの）は、開発のブランチ経由で上がる
 - 伝播を前提にしているもの: `phases/init/add_tier.sh`・`remove_tier.sh`・`status.sh`・`verify.sh`・`lib/diag.sh`（ワークフローの数・`wf-propagate` の存在の確認）・e2e（`run.sh` の「wf-propagate: staging・develop に main の最新が入った」・`scenario.sh` の伝播のシナリオ）。それぞれ、伝播の確認を消し、「伝播しないこと」を確かめる形に変える
 
@@ -144,7 +144,7 @@ sf-promote-check.sh --plan [--json]                                            #
 | `templates/.github/workflows/wf-release.yml` | リリースの前に R0〜R3。成功したら印（3.1）。workflow_dispatch をなくす。`statuses: write`・`actions: read` |
 | `templates/.github/workflows/wf-propagate.yml` | 削除 |
 | `bin/sf-metasync.sh`・`templates/.github/workflows/wf-metasync.yml` | 手順 12（伝播）を削除 |
-| `bin/sf-next.sh` | 出し先を `sf-promote-check.sh --plan --json` で決める（今の `get_branch_list`・`origin/<段階>` での判定をやめる。3.6） |
+| `bin/sf-pr.sh` | 出し先を `sf-promote-check.sh --plan --json` で決める（今の `get_branch_list`・`origin/<段階>` での判定をやめる。3.6） |
 | `lib/project.sh` | `get_tier_list --strict` を足す（3.2 の表。`--strict` なしは今のまま） |
 | `phases/init/*`（add_tier・remove_tier・status・verify）・`lib/diag.sh` | 伝播への言及・確認を削除 |
 | `tests/`・`tests/e2e/`（run.sh・scenario.sh） | 7 章 |
@@ -153,7 +153,7 @@ sf-promote-check.sh --plan [--json]                                            #
 ## 5. 移行
 
 - sf-tools は公開前のため、利用者への移行の配慮は要らない（2026-11-01 の決定）
-- force-test-win・force-test-mac・e2e のリポジトリは、`sf-sync-wf.sh` で新しいワークフローにし、`--remove wf-propagate.yml` で伝播を消す
+- force-test-win・force-test-mac・e2e のリポジトリは、`sf-update-workflows.sh` で新しいワークフローにし、`--remove wf-propagate.yml` で伝播を消す
 - 移行の前に出したリリースには印がない。進行中のブランチは、develop から出し直す（JOB-EQL-1 は main まで済んでいる）
 
 ## 6. 決めたこと（2026-11-26・TAMAさん）
@@ -180,7 +180,7 @@ sf-promote-check.sh --plan [--json]                                            #
 
 **ワークフローの雛形の静的テスト**（`tests/test_workflows.sh` など、今のテストに足す）: wf-release に workflow_dispatch がない・`statuses: write` がある・印を付けるのは成功のあとだけ・wf-release は `sf-promote-check.sh --pr` を `--only` なしで呼ぶ・wf-sequence は `--only sequence`・wf-validate は `--only stack`・wf-propagate がない・wf-sequence が順序外で `exit 1`
 
-**そのほかの単体テスト**: sf-release.sh（マニフェストの生成を lib へ移しても、出力が同じ）・sf-next.sh（develop に出したあと変えたら develop を勧める・R2 を破るなら PR を作らない）・sf-metasync.sh（伝播しない）・sf-init の status・verify・`lib/diag.sh`（伝播を前提にしない）
+**そのほかの単体テスト**: sf-release.sh（マニフェストの生成を lib へ移しても、出力が同じ）・sf-pr.sh（develop に出したあと変えたら develop を勧める・R2 を破るなら PR を作らない）・sf-metasync.sh（伝播しない）・sf-project の status・verify・`lib/diag.sh`（伝播を前提にしない）
 
 **e2e**（rr の前に 1 回。CLAUDE.md 1.3.2）:
 
@@ -202,5 +202,5 @@ sf-promote-check.sh --plan [--json]                                            #
   - 一部だけ: マニフェストを保存して使う案 → 作り直しを残す（前のコミットにそのときのファイルが全部ある。Actions の成果物は期限で消える）。代わりに、作れないときは止める（3.2）／やり直しで二重に出す危険 → 小さい（デプロイは全部か無か・削除は組織にない対象を外す。3.5）
   - 取り入れなかった（2 回目で了承）: squash / rebase のマージで壊れる（この設計は、祖先でなく先頭のコミットの印で判断するため、マージ方式に依らない。3.1）／順序外が警告だけの道が残る（2 章の「今の動き」の読み違え。3.4 で失敗にする）／R2 では同じものを証明できない（同じものは R1 が保証する。R2 は積み重ねの抜けだけを見る）／リリースのフォルダを一意の ID にする（範囲が大きい。使い回しは R2 の絞り込みで解ける）／「10 章の未決」（存在しない章）
 - Codex のレビュー（2 回目・条件付き承認・新しい指摘 6 件。すべて取り入れた）: 印の実行の `head_sha` が H と同じこと・`path` が wf-release.yml であること（3.1）／R2 の前のリリースを `head.ref` = B・`base.ref` = T に限る（3.2）／`--rules` で規則を外せる道をなくす（`--pr` で PR の情報を GitHub から読む・`--only` は sf のない場所の分担だけで R0 は必ず。3.6）／`get_tier_list` が `branches.txt` のないとき main だけを返す（fail-open）ため、`--strict` を作る（3.2）／印の検証のテストを足す（7 章）／`lib/manifest.sh` の公開の関数と、sf-release.sh に残すものを決める（3.2）
-- Codex のレビュー（3 回目・条件付き承認・指摘 5 件。すべて取り入れた）: `get_tier_list --strict` の入力ごとの表（3.2）／`--only` は `sequence`・`stack` だけで、ほかは拒否・wf-release は付けない（3.6・7 章）／`--plan` の `next_tier` の決め方と、今の sf-next の表示との対応・判断できないときは止める（3.6）／R2 が比べるのは、両方とも宣言した対象（組織に問い合わせない。3.2）／「先頭のコミット」は先端（tip）のこと（3.2）
-- Codex のレビュー（4 回目）: 3 回目の 5 件はすべて解決。設計の新しい誤りはなし（言い回し 1 件「sf-next は R1・R2 を先に計算」→「結果を受け取って表示する」を直した。3.4）。重要度「高」「中」とされた 3 件は、まだ実装していないこと（`get_tier_list --strict`・sf-next の `--plan` への置き換え・`lib/manifest.sh` への切り出し）で、設計の誤りではない。判定は「条件付き承認（実装して、古い判定が残らないことをテストで確かめてから完了）」。設計としては承認と扱い、条件は実装の完了の条件にする
+- Codex のレビュー（3 回目・条件付き承認・指摘 5 件。すべて取り入れた）: `get_tier_list --strict` の入力ごとの表（3.2）／`--only` は `sequence`・`stack` だけで、ほかは拒否・wf-release は付けない（3.6・7 章）／`--plan` の `next_tier` の決め方と、今の sf-pr の表示との対応・判断できないときは止める（3.6）／R2 が比べるのは、両方とも宣言した対象（組織に問い合わせない。3.2）／「先頭のコミット」は先端（tip）のこと（3.2）
+- Codex のレビュー（4 回目）: 3 回目の 5 件はすべて解決。設計の新しい誤りはなし（言い回し 1 件「sf-pr は R1・R2 を先に計算」→「結果を受け取って表示する」を直した。3.4）。重要度「高」「中」とされた 3 件は、まだ実装していないこと（`get_tier_list --strict`・sf-pr の `--plan` への置き換え・`lib/manifest.sh` への切り出し）で、設計の誤りではない。判定は「条件付き承認（実装して、古い判定が残らないことをテストで確かめてから完了）」。設計としては承認と扱い、条件は実装の完了の条件にする

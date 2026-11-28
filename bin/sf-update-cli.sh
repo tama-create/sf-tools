@@ -1,14 +1,14 @@
 #!/bin/bash
 # ==============================================================================
-# sf-upgrade.sh - 開発ツール一括アップデートスクリプト
+# sf-update-cli.sh - npm・Salesforce CLI・Git の更新（2026-11-28 に sf-upgrade.sh から改名）
 # ==============================================================================
 # npm・Salesforce CLI（sf）・Git（Windows の Git Bash のみ）を、最新版にアップデートする。
-# sf-install.sh が、前回から 24 時間以上たっているときに、バックグラウンドで自動で呼び出す（引数なし。標準出力は捨て、
-# 標準エラー（画面への表示）は ./sf-tools/logs/sf-install.log に追記する）。
+# sf-refresh.sh が、前回から 24 時間以上たっているときに、バックグラウンドで自動で呼び出す（引数なし。標準出力は捨て、
+# 標準エラー（画面への表示）は ./sf-tools/logs/sf-refresh.log に追記する）。
 # 手動でも実行できる。
 #
 # 【使い方】
-#   bash ~/sf-tools/bin/sf-upgrade.sh [オプション]     # force-* ディレクトリで実行する
+#   bash ~/sf-tools/bin/sf-update-cli.sh [オプション]     # force-* ディレクトリで実行する
 #
 # 【オプション】
 #   -v, --verbose : コマンドの応答（出力）をコンソールにも表示する
@@ -21,7 +21,7 @@
 #        読んで確かめてから書いていたため、同時に起動すると、両方が重い入れ替えに進めた）。作れたら、自分のロック。
 #        作れない（もうある）とき: 持ち主が動いている（PID が生きていて、ロックが 2 時間より新しい）→ 何もせずに終わる（INFO。
 #          終了コード 0）。2 時間以上たったロックは、PID が生きていても、途中で切れたものとみなす（PID が別のプロセスに
-#          使い回されたとき、いつまでも「動いている」と見てしまうため。sf-install.sh の、途中で切れたかの判定と同じ決まり）。
+#          使い回されたとき、いつまでも「動いている」と見てしまうため。sf-refresh.sh の、途中で切れたかの判定と同じ決まり）。
 #          持ち主が動いていない → 途中で切れたロックとして消し、もう一度だけ「ないときだけ作る」。それも作れず、持ち主が動いて
 #          いれば、ほかが先に取ったとして終わる（INFO）。持ち主が動いていなければ（消せない・書けないロック）、下の「書けない」と同じ。途中で切れたロックを、2 つが同時に見つけたときだけは、まれに両方が進むことがある（消して
 #          作り直すあいだの隙間。普段の同時起動は、上の 1 回目で防げる）
@@ -42,7 +42,7 @@
 #          → 更新しない（失敗に数える）。WARNING で、跡の場所と直し方（退避された元の版を cli/ に戻すか、
 #            npm install -g @salesforce/cli で入れ直す）を表示する。自動では直さない（消す・戻すは取り返しがつかないため）。
 #            跡の場所を、印のファイル（~/.sf-tools-sf-broken。環境変数 SF_TOOLS_SF_BROKEN_MARK で差し替え可）にも書く
-#            （この表示は sf-upgrade.log にしか残らないため。check_sf_cli が、毎回の起動の画面に WARNING で出す）。
+#            （この表示は sf-update-cli.log にしか残らないため。check_sf_cli が、毎回の起動の画面に WARNING で出す）。
 #            npm の置き場所を読めて、跡がないときは、印を消す
 #            この確認を、下の npm 版かの判定より前に置く（跡があると npm ls -g が失敗し、npm 版でないと見て sf update に
 #            進んでしまう。WSL では、PATH の後ろの Windows の sf が、黙って使われていた。2026-11-27）
@@ -63,14 +63,14 @@
 # 【補足】
 #   - どの手順が失敗しても、WARNING を表示して続行する。最後に、失敗した手順（npm・Salesforce CLI・Git のうち、
 #     見つからなかった・更新できなかったもの）があれば、その名前を WARNING で一覧し、なければ「すべてのアップデートが完了しました」を表示する
-#     （失敗があっても、終了コードは 0。sf-install.sh が裏で呼び出すため、呼び出し元を止めない）
+#     （失敗があっても、終了コードは 0。sf-refresh.sh が裏で呼び出すため、呼び出し元を止めない）
 #   - npm の最新版は、Node の版が新しくないと入らないことがある（npm は Node に同梱されている。npm だけを更新すると、Node との組み合わせで失敗する）。
 #     その場合は、更新せず、Node の更新を案内するだけ（Windows の Git Bash では winget のコマンドを示す。自動では Node を更新しない）
 #   - npm install --dry-run を、事前の確認に使わない理由: npm 12 は、--dry-run のときだけ、npm 自身（同梱の部品を持つ）の取得を、
 #     EALLOWREMOTE（「remote の取得は無効」）で誤って拒否するため、npm 12 の環境（Node 26 など）で、毎回、失敗してしまう
 #     （npm/cli#9800。--dry-run なしの同じコマンドは成功する）。対応外の Node は、本番のコマンドの出力（Not compatible）で見分ける
-#   - 自動で呼ばれたときの表示は sf-install.log にだけ残る。案内を画面で見るには、手動で実行する
-#   - ログ: ./sf-tools/logs/sf-upgrade.log（実行ごとに作り直す）
+#   - 自動で呼ばれたときの表示は sf-refresh.log にだけ残る。案内を画面で見るには、手動で実行する
+#   - ログ: ./sf-tools/logs/sf-update-cli.log（実行ごとに作り直す）
 # ==============================================================================
 
 # ------------------------------------------------------------------------------
@@ -104,7 +104,7 @@ reject_unknown_args "$@"   # -v / --verbose 以外の引数は、不明なオプ
 # sf の更新のロック（処理の流れ 0）。sf-log.sh が読む（場所・形は sf-log.sh の UPGRADE_LOCK と同じ。PID=<数字> の 1 行）
 # ------------------------------------------------------------------------------
 UPGRADE_LOCK="${SF_TOOLS_UPGRADE_LOCK:-${HOME}/.sf-tools-upgrade.lock}"
-readonly UPGRADE_LOCK_STALE_MIN=120   # これより古い（分）ロックは、PID が生きていても、途中で切れたものとみなす（PID の使い回し。sf-install.sh と同じ 2 時間）
+readonly UPGRADE_LOCK_STALE_MIN=120   # これより古い（分）ロックは、PID が生きていても、途中で切れたものとみなす（PID の使い回し。sf-refresh.sh と同じ 2 時間）
 # ないときだけ作る（set -C は、> を O_EXCL で開く。Bash 3.2・Git Bash でも同じ）。作れたら 0
 _try_lock() { ( set -C; printf 'PID=%s\n' "$$" > "$UPGRADE_LOCK" ) 2>/dev/null; }  # 条件チェックのため run 不使用
 # 今のロックの持ち主が動いているか（PID が生きていて、ロックが 2 時間より新しい）。持ち主の PID は _lock_pid に入れる
@@ -118,7 +118,7 @@ _lock_pid=""
 if ! _try_lock; then
     if [[ -e "$UPGRADE_LOCK" ]]; then
         if _lock_holder_alive; then
-            log "INFO" "ほかの sf-upgrade.sh（PID ${_lock_pid}）が動いているため、何もせずに終わります。"
+            log "INFO" "ほかの sf-update-cli.sh（PID ${_lock_pid}）が動いているため、何もせずに終わります。"
             exit 0
         fi
         # 持ち主が動いていない（途中で切れた）→ 消して、もう一度だけ取る
@@ -127,7 +127,7 @@ if ! _try_lock; then
             # ほかが先に取った（持ち主が動いている）なら終わる。そうでなければ、消せない・書けないロック（読み取り専用など）
             #   → 「ほかが取った」と取り違えて更新を止めないよう、ロックなしで続ける（以前と同じ）
             if [[ -e "$UPGRADE_LOCK" ]] && _lock_holder_alive; then
-                log "INFO" "ほかの sf-upgrade.sh（PID ${_lock_pid}）が、先にロックを取ったため、何もせずに終わります。"
+                log "INFO" "ほかの sf-update-cli.sh（PID ${_lock_pid}）が、先にロックを取ったため、何もせずに終わります。"
                 exit 0
             fi
             log "WARNING" "sf の更新のロックを書けません（${UPGRADE_LOCK}）。続行します。"   # 書けなくても更新は続ける（sf-log.sh が待たないだけ）
@@ -136,7 +136,7 @@ if ! _try_lock; then
         log "WARNING" "sf の更新のロックを書けません（${UPGRADE_LOCK}）。続行します。"   # 書けなくても更新は続ける（sf-log.sh が待たないだけ）
     fi
 fi
-# 自分の PID のときだけ消す（ほかの sf-upgrade.sh が書き直したロックを消さない）
+# 自分の PID のときだけ消す（ほかの sf-update-cli.sh が書き直したロックを消さない）
 _release_upgrade_lock() {
     [[ "$(sed -n 's/^PID=//p' "$UPGRADE_LOCK" 2>/dev/null | head -n 1)" == "$$" ]] && rm -f "$UPGRADE_LOCK" 2>/dev/null  # 後始末のため run 不使用
     return 0
@@ -284,7 +284,7 @@ else
     log "INFO" "Git のアップデートはパッケージマネージャーで行ってください（スキップ）"
 fi
 
-# 失敗があれば、成功とは言わず、名前を一覧する（終了コードは 0 のまま。裏で呼ぶ sf-install.sh を止めない）
+# 失敗があれば、成功とは言わず、名前を一覧する（終了コードは 0 のまま。裏で呼ぶ sf-refresh.sh を止めない）
 if [[ -n "$failed_steps" ]]; then
     log "WARNING" "更新できなかったものがあります: ${failed_steps}"
 else

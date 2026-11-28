@@ -2,7 +2,7 @@
 # ==============================================================================
 # sf-metasync.sh - Salesforce メタデータ Git 自動同期スクリプト
 # ==============================================================================
-# main の組織（sf-init で 1 番目に登録した組織。本番・Sandbox・Developer Edition のどれでもよい）から、メタデータを取得し、
+# main の組織（sf-project で 1 番目に登録した組織。本番・Sandbox・Developer Edition のどれでもよい）から、メタデータを取得し、
 # main ブランチの「同期の対象のフォルダ」（【補足】）を、取得した内容と同じにして（追加・変更・削除）、コミットして push する。
 # staging・develop のブランチへは、伝播しない（2026-11-26 にやめた。doc/one-way-promotion-design.md 3.7。開発のブランチが、sf-push.sh で main を取り込む）。
 # Salesforce 組織の内容を正とする。どのブランチから実行しても、main に切り替えて処理し、終了時に元のブランチへ戻る。
@@ -30,7 +30,7 @@
 #   2. 事前の確認（上から順に確かめ、満たされなければ、何も変更せずに中断する）
 #      - 接続先の組織（main の組織）を決める。手元と GitHub Actions 上で、決め方が違う:
 #          手元: エイリアスの名前には頼らず、組織 ID で決める。git remote get-url origin から owner/repo を特定し、
-#                gh variable get SF_ORG_ID_PROD（sf-init が記録した、1 番目の組織の ID）を読み、sf org list --json の
+#                gh variable get SF_ORG_ID_PROD（sf-project が記録した、1 番目の組織の ID）を読み、sf org list --json の
 #                ログイン済みの組織から、ID（上位 15 文字）が一致するものを探して、そのユーザー名を接続先にする。
 #                次のどれかなら、何も変更せずに中断する（推測して別の組織に進まない。prod エイリアスには、フォールバックしない）:
 #                origin から特定できない／ SF_ORG_ID_PROD を読み取れない／ 一致する組織が、この PC の sf にない
@@ -120,8 +120,8 @@
 #
 # 【前提条件】
 #   - force-* ディレクトリ（フォルダ名が force- で始まる）で実行すること。それ以外では lib/common.sh が終了する（終了コード 1）
-#   - 手元で実行するとき: main の組織（sf-init で 1 番目に登録した組織）が、この PC の sf にログイン済みであること
-#     （エイリアスの名前は、何でもよい。sf-init は、この PC の sf にエイリアスを残さない。sf org login web --alias <名前> などでログインする）。
+#   - 手元で実行するとき: main の組織（sf-project で 1 番目に登録した組織）が、この PC の sf にログイン済みであること
+#     （エイリアスの名前は、何でもよい。sf-project は、この PC の sf にエイリアスを残さない。sf org login web --alias <名前> などでログインする）。
 #     gh が使え、リポジトリの Variable（SF_ORG_ID_PROD）を読めること
 #   - Salesforce CLI（sf）は npm 版であること。手順 1 の確認は、成功したら 24 時間は省略する（GitHub Actions 上では、確認しない）
 #   - node があること（sf が npm 版のため、通常はある）。sf のプラグインは不要（以前使っていた sfdx-git-delta は、使わない）
@@ -273,7 +273,7 @@ readonly EXIT_PUBLIC=5
 # ------------------------------------------------------------------------------
 # 接続先の組織（main の組織。本番・Sandbox・Developer Edition のどれでもよい）
 #   ・GitHub Actions 上: ワークフローが JWT で作る prod エイリアスを使う（接続先の決定には、gh を使わない）
-#   ・手元: エイリアスの名前には頼らず、組織 ID で決める。sf-init が GitHub の Variable SF_ORG_ID_PROD に記録した、1 番目（main）の
+#   ・手元: エイリアスの名前には頼らず、組織 ID で決める。sf-project が GitHub の Variable SF_ORG_ID_PROD に記録した、1 番目（main）の
 #     組織の ID と、この PC の sf にログイン済みの組織の ID を突き合わせ、一致した組織のユーザー名を接続先にする。
 #     名前は付け替えられ、同じ PC の別のプロジェクトと衝突する。ID で決めれば、取り違え（別のプロジェクトの組織で main を書き換える）を防げる。
 #     見つからなければ、何も変えずに中断する（推測して、別の組織に進まない。prod エイリアスには、フォールバックしない）
@@ -436,7 +436,7 @@ phase_check_visibility() {
             return 0 ;;
     esac
     if [[ "$vis" == "public" ]]; then why="リポジトリが公開（public）です"
-    elif [[ "$no_token" -eq 1 ]]; then why="リポジトリの公開・非公開を確認できませんでした（GH_TOKEN が渡されていません。wf-metasync.yml が古い可能性があります。sf-sync-wf.sh で更新してください）"
+    elif [[ "$no_token" -eq 1 ]]; then why="リポジトリの公開・非公開を確認できませんでした（GH_TOKEN が渡されていません。wf-metasync.yml が古い可能性があります。sf-update-workflows.sh で更新してください）"
     else why="リポジトリの公開・非公開を確認できませんでした（${REPO_FULL:-不明}）"; fi
     log "ERROR" "${why}。Salesforce 組織の開発物を外部にさらさないため、取得せずに止めます。非公開（private）のリポジトリで実行してください。"
     [[ "$DRY_RUN" -eq 1 ]] || notify_slack ":no_entry: [metasync] 同期を止めました: ${REPO_FULL:-不明}" "理由: ${why}（取得は行っていません）"
@@ -490,7 +490,7 @@ phase_git_update() {
 
     # 手元で実行したときは、追跡していないファイル（.gitignore の対象と、sf-tools/release/ を除く）がある場合も中止する。
     #   後の git add -A で、無関係なファイルが、同期のコミットに含まれてしまうため（以前は、含めていた）。
-    #   sf-tools/release/ は、作業ブランチの日常的な作業用ファイル（sf-install.sh が作る）のため、対象外（ステージもしない）。
+    #   sf-tools/release/ は、作業ブランチの日常的な作業用ファイル（sf-refresh.sh が作る）のため、対象外（ステージもしない）。
     #   GitHub Actions 上では、確認しない（クリーンなチェックアウトで、定期の同期を、予期しないファイルで止めないため）
     if [[ "${GITHUB_ACTIONS:-false}" != "true" ]]; then
         local untracked

@@ -4,8 +4,8 @@
 # ==============================================================================
 # 段階（main / staging / develop）と、Salesforce 組織の種類（本番・Sandbox・Developer Edition など）は、
 # 基本的に独立している。ただし、**本番組織は、main にしか、つなげない**（F8。doc/wizard-ux-design.md 4.7）。
-# phases/init/init-common.sh（sf-init.sh の各 Phase・add_tier.sh・reconnect.sh・status.sh）・phases/init/verify.sh・
-# sf-start.sh・sf-update-secret.sh・sf-typecheck.sh・sf-release.sh・sf-deploy.sh が、この部品を source して共有する（common.sh からは source しない）。
+# phases/init/init-common.sh（sf-project.sh の各 Phase・add_tier.sh・reconnect.sh・status.sh）・phases/init/verify.sh・
+# sf-start.sh・sf-update-secret.sh・sf-test-types.sh・sf-release.sh・sf-deploy.sh が、この部品を source して共有する（common.sh からは source しない）。
 #
 # 【前提】
 #   lib/common.sh を source 済みであること（log / run / die / json_get / read_input / read_or_quit / set_var /
@@ -140,7 +140,7 @@ org_parse_info() {
 
 # この PC の sf にログイン済みの組織から、組織 ID が一致するものを探し、そのユーザー名を VAR にセットする。引数: 組織 ID・VAR 名
 #   エイリアスの名前には頼らない（名前は、付け替えられ、同じ PC の別のプロジェクトと衝突する）。組織 ID は、Salesforce が付けた、
-#   変えられない印のため、段階（main / staging / develop）と組織の結びつけ（sf-init が GitHub の SF_ORG_ID_* に記録）を、確かに引き当てられる。
+#   変えられない印のため、段階（main / staging / develop）と組織の結びつけ（sf-project が GitHub の SF_ORG_ID_* に記録）を、確かに引き当てられる。
 #   一覧は sf org list --json（種類の違う一覧をまたいで探す。同じ組織が複数の一覧に出ても、最初の一致を使う）。
 #   ID は、上位 15 文字で比べる（15 文字と 18 文字の表記の違いを吸収する。大文字小文字は区別する）
 #   戻り値: 0=見つかった（VAR にユーザー名）/ 1=見つからない・一覧を読み取れない・ID が短すぎる（推測しない。VAR は空にする）
@@ -180,7 +180,7 @@ org_read_info() {
 }
 
 # JWT 接続テストと、組織情報の読み取りを、同じ一時的なホームフォルダの中で行う（sf-update-secret.sh 用。
-#   コンシューマー鍵を手で入れたとき。sf-init の外部クライアントアプリの道は、register_jwt_secret_eca が別に確かめる）
+#   コンシューマー鍵を手で入れたとき。sf-project の外部クライアントアプリの道は、register_jwt_secret_eca が別に確かめる）
 #   一時的なホームの中で実行する: エイリアスが増えず、同じユーザーの既存の sf の認証も置き換わらない（run_isolated_home）。
 #   認証は、一時的なホームと一緒に消えるため、組織情報の読み取りも、その中で行う。
 #   引数: エイリアス コンシューマー鍵 秘密鍵ファイル ユーザー名 ログイン入口（--instance-url）

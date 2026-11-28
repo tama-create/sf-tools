@@ -23,10 +23,10 @@
 
 | 区分 | コマンド | AI の扱い |
 |---|---|---|
-| A 読むだけ | `sf-check.sh`・`sf-dryrun.sh -n`（`-r` は付けない。付けると実際の反映）・`sf-next.sh`（`SF_TOOLS_ANSWERS="next.pr=n"` で、状況の表示だけ）・`sf-log.sh status` / `pull` | 言われたら、確認なしで動かす |
-| B 書き込む（自分の組織・Git・GitHub） | `sf-deploy.sh -n`（自分用の組織への反映）・`sf-push.sh -m <ファイル>`（コミットと push）・`sf-next.sh --create`（`next.pr=y` で、PR を作る）・`sf-job.sh --name`（新しい作業のブランチとクローン。AI のときは sf-start を動かさない） | 2.2 のとおり、内容を示して、人の「はい」をもらってから動かす |
-| C 人が動かす | `sf-start.sh`・`sf-restart.sh`（作業の開始・組織の切り替え。VS Code・ブラウザでのログインがある。`sf-job.sh` のあとの sf-start も） | 人に頼む（ランチャーの [6] Start・[7] Restart） |
-| D 動かさない | `sf-log.sh start` / `stop` / `auto`（組織に書き込む）・管理者向け（`sf-init.sh`・`sf-update-secret.sh`・`sf-sync-wf.sh`・`sf-typecheck.sh`）・自動で動くもの（`sf-install.sh`・`sf-metasync.sh` など） | 動かさない（人に頼む） |
+| A 読むだけ | `sf-check.sh`・`sf-dryrun.sh -n`（`-r` は付けない。付けると実際の反映）・`sf-pr.sh`（`SF_TOOLS_ANSWERS="pr.create=n"` で、状況の表示だけ）・`sf-log.sh status` / `pull` | 言われたら、確認なしで動かす |
+| B 書き込む（自分の組織・Git・GitHub） | `sf-deploy.sh -n`（自分用の組織への反映）・`sf-push.sh -m <ファイル>`（コミットと push）・`sf-pr.sh --create`（`pr.create=y` で、PR を作る）・`sf-job.sh --name`（新しい作業のブランチとクローン。AI のときは sf-start を動かさない） | 2.2 のとおり、内容を示して、人の「はい」をもらってから動かす |
+| C 人が動かす | `sf-start.sh`・`sf-switch-org.sh`（作業の開始・組織の切り替え。VS Code・ブラウザでのログインがある。`sf-job.sh` のあとの sf-start も） | 人に頼む（ランチャーの [6] Start・[7] SwitchOrg） |
+| D 動かさない | `sf-log.sh start` / `stop` / `auto`（組織に書き込む）・管理者向け（`sf-project.sh`・`sf-update-secret.sh`・`sf-update-workflows.sh`・`sf-test-types.sh`）・自動で動くもの（`sf-refresh.sh`・`sf-metasync.sh` など） | 動かさない（人に頼む） |
 
 - 共有の環境の組織（エイリアス `develop`・`staging`・`main`・`prod`）と本番には、手元から反映できない（コマンドが拒否する。AI 操作の印があっても変わらない）。頼まれても動かさず、理由（GitHub の PR とワークフローで反映する）を伝える
 
@@ -35,12 +35,12 @@
 1. 動かす前に、会話で次を示し、人の「はい」をもらう
    - `sf-deploy.sh`: 反映先の組織（エイリアス）・ターゲットファイルの要点（反映する数・削除するもの）・直前の `sf-dryrun.sh -n` の結果
    - `sf-push.sh`: `origin/main` を取り込むこと・変更の一覧（`git status` の要点）・未プッシュのコミット・コミットのメッセージの案
-   - `sf-next.sh`（PR）: PR の先（例: develop）・ブランチ・題名・本文と、`next.pr=n` で動かしたときの状況の表示
+   - `sf-pr.sh`（PR）: PR の先（例: develop）・ブランチ・題名・本文と、`pr.create=n` で動かしたときの状況の表示
    - `sf-job.sh`（新しい作業）: プロジェクト（`OWNER/force-XXXX`。今の force-* の `git remote` から取る）・ジョブ名・作るブランチ（main の最新から）・クローン先（作業フォルダ/ジョブ名/force-XXXX）
 2. 「はい」をもらった質問だけに、答えを渡して動かす
    - `SF_TOOLS_AI=1 SF_TOOLS_ANSWERS="deploy.force=y" bash ~/sf-tools/bin/sf-deploy.sh -n`
    - `SF_TOOLS_AI=1 bash ~/sf-tools/bin/sf-push.sh -m <メッセージのファイル>`（メッセージは、案を人に見せて決めたものを、ファイルに書いて渡す。`#` で始まる行・前後の空行は除かれる）
-   - `SF_TOOLS_AI=1 SF_TOOLS_ANSWERS="next.pr=y" bash ~/sf-tools/bin/sf-next.sh --create --title "<題名>" --body-file <本文のファイル>`（PR を作り、URL を表示する。題名は 1 行。本文は、案を人に見せて決めたものを、一時ファイルに書いて渡し、終わったら消す）
+   - `SF_TOOLS_AI=1 SF_TOOLS_ANSWERS="pr.create=y" bash ~/sf-tools/bin/sf-pr.sh --create --title "<題名>" --body-file <本文のファイル>`（PR を作り、URL を表示する。題名は 1 行。本文は、案を人に見せて決めたものを、一時ファイルに書いて渡し、終わったら消す）
    - `cd <作業フォルダ> && SF_TOOLS_AI=1 SF_TOOLS_ANSWERS="job.create=y" bash ~/sf-tools/bin/sf-job.sh --project XXXX --owner OWNER --name <ジョブ名>`（作業フォルダは、ジョブフォルダの親。今の force-* のフォルダの 2 つ上。`--project`・`--owner`・`--name` は必ず付ける。付けないと、入力で確認待ちになる）。終わったら、クローン先を伝え、「そのフォルダで sf-start.sh（ランチャーの [6] Start）を動かしてください」と人に頼む（AI のときは sf-start を動かさない）
 3. 「はい」は、**その 1 回の実行・その質問にだけ**使う。前の「はい」を、別の実行・別の質問に使わない（確認待ちのあとに、動かし直すときも、その回に人からもらった答えだけを渡す）
 4. 終わったら、結果（成功・失敗・作られたもの）を報告する。失敗は、表示されたエラーをそのまま添える
@@ -50,7 +50,7 @@
 | 名前 | コマンド | 質問 |
 |---|---|---|
 | `deploy.force` | `sf-deploy.sh` | 強制デプロイ（--force）を実行します。続行しますか？ |
-| `next.pr` | `sf-next.sh` | 〜にPRを出しますか？（staging・main へは、前の段階の組織で確かめたかも聞く） |
+| `pr.create` | `sf-pr.sh` | 〜にPRを出しますか？（staging・main へは、前の段階の組織で確かめたかも聞く） |
 | `job.existing` | `sf-job.sh` | （GitHub に同じ名前のブランチがあるとき）このブランチを使って、続けますか？（表示された最後のコミットの作者・日時も、人に伝える） |
 | `job.create` | `sf-job.sh` | ▶ よろしいですか？（ジョブ名・ブランチ・クローン先の確認） |
 | `update.sftools` | （どのコマンドでも。sf-tools が古いとき） | sf-tools を更新しますか？ |
@@ -75,13 +75,13 @@
 | Dryrun | 「反映できるか試して」「dry-run して」 | `sf-dryrun.sh -n` | A |
 | Deploy | 「反映して」「デプロイして」 | `sf-deploy.sh -n`（自分用の組織） | B |
 | Push | 「コミットして」「プッシュして」 | `sf-push.sh -m <ファイル>` | B |
-| PullRequest（PR・Next） | 「次はどこに PR？」「状況を見て」 | `sf-next.sh`（`next.pr=n`。状況の表示だけ） | A |
-| PullRequest（PR を出す） | 「PR を出して」 | `sf-next.sh --create --title … --body-file …`（`next.pr=y`） | B |
+| PullRequest（PR・Next） | 「次はどこに PR？」「状況を見て」 | `sf-pr.sh`（`pr.create=n`。状況の表示だけ） | A |
+| PullRequest（PR を出す） | 「PR を出して」 | `sf-pr.sh --create --title … --body-file …`（`pr.create=y`） | B |
 | （なし） | 「ログを見て」 | `sf-log.sh pull` → `logs/apex/latest.md` | A |
 | （なし） | 「新しい作業を始めて」「ジョブを作って」 | `sf-job.sh --project XXXX --owner OWNER --name <ジョブ名>`（作業フォルダで。`job.create=y`） | B |
-| Start・Restart | 「作業を始めて（VS Code・ランチャーを開く）」「組織を切り替えて」 | （C: 人に頼む。ランチャーの [6]・[7]） | C |
+| Start・SwitchOrg | 「作業を始めて（VS Code・ランチャーを開く）」「組織を切り替えて」 | （C: 人に頼む。ランチャーの [6]・[7]） | C |
 
-- 「PullRequest」「PR」「Next」だけと言われたら、まず状況の表示（`next.pr=n`）を見せ、PR を出すかは、あらためて聞く（PR を作るのは B のため）
+- 「PullRequest」「PR」「Next」だけと言われたら、まず状況の表示（`pr.create=n`）を見せ、PR を出すかは、あらためて聞く（PR を作るのは B のため）
 - 「作業を始めて」が、新しいジョブ（ブランチとクローン）のことか、今のフォルダでの sf-start のことか分からないときは、聞き返す
 - Claude Code のスキル（`/sf` など）は、配っていない。この手順書が正本（2026-11-27 の決定。`~/sf-tools/doc/ai-operation-design.md` 11.1）
 - 番号（「3 番」など）で頼まれたら、ランチャーの名前に直して確かめる（「3 は Deploy です。反映してよいですか？」）。番号の並びは、ランチャーの版で変わることがあるため、番号だけで動かさない
@@ -136,7 +136,7 @@
 ### 3.5 直して、3.2 に戻る
 
 - 原因が分からないときは、人に `sf-log.sh start --level detail` を頼む（詳しいログに切り替える。項目の値・条件の結果・制限の使用量などが出る。ログが大きくなる）
-- 直し終わったら、変更を送るか（`sf-push.sh`）・PR を出すか（`sf-next.sh`）を、人に聞く。頼まれたら、2.2 のとおり動かす
+- 直し終わったら、変更を送るか（`sf-push.sh`）・PR を出すか（`sf-pr.sh`）を、人に聞く。頼まれたら、2.2 のとおり動かす
 
 ## 4. Apex を試しに動かすとき
 

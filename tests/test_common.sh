@@ -778,7 +778,7 @@ test_check_java_cli() {
     teardown "$mb"
 }
 
-# check_vscode_extension のテスト（sf-init の Phase 1。VS Code に Salesforce 拡張が入っているか）
+# check_vscode_extension のテスト（sf-project の Phase 1。VS Code に Salesforce 拡張が入っているか）
 _cve_run() {   # 引数: 1=PATH, 2=check_vscode_extension の引数
     PATH="$1" bash -c "
         readonly SCRIPT_NAME=test; readonly LOG_FILE=/dev/null; readonly LOG_MODE=NEW; export SF_INIT_MODE=1
@@ -1233,8 +1233,8 @@ test_ai_mode_input() {
     out=$(SF_TOOLS_AI=1 SF_TOOLS_ANSWERS="deploy.force=y deploy.force=n" _ai sf-deploy 'echo NEVER'); rc=$?
     assert_equals "$rc" "1" "AI: 同じ名前が 2 つ → 中断"
     assert_output_contains "$out" "同じ名前が 2 つあります" "AI: 同じ名前が 2 つ → 理由"
-    out=$(SF_TOOLS_AI=1 SF_TOOLS_ANSWERS="deploy.force=y next.pr=n update.sftools=y release.x=n" _ai sf-deploy 'echo "REST=[$SF_TOOLS_ANSWERS]"'); rc=$?
-    assert_output_contains "$out" "REST=\[next.pr=n release.x=n\]" "AI: 自分（deploy）と update の答えを受け取り、残りだけを子に渡す"
+    out=$(SF_TOOLS_AI=1 SF_TOOLS_ANSWERS="deploy.force=y pr.create=n update.sftools=y release.x=n" _ai sf-deploy 'echo "REST=[$SF_TOOLS_ANSWERS]"'); rc=$?
+    assert_output_contains "$out" "REST=\[pr.create=n release.x=n\]" "AI: 自分（deploy）と update の答えを受け取り、残りだけを子に渡す"
     out=$(SF_TOOLS_AI=1 SF_TOOLS_ANSWERS="deploy.force=y" _ai sf-deploy 'bash -c "echo CHILD=[\$SF_TOOLS_ANSWERS]"'); rc=$?
     assert_output_contains "$out" "CHILD=\[\]" "AI: 子のプロセスには、親が受け取った答えが渡らない"
     out=$(SF_TOOLS_ANSWERS="deploy.force=yes" _ai sf-deploy 'echo OK'); rc=$?
@@ -1601,7 +1601,7 @@ test_bash32_compat() {
 # ------------------------------------------------------------------------------
 # テストの保護: 実際の Git for Windows の更新・npm のグローバル更新・sf update を、テストが実行しない
 #   （run_tests.sh が、保護用の代理コマンドを PATH の先頭に置く。2026-10-14: Windows の Actions で、モックが消えたあとの
-#    バックグラウンドの sf-upgrade.sh が、本物の git update-git-for-windows を実行し、Git Bash 自体が壊れた）
+#    バックグラウンドの sf-update-cli.sh が、本物の git update-git-for-windows を実行し、Git Bash 自体が壊れた）
 # ------------------------------------------------------------------------------
 test_runner_guard() {
     echo ""; echo -e "${CLR_HEAD}[TEST] テストの保護: 実際の Git / npm / sf の更新を実行しない${CLR_RST}"
@@ -1881,7 +1881,7 @@ test_env_log() {
     done
     assert_equals "$(grep -c '\[ENV\] sf-tools' "$log" | tr -d ' ')" "2" "追記のログでは、実行のたびに [ENV] の行が 1 行ずつ増える"
 
-    # 3b. 親のプロセスが、同じログファイルに書いたあとは、子のプロセスの source で重ねて書かない（sf-init の Phase など）
+    # 3b. 親のプロセスが、同じログファイルに書いたあとは、子のプロセスの source で重ねて書かない（sf-project の Phase など）
     log="$td/f2.log"
     ( export SF_INIT_MODE=1 SCRIPT_NAME=parent LOG_FILE="$log"
       source "$SF_TOOLS_DIR/lib/common.sh"

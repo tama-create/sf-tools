@@ -2,7 +2,7 @@
 
 ## 1. 概要
 
-Salesforce プロジェクト（管理者が sf-tools の `sf-init.sh` で作成）。
+Salesforce プロジェクト（管理者が sf-tools の `sf-project.sh` で作成）。
 
 ## 2. 作業の始め方
 

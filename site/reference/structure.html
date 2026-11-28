@@ -23,7 +23,7 @@
     <p class="label">💻 あなたのパソコン</p>
     <div class="nest admin">
       <p class="label">📁 ~/sf-tools/logs/<small>sf-tools 側（プロジェクトの外）</small></p>
-      <p><code>sf-init.sh</code>（<code>--add-tier</code>・<code>--reconnect</code>・<code>--verify</code>・<code>--status</code> を含む）・<code>sf-job.sh</code>・<code>sf-typecheck.sh</code></p>
+      <p><code>sf-project.sh</code>（<code>--add-tier</code>・<code>--reconnect</code>・<code>--verify</code>・<code>--status</code> を含む）・<code>sf-job.sh</code>・<code>sf-test-types.sh</code></p>
     </div>
     <div class="nest">
       <p class="label">📁 force-XXXX/sf-tools/logs/<small>実行したプロジェクトの中</small></p>
@@ -35,17 +35,17 @@
 <table>
   <thead><tr><th>ログの場所</th><th>コマンド</th></tr></thead>
   <tbody>
-    <tr><td><code>~/sf-tools/logs/&lt;名前&gt;.log</code>（sf-tools 側。プロジェクトの外）</td><td><code>sf-init.sh</code>（<code>sf-init.log</code>。各 Phase も追記する。<code>--add-tier</code>・<code>--reconnect</code>・<code>--status</code> も同じファイル）・<code>sf-init.sh --verify</code> とセットアップの最後の動作の確認（<code>verify.log</code>）・<code>sf-job.sh</code>（<code>sf-job.log</code>）・<code>sf-typecheck.sh</code>（<code>sf-typecheck.log</code>）</td></tr>
+    <tr><td><code>~/sf-tools/logs/&lt;名前&gt;.log</code>（sf-tools 側。プロジェクトの外）</td><td><code>sf-project.sh</code>（<code>sf-project.log</code>。各 Phase も追記する。<code>--add-tier</code>・<code>--reconnect</code>・<code>--status</code> も同じファイル）・<code>sf-project.sh --verify</code> とセットアップの最後の動作の確認（<code>verify.log</code>）・<code>sf-job.sh</code>（<code>sf-job.log</code>）・<code>sf-test-types.sh</code>（<code>sf-test-types.log</code>）</td></tr>
     <tr><td>実行した <code>force-*</code> フォルダの中の <code>sf-tools/logs/&lt;コマンド名&gt;.log</code></td><td>上以外の、すべてのコマンド（<code>sf-start.sh</code> が開くランチャーは、ログを作りません）</td></tr>
   </tbody>
 </table>
-<p>ログは、ほとんどのコマンドで、実行のたびに作り直されます（前回の内容は消えます）。<code>sf-init.sh</code>（<code>--add-tier</code>・<code>--reconnect</code>・<code>--status</code> を含む）も、起動のたびに <code>sf-init.log</code> を作り直します。<code>sf-check.sh</code>（ほかのコマンドや git のフックからも呼ばれる）と <code>sf-prepush.sh</code>（pre-push フック）だけは、実行のたびに追記されます。</p>
+<p>ログは、ほとんどのコマンドで、実行のたびに作り直されます（前回の内容は消えます）。<code>sf-project.sh</code>（<code>--add-tier</code>・<code>--reconnect</code>・<code>--status</code> を含む）も、起動のたびに <code>sf-project.log</code> を作り直します。<code>sf-check.sh</code>（ほかのコマンドや git のフックからも呼ばれる）と <code>sf-prepush.sh</code>（pre-push フック）だけは、実行のたびに追記されます。</p>
 <p>コマンドの実行に失敗したときは、同じフォルダの <code>error.log</code> にも、失敗したコマンドと、その出力が追記されます（作り直されません）。<code>force-*</code> の <code>sf-tools/logs/</code> は、git の対象外です。</p>
 
 <h2 id="workspace">作業フォルダの構成</h2>
-<p><code>sf-job.sh</code> と <code>sf-init.sh</code> を実行する場所が、作業フォルダです。場所は任意です（おすすめ: <code>~/sf</code> のような、短い名前のフォルダ）。<code>admin</code>・<code>force-*</code> の中では、どちらも実行できません。先に、管理者が <code>sf-init.sh</code> でリポジトリを作ります（<code>admin/</code> ができます）。開発者は、そのあとで、<code>sf-job.sh</code> で、作業ごとのジョブフォルダを作ります。</p>
+<p><code>sf-job.sh</code> と <code>sf-project.sh</code> を実行する場所が、作業フォルダです。場所は任意です（おすすめ: <code>~/sf</code> のような、短い名前のフォルダ）。<code>admin</code>・<code>force-*</code> の中では、どちらも実行できません。先に、管理者が <code>sf-project.sh</code> でリポジトリを作ります（<code>admin/</code> ができます）。開発者は、そのあとで、<code>sf-job.sh</code> で、作業ごとのジョブフォルダを作ります。</p>
 <pre><code>{作業フォルダ}/
-├── admin/                          ← sf-init.sh が作る、管理者用のフォルダ（完了後も残す。保守に使う）
+├── admin/                          ← sf-project.sh が作る、管理者用のフォルダ（完了後も残す。保守に使う）
 │   ├── force-XXXX/                 ← 管理者用のクローン（完了後は admin ブランチ）
 │   ├── .sf-init-XXXX.env           ← 状態ファイル（Phase 2 が作る。セットアップが完了したら消える）
 │   ├── .sf-init-XXXX.progress      ← 進捗（完了した Phase。完了したら消える）
@@ -56,12 +56,12 @@
 <p>ホームフォルダには、次のものがあります。</p>
 <ul>
   <li><code>~/sf-tools/</code> … sf-tools 本体（<a href="#tools">下記</a>）。<code>~/sf-tools/logs/</code> に、一部のコマンドのログ（<a href="#logs">上記</a>）</li>
-  <li><code>~/.sf-jwt/force-XXXX/</code> … JWT 認証用の <code>server.key</code>・<code>server.crt</code>（<code>sf-init.sh</code> の Phase 10 が作る。<code>--add-tier</code>・<code>--reconnect</code>・<code>sf-update-secret.sh</code> が使う。<code>sf-init.sh</code> を実行した管理者の PC にだけある）</li>
-  <li><code>~/.sf-tools-last-update</code> … <code>sf-upgrade.sh</code> を最後に起動した時刻の印（<code>sf-install.sh</code> が、24 時間おきの起動の判定に使う）</li>
+  <li><code>~/.sf-jwt/force-XXXX/</code> … JWT 認証用の <code>server.key</code>・<code>server.crt</code>（<code>sf-project.sh</code> の Phase 10 が作る。<code>--add-tier</code>・<code>--reconnect</code>・<code>sf-update-secret.sh</code> が使う。<code>sf-project.sh</code> を実行した管理者の PC にだけある）</li>
+  <li><code>~/.sf-tools-last-update</code> … <code>sf-update-cli.sh</code> を最後に起動した時刻の印（<code>sf-refresh.sh</code> が、24 時間おきの起動の判定に使う）</li>
 </ul>
 
 <h2 id="force">force-* プロジェクトの構成</h2>
-<p>雛形のファイルは、<code>sf-init.sh</code> の Phase 3（<a href="../admin/setup.html#phase-map">ステップとの対応</a>） が、sf-tools の <code>templates/</code> からコピーします（<code>.gitmessage</code> と、<code>sf-tools/release/</code> の中は、<code>sf-install.sh</code> が、sf-tools の <code>config/install/</code> の雛形から作ります）。★ は、sf-tools 独自のもの（または、sf-tools 用に設定したもの）で、それ以外は、<code>sf project generate</code> が作る標準の構成と同じものです。☆ は、git の対象外で、それぞれのクローンで作られるものです。</p>
+<p>雛形のファイルは、<code>sf-project.sh</code> の Phase 3（<a href="../admin/setup.html#phase-map">ステップとの対応</a>） が、sf-tools の <code>templates/</code> からコピーします（<code>.gitmessage</code> と、<code>sf-tools/release/</code> の中は、<code>sf-refresh.sh</code> が、sf-tools の <code>config/install/</code> の雛形から作ります）。★ は、sf-tools 独自のもの（または、sf-tools 用に設定したもの）で、それ以外は、<code>sf project generate</code> が作る標準の構成と同じものです。☆ は、git の対象外で、それぞれのクローンで作られるものです。</p>
 <pre><code>force-XXXX/
 ├── .forceignore
 ├── .gitattributes                       ★ 改行コードの設定
@@ -78,7 +78,7 @@
 ├── CLAUDE.md                            ★ AI（Claude Code）への 1 行の案内（@~/sf-tools/doc/ai-dev-loop.md で、手順書を読み込む）
 ├── config/
 │   └── project-scratch-def.json
-├── .gitmessage                          ★ コミットメッセージの雛形（sf-init の Phase 4 で、sf-install.sh が config/install/gitmessage から作る。
+├── .gitmessage                          ★ コミットメッセージの雛形（sf-project の Phase 4 で、sf-refresh.sh が config/install/gitmessage から作る。
 │                                            commit.template の設定は、管理者用のクローンだけ）
 ├── eslint.config.js
 ├── force-app/                           ← Salesforce のメタデータ本体（雛形には main/default/.gitkeep の 1 個だけ。
@@ -92,9 +92,9 @@
 │   ├── config/
 │   │   ├── branches.txt                 ★   使うブランチ（段階）の一覧。並びが順序（main → staging → develop）
 │   │   └── metadata.txt                 ★   メタデータの同期（sf-metasync.sh）で取得する種類
-│   ├── release/                         ★   （sf-install.sh が毎回作る）
-│   │   ├── branch_name.txt              ☆   現在のブランチ名（sf-install.sh が書く。main では作らない）
-│   │   └── &lt;ブランチ&gt;/                   ★   作業用ブランチごと（sf-install.sh が作る。main では作らない）
+│   ├── release/                         ★   （sf-refresh.sh が毎回作る）
+│   │   ├── branch_name.txt              ☆   現在のブランチ名（sf-refresh.sh が書く。main では作らない）
+│   │   └── &lt;ブランチ&gt;/                   ★   作業用ブランチごと（sf-refresh.sh が作る。main では作らない）
 │   │       ├── README.md                ★     このブランチの作業の資料の入口（目的・作業の概要・詳細な仕様・確かめ方・結果）
 │   │       ├── deploy-target.txt        ★     リリースの対象
 │   │       └── remove-target.txt        ★     削除の対象
@@ -103,7 +103,7 @@
 <p><code>sf-tools/release/&lt;ブランチ&gt;/</code> に、リリースのときに作られる <code>package.xml</code>・<code>destructiveChanges.xml</code> も、git の対象外です。書き方は、<a href="target-files.html">ターゲットファイル</a>にあります。</p>
 <h3 id="branch-docs">ブランチの作業の資料の置き場所</h3>
 <ul>
-  <li><strong>そのブランチだけの資料</strong>（このブランチで何をするか・目的・詳細な仕様・確かめ方・テストデータ・手元で動かす台本など、組織に出さないもの）は、<code>sf-tools/release/&lt;ブランチ&gt;/</code> に置きます。入口は <code>README.md</code> です。ブランチを始めるとき（<code>sf-start.sh</code> の中の <code>sf-install.sh</code>）に、見出しだけの雛形が自動で置かれます（すでにあれば、上書きしません）。GitHub でこのフォルダを開くと、<code>README.md</code> が自動で表示されます。</li>
+  <li><strong>そのブランチだけの資料</strong>（このブランチで何をするか・目的・詳細な仕様・確かめ方・テストデータ・手元で動かす台本など、組織に出さないもの）は、<code>sf-tools/release/&lt;ブランチ&gt;/</code> に置きます。入口は <code>README.md</code> です。ブランチを始めるとき（<code>sf-start.sh</code> の中の <code>sf-refresh.sh</code>）に、見出しだけの雛形が自動で置かれます（すでにあれば、上書きしません）。GitHub でこのフォルダを開くと、<code>README.md</code> が自動で表示されます。</li>
   <li><strong>どの開発者にも共通のもの</strong>（プロジェクトの説明など）は、プロジェクトの直下（<code>README.md</code> など）に置きます。</li>
   <li>ほかのブランチのフォルダは、書き換えません。Apex のテストクラスなど、組織に出す部品は、今までどおり <code>force-app/</code> に置きます。</li>
 </ul>
@@ -114,21 +114,21 @@
 │   ├── sf-job.sh
 │   ├── sf-start.sh
 │   ├── sf-push.sh
-│   ├── sf-next.sh
+│   ├── sf-pr.sh
 │   ├── sf-promote-check.sh
 │   ├── sf-release.sh
 │   ├── sf-dryrun.sh
 │   ├── sf-deploy.sh
 │   ├── sf-check.sh
-│   ├── sf-typecheck.sh
-│   ├── sf-restart.sh
-│   ├── sf-init.sh
+│   ├── sf-test-types.sh
+│   ├── sf-switch-org.sh
+│   ├── sf-project.sh
 │   ├── sf-hook.sh
 │   ├── sf-unhook.sh
-│   ├── sf-sync-wf.sh
+│   ├── sf-update-workflows.sh
 │   ├── sf-update-secret.sh
-│   ├── sf-install.sh
-│   ├── sf-upgrade.sh
+│   ├── sf-refresh.sh
+│   ├── sf-update-cli.sh
 │   ├── sf-prepush.sh
 │   ├── sf-precommit.sh
 │   └── sf-metasync.sh
@@ -139,19 +139,19 @@
 │   ├── platform.sh             ← OS・外部コマンド（is_gitbash / sed_inplace / run_with_timeout / run_isolated_home / check_sf_cli / check_java_cli / check_vscode_extension / open_browser）
 │   ├── project.sh              ← プロジェクト（force-* の確認・gh のオーナー確認・プロジェクトの特定・ブランチ一覧・予約名の判定・
 │   │                               sf-tools の最新化・admin ブランチ・セットアップの完了の印）
-│   ├── wizard.sh               ← ウィザード形式の画面の共通部品（sf-init で使用）
+│   ├── wizard.sh               ← ウィザード形式の画面の共通部品（sf-project で使用）
 │   ├── org.sh                  ← Salesforce 組織の接続情報の共通部品（ログイン先の選択・種類の判定・本番は main のみのガード・
 │   │                               共有環境へのローカルリリースの拒否）
-│   ├── diag.sh                 ← セットアップの診断（sf-init.sh --status と --verify で使用。読み取りのみ）
+│   ├── diag.sh                 ← セットアップの診断（sf-project.sh --status と --verify で使用。読み取りのみ）
 │   ├── manifest.sh             ← ターゲットファイルから package.xml・destructiveChanges.xml を作る（sf-release.sh と sf-promote-check.sh で共有）
 │   ├── verify-common.sh        ← Hello World の本文・PR とワークフローの実行の部品（phases/init/verify.sh と e2e で共有）
-│   ├── verify-samples.sh       ← リリースの仕組みの確認用サンプル（パターン別のコンポーネント。sf-init.sh --verify --components が使う）
+│   ├── verify-samples.sh       ← リリースの仕組みの確認用サンプル（パターン別のコンポーネント。sf-project.sh --verify --components が使う）
 │   ├── metasync.js             ← 組織から取得した内容と main を比べて、追加・変更・削除の計画を作り、反映する（sf-metasync.sh が呼ぶ。Node の標準機能のみ）
-│   └── typecheck.js            ← メタデータの種類ごとに、リリース・削除ができるかを確かめる（sf-typecheck.sh が呼ぶ。Node の標準機能のみ）
+│   └── typecheck.js            ← メタデータの種類ごとに、リリース・削除ができるかを確かめる（sf-test-types.sh が呼ぶ。Node の標準機能のみ）
 ├── phases/
 │   ├── start/                  ← sf-start.sh の部品
 │   │   └── launcher.sh         ← 最後に開くメニュー（ランチャー）
-│   └── init/                   ← sf-init.sh のフェーズスクリプト
+│   └── init/                   ← sf-project.sh のフェーズスクリプト
 │       ├── init-common.sh
 │       ├── add_tier.sh          ← --add-tier オプションで呼ばれる tier 追加スクリプト
 │       ├── remove_tier.sh       ← --remove-tier オプションで呼ばれる tier の取り外し（branches.txt の行を消す PR）
@@ -171,7 +171,7 @@
 ├── hooks/
 │   ├── pre-push                ← sf-hook.sh がプロジェクト側（.git/hooks/）へコピー（bin/sf-prepush.sh を呼ぶだけのラッパー）
 │   └── pre-commit              ← 同じく、sf-hook.sh がコピー（bin/sf-precommit.sh を呼ぶだけのラッパー）
-├── templates/                  ← force-* プロジェクトの雛形（唯一の正本。sf-init.sh の Phase 3 が、すべてコピーする。
+├── templates/                  ← force-* プロジェクトの雛形（唯一の正本。sf-project.sh の Phase 3 が、すべてコピーする。
 │                                  force-* にそのまま置くものだけを入れる。名前や場所を変えて使うものは config/install/）
 │   ├── .forceignore
 │   ├── .gitattributes
@@ -192,20 +192,20 @@
 │   └── sf-tools/
 │       └── config/             ← metadata.txt / branches.txt 雛形
 ├── config/                     ← sf-tools 自身の設定・データ（force-* には配布されない）
-│   ├── install/                ← sf-install.sh が、名前や場所を変えて force-* に置く雛形（templates/ には置かない。
+│   ├── install/                ← sf-refresh.sh が、名前や場所を変えて force-* に置く雛形（templates/ には置かない。
 │   │   │                           Phase 3 が丸ごとコピーすると、force-* に不要な写しが残るため）
-│   │   ├── gitmessage          ← コミットメッセージの雛形（sf-init のとき、.gitmessage として置く）
+│   │   ├── gitmessage          ← コミットメッセージの雛形（sf-project のとき、.gitmessage として置く）
 │   │   └── release/            ← deploy-target.txt / remove-target.txt の雛形（作業ブランチごとに、sf-tools/release/&lt;ブランチ名&gt;/ へコピー）
 │   ├── metadata-dirs.txt       ← メタデータの種類 → フォルダ名の表（sf-metasync.sh が、同期の対象のフォルダを決めるために参照）
 │   ├── metasync-detect.txt     ← メタデータの種類ごとの、変更の検知の区分の表（sf-metasync.sh の変更の検知が参照。A = 履歴 / B = 更新日時の一覧）
-│   ├── metadata-capability.txt ← メタデータの種類ごとの、リリース・削除の可否の表（sf-typecheck.sh が確認。sf-check.sh が参照）
-│   └── changeset-types.txt     ← 変更セットで扱える種類の一覧（公式の Metadata Coverage Report。sf-typecheck.sh --coverage が参照）
+│   ├── metadata-capability.txt ← メタデータの種類ごとの、リリース・削除の可否の表（sf-test-types.sh が確認。sf-check.sh が参照）
+│   └── changeset-types.txt     ← 変更セットで扱える種類の一覧（公式の Metadata Coverage Report。sf-test-types.sh --coverage が参照）
 ├── site/                       ← この文書サイト（HTML。GitHub Pages で公開）
 ├── doc/                        ← 設計・手順・開発者向けの文書（Markdown）
 ├── tests/                      ← テスト一式（モックの単体テスト test_*.sh・結合テスト test_integration*.sh。run_tests.sh で実行）
 │   ├── integration/            ← 結合テストの共通部品
-│   └── e2e/                    ← 実環境での通し検証（sf-init の自動実行。通常のテストには含めない）
-├── logs/                       ← ~/sf-tools/logs/（sf-init・verify・sf-job・sf-typecheck のログ。git の対象外）
+│   └── e2e/                    ← 実環境での通し検証（sf-project の自動実行。通常のテストには含めない）
+├── logs/                       ← ~/sf-tools/logs/（sf-project・verify・sf-job・sf-test-types のログ。git の対象外）
 ├── .github/workflows/          ← sf-tools 自身の CI（test.yml・e2e.yml）と、文書サイトの公開（pages.yml）
 ├── CLAUDE.md
 ├── LICENSE

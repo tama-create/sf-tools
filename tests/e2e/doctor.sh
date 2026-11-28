@@ -13,7 +13,7 @@
 #   3. gh / git  : gh がログイン済みか・delete_repo の権限・git が GitHub に認証できるか（credential helper。無いと、https のクローンが
 #                  パスワードを待って止まる。WSL・Linux で起こる）・git のユーザー名とメールアドレス（無いと、コミットで失敗する）。fixture.env の E2E_GH_USER と同じユーザーか
 #   4. 鍵一式    : fixture.env の有無・権限（600。Windows は除く）・必須の項目・認証 URL の形式・作業フォルダ（E2E_HOME_ROOT）
-#   5. openssl   : JWT 用の鍵と証明書を、sf-init と同じ関数で作れるか（PKCS#1 形式・発行先が空でないこと）
+#   5. openssl   : JWT 用の鍵と証明書を、sf-project と同じ関数で作れるか（PKCS#1 形式・発行先が空でないこと）
 #   6. sf-tools  : 手元の sf-tools が development で、origin/development と一致しているか（GitHub Actions は origin を使うため）
 #
 # 【使い方】 bash tests/e2e/doctor.sh
@@ -40,7 +40,7 @@ fi
 
 source "${SF_TOOLS_ROOT}/lib/common.sh"
 source "${E2E_SCRIPT_DIR}/lib.sh"
-source "${SF_TOOLS_ROOT}/phases/init/init-common.sh"   # generate_jwt_cert（sf-init と同じ証明書の作り方で確認する）
+source "${SF_TOOLS_ROOT}/phases/init/init-common.sh"   # generate_jwt_cert（sf-project と同じ証明書の作り方で確認する）
 
 N_OK=0; N_NG=0; N_WARN=0
 _ok()   { N_OK=$((N_OK + 1));     log "SUCCESS" "  [OK]   $1"; }
@@ -113,7 +113,7 @@ else
     _ng "git に、GitHub の認証の仕組み（credential helper）がありません。https のクローンが、パスワードを待って止まります" "gh auth setup-git（gh のログインを、git にも使う）。e2e だけなら、環境変数 GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=credential.https://github.com.helper GIT_CONFIG_VALUE_0='!gh auth git-credential' でも渡せる"
 fi
 
-# git のユーザー名とメールアドレス（コミットの作者）。決まらないと、sf-init の初回のコミットで「Author identity unknown」になる
+# git のユーザー名とメールアドレス（コミットの作者）。決まらないと、sf-project の初回のコミットで「Author identity unknown」になる
 # （git var は、設定・環境変数・OS のユーザー情報から、コミットのときと同じ規則で、作者を決められるかを調べる）
 if git var GIT_AUTHOR_IDENT >/dev/null 2>&1 && git var GIT_COMMITTER_IDENT >/dev/null 2>&1; then   # 条件チェックのため run 不使用
     _ok "git: コミットの作者（ユーザー名・メールアドレス）が決まる"
@@ -192,7 +192,7 @@ else
 fi
 
 # ------------------------------------------------------------------------------
-# 5. openssl: sf-init と同じ関数で、JWT 用の鍵と証明書を作る（macOS の LibreSSL・Windows の Git Bash の差が出る所）
+# 5. openssl: sf-project と同じ関数で、JWT 用の鍵と証明書を作る（macOS の LibreSSL・Windows の Git Bash の差が出る所）
 # ------------------------------------------------------------------------------
 log "INFO" "5. openssl（JWT 用の鍵と証明書）"
 if command -v openssl >/dev/null 2>&1; then
@@ -204,7 +204,7 @@ if command -v openssl >/dev/null 2>&1; then
             if grep -q "BEGIN RSA PRIVATE KEY" "${_jwt_tmp}/jwt/server.key" 2>/dev/null; then
                 _ok "秘密鍵を作れた（PKCS#1 形式。Salesforce の JWT に必要）"
             else
-                _ng "秘密鍵が PKCS#1 形式（BEGIN RSA PRIVATE KEY）ではありません" "openssl のバージョンを確認する（sf-init の Phase 10 で失敗します）"
+                _ng "秘密鍵が PKCS#1 形式（BEGIN RSA PRIVATE KEY）ではありません" "openssl のバージョンを確認する（sf-project の Phase 10 で失敗します）"
             fi
             if _jwt_cert_subject_state "${_jwt_tmp}/jwt/server.crt"; then
                 _ok "証明書を作れた（発行先が入っている）"

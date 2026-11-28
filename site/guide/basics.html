@@ -37,14 +37,14 @@
   <tbody>
     <tr><td><strong>プロジェクト</strong></td><td><code>force-XXXX</code>（リポジトリのクローン。VS Code で開く単位）。<strong><code>force-</code> は固定で、<code>XXXX</code> は管理者が決める名前</strong>です（例: <code>acme</code> → <code>force-acme</code>）</td></tr>
     <tr><td><strong>作業単位</strong></td><td>プロジェクトの<strong>すぐ上のフォルダ</strong>です（<code>JOB-xxx</code> や <code>admin</code> など）。同じ <code>force-XXXX</code> を、別々の作業として、同時に複数開くための入れ物です</td></tr>
-    <tr><td><strong>作業フォルダ</strong></td><td>作業単位のフォルダを、まとめて置く場所です。<strong>どこでも構いません</strong>（<code>sf-init.sh</code> や <code>sf-job.sh</code> は、ここで実行します）</td></tr>
+    <tr><td><strong>作業フォルダ</strong></td><td>作業単位のフォルダを、まとめて置く場所です。<strong>どこでも構いません</strong>（<code>sf-project.sh</code> や <code>sf-job.sh</code> は、ここで実行します）</td></tr>
   </tbody>
 </table>
 <figure class="diagram">
   <div class="nest">
     <p class="label">📁 作業フォルダ<small>好きな場所・好きな名前（おすすめ: C:\sf や ~/sf のような、短い名前）。sf-job.sh は、ここで実行します</small></p>
     <div class="nest admin">
-      <p class="label">📂 admin<small>管理者用の作業単位（sf-init.sh が作る。メンテナンス用として残す）</small></p>
+      <p class="label">📂 admin<small>管理者用の作業単位（sf-project.sh が作る。メンテナンス用として残す）</small></p>
       <div class="nest"><p class="label">🗂️ force-acme<small>プロジェクト（リポジトリのクローン）</small></p></div>
       <div class="nest"><p class="label">🗂️ force-beta<small>別のプロジェクトも、同じ admin に置く</small></p></div>
     </div>
@@ -172,7 +172,7 @@ sf-start.sh</code></pre>
 </table>
 <div class="box">
   <div class="title">接続する組織を変えたいとき</div>
-  <p>別の組織に切り替えるときは、<code>sf-restart.sh</code>（ランチャーの <strong>7</strong> Restart）を使います。接続済みでも、エイリアスの入力とログインから、やり直します。ログインに失敗したときは、元の接続の設定に戻ります。</p>
+  <p>別の組織に切り替えるときは、<code>sf-switch-org.sh</code>（ランチャーの <strong>7</strong> SwitchOrg）を使います。接続済みでも、エイリアスの入力とログインから、やり直します。ログインに失敗したときは、元の接続の設定に戻ります。</p>
 </div>
 
 <div class="box next">

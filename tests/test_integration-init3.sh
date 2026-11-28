@@ -1,6 +1,6 @@
 #!/bin/bash
 # ==============================================================================
-# test_integration-init3.sh - 結合テスト L1: sf-init の診断（--status）・管理者用ブランチの欠け・Salesforce の失敗・同時の作成
+# test_integration-init3.sh - 結合テスト L1: sf-project の診断（--status）・管理者用ブランチの欠け・Salesforce の失敗・同時の作成
 # ==============================================================================
 # 実際の git と、状態を持つ fake の gh・sf で、完了済みのプロジェクトの、手動の削除・欠け、Salesforce の接続の失敗、
 # 同名のリポジトリの同時作成を確かめる。共通の部品は tests/integration/init-lib.sh。
@@ -15,26 +15,26 @@
 # ==============================================================================
 source "$(dirname "${BASH_SOURCE[0]}")/test_helper.sh"
 source "$(dirname "${BASH_SOURCE[0]}")/integration/lib.sh"
-echo -e "${CLR_HEAD}=== 結合テスト L1: sf-init の診断・欠け・Salesforce の失敗・同時の作成 ===${CLR_RST}"
+echo -e "${CLR_HEAD}=== 結合テスト L1: sf-project の診断・欠け・Salesforce の失敗・同時の作成 ===${CLR_RST}"
 
 trap 'it_teardown' EXIT
 source "$(dirname "${BASH_SOURCE[0]}")/integration/init-lib.sh"
 
-# 環境変数つきで、sf-init を動かす。引数: 入力 変数=値...
+# 環境変数つきで、sf-project を動かす。引数: 入力 変数=値...
 _initx() {
     local inp="$1"; shift
     mkdir -p "$IT_WORK/proj"
-    it_run "$IT_WORK/proj" -i "$inp" env "$@" bash "$IT_HOME/sf-tools/bin/sf-init.sh" --owner "$IT_OWNER" --project "$IT_PROJECT"
+    it_run "$IT_WORK/proj" -i "$inp" env "$@" bash "$IT_HOME/sf-tools/bin/sf-project.sh" --owner "$IT_OWNER" --project "$IT_PROJECT"
 }
 # 管理者用のクローンで、--status を動かす。結果: IT_RC・IT_OUT
-_status() { it_run "$(_admin)" bash "$IT_HOME/sf-tools/bin/sf-init.sh" --status; }
+_status() { it_run "$(_admin)" bash "$IT_HOME/sf-tools/bin/sf-project.sh" --status; }
 _plain() { it_out | sed 's/\x1b\[[0-9;]*m//g'; }
 
 test_X3_9() {
     echo -e "\n${CLR_HEAD}--- X3-9: --status が、欠けを見つける ---${CLR_RST}"
     _fresh || return 1; IT_TIMEOUT=900
     _init "$FULL_INPUT"
-    assert_exit_ok "$IT_RC" "X3-9: 準備: sf-init が、最後まで成功する"
+    assert_exit_ok "$IT_RC" "X3-9: 準備: sf-project が、最後まで成功する"
     IT_TIMEOUT=300
 
     _status
@@ -53,10 +53,10 @@ test_X3_9() {
     mv "$IT_STATE/variables/SF_USERNAME_PROD" "$IT_ROOT/saved.var"
     _status
     assert_exit_fail "$IT_RC" "X3-9: Variable（SF_USERNAME_PROD）がないと、--status は、不足で失敗する"
-    _plain | grep -q "sf-init.sh --reconnect main" && pass "X3-9: 直し方（--reconnect main）が、表示される" || fail "X3-9: 直し方（--reconnect main）が、表示される"
+    _plain | grep -q "sf-project.sh --reconnect main" && pass "X3-9: 直し方（--reconnect main）が、表示される" || fail "X3-9: 直し方（--reconnect main）が、表示される"
     mv "$IT_ROOT/saved.var" "$IT_STATE/variables/SF_USERNAME_PROD"
 
-    # ワークフローのファイルが、main から消えている → 不足。直し方（sf-sync-wf）が出る
+    # ワークフローのファイルが、main から消えている → 不足。直し方（sf-update-workflows）が出る
     it_origin_delete_file main ".github/workflows/wf-validate.yml" || { fail "X3-9: 準備（ワークフローの削除）"; return; }
     _status
     assert_exit_fail "$IT_RC" "X3-9: ワークフロー（wf-validate.yml）がないと、--status は、不足で失敗する"
@@ -69,7 +69,7 @@ test_X3_9() {
     _status
     assert_exit_fail "$IT_RC" "X3-9: branches.txt にあるブランチ（staging）が、origin にないと、--status は、不足で失敗する"
     _plain | grep -q "ブランチ staging がありません" && pass "X3-9: 不足のブランチ（staging）が、表示される" || fail "X3-9: 不足のブランチ（staging）が、表示される"
-    _plain | grep -q "sf-init.sh --add-tier staging" && pass "X3-9: 直し方（--add-tier staging）が、表示される" || fail "X3-9: 直し方（--add-tier staging）が、表示される"
+    _plain | grep -q "sf-project.sh --add-tier staging" && pass "X3-9: 直し方（--add-tier staging）が、表示される" || fail "X3-9: 直し方（--add-tier staging）が、表示される"
     printf '%s\n' "$orig" > "$bt"
 
     # リポジトリそのものが、GitHub から消えている
@@ -84,7 +84,7 @@ test_X3_8() {
     echo -e "\n${CLR_HEAD}--- X3-8: admin ブランチが origin から消え、状態ファイルが残った ---${CLR_RST}"
     _fresh || return 1; IT_TIMEOUT=900
     _init "$FULL_INPUT"
-    assert_exit_ok "$IT_RC" "X3-8: 準備: sf-init が、最後まで成功する"
+    assert_exit_ok "$IT_RC" "X3-8: 準備: sf-project が、最後まで成功する"
     IT_TIMEOUT=300
     # origin の admin ブランチを消し、「完了の直前で止まった」状態（進捗 10・状態ファイルあり）を、作る
     _it_git --git-dir="$IT_ORIGIN" branch -D admin >/dev/null
@@ -103,7 +103,7 @@ test_X1_4() {
     _fresh || return 1; IT_TIMEOUT=900
     it_fault sf "org login web*" 1 1 1 "Error: Authentication failed (access_denied)"
     _init "$FULL_INPUT"
-    assert_exit_fail "$IT_RC" "X1-4: Salesforce へのログインが失敗すると、sf-init は、失敗で終わる"
+    assert_exit_fail "$IT_RC" "X1-4: Salesforce へのログインが失敗すると、sf-project は、失敗で終わる"
     [[ -f "$IT_STATE/secrets/SF_CONSUMER_KEY_PROD" ]] && fail "X1-4: 接続できなかった組織の Secret は、登録されない" || pass "X1-4: 接続できなかった組織の Secret は、登録されない"
     assert_equals "$(_progress)" "9" "X1-4: 進捗は、Phase 10 の前（Phase 9）まで"
     it_fault_clear
@@ -118,7 +118,7 @@ test_X9_1() {
     _fresh || return 1; IT_TIMEOUT=900
     it_fault sf "org login jwt*" 1 99 1 "ERROR: invalid_grant: user hasn't approved this consumer"
     _initx "${FULL_INPUT}N\n" SF_INIT_JWT_RETRIES=4 SF_INIT_JWT_INTERVAL=0
-    assert_exit_fail "$IT_RC" "X9-1: 接続テストが、リトライしても失敗し、スキップを断ると（N）、sf-init は、失敗で終わる"
+    assert_exit_fail "$IT_RC" "X9-1: 接続テストが、リトライしても失敗し、スキップを断ると（N）、sf-project は、失敗で終わる"
     assert_equals "$(it_calls sf | grep -c 'org login jwt')" "4" "X9-1: リトライは、上限（4 回）で止まる（無限に繰り返さない）"
     [[ -f "$IT_STATE/secrets/SF_CONSUMER_KEY_PROD" ]] && fail "X9-1: 接続テストをスキップしなかったときは、Secret を登録しない" || pass "X9-1: 接続テストをスキップしなかったときは、Secret を登録しない"
     # 続きから: 接続テストをスキップする（Y）と、Secret の登録まで進む
@@ -143,10 +143,10 @@ test_X4_1b() {
         (
             cd "$1" || exit 99
             export HOME="$IT_HOME" PATH="$IT_BIN:$PATH" IT_STATE IT_ORIGIN SF_LAUNCHER_ACTIVE=1 SF_TOOLS_SF_CHECK_STAMP=/dev/null
-            export SF_TOOLS_SKIP_JAVA_CHECK=1   # 実機の Java で、sf-init の Phase 1 が止まらないように（Java の確認は、test_common.sh が検査する）
+            export SF_TOOLS_SKIP_JAVA_CHECK=1   # 実機の Java で、sf-project の Phase 1 が止まらないように（Java の確認は、test_common.sh が検査する）
             export GIT_TERMINAL_PROMPT=0 GIT_CONFIG_NOSYSTEM=1 GIT_SSH_COMMAND="$IT_BIN/ssh" TMPDIR="$IT_ROOT/tmp"
             unset GITHUB_ACTIONS CI GH_TOKEN GITHUB_TOKEN; mkdir -p "$TMPDIR"
-            bash "$IT_HOME/sf-tools/bin/sf-init.sh" --owner "$IT_OWNER" --project "$IT_PROJECT" < "$2" > "$3" 2>&1; echo $? > "$4"
+            bash "$IT_HOME/sf-tools/bin/sf-project.sh" --owner "$IT_OWNER" --project "$IT_PROJECT" < "$2" > "$3" 2>&1; echo $? > "$4"
         ) &
     }
     _run_bg "$p1" "$IT_ROOT/r1.in" "$IT_ROOT/r1.out" "$IT_ROOT/r1.rc"

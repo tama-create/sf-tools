@@ -37,13 +37,13 @@ ALLOW_PATHS=" $(_fact_allow path) "
 ALLOW_ENVS=" $(_fact_allow env) "
 
 # コマンドごとの、冒頭コメントのオプション: 「コマンド オプション」の組（1 行に 1 組）
-#   sf-init.sh は、--verify の追加の引数（phases/init/verify.sh の冒頭コメントのオプション）も受け付ける
+#   sf-project.sh は、--verify の追加の引数（phases/init/verify.sh の冒頭コメントのオプション）も受け付ける
 build_pairs() {
     local f cmd
     : > "$FACT_TMP/pairs.txt"
     for f in "$SF_TOOLS_DIR"/bin/sf-*.sh; do
         cmd=$(basename "$f")
-        { _fact_header "$f"; [[ "$cmd" == "sf-init.sh" ]] && _fact_header "$SF_TOOLS_DIR/phases/init/verify.sh"; } \
+        { _fact_header "$f"; [[ "$cmd" == "sf-project.sh" ]] && _fact_header "$SF_TOOLS_DIR/phases/init/verify.sh"; } \
             | grep -oE '(^|[^-a-zA-Z0-9])--[a-z][a-z0-9-]+' | grep -oE '\-\-[a-z][a-z0-9-]+' | sort -u | sed "s/^/${cmd} /" >> "$FACT_TMP/pairs.txt"
     done
     # 全体で知られているオプション（phases/init/*.sh の冒頭コメントも含む）
@@ -185,7 +185,7 @@ test_facts_selftest() {
 EOF
     cat > "$d/good.html" <<'EOF'
 <p><code>sf-release.sh --release</code> と <code>bin/sf-check.sh</code>、<code>SF_TARGET_ORG</code></p>
-<pre><code>sf-init.sh --verify --components   # 説明
+<pre><code>sf-project.sh --verify --components   # 説明
 </code></pre>
 EOF
     cat > "$d/bad.md" <<'EOF'

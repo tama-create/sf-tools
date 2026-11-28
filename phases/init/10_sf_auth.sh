@@ -5,7 +5,7 @@
 # JWT（OAuth 2.0 JWT Bearer Flow）方式で、Salesforce 組織への認証情報を GitHub の Secrets / Variables に登録する。
 #
 # 【使い方】
-#   sf-init.sh が、管理者用の作業フォルダ（admin）をカレントにして、bash で呼び出す。
+#   sf-project.sh が、管理者用の作業フォルダ（admin）をカレントにして、bash で呼び出す。
 #
 # 【処理の流れ】
 #   1.   JWT 用の秘密鍵・証明書（~/.sf-jwt/<REPO_NAME>/server.key・server.crt）を用意する
@@ -20,7 +20,7 @@
 #   4.   段階ごとに登録する: メイン組織（PROD）は常に、ステージング組織（STG）は BRANCH_COUNT が 2 以上、
 #        開発組織（DEV）は 3 以上のとき
 #          - 次の 3 つを満たす段階は、スキップする（前回完了済み）
-#              ・SF_INIT_TIER_RESUME=1（sf-init.sh が、--only 以外のときに export する）
+#              ・SF_INIT_TIER_RESUME=1（sf-project.sh が、--only 以外のときに export する）
 #              ・進捗ファイル（SF_INIT_PROGRESS_FILE）に SF_INIT_DONE_TIER_<接尾辞>=1 がある
 #              ・gh secret list に SF_CONSUMER_KEY_<接尾辞> がある（一覧を取得できなければ、スキップしない）
 #          - register_jwt_secret_eca（init-common.sh。ブラウザでログインし、外部クライアントアプリを deploy で作成して、
@@ -31,19 +31,19 @@
 # 【前提条件】
 #   - Phase 2 が書き出した状態ファイル（REPO_FULL_NAME・REPO_NAME。空なら die）。BRANCH_COUNT（Phase 5）が
 #     ないときは 1 として扱う
-#   - 環境変数 SF_TOOLS_DIR（sf-tools のルート。sf-init.sh が export する）
+#   - 環境変数 SF_TOOLS_DIR（sf-tools のルート。sf-project.sh が export する）
 #   - openssl・sf（npm 版）・gh
 #
 # 【補足】
 #   - アプリは、外部クライアントアプリケーション（distributionState=Local。組織ごとに作る）だけを使う。
-#     従来の接続アプリケーション（sf-init.sh --legacy-connected-app）は、Salesforce のサポート終了（Summer '27）を前に、廃止した
-#   - 以前の sf-init が状態ファイルに書いた APP_TYPE は、読まない（値が残っていても、無視する）
+#     従来の接続アプリケーション（sf-project.sh --legacy-connected-app）は、Salesforce のサポート終了（Summer '27）を前に、廃止した
+#   - 以前の sf-project が状態ファイルに書いた APP_TYPE は、読まない（値が残っていても、無視する）
 #   - ブラウザでのログイン（sf org login web）は、約 2 分で時間切れになる（失敗・時間切れ・ブラウザを閉じたときは、
 #     終了コードが 0 以外になり die。画面にも、その旨の警告を出す）
 #   - 登録する Secrets: SF_PRIVATE_KEY（全段階で共通）/ SF_CONSUMER_KEY_PROD・_STG・_DEV
 #   - 登録する Variables: SF_USERNAME_PROD・_STG・_DEV / SF_INSTANCE_URL_PROD・_STG・_DEV /
 #     SF_ORG_ID_*・SF_ORG_NAME_*・SF_ORG_KIND_*・SF_ORG_CHECKED_*（組織の ID・名前・種類・確認日時。
-#     sf-init.sh --status の表示用。組織の情報を読み取れたときだけ登録する）
+#     sf-project.sh --status の表示用。組織の情報を読み取れたときだけ登録する）
 #   - ログイン先は、組織の種類ではなく URL で選ぶ（3 択: login.salesforce.com / test.salesforce.com / 組織の URL。
 #     Enter は test.salesforce.com）。環境変数 SF_INIT_LOGIN_URL_<接尾辞>（login / test / URL）があれば、質問しない
 #   - 段階と組織の種類は結びつけない。ただし、Salesforce の本番組織は main にしかつなげない（org_guard）。
@@ -57,17 +57,17 @@
 #   - 手順 1 で N を選んで鍵を作り直したときは、手順 4 の「前回完了済み」のスキップをしない（SF_INIT_TIER_RESUME=0 にする）。
 #     完了済みの段階も、設定しなおす（Secret SF_PRIVATE_KEY は新しい秘密鍵に置き換わるため、組織のアプリに以前の証明書が
 #     残ると、JWT 接続ができなくなる）
-#   - 進捗ファイルは、sf-init.sh が Phase の成功ごとに上書きする（Phase 10 が成功すると、段階の記録は消える）
+#   - 進捗ファイルは、sf-project.sh が Phase の成功ごとに上書きする（Phase 10 が成功すると、段階の記録は消える）
 #   - 証明書（server.crt）は、外部クライアントアプリの deploy で、組織に登録する
 #   - 終了コード: 0 = OK / 1 = die
 # ==============================================================================
 
-# SF_TOOLS_DIR は sf-init.sh（司令塔）から export される
+# SF_TOOLS_DIR は sf-project.sh（司令塔）から export される
 PHASE_DIR="${BASH_SOURCE[0]%/*}"
 [[ "$PHASE_DIR/" == /* && "$PHASE_DIR/" != *//* && "$PHASE_DIR/" != */./* && "$PHASE_DIR/" != */../* ]] || PHASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SF_TOOLS_DIR="${SF_TOOLS_DIR:-$(dirname "$(dirname "$PHASE_DIR")")}"
 
-readonly SCRIPT_NAME="sf-init"
+readonly SCRIPT_NAME="sf-project"
 mkdir -p "$HOME/sf-tools/logs" 2>/dev/null || true  # run 不使用: common.sh の読み込み前（run が未定義）
 readonly LOG_FILE="$HOME/sf-tools/logs/${SCRIPT_NAME}.log"
 readonly LOG_MODE="APPEND"  # 司令塔が NEW で初期化済みのため追記
@@ -124,11 +124,11 @@ fi
 # Step 2: 外部クライアントアプリの案内
 # --------------------------------------------------------------------------
 # アプリは、外部クライアントアプリケーションだけ（従来の接続アプリケーションは、廃止した）。
-#   以前の sf-init が状態ファイル（.sf-init.env）に書いた APP_TYPE は、読まない（値が残っていても、無視する）
+#   以前の sf-project が状態ファイル（.sf-init.env）に書いた APP_TYPE は、読まない（値が残っていても、無視する）
 # 外部クライアントアプリは、組織ごとに自動で作成する（Step 4: register_jwt_secret_eca）
 log "HEADER" "外部クライアントアプリケーションは自動で作成します。"
 log "INFO" "  各組織で、ブラウザでのログインが必要です（接続ユーザー＝管理者権限のユーザー）。"
-log "INFO" "  アプリの作成・証明書の登録・ポリシーとプロファイルの設定・コンシューマー鍵の取得は、sf-init が自動で行います。"
+log "INFO" "  アプリの作成・証明書の登録・ポリシーとプロファイルの設定・コンシューマー鍵の取得は、sf-project が自動で行います。"
 
 # --------------------------------------------------------------------------
 # Step 3: SF_PRIVATE_KEY を GitHub Secrets に登録
@@ -150,8 +150,8 @@ log "HEADER" "各組織の JWT 認証情報を設定します。"
 #   段階ごとの再開: 完了した段階は、進捗ファイル（SF_INIT_PROGRESS_FILE。admin/.sf-init-XXXX.progress）に
 #   SF_INIT_DONE_TIER_<接尾辞>=1 を記録する（SF_INIT_TIER_RESUME=1 のときだけ）。
 #   再実行では、記録があり、登録した Secret（SF_CONSUMER_KEY_<接尾辞>）が、いまもあるときだけ、その段階をスキップする
-#   （ブラウザのログインを、やり直さなくてよいように）。付け替えるときは、sf-init.sh --reconnect <段階>。
-#   進捗ファイルは、Phase 10 が成功したとき、sf-init.sh が書き直す（段階の記録は、消える）。--only 10 では、使わない
+#   （ブラウザのログインを、やり直さなくてよいように）。付け替えるときは、sf-project.sh --reconnect <段階>。
+#   進捗ファイルは、Phase 10 が成功したとき、sf-project.sh が書き直す（段階の記録は、消える）。--only 10 では、使わない
 _tier_done() {
     [[ "${SF_INIT_TIER_RESUME:-}" == "1" && -f "${SF_INIT_PROGRESS_FILE:-}" ]] || return 1
     grep -qx "SF_INIT_DONE_TIER_${1}=1" "$SF_INIT_PROGRESS_FILE" 2>/dev/null || return 1  # 条件チェックのため run 不使用
@@ -166,7 +166,7 @@ _tier_done() {
 _register_org() {
     local alias="$1" suffix="$2" label="$3"
     if _tier_done "$suffix"; then
-        log "INFO" "  ${label}（${suffix}）は、前回、設定が完了しているため、スキップします（付け替えるときは、sf-init.sh --reconnect <段階>）。"
+        log "INFO" "  ${label}（${suffix}）は、前回、設定が完了しているため、スキップします（付け替えるときは、sf-project.sh --reconnect <段階>）。"
         return 0
     fi
     register_jwt_secret_eca "$alias" "$suffix" "$label" "${JWT_DIR}/server.key" "${JWT_DIR}/server.crt" || return 1

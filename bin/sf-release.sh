@@ -84,7 +84,7 @@
 #   - 存在しない削除対象を許す指示（# @ignore-missing）: remove-target.txt に、`# @ignore-missing` で始まる
 #     コメント行（行頭・# の後の空白は可）があるときだけ、sf project deploy start に --ignore-warnings を付ける。
 #     削除対象が組織に存在しなくても、エラーにしない（「No ApexClass named: X found」を、警告として扱う）。
-#     後始末（sf-init.sh --verify --cleanup）のように、どこまで消えているか分からない削除を、何度でも実行できる
+#     後始末（sf-project.sh --verify --cleanup）のように、どこまで消えているか分からない削除を、何度でも実行できる
 #     ようにするための指示。--ignore-warnings はデプロイ全体に付くため、削除以外の警告も、エラーにならない。
 #     指示があるときは、上の「組織にない削除の対象」の確認をせず、Salesforce に任せる（従来どおり）。指示がなければ、
 #     組織にない対象は、上の確認で外れる（確かめられなかったものは、Salesforce のエラーになる）。通常のリリース・削除には、

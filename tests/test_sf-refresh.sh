@@ -1,9 +1,9 @@
 #!/bin/bash
 # ==============================================================================
-# test_sf-install.sh - sf-install.sh のテスト
+# test_sf-refresh.sh - sf-refresh.sh のテスト
 # ==============================================================================
 source "$(dirname "${BASH_SOURCE[0]}")/test_helper.sh"
-echo -e "${CLR_HEAD}=== sf-install.sh ===${CLR_RST}"
+echo -e "${CLR_HEAD}=== sf-refresh.sh ===${CLR_RST}"
 
 # 正常実行 → git pull、マージドライバー登録、npm install が行われる
 test_normal_run() {
@@ -11,7 +11,7 @@ test_normal_run() {
     setup_std_env td mb mh
     create_all_mocks "$mb"
 
-    local out; out=$(cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-install.sh" 2>&1)
+    local out; out=$(cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-refresh.sh" 2>&1)
     local ec=$?
 
     assert_exit_ok $ec "正常実行 → 終了コード 0"
@@ -19,7 +19,7 @@ test_normal_run() {
     teardown "$td" "$mb" "$mh"
 }
 
-# スタンプファイルが新しい（24h以内）→ sf-upgrade.sh がバックグラウンド起動されない
+# スタンプファイルが新しい（24h以内）→ sf-update-cli.sh がバックグラウンド起動されない
 test_upgrade_skipped_within_24h() {
     local td mb mh
     setup_std_env td mb mh
@@ -29,13 +29,13 @@ test_upgrade_skipped_within_24h() {
     touch -t "$(date -d '1 hour ago' +'%Y%m%d%H%M' 2>/dev/null || date -v -1H +'%Y%m%d%H%M' 2>/dev/null || date +'%Y%m%d%H%M')" "$mh/.sf-tools-last-update" 2>/dev/null \
         || touch "$mh/.sf-tools-last-update"
 
-    local out; out=$(cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-install.sh" 2>&1)
+    local out; out=$(cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-refresh.sh" 2>&1)
 
     assert_output_contains "$out" "スキップ" "24h 以内のためスキップメッセージが表示された"
     teardown "$td" "$mb" "$mh"
 }
 
-# スタンプファイルなし（初回）→ sf-upgrade.sh がバックグラウンド起動される
+# スタンプファイルなし（初回）→ sf-update-cli.sh がバックグラウンド起動される
 test_upgrade_triggered_on_first_run() {
     local td mb mh
     setup_std_env td mb mh
@@ -44,7 +44,7 @@ test_upgrade_triggered_on_first_run() {
     # スタンプファイルなし（初回実行を再現）
     rm -f "$mh/.sf-tools-last-update"
 
-    cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-install.sh" 2>&1 >/dev/null
+    cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-refresh.sh" 2>&1 >/dev/null
     sleep 1  # バックグラウンド起動を少し待つ
 
     assert_file_exists "$mh/.sf-tools-last-update" "スタンプファイルが作成された"
@@ -58,7 +58,7 @@ test_npm_install_skipped_no_package_json() {
     create_all_mocks "$mb"
     rm -f "$mh/.sf-tools-last-update"  # アップグレードも動かすが npm install のみ確認
 
-    local out; out=$(cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-install.sh" 2>&1)
+    local out; out=$(cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-refresh.sh" 2>&1)
 
     assert_output_contains "$out" "package.json が見つかりません" "package.json なし → npm install スキップメッセージ"
     teardown "$td" "$mb" "$mh"
@@ -70,7 +70,7 @@ test_outside_force_dir() {
     rd=$(setup_regular_dir); mb=$(setup_mock_bin); export MOCK_CALL_LOG="$mb/calls.log"; mh=$(setup_mock_home)
     create_all_mocks "$mb"
 
-    local out; out=$(cd "$rd" && HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-install.sh" 2>&1)
+    local out; out=$(cd "$rd" && HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-refresh.sh" 2>&1)
     local ec=$?
 
     assert_exit_fail $ec "force-* 外 → エラー終了"
@@ -83,7 +83,7 @@ test_skip_pull_when_sf_init_running() {
     setup_std_env td mb mh
     create_all_mocks "$mb"
 
-    local out; out=$(cd "$td" && SF_INIT_RUNNING=1 HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-install.sh" 2>&1)
+    local out; out=$(cd "$td" && SF_INIT_RUNNING=1 HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-refresh.sh" 2>&1)
 
     assert_output_contains "$out" "git pull をスキップ" "SF_INIT_RUNNING=1 → git pull スキップメッセージが表示された"
 
@@ -100,7 +100,7 @@ test_hook_installed() {
     setup_std_env td mb mh
     create_all_mocks "$mb"
 
-    cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-install.sh" 2>&1 >/dev/null
+    cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-refresh.sh" 2>&1 >/dev/null
 
     assert_file_exists "$td/.git/hooks/pre-push" "sf-hook.sh が呼び出され pre-push フックが生成された"
     teardown "$td" "$mb" "$mh"
@@ -113,7 +113,7 @@ test_release_dir_created() {
     create_all_mocks "$mb"
     export MOCK_GIT_BRANCH="feature/test"
 
-    cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-install.sh" 2>&1 >/dev/null
+    cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-refresh.sh" 2>&1 >/dev/null
 
     assert_file_exists "$td/sf-tools/release/branch_name.txt" "branch_name.txt が作成された"
     assert_dir_exists "$td/sf-tools/release/feature/test" "リリースディレクトリが作成された"
@@ -128,7 +128,7 @@ test_release_dir_skipped_on_main() {
     create_all_mocks "$mb"
     export MOCK_GIT_BRANCH="main"
 
-    cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-install.sh" 2>&1 >/dev/null
+    cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-refresh.sh" 2>&1 >/dev/null
 
     assert_dir_exists     "$td/sf-tools/release"           "sf-tools/release/ ベースディレクトリが作成された"
     assert_file_not_exists "$td/sf-tools/release/.gitkeep" ".gitkeep は作らない（2026-11-27 に、作るのをやめた）"
@@ -137,23 +137,23 @@ test_release_dir_skipped_on_main() {
     teardown "$td" "$mb" "$mh"
 }
 
-# sf-upgrade.sh が呼び出された（初回実行時）
+# sf-update-cli.sh が呼び出された（初回実行時）
 test_upgrade_called_on_first_run() {
     local td mb mh
     setup_std_env td mb mh
     create_all_mocks "$mb"
     rm -f "$mh/.sf-tools-last-update"
 
-    cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-install.sh" 2>&1 >/dev/null
+    cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-refresh.sh" 2>&1 >/dev/null
     sleep 2
 
     grep -q "sf update" "$MOCK_CALL_LOG" \
-        && pass "sf-upgrade.sh が呼び出された" \
-        || fail "sf-upgrade.sh が呼び出された"
+        && pass "sf-update-cli.sh が呼び出された" \
+        || fail "sf-update-cli.sh が呼び出された"
     teardown "$td" "$mb" "$mh"
 }
 
-# sf-upgrade.sh が呼び出されない（24h以内）
+# sf-update-cli.sh が呼び出されない（24h以内）
 test_upgrade_not_called_within_24h() {
     local td mb mh
     setup_std_env td mb mh
@@ -161,16 +161,16 @@ test_upgrade_not_called_within_24h() {
     touch -t "$(date -d '1 hour ago' +'%Y%m%d%H%M' 2>/dev/null || date -v -1H +'%Y%m%d%H%M' 2>/dev/null || date +'%Y%m%d%H%M')" "$mh/.sf-tools-last-update" 2>/dev/null \
         || touch "$mh/.sf-tools-last-update"
 
-    cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-install.sh" 2>&1 >/dev/null
+    cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-refresh.sh" 2>&1 >/dev/null
     sleep 1
 
     grep -q "sf update" "$MOCK_CALL_LOG" \
-        && fail "sf-upgrade.sh が呼び出されていない（24h以内）" \
-        || pass "sf-upgrade.sh が呼び出されていない（24h以内）"
+        && fail "sf-update-cli.sh が呼び出されていない（24h以内）" \
+        || pass "sf-update-cli.sh が呼び出されていない（24h以内）"
     teardown "$td" "$mb" "$mh"
 }
 
-# 前回の sf-upgrade.sh が途中で切れていた（ロックが残り、その PID が動いていない）→ 24 時間以内でも、もう一度動かす
+# 前回の sf-update-cli.sh が途中で切れていた（ロックが残り、その PID が動いていない）→ 24 時間以内でも、もう一度動かす
 test_upgrade_rerun_when_interrupted() {
     echo ""; echo -e "${CLR_HEAD}[TEST] 途中で切れた更新を「済み」にしない${CLR_RST}"
     local td mb mh out
@@ -180,25 +180,25 @@ test_upgrade_rerun_when_interrupted() {
     # 動いていない PID のロック（sleep を起動して終わらせ、その PID を使う）
     local dead; sleep 0 & dead=$!; wait "$dead" 2>/dev/null
     printf 'PID=%s\n' "$dead" > "$mh/.sf-tools-upgrade.lock"
-    out=$(cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-install.sh" 2>&1 >/dev/null)
+    out=$(cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-refresh.sh" 2>&1 >/dev/null)
     sleep 1
     assert_output_contains "$out" "途中で切れていました" "ロックが残り、PID が動いていない → 途中で切れたと表示する"
-    assert_file_contains "$td/sf-tools/logs/sf-install.log" "開発ツールのアップデートをバックグラウンドで開始します" "24 時間以内でも、もう一度動かす"
+    assert_file_contains "$td/sf-tools/logs/sf-refresh.log" "開発ツールのアップデートをバックグラウンドで開始します" "24 時間以内でも、もう一度動かす"
 
-    # ロックの PID が動いている（ほかの sf-upgrade.sh が更新中）→ 途中で切れたとは見ない（24 時間以内なら、飛ばす）
+    # ロックの PID が動いている（ほかの sf-update-cli.sh が更新中）→ 途中で切れたとは見ない（24 時間以内なら、飛ばす）
     sleep 30 & local alive=$!
     printf 'PID=%s\n' "$alive" > "$mh/.sf-tools-upgrade.lock"
     touch "$mh/.sf-tools-last-update"
-    out=$(cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-install.sh" 2>&1 >/dev/null)
+    out=$(cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-refresh.sh" 2>&1 >/dev/null)
     kill "$alive" 2>/dev/null; wait "$alive" 2>/dev/null
     assert_output_not_contains "$out" "途中で切れていました" "ロックの PID が動いている → 途中で切れたと見ない"
-    assert_file_contains "$td/sf-tools/logs/sf-install.log" "アップデート済みのためスキップします" "ロックの PID が動いている → 24 時間以内なら飛ばす"
+    assert_file_contains "$td/sf-tools/logs/sf-refresh.log" "アップデート済みのためスキップします" "ロックの PID が動いている → 24 時間以内なら飛ばす"
 
     # PID が生きていても、ロックが 2 時間以上前 → 途中で切れたとみる（PID の使い回し）
     printf 'PID=%s\n' "$$" > "$mh/.sf-tools-upgrade.lock"
     touch -t "$(date -d '3 hours ago' +'%Y%m%d%H%M' 2>/dev/null || date -v -3H +'%Y%m%d%H%M')" "$mh/.sf-tools-upgrade.lock"
     touch "$mh/.sf-tools-last-update"
-    out=$(cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-install.sh" 2>&1 >/dev/null)
+    out=$(cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-refresh.sh" 2>&1 >/dev/null)
     sleep 1
     assert_output_contains "$out" "途中で切れていました" "ロックが 2 時間以上前 → PID が生きていても、途中で切れたとみる"
     teardown "$td" "$mb" "$mh"
@@ -211,7 +211,7 @@ test_deploy_remove_target_created() {
     create_all_mocks "$mb"
     export MOCK_GIT_BRANCH="feature/test"
 
-    cd "$td" && SF_INIT_RUNNING=1 HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-install.sh" 2>&1 >/dev/null
+    cd "$td" && SF_INIT_RUNNING=1 HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-refresh.sh" 2>&1 >/dev/null
 
     assert_file_exists "$td/sf-tools/release/feature/test/deploy-target.txt" "deploy-target.txt が作成された"
     assert_file_exists "$td/sf-tools/release/feature/test/remove-target.txt" "remove-target.txt が作成された"
@@ -230,15 +230,15 @@ test_deploy_remove_target_created() {
     # すでにある README.md・ターゲットファイルは、上書きしない（書いた内容を消さない）
     printf '自分で書いた内容\n' > "$td/sf-tools/release/feature/test/README.md"
     printf '[files]\nforce-app/main/default/classes/A.cls\n' > "$td/sf-tools/release/feature/test/deploy-target.txt"
-    cd "$td" && SF_INIT_RUNNING=1 HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-install.sh" 2>&1 >/dev/null
+    cd "$td" && SF_INIT_RUNNING=1 HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-refresh.sh" 2>&1 >/dev/null
     assert_equals "$(cat "$td/sf-tools/release/feature/test/README.md")" "自分で書いた内容" "すでにある README.md は、上書きしない"
     assert_file_contains "$td/sf-tools/release/feature/test/deploy-target.txt" "classes/A.cls" "すでにある deploy-target.txt は、上書きしない"
     unset MOCK_GIT_BRANCH
     teardown "$td" "$mb" "$mh"
 }
 
-# 決まり: templates/ には、force-* にそのまま置くものだけを入れる（sf-init の Phase 3 が、除外なしで丸ごとコピーするため）。
-#   sf-install.sh が名前や場所を変えて使うコピー元は、config/install/ に置く。
+# 決まり: templates/ には、force-* にそのまま置くものだけを入れる（sf-project の Phase 3 が、除外なしで丸ごとコピーするため）。
+#   sf-refresh.sh が名前や場所を変えて使うコピー元は、config/install/ に置く。
 #   以前は templates/sf-tools/release/__BRANCH__/ と templates/gitmessage に置いていて、force-* に不要な写しが残っていた
 test_templates_only_force_files() {
     echo ""
@@ -265,13 +265,13 @@ test_templates_only_force_files() {
     local keeps
     keeps=$(cd "$SF_TOOLS_DIR/templates" && find . -name .gitkeep | sort | tr '\n' ' ')  # VAR=$(cmd) のため run 不使用
     assert_equals "$keeps" "./force-app/main/default/.gitkeep " "templates/ の .gitkeep は force-app/main/default/.gitkeep の 1 個だけ"
-    # sf-install.sh が templates/ から読むのは、同じ名前・同じ場所に置く sf-tools/config/ だけ
+    # sf-refresh.sh が templates/ から読むのは、同じ名前・同じ場所に置く sf-tools/config/ だけ
     local refs
-    refs=$(grep -v '^[[:space:]]*#' "$SF_TOOLS_DIR/bin/sf-install.sh" | grep -o 'sf-tools/templates/[^"]*' | grep -v '^sf-tools/templates/sf-tools/config/' | head -3)  # VAR=$(cmd) のため run 不使用
+    refs=$(grep -v '^[[:space:]]*#' "$SF_TOOLS_DIR/bin/sf-refresh.sh" | grep -o 'sf-tools/templates/[^"]*' | grep -v '^sf-tools/templates/sf-tools/config/' | head -3)  # VAR=$(cmd) のため run 不使用
     if [[ -n "$refs" ]]; then
-        fail "sf-install.sh は templates/ をコピー元にしない（sf-tools/config/ を除く）" "$refs"
+        fail "sf-refresh.sh は templates/ をコピー元にしない（sf-tools/config/ を除く）" "$refs"
     else
-        pass "sf-install.sh は templates/ をコピー元にしない（sf-tools/config/ を除く）"
+        pass "sf-refresh.sh は templates/ をコピー元にしない（sf-tools/config/ を除く）"
     fi
 }
 
@@ -281,7 +281,7 @@ test_gitmessage_created() {
     setup_std_env td mb mh
     create_all_mocks "$mb"
 
-    cd "$td" && SF_INIT_RUNNING=1 HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-install.sh" 2>&1 >/dev/null
+    cd "$td" && SF_INIT_RUNNING=1 HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-refresh.sh" 2>&1 >/dev/null
 
     assert_file_exists "$td/.gitmessage" ".gitmessage が作成された"
     if cmp -s "$td/.gitmessage" "$SF_TOOLS_DIR/config/install/gitmessage"; then
@@ -301,7 +301,7 @@ test_release_dir_init_fail() {
     export MOCK_GIT_BRANCH="feature/test"
     rm -f "$mh/sf-tools/config/install/release/deploy-target.txt"
 
-    local out; out=$(cd "$td" && SF_INIT_RUNNING=1 HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-install.sh" 2>&1)
+    local out; out=$(cd "$td" && SF_INIT_RUNNING=1 HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-refresh.sh" 2>&1)
 
     assert_output_contains "$out" "リリース管理ディレクトリの準備に失敗" "release 初期化失敗 → WARNING が出力された"
     assert_output_not_contains "$out" "リリース管理ディレクトリの準備が完了" "release 初期化失敗 → SUCCESS ログが出ていない"
@@ -315,7 +315,7 @@ test_sf_cli_warning_only() {
     setup_std_env td mb mh
     create_all_mocks "$mb"
 
-    local out; out=$(cd "$td" && HOME="$mh" PATH="$mb:$PATH" MOCK_SF_VERSION_EXIT=1 bash "$SF_TOOLS_DIR/bin/sf-install.sh" 2>&1)
+    local out; out=$(cd "$td" && HOME="$mh" PATH="$mb:$PATH" MOCK_SF_VERSION_EXIT=1 bash "$SF_TOOLS_DIR/bin/sf-refresh.sh" 2>&1)
     local ec=$?
 
     assert_exit_ok $ec "sf の終了コード 1 → 警告のみで、終了コード 0（中断しない）"
@@ -331,7 +331,7 @@ test_java_old_warning_only() {
     setup_std_env td mb mh
     create_all_mocks "$mb"
 
-    local out; out=$(cd "$td" && HOME="$mh" PATH="$mb:$PATH" MOCK_JAVA_VERSION=11.0.17 bash "$SF_TOOLS_DIR/bin/sf-install.sh" 2>&1)
+    local out; out=$(cd "$td" && HOME="$mh" PATH="$mb:$PATH" MOCK_JAVA_VERSION=11.0.17 bash "$SF_TOOLS_DIR/bin/sf-refresh.sh" 2>&1)
     local ec=$?
 
     assert_exit_ok $ec "Java 11 → 警告のみで、終了コード 0（中断しない）"
@@ -352,7 +352,7 @@ test_java_missing_warning_only() {
     if PATH="$mb:/usr/bin:/bin" command -v java >/dev/null 2>&1; then  # 条件チェックのため run 不使用
         skip "この環境の /usr/bin か /bin に java があるため、「java が無い」状態を作れない（check_java_cli のテストで検査済み）"
     else
-        local out; out=$(cd "$td" && HOME="$mh" PATH="$mb:/usr/bin:/bin" bash "$SF_TOOLS_DIR/bin/sf-install.sh" 2>&1)
+        local out; out=$(cd "$td" && HOME="$mh" PATH="$mb:/usr/bin:/bin" bash "$SF_TOOLS_DIR/bin/sf-refresh.sh" 2>&1)
         local ec=$?
         assert_exit_ok $ec "Java なし → 警告のみで、終了コード 0（中断しない）"
         assert_output_contains "$out" "Java が見つかりません" "Java なし → 警告が表示された"
@@ -366,28 +366,28 @@ test_java_ok_no_warning() {
     setup_std_env td mb mh
     create_all_mocks "$mb"
 
-    local out; out=$(cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-install.sh" 2>&1)
+    local out; out=$(cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-refresh.sh" 2>&1)
     assert_output_not_contains "$out" "Apex 拡張" "Java 17 → Java の警告は出ない"
 
-    out=$(cd "$td" && HOME="$mh" PATH="$mb:$PATH" MOCK_JAVA_VERSION=11.0.17 SF_TOOLS_SKIP_JAVA_CHECK=1 bash "$SF_TOOLS_DIR/bin/sf-install.sh" 2>&1)
+    out=$(cd "$td" && HOME="$mh" PATH="$mb:$PATH" MOCK_JAVA_VERSION=11.0.17 SF_TOOLS_SKIP_JAVA_CHECK=1 bash "$SF_TOOLS_DIR/bin/sf-refresh.sh" 2>&1)
     assert_output_not_contains "$out" "Apex 拡張" "SF_TOOLS_SKIP_JAVA_CHECK=1 → Java 11 でも警告は出ない"
     teardown "$td" "$mb" "$mh"
 }
 
 
-# sf-init.sh から呼ばれた場合（SF_INIT_RUNNING=1）は、package.json があっても npm install をスキップする
-#   （sf-init が、このクローンで行うのは、ファイルの準備とプッシュだけで、node_modules を使わないため。約 90 秒の短縮）
+# sf-project.sh から呼ばれた場合（SF_INIT_RUNNING=1）は、package.json があっても npm install をスキップする
+#   （sf-project が、このクローンで行うのは、ファイルの準備とプッシュだけで、node_modules を使わないため。約 90 秒の短縮）
 test_npm_install_skipped_when_sf_init_running() {
     local td mb mh
     setup_std_env td mb mh
     create_all_mocks "$mb"
     echo '{"name":"x","version":"1.0.0"}' > "$td/package.json"
 
-    local out; out=$(cd "$td" && SF_INIT_RUNNING=1 HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-install.sh" 2>&1)
+    local out; out=$(cd "$td" && SF_INIT_RUNNING=1 HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-refresh.sh" 2>&1)
 
-    assert_output_contains "$out" "npm install をスキップします（sf-init は、ファイルの準備とプッシュだけを行うため）" "sf-init 中 → npm install のスキップメッセージが表示された"
-    # 背景で動く sf-upgrade.sh の npm install -g（別のコマンド）と区別するため、引数なしの行だけを見る
-    if grep -qx "npm install" "$MOCK_CALL_LOG"; then fail "sf-init 中 → npm install が呼び出されていない" "引数なしの npm install が呼ばれた"; else pass "sf-init 中 → npm install が呼び出されていない"; fi
+    assert_output_contains "$out" "npm install をスキップします（sf-project は、ファイルの準備とプッシュだけを行うため）" "sf-project 中 → npm install のスキップメッセージが表示された"
+    # 背景で動く sf-update-cli.sh の npm install -g（別のコマンド）と区別するため、引数なしの行だけを見る
+    if grep -qx "npm install" "$MOCK_CALL_LOG"; then fail "sf-project 中 → npm install が呼び出されていない" "引数なしの npm install が呼ばれた"; else pass "sf-project 中 → npm install が呼び出されていない"; fi
     teardown "$td" "$mb" "$mh"
 }
 
@@ -399,7 +399,7 @@ test_npm_install_runs_normally() {
     echo '{"name":"x","version":"1.0.0"}' > "$td/package.json"
     rm -f "$td/node_modules/.package-lock.json"
 
-    local out; out=$(cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-install.sh" 2>&1)
+    local out; out=$(cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-refresh.sh" 2>&1)
 
     assert_file_contains "$MOCK_CALL_LOG" "npm install" "通常起動 → npm install が呼び出される"
     teardown "$td" "$mb" "$mh"
@@ -427,7 +427,7 @@ test_release_dir_detached_head() {
     create_all_mocks "$mb"
     _fail_git_matching "$mb" "symbolic-ref*" 128 "fatal: ref HEAD is not a symbolic ref"
 
-    out=$(cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-install.sh" 2>&1); ec=$?
+    out=$(cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-refresh.sh" 2>&1); ec=$?
     assert_exit_ok "$ec" "detached HEAD → 終了コード 0（WARNING のみ）"
     assert_output_contains "$out" "現在のブランチ名を取得できませんでした" "detached HEAD → WARNING が表示される"
     assert_file_not_exists "$td/sf-tools/release/branch_name.txt" "detached HEAD → branch_name.txt を作らない"
@@ -446,7 +446,7 @@ test_gitmessage_template_missing() {
     create_all_mocks "$mb"
     rm -f "$mh/sf-tools/config/install/gitmessage"
 
-    out=$(cd "$td" && SF_INIT_RUNNING=1 HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-install.sh" 2>&1)
+    out=$(cd "$td" && SF_INIT_RUNNING=1 HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-refresh.sh" 2>&1)
     assert_output_contains "$out" "gitmessage テンプレートが見つかりません" "テンプレートなし → 理由が表示される"
     assert_output_contains "$out" "コミットメッセージテンプレートの設置に失敗しました" "テンプレートなし → 失敗の WARNING が表示される"
     # assert_output_not_contains（grep -v）は、複数行の出力では、ほかの行で成功してしまうため、直接確かめる
@@ -463,7 +463,7 @@ test_gitmessage_config_fail() {
     create_all_mocks "$mb"
     _fail_git_matching "$mb" "config*commit.template*" 1 "error: could not lock config file"
 
-    out=$(cd "$td" && SF_INIT_RUNNING=1 HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-install.sh" 2>&1)
+    out=$(cd "$td" && SF_INIT_RUNNING=1 HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-refresh.sh" 2>&1)
     assert_output_contains "$out" "コミットメッセージテンプレートの設置に失敗しました" "git config の失敗 → 失敗の WARNING が表示される"
     echo "$out" | grep -q "コミットメッセージテンプレートの設置が完了しました" \
         && fail "git config の失敗 → 完了と表示しない" "完了と表示した" \

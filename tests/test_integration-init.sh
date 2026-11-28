@@ -1,14 +1,14 @@
 #!/bin/bash
 # ==============================================================================
-# test_integration-init.sh - 結合テスト L1: sf-init の通し・中断と再開・生成物の後続コマンドでの利用
+# test_integration-init.sh - 結合テスト L1: sf-project の通し・中断と再開・生成物の後続コマンドでの利用
 # ==============================================================================
-# 実際の git と、状態を持つ fake の gh・sf（tests/integration/lib.sh）で、sf-init を最後まで動かす。
+# 実際の git と、状態を持つ fake の gh・sf（tests/integration/lib.sh）で、sf-project を最後まで動かす。
 # 計画: doc/integration-test-plan.md の A13・B1・X2-1・X7-1・X8-1
 #
 # 【シナリオ】
-#   I1  sf-init の通し（1 層）。完了後の状態（リポジトリ・ブランチ・Secret・Variable・Ruleset・完了の印）の基準を取る
-#   A13 sf-init が生成したリポジトリを、後続のコマンド（sf-job → sf-install → sf-hook → sf-dryrun → sf-push）が使える
-#   X8-1 完了済みのプロジェクトで、sf-init を再実行しても、何も変わらない（メニューで q）
+#   I1  sf-project の通し（1 層）。完了後の状態（リポジトリ・ブランチ・Secret・Variable・Ruleset・完了の印）の基準を取る
+#   A13 sf-project が生成したリポジトリを、後続のコマンド（sf-job → sf-refresh → sf-hook → sf-dryrun → sf-push）が使える
+#   X8-1 完了済みのプロジェクトで、sf-project を再実行しても、何も変わらない（メニューで q）
 #   X2-1 中断と再開: 停止点（Phase 3 の clone・Phase 8 の push・Phase 10 の Secret 登録・Phase 7 の SIGTERM・Phase 10 の SIGKILL）で止める
 #        → 「続きから」で完了 → 完了後の状態が、I1 の基準と同じ（重複したコミット・ブランチ・Secret・Ruleset がない）
 #   X3-10 生成物の改変点ごとの拒否の表（A13 のクローンを、1 か所ずつ改変して、止まることを確かめる）
@@ -16,7 +16,7 @@
 # ==============================================================================
 source "$(dirname "${BASH_SOURCE[0]}")/test_helper.sh"
 source "$(dirname "${BASH_SOURCE[0]}")/integration/lib.sh"
-echo -e "${CLR_HEAD}=== 結合テスト L1: sf-init の通し・中断と再開 ===${CLR_RST}"
+echo -e "${CLR_HEAD}=== 結合テスト L1: sf-project の通し・中断と再開 ===${CLR_RST}"
 
 trap 'it_teardown' EXIT
 source "$(dirname "${BASH_SOURCE[0]}")/integration/init-lib.sh"
@@ -26,12 +26,12 @@ source "$(dirname "${BASH_SOURCE[0]}")/integration/init-lib.sh"
 # I1: 通し
 # ------------------------------------------------------------------------------
 test_I1() {
-    echo -e "\n${CLR_HEAD}--- I1・X7-1: sf-init の通し（1 層）---${CLR_RST}"
+    echo -e "\n${CLR_HEAD}--- I1・X7-1: sf-project の通し（1 層）---${CLR_RST}"
     _fresh || { fail "I1: サンドボックスの作成"; return 1; }
     IT_TIMEOUT=900
     _init "$FULL_INPUT"
     [[ $IT_RC -eq 0 ]] || { it_out | tail -20; }
-    assert_exit_ok "$IT_RC" "I1: sf-init が最後まで成功する"
+    assert_exit_ok "$IT_RC" "I1: sf-project が最後まで成功する"
     BASE_STATE=$(_state)
     echo "  基準: ${BASE_STATE}"
     it_remote_snap | grep -q 'refs/heads/main ' && pass "I1: origin に main ができる" || fail "I1: origin に main ができる"
@@ -58,15 +58,15 @@ test_I1() {
 # A13: 生成されたリポジトリを、後続のコマンドが使える
 # ------------------------------------------------------------------------------
 test_A13() {
-    echo -e "\n${CLR_HEAD}--- A13: sf-init の生成物を、後続のコマンドが使う ---${CLR_RST}"
+    echo -e "\n${CLR_HEAD}--- A13: sf-project の生成物を、後続のコマンドが使う ---${CLR_RST}"
     local dev="$IT_WORK/dev" cl="$IT_WORK/dev/JOB-1/$IT_REPO" i
     mkdir -p "$dev"
     IT_TIMEOUT=300
     it_run "$dev" -i 'JOB-1\nY\nitorg\n1\n' bash "$IT_HOME/sf-tools/bin/sf-job.sh" --owner "$IT_OWNER" --project "$IT_PROJECT"
-    assert_exit_ok "$IT_RC" "A13: sf-init が作ったリポジトリから、sf-job が成功する"
+    assert_exit_ok "$IT_RC" "A13: sf-project が作ったリポジトリから、sf-job が成功する"
     assert_dir_exists "$cl/.git" "A13: クローンができる"
-    for i in $(seq 1 300); do grep -q "npm install の確認が完了しました" "$cl/sf-tools/logs/sf-install.log" 2>/dev/null && break; sleep 1; done
-    assert_file_exists "$cl/.git/hooks/pre-push" "A13: sf-install がフックを入れる"
+    for i in $(seq 1 300); do grep -q "npm install の確認が完了しました" "$cl/sf-tools/logs/sf-refresh.log" 2>/dev/null && break; sleep 1; done
+    assert_file_exists "$cl/.git/hooks/pre-push" "A13: sf-refresh がフックを入れる"
     assert_file_exists "$cl/sf-tools/release/JOB-1/deploy-target.txt" "A13: release/JOB-1/ ができる"
     it_add_class "$cl" ItA13
     it_set_deploy_target "$cl" JOB-1 "force-app/main/default/classes/ItA13.cls"
@@ -98,22 +98,22 @@ test_X3_10() {
     _it_git -C "$cl" config remote.origin.url "$url"
     rm -f "$cl/x310.txt"
 
-    # (b) branches.txt が、なくなっている → sf-install は、プロジェクトの破損として、止まる（黙って作り直さない）。git で戻せば、動く
+    # (b) branches.txt が、なくなっている → sf-refresh は、プロジェクトの破損として、止まる（黙って作り直さない）。git で戻せば、動く
     rm -f "$cl/sf-tools/config/branches.txt"
-    it_run "$cl" bash "$IT_HOME/sf-tools/bin/sf-install.sh"
-    assert_exit_fail "$IT_RC" "X3-10（branches.txt がない）: sf-install は、止まる"
+    it_run "$cl" bash "$IT_HOME/sf-tools/bin/sf-refresh.sh"
+    assert_exit_fail "$IT_RC" "X3-10（branches.txt がない）: sf-refresh は、止まる"
     it_out_has "設定ファイルが見つかりません" && pass "X3-10（branches.txt がない）: 理由（設定ファイルが見つかりません）が出る" || fail "X3-10（branches.txt がない）: 理由が出る"
     assert_file_not_exists "$cl/sf-tools/config/branches.txt" "X3-10（branches.txt がない）: 黙って作り直さない"
     _it_git -C "$cl" checkout -- sf-tools/config/branches.txt
 
-    # (c) release/<ブランチ>/ と branch_name.txt が、なくなっている → sf-install が復元する。復元前の sf-dryrun は、デプロイしない
+    # (c) release/<ブランチ>/ と branch_name.txt が、なくなっている → sf-refresh が復元する。復元前の sf-dryrun は、デプロイしない
     rm -rf "$cl/sf-tools/release/JOB-1" "$cl/sf-tools/release/branch_name.txt"
     it_calls_clear
     it_run "$cl" bash "$IT_HOME/sf-tools/bin/sf-dryrun.sh" -n
     assert_equals "$(it_calls sf | grep -c 'deploy start')" "0" "X3-10（release/ がない）: 対象がないため、デプロイ（検証）を呼ばない"
     assert_equals "$(it_mutating_calls | wc -l | tr -d ' ')" "0" "X3-10（release/ がない）: 外部へ書き込まない"
-    it_run "$cl" bash "$IT_HOME/sf-tools/bin/sf-install.sh"
-    assert_file_exists "$cl/sf-tools/release/JOB-1/deploy-target.txt" "X3-10（release/ がない）: sf-install が、release/JOB-1/ を復元する"
+    it_run "$cl" bash "$IT_HOME/sf-tools/bin/sf-refresh.sh"
+    assert_file_exists "$cl/sf-tools/release/JOB-1/deploy-target.txt" "X3-10（release/ がない）: sf-refresh が、release/JOB-1/ を復元する"
     assert_equals "$(cat "$cl/sf-tools/release/branch_name.txt" 2>/dev/null)" "JOB-1" "X3-10（release/ がない）: branch_name.txt も復元される"
 
     # (d) Salesforce に、接続していない（ログインが切れた）→ sf-dryrun は、デプロイせず、失敗で終わる
@@ -131,7 +131,7 @@ test_X3_10() {
 # X8-1: 完了済みのプロジェクトで再実行
 # ------------------------------------------------------------------------------
 test_X8_1() {
-    echo -e "\n${CLR_HEAD}--- X8-1: 完了済みのプロジェクトで sf-init を再実行 ---${CLR_RST}"
+    echo -e "\n${CLR_HEAD}--- X8-1: 完了済みのプロジェクトで sf-project を再実行 ---${CLR_RST}"
     local s0; s0=$(_state)
     IT_TIMEOUT=240
     _init 'Y\nq\n'
@@ -155,7 +155,7 @@ test_X2_1_clone() {
     _fresh || return 1; IT_TIMEOUT=900
     it_ssh_fail on
     _init "$FULL_INPUT"
-    assert_exit_fail "$IT_RC" "X2-1（clone）: clone が失敗すると、sf-init は失敗で終わる"
+    assert_exit_fail "$IT_RC" "X2-1（clone）: clone が失敗すると、sf-project は失敗で終わる"
     grep -qxF "${IT_OWNER}/${IT_REPO}" "$IT_STATE/repos" && pass "X2-1（clone）: リポジトリは、すでに作られている（作成後の失敗）" || fail "X2-1（clone）: リポジトリは、すでに作られている"
     it_ssh_fail off
     _init "${RESUME_HEAD}3\n${PAT_MARK}\n\n${SLACK_MARK}\n${CHAN}\n\n1\n"
@@ -170,8 +170,8 @@ test_X2_1_push() {
     _fresh || return 1; IT_TIMEOUT=900
     git init -q --bare -b main "$IT_ORIGIN"; it_origin_reject on   # 空の bare を先に作り、push を拒否させる
     _init "$FULL_INPUT"
-    assert_exit_fail "$IT_RC" "X2-1（push）: push が拒否されると、sf-init は失敗で終わる"
-    # X8-2: 失敗の画面が案内する復旧の手順（もう一度 sf-init.sh を実行し、「続きをやる」を選ぶ）が、出る。実際に通ることは、下の再開で確認する
+    assert_exit_fail "$IT_RC" "X2-1（push）: push が拒否されると、sf-project は失敗で終わる"
+    # X8-2: 失敗の画面が案内する復旧の手順（もう一度 sf-project.sh を実行し、「続きをやる」を選ぶ）が、出る。実際に通ることは、下の再開で確認する
     it_out_has "「続きをやる」を選ぶと" && pass "X8-2: 失敗の画面に、復旧の手順（「続きをやる」を選ぶ）が、案内される" || fail "X8-2: 失敗の画面に、復旧の手順が、案内される" "$(it_out | sed 's/\x1b\[[0-9;]*m//g' | tail -5)"
     assert_equals "$(_progress)" "7" "X2-1（push）: 進捗は、Phase 7 まで（Phase 8 は、記録されない）"
     assert_equals "$(it_remote_snap | wc -l | tr -d ' ')" "0" "X2-1（push）: origin には、何も届いていない"
@@ -191,7 +191,7 @@ test_X2_1_secret() {
     _fresh || return 1; IT_TIMEOUT=900
     it_fault gh "secret set SF_CONSUMER_KEY_PROD*" 1 1 1 "HTTP 403: Resource not accessible by personal access token"
     _init "$FULL_INPUT"
-    assert_exit_fail "$IT_RC" "X2-1（secret）: Secret の登録が失敗すると、sf-init は失敗で終わる"
+    assert_exit_fail "$IT_RC" "X2-1（secret）: Secret の登録が失敗すると、sf-project は失敗で終わる"
     [[ -f "$IT_STATE/secrets/SF_CONSUMER_KEY_PROD" ]] && fail "X2-1（secret）: 失敗した Secret は、入らない" || pass "X2-1（secret）: 失敗した Secret は、入らない"
     it_fault_clear
     _init "${RESUME_HEAD}Y\n1\n"   # 続きから → 既存の証明書を再利用（Y）→ ログイン先 1
@@ -206,7 +206,7 @@ test_X2_1_sigterm() {
     _fresh || return 1; IT_TIMEOUT=900
     it_fault gh "secret set SLACK_BOT_TOKEN*" 1 1 0 "" 25    # 25 秒かかる呼び出し（その間に止める）
     _init_kill "$FULL_INPUT" "secret set SLACK_BOT_TOKEN" TERM
-    [[ $IT_KILL_RC -ne 0 ]] && pass "X2-1（SIGTERM）: 止めると、sf-init は非ゼロで終わる" || fail "X2-1（SIGTERM）: 止めると、sf-init は非ゼロで終わる" "rc=$IT_KILL_RC"
+    [[ $IT_KILL_RC -ne 0 ]] && pass "X2-1（SIGTERM）: 止めると、sf-project は非ゼロで終わる" || fail "X2-1（SIGTERM）: 止めると、sf-project は非ゼロで終わる" "rc=$IT_KILL_RC"
     [[ -f "$IT_WORK/proj/admin/.sf-init-${IT_PROJECT}.progress" ]] && pass "X2-1（SIGTERM）: 進捗が残る" || fail "X2-1（SIGTERM）: 進捗が残る"
     _pat_in_state && pass "X2-1（SIGTERM）: Phase 8 の完了前は、PAT は、状態ファイルにだけ置かれている" || fail "X2-1（SIGTERM）: Phase 8 の完了前は、PAT は、状態ファイルにだけ置かれている"
     _state_mode_600 && pass "X2-1（SIGTERM）: PAT のある状態ファイルの権限は 600" || fail "X2-1（SIGTERM）: PAT のある状態ファイルの権限は 600"

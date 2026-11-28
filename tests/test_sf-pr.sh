@@ -1,12 +1,12 @@
 #!/bin/bash
 # ==============================================================================
-# test_sf-next.sh - sf-next.sh のテスト
+# test_sf-pr.sh - sf-pr.sh のテスト
 # ==============================================================================
 # 判定の本体は sf-promote-check.sh --plan（tests/test_sf-promote-check.sh が確かめる）。ここでは、偽の判定
 # （環境変数 SF_PROMOTE_CHECK_CMD。終了コードと JSON を MOCK_PC_RC・MOCK_PC_JSON で決める）を使い、表示・確認・
 # PR の作成画面の URL を確かめる。
 source "$(dirname "${BASH_SOURCE[0]}")/test_helper.sh"
-echo -e "${CLR_HEAD}=== sf-next.sh ===${CLR_RST}"
+echo -e "${CLR_HEAD}=== sf-pr.sh ===${CLR_RST}"
 
 # git モック（symbolic-ref・remote get-url だけ）
 _make_git() {
@@ -52,7 +52,7 @@ _env() { # 変数名 td mb mh
 _unset() { unset SF_PROMOTE_CHECK_CMD MOCK_GIT_BRANCH MOCK_PC_RC MOCK_PC_JSON MOCK_GIT_REMOTE_URL; }
 _next() { # 標準入力の答え [追加の環境変数...] → 出力。終了コードは NX_RC
     local ans="$1"; shift
-    NX_OUT=$(cd "$TD" && printf '%s\n' "$ans" | env PATH="$MB:$PATH" "$@" bash "$SF_TOOLS_DIR/bin/sf-next.sh" 2>&1); NX_RC=$?
+    NX_OUT=$(cd "$TD" && printf '%s\n' "$ans" | env PATH="$MB:$PATH" "$@" bash "$SF_TOOLS_DIR/bin/sf-pr.sh" 2>&1); NX_RC=$?
 }
 
 test_display_and_next() {
@@ -151,24 +151,24 @@ test_pr_url() {
     _unset; teardown "$TD" "$MB"
 }
 
-# AI 操作（SF_TOOLS_AI=1）: next.pr=n → 表示だけ／=y → 開く／答えなし → ブラウザを開く前に 20
+# AI 操作（SF_TOOLS_AI=1）: pr.create=n → 表示だけ／=y → 開く／答えなし → ブラウザを開く前に 20
 test_ai_mode() {
     echo ""; echo -e "${CLR_HEAD}[TEST] AI 操作${CLR_RST}"
     local TD MB MH; _env TD MB MH
     export MOCK_PC_JSON; MOCK_PC_JSON=$(_pc_json staging)
     _next y SF_TOOLS_AI=1
     assert_equals "$NX_RC" "20" "AI・答えなし → 20（標準入力の y は読まない）"
-    assert_output_contains "$NX_OUT" "\[確認待ち\] next.pr: develop の組織で、動作を確かめ終えましたか？ staging にPRを出しますか？" "AI・答えなし → 確認待ちの行"
+    assert_output_contains "$NX_OUT" "\[確認待ち\] pr.create: develop の組織で、動作を確かめ終えましたか？ staging にPRを出しますか？" "AI・答えなし → 確認待ちの行"
     assert_file_not_contains "$MOCK_CALL_LOG" "compare/" "AI・答えなし → ブラウザを開かない"
     : > "$MOCK_CALL_LOG"
-    _next "" SF_TOOLS_AI=1 SF_TOOLS_ANSWERS="next.pr=n"
-    assert_exit_ok "$NX_RC" "AI・next.pr=n → 正常終了"
-    assert_output_contains "$NX_OUT" "▶.*staging" "AI・next.pr=n → 状況を表示する"
-    assert_file_not_contains "$MOCK_CALL_LOG" "compare/" "AI・next.pr=n → ブラウザを開かない"
+    _next "" SF_TOOLS_AI=1 SF_TOOLS_ANSWERS="pr.create=n"
+    assert_exit_ok "$NX_RC" "AI・pr.create=n → 正常終了"
+    assert_output_contains "$NX_OUT" "▶.*staging" "AI・pr.create=n → 状況を表示する"
+    assert_file_not_contains "$MOCK_CALL_LOG" "compare/" "AI・pr.create=n → ブラウザを開かない"
     : > "$MOCK_CALL_LOG"
-    _next "" SF_TOOLS_AI=1 SF_TOOLS_ANSWERS="next.pr=y"
-    assert_exit_ok "$NX_RC" "AI・next.pr=y → 正常終了"
-    assert_file_contains "$MOCK_CALL_LOG" "compare/staging...feature/my-feature" "AI・next.pr=y → PR の作成画面を開く"
+    _next "" SF_TOOLS_AI=1 SF_TOOLS_ANSWERS="pr.create=y"
+    assert_exit_ok "$NX_RC" "AI・pr.create=y → 正常終了"
+    assert_file_contains "$MOCK_CALL_LOG" "compare/staging...feature/my-feature" "AI・pr.create=y → PR の作成画面を開く"
     _unset; teardown "$TD" "$MB"
 }
 
@@ -192,7 +192,7 @@ _nextc() { # 標準入力の答え [環境変数...] -- [引数...] → NX_OUT�
     local envs=()
     while [[ $# -gt 0 && "$1" != "--" ]]; do envs+=("$1"); shift; done
     [[ "${1:-}" == "--" ]] && shift
-    NX_OUT=$(cd "$TD" && printf '%s\n' "$ans" | env PATH="$MB:$PATH" "${envs[@]}" bash "$SF_TOOLS_DIR/bin/sf-next.sh" "$@" 2>&1); NX_RC=$?
+    NX_OUT=$(cd "$TD" && printf '%s\n' "$ans" | env PATH="$MB:$PATH" "${envs[@]}" bash "$SF_TOOLS_DIR/bin/sf-pr.sh" "$@" 2>&1); NX_RC=$?
 }
 
 test_create() {
@@ -203,8 +203,8 @@ test_create() {
     local body="$TD/本文 の ファイル.md" title='fix: $HOME; `x` "q" -n 題名'
     printf '本文の 1 行目\n\n- 項目\n' > "$body"
 
-    _nextc "" SF_TOOLS_AI=1 SF_TOOLS_ANSWERS="next.pr=y" -- --create --title "$title" --body-file "$body"
-    assert_exit_ok "$NX_RC" "AI・next.pr=y → 正常終了"
+    _nextc "" SF_TOOLS_AI=1 SF_TOOLS_ANSWERS="pr.create=y" -- --create --title "$title" --body-file "$body"
+    assert_exit_ok "$NX_RC" "AI・pr.create=y → 正常終了"
     assert_file_contains "$MOCK_CALL_LOG" "GHARG<--title=${title}>" "題名は、--title= の形の 1 つの引数で、そのまま渡る（空白・\$・;・\`・\" を含む）"
     assert_file_contains "$MOCK_CALL_LOG" "GHARG<--body-file=${body}>" "本文のファイルは、--body-file= の形の 1 つの引数で渡る（ファイル名に空白）"
     assert_equals "$(grep -A1 -xF 'GHARG<--base>' "$MOCK_CALL_LOG" | tail -n 1)" "GHARG<staging>" "出し先（--base）は next_tier"
@@ -214,14 +214,14 @@ test_create() {
     assert_output_contains "$NX_OUT" "PR を作りました: https://github.com/test-owner/force-tama/pull/7" "作られた PR の URL を表示する"
 
     : > "$MOCK_CALL_LOG"
-    _nextc "" SF_TOOLS_AI=1 SF_TOOLS_ANSWERS="next.pr=y" -- --create --title "-x 先頭がハイフン" --body-file "$body"
+    _nextc "" SF_TOOLS_AI=1 SF_TOOLS_ANSWERS="pr.create=y" -- --create --title "-x 先頭がハイフン" --body-file "$body"
     assert_exit_ok "$NX_RC" "題名が - で始まる → 正常終了"
     assert_file_contains "$MOCK_CALL_LOG" "GHARG<--title=-x 先頭がハイフン>" "題名が - で始まっても、--title= の値として渡る"
 
     : > "$MOCK_CALL_LOG"
-    _nextc "" SF_TOOLS_AI=1 SF_TOOLS_ANSWERS="next.pr=n" -- --create --title "t" --body-file "$body"
-    assert_exit_ok "$NX_RC" "AI・next.pr=n → 正常終了"
-    assert_file_not_contains "$MOCK_CALL_LOG" "GHARG<" "AI・next.pr=n → PR を作らない"
+    _nextc "" SF_TOOLS_AI=1 SF_TOOLS_ANSWERS="pr.create=n" -- --create --title "t" --body-file "$body"
+    assert_exit_ok "$NX_RC" "AI・pr.create=n → 正常終了"
+    assert_file_not_contains "$MOCK_CALL_LOG" "GHARG<" "AI・pr.create=n → PR を作らない"
 
     : > "$MOCK_CALL_LOG"
     _nextc "y" SF_TOOLS_AI=1 -- --create --title "t" --body-file "$body"
@@ -234,7 +234,7 @@ test_create() {
     assert_file_contains "$MOCK_CALL_LOG" "GHARG<--title=t>" "人の操作の --create → gh pr create を呼ぶ"
 
     : > "$MOCK_CALL_LOG"
-    _nextc "" SF_TOOLS_AI=1 SF_TOOLS_ANSWERS="next.pr=y" MOCK_GH_PR_RC=1 -- --create --title "t" --body-file "$body"
+    _nextc "" SF_TOOLS_AI=1 SF_TOOLS_ANSWERS="pr.create=y" MOCK_GH_PR_RC=1 -- --create --title "t" --body-file "$body"
     assert_equals "$NX_RC" "1" "gh pr create の失敗 → 1"
     assert_output_contains "$NX_OUT" "already exists" "gh pr create の失敗 → gh の理由を表示する"
     assert_output_contains "$NX_OUT" "PR を作れませんでした" "gh pr create の失敗 → 中断の理由"
@@ -242,14 +242,14 @@ test_create() {
     local u
     for u in "https://gitlab.com/test-owner/force-tama.git" "https://github.com/test-owner/force-tama/extra" "https://github.com/test-owner/force-tama?x=1" "https://github.com/test-owner/.."; do
         : > "$MOCK_CALL_LOG"
-        _nextc "" SF_TOOLS_AI=1 SF_TOOLS_ANSWERS="next.pr=y" MOCK_GIT_REMOTE_URL="$u" -- --create --title "t" --body-file "$body"
+        _nextc "" SF_TOOLS_AI=1 SF_TOOLS_ANSWERS="pr.create=y" MOCK_GIT_REMOTE_URL="$u" -- --create --title "t" --body-file "$body"
         assert_exit_fail "$NX_RC" "origin が GitHub の形でない（${u}）→ 中断"
         assert_file_not_contains "$MOCK_CALL_LOG" "GHARG<" "origin が GitHub の形でない（${u}）→ PR を作らない"
     done
 
     : > "$MOCK_CALL_LOG"
     MOCK_PC_JSON=$(_pc_json staging 12)
-    _nextc "" SF_TOOLS_AI=1 SF_TOOLS_ANSWERS="next.pr=y" -- --create --title "t" --body-file "$body"
+    _nextc "" SF_TOOLS_AI=1 SF_TOOLS_ANSWERS="pr.create=y" -- --create --title "t" --body-file "$body"
     assert_exit_ok "$NX_RC" "発行済みの PR がある → 正常終了"
     assert_file_not_contains "$MOCK_CALL_LOG" "GHARG<" "発行済みの PR がある → PR を作らない（二重に作らない）"
     _unset; unset MOCK_GH_PR_RC; teardown "$TD" "$MB"
@@ -277,7 +277,7 @@ test_create_option_errors() {
     for c in "${cases[@]}"; do
         : > "$MOCK_CALL_LOG"
         # shellcheck disable=SC2086  # 空白で分けて引数にする（ケースの値に、空白を含むパスはない）
-        _nextc "y" SF_TOOLS_AI=1 SF_TOOLS_ANSWERS="next.pr=y" -- $c
+        _nextc "y" SF_TOOLS_AI=1 SF_TOOLS_ANSWERS="pr.create=y" -- $c
         assert_exit_fail "$NX_RC" "「${c##*/}」→ 中断"
         assert_file_not_contains "$MOCK_CALL_LOG" "pc --plan" "「${c##*/}」→ 判定を呼ばない"
         assert_file_not_contains "$MOCK_CALL_LOG" "GHARG<" "「${c##*/}」→ PR を作らない"
@@ -286,14 +286,14 @@ test_create_option_errors() {
     for t in "" "$nl" "$cr"; do
         i=$((i + 1))
         : > "$MOCK_CALL_LOG"
-        _nextc "y" SF_TOOLS_AI=1 SF_TOOLS_ANSWERS="next.pr=y" -- --create --title "$t" --body-file "$body"
+        _nextc "y" SF_TOOLS_AI=1 SF_TOOLS_ANSWERS="pr.create=y" -- --create --title "$t" --body-file "$body"
         assert_exit_fail "$NX_RC" "題名が不正（${i}: 空・LF・CR）→ 中断"
         assert_file_not_contains "$MOCK_CALL_LOG" "pc --plan" "題名が不正（${i}）→ 判定を呼ばない"
     done
     # 長さは数えない（GitHub が確かめる）。${#…} はロケールが C だとバイトで数え、日本語を誤って弾くため
     : > "$MOCK_CALL_LOG"
     long=$(printf 'あ%.0s' $(seq 1 120))
-    _nextc "" SF_TOOLS_AI=1 SF_TOOLS_ANSWERS="next.pr=y" LC_ALL=C -- --create --title "$long" --body-file "$body"
+    _nextc "" SF_TOOLS_AI=1 SF_TOOLS_ANSWERS="pr.create=y" LC_ALL=C -- --create --title "$long" --body-file "$body"
     assert_exit_ok "$NX_RC" "日本語の長い題名（120 文字・C のロケール）→ 受け付ける"
     _unset; teardown "$TD" "$MB"
 }
@@ -328,16 +328,16 @@ test_status_only() {
     local TD MB MH; _env TD MB MH
     local f="$TD/sf-tools/logs/next-status.txt"
     export MOCK_PC_JSON; MOCK_PC_JSON=$(_pc_json staging)
-    NX_OUT=$(cd "$TD" && env PATH="$MB:$PATH" bash "$SF_TOOLS_DIR/bin/sf-next.sh" --status < /dev/null 2>&1); NX_RC=$?
+    NX_OUT=$(cd "$TD" && env PATH="$MB:$PATH" bash "$SF_TOOLS_DIR/bin/sf-pr.sh" --status < /dev/null 2>&1); NX_RC=$?
     assert_exit_ok "$NX_RC" "--status → 0（確認を待たない）"
     assert_file_contains "$f" "NEXT=staging" "--status → next-status.txt を書く"
     assert_output_not_contains "$NX_OUT" "PRを出しますか" "--status → 確認しない"
     assert_output_not_contains "$NX_OUT" "リリース状況" "--status → 結果の表示をしない"
-    [[ -f "$TD/sf-tools/logs/sf-next-status.log" ]] && pass "--status → ログは sf-next-status.log" || fail "--status → ログは sf-next-status.log"
-    NX_OUT=$(cd "$TD" && env PATH="$MB:$PATH" bash "$SF_TOOLS_DIR/bin/sf-next.sh" --status --create --title t --body-file /dev/null < /dev/null 2>&1); NX_RC=$?
+    [[ -f "$TD/sf-tools/logs/sf-pr-status.log" ]] && pass "--status → ログは sf-pr-status.log" || fail "--status → ログは sf-pr-status.log"
+    NX_OUT=$(cd "$TD" && env PATH="$MB:$PATH" bash "$SF_TOOLS_DIR/bin/sf-pr.sh" --status --create --title t --body-file /dev/null < /dev/null 2>&1); NX_RC=$?
     assert_exit_fail "$NX_RC" "--status と --create は一緒に使えない"
     rm -f "$TD/sf-tools/logs/next-status.txt"; mkdir -p "$TD/sf-tools/logs/next-status.txt"   # 置き換え先がフォルダ → 書けない
-    NX_OUT=$(cd "$TD" && env PATH="$MB:$PATH" bash "$SF_TOOLS_DIR/bin/sf-next.sh" --status < /dev/null 2>&1); NX_RC=$?
+    NX_OUT=$(cd "$TD" && env PATH="$MB:$PATH" bash "$SF_TOOLS_DIR/bin/sf-pr.sh" --status < /dev/null 2>&1); NX_RC=$?
     assert_exit_fail "$NX_RC" "--status で結果を書けない → エラー（ランチャーに、書けたと思わせない）"
     rmdir "$TD/sf-tools/logs/next-status.txt"
     ls "$TD"/sf-tools/logs/next-status.txt.* >/dev/null 2>&1 && fail "書けなかった一時ファイルを残さない" || pass "書けなかった一時ファイルを残さない"

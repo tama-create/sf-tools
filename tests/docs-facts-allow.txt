@@ -4,4 +4,4 @@
 
 option  --id             # winget install --id（外部コマンド）
 option  --state          # gh pr list --state（外部コマンド）
-option  --install-extension  # code --install-extension（VS Code の外部コマンドのオプション。sf-init の Phase 1 の案内）
+option  --install-extension  # code --install-extension（VS Code の外部コマンドのオプション。sf-project の Phase 1 の案内）

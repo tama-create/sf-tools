@@ -937,7 +937,9 @@ force-*/logs/apex/
 - [x] 環境の混在（5.6）: WSL で取得中に、Windows の Git Bash から sf-start・`pull`・`stop`・`status`／その逆／片方の取得役が止まって 30 分たったあとに、もう一方で sf-start／2 つの環境で、ほぼ同時に sf-start → 2026-11-25 に tama-dev で確認（ad95ed5。30 項目）。WSL で取得中の Git Bash からは、`status` だけが「別の環境（wsl）で動作中（最後の合図は N 秒前）」と答え、`pull`・`stop`・`start` は中断、`begin` は 10、`leave` は 0。`.status`・`.owners`・`.state` は変わらず、TraceFlag は 1 つのまま。WSL の `pull` は取得役に頼んで成功。WSL の後始末で、名乗り・取得役の印・TraceFlag が消え、すぐ Git Bash で始められた。逆向き（Git Bash で取得中の WSL から）も同じ。ほぼ同時の `begin` は、WSL が 0・Git Bash が 10 で、取得役・TraceFlag は 1 つだけ。この変更の前の版で動いていた WSL の取得役（古い形の記録）に対しても、Git Bash から「別の環境（不明（古い形の記録））」として断り、何も書かなかった。「30 分たったあと」は待たずに、単体テスト（合図を 2,000 秒前にした記録）で確かめた。実機の注意: `wsl.exe` の呼び出しが終わると、その中で裏に起動したプロセス（`sleep` など）も終わる（持ち主の代わりは、`wsl.exe` を前面で動かし続けた）
 - [x] **引き継ぎ（4.2）**（2026-11-28。Mac の取得中に、Windows で起動・tama-dev）→ 別の場所の sf-log.sh の TraceFlag を消した直後に、新しい TraceFlag を作れた。古い取得役は、約 2 分 45 秒後に止まり、相手の設定に触れなかった。古い方の終了でも、相手の設定は残り、新しい方の終了で消えた。ただし、Windows は、手元に残っていた期限切れの ID のため 4.2 の a で失敗し、`sf-log.sh stop` のあとで成功した（a の条件を直した）
 - [ ] 直した 4.2 の a: 手元に期限切れの ID が残った状態から、`stop` なしで引き継げるか（実機。偽の組織のテストは済み）
-- [ ] 取り戻し（古い方で改めて起動する）と、Windows の取得中に Mac で起動する向き（実機。偽の組織のテストは済み）
+- [x] **取り戻しと、逆向きの引き継ぎ**（2026-11-28。34468bd・tama-dev・Windows の Git Bash と Mac）→ Windows の取得中に Mac で起動して引き継ぎ（21:22:36）。古い Windows は止まった（画面の表示で確かめたのは 21:28 まで）。続けて、Windows のランチャーの Start で取り戻した（21:31:50）。古い Mac の取得役は、約 3 分後（21:34:57）に止まった。どちらも、操作しなくても、メニューが「止まっています（別の場所の sf-start に引き継がれたため）」に描き直された（5.4。Mac は画面、Windows は利用者の報告で確かめた）。そのあと Mac → Windows の順に q で終了し、Mac は「sf-log.sh が作った TraceFlag はありません」（Windows の設定は残る）、Windows は「TraceFlag を消しました」を表示して、有効な TraceFlag は 0 件になった。古い方が止まるまでの時間は、取得の回ごとに確かめるため、数分かかる（この日の実測は、約 3 分と、約 6 分以内）
+- [ ] 終了済みの持ち主の印が残った状態（PC の再起動のあと）で、`leave` が TraceFlag を消すか（5.2。実機。偽の組織のテストは済み）
+- [ ] 組織の情報を読めないとき（認証切れ・通信の失敗）の、理由の表示と、やり直し（4.2 の前。実機。偽の組織のテストは済み）
 - [ ] 認証の期限切れのときの `sf org display` の `connectedStatus` の実際の値（`sf-start.sh` は、「expired access/refresh token」「invalid_grant」「RefreshTokenAuthError」を含むかで判定する。1 つ目の文言は、`sf data query` の応答で確かめた。CLI のコードでは、`connectedStatus` は、更新の失敗の code か message になる）
 
 ### 13.2 決めること

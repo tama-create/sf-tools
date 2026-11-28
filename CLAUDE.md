@@ -103,6 +103,20 @@ git pull origin main                     # main の最新を取り込む
 
 > CLAUDE.md が重くなると Claude のパフォーマンスと回答精度が低下する。ルールや判断基準は簡潔に、詳細は必ず dev-reference に書くこと。
 
+### 1.7 Mac と Windows を切り替えて開発する
+
+sf-tools は、Mac と Windows のどちらでも開発する（2026-11-28 から）。合図の言葉を言われたら、次を行う。
+
+| 合図 | やること |
+|---|---|
+| 「作業開始」 | 現在のブランチと未コミットを確認し、`git fetch`。`development` にいて、追跡しているファイルに未コミットの変更がなく、早送りできるときだけ、`git pull --ff-only origin development`（この合図は、この取り込みの指示を含む）。できないときは、**上書き・退避・破棄をせず**、状況を報告して指示を待つ。最後に、直近の変更と、残っている作業（コミットと `doc/` から分かるもの）を報告する |
+| 「作業終了」 | 未コミット・未プッシュ・`development` の CI の結果を確認し、次の PC への引き継ぎ（済んだこと・残り・注意）を報告する。**mm / rr は、指示がなければ実行しない** |
+
+- **引き継ぐ内容は、コミットか `doc/` に残す。** 会話の流れ・Claude のメモリ・未コミットの変更は、もう一方の PC に届かない。会話にしかない引き継ぎがあれば、「作業終了」で知らせて、残すことを提案する
+- **同じ変更を、2 台で同時に進めない。** 区切れない作業は、同じ PC で終える
+- どちらの PC でも、`~/sf-tools` は開発する場所であり、使う場所でもある（**編集中の変更も、その PC の `sf-start.sh` などで使われる**）
+- **Mac では WSL を使わない。** テストは、標準の Bash（3.2）でそのまま動かし、改行の変換（2.2）は不要。ウィンドウを閉じる・PC の再起動など、Windows の実機でしか分からない動きは、Windows で確認する
+
 ---
 
 ## 2. コーディング規約
@@ -127,7 +141,7 @@ git pull origin main                     # main の最新を取り込む
 
 - すべてのテキストファイルは UTF-8 / LF で統一すること
   - **新規ファイル作成後は必ず LF 変換すること**（Write ツールは CRLF を生成するため）
-  - 変換コマンド: `wsl bash -c "sed -i 's/\r//' <file>"`
+  - 変換コマンド（Windows。Mac では不要）: `wsl bash -c "sed -i 's/\r//' <file>"`
 - `jq` など追加依存は原則追加しないこと（`awk` / `sed` / `grep` など標準コマンドを使う）。**JSON の読み取り**: GitHub の情報は `gh --jq`、sf CLI の出力などは `json_get`（`lib/common.sh`。Node の標準機能のみ）。シェルの `grep` / `sed` で JSON を読まない
 - **クロスプラットフォーム（Windows の Git Bash・macOS・Linux で、同じように動くこと。絶対条件）**: GNU 固有の書き方を使わない。`sed -i` は使わず `sed_inplace`（`lib/platform.sh`）、`base64 -w 0` は使わず `base64_oneline`、sed の `\x1b` / `\t` は使わず `$'\033'` / `$'\t'` で展開してから渡す（`_strip_ansi`・`_strip_term_codes`）、`date -d` / `readlink -f` / `grep -P` / `stat -c`（`_get_mtime` を使う）・`touch -d`・`timeout` などは避ける。`wc -l` の結果を文字列として使うときは `tr -d ' '` を付ける（BSD は先頭に空白が付く）。CI（`test-macos` / `test-windows`）で、macOS 標準の Bash 3.2・BSD の sed のまま確認する
 - **言語の方針**: 新機能は、基本的にシェルで書く。JSON / XML の処理や、状態・分岐が多い処理など、シェルだけでは重いと判断した場合に限り、
@@ -199,9 +213,9 @@ git pull origin main                     # main の最新を取り込む
 ### 3.1 実行方法
 
 ```bash
-bash tests/run_tests.sh                        # 全テスト実行（手元では通常は不要。mm 後に CI が全件を実行する。手元で必要なときは WSL で）
+bash tests/run_tests.sh                        # 全テスト実行（手元では通常は不要。mm 後に CI が全件を実行する。手元で必要なとき、Windows は WSL で）
 bash tests/run_tests.sh --shard 2/6            # 全ファイルを 6 組に分けた 2 番目だけ実行（CI の Windows が、6 つのジョブで並列に動かす）
-bash tests/run_tests.sh test_sf-metasync.sh   # 単体実行
+bash tests/run_tests.sh test_sf-metasync.sh   # 単体実行（端末から 1 本だけ動かすと、確認の入力待ちで止まることがある。末尾に < /dev/null を付ける）
 bash tests/run_tests.sh --changed             # 変更ファイルに対応するテストのみ実行
 bash tests/run_tests.sh --jobs 4 / --serial   # 同時に動かすファイル数（既定: CPU の数。--serial は 1 つずつ）
 bash tests/test_integration.sh                # 結合テスト L1（実 git ＋ fake。run_tests.sh の全件にも含まれる。手元の Windows は約 10 分、CI は 1〜3 分）

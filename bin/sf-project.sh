@@ -285,6 +285,7 @@ for phase_num in $PHASE_LIST; do
         export SF_INIT_RESTARTED=1
         log "INFO" "更新した sf-tools で、もう一度、はじめから実行します。"
         cd "$INIT_BASE" || die "作業フォルダに移動できません: ${INIT_BASE}"
+        # shellcheck disable=SC2154  # _init_lock_dir は、部品 phases/project/env.sh（6 章）が入れる（shellcheck は、部品の中の代入を追えない）
         run rm -rf "$_init_lock_dir" || die "ロックを解放できません: ${_init_lock_dir}"
         exec bash "$SF_PROJECT_SELF" "${ORIG_ARGS[@]}"  # exec のため run 不使用（このプロセスを置き換える）
     fi
@@ -316,9 +317,6 @@ done
 # ------------------------------------------------------------------------------
 # 8 章: 後処理（phases/project/。2026-11-28 に、このファイルから分けた。読み込む順番は、元の章の順のまま）
 # ------------------------------------------------------------------------------
-for _part in finish; do
-    source "${SCRIPT_DIR%/*}/phases/project/${_part}.sh" \
-        || die "sf-project.sh の部品を読み込めません: ${SCRIPT_DIR%/*}/phases/project/${_part}.sh"
-done
-unset _part
+source "${SCRIPT_DIR%/*}/phases/project/finish.sh" \
+    || die "sf-project.sh の部品を読み込めません: ${SCRIPT_DIR%/*}/phases/project/finish.sh"
 

@@ -40,7 +40,10 @@ cmd_leave() {
         log "INFO" "持ち主の一覧に、この印はありません（何もしません）。"
         exit 0   # 登録していない sf-start の終了で、ほかの人・手動の start の TraceFlag を消さない
     fi
-    n=$(owners_remove_locked "$OWNER")
+    owners_remove_locked "$OWNER" >/dev/null
+    # 残りは、生きている sf-start だけを数える。PC の再起動などで後始末できずに終わった印は、取得役がいないと残ったままになり、
+    #   数えると、最後の sf-start を終了しても TraceFlag を消さない（2026-11-28 に再現）
+    n=$(owners_drop_dead_locked)  # VAR=$(cmd) のため run 不使用
     if [[ "$n" -gt 0 ]]; then
         lock_drop "$LOCK_DIR"
         log "INFO" "ほかの sf-start が起動中（残り ${n} 件）のため、デバッグログの取得は止めません（組織のログの設定は残ります。すべての sf-start を終了すると消します）。"

@@ -50,8 +50,10 @@
 #          色は状態で変える（取得中 = 太字の緑 / 準備中 = 太字の水色 / 取れていません = 太字の赤 / 取っていません・止まっています = 黄色）。
 #          WARNING があれば「⚠ Log: …」をもう 1 行。ファイルがない・STATE がそれ以外なら、ログの部分を出さない。
 #          キー=値 の行を while read で読み、source しない。
-#          準備中（starting）のあいだは、入力を 5 秒ずつ待ち（read -t）、STATE が変わったら、コマンドを動かさずにメニューを描き直す
-#          （裏の準備は数分かかることがあり、つながっても「準備中」のままだと迷うため）。待ち切れと EOF は、待った時間でも見分ける（Bash 3.2）
+#          準備中（starting）・取得中（collecting）のあいだは、入力を 5 秒ずつ待ち（read -t）、STATE が変わったら、コマンドを
+#          動かさずにメニューを描き直す（本数・期限の更新では描き直さない）。裏の準備は数分かかることがあり、つながっても
+#          「準備中」のままだと迷うため。取得中は、別の場所の sf-start に引き継がれるなどで止まっても、古い「取得中」を
+#          残さないため。待ち切れと EOF は、待った時間でも見分ける（Bash 3.2）
 #      環境ブランチ（sf-tools/config/branches.txt の行。ファイルがない・空なら main だけ）の上では、続けて
 #      「⚠ 環境ブランチの上です」を出して終わる（Branch: の行は出さない）
 #   6. 2 行目: 「Branch: <段階の並び>」。段階を下から順に「 ⇒ 」でつなぎ、出し終わった段階 = 「✓ <段階>」（緑）/
@@ -178,7 +180,7 @@ apexlog_summary() {
     return 0
 }
 
-# デバッグログの状態（.status の STATE）だけを読む（なければ空）。準備中のあいだの描き直しの判定に使う
+# デバッグログの状態（.status の STATE）だけを読む（なければ空）。準備中・取得中のあいだの描き直しの判定に使う
 apexlog_state() {
     local f="logs/apex/.status" line
     [[ -f "$f" ]] || return 0
@@ -187,7 +189,7 @@ apexlog_state() {
     done < "$f"
     return 0
 }
-APEXLOG_REFRESH=5   # 準備中のあいだ、状態を見直す間隔（秒）
+APEXLOG_REFRESH=5   # 準備中・取得中のあいだ、状態を見直す間隔（秒）
 
 # ------------------------------------------------------------------------------
 # 今の状況（メニューの上の数行。読み取りのみ。通信しない。冒頭コメントの処理の流れ 6）
@@ -481,13 +483,14 @@ main() {
 
         local count="${#MENU_ITEMS[@]}"
         local input cmd shown t0 rc redraw=0
-        shown=$(apexlog_state)   # 表示したデバッグログの状態（準備中のあいだは、変わったら描き直す）
+        shown=$(apexlog_state)   # 表示したデバッグログの状態（準備中・取得中のあいだは、変わったら描き直す）
 
         # 入力ループ（1文字即時入力・無効入力は行クリアして待機）
         while true; do
             printf "  番号を入力 (1-%d / q で終了): " "$count"
-            # APEXLOG_REFRESH 秒ずつ待つ。待ち切れたら、自分の書き換わり（処理の流れ 8）と、準備中のあいだはデバッグログの
-            #   状態を見て、変わっていたら描き直す（裏の準備は数分かかることがある。2026-11-23）
+            # APEXLOG_REFRESH 秒ずつ待つ。待ち切れたら、自分の書き換わり（処理の流れ 8）と、準備中・取得中のあいだは
+            #   デバッグログの状態を見て、変わっていたら描き直す（裏の準備は数分かかることがある。2026-11-23。取得中は、
+            #   別の場所に引き継がれるなどで止まる。古い「取得中」の表示を残さない。2026-11-28）
             t0=$SECONDS; rc=0
             read -rsn1 -t "$APEXLOG_REFRESH" input || rc=$?
             if [[ $rc -ne 0 ]]; then
@@ -496,7 +499,8 @@ main() {
                 if (( rc > 128 || SECONDS - t0 >= APEXLOG_REFRESH - 1 )); then
                     printf "\r\033[K"
                     reload_if_updated
-                    if [[ "$shown" == "starting" && "$(apexlog_state)" != "starting" ]]; then printf "\n"; redraw=1; break; fi
+                    # 本数・期限の更新では描き直さない（状態（STATE）が変わったときだけ）
+                    if [[ ( "$shown" == "starting" || "$shown" == "collecting" ) && "$(apexlog_state)" != "$shown" ]]; then printf "\n"; redraw=1; break; fi
                     if [[ -n "$BG_PID" ]] && ! bg_status_running; then printf "\n"; redraw=1; break; fi   # 裏の判定が終わった → 2 行目を描き直す
                     continue
                 fi

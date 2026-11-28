@@ -328,10 +328,10 @@ wait_sf_upgrade() {
     return 0
 }
 
-# 持ち主の一覧（.owners）から、死んだ持ち主（と、別の環境の印。5.6）を外す（短いロックの中）。出力: 生きている持ち主の数。後始末の最中（CLOSING）なら -1
-owners_prune() {
+# 持ち主の一覧（.owners）から、死んだ持ち主（と、別の環境の印。5.6）を外す（短いロックの中で呼ぶ）。
+#   出力: 生きている持ち主の数（CLOSING の行は数えず、残す）。取得役の見張り（owners_prune）と、leave が使う
+owners_drop_dead_locked() {
     local line alive=() dead=0 closing="" tmp="${OWNERS_F}.tmp.$$"
-    lock_take "$LOCK_DIR" 50 || { echo "?"; return 1; }
     if [[ -f "$OWNERS_F" ]]; then
         while IFS= read -r line || [[ -n "$line" ]]; do
             line="${line%$'\r'}"
@@ -346,8 +346,17 @@ owners_prune() {
             mv -f "$tmp" "$OWNERS_F"
         fi
     fi
+    echo "${#alive[@]}"
+}
+
+# 取得役の見張り（短いロックを取って、死んだ持ち主を外す）。出力: 生きている持ち主の数。後始末の最中（CLOSING）なら -1
+owners_prune() {
+    local n closing
+    lock_take "$LOCK_DIR" 50 || { echo "?"; return 1; }
+    closing=$(kv_get "$OWNERS_F" CLOSING)  # VAR=$(cmd) のため run 不使用
+    n=$(owners_drop_dead_locked)           # VAR=$(cmd) のため run 不使用
     lock_drop "$LOCK_DIR"
-    if [[ -n "$closing" ]]; then echo "-1"; else echo "${#alive[@]}"; fi
+    if [[ -n "$closing" ]]; then echo "-1"; else echo "$n"; fi
 }
 
 # 持ち主の一覧から 1 行を外し、残りの持ち主（CLOSING 以外）の数を出す（短いロックの中で呼ぶ）。引数: 外す行（空なら外さない）

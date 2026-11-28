@@ -203,6 +203,42 @@ test_apexlog_status_refresh() {
 test_apexlog_status_refresh
 
 # ------------------------------------------------------------------------------
+# 取得中（collecting）のあいだも、状態が変わったら描き直す（別の場所の sf-start に引き継がれるなど。本数の更新では描き直さない）
+# ------------------------------------------------------------------------------
+test_apexlog_collecting_refresh() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] デバッグログ: 取得中のあいだの描き直し${CLR_RST}"
+    local td mb out n
+    td=$(setup_force_dir); mb=$(setup_mock_bin)
+    export MOCK_CALL_LOG="$mb/calls.log"
+    create_all_mocks "$mb"
+    mkdir -p "$td/logs/apex"
+    printf 'STATE=collecting\nORG=dev\nEXPIRES_AT=15:30\nCOUNT_TODAY=0\n' > "$td/logs/apex/.status"
+    local outf="$td/launcher.out"
+    _wait_menus2() { # ファイル 回数 → その回数だけメニューが描かれるまで待つ（最大 90 秒）
+        local i=0
+        while [[ $(grep -c ">> LAUNCHER <<" "$1" 2>/dev/null || true) -lt $2 && $i -lt 90 ]]; do sleep 1; i=$((i + 1)); done
+    }
+    (
+        cd "$td" && {
+            _wait_menus2 "$outf" 1
+            # 本数と期限だけを変えて、待ち切れが 1 回以上起きる時間を置く → 描き直さない
+            printf 'STATE=collecting\nORG=dev\nEXPIRES_AT=16:30\nCOUNT_TODAY=7\n' > "$td/logs/apex/.status"
+            sleep 7
+            printf 'STATE=stopped\nREASON=別の場所の sf-start に引き継がれたため\n' > "$td/logs/apex/.status"
+            _wait_menus2 "$outf" 2
+            sleep 6; printf 'q'
+        } | PATH="$mb:$PATH" bash "$LAUNCHER" > "$outf" 2>&1
+    )
+    out=$(cat "$outf")
+    [[ "$out" == *"止まっています（別の場所の sf-start に引き継がれたため）"* ]] && pass "取得中に停止した → 描き直して、理由を表示する" || fail "取得中に停止した → 描き直して、理由を表示する" "$out"
+    [[ "$out" != *"16:30/7本"* ]] && pass "本数・期限の更新だけでは、描き直さない" || fail "本数・期限の更新だけでは、描き直さない" "$out"
+    n=$(printf '%s\n' "$out" | grep -c ">> LAUNCHER <<")
+    assert_equals "$n" "2" "描き直しは 1 回だけ（停止したあとは、描き直さない）"
+    teardown "$td" "$mb"
+}
+test_apexlog_collecting_refresh
+
+# ------------------------------------------------------------------------------
 # 今の状況の表示と、次の目安（処理の流れ 6）・結果の 1 行（処理の流れ 7）
 #   本物の git の一時リポジトリ（origin は bare）で確かめる（偽の git では、変更の数・追跡先の差を作れないため）
 # ------------------------------------------------------------------------------

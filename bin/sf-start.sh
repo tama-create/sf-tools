@@ -20,7 +20,10 @@
 #      sf が未インストールのとき・GitHub Actions 上では確認しない
 #   2. 接続の確認。環境変数 FORCE_RELOGIN が 1 でなく、.sf/config.json があるときに sf org display --json を実行し、
 #      エイリアスが取れ、組織 ID が 00D で始まれば、接続済みとしてログインを省略する（そのエイリアスを 4 で使う）。
-#      sf org display が失敗した・JSON を読み取れないときは、未接続として扱う
+#      sf org display が失敗した・JSON を読み取れないときは、未接続として扱う。
+#      ただし、connectedStatus が、認証の期限切れ・取り消し（lib/org.sh の org_is_auth_expired）を示すときは、WARNING を出して、
+#      未接続として扱う（sf org display は、認証が切れていても、保存した情報を返して成功するため）。
+#      通信の失敗など、ほかの内容のときは、接続済みとして進む
 #   3. 未接続（または FORCE_RELOGIN=1）のときのログイン:
 #        a. 接続する組織のエイリアスを入力する（空 Enter は再入力。q / EOF で中断）
 #        b. sf alias unset vscodeOrg を実行する（失敗しても続行）
@@ -138,9 +141,16 @@ if [ "$FORCE_RELOGIN" != "1" ] && [ -f ".sf/config.json" ]; then
 
     # エイリアスと本番/Sandbox 組織ID（00D始まり）が取得できた場合は接続済みと判断
     if [ -n "$CURRENT_ALIAS" ] && [ "$CURRENT_ALIAS" != "null" ] && [[ "$CURRENT_ID" == 00D* ]]; then
-        log "INFO" "組織 (${CURRENT_ALIAS}) に接続済みです。"
-        ORG_ALIAS="$CURRENT_ALIAS"
-        SKIP_LOGIN=1
+        # sf org display は、認証の更新に失敗しても、保存した情報を返して成功する。失敗の内容は connectedStatus に入る。
+        #   期限切れ・取り消しと分かるときだけ、ログインし直す（通信の失敗などは、これまでどおり接続済みとして進む）
+        _disp_status=$(json_get "$DISPLAY_JSON" result.connectedStatus) || _disp_status=""  # VAR=$(cmd) のため run 不使用
+        if org_is_auth_expired "$_disp_status"; then
+            log "WARNING" "組織 (${CURRENT_ALIAS}) の認証が切れています。ログインし直してください（q で中断）。"
+        else
+            log "INFO" "組織 (${CURRENT_ALIAS}) に接続済みです。"
+            ORG_ALIAS="$CURRENT_ALIAS"
+            SKIP_LOGIN=1
+        fi
     fi
 fi
 

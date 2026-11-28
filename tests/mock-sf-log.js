@@ -10,7 +10,7 @@
 //   - sf apex get log -n N: 全ユーザーのログの新しい順に N 本を、-d のフォルダに <ID>.log で書く。-i ID: その 1 本
 //   - 日時は「…000+0000」の形で返す
 // 失敗の注入: org.json の fail に「操作:オブジェクト」（例: "create:TraceFlag"・"query:ApexLog"・"getlog"）→ name を書く。
-//   failOnce に書くと、1 回だけ失敗する
+//   failOnce に書くと、1 回だけ失敗する。"query:Organization" は、org.failMessage を、応答の message にする
 // 取得の競合の注入: org.json の injectOnGetLog（ログの配列）を、最初の apex get log -n の直前に、ログに足す
 // 遅れて現れるログ: ログに visibleAt（ミリ秒）があれば、その時刻までは一覧・本文に出ない（処理が終わってから一覧に現れる。
 //   2026-11-24 に開発組織で確かめた。doc/sf-log-design.md 8.3）。拾い直しの検索（LogUserId と StartTime の範囲・新しい順）も解釈する。
@@ -66,6 +66,7 @@ if (cmd === 'org display' && args[2] === 'user') {
 if (cmd === 'data query') {
     const q = opt('--query') || '';
     if (/FROM Organization/.test(q)) {
+        if (failKey('query:Organization')) err(failKey('query:Organization'), org.failMessage);   // failMessage: 認証切れ・通信の失敗の文言の注入
         ok({ records: [{ Id: org.orgId, Name: 'Fake', IsSandbox: false, OrganizationType: org.orgType || 'Developer Edition', TrialExpirationDate: null }], totalSize: 1, done: true });
     }
     let m;

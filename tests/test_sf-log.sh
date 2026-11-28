@@ -24,6 +24,10 @@
 #   7b. 引き継ぎ（2 つのフォルダ）: 後から始めた方が、別の sf-log.sh の TraceFlag を消して作る／古い取得役は止まる（作り直さない）／
 #      改めて始めると取り戻す／引き継がれた側の終了で、相手の設定は消えない／引き継がない: sf-start が終了していた・消せない・
 #      人の DebugLevel の設定・期限切れだけ・設定が消されただけ
+#   7c. 後始末できずに終わったあと: 手元に期限切れの自分の ID があっても引き継ぐ（人の設定なら触らず 10・相手がいなければ延ばす）／
+#      leave は、終了済みの持ち主の印を数えない
+#   7d. 組織の種類を確認できない: 認証切れ → 10（--auto の理由に、ログインし直し方。die には添えない）／読めない → 1（理由に name・
+#      message はログに残し、セッション ID の形は伏せる）
 #   8. begin（sf-start の前面）:sf を呼ばない・答えがなければ 10・予約名 10・答えが on → 裏で準備して取得役になる／
 #      登録していない印の leave は何もしない／止めたら期限の表示を消す／
 #      裏の準備の失敗 → 1 回だけやり直す（成功したら WARNING を消す・失敗が続けば error・持ち主が死んでいればやり直さない）
@@ -818,6 +822,96 @@ test_takeover_guards() {
     _done
 }
 
+# 後始末できずに終わった（PC の再起動など）あとの状態: 手元に期限切れの自分の ID が残る・死んだ持ち主の印が残る（2026-11-28 に実機で発生）
+_expire_tf() { _org_set "const t=o.traceFlags.find(x=>x.Id==='$1'); t.StartDate=Date.now()-7200000; t.ExpirationDate=Date.now()-1000"; }
+_active_ids() { _org '(o.traceFlags||[]).filter(t=>t.ExpirationDate>Date.now()).map(t=>t.Id).join(",")'; }
+
+test_takeover_after_crash() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] 引き継ぎ: 手元に期限切れの自分の ID が残っている（PC の再起動のあと）${CLR_RST}"
+    _env
+    local dir_a="$TD" dir_b; dir_b=$(setup_force_dir)
+    _run auto on -o dev; _live_mark; _run start -o dev --auto --owner "$MARK"
+    local old_a; old_a=$(_kv .state TRACE_FLAG_ID)
+    _expire_tf "$old_a"; rm -f "$TD/logs/apex/.owners"
+    TD="$dir_b"; _run auto on -o dev; _live_mark; _run start -o dev --auto --owner "$MARK"
+    local id_b; id_b=$(_kv .state TRACE_FLAG_ID)
+
+    # A を起動し直す → 期限切れの自分のものを延ばさず（重なって失敗する）、B のものを引き継ぐ
+    TD="$dir_a"; _live_mark; local ma="$MARK"
+    _run start -o dev --auto --owner "$ma"
+    assert_exit_ok "$RC" "期限切れの自分の ID があっても、引き継いで取り始める"
+    local new_a; new_a=$(_kv .state TRACE_FLAG_ID)
+    [[ -n "$new_a" && "$new_a" != "$old_a" && "$new_a" != "$id_b" ]] && pass "新しい TraceFlag を作る" || fail "新しい TraceFlag を作る" "old=${old_a} B=${id_b} new=${new_a}"
+    assert_equals "$(_active_ids)" "$new_a" "有効な TraceFlag は、新しいものだけ"
+    assert_equals "$(_kv .status TAKEOVER)" "1" "引き継ぎの印を書く"
+
+    # 相手が人の設定なら、触らずに 10（理由を書く。延長の失敗にしない）
+    _expire_tf "$new_a"; _tf 7tf000000000931AAA USER_DEBUG 3600
+    _run start -o dev --auto --owner "$ma"
+    assert_equals "$RC" "10" "期限切れの自分の ID + 人の有効な設定 → 10"
+    _has "$(_kv .status REASON)" "sf-tools 以外のログ設定があるため" "理由を書く"
+    assert_equals "$(_active_ids)" "7tf000000000931AAA" "人の設定に触れない"
+
+    # 相手がいなければ、自分のものを延ばす（これまでどおり）
+    _org_set "o.traceFlags=o.traceFlags.filter(t=>t.Id!=='7tf000000000931AAA')"
+    _run start -o dev --auto --owner "$ma"
+    assert_exit_ok "$RC" "相手がいない → 取り始める"
+    assert_equals "$(_active_ids)" "$new_a" "相手がいない → 期限切れの自分のものを延ばす"
+    rm -rf "$dir_b"
+    _done
+}
+
+test_leave_dead_owners() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] leave: 終了済みの持ち主の印は数えない${CLR_RST}"
+    _env
+    _run auto on -o dev; _live_mark; local m1="$MARK"
+    _run start -o dev --auto --owner "$m1"
+    local d1 d2; bash -c 'exit 0' & d1=$!; wait "$d1"; bash -c 'exit 0' & d2=$!; wait "$d2"
+    _live_mark; local m2="$MARK"
+    _run start -o dev --auto --owner "$m2"
+    printf '%s:1:dead1\n%s:1:dead2\n' "$d1" "$d2" >> "$TD/logs/apex/.owners"
+
+    _run leave --owner "$m2"
+    _has "$OUT" "残り 1 件" "生きている持ち主だけを数える"
+    assert_file_not_contains "$TD/logs/apex/.owners" "dead1" "終了済みの印は、一覧から除く"
+    assert_equals "$(_tf_count)" "1" "生きている持ち主がいる → TraceFlag は残る"
+
+    printf '%s:1:dead1\n%s:1:dead2\n' "$d1" "$d2" >> "$TD/logs/apex/.owners"
+    _run leave --owner "$m1"
+    assert_exit_ok "$RC" "最後の leave が成功する"
+    assert_equals "$(_tf_count)" "0" "残りが終了済みの印だけ → TraceFlag を消す"
+    assert_file_not_exists "$TD/logs/apex/.owners" "残りが終了済みの印だけ → 一覧を消す"
+    _done
+}
+
+test_org_check_failure() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] start: 組織の種類を確認できないとき（認証切れ・読めない）${CLR_RST}"
+    _env
+    _run auto on -o dev
+    # 認証の期限切れ → 取らない（理由と、ログインし直し方）
+    _org_set "o.fail={'query:Organization':'Error'}; o.failMessage='Unable to refresh session due to: Error authenticating with the refresh token due to: expired access/refresh token'"
+    _run start -o dev --auto
+    assert_equals "$RC" "10" "認証切れ → 10（やり直さない）"
+    _has "$(_kv .status REASON)" "認証が切れているため" "認証切れ → 理由に書く"
+    _has "$(_kv .status REASON)" "SwitchOrg" "認証切れ（--auto）→ ログインし直し方を添える"
+    assert_file_contains "$TD/sf-tools/logs/sf-log.log" "expired access/refresh token" "認証切れ → sf の応答の message を、ログに残す"
+    assert_equals "$(_tf_count)" "0" "認証切れ → TraceFlag を作らない"
+    _run start -o dev -y
+    assert_exit_fail "$RC" "認証切れ（手動）→ 中断"
+    _has "$OUT" "認証が切れているため" "認証切れ（手動）→ 理由を表示する"
+    _hasnt "$OUT" "SwitchOrg" "認証切れ（手動）→ die に、復旧の案内を含めない"
+
+    # 通信の失敗など → 失敗（1。裏の準備はやり直す）。理由に name を書き、セッション ID の形の文字列は伏せる
+    _org_set "o.fail={'query:Organization':'RequestError'}; o.failMessage='getaddrinfo ENOTFOUND login.example 00D000000000001!AQEAQsecret.value_1'"
+    _run start -o dev --auto
+    assert_equals "$RC" "1" "読めない → 1"
+    _has "$(_kv .status REASON)" "組織の情報を読めません: RequestError" "読めない → 理由に name を書く"
+    assert_file_contains "$TD/sf-tools/logs/sf-log.log" "getaddrinfo ENOTFOUND" "読めない → message をログに残す"
+    assert_file_not_contains "$TD/sf-tools/logs/sf-log.log" "AQEAQsecret" "セッション ID の形の文字列は、ログに残さない"
+    assert_equals "$(_tf_count)" "0" "読めない → TraceFlag を作らない"
+    _done
+}
+
 test_register_owner() {
     echo ""; echo -e "${CLR_HEAD}[TEST] start --auto --owner: 後始末の最中${CLR_RST}"
     _env
@@ -1193,6 +1287,9 @@ test_collect_stops
 test_collect_extend
 test_takeover
 test_takeover_guards
+test_takeover_after_crash
+test_leave_dead_owners
+test_org_check_failure
 test_register_owner
 test_begin
 test_begin_retry

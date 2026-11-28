@@ -24,7 +24,7 @@ prepare_org() {
         org_local_release_check "$TARGET_ORG" || rc=$?  # run 不使用: 戻り値で分岐する（run は、戻り値を変える）
         case "$rc" in
             1) finish_auto_or_die 10 "${TARGET_ORG} は本番組織のため" ;;
-            2) finish_auto_or_die 10 "${TARGET_ORG} の組織の種類を確認できないため" ;;
+            2) org_check_failed ;;
         esac
     fi
     j=$(run sf org display user --target-org "$TARGET_ORG" --json) || finish_auto_or_die 1 "ユーザーの情報を取得できません（$(sf_err_name "$j")）"
@@ -32,6 +32,26 @@ prepare_org() {
     ORG_ID=$(json_get "$j" result.orgId) || ORG_ID=""  # VAR=$(cmd) のため run 不使用
     [[ "$USER_ID" =~ $ID_RE ]] || finish_auto_or_die 1 "ユーザー ID の形が正しくありません"
     [[ "$ORG_ID" =~ $ID_RE ]] || finish_auto_or_die 1 "組織 ID の形が正しくありません"
+}
+
+# 組織の種類を確認できないときの終わり方（戻らない）。どの場合も、ログは取らない（確認できない組織では取らない）。
+#   理由が分かるように分ける:
+#     認証の期限切れ・取り消し → 10（やり直しても直らない。--auto の理由には、ログインし直し方を添える。die には添えない）
+#     組織の情報を読めない（通信・sf の一時的な失敗など） → 1（裏の準備は、30 秒後に 1 回だけやり直す）
+#     読めたが、種類を判定できない → 10
+#   読めないときは、sf の応答の name と message の先頭を、sf-log.log に残す（セッション ID の形の文字列は伏せる）
+org_check_failed() {
+    local name msg hint=""
+    [[ -n "$ORG_READ_ERR" ]] || finish_auto_or_die 10 "${TARGET_ORG} の組織の種類を確認できないため"
+    name=$(sf_err_name "$ORG_READ_ERR")  # VAR=$(cmd) のため run 不使用
+    msg=$(json_get "$ORG_READ_ERR" message 2>/dev/null) || msg=""  # VAR=$(cmd) のため run 不使用
+    msg=$(printf '%s' "$msg" | tr '\r\n' '  ' | sed -E 's/00D[A-Za-z0-9]{12,15}![A-Za-z0-9._]+/***/g')  # VAR=$(cmd) のため run 不使用
+    note_warn "組織の情報を読めません（${TARGET_ORG}・${name}）: ${msg:0:200}"
+    if org_is_auth_expired "$ORG_READ_ERR"; then
+        [[ $AUTO -eq 1 ]] && hint="。ログインし直しは、ランチャーの SwitchOrg"
+        finish_auto_or_die 10 "${TARGET_ORG} の認証が切れているため${hint}"
+    fi
+    finish_auto_or_die 1 "${TARGET_ORG} の組織の種類を確認できないため（組織の情報を読めません: ${name}）"
 }
 
 # ------------------------------------------------------------------------------
@@ -153,8 +173,10 @@ ensure_traceflag() {
         if [[ "$type" == "USER_DEBUG" && "$state" == "active" ]]; then other_ids+=("$id"); other_exp+=("$ex"); other_dl+=("$dl"); fi
     done <<< "$tsv"
 
-    # a. 自分が作ったもの → 延ばす
-    if [[ $found_mine -eq 1 ]]; then
+    # a. 自分が作ったもの → 延ばす。ただし、ほかに有効な USER_DEBUG があるときは、延ばさずに b へ
+    #    （手元に期限切れの自分の ID が残ったまま（PC の再起動など）、別の場所が取り始めていると、延ばすと期間が重なって、
+    #      FIELD_INTEGRITY_EXCEPTION になり、引き継げない。2026-11-28 に実機で発生）
+    if [[ $found_mine -eq 1 && ${#other_ids[@]} -eq 0 ]]; then
         TF_EXPIRES=$(aj time add "$now" --sec $((HOURS * 3600)))
         j=$(run sf data update record --use-tooling-api --sobject TraceFlag --record-id "$mine" --target-org "$TARGET_ORG" --json \
             --values "DebugLevelId=${DL_ID} StartDate=${now} ExpirationDate=${TF_EXPIRES}") \

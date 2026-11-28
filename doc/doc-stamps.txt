@@ -5,8 +5,8 @@
 # 文書を足したら、その文書の基になるコードを、ここに足す（- のままで足し、文書を読み直してから --update する）。
 
 site/reference/commands-dev.html | bin/sf-job.sh | 2680601830-8297 | 1e2702a
-site/reference/commands-dev.html | bin/sf-start.sh | 4059323224-7863 | dffb69c
-site/reference/commands-dev.html | phases/start/launcher.sh | 1863764710-11164 | dffb69c
+site/reference/commands-dev.html | bin/sf-start.sh | 1567856551-8257 | d081347
+site/reference/commands-dev.html | phases/start/launcher.sh | 2188090601-11400 | d081347
 site/reference/commands-dev.html | bin/sf-check.sh | 3392061729-7193 | 1e2702a
 site/reference/commands-dev.html | bin/sf-dryrun.sh | 2320821728-2196 | 1e2702a
 site/reference/commands-dev.html | bin/sf-release.sh | 4110860491-11491 | 1e2702a
@@ -16,7 +16,7 @@ site/reference/commands-dev.html | bin/sf-pr.sh | 3306511853-8907 | 1e2702a
 site/reference/commands-dev.html | bin/sf-promote-check.sh | 1332322017-5975 | 1e2702a
 site/reference/commands-dev.html | bin/sf-switch-org.sh | 1643247863-2451 | 1e2702a
 site/reference/commands-dev.html | bin/sf-hook.sh | 2813268542-3264 | 1e2702a
-site/reference/commands-dev.html | bin/sf-log.sh | 26583868-24390 | dffb69c
+site/reference/commands-dev.html | bin/sf-log.sh | 4037022864-25593 | d081347
 site/reference/commands-dev.html | bin/sf-unhook.sh | 756720157-1896 | 1e2702a
 
 site/reference/commands-auto.html | bin/sf-refresh.sh | 3748795163-8693 | b9b100a
@@ -29,7 +29,7 @@ site/reference/target-files.html | bin/sf-check.sh | 3392061729-7193 | 1e2702a
 site/reference/target-files.html | bin/sf-release.sh | 4110860491-11491 | 1e2702a
 
 site/guide/basics.html | bin/sf-job.sh | 2680601830-8297 | 05e9175
-site/guide/basics.html | bin/sf-start.sh | 4059323224-7863 | dffb69c
+site/guide/basics.html | bin/sf-start.sh | 1567856551-8257 | d081347
 
 site/guide/daily.html | bin/sf-dryrun.sh | 2320821728-2196 | 1e2702a
 site/guide/daily.html | bin/sf-deploy.sh | 3742126846-4982 | 1e2702a
@@ -58,7 +58,7 @@ site/admin/verify.html | lib/typecheck.js | 2804243711-5156 | 05e9175
 
 site/guide/install.html | bin/sf-update-cli.sh | 2791300717-8229 | 05e9175
 site/guide/install.html | bin/sf-refresh.sh | 3748795163-8693 | 05e9175
-site/guide/install.html | bin/sf-start.sh | 4059323224-7863 | dffb69c
+site/guide/install.html | bin/sf-start.sh | 1567856551-8257 | d081347
 
 site/admin/troubleshooting.html | bin/sf-job.sh | 2680601830-8297 | b9b100a
 site/admin/troubleshooting.html | bin/sf-push.sh | 485829100-5735 | b9b100a
@@ -67,7 +67,7 @@ site/admin/troubleshooting.html | bin/sf-deploy.sh | 3742126846-4982 | b9b100a
 site/admin/troubleshooting.html | bin/sf-update-workflows.sh | 651806082-6226 | b9b100a
 site/admin/troubleshooting.html | bin/sf-project.sh | 952302030-24353 | b9b100a
 
-site/reference/commands.html | phases/start/launcher.sh | 1863764710-11164 | dffb69c
+site/reference/commands.html | phases/start/launcher.sh | 2188090601-11400 | d081347
 site/reference/commands.html | bin/sf-job.sh | 2680601830-8297 | b9b100a
 site/reference/commands.html | bin/sf-project.sh | 952302030-24353 | b9b100a
 site/reference/commands.html | bin/sf-update-secret.sh | 1262693024-6313 | b9b100a
@@ -79,9 +79,9 @@ site/reference/commands.html | phases/init/add_tier.sh | 355713427-7575 | b9b100
 site/reference/commands.html | phases/init/remove_tier.sh | 1325496521-6860 | b9b100a
 site/reference/commands.html | phases/init/reconnect.sh | 2543603392-4690 | b9b100a
 site/index.html | bin/sf-job.sh | 2680601830-8297 | b9b100a
-site/index.html | phases/start/launcher.sh | 1863764710-11164 | dffb69c
+site/index.html | phases/start/launcher.sh | 2188090601-11400 | d081347
 site/index.html | bin/sf-project.sh | 952302030-24353 | b9b100a
-site/guide/glossary.html | phases/start/launcher.sh | 1863764710-11164 | dffb69c
+site/guide/glossary.html | phases/start/launcher.sh | 2188090601-11400 | d081347
 site/guide/glossary.html | bin/sf-job.sh | 2680601830-8297 | 05e9175
 site/guide/glossary.html | bin/sf-release.sh | 4110860491-11491 | 05e9175
 site/design/cicd.html | bin/sf-metasync.sh | 1724051175-25493 | b9b100a

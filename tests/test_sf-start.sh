@@ -238,6 +238,36 @@ test_sf_cli_abort() {
 
 # デバッグログ（sf-log.sh）とのつなぎ: begin に印を渡し、登録したときだけ、終了時に同じ印で leave する（doc/sf-log-design.md 5 章）
 #   sf-log.sh は、呼ばれた引数を記録するだけの偽物にする（終了コードは SFLOG_RC）
+test_expired_auth() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] 接続の確認: 認証の期限切れ（sf org display は成功し、connectedStatus に内容が入る）${CLR_RST}"
+    local td mb mh out ec st
+    setup_std_env td mb mh
+    create_all_mocks "$mb"
+    mkdir -p "$mh/sf-tools/bin" "$mh/sf-tools/phases/start"
+    printf '#!/bin/bash\nexit 0\n' > "$mh/sf-tools/phases/start/launcher.sh"
+    echo '{"target-org":"testorg"}' > "$td/.sf/config.json"
+
+    # 期限切れ → 接続済みとみなさず、ログインし直しへ（エイリアスの質問で q → 中断）
+    export MOCK_SF_ORG_JSON='{"result":{"alias":"testorg","id":"00D000000000001AAA","connectedStatus":"Unable to refresh session due to: Error authenticating with the refresh token due to: expired access/refresh token"}}'
+    out=$(cd "$td" && echo "q" | HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-start.sh" 2>&1); ec=$?
+    assert_output_contains "$out" "認証が切れています" "期限切れ → 知らせる"
+    assert_output_not_contains "$out" "に接続済みです" "期限切れ → 接続済みとしない"
+    # エイリアスの質問文は、標準入力が端末でないと表示されないため、質問の q で中断したことで確かめる
+    assert_output_contains "$out" "中断しました" "期限切れ → ログインし直し（エイリアスの質問）へ進み、q で中断する"
+    assert_exit_fail "$ec" "期限切れで q → 中断する"
+    assert_file_not_contains "$MOCK_CALL_LOG" "sf org login web" "期限切れで q → ログインは始めない"
+
+    # 通信の失敗・正常 → これまでどおり接続済み
+    for st in "getaddrinfo ENOTFOUND login.salesforce.com" "Unable to refresh session due to: getaddrinfo ENOTFOUND" "Connected"; do
+        export MOCK_SF_ORG_JSON="{\"result\":{\"alias\":\"testorg\",\"id\":\"00D000000000001AAA\",\"connectedStatus\":\"${st}\"}}"
+        out=$(cd "$td" && HOME="$mh" PATH="$mb:$PATH" bash "$SF_TOOLS_DIR/bin/sf-start.sh" 2>&1 < /dev/null); ec=$?
+        assert_exit_ok "$ec" "connectedStatus = ${st} → 終了コード 0"
+        assert_output_contains "$out" "に接続済みです" "connectedStatus = ${st} → 接続済み"
+    done
+    unset MOCK_SF_ORG_JSON
+    teardown "$td" "$mb" "$mh"
+}
+
 test_sf_log_begin_and_leave() {
     echo ""; echo -e "${CLR_HEAD}[TEST] デバッグログ（sf-log.sh begin / leave）${CLR_RST}"
     local td mb mh out owner
@@ -295,5 +325,6 @@ test_ai_guide_check
 test_sf_cli_abort
 test_outside_force_dir
 test_sf_log_begin_and_leave
+test_expired_auth
 
 print_summary

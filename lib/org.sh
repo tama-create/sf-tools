@@ -19,7 +19,9 @@
 #   org_validate_url URL                  ... Salesforce のログイン先として正しい URL か（https かつ salesforce.com / force.com）
 #   org_choose_login_url VAR LABEL TIER [SUFFIX]
 #                                            ... ログイン先（URL）を、3 択で選ぶ。種類ではなく、URL で決める（F2）
-#   org_read_info ALIAS                   ... ログイン済みの組織から、ID・名前・種類を読み取る（ORG_* 変数にセット）
+#   org_read_info ALIAS                   ... ログイン済みの組織から、ID・名前・種類を読み取る（ORG_* 変数にセット。
+#                                             失敗したら、sf の出力を ORG_READ_ERR に残す）
+#   org_is_auth_expired TEXT              ... sf の出力が、保存した認証の期限切れ・取り消しを示すか
 #   org_kind                              ... ORG_* から、production / sandbox / developer / trial / unknown を出力する
 #   org_kind_label KIND                   ... 種類の表示名
 #   org_guard TIER LABEL                  ... 本番は main のみ（F8）。違反・判定不能（main 以外）は戻り値 2
@@ -170,13 +172,25 @@ org_find_username_by_id() {
 # ログイン済みの組織から、ID・名前・種類を読み取る。引数: エイリアス（またはユーザー名）
 #   sf data query（Organization を 1 件）を実行し、org_parse_info で ORG_* にセットする
 #   戻り値: 0=読み取れた / 1=読み取れなかった（権限不足・通信の失敗など。推測しない）
+#   読み取れなかったときは、sf の出力を ORG_READ_ERR に残す（呼び出し側が、理由を調べて表示する。読み取れたら空）
+ORG_READ_ERR=""
 org_read_info() {
     local out
-    ORG_ID=""; ORG_NAME=""; ORG_IS_SANDBOX=""; ORG_EDITION=""; ORG_TRIAL_EXPIRES=""
+    ORG_ID=""; ORG_NAME=""; ORG_IS_SANDBOX=""; ORG_EDITION=""; ORG_TRIAL_EXPIRES=""; ORG_READ_ERR=""
     out=$(sf data query \
         --query "SELECT Id, Name, IsSandbox, OrganizationType, TrialExpirationDate FROM Organization LIMIT 1" \
-        --target-org "$1" --json 2>/dev/null) || return 1  # VAR=$(cmd) のため run 不使用（出力の取得。成否は終了コードで判定）
-    org_parse_info "$out"
+        --target-org "$1" --json 2>/dev/null) || { ORG_READ_ERR="$out"; return 1; }  # VAR=$(cmd) のため run 不使用（出力の取得。成否は終了コードで判定）
+    org_parse_info "$out" || { ORG_READ_ERR="$out"; return 1; }
+}
+
+# sf の出力（--json の応答・connectedStatus の文字列）が、保存した認証の期限切れ・取り消しを示すか。引数: 文字列
+#   通信の失敗などと分けるため、認証が使えないと分かる語だけを見る（OAuth の応答の語は、利用者の言語によらず英語。
+#   sf が付ける「Unable to refresh session」は、通信の失敗でも付くことがあるため、それだけでは判定しない）
+org_is_auth_expired() {
+    case "$1" in
+        *"expired access/refresh token"*|*invalid_grant*|*RefreshTokenAuthError*) return 0 ;;
+    esac
+    return 1
 }
 
 # JWT 接続テストと、組織情報の読み取りを、同じ一時的なホームフォルダの中で行う（sf-update-secret.sh 用。

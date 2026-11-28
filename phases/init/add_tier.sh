@@ -105,12 +105,9 @@ check_force_dir || die "force-* ディレクトリ内で実行してください
 BRANCHES_FILE="${PWD}/sf-tools/config/branches.txt"
 BRANCHES_REL="sf-tools/config/branches.txt"
 
-remote_url=$(git remote get-url origin 2>/dev/null) || die "git remote を取得できません。"  # VAR=$(cmd) のため run 不使用
-# GitHub の URL だけを受け付ける（parse_github_remote: lib/project.sh。出力は「owner repo」）。GitHub 以外は die
-_owner_repo=$(parse_github_remote "$remote_url") \
-    || die "origin が GitHub のリポジトリではありません: $(git_origin_redacted .)"  # VAR=$(cmd) のため run 不使用
-REPO_NAME="${_owner_repo#* }"
-REPO_FULL_NAME="${_owner_repo%% *}/${REPO_NAME}"
+# origin から「owner/repo」を取り出す（require_origin_repo: lib/project.sh。origin がない・GitHub 以外は die）
+require_origin_repo REPO_FULL_NAME
+REPO_NAME="${REPO_FULL_NAME#*/}"
 
 # ------------------------------------------------------------------------------
 # 3. 追加 tier のバリデーション

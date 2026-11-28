@@ -288,10 +288,7 @@ if [[ "${GITHUB_ACTIONS:-false}" == "true" ]]; then
     fi
     log "INFO" "接続先組織: ${TARGET_ORG}"
 else
-    _origin_url=$(git remote get-url origin 2>/dev/null) || _origin_url=""  # VAR=$(cmd) のため run 不使用
-    _repo_pair=$(parse_github_remote "$_origin_url") || _repo_pair=""        # VAR=$(cmd) のため run 不使用
-    [[ -n "$_repo_pair" ]] || die "origin の URL から、GitHub のリポジトリを特定できません: ${_origin_url:-（origin なし）}"
-    _repo_full="${_repo_pair%% *}/${_repo_pair##* }"
+    require_origin_repo _repo_full   # origin から「owner/repo」（lib/project.sh。取れなければ die。URL は伏せて出す）
     REPO_FULL="$_repo_full"
     _main_org_id=$(gh variable get SF_ORG_ID_PROD -R "$_repo_full" 2>/dev/null | tr -d '\r') || _main_org_id=""  # VAR=$(cmd) のため run 不使用
     [[ -n "$_main_org_id" ]] || die "GitHub の Variable SF_ORG_ID_PROD を読み取れませんでした（${_repo_full}）。"

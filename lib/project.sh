@@ -13,6 +13,8 @@
 #   resolve_job_identity O P  ... sf-job 用: 同上（引数・カレントの下のクローンの git remote・対話）
 #   prompt_project_identity MODE ... オーナーと XXXX を、対話で決める（MODE: init / job。上の 2 つが使う）
 #   parse_github_remote URL   ... GitHub の URL から「owner repo」を取り出す（HTTPS / SSH）
+#   origin_repo VAR [DIR]     ... DIR（既定: カレント）の origin から「owner/repo」を取り出して VAR に入れる（取れなければ戻り値 1・2）
+#   require_origin_repo VAR   ... origin_repo の、取れなければ die する版（カレントの origin。URL は伏せて表示する）
 #   normalize_project_name X  ... 入力から XXXX（force- の後ろ）を取り出す（force- が付いていれば除く。不正なら戻り値 1）
 #   discover_clones DIR       ... DIR/*/force-*/ のクローンの git remote から「owner repo」を取り出す
 #   gh_owner_candidates MODE  ... gh のログインから、オーナーの候補を出す（MODE: admin / member）
@@ -344,6 +346,36 @@ parse_github_remote() {
     echo "${rest%%/*} ${rest##*/}"
 }
 
+# origin_repo - そのフォルダの origin の URL から、GitHub の「owner/repo」を取り出して、変数に入れる
+#   引数: 変数名 [フォルダ（省略時はカレント）]。$( ) の中で呼ばない（変数に入れて返す。set_var）
+#   戻り値: 0 = 入れた / 1 = origin がない（URL を読めない）/ 2 = GitHub のリポジトリではない・形が違う（parse_github_remote）。
+#   0 以外のとき、変数は空。URL には認証情報が入っていることがあるため、URL そのものは返さない（表示は git_origin_redacted）。
+#   2026-11-28 に、9 か所で同じ形に書いていた「git remote get-url origin → parse_github_remote → owner/repo」をまとめた
+origin_repo() {
+    local _or_url _or_pair
+    set_var "$1" ""
+    # フォルダの指定がないときは -C を付けない（今までの呼び出しと同じ形にする。テストの偽の git も、この形で受ける）
+    if [[ -n "${2:-}" ]]; then
+        _or_url=$(git -C "$2" remote get-url origin 2>/dev/null) || return 1   # VAR=$(cmd) のため run 不使用
+    else
+        _or_url=$(git remote get-url origin 2>/dev/null) || return 1           # VAR=$(cmd) のため run 不使用
+    fi
+    _or_pair=$(parse_github_remote "$_or_url") || return 2                     # VAR=$(cmd) のため run 不使用
+    set_var "$1" "${_or_pair%% *}/${_or_pair##* }"
+}
+
+# require_origin_repo - origin_repo の、取り出せなければ die する版（カレントの origin）
+#   引数: 変数名。メッセージは 2 種類（origin がない／GitHub のリポジトリではない。URL は *** で伏せて出す）
+require_origin_repo() {
+    local _ror_rc=0
+    origin_repo "$1" || _ror_rc=$?
+    case $_ror_rc in
+        0) return 0 ;;
+        1) die "git remote（origin）の URL を取得できません。" ;;
+        *) die "origin が GitHub のリポジトリではありません: $(git_origin_redacted .)" ;;
+    esac
+}
+
 # normalize_project_name - 入力から XXXX（リポジトリ名 force-XXXX の、force- の後ろ）を取り出す
 #   前後の空白を除き、先頭の「force-」（大文字小文字を問わない）が付いていれば除く（force-force-XXXX を防ぐ）。
 #   使える文字: 英数字・ハイフン・アンダースコア・ピリオド。区切り（- _ .）は、英数字の間に、1 つだけ（連続・先頭・末尾は不可）。
@@ -367,12 +399,11 @@ normalize_project_name() {
 #   force- で始まる GitHub のリポジトリだけを対象にする（無関係なリポジトリは、無視する）。1 行に 1 つ、LC_ALL=C の sort -u で
 #   重複を除く（大文字と小文字だけが違うものは、別の行のまま。呼び出し側が、区別せずに扱う）
 discover_clones() {
-    local d u parsed
+    local d parsed
     for d in "$1"/*/force-*; do
         [[ -e "$d/.git" ]] || continue
-        u=$(git -C "$d" remote get-url origin 2>/dev/null) || continue  # VAR=$(cmd) のため run 不使用
-        parsed=$(parse_github_remote "$u") || continue                  # VAR=$(cmd) のため run 不使用
-        case "${parsed##* }" in force-?*) echo "$parsed" ;; esac
+        origin_repo parsed "$d" || continue   # origin がない・GitHub 以外は、飛ばす
+        case "${parsed#*/}" in force-?*) echo "${parsed%%/*} ${parsed#*/}" ;; esac   # 出力は「owner repo」（空白区切り）
     done | LC_ALL=C sort -u  # run 不使用: 出力を、そのまま一覧として返す（パイプの部品）
 }
 
@@ -906,12 +937,11 @@ push_admin_branch() {
 # 【比較】   大文字と小文字は、区別しない（GitHub は、区別しない）
 # 【戻り値】 0 = 一致する / 1 = 一致しない（クローンではない・origin がない・GitHub 以外・別のリポジトリ）
 clone_matches_repo() {
-    local dir="${1:-}" owner="${2:-}" repo="${3:-}" url pair want
+    local dir="${1:-}" owner="${2:-}" repo="${3:-}" pair want
     [[ -n "$dir" && -n "$owner" && -n "$repo" && -d "$dir" ]] || return 1
-    url=$(git -C "$dir" remote get-url origin 2>/dev/null) || return 1  # VAR=$(cmd) のため run 不使用
-    pair=$(parse_github_remote "$url") || return 1                         # VAR=$(cmd) のため run 不使用
+    origin_repo pair "$dir" || return 1                                    # origin がない・GitHub 以外は、一致しない
     pair=$(printf '%s' "$pair" | tr 'A-Z' 'a-z')                           # VAR=$(cmd) のため run 不使用
-    want=$(printf '%s %s' "$owner" "$repo" | tr 'A-Z' 'a-z')               # VAR=$(cmd) のため run 不使用
+    want=$(printf '%s/%s' "$owner" "$repo" | tr 'A-Z' 'a-z')               # VAR=$(cmd) のため run 不使用
     [[ "$pair" == "$want" ]]
 }
 

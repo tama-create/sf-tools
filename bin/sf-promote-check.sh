@@ -164,9 +164,12 @@ command -v git >/dev/null 2>&1 || _cannot_judge "git がありません。"  # �
 command -v gh  >/dev/null 2>&1 || _cannot_judge "gh がありません。"   # 存在確認のため run 不使用
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 || _cannot_judge "Git リポジトリの中ではありません。"  # 条件チェック
 
-ORIGIN_URL=$(git remote get-url origin 2>/dev/null) || _cannot_judge "origin の URL を取得できません。"  # VAR=$(cmd) のため run 不使用
-OWNER_REPO=$(parse_github_remote "$ORIGIN_URL") || _cannot_judge "origin が GitHub のリポジトリではありません。"  # VAR=$(cmd) のため run 不使用
-REPO="${OWNER_REPO% *}/${OWNER_REPO#* }"
+_or_rc=0; origin_repo REPO || _or_rc=$?   # origin から「owner/repo」（lib/project.sh。1 = origin なし / 2 = GitHub 以外）
+case $_or_rc in
+    0) ;;
+    1) _cannot_judge "origin の URL を取得できません。" ;;
+    *) _cannot_judge "origin が GitHub のリポジトリではありません。" ;;
+esac
 REPO_LC=$(printf "%s" "$REPO" | tr "[:upper:]" "[:lower:]")  # VAR=$(cmd) のため run 不使用（GitHub の名前は、大文字・小文字を区別しない）
 _lc() { printf "%s" "$1" | tr "[:upper:]" "[:lower:]"; }
 

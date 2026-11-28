@@ -82,7 +82,7 @@
 | `test_sf-deploy.sh` | sf-deploy.sh |
 | `test_sf-dryrun.sh` | sf-dryrun.sh |
 | `test_sf-job.sh` | sf-job.sh（任意の作業フォルダ・`--owner` / `--project`・クローンの git remote・同名ジョブの重複判定・`--name`・AI 操作（`job.existing`・`job.create`・sf-start を呼ばない・gh auth login を呼ばない）を含む） |
-| `test_project-identity.sh` | lib/project.sh のオーナー・XXXX の決め方（`parse_github_remote` / `normalize_project_name` / `discover_clones` / `gh_owner_candidates` / `resolve_init_identity` / `resolve_job_identity`） |
+| `test_project-identity.sh` | lib/project.sh のオーナー・XXXX の決め方（`parse_github_remote` / `origin_repo` / `require_origin_repo` / `normalize_project_name` / `discover_clones` / `gh_owner_candidates` / `resolve_init_identity` / `resolve_job_identity`） |
 | `test_sf-pr.sh` | sf-pr.sh（判定は偽の `sf-promote-check.sh`（`SF_PROMOTE_CHECK_CMD`）で差し替える。表示・終わり方・PR の作成画面・止まる条件・`--create`（gh pr create の引数・オプションの誤り・origin の形）） |
 | `test_sf-promote-check.sh` | sf-promote-check.sh（一方通行の確認。本物の git（bare の origin）と偽の gh（PR・commit status・実行）で、R0〜R3・印を信じる条件・`--only`・`--plan`・`--json`。リポジトリのフォルダは `force-t`） |
 | `test_launcher.sh` | phases/start/launcher.sh（`sf-start.sh` が開くメニュー。`common.sh` を読み込まない standalone のランチャー） |
@@ -228,6 +228,8 @@ source 時の動作: Bash 3.2 未満なら `exit 1` → `LOG_FILE` の確認 →
 | `resolve_job_identity` | `resolve_job_identity OWNER XXXX` | sf-job 用: 引数 → カレントの下のクローンの git remote（`discover_clones`）→ 対話。値が不正なら `die` |
 | `prompt_project_identity` | `prompt_project_identity init\|job` | 上の 2 つが使う対話（オーナーの候補が 0 件なら入力・1 件ならそれ・複数なら番号で選ぶ。XXXX は入力 → 確認。init は、すでにあるリポジトリ名を断る（`admin/` に同じリポジトリのクローン・状態ファイルがあれば受け付ける）） |
 | `parse_github_remote` | `parse_github_remote URL` | GitHub の URL（HTTPS / SSH / `ssh://`）から `owner repo` を取り出す（GitHub でない・2 階層でなければ戻り値 1） |
+| `origin_repo` | `origin_repo VAR [DIR]` | DIR（既定: カレント）の origin から `owner/repo` を VAR に入れる（1 = origin なし / 2 = GitHub 以外。URL は返さない）。`$( )` の中で呼ばない |
+| `require_origin_repo` | `require_origin_repo VAR` | `origin_repo` の、取れなければ die する版（メッセージは 2 種類。URL は `git_origin_redacted` で伏せる）。2026-11-28 に、9 か所の同じ処理をまとめた |
 | `normalize_project_name` | `normalize_project_name X` | 入力から XXXX を取り出す（前後の空白と先頭の `force-` を除く。使える文字: 英数字・`-`・`_`・`.`。区切りは英数字の間に 1 つだけ・50 文字まで・末尾の `.git` は不可。不正なら戻り値 1） |
 | `discover_clones` | `discover_clones DIR` | `DIR/*/force-*/` のクローンの `git remote` から `owner repo` を出す（GitHub の `force-*` だけ） |
 | `gh_owner_candidates` | `gh_owner_candidates admin\|member` | `gh` のログインから、オーナー候補を出す（組織 → 自分のアカウント） |
@@ -578,7 +580,7 @@ GitHub Secrets / Variables の JWT 認証情報を再登録する。実行フロ
 
 1. `sf`・`gh`・`git`・`openssl` のどれかがなければ中断（`force-*` 以外での実行は、`lib/common.sh` が source の時点で終了させる）
 2. 赤い警告ボックス（`print_admin_warning`）+ `ask_yn || die`（管理者向け確認。`GITHUB_ACTIONS=true` では表示・確認しない）
-3. git remote（origin）から対象リポジトリ（OWNER/REPO）を自動取得（`parse_github_remote`。取得できなければ中断。URL に認証情報が入ることがあるため、メッセージに URL を出さない）
+3. git remote（origin）から対象リポジトリ（OWNER/REPO）を自動取得（`require_origin_repo`。取得できなければ中断。URL に認証情報が入ることがあるため、メッセージに URL を出さない）
 4. `check_gh_owner` で gh 認証ユーザーを確認（不一致は die。オーナーが組織で、ユーザーがその有効な admin なら通過）
 5. `check_sf_cli --cache`（終了コードが 0 以外なら中断）
 6. メインメニューで操作を選択 `[1-4/q]`（1文字即時選択）:
@@ -731,7 +733,7 @@ sf-project.sh --add-tier develop    # main+staging → main+staging+develop
 
 `add_tier.sh` の処理フロー（正本は `phases/init/add_tier.sh` の冒頭コメント。状態ファイルは読まない）:
 1. `ADD_TIER`（sf-project.sh が export）が空・カレントのフォルダ名が `force-` で始まらなければ die
-2. origin の URL から `REPO_FULL_NAME`・`REPO_NAME` を求める（`parse_github_remote`。GitHub 以外は die）
+2. origin の URL から `REPO_FULL_NAME`・`REPO_NAME` を求める（`require_origin_repo`。GitHub 以外は die）
 3. バリデーション（`git fetch origin main` のあと、**origin/main の** `branches.txt` を `git show` で読んで確認する。作業ツリー（admin など）の branches.txt は origin/main と食い違うことがあり、それで確認すると重複がすり抜けるため）:
    - staging / develop 以外はエラー
    - 対象 tier がすでに `branches.txt` に存在する場合はエラー
@@ -769,7 +771,7 @@ sf-project.sh --add-tier develop    # main+staging → main+staging+develop
 | `.sf-init-XXXX.env` | 入力内容（Phase 2 以降が読む。XXXX = プロジェクト名） | `KEY="値"`（各 Phase と、sf-project.sh の後処理は `source` で読み込む。フェーズループの前の判定は `_kv_value`。権限 600。Windows では効果なし） | 完了時に `*TOKEN_VALUE=` の行を消し、完了の印を付けたあと、**ファイルごと削除する**（最後まで終わったとき。途中で止まったとき・印を付けられなかったときは残る）。別のリポジトリの状態なら、残骸として扱い、最初から |
 | `.sf-init-XXXX.progress` | 進捗（どこまで成功したか。XXXX = プロジェクト名） | `KEY=値`（書き換えに外部コマンドを使わない） | `--only` では書かない。`.sf-init-XXXX.env` がないときも書かない。Phase 1 は、状態を持たないため、記録しない。完了時に、`.sf-init-XXXX.env` と一緒に削除する |
 
-保守用のモード（`add_tier.sh` / `remove_tier.sh` / `reconnect.sh` / `status.sh` / `verify.sh`）は、状態ファイルを読まない（origin の URL から、リポジトリを求める: `parse_github_remote`）。Phase のスクリプトは、`SF_INIT_ENV_FILE` が未設定のとき、`${PWD}/.sf-init.env` を使う。
+保守用のモード（`add_tier.sh` / `remove_tier.sh` / `reconnect.sh` / `status.sh` / `verify.sh`）は、状態ファイルを読まない（origin の URL から、リポジトリを求める: `require_origin_repo`）。Phase のスクリプトは、`SF_INIT_ENV_FILE` が未設定のとき、`${PWD}/.sf-init.env` を使う。
 
 **`.sf-init-XXXX.env` のキー**
 
@@ -886,7 +888,7 @@ sf-project.sh --add-tier develop    # main+staging → main+staging+develop
 
 **オプションの組み合わせ:** `--validate-only`・`--with-objects` は `--components` と一緒でなければ die。`--validate-only` と `--cleanup` は同時に指定できない。ほかの引数は「不明なオプションです」で die。`-h` / `--help` は第 1 引数のときだけ（`sf-project.sh --verify -h` では sf-project.sh のヘルプが出る）。
 
-**フロー:** (1) `GITHUB_ACTIONS` なら中断。force-* の中で実行。origin の URL からリポジトリを求める（`parse_github_remote`。GitHub 以外は die）。`check_gh_owner` (2) 段階の判定: リモートのブランチから（一覧を取得できない・`main` がなければ die。develop + staging があれば 3 層・staging があれば 2 層・それ以外は main のみ。`--components` は develop だけで、develop がなければ die）。リリースの順は develop → staging → main (3) 診断（`diag_run`。対象は (2) で決めた段階だけ）。不足があれば、確認の前に中断 (3b) 検証用と同名のクラスのファイルが、いずれかの段階のブランチに、すでにあれば、中断（`--cleanup` は、対象外）(4) 実行内容の表示（段階ごとの `SF_ORG_NAME_*`・`SF_ORG_KIND_*`・`SF_USERNAME_*`。種類が developer / sandbox / trial 以外は、本番扱いで赤く表示）。`--plan` はここで終了 (5) 確認（`SF_VERIFY_CONFIRMED=1` のときは、聞かない）: 警告ボックスと `wizard_confirm`（Enter / Y で進む。N / q / EOF は中断。入力を最小にするため）。本番扱いの組織があれば、質問の文面で、本番を含むことを明示する（リポジトリ名・`production` の入力は、求めない） (5b) 環境の確認（`--cleanup` では行わない。NG があれば、そこで止める。`wf-metasync` は、手前の 2 つの確認が OK のときだけ起動する）: `SF_TOOLS_BRANCH` が main / development／`~/sf-tools/logs/*.log` に Token・認証 URL（`ghp_` / `github_pat_` / `xoxb-`・`xoxp-` / `force://…`）が残っていない（`_logs_clean`）／`wf-metasync` を `verify_dispatch_workflow` で手動起動 → `verify_wait_run` → `_run_ok`（失敗は 1 回だけ再実行）→ ステップ `Salesforce 組織にログイン`・`自動化ツール（sf-tools）を取得` が success（`--no-metasync` で省略）(6) リリース: main の先頭から `verify-hello-時刻` を API で作り（クラスのファイル 4 つ + `deploy-target.txt` + 空の `remove-target.txt`）、段階ごとに PR → wf-validate → マージ → wf-release（同じコミットのまま。一方通行の確認が通る）。各 PR の前に、実行 ID の基準を覚え、より新しい実行だけを、その PR の実行とする。失敗した実行は、1 回だけ再実行する (7) 削除: main の先頭から `verify-hello-delete-時刻`（クラスのファイルを API で削除 + `remove-target.txt`）を作り、同じ順に各段階へ (7b) 後始末（`_delete_job_branches`）: 今回作ったブランチ（`verify-hello-時刻` / `verify-hello-delete-時刻`。`--components` の名前は下記。`--cleanup` では削除用のみ、`--validate-only` ではリリース用のみ）を、API で削除する。名前が `^verify-(hello|comp)(-delete2?)?-[0-9]{6}$` に合うことと、そのブランチを head とする、開いている PR がない（確認できないときも、ない扱いにしない）ことを確認してから削除する。途中で止めたとき（`exit` の前）は、行わない（調査のために、残す）。削除の失敗は、警告のみで、検証の成否に含めない。PR の履歴は、PR の番号で残る (8) 結果。
+**フロー:** (1) `GITHUB_ACTIONS` なら中断。force-* の中で実行。origin の URL からリポジトリを求める（`require_origin_repo`。GitHub 以外は die）。`check_gh_owner` (2) 段階の判定: リモートのブランチから（一覧を取得できない・`main` がなければ die。develop + staging があれば 3 層・staging があれば 2 層・それ以外は main のみ。`--components` は develop だけで、develop がなければ die）。リリースの順は develop → staging → main (3) 診断（`diag_run`。対象は (2) で決めた段階だけ）。不足があれば、確認の前に中断 (3b) 検証用と同名のクラスのファイルが、いずれかの段階のブランチに、すでにあれば、中断（`--cleanup` は、対象外）(4) 実行内容の表示（段階ごとの `SF_ORG_NAME_*`・`SF_ORG_KIND_*`・`SF_USERNAME_*`。種類が developer / sandbox / trial 以外は、本番扱いで赤く表示）。`--plan` はここで終了 (5) 確認（`SF_VERIFY_CONFIRMED=1` のときは、聞かない）: 警告ボックスと `wizard_confirm`（Enter / Y で進む。N / q / EOF は中断。入力を最小にするため）。本番扱いの組織があれば、質問の文面で、本番を含むことを明示する（リポジトリ名・`production` の入力は、求めない） (5b) 環境の確認（`--cleanup` では行わない。NG があれば、そこで止める。`wf-metasync` は、手前の 2 つの確認が OK のときだけ起動する）: `SF_TOOLS_BRANCH` が main / development／`~/sf-tools/logs/*.log` に Token・認証 URL（`ghp_` / `github_pat_` / `xoxb-`・`xoxp-` / `force://…`）が残っていない（`_logs_clean`）／`wf-metasync` を `verify_dispatch_workflow` で手動起動 → `verify_wait_run` → `_run_ok`（失敗は 1 回だけ再実行）→ ステップ `Salesforce 組織にログイン`・`自動化ツール（sf-tools）を取得` が success（`--no-metasync` で省略）(6) リリース: main の先頭から `verify-hello-時刻` を API で作り（クラスのファイル 4 つ + `deploy-target.txt` + 空の `remove-target.txt`）、段階ごとに PR → wf-validate → マージ → wf-release（同じコミットのまま。一方通行の確認が通る）。各 PR の前に、実行 ID の基準を覚え、より新しい実行だけを、その PR の実行とする。失敗した実行は、1 回だけ再実行する (7) 削除: main の先頭から `verify-hello-delete-時刻`（クラスのファイルを API で削除 + `remove-target.txt`）を作り、同じ順に各段階へ (7b) 後始末（`_delete_job_branches`）: 今回作ったブランチ（`verify-hello-時刻` / `verify-hello-delete-時刻`。`--components` の名前は下記。`--cleanup` では削除用のみ、`--validate-only` ではリリース用のみ）を、API で削除する。名前が `^verify-(hello|comp)(-delete2?)?-[0-9]{6}$` に合うことと、そのブランチを head とする、開いている PR がない（確認できないときも、ない扱いにしない）ことを確認してから削除する。途中で止めたとき（`exit` の前）は、行わない（調査のために、残す）。削除の失敗は、警告のみで、検証の成否に含めない。PR の履歴は、PR の番号で残る (8) 結果。
 
 **確認（段階ごと・リリースと削除）:** `<段階> の組織にログイン（JWT）` ステップが success（文言の中立化より前の古い名前 `本番組織` / `ステージング組織` / `開発組織` も候補。`_login_step_names`）／ほかの段階のログインのステップが `skipped`（見つからなければ、注意の表示のみ）／`SF_USERNAME_*` が登録されていて、その値がログに出ている（空は NG）／ログに Hello World のクラス名が出ている。Slack の `ok:true` は、注意の表示のみ（成否に含めない）。確認が NG でも、削除まで進める（組織を元に戻すため）。
 

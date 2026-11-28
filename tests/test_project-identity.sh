@@ -3,7 +3,7 @@
 # test_project-identity.sh - lib/project.sh の「プロジェクトの特定」（オーナーと XXXX）のテスト
 # ==============================================================================
 # 確認すること:
-#   ・parse_github_remote / normalize_project_name / discover_clones / gh_owner_candidates
+#   ・parse_github_remote / origin_repo / require_origin_repo / normalize_project_name / discover_clones / gh_owner_candidates
 #   ・resolve_init_identity: 引数・対話（オーナー候補・XXXX の入力・補助）。フォルダ構成には頼らない
 #   ・resolve_job_identity: 引数・クローンの git remote（1 つ / 複数）・対話
 # gh は、モック（test_helper.sh の create_mock_gh）。リポジトリ名は force-XXXX（force- は固定、XXXX は任意）
@@ -59,6 +59,30 @@ test_parse_github_remote() {
     _has "$out" "gitlab.com/o/r => NG" "GitHub 以外の URL は、拒否する"
     _has "$out" "r/extra => NG" "階層が多い URL は、拒否する"
     teardown "$mb"
+}
+
+test_origin_repo() {
+    echo ""; echo -e "${CLR_HEAD}[TEST] origin_repo / require_origin_repo: origin から「owner/repo」を取り出す${CLR_RST}"
+    local mb base out; mb=$(setup_mock_bin); base=$(_mkdirs)
+    _mkclone "$base" j gh "https://tok@github.com/o/force-a.git"
+    _mkclone "$base" j gl "https://gitlab.com/o/r"
+    mkdir -p "$base/j/none"; git -C "$base/j/none" init -q 2>/dev/null
+    out=$(_run_in "$base/j/gh" "" 'origin_repo R; echo "rc=$? R=$R"; origin_repo R2 ../gl; echo "rc=$? R2=[$R2]"; origin_repo R3 ../none; echo "rc=$? R3=[$R3]"' "$mb")
+    _has "$out" "rc=0 R=o/force-a" "GitHub の origin → 戻り値 0・owner/repo（.git と認証情報は除く）"
+    _has "$out" "rc=2 R2=[]" "GitHub 以外の origin → 戻り値 2・変数は空"
+    _has "$out" "rc=1 R3=[]" "origin がない → 戻り値 1・変数は空"
+    out=$(_run_in "$base/j/gh" "" 'require_origin_repo R; echo "R=$R"' "$mb")
+    _has "$out" "R=o/force-a" "require_origin_repo: 取れたら、変数に入れて続ける"
+    out=$(_run_in "$base/j/gl" "" 'require_origin_repo R; echo "続いた"' "$mb")
+    _has "$out" "origin が GitHub のリポジトリではありません" "require_origin_repo: GitHub 以外 → die（理由を出す）"
+    _hasnt "$out" "続いた" "require_origin_repo: GitHub 以外 → 先へ進まない"
+    out=$(_run_in "$base/j/none" "" 'require_origin_repo R; echo "続いた"' "$mb")
+    _has "$out" "git remote（origin）の URL を取得できません" "require_origin_repo: origin がない → die（理由を出す）"
+    _hasnt "$out" "続いた" "require_origin_repo: origin がない → 先へ進まない"
+    _mkclone "$base" j tok "https://secret123@gitlab.com/o/r"
+    out=$(_run_in "$base/j/tok" "" 'require_origin_repo R' "$mb")
+    _hasnt "$out" "secret123" "require_origin_repo: メッセージに、URL の認証情報を出さない"
+    _rm_base "$base"; teardown "$mb"
 }
 
 test_normalize_project_name() {
@@ -449,5 +473,6 @@ test_job_identity_project_case
 test_pick_from_list_decimal
 test_clone_setup_completed
 test_git_origin_redacted
+test_origin_repo
 
 print_summary

@@ -108,16 +108,10 @@ fi
 # ------------------------------------------------------------------------------
 # 5. git remote からリポジトリ名を取得
 # ------------------------------------------------------------------------------
-# 以下の REMOTE_URL・REPO_FULL_NAME・REPO_NAME は、VAR=$(cmd) のため run 不使用
-REMOTE_URL=$(git remote get-url origin 2>/dev/null) \
-    || die "git remote（origin）の URL を取得できませんでした。"
-
-# GitHub の URL から「owner repo」を取り出す（parse_github_remote。GitHub 以外の URL・形が違う URL は、ここで中断する。
-# URL に認証情報が入っていることがあるため、メッセージには URL を出さない）
-_remote_pair=$(parse_github_remote "$REMOTE_URL") \
-    || die "origin の URL から、リポジトリ名を取得できませんでした（GitHub のリポジトリではない、または形式が違います）。"
-REPO_FULL_NAME="${_remote_pair%% *}/${_remote_pair#* }"
-REPO_NAME="${_remote_pair#* }"
+# origin から「owner/repo」を取り出す（require_origin_repo: lib/project.sh。origin がない・GitHub 以外の URL・形が違う URL は、
+# ここで中断する。URL に認証情報が入っていることがあるため、メッセージの URL は伏せる）
+require_origin_repo REPO_FULL_NAME
+REPO_NAME="${REPO_FULL_NAME#*/}"
 
 JWT_DIR="$HOME/.sf-jwt/${REPO_NAME}"
 

@@ -362,8 +362,12 @@ if [[ "${1:-}" == "--changed" ]]; then
             lib/org.sh)
                 _changed_tests+=("test_org.sh")
                 ;;
-            lib/project.sh)
+            lib/project.sh|lib/identity.sh|lib/branches.sh|lib/sftools-update.sh|lib/admin-clone.sh)
+                # project.sh と、2026-11-28 に project.sh から分けたファイル（project.sh が source する）
                 _changed_tests+=("test_common.sh" "test_project-identity.sh")
+                ;;
+            lib/package-xml.sh)
+                _changed_tests+=("test_common.sh" "test_sf-release.sh")   # マニフェストの統合と比較（project.sh が source する。sf-release.sh が使う）
                 ;;
             lib/diag.sh)
                 _changed_tests+=("test_diag.sh")

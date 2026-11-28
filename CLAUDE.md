@@ -248,7 +248,7 @@ Salesforce 開発の環境構築と日々の作業を自動化するシェルス
 | パス | 役割 |
 |---|---|
 | `bin/sf-*.sh` | 各種自動化スクリプト本体 |
-| `lib/` | 共通ライブラリ。`common.sh` が窓口（`log` / `run` / `die` など。`input.sh`・`platform.sh`・`project.sh` を読み込む）。`org.sh`・`wizard.sh`・`diag.sh`・`verify-common.sh` などは、使うスクリプトが個別に読み込む（`doc/dev-reference.md` 3） |
+| `lib/` | 共通ライブラリ。`common.sh` が窓口（`log` / `run` / `die` など。`input.sh`・`platform.sh`・`project.sh` を読み込む。`project.sh` は、テーマごとの `identity.sh`・`branches.sh`・`sftools-update.sh`・`admin-clone.sh`・`package-xml.sh` を読み込む）。`org.sh`・`wizard.sh`・`diag.sh`・`verify-common.sh` などは、使うスクリプトが個別に読み込む（`doc/dev-reference.md` 3） |
 | `phases/init/` | sf-project.sh のサブスクリプト（Phase 01〜10・`init-common.sh`・`--add-tier` / `--remove-tier` / `--reconnect` / `--status` / `--verify` の `add_tier.sh` / `remove_tier.sh` / `reconnect.sh` / `status.sh` / `verify.sh`） |
 | `config/changeset-types.txt` | 変更セットで扱える種類の一覧（公式の Metadata Coverage Report。「全種類を対象にする」目標の一覧。`sf-test-types.sh --coverage` で、確認の進み具合を見る） |
 | `config/metadata-capability.txt` | メタデータの種類ごとの「リリース・削除」の可否の表（`sf-test-types.sh` が実機で確認した結果。`sf-check.sh` が読む） |

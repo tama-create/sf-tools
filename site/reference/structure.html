@@ -135,8 +135,12 @@
 │   │                               下の input.sh・platform.sh・project.sh を source する）
 │   ├── input.sh                ← 対話入力（read_input / read_key / press_enter / read_or_quit / read_secret / ask_yn）
 │   ├── platform.sh             ← OS・外部コマンド（is_gitbash / sed_inplace / run_with_timeout / run_isolated_home / check_sf_cli / check_java_cli / check_vscode_extension / open_browser）
-│   ├── project.sh              ← プロジェクト（force-* の確認・gh のオーナー確認・プロジェクトの特定・ブランチ一覧・予約名の判定・
-│   │                               sf-tools の最新化・admin ブランチ・セットアップの完了の印）
+│   ├── project.sh              ← プロジェクト（接続先の組織・force-* の確認・gh のオーナー確認）。下の 5 つを source する
+│   ├── identity.sh             ← プロジェクトの特定（GitHub の URL・origin の owner/repo・オーナーと XXXX の決定）
+│   ├── branches.sh             ← ブランチと段階（branches.txt・有効な段階・予約名・保護ブランチ・必須チェックの名前）
+│   ├── sftools-update.sh       ← sf-tools 自身の最新化の確認
+│   ├── admin-clone.sh          ← 管理者用のクローン（admin ブランチ・照合・セットアップの完了の印）
+│   ├── package-xml.sh          ← package.xml 形式のマニフェストの統合と比較
 │   ├── wizard.sh               ← ウィザード形式の画面の共通部品（sf-project で使用）
 │   ├── org.sh                  ← Salesforce 組織の接続情報の共通部品（ログイン先の選択・種類の判定・本番は main のみのガード・
 │   │                               共有環境へのローカルリリースの拒否）
